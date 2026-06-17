@@ -1,0 +1,19 @@
+[package]
+name = "quill"
+version = "0.1.0"
+edition = "2021"
+description = "A terminal editor optimized for writing novels"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+ropey = "1.6"
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
