@@ -93,6 +93,28 @@ src/
 - Full field-by-field spec and formulas in
   [`docs/progress-reports.md`](docs/progress-reports.md).
 
+### AI assistance (Claude)
+
+Opt-in, off by default — a draft only leaves the machine when the author enables
+it and supplies a key. Talks to the Claude Messages API directly (no official
+Rust SDK), defaulting to `claude-opus-4-8`, using structured outputs, prompt
+caching (the manuscript is the ideal cache prefix), and the Batch API. Features
+read/write a human-readable **story bible** kept in the project.
+
+- **Character tracking** — AI-summarized profiles with per-chapter traits,
+  relationships, and arc, plus drift/contradiction flags.
+- **Timeline & continuity** — extract and order events; flag contradictions
+  (a character in two places, an object used after it's destroyed).
+- **Scaffolding** — generate outlines/beat sheets from a premise or partial
+  draft and insert `xxx` TODO markers at gaps (feeding the progress report).
+- **Setting & worldbuilding** — extract a setting bible (geography,
+  magic/tech systems, factions) and flag prose that breaks established rules.
+- **Also planned** — naming/term consistency, prose & style checks, "ask the
+  manuscript" Q&A, a selection rewrite assistant, synopsis/blurb generation,
+  and a local-model backend for fully offline use.
+- Full design, model choices, and privacy model in
+  [`docs/ai-features.md`](docs/ai-features.md).
+
 ### Editing & workflow
 
 - Word-wrap soft-wrapped paragraphs to the focus column
