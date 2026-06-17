@@ -52,37 +52,39 @@ src/
 - Treat the manuscript as Markdown, so emphasis, scene breaks, and headings are
   plain text the author can read anywhere.
 - **tree-sitter** ([`tree-sitter-md`](https://github.com/tree-sitter-grammars/tree-sitter-markdown))
-  for incremental parsing: syntax-aware highlighting in the focus column and a
-  reliable document outline without regex heuristics.
+  for incremental parsing: syntax-aware highlighting in the focus column and
+  scene-level structure *within* a chapter (the chapter tree itself comes from
+  the project manifest — see Project structure).
 - Soft inline rendering — show `*emphasis*` / `**strong**` styled rather than as
   literal asterisks, while keeping the underlying text Markdown.
 
-### Project structure: series (optional) → book → chapter
+### Project structure: a project is a folder of chapter files
 
-- Model a manuscript as a tree: an optional **series** containing one or more
-  **books**, each containing **chapters**, with an optional **act** grouping
-  between book and chapter. A standalone novel is just one book.
-- Drive the divisions from the document itself via tree-sitter heading levels
-  (e.g. `#` book / series, `##` chapter), so structure and prose stay in one
-  file and never drift out of sync. A multi-file project (one file per chapter,
-  manifest at the root) is a later option.
-- Outline/navigation pane that walks the tree; jump between chapters and books,
-  with per-node and rolled-up word counts.
+- A Quill project is a **directory**: each chapter is its own Markdown file, and
+  a root **manifest** records the tree — an optional **series** containing one or
+  more **books**, each with **chapters** and an optional **act** grouping. A
+  standalone novel is one book. The editor manages these files transparently;
+  the author works in chapters, not filenames.
+- **Two views, switchable by hotkey.** *Chapter-at-a-time* (default) edits one
+  chapter file at a time via the outline pane. *Continuous manuscript* scrolls
+  every chapter as one seamless document, with the editor mapping edits back to
+  the right files.
+- Outline/navigation pane walks the manifest tree; jump between chapters, acts,
+  and books, with per-node and rolled-up word counts.
 
 ### Metadata & front matter
 
-- Lightweight per-node metadata via YAML front matter (and/or fenced blocks),
-  parsed alongside the tree-sitter outline:
-  - **Chapter:** title, POV character, status (draft/revised/final), summary.
-  - **Book / series:** title, subtitle, author.
+- Per-node metadata, all human-readable so the manuscript stays portable:
+  - **Chapter:** title, POV character, status (draft/revised/final), summary —
+    stored as standard YAML front matter at the top of each chapter file.
+  - **Book / series:** title, subtitle, author — stored in the project manifest.
 - **Epigraphs** on both books and chapters — a quotation plus attribution stored
-  in metadata and rendered above the body, distinct from the prose itself.
-- Keep all metadata human-readable in the file so a manuscript remains portable
-  plain text.
+  in metadata (chapter front matter or the manifest) and rendered above the body,
+  distinct from the prose itself.
 
 ### Progress reports & writing goals
 
-- Author-set goals in project front matter: target **words**, **chapters**, and
+- Author-set goals in the project manifest: target **words**, **chapters**, and
   `words_per_page` (pages are derived), plus a project **start date**.
 - Single-screen status report tracking the manuscript against goals: word /
   page / chapter completion, a projected final length ("expansion ratio") from

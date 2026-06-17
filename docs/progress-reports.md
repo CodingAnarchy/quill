@@ -40,9 +40,11 @@ formula behind every line of the report.
 
 ## Goal metadata
 
-Goals live in the project's front matter so they travel with the manuscript and
-stay human-readable. Pages are always *derived* from words via `words_per_page`,
-never tracked directly.
+Goals live in the **project manifest** (the root file that records the
+chapter/book/act tree; see the README "Project structure" section) so they
+travel with the manuscript and stay human-readable. Word, page, and chapter
+counts aggregate across the project's per-chapter files. Pages are always
+*derived* from words via `words_per_page`, never tracked directly.
 
 ```yaml
 ---
