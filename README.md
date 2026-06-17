@@ -122,6 +122,16 @@ read/write a human-readable **story bible** kept in the project.
 - Find & replace
 - Undo / redo
 
+### Export to Word / Scrivener / Vellum
+
+- Export the manuscript and its structure to the formats publishing actually
+  uses: Word (`.docx`, standard manuscript format), Scrivener (binder
+  hierarchy), and Vellum (per-chapter import).
+- Carry structural metadata through where supported — chapter titles become
+  titles, epigraphs render in place.
+- Word is the highest-leverage target: it's the submission standard, and both
+  Vellum and Scrivener import `.docx`.
+
 ## License
 
 MIT
