@@ -145,6 +145,19 @@ read/write a human-readable **story bible** kept in the project.
 - Word is the highest-leverage target: it's the submission standard, and both
   Vellum and Scrivener import `.docx`.
 
+### Hardening: performance & stability
+
+Cross-cutting passes scheduled *after* the skeleton and feature set are built
+out. Small wins happen inline during feature work; these are the deliberate,
+focused passes before Quill is a daily driver.
+
+- **Performance** — stay instant on real manuscripts: typing, scrolling,
+  navigation, and save remain snappy from a short story up to a multi-book
+  series, backed by a benchmark suite with documented targets.
+- **Stability** — never lose an author's words: atomic saves, autosave and
+  crash recovery, panic-free error handling, and a fuzzed, property-tested data
+  path.
+
 ## License
 
 MIT
