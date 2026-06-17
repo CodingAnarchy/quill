@@ -60,7 +60,8 @@ src/
 ### Project structure: series (optional) → book → chapter
 
 - Model a manuscript as a tree: an optional **series** containing one or more
-  **books**, each containing **chapters**. A standalone novel is just one book.
+  **books**, each containing **chapters**, with an optional **act** grouping
+  between book and chapter. A standalone novel is just one book.
 - Drive the divisions from the document itself via tree-sitter heading levels
   (e.g. `#` book / series, `##` chapter), so structure and prose stay in one
   file and never drift out of sync. A multi-file project (one file per chapter,
@@ -79,10 +80,23 @@ src/
 - Keep all metadata human-readable in the file so a manuscript remains portable
   plain text.
 
+### Progress reports & writing goals
+
+- Author-set goals in project front matter: target **words**, **chapters**, and
+  `words_per_page` (pages are derived), plus a project **start date**.
+- Single-screen status report tracking the manuscript against goals: word /
+  page / chapter completion, a projected final length ("expansion ratio") from
+  current pace, `xxx` TODO-marker count, and an "unused" (cut) section.
+- Daily momentum from an append-only snapshot log: today's word delta with
+  additions vs. deletions, the same broken down **per act**, average words/day,
+  and "to go" estimates with projected completion dates.
+- Full field-by-field spec and formulas in
+  [`docs/progress-reports.md`](docs/progress-reports.md).
+
 ### Editing & workflow
 
 - Word-wrap soft-wrapped paragraphs to the focus column
-- Per-session and daily word-count goals (per chapter / book / project)
+- Per-session and daily word-count goals (per chapter / act / book / project)
 - Find & replace
 - Undo / redo
 
