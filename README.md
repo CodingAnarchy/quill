@@ -19,10 +19,21 @@ keystrokes that stay out of the way.
 ## Build & run
 
 ```sh
-cargo run --release -- manuscript.txt
+cargo run --release -- manuscript.md
 ```
 
 Passing no file opens an untitled buffer.
+
+## File format
+
+Manuscripts are plain UTF-8 **Markdown** — portable text that opens in any
+editor. A file argument with no extension gets `.md` (so `quill mybook` opens
+`mybook.md`); an explicit extension is respected.
+
+Quill writes your text back unchanged except for one normalization: a non-empty
+file ends with exactly one trailing newline (the POSIX/git convention), and an
+empty document writes an empty file. Interior bytes, including line endings, are
+left exactly as you wrote them, so a conforming file round-trips byte-for-byte.
 
 ## Keys
 

@@ -41,17 +41,18 @@ impl Buffer {
     }
 
     /// Load a file from disk, or start an empty buffer pointed at `path` if the
-    /// file does not exist yet.
+    /// file does not exist yet. The path is normalized to Quill's manuscript
+    /// format: a path with no extension gets `.md` (see [`with_default_extension`]).
     pub fn from_path(path: impl AsRef<Path>) -> std::io::Result<Self> {
-        let path = path.as_ref();
-        let rope = match std::fs::read_to_string(path) {
+        let path = with_default_extension(path.as_ref());
+        let rope = match std::fs::read_to_string(&path) {
             Ok(text) => Rope::from_str(&text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Rope::new(),
             Err(e) => return Err(e),
         };
         Ok(Self {
             rope,
-            path: Some(path.to_path_buf()),
+            path: Some(path),
             cursor: Cursor::default(),
             dirty: false,
             goal_col: None,
@@ -59,12 +60,27 @@ impl Buffer {
     }
 
     /// Persist the buffer to its path. Returns an error if there is no path.
+    ///
+    /// The manuscript is written as UTF-8 Markdown, unchanged except for one
+    /// documented normalization: a non-empty file ends with exactly one
+    /// trailing newline (the POSIX/git convention), and an empty document
+    /// writes an empty file. Interior bytes — including any line endings — are
+    /// left exactly as the author wrote them, so a conforming file round-trips
+    /// byte-for-byte.
     pub fn save(&mut self) -> std::io::Result<()> {
-        let path = self.path.as_ref().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "no file path set")
-        })?;
-        let mut file = std::fs::File::create(path)?;
-        self.rope.write_to(&mut file)?;
+        let path = self
+            .path
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("no file path set"))?;
+
+        let mut content = self.rope.to_string();
+        let trimmed_len = content.trim_end_matches('\n').len();
+        content.truncate(trimmed_len);
+        if !content.is_empty() {
+            content.push('\n');
+        }
+
+        std::fs::write(path, content)?;
         self.dirty = false;
         Ok(())
     }
@@ -215,5 +231,116 @@ impl Buffer {
     #[allow(dead_code)] // part of the buffer's public API; used by upcoming stats UI
     pub fn char_count(&self) -> usize {
         self.rope.len_chars()
+    }
+}
+
+/// Quill's manuscript format is Markdown. A path with no extension gets `.md`;
+/// an explicit extension (`.md`, `.txt`, anything) is respected so an author
+/// who names a file deliberately keeps that name.
+fn with_default_extension(path: &Path) -> PathBuf {
+    if path.extension().is_none() {
+        path.with_extension("md")
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    /// A unique-per-process temp path so parallel tests don't collide.
+    fn temp_path(name: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("quill-test-{}-{}", std::process::id(), name));
+        p
+    }
+
+    fn write(path: &Path, bytes: &str) {
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    fn round_trip_is_byte_identical_with_trailing_newline() {
+        let path = temp_path("roundtrip.md");
+        let original = "# Chapter One\n\nThe night was *dark* and **stormy**.\n";
+        write(&path, original);
+
+        let mut buf = Buffer::from_path(&path).unwrap();
+        buf.save().unwrap();
+
+        assert_eq!(read(&path), original);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn save_adds_missing_trailing_newline() {
+        let path = temp_path("no-newline.md");
+        write(&path, "No newline at end");
+
+        let mut buf = Buffer::from_path(&path).unwrap();
+        buf.save().unwrap();
+
+        assert_eq!(read(&path), "No newline at end\n");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn save_collapses_multiple_trailing_newlines_to_one() {
+        let path = temp_path("many-newlines.md");
+        write(&path, "Body\n\n\n\n");
+
+        let mut buf = Buffer::from_path(&path).unwrap();
+        buf.save().unwrap();
+
+        assert_eq!(read(&path), "Body\n");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn empty_document_saves_empty_file() {
+        let path = temp_path("empty.md");
+        write(&path, "");
+
+        let mut buf = Buffer::from_path(&path).unwrap();
+        buf.save().unwrap();
+
+        assert_eq!(read(&path), "");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn non_ascii_round_trips_exactly() {
+        let path = temp_path("unicode.md");
+        let original = "Café — résumé, naïve façade. 日本語のテキスト. 🚀✍️🌙\n";
+        write(&path, original);
+
+        let mut buf = Buffer::from_path(&path).unwrap();
+        buf.save().unwrap();
+
+        assert_eq!(read(&path), original);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn extensionless_path_defaults_to_md() {
+        let path = temp_path("manuscript"); // no extension
+        let buf = Buffer::from_path(&path).unwrap();
+
+        let expected = path.with_extension("md");
+        assert_eq!(buf.path.as_deref(), Some(expected.as_path()));
+    }
+
+    #[test]
+    fn explicit_extension_is_respected() {
+        let path = temp_path("notes.txt");
+        let buf = Buffer::from_path(&path).unwrap();
+
+        assert_eq!(buf.path.as_deref(), Some(path.as_path()));
     }
 }
