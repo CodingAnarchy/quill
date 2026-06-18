@@ -162,12 +162,17 @@ impl Project {
         self.manifest.chapters.get(index).map_or(0, |c| c.words)
     }
 
-    /// Refresh the active chapter's cached word count (called after editing it).
-    pub fn set_active_words(&mut self, words: usize) {
-        let active = self.active_index();
-        if let Some(chapter) = self.manifest.chapters.get_mut(active) {
+    /// Refresh the cached word count for chapter `index` (no-op if out of range).
+    /// The continuous view uses this to update each chapter it saves.
+    pub fn set_chapter_words(&mut self, index: usize, words: usize) {
+        if let Some(chapter) = self.manifest.chapters.get_mut(index) {
             chapter.words = words;
         }
+    }
+
+    /// Refresh the active chapter's cached word count (called after editing it).
+    pub fn set_active_words(&mut self, words: usize) {
+        self.set_chapter_words(self.active_index(), words);
     }
 
     /// Path to the active chapter's file.
@@ -177,10 +182,12 @@ impl Project {
 
     /// Title of the active chapter, for the status bar.
     pub fn active_title(&self) -> Option<&str> {
-        self.manifest
-            .chapters
-            .get(self.active_index())
-            .map(|c| c.title.as_str())
+        self.chapter_title(self.active_index())
+    }
+
+    /// Title of chapter `index` (None if out of range).
+    pub fn chapter_title(&self, index: usize) -> Option<&str> {
+        self.manifest.chapters.get(index).map(|c| c.title.as_str())
     }
 
     /// Write the manifest back to `book.toml`.

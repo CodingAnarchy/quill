@@ -3,6 +3,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
+use crate::manuscript::Manuscript;
 use crate::project::Project;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
@@ -54,6 +55,10 @@ pub struct App {
     /// The open project (manifest, root, active chapter index). The `buffer`
     /// above holds the active chapter's text.
     pub project: Project,
+    /// When `Some`, the continuous-manuscript view is active: editing and
+    /// rendering go through this windowed multi-chapter buffer instead of the
+    /// single-chapter `buffer` above (which is then the saved, idle chapter).
+    pub manuscript: Option<Manuscript>,
     pub mode: Mode,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
@@ -69,11 +74,43 @@ impl App {
         Self {
             buffer,
             project,
+            manuscript: None,
             mode: Mode::Insert,
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
             message: None,
+        }
+    }
+
+    /// The buffer the author is currently editing: the continuous-view buffer
+    /// when that view is active, otherwise the single active chapter. The
+    /// renderer and movement go through this so both views share one path.
+    pub fn edit_buffer(&self) -> &Buffer {
+        match &self.manuscript {
+            Some(m) => m.buffer(),
+            None => &self.buffer,
+        }
+    }
+
+    pub fn edit_buffer_mut(&mut self) -> &mut Buffer {
+        match &mut self.manuscript {
+            Some(m) => m.buffer_mut(),
+            None => &mut self.buffer,
+        }
+    }
+
+    /// Reparse the active edit buffer once input goes idle (called from the
+    /// event loop). Routes to whichever buffer is being edited.
+    pub fn refresh_syntax(&mut self) {
+        self.edit_buffer_mut().refresh_syntax();
+    }
+
+    /// Whether the active edit target has unsaved changes (either view).
+    fn edit_dirty(&self) -> bool {
+        match &self.manuscript {
+            Some(m) => m.dirty(),
+            None => self.buffer.dirty,
         }
     }
 
@@ -151,6 +188,101 @@ impl App {
 
     fn chapter_count(&self) -> usize {
         self.project.manifest.chapters.len()
+    }
+
+    // --- Continuous-manuscript view ---------------------------------------
+
+    /// Toggle between the single-chapter view and the continuous view.
+    fn toggle_continuous(&mut self) {
+        if self.manuscript.is_some() {
+            self.leave_continuous();
+        } else {
+            self.enter_continuous();
+        }
+    }
+
+    /// Enter the continuous view: flush the single chapter, then open a window
+    /// of chapters around it.
+    fn enter_continuous(&mut self) {
+        if self.buffer.dirty {
+            if let Err(e) = self.buffer.save() {
+                self.message = Some(format!("Save failed: {e}"));
+                return;
+            }
+            self.project.set_active_words(self.buffer.word_count());
+        }
+        self.manuscript = Some(Manuscript::open(&self.project));
+        self.message = Some("Continuous view".into());
+    }
+
+    /// Leave the continuous view: save its chapters, then reopen the single
+    /// chapter the cursor was in. Stays in continuous view if the save fails, so
+    /// no edits are lost.
+    fn leave_continuous(&mut self) {
+        let Some(mut m) = self.manuscript.take() else {
+            return;
+        };
+        if let Err(e) = m.save(&mut self.project) {
+            self.message = Some(format!("Save failed: {e}"));
+            self.manuscript = Some(m);
+            return;
+        }
+        self.project.set_active(m.current_chapter());
+        match Buffer::from_path(self.project.active_path()) {
+            Ok(buffer) => {
+                self.buffer = buffer;
+                self.message = Some("Chapter view".into());
+            }
+            Err(e) => self.message = Some(format!("Open failed: {e}")),
+        }
+    }
+
+    // --- Edit dispatch (single chapter or continuous) ----------------------
+
+    fn edit_insert_char(&mut self, c: char) {
+        match &mut self.manuscript {
+            Some(m) => m.insert_char(c),
+            None => self.buffer.insert_char(c),
+        }
+    }
+
+    fn edit_backspace(&mut self) {
+        match &mut self.manuscript {
+            Some(m) => m.backspace(),
+            None => self.buffer.backspace(),
+        }
+    }
+
+    /// Apply a cursor movement to the active edit buffer, then page the window
+    /// if the continuous view's cursor crossed into another chapter.
+    fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
+        mv(self.edit_buffer_mut());
+        if let Some(mut m) = self.manuscript.take() {
+            if let Err(e) = m.reslide(&mut self.project) {
+                self.message = Some(format!("Save failed: {e}"));
+            }
+            self.manuscript = Some(m);
+        }
+    }
+
+    /// Save the active edit target (the continuous window, or the single chapter).
+    fn save_edit(&mut self) {
+        if let Some(mut m) = self.manuscript.take() {
+            let result = m.save(&mut self.project);
+            self.manuscript = Some(m);
+            self.message = Some(match result {
+                Ok(()) => "Saved".into(),
+                Err(e) => format!("Save failed: {e}"),
+            });
+        } else {
+            match self.buffer.save() {
+                Ok(()) => {
+                    self.project.set_active_words(self.buffer.word_count());
+                    self.message = Some("Saved".into());
+                }
+                Err(e) => self.message = Some(format!("Save failed: {e}")),
+            }
+        }
     }
 
     fn next_chapter(&mut self) {
@@ -373,15 +505,9 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         match (ctrl, key.code) {
-            (true, KeyCode::Char('s')) => match self.buffer.save() {
-                Ok(()) => {
-                    self.project.set_active_words(self.buffer.word_count());
-                    self.message = Some("Saved".into());
-                }
-                Err(e) => self.message = Some(format!("Save failed: {e}")),
-            },
+            (true, KeyCode::Char('s')) => self.save_edit(),
             (true, KeyCode::Char('q')) => {
-                if self.buffer.dirty {
+                if self.edit_dirty() {
                     self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
                 } else {
                     self.should_quit = true;
@@ -396,32 +522,38 @@ impl App {
             (true, KeyCode::Char('o')) => {
                 self.outline_visible = !self.outline_visible;
             }
-            // Step to the next / previous chapter.
-            (true, KeyCode::Char('n')) => self.next_chapter(),
-            (true, KeyCode::Char('p')) => self.prev_chapter(),
-            // Focus the chapter pane to browse and jump to one.
+            // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
+            // Ctrl-m — terminals deliver Ctrl-m as Enter.
+            (true, KeyCode::Char('l')) => self.toggle_continuous(),
+            // Step to the next / previous chapter (single-chapter view only;
+            // in continuous view you just scroll across boundaries).
+            (true, KeyCode::Char('n')) if self.manuscript.is_none() => self.next_chapter(),
+            (true, KeyCode::Char('p')) if self.manuscript.is_none() => self.prev_chapter(),
+            // Focus the chapter pane to browse. Chapter structure is edited in
+            // the single-chapter view, so leave continuous first.
             (true, KeyCode::Char('g')) => {
+                self.leave_continuous();
                 self.outline_visible = true;
                 self.mode = Mode::Nav {
                     selected: self.project.active_index(),
                 };
             }
 
-            (false, KeyCode::Char(c)) => self.buffer.insert_char(c),
-            (false, KeyCode::Enter) => self.buffer.insert_newline(),
-            (false, KeyCode::Backspace) => self.buffer.backspace(),
+            (false, KeyCode::Char(c)) => self.edit_insert_char(c),
+            (false, KeyCode::Enter) => self.edit_insert_char('\n'),
+            (false, KeyCode::Backspace) => self.edit_backspace(),
             (false, KeyCode::Tab) => {
                 for _ in 0..4 {
-                    self.buffer.insert_char(' ');
+                    self.edit_insert_char(' ');
                 }
             }
 
-            (false, KeyCode::Left) => self.buffer.move_left(),
-            (false, KeyCode::Right) => self.buffer.move_right(),
-            (false, KeyCode::Up) => self.buffer.move_up(),
-            (false, KeyCode::Down) => self.buffer.move_down(),
-            (false, KeyCode::Home) => self.buffer.move_home(),
-            (false, KeyCode::End) => self.buffer.move_end(),
+            (false, KeyCode::Left) => self.edit_move(Buffer::move_left),
+            (false, KeyCode::Right) => self.edit_move(Buffer::move_right),
+            (false, KeyCode::Up) => self.edit_move(Buffer::move_up),
+            (false, KeyCode::Down) => self.edit_move(Buffer::move_down),
+            (false, KeyCode::Home) => self.edit_move(Buffer::move_home),
+            (false, KeyCode::End) => self.edit_move(Buffer::move_end),
 
             _ => {}
         }
@@ -672,6 +804,43 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
         assert_eq!(app.project.active_title(), Some("One"));
         assert!(app.buffer.line(0).contains("first"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn continuous_view_edits_persist_to_the_right_chapter() {
+        let (mut app, dir) = two_chapter_app("continuous"); // "first chapter", "second chapter"
+        app.on_key(ctrl('l')); // enter continuous view
+        assert!(app.manuscript.is_some());
+
+        // Move into chapter two and append to it.
+        app.on_key(key(KeyCode::Down));
+        app.on_key(key(KeyCode::End));
+        typed(&mut app, "Z");
+
+        app.on_key(ctrl('l')); // leave continuous — saves on the way out
+        assert!(app.manuscript.is_none());
+
+        // The edit landed in chapter two's file; chapter one is untouched.
+        assert_eq!(std::fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
+        assert_eq!(std::fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
+        // Back in single-chapter view at the chapter the cursor was in.
+        assert_eq!(app.project.active_index(), 1);
+        assert!(app.buffer.line(0).contains("second"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn entering_continuous_flushes_the_single_chapter() {
+        let (mut app, dir) = two_chapter_app("continuous-flush");
+        // Edit chapter one in single view, then enter continuous without saving.
+        app.on_key(key(KeyCode::Char('X')));
+        assert!(app.buffer.dirty);
+
+        app.on_key(ctrl('l')); // entering must flush the dirty single chapter
+        assert!(std::fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
 
         std::fs::remove_dir_all(&dir).ok();
     }
