@@ -22,7 +22,9 @@ trait Pane {
 
 /// The prose column: centered, fixed-width text following the cursor.
 struct Editor<'a>(&'a App);
-/// The left strip: chapter list with the active chapter's heading outline.
+/// The left strip: chapter list with the active chapter's heading outline
+/// nested beneath it (current section highlighted; the Nav-mode selection
+/// reversed).
 struct NavPane<'a>(&'a App);
 /// The bottom line: chapter name / counts, or the active prompt.
 struct StatusBar<'a>(&'a App);
@@ -109,9 +111,6 @@ fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<
     }
 }
 
-/// The navigation pane: the project's chapters, with the active chapter's
-/// in-chapter heading outline nested beneath it (the current section
-/// highlighted). While browsing (Nav mode), the selected chapter is reversed.
 impl Pane for NavPane<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
         let app = self.0;
