@@ -2,10 +2,12 @@
 //! `book.toml` manifest that records the chapter order.
 //!
 //! The unit of work is always a project — there is no single-file mode. The
-//! manifest is the source of truth for chapter order and titles; the chapter
-//! text lives in the individual `.md` files. This module owns loading, creating,
-//! and saving that structure; the active chapter's text is held in a [`Buffer`]
-//! alongside, not here.
+//! manifest is the source of truth for chapter order, titles, and a cached
+//! per-chapter word count; the chapter text lives in the individual `.md` files.
+//! This module owns loading, creating, and saving that structure. It does not
+//! hold chapter text — the active chapter's text lives in a [`Buffer`] alongside
+//! — but it does read each file once at open to populate the word counts (a
+//! transient read per chapter, never N live buffers).
 //!
 //! This is the foundation (issue #22). Navigation between chapters (#23),
 //! structure editing (#24), rolled-up counts (#25), and the continuous view
@@ -17,15 +19,23 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::buffer::count_words;
+
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
 
-/// One chapter's entry in the manifest: its display title and the file that
-/// holds its prose (relative to the project root).
+/// One chapter's entry in the manifest: its display title, the file that holds
+/// its prose (relative to the project root), and a cached word count.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ChapterEntry {
     pub title: String,
     pub file: String,
+    /// Cached word count, populated from the file at open and refreshed as the
+    /// chapter is edited. Transient — never written to `book.toml` (`serde(skip)`),
+    /// but it does participate in equality (compare structure explicitly if you
+    /// need to ignore counts).
+    #[serde(skip)]
+    pub words: usize,
 }
 
 /// The on-disk manifest (`book.toml`), deserialized.
@@ -36,14 +46,17 @@ pub struct Manifest {
     pub chapters: Vec<ChapterEntry>,
 }
 
-/// A loaded project: where it lives, its manifest, and which chapter is active.
-/// The active chapter's text is edited through a separate [`Buffer`]; this type
-/// only tracks structure.
+/// A loaded project: where it lives, its manifest (structure + cached word
+/// counts), and which chapter is active. The active chapter's text is edited
+/// through a separate [`Buffer`]; this type holds no chapter text.
 pub struct Project {
     pub root: PathBuf,
     pub manifest: Manifest,
-    /// Index into `manifest.chapters` of the chapter currently being edited.
-    pub active: usize,
+    /// The active chapter, tracked by file identity rather than index: a
+    /// structural edit (insert/move/remove) reorders the list but the active
+    /// chapter is still the same file, so [`active_index`](Self::active_index)
+    /// re-derives the position with no per-op bookkeeping.
+    active: String,
 }
 
 impl Project {
@@ -65,10 +78,17 @@ impl Project {
         let mut project = Self {
             root,
             manifest,
-            active: 0,
+            active: String::new(),
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
+        } else {
+            project.active = project.manifest.chapters[0].file.clone();
+            // Populate the per-chapter word counts from disk (one transient read
+            // each — never N live buffers).
+            for i in 0..project.manifest.chapters.len() {
+                project.manifest.chapters[i].words = count_file_words(&project.chapter_path(i));
+            }
         }
         Ok(project)
     }
@@ -90,7 +110,7 @@ impl Project {
                 title,
                 chapters: Vec::new(),
             },
-            active: 0,
+            active: String::new(),
         };
         project.add_default_chapter()?;
         Ok(project)
@@ -103,13 +123,14 @@ impl Project {
         let entry = ChapterEntry {
             title: format!("Chapter {n}"),
             file: format!("chapter-{n}.md"),
+            words: 0,
         };
         let path = self.root.join(&entry.file);
         if !path.exists() {
             std::fs::write(&path, "")?;
         }
+        self.active = entry.file.clone();
         self.manifest.chapters.push(entry);
-        self.active = self.manifest.chapters.len() - 1;
         self.save_manifest()
     }
 
@@ -118,16 +139,47 @@ impl Project {
         self.root.join(&self.manifest.chapters[index].file)
     }
 
+    /// Index of the active chapter — derived from its file identity, so it stays
+    /// correct after any structural edit. Falls back to 0 if the active file is
+    /// momentarily absent (e.g. just after deleting it, before a new one is set).
+    pub fn active_index(&self) -> usize {
+        self.manifest
+            .chapters
+            .iter()
+            .position(|c| c.file == self.active)
+            .unwrap_or(0)
+    }
+
+    /// Make chapter `index` the active one.
+    pub fn set_active(&mut self, index: usize) {
+        if let Some(chapter) = self.manifest.chapters.get(index) {
+            self.active = chapter.file.clone();
+        }
+    }
+
+    /// Cached word count for chapter `index` (0 if out of range).
+    pub fn chapter_words(&self, index: usize) -> usize {
+        self.manifest.chapters.get(index).map_or(0, |c| c.words)
+    }
+
+    /// Refresh the active chapter's cached word count (called after editing it).
+    pub fn set_active_words(&mut self, words: usize) {
+        let active = self.active_index();
+        if let Some(chapter) = self.manifest.chapters.get_mut(active) {
+            chapter.words = words;
+        }
+    }
+
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
-        self.chapter_path(self.active)
+        self.chapter_path(self.active_index())
     }
 
     /// Title of the active chapter, for the status bar.
     pub fn active_title(&self) -> Option<&str> {
         self.manifest
             .chapters
-            .get(self.active)
+            .get(self.active_index())
             .map(|c| c.title.as_str())
     }
 
@@ -141,10 +193,11 @@ impl Project {
 
     // --- Structure editing -------------------------------------------------
     //
-    // These mutate the manifest and chapter files but never touch `active` —
-    // keeping the active index and the live buffer in sync is the caller's job
-    // (see `App`). Each does the fallible filesystem work first, then mutates
-    // the manifest and persists, so a failed file op leaves the project intact.
+    // These mutate the manifest and chapter files but never touch `active` — it
+    // tracks the active chapter by file identity, so the index re-derives itself
+    // (the one exception, deleting the active chapter, is handled in `App`). Each
+    // does the fallible filesystem work first, then mutates the manifest and
+    // persists, so a failed file op leaves the project intact.
 
     /// Insert a new empty chapter titled `title` at position `at` (clamped to
     /// the end). Its file is created on disk.
@@ -157,6 +210,7 @@ impl Project {
             ChapterEntry {
                 title: title.to_string(),
                 file,
+                words: 0,
             },
         );
         self.save_manifest()
@@ -204,18 +258,39 @@ impl Project {
     /// headless rendering. Like real projects, it always has an active chapter.
     #[cfg(test)]
     pub fn scratch() -> Self {
+        Self::scratch_with(&["Chapter 1"])
+    }
+
+    /// An in-memory project with the given chapter titles (no files on disk),
+    /// for tests and headless rendering. Always has an active chapter (the first).
+    #[cfg(test)]
+    pub fn scratch_with(titles: &[&str]) -> Self {
+        let chapters: Vec<ChapterEntry> = titles
+            .iter()
+            .enumerate()
+            .map(|(i, title)| ChapterEntry {
+                title: (*title).to_string(),
+                file: format!("chapter-{}.md", i + 1),
+                words: 0,
+            })
+            .collect();
+        let active = chapters[0].file.clone();
         Self {
             root: PathBuf::from("."),
             manifest: Manifest {
                 title: "untitled".into(),
-                chapters: vec![ChapterEntry {
-                    title: "Chapter 1".into(),
-                    file: "chapter-1.md".into(),
-                }],
+                chapters,
             },
-            active: 0,
+            active,
         }
     }
+}
+
+/// Words in a chapter file, or 0 if it can't be read.
+fn count_file_words(path: &Path) -> usize {
+    std::fs::read_to_string(path)
+        .map(|text| count_words(&text))
+        .unwrap_or(0)
 }
 
 /// A path inside `dir` for `file`, appending `-1`, `-2`, … to the stem if a file
@@ -275,9 +350,19 @@ mod tests {
         }
         buf.save().unwrap();
 
-        // Reopen and confirm structure + content survived.
+        // Reopen and confirm the structure (titles + files) and content
+        // survived. Compare the persisted projection, not the whole manifest:
+        // `reopened` has word counts from disk while `project`'s are still 0.
         let reopened = Project::open(&dir).unwrap();
-        assert_eq!(reopened.manifest, project.manifest);
+        let structure = |p: &Project| -> Vec<(String, String)> {
+            p.manifest
+                .chapters
+                .iter()
+                .map(|c| (c.title.clone(), c.file.clone()))
+                .collect()
+        };
+        assert_eq!(reopened.manifest.title, project.manifest.title);
+        assert_eq!(structure(&reopened), structure(&project));
         let text = std::fs::read_to_string(reopened.active_path()).unwrap();
         assert!(text.contains("The night was dark."));
 
@@ -302,7 +387,7 @@ mod tests {
         let project = Project::open(&dir).unwrap();
         assert_eq!(project.manifest.title, "Red State Earth");
         assert_eq!(project.manifest.chapters.len(), 2);
-        assert_eq!(project.active, 0);
+        assert_eq!(project.active_index(), 0);
         assert_eq!(project.active_title(), Some("One"));
 
         std::fs::remove_dir_all(&dir).ok();
