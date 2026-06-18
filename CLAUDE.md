@@ -7,6 +7,12 @@ feature specs. Storage model: one chapter per file; a buffer holds one chapter
 (single-chapter view) or at most ~3 chapters (continuous view), never the whole
 novel.
 
+The continuous-manuscript view (`Ctrl-l`) concatenates a window of up to ~3
+adjacent chapters into one editable buffer (`src/manuscript.rs`), paging
+chapters in/out around the cursor and writing edits back to each chapter's file.
+Chapter boundaries are fixed seams (editing never merges chapters); the centered
+title dividers between chapters are render-only.
+
 ## Code conventions
 
 - **`use` imports go at the top of the module**, after the module doc comment —
@@ -92,5 +98,6 @@ tmux kill-session -t quill               # always clean up
 Notes:
 - Use the bounded `until` poll to wait for paint — `sleep` is blocked in this
   harness, and the editor renders within a few milliseconds anyway.
-- Keys: `C-o` toggles the outline, `C-s` saves, `C-q` quits, arrows move.
+- Keys: `C-o` toggles the outline, `C-l` toggles the continuous view, `C-s`
+  saves, `C-q` quits, `C-n`/`C-p` step chapters (single view), arrows move.
 - Always `tmux kill-session -t quill` when done so sessions don't linger.

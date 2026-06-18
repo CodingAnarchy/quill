@@ -5,6 +5,7 @@
 
 mod app;
 mod buffer;
+mod manuscript;
 mod project;
 mod syntax;
 mod ui;
@@ -118,7 +119,7 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
             }
             // Input has gone idle: reparse once to refresh highlighting. Kept
             // off the per-keystroke path so typing stays instant.
-            app.buffer.refresh_syntax();
+            app.refresh_syntax();
         }
     }
     Ok(())

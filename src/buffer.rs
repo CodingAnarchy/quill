@@ -53,6 +53,22 @@ impl Buffer {
         }
     }
 
+    /// An in-memory buffer over `text`, with no backing path. Used for the
+    /// continuous-manuscript view, whose buffer spans several chapter files and
+    /// is saved by splitting it back out (see [`crate::manuscript`]), so it has
+    /// no single path of its own.
+    pub fn from_text(text: &str) -> Self {
+        Self {
+            syntax: Syntax::new(text),
+            rope: Rope::from_str(text),
+            path: None,
+            cursor: Cursor::default(),
+            dirty: false,
+            goal_col: None,
+            syntax_dirty: false,
+        }
+    }
+
     /// Load a file from disk, or start an empty buffer pointed at `path` if the
     /// file does not exist yet. The path is normalized to Quill's manuscript
     /// format: a path with no extension gets `.md` (see [`with_default_extension`]).
@@ -88,13 +104,7 @@ impl Buffer {
             .as_ref()
             .ok_or_else(|| std::io::Error::other("no file path set"))?;
 
-        let mut content = self.rope.to_string();
-        let trimmed_len = content.trim_end_matches('\n').len();
-        content.truncate(trimmed_len);
-        if !content.is_empty() {
-            content.push('\n');
-        }
-
+        let content = normalize_trailing_newline(&self.rope.to_string());
         std::fs::write(path, content)?;
         self.dirty = false;
         Ok(())
@@ -112,6 +122,21 @@ impl Buffer {
         let mut s = self.rope.line(idx).to_string();
         s.truncate(s.trim_end_matches('\n').len());
         s
+    }
+
+    /// The exact text of the line range `[start, end)`, including the lines'
+    /// trailing newlines — the rope slice verbatim. Used to split the continuous
+    /// view's buffer back into per-chapter files.
+    pub fn line_range_text(&self, start: usize, end: usize) -> String {
+        let last = self.rope.len_lines();
+        let start = start.min(last);
+        let end = end.min(last);
+        if start >= end {
+            return String::new();
+        }
+        let from = self.rope.line_to_char(start);
+        let to = self.rope.line_to_char(end);
+        self.rope.slice(from..to).to_string()
     }
 
     /// Number of grapheme clusters on a line (how far the cursor can travel).
@@ -201,10 +226,6 @@ impl Buffer {
             self.cursor.col += 1;
         }
         self.goal_col = None;
-    }
-
-    pub fn insert_newline(&mut self) {
-        self.insert_char('\n');
     }
 
     /// Delete the grapheme before the cursor (Backspace).
@@ -334,6 +355,19 @@ fn point_at_byte(rope: &Rope, byte: usize) -> Point {
 /// buffer count and the per-chapter file counts in the navigation pane.
 pub fn count_words(text: &str) -> usize {
     text.unicode_words().count()
+}
+
+/// Quill's on-disk newline convention: a non-empty file ends with exactly one
+/// trailing newline (POSIX/git), and empty content writes an empty file.
+/// Interior bytes are left untouched. Shared by [`Buffer::save`] and the
+/// continuous view's per-chapter split so both write files the same way.
+pub fn normalize_trailing_newline(text: &str) -> String {
+    let mut content = text.to_string();
+    content.truncate(content.trim_end_matches('\n').len());
+    if !content.is_empty() {
+        content.push('\n');
+    }
+    content
 }
 
 /// Quill's manuscript format is Markdown. A path with no extension gets `.md`;

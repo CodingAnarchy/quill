@@ -179,7 +179,7 @@ impl Pane for Editor<'_> {
             height: area.height.saturating_sub(1),
         };
 
-        let buffer = &app.buffer;
+        let buffer = app.edit_buffer();
         let height = column.height as usize;
 
         // Vertically follow the cursor: keep it roughly centered in the viewport.
@@ -195,17 +195,43 @@ impl Pane for Editor<'_> {
         let cursor_byte = buffer.cursor_byte();
         let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
 
-        let lines: Vec<Line> = (top..(top + height).min(total))
-            .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i), &conceal))
-            .collect();
+        // In continuous view, chapter dividers are drawn at segment boundaries.
+        // They're display-only rows, so we track where the cursor's buffer line
+        // lands among them to place the terminal cursor correctly.
+        let dividers = match &app.manuscript {
+            Some(m) => m.dividers(),
+            None => Vec::new(),
+        };
+
+        let mut lines: Vec<Line> = Vec::with_capacity(height);
+        let mut cursor_row = None;
+        let mut i = top;
+        while lines.len() < height && i < total {
+            if let Some(title) = divider_at(i, &dividers) {
+                lines.push(divider_line(title, column.width));
+                if lines.len() >= height {
+                    break;
+                }
+            }
+            if i == cursor_line {
+                cursor_row = Some(lines.len() as u16);
+            }
+            lines.push(styled_line(
+                buffer.syntax(),
+                buffer.line_start_byte(i),
+                &buffer.line(i),
+                &conceal,
+            ));
+            i += 1;
+        }
 
         let paragraph = Paragraph::new(lines).block(Block::default());
         frame.render_widget(paragraph, column);
 
         // Place the terminal cursor (only in Insert mode). The cursor's own span
         // is revealed, so the cursor never lands on a concealed character.
-        if matches!(app.mode, Mode::Insert) {
-            let screen_y = column.y + (cursor_line - top) as u16;
+        if let (true, Some(row)) = (matches!(app.mode, Mode::Insert), cursor_row) {
+            let screen_y = column.y + row;
             let col_width = visible_width_before(
                 &buffer.line(cursor_line),
                 buffer.line_start_byte(cursor_line),
@@ -216,6 +242,28 @@ impl Pane for Editor<'_> {
             frame.set_cursor_position((screen_x, screen_y));
         }
     }
+}
+
+/// The chapter title to draw as a divider above buffer line `line`, if a
+/// continuous-view segment begins there.
+fn divider_at<'a>(line: usize, dividers: &[(usize, &'a str)]) -> Option<&'a str> {
+    dividers
+        .iter()
+        .find(|(l, _)| *l == line)
+        .map(|&(_, title)| title)
+}
+
+/// A centered, dimmed chapter-break label, e.g. `—— Chapter Two ——`. Rendered
+/// only; it never enters the buffer or any file.
+fn divider_line(title: &str, width: u16) -> Line<'static> {
+    let label = format!("—— {title} ——");
+    let pad = (width as usize).saturating_sub(label.chars().count()) / 2;
+    Line::from(Span::styled(
+        format!("{}{label}", " ".repeat(pad)),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    ))
 }
 
 /// Build a styled line: split `text` (one line, no newline) into runs of equal
@@ -309,7 +357,7 @@ fn visible_width_before(
 impl Pane for StatusBar<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
         let app = self.0;
-        let buffer = &app.buffer;
+        let buffer = app.edit_buffer();
 
         if let Mode::Prompt(prompt_state) = &app.mode {
             // Label plus any typed text (empty for y/N confirmations) — two
@@ -323,10 +371,16 @@ impl Pane for StatusBar<'_> {
             return;
         }
 
-        // The manifest is the source of truth for the active chapter's name;
-        // every real (and scratch) project always has an active chapter.
-        let name = app.project.active_title().unwrap_or("[untitled]");
-        let dirty = if buffer.dirty { " ●" } else { "" };
+        // The chapter the cursor is in: in continuous view that's the segment
+        // under the cursor (with a marker); otherwise the single active chapter.
+        let (name, dirtied) = match &app.manuscript {
+            Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
+            None => (
+                app.project.active_title().unwrap_or("[untitled]").to_string(),
+                buffer.dirty,
+            ),
+        };
+        let dirty = if dirtied { " ●" } else { "" };
         let left = format!(" {name}{dirty}");
         let right = match &app.message {
             Some(m) => format!("{m}  "),
@@ -489,5 +543,39 @@ mod tests {
         assert!(screen.contains("Three"), "screen:\n{screen}");
         // The active chapter (index 0) carries the active marker.
         assert!(screen.contains("▸ One"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn continuous_view_shows_chapters_flowing_with_a_divider() {
+        use crate::manuscript::Manuscript;
+
+        // A two-chapter project on disk (the manuscript window reads files).
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("quill-ui-cont-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            Project::manifest_path(&dir),
+            "title = \"Book\"\n\n\
+             [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+             [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("one.md"), "Alpha prose here.\n").unwrap();
+        std::fs::write(dir.join("two.md"), "Beta prose here.\n").unwrap();
+
+        let project = Project::open(&dir).unwrap();
+        let buffer = Buffer::from_path(project.active_path()).unwrap();
+        let mut app = App::new(buffer, project);
+        app.manuscript = Some(Manuscript::open(&app.project));
+
+        let screen = render(&app, 60, 12);
+        // Both chapters' prose appears in one continuous flow...
+        assert!(screen.contains("Alpha prose here."), "screen:\n{screen}");
+        assert!(screen.contains("Beta prose here."), "screen:\n{screen}");
+        // ...separated by a centered divider carrying the next chapter's title.
+        assert!(screen.contains("—— Two ——"), "screen:\n{screen}");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
