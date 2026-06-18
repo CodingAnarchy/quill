@@ -7,6 +7,12 @@ feature specs. Storage model: one chapter per file; a buffer holds one chapter
 (single-chapter view) or at most ~3 chapters (continuous view), never the whole
 novel.
 
+Chapter files may begin with a `---`-fenced YAML front matter block. Quill
+splits it off when loading (`src/frontmatter.rs`), keeps it out of the prose
+buffer so the editor shows only the body, and re-attaches it verbatim on save.
+Titles stay in the manifest; front matter carries the rest of the chapter
+metadata (the #3 epic builds typed access on this).
+
 The continuous-manuscript view (`Ctrl-l`) concatenates a window of up to ~3
 adjacent chapters into one editable buffer (`src/manuscript.rs`), paging
 chapters in/out around the cursor and writing edits back to each chapter's file.

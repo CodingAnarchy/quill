@@ -5,6 +5,7 @@
 
 mod app;
 mod buffer;
+mod frontmatter;
 mod manuscript;
 mod project;
 mod syntax;

@@ -16,6 +16,7 @@
 //! draws between chapters are display-only and never enter the buffer.
 
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
+use crate::frontmatter;
 use crate::project::Project;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
@@ -30,6 +31,9 @@ struct Segment {
     /// Number of lines this chapter occupies in the buffer (always ≥ 1, so even
     /// an empty chapter is editable).
     lines: usize,
+    /// The chapter file's front matter (verbatim), kept out of the flowing text
+    /// and re-attached when this chapter is written back. `None` if it has none.
+    front_matter: Option<String>,
     /// Whether this chapter has edits not yet written to its file.
     dirty: bool,
 }
@@ -145,9 +149,11 @@ impl Manuscript {
             let end = start + s.lines;
             if s.dirty {
                 let raw = self.buffer.line_range_text(start, end);
-                let content = normalize_trailing_newline(&raw);
-                std::fs::write(project.chapter_path(s.index), &content)?;
-                project.set_chapter_words(s.index, count_words(&content));
+                let body = normalize_trailing_newline(&raw);
+                let content = frontmatter::join(s.front_matter.as_deref(), &body);
+                std::fs::write(project.chapter_path(s.index), content.as_bytes())?;
+                // Count the prose only, not the front matter keys.
+                project.set_chapter_words(s.index, count_words(&body));
                 s.dirty = false;
             }
             start = end;
@@ -192,9 +198,11 @@ impl Manuscript {
         let mut segments = Vec::new();
         for index in lo..hi {
             let raw = std::fs::read_to_string(project.chapter_path(index)).unwrap_or_default();
+            // Front matter stays out of the flowing text; keep it to re-attach on save.
+            let (front, body) = frontmatter::split(&raw);
             // Give every chapter at least one line so it's always editable; an
             // empty chapter becomes a single empty line (save normalizes it back).
-            let mut content = normalize_trailing_newline(&raw);
+            let mut content = normalize_trailing_newline(body);
             if content.is_empty() {
                 content.push('\n');
             }
@@ -205,6 +213,7 @@ impl Manuscript {
                 index,
                 title,
                 lines,
+                front_matter: front.map(str::to_string),
                 dirty: false,
             });
         }
@@ -314,6 +323,35 @@ mod tests {
         assert_eq!(m.window_hi(), 3);
         // Invariant: per-segment line counts add up to the buffer's content lines.
         assert_eq!(lines_sum(&m), m.buffer.line_count() - 1); // +1 trailing line
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn front_matter_stays_out_of_the_flow_and_is_re_attached_on_save() {
+        let (mut project, dir) = project_with(
+            "frontmatter",
+            &[
+                "---\nstatus: draft\n---\nAlpha prose.\n",
+                "Beta prose.\n",
+            ],
+        );
+        let mut m = Manuscript::open(&project);
+
+        // The concatenated buffer holds only prose — no YAML in the flow.
+        let flow = m.buffer.line_range_text(0, m.buffer.line_count());
+        assert!(flow.contains("Alpha prose."), "flow:\n{flow}");
+        assert!(!flow.contains("status:"), "front matter leaked into flow:\n{flow}");
+
+        // Edit chapter 0 and save; its front matter is re-attached untouched.
+        m.insert_char('X');
+        m.save(&mut project).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("ch0.md")).unwrap(),
+            "---\nstatus: draft\n---\nXAlpha prose.\n"
+        );
+        // Chapter 1 (no front matter) is untouched.
+        assert_eq!(std::fs::read_to_string(dir.join("ch1.md")).unwrap(), "Beta prose.\n");
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -23,6 +23,10 @@ pub struct Cursor {
 pub struct Buffer {
     rope: Rope,
     pub path: Option<PathBuf>,
+    /// The chapter file's YAML front matter (the verbatim text between the
+    /// `---` fences), kept off the rope so the editor shows only the prose and
+    /// re-attached on save. `None` when the file has no front matter block.
+    front_matter: Option<String>,
     pub cursor: Cursor,
     /// Whether there are unsaved changes.
     pub dirty: bool,
@@ -45,6 +49,7 @@ impl Buffer {
         Self {
             rope: Rope::new(),
             path: None,
+            front_matter: None,
             cursor: Cursor::default(),
             dirty: false,
             goal_col: None,
@@ -56,12 +61,13 @@ impl Buffer {
     /// An in-memory buffer over `text`, with no backing path. Used for the
     /// continuous-manuscript view, whose buffer spans several chapter files and
     /// is saved by splitting it back out (see [`crate::manuscript`]), so it has
-    /// no single path of its own.
+    /// no single path or front matter of its own.
     pub fn from_text(text: &str) -> Self {
         Self {
             syntax: Syntax::new(text),
             rope: Rope::from_str(text),
             path: None,
+            front_matter: None,
             cursor: Cursor::default(),
             dirty: false,
             goal_col: None,
@@ -72,6 +78,10 @@ impl Buffer {
     /// Load a file from disk, or start an empty buffer pointed at `path` if the
     /// file does not exist yet. The path is normalized to Quill's manuscript
     /// format: a path with no extension gets `.md` (see [`with_default_extension`]).
+    ///
+    /// Any YAML front matter is split off and kept aside ([`front_matter`]); the
+    /// rope and the parse hold only the prose body, so the editor never shows the
+    /// raw block.
     pub fn from_path(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = with_default_extension(path.as_ref());
         let text = match std::fs::read_to_string(&path) {
@@ -79,10 +89,12 @@ impl Buffer {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
         };
+        let (front, body) = crate::frontmatter::split(&text);
         Ok(Self {
-            syntax: Syntax::new(&text),
-            rope: Rope::from_str(&text),
+            syntax: Syntax::new(body),
+            rope: Rope::from_str(body),
             path: Some(path),
+            front_matter: front.map(str::to_string),
             cursor: Cursor::default(),
             dirty: false,
             goal_col: None,
@@ -90,22 +102,30 @@ impl Buffer {
         })
     }
 
+    /// The chapter's front matter block, if any (verbatim YAML between the
+    /// `---` fences). The metadata tickets (#46, #48) build typed access on this.
+    #[allow(dead_code)]
+    pub fn front_matter(&self) -> Option<&str> {
+        self.front_matter.as_deref()
+    }
+
     /// Persist the buffer to its path. Returns an error if there is no path.
     ///
     /// The manuscript is written as UTF-8 Markdown, unchanged except for one
-    /// documented normalization: a non-empty file ends with exactly one
-    /// trailing newline (the POSIX/git convention), and an empty document
-    /// writes an empty file. Interior bytes — including any line endings — are
-    /// left exactly as the author wrote them, so a conforming file round-trips
-    /// byte-for-byte.
+    /// documented normalization: a non-empty body ends with exactly one
+    /// trailing newline (the POSIX/git convention), and an empty body writes no
+    /// body. Interior bytes — including any line endings — are left exactly as
+    /// the author wrote them, so a conforming file round-trips byte-for-byte.
+    /// Any front matter the file had is re-attached above the body untouched.
     pub fn save(&mut self) -> std::io::Result<()> {
         let path = self
             .path
             .as_ref()
             .ok_or_else(|| std::io::Error::other("no file path set"))?;
 
-        let content = normalize_trailing_newline(&self.rope.to_string());
-        std::fs::write(path, content)?;
+        let body = normalize_trailing_newline(&self.rope.to_string());
+        let content = crate::frontmatter::join(self.front_matter.as_deref(), &body);
+        std::fs::write(path, content.as_bytes())?;
         self.dirty = false;
         Ok(())
     }
@@ -410,6 +430,25 @@ mod tests {
         let mut buf = Buffer::from_path(&path).unwrap();
         buf.save().unwrap();
 
+        assert_eq!(read(&path), original);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn front_matter_is_kept_off_the_prose_and_re_attached_on_save() {
+        let path = temp_path("frontmatter.md");
+        let original = "---\nstatus: draft\npov: Mara\n---\n# Chapter One\n\nThe body.\n";
+        write(&path, original);
+
+        let mut buf = Buffer::from_path(&path).unwrap();
+        // The prose area (rope) holds only the body — no raw YAML.
+        assert_eq!(buf.line(0), "# Chapter One");
+        assert!(buf.front_matter().is_some());
+        // Word count covers the body, not the front matter keys.
+        assert_eq!(buf.word_count(), count_words("# Chapter One\n\nThe body.\n"));
+
+        // Saving re-attaches the front matter untouched: byte-for-byte round-trip.
+        buf.save().unwrap();
         assert_eq!(read(&path), original);
         std::fs::remove_file(&path).ok();
     }
