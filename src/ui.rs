@@ -113,6 +113,10 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
     let headings = app.buffer.syntax().headings();
     let current_heading = current_section(headings, app.buffer.cursor_byte());
 
+    // Resolve the active index once: active_index() is an O(n) scan, so calling
+    // it per row would be O(n²) per frame.
+    let active = app.project.active_index();
+
     // Count each chapter once for this frame, then reuse for the rows and the
     // total — so the active chapter's live count isn't recomputed twice.
     let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
@@ -120,7 +124,7 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
-        let is_active = i == app.project.active_index();
+        let is_active = i == active;
         let is_selected = app.mode == Mode::Nav && i == app.nav_selected;
         lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
         if is_active {

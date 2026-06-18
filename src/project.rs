@@ -2,10 +2,12 @@
 //! `book.toml` manifest that records the chapter order.
 //!
 //! The unit of work is always a project — there is no single-file mode. The
-//! manifest is the source of truth for chapter order and titles; the chapter
-//! text lives in the individual `.md` files. This module owns loading, creating,
-//! and saving that structure; the active chapter's text is held in a [`Buffer`]
-//! alongside, not here.
+//! manifest is the source of truth for chapter order, titles, and a cached
+//! per-chapter word count; the chapter text lives in the individual `.md` files.
+//! This module owns loading, creating, and saving that structure. It does not
+//! hold chapter text — the active chapter's text lives in a [`Buffer`] alongside
+//! — but it does read each file once at open to populate the word counts (a
+//! transient read per chapter, never N live buffers).
 //!
 //! This is the foundation (issue #22). Navigation between chapters (#23),
 //! structure editing (#24), rolled-up counts (#25), and the continuous view
@@ -24,35 +26,29 @@ pub const MANIFEST_NAME: &str = "book.toml";
 
 /// One chapter's entry in the manifest: its display title, the file that holds
 /// its prose (relative to the project root), and a cached word count.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ChapterEntry {
     pub title: String,
     pub file: String,
     /// Cached word count, populated from the file at open and refreshed as the
-    /// chapter is edited. Transient — never written to `book.toml`.
+    /// chapter is edited. Transient — never written to `book.toml` (`serde(skip)`),
+    /// but it does participate in equality (compare structure explicitly if you
+    /// need to ignore counts).
     #[serde(skip)]
     pub words: usize,
 }
 
-// `words` is a transient cache, so two entries are equal when their persisted
-// fields (title, file) match — keeps round-trip comparisons about structure.
-impl PartialEq for ChapterEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.title == other.title && self.file == other.file
-    }
-}
-
 /// The on-disk manifest (`book.toml`), deserialized.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub title: String,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
 }
 
-/// A loaded project: where it lives, its manifest, and which chapter is active.
-/// The active chapter's text is edited through a separate [`Buffer`]; this type
-/// only tracks structure.
+/// A loaded project: where it lives, its manifest (structure + cached word
+/// counts), and which chapter is active. The active chapter's text is edited
+/// through a separate [`Buffer`]; this type holds no chapter text.
 pub struct Project {
     pub root: PathBuf,
     pub manifest: Manifest,
@@ -166,9 +162,10 @@ impl Project {
         self.manifest.chapters.get(index).map_or(0, |c| c.words)
     }
 
-    /// Update chapter `index`'s cached word count.
-    pub fn set_chapter_words(&mut self, index: usize, words: usize) {
-        if let Some(chapter) = self.manifest.chapters.get_mut(index) {
+    /// Refresh the active chapter's cached word count (called after editing it).
+    pub fn set_active_words(&mut self, words: usize) {
+        let active = self.active_index();
+        if let Some(chapter) = self.manifest.chapters.get_mut(active) {
             chapter.words = words;
         }
     }
@@ -353,9 +350,19 @@ mod tests {
         }
         buf.save().unwrap();
 
-        // Reopen and confirm structure + content survived.
+        // Reopen and confirm the structure (titles + files) and content
+        // survived. Compare the persisted projection, not the whole manifest:
+        // `reopened` has word counts from disk while `project`'s are still 0.
         let reopened = Project::open(&dir).unwrap();
-        assert_eq!(reopened.manifest, project.manifest);
+        let structure = |p: &Project| -> Vec<(String, String)> {
+            p.manifest
+                .chapters
+                .iter()
+                .map(|c| (c.title.clone(), c.file.clone()))
+                .collect()
+        };
+        assert_eq!(reopened.manifest.title, project.manifest.title);
+        assert_eq!(structure(&reopened), structure(&project));
         let text = std::fs::read_to_string(reopened.active_path()).unwrap();
         assert!(text.contains("The night was dark."));
 

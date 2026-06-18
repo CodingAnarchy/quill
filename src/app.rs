@@ -131,8 +131,7 @@ impl App {
             }
         }
         // The chapter we're leaving is now on disk; refresh its cached count.
-        self.project
-            .set_chapter_words(self.project.active_index(), self.buffer.word_count());
+        self.project.set_active_words(self.buffer.word_count());
         match Buffer::from_path(self.project.chapter_path(index)) {
             Ok(buffer) => {
                 self.buffer = buffer;
@@ -340,8 +339,7 @@ impl App {
         match (ctrl, key.code) {
             (true, KeyCode::Char('s')) => match self.buffer.save() {
                 Ok(()) => {
-                    self.project
-                        .set_chapter_words(self.project.active_index(), self.buffer.word_count());
+                    self.project.set_active_words(self.buffer.word_count());
                     self.message = Some("Saved".into());
                 }
                 Err(e) => self.message = Some(format!("Save failed: {e}")),
