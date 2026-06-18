@@ -44,41 +44,54 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
     headings.iter().rposition(|h| h.start <= cursor_byte)
 }
 
-/// The in-chapter outline: heading titles indented by level, with the current
-/// section highlighted. Shows an empty state rather than erroring when there are
-/// no headings.
+/// The navigation pane: the project's chapters, with the active chapter's
+/// in-chapter heading outline nested beneath it (the current section
+/// highlighted). While browsing (Nav mode), the selected chapter is reversed.
 fn draw_outline(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default().borders(Borders::RIGHT);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let header = Span::styled(
-        "OUTLINE",
+        "CHAPTERS",
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     );
-
-    let headings = app.buffer.syntax().headings();
     let mut lines: Vec<Line> = vec![Line::from(header), Line::raw("")];
 
-    if headings.is_empty() {
+    let navigating = app.mode == Mode::Nav;
+    let headings = app.buffer.syntax().headings();
+    let current_heading = current_section(headings, app.buffer.cursor_byte());
+
+    for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
+        let is_active = i == app.project.active;
+        let mut style = Style::default();
+        if is_active {
+            style = style.fg(Color::Cyan).add_modifier(Modifier::BOLD);
+        }
+        if navigating && i == app.nav_selected {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        let marker = if is_active { "▸ " } else { "  " };
         lines.push(Line::from(Span::styled(
-            "No headings",
-            Style::default().fg(Color::DarkGray),
+            format!("{marker}{}", chapter.title),
+            style,
         )));
-    } else {
-        let current = current_section(headings, app.buffer.cursor_byte());
-        for (i, h) in headings.iter().enumerate() {
-            let indent = "  ".repeat(h.level.saturating_sub(1) as usize);
-            let style = if Some(i) == current {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            lines.push(Line::from(Span::styled(format!("{indent}{}", h.title), style)));
+
+        // Nest the active chapter's heading outline beneath it.
+        if is_active {
+            for (h_idx, h) in headings.iter().enumerate() {
+                let indent = "  ".repeat(h.level as usize);
+                let style = if Some(h_idx) == current_heading {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Gray)
+                };
+                lines.push(Line::from(Span::styled(format!("{indent}{}", h.title), style)));
+            }
         }
     }
 
@@ -336,21 +349,58 @@ mod tests {
         assert_eq!(current_section(&[], 0), None);
     }
 
+    /// An App over an in-memory project with several chapters (no files needed
+    /// for rendering, which only reads chapter titles + the active buffer).
+    fn app_with_chapters(titles: &[&str], active_text: &str) -> App {
+        use crate::project::{ChapterEntry, Manifest, Project};
+        let chapters = titles
+            .iter()
+            .enumerate()
+            .map(|(i, t)| ChapterEntry {
+                title: (*t).to_string(),
+                file: format!("ch-{i}.md"),
+            })
+            .collect();
+        let project = Project {
+            root: ".".into(),
+            manifest: Manifest {
+                title: "book".into(),
+                chapters,
+            },
+            active: 0,
+        };
+        App::new(buffer_with(active_text), project)
+    }
+
     #[test]
-    fn outline_pane_lists_headings_when_visible() {
+    fn pane_nests_active_chapter_headings() {
         let mut app = app_with("# Chapter\n\nbody\n\n## Scene\n\nmore\n");
         app.outline_visible = true;
         let screen = render(&app, 90, 16);
-        assert!(screen.contains("OUTLINE"), "screen:\n{screen}");
-        assert!(screen.contains("Chapter"), "screen:\n{screen}");
+        assert!(screen.contains("CHAPTERS"), "screen:\n{screen}");
+        // The scratch project's chapter, with the in-chapter headings nested.
+        assert!(screen.contains("Chapter 1"), "screen:\n{screen}");
         assert!(screen.contains("Scene"), "screen:\n{screen}");
     }
 
     #[test]
-    fn outline_pane_shows_empty_state_without_headings() {
+    fn pane_lists_chapter_even_without_headings() {
         let mut app = app_with("just prose, no headings\n");
         app.outline_visible = true;
         let screen = render(&app, 90, 12);
-        assert!(screen.contains("No headings"), "screen:\n{screen}");
+        assert!(screen.contains("CHAPTERS"), "screen:\n{screen}");
+        assert!(screen.contains("Chapter 1"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn pane_lists_all_chapters_and_marks_the_active_one() {
+        let mut app = app_with_chapters(&["One", "Two", "Three"], "body\n");
+        app.outline_visible = true;
+        let screen = render(&app, 90, 14);
+        assert!(screen.contains("One"), "screen:\n{screen}");
+        assert!(screen.contains("Two"), "screen:\n{screen}");
+        assert!(screen.contains("Three"), "screen:\n{screen}");
+        // The active chapter (index 0) carries the active marker.
+        assert!(screen.contains("▸ One"), "screen:\n{screen}");
     }
 }
