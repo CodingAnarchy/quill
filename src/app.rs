@@ -250,15 +250,29 @@ impl App {
         });
     }
 
+    /// Enter (or stay in) the chapter browser with `selected` highlighted.
+    fn select(&mut self, selected: usize) {
+        self.mode = Mode::Nav { selected };
+    }
+
+    /// The prompt state, while in [`Mode::Prompt`]. Only call from a prompt key
+    /// handler, which has already matched the variant.
+    fn prompt_mut(&mut self) -> &mut PromptState {
+        match &mut self.mode {
+            Mode::Prompt(state) => state,
+            _ => unreachable!("prompt editing runs only in Prompt mode"),
+        }
+    }
+
     fn on_key_nav(&mut self, key: KeyEvent) {
         let Mode::Nav { selected: sel } = self.mode else {
             return;
         };
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Nav { selected: sel.saturating_sub(1) },
+            KeyCode::Up | KeyCode::Char('k') => self.select(sel.saturating_sub(1)),
             KeyCode::Down | KeyCode::Char('j') => {
                 let last = self.chapter_count() - 1;
-                self.mode = Mode::Nav { selected: (sel + 1).min(last) };
+                self.select((sel + 1).min(last));
             }
             KeyCode::Enter => {
                 self.activate_chapter(sel);
@@ -267,11 +281,11 @@ impl App {
             // Reorder the selected chapter.
             KeyCode::Char('K') => {
                 let s = self.move_chapter(sel, true);
-                self.mode = Mode::Nav { selected: s };
+                self.select(s);
             }
             KeyCode::Char('J') => {
                 let s = self.move_chapter(sel, false);
-                self.mode = Mode::Nav { selected: s };
+                self.select(s);
             }
             // Add / rename / delete (each returns to the browser when done).
             KeyCode::Char('a') => {
@@ -320,7 +334,7 @@ impl App {
             Pending::Delete { at } => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     let selected = self.delete_chapter(at);
-                    self.mode = Mode::Nav { selected };
+                    self.select(selected);
                 }
                 _ => self.mode = closed,
             },
@@ -328,31 +342,25 @@ impl App {
             Pending::NewChapter { at } | Pending::Rename { at } => {
                 let is_rename = matches!(pending, Pending::Rename { .. });
                 match key.code {
-                    KeyCode::Char(c) => {
-                        if let Mode::Prompt(s) = &mut self.mode {
-                            s.input.push(c);
-                        }
-                    }
+                    KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
-                        if let Mode::Prompt(s) = &mut self.mode {
-                            s.input.pop();
-                        }
+                        self.prompt_mut().input.pop();
                     }
                     KeyCode::Enter => {
-                        let text = match &mut self.mode {
-                            Mode::Prompt(s) => std::mem::take(&mut s.input),
-                            _ => String::new(),
-                        };
+                        let text = std::mem::take(&mut self.prompt_mut().input);
                         let text = text.trim();
+                        // Empty or rename keeps the original selection; a new
+                        // chapter lands on the one just created.
+                        let fallback = nav_return.unwrap_or(0);
                         let selected = if text.is_empty() {
-                            nav_return.unwrap_or(0)
+                            fallback
                         } else if is_rename {
                             self.rename_chapter(at, text);
-                            nav_return.unwrap_or(0)
+                            fallback
                         } else {
                             self.create_chapter(at, text)
                         };
-                        self.mode = Mode::Nav { selected };
+                        self.select(selected);
                     }
                     KeyCode::Esc => self.mode = closed,
                     _ => {}
