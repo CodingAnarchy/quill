@@ -136,6 +136,43 @@ fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<
     }
 }
 
+/// The top of the nav pane: book / series metadata above the chapter list.
+/// Series (if any) sits above the book title; subtitle and author follow.
+fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(series) = &manifest.series {
+        lines.push(Line::from(Span::styled(
+            series.clone(),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        manifest.title.clone(),
+        active_style(),
+    )));
+    if let Some(subtitle) = &manifest.subtitle {
+        lines.push(Line::from(Span::styled(
+            subtitle.clone(),
+            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+        )));
+    }
+    if let Some(author) = &manifest.author {
+        lines.push(Line::from(Span::styled(
+            format!("by {author}"),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "CHAPTERS",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::raw(""));
+    lines
+}
+
 impl Pane for NavPane<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
         let app = self.0;
@@ -143,13 +180,7 @@ impl Pane for NavPane<'_> {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let header = Span::styled(
-            "CHAPTERS",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
-        let mut lines: Vec<Line> = vec![Line::from(header), Line::raw("")];
+        let mut lines: Vec<Line> = project_header(&app.project.manifest);
 
         let headings = app.buffer.syntax().headings();
         let current_heading = current_section(headings, app.buffer.cursor_byte());
@@ -634,6 +665,22 @@ mod tests {
         assert!(screen.contains("Three"), "screen:\n{screen}");
         // The active chapter (index 0) carries the active marker.
         assert!(screen.contains("▸ One"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn nav_pane_shows_the_project_header() {
+        let mut app = app_with_chapters(&["One", "Two"], "body\n");
+        app.project.manifest.title = "Book of Dust".into();
+        app.project.manifest.subtitle = Some("La Belle Sauvage".into());
+        app.project.manifest.author = Some("Philip Pullman".into());
+        app.project.manifest.series = Some("The Book of Dust".into());
+        app.outline_visible = true;
+
+        let screen = render(&app, 90, 16);
+        assert!(screen.contains("Book of Dust"), "screen:\n{screen}");
+        assert!(screen.contains("La Belle Sauvage"), "screen:\n{screen}");
+        assert!(screen.contains("by Philip Pullman"), "screen:\n{screen}");
+        assert!(screen.contains("CHAPTERS"), "screen:\n{screen}");
     }
 
     #[test]

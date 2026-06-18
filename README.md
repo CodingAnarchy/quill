@@ -29,6 +29,8 @@ keystrokes that stay out of the way.
 - **Chapter metadata** — set each chapter's status (draft / revised / final),
   a one-line summary, and POV character; stored as YAML front matter in the file
   (portable, and your other keys are preserved), with status shown in the pane.
+- **Book & series metadata** — title, subtitle, author, and series, stored in
+  the `book.toml` manifest and shown as a header above the chapter list.
 
 ## Build & run
 
@@ -71,7 +73,8 @@ byte-for-byte.
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
 (draft → revised → final), **m** edit the one-line summary, **v** set the POV
-character.
+character. Book/series metadata (shown in the pane header): **t** book title,
+**b** subtitle, **w** author, **e** series.
 
 ## Layout
 

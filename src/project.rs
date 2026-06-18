@@ -49,9 +49,21 @@ pub struct ChapterEntry {
 }
 
 /// The on-disk manifest (`book.toml`), deserialized.
+///
+/// `title` is the book title; `subtitle`, `author`, and `series` are optional
+/// book/series metadata. New optional fields default to absent so manifests
+/// written before they existed still parse, and unset fields aren't written
+/// back. Scalars are declared before `chapters` so the TOML array-of-tables
+/// stays last (a TOML requirement).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
 }
@@ -118,6 +130,9 @@ impl Project {
             root,
             manifest: Manifest {
                 title,
+                subtitle: None,
+                author: None,
+                series: None,
                 chapters: Vec::new(),
             },
             active: String::new(),
@@ -368,6 +383,9 @@ impl Project {
             root: PathBuf::from("."),
             manifest: Manifest {
                 title: "untitled".into(),
+                subtitle: None,
+                author: None,
+                series: None,
                 chapters,
             },
             active,
@@ -471,6 +489,32 @@ mod tests {
         assert_eq!(project.manifest.chapters.len(), 2);
         assert_eq!(project.active_index(), 0);
         assert_eq!(project.active_title(), Some("One"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn book_metadata_persists_and_old_manifests_still_parse() {
+        let dir = temp_dir("book-meta");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A manifest written before these fields existed still opens.
+        let mut project = Project::create(&dir).unwrap();
+        assert_eq!(project.manifest.subtitle, None);
+
+        // Set the new fields and persist.
+        project.manifest.subtitle = Some("A Novel".into());
+        project.manifest.author = Some("A. Writer".into());
+        project.manifest.series = Some("The Saga".into());
+        project.save_manifest().unwrap();
+
+        // The written TOML carries them, and they survive a reopen.
+        let toml = std::fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("author = \"A. Writer\""), "manifest:\n{toml}");
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.manifest.subtitle.as_deref(), Some("A Novel"));
+        assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
+        assert_eq!(reopened.manifest.series.as_deref(), Some("The Saga"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
