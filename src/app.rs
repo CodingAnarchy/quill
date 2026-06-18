@@ -5,7 +5,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::buffer::Buffer;
 use crate::frontmatter::{FrontMatter, Status};
 use crate::manuscript::Manuscript;
-use crate::project::Project;
+use crate::project::{Manifest, Project};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
@@ -53,6 +53,11 @@ enum Pending {
     SetSummary { at: usize },
     /// Text input: POV character for the chapter at `at`.
     SetPov { at: usize },
+    /// Text input: project-level book / series metadata (no chapter index).
+    SetBookTitle,
+    SetSubtitle,
+    SetAuthor,
+    SetSeries,
 }
 
 pub struct App {
@@ -420,6 +425,14 @@ impl App {
         }
     }
 
+    /// Apply a book/series metadata edit to the manifest and persist it.
+    fn set_book_meta(&mut self, f: impl FnOnce(&mut Manifest)) {
+        f(&mut self.project.manifest);
+        if let Err(e) = self.project.save_manifest() {
+            self.message = Some(format!("Save failed: {e}"));
+        }
+    }
+
     /// Open a prompt. `nav_return` is the chapter to reselect when it closes
     /// (`None` returns to insert mode, e.g. the quit prompt).
     fn open_prompt(
@@ -492,6 +505,23 @@ impl App {
                 let prefill = self.project.chapter_pov(sel).unwrap_or("").to_string();
                 self.open_prompt(Pending::SetPov { at: sel }, "POV: ", &prefill, Some(sel));
             }
+            // Project-level book / series metadata.
+            KeyCode::Char('t') => {
+                let cur = self.project.manifest.title.clone();
+                self.open_prompt(Pending::SetBookTitle, "Book title: ", &cur, Some(sel));
+            }
+            KeyCode::Char('b') => {
+                let cur = self.project.manifest.subtitle.clone().unwrap_or_default();
+                self.open_prompt(Pending::SetSubtitle, "Subtitle: ", &cur, Some(sel));
+            }
+            KeyCode::Char('w') => {
+                let cur = self.project.manifest.author.clone().unwrap_or_default();
+                self.open_prompt(Pending::SetAuthor, "Author: ", &cur, Some(sel));
+            }
+            KeyCode::Char('e') => {
+                let cur = self.project.manifest.series.clone().unwrap_or_default();
+                self.open_prompt(Pending::SetSeries, "Series: ", &cur, Some(sel));
+            }
             KeyCode::Char('d') => {
                 if self.chapter_count() <= 1 {
                     self.message = Some(ONLY_CHAPTER_MSG.into());
@@ -539,7 +569,11 @@ impl App {
             Pending::NewChapter { .. }
             | Pending::Rename { .. }
             | Pending::SetSummary { .. }
-            | Pending::SetPov { .. } => {
+            | Pending::SetPov { .. }
+            | Pending::SetBookTitle
+            | Pending::SetSubtitle
+            | Pending::SetAuthor
+            | Pending::SetSeries => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -567,9 +601,31 @@ impl App {
                                 self.edit_chapter_meta(at, |fm| fm.set_pov(text));
                                 fallback
                             }
-                            // Empty title for New/Rename: a no-op. (The summary
-                            // and POV arms above run on empty text on purpose —
-                            // that clears the field.)
+                            // Project metadata. The book title is required, so
+                            // empty input keeps it; the optional fields clear on
+                            // empty (stored as `None`).
+                            Pending::SetBookTitle if !text.is_empty() => {
+                                self.set_book_meta(|m| m.title = text.to_string());
+                                fallback
+                            }
+                            Pending::SetSubtitle => {
+                                let v = (!text.is_empty()).then(|| text.to_string());
+                                self.set_book_meta(|m| m.subtitle = v);
+                                fallback
+                            }
+                            Pending::SetAuthor => {
+                                let v = (!text.is_empty()).then(|| text.to_string());
+                                self.set_book_meta(|m| m.author = v);
+                                fallback
+                            }
+                            Pending::SetSeries => {
+                                let v = (!text.is_empty()).then(|| text.to_string());
+                                self.set_book_meta(|m| m.series = v);
+                                fallback
+                            }
+                            // Empty title for New/Rename/BookTitle: a no-op. (The
+                            // summary/POV/optional-book arms above run on empty
+                            // text on purpose — that clears the field.)
                             _ => fallback,
                         };
                         self.select(selected);
@@ -884,6 +940,45 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
         assert_eq!(app.project.active_title(), Some("One"));
         assert!(app.buffer.line(0).contains("first"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn editing_book_metadata_persists_to_the_manifest() {
+        let (mut app, dir) = two_chapter_app("book-meta");
+        app.on_key(ctrl('g')); // chapter browser
+
+        app.on_key(key(KeyCode::Char('t'))); // book title (prefilled "Book")
+        typed(&mut app, " of Dust"); // -> "Book of Dust"
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(key(KeyCode::Char('w'))); // author
+        typed(&mut app, "A. Writer");
+        app.on_key(key(KeyCode::Enter));
+
+        assert_eq!(app.project.manifest.title, "Book of Dust");
+        assert_eq!(app.project.manifest.author.as_deref(), Some("A. Writer"));
+
+        // Persisted to the manifest and survives a reopen.
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.manifest.title, "Book of Dust");
+        assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn clearing_an_optional_book_field_removes_it() {
+        let (mut app, dir) = two_chapter_app("book-meta-clear");
+        app.project.manifest.subtitle = Some("placeholder".into());
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Char('b'))); // subtitle prompt (prefilled)
+        // Clear the prefilled text, then confirm empty.
+        for _ in 0.."placeholder".len() {
+            app.on_key(key(KeyCode::Backspace));
+        }
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!(app.project.manifest.subtitle, None);
 
         std::fs::remove_dir_all(&dir).ok();
     }
