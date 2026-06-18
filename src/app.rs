@@ -5,6 +5,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::buffer::Buffer;
 use crate::project::Project;
 
+/// Shown when the author tries to delete a project's last remaining chapter.
+const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
+
 /// Editor modes. Quill is mostly modeless for writing, but borrows a light
 /// command line for actions that shouldn't be a stray keystroke away.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,7 +183,7 @@ impl App {
 
     fn delete_chapter(&mut self, at: usize) {
         if self.chapter_count() <= 1 {
-            self.message = Some("Can't delete the only chapter".into());
+            self.message = Some(ONLY_CHAPTER_MSG.into());
             return;
         }
         // If we're removing the active chapter, persist its latest text first so
@@ -250,7 +253,7 @@ impl App {
             }
             KeyCode::Char('d') => {
                 if self.chapter_count() <= 1 {
-                    self.message = Some("Can't delete the only chapter".into());
+                    self.message = Some(ONLY_CHAPTER_MSG.into());
                 } else {
                     let title = self.project.manifest.chapters[sel].title.clone();
                     self.open_prompt(Pending::Delete { at: sel }, format!("Delete '{title}'? (y/N)"), "");
@@ -274,26 +277,30 @@ impl App {
                 }
                 _ => self.close_prompt(Mode::Nav),
             },
-            Some(Pending::NewChapter { at }) | Some(Pending::Rename { at }) => match key.code {
-                KeyCode::Char(c) => self.prompt_input.push(c),
-                KeyCode::Backspace => {
-                    self.prompt_input.pop();
-                }
-                KeyCode::Enter => {
-                    let text = std::mem::take(&mut self.prompt_input);
-                    let text = text.trim();
-                    if !text.is_empty() {
-                        match self.pending {
-                            Some(Pending::NewChapter { .. }) => self.create_chapter(at, text),
-                            Some(Pending::Rename { .. }) => self.rename_chapter(at, text),
-                            _ => {}
-                        }
+            // Both text prompts share the same editing keys; only Enter differs.
+            Some(Pending::NewChapter { at }) | Some(Pending::Rename { at }) => {
+                let is_rename = matches!(self.pending, Some(Pending::Rename { .. }));
+                match key.code {
+                    KeyCode::Char(c) => self.prompt_input.push(c),
+                    KeyCode::Backspace => {
+                        self.prompt_input.pop();
                     }
-                    self.close_prompt(Mode::Nav);
+                    KeyCode::Enter => {
+                        let text = std::mem::take(&mut self.prompt_input);
+                        let text = text.trim();
+                        if !text.is_empty() {
+                            if is_rename {
+                                self.rename_chapter(at, text);
+                            } else {
+                                self.create_chapter(at, text);
+                            }
+                        }
+                        self.close_prompt(Mode::Nav);
+                    }
+                    KeyCode::Esc => self.close_prompt(Mode::Nav),
+                    _ => {}
                 }
-                KeyCode::Esc => self.close_prompt(Mode::Nav),
-                _ => {}
-            },
+            }
             None => self.close_prompt(Mode::Insert),
         }
     }
