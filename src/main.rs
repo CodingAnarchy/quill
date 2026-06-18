@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::{
+    cursor::Show,
     event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{
@@ -42,11 +43,36 @@ fn main() -> io::Result<()> {
     let buffer = Buffer::from_path(project.active_path())?;
     let mut app = App::new(buffer, project);
 
+    // Restore the terminal even on panic. The release `panic = "abort"` profile
+    // never unwinds, so `Tui`'s Drop won't run on a crash — but a panic hook
+    // fires before the abort, making this the only thing that un-mangles the
+    // shell. Installed before raw mode so it's armed for the whole TUI lifetime.
+    install_panic_hook();
+
     // `Tui` restores the terminal when dropped, so any return from `run` —
-    // including a `?` error — leaves the terminal usable. (A panic under the
-    // release `panic = "abort"` profile still won't run Drop; that's issue #35.)
+    // including a `?` error — leaves the terminal usable.
     let mut tui = Tui::new()?;
     run(&mut tui, &mut app)
+}
+
+/// Undo the terminal setup from [`Tui::new`]: leave raw mode and the alternate
+/// screen, and re-show the cursor. Shared by the [`Tui`] drop guard and the
+/// panic hook so the two teardown paths can't drift. Best-effort — errors are
+/// ignored because there's nothing useful to do with them mid-teardown.
+fn restore_terminal(w: &mut impl io::Write) {
+    let _ = disable_raw_mode();
+    let _ = execute!(w, LeaveAlternateScreen, DisableMouseCapture, Show);
+}
+
+/// Install a panic hook that restores the terminal before the default hook
+/// prints the panic message, so a crash doesn't leave the shell in raw mode /
+/// the alternate screen. Chains to the previous hook so the message still shows.
+fn install_panic_hook() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal(&mut io::stdout());
+        prev(info);
+    }));
 }
 
 /// Owns the terminal in raw / alternate-screen mode and restores it on drop.
@@ -72,13 +98,7 @@ impl Tui {
 
 impl Drop for Tui {
     fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        );
-        let _ = self.terminal.show_cursor();
+        restore_terminal(self.terminal.backend_mut());
     }
 }
 
@@ -100,4 +120,22 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_terminal_leaves_alt_screen_and_shows_cursor() {
+        // restore_terminal writes the teardown escapes to the given sink;
+        // disable_raw_mode touches the (absent) tty and is harmlessly ignored.
+        let mut out: Vec<u8> = Vec::new();
+        restore_terminal(&mut out);
+        let seq = String::from_utf8(out).unwrap();
+        // The user-visible halves of teardown: back to the main screen, cursor
+        // shown. If these regress, a crash leaves the shell unusable.
+        assert!(seq.contains("\x1b[?1049l"), "should leave alt screen: {seq:?}");
+        assert!(seq.contains("\x1b[?25h"), "should show the cursor: {seq:?}");
+    }
 }
