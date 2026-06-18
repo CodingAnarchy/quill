@@ -43,23 +43,36 @@ cargo clippy --all-targets   # must be clean
 ## Performance guards (ignored tests)
 
 Some tests are `#[ignore]`d because they measure timing and only make sense in
-release. **Run them whenever you touch the parse, the edit path, or rendering**
+release — in a debug build the unoptimized code is 3–18× slower and the
+thresholds false-fail, so they can't run as part of plain `cargo test`. **Run
+them whenever you touch the parse, the edit path, rendering, or project load**
 — they back the "typing stays instant" promise.
 
 ```sh
-cargo test --release -- --ignored --nocapture
+cargo perf   # alias for: cargo test --release -- --ignored --nocapture
 ```
 
-What they assert (in `src/buffer.rs`):
+What they assert:
 
-- `keystroke_is_decoupled_from_document_size` — a keystroke only *records* the
-  edit (no parse), so it stays cheap (~tens of µs) even on a 75k-word buffer.
-- `reparse_is_fast_at_window_size` — a full reparse on a ~3-chapter window
-  (the realistic worst case) is under one 16ms frame.
+- `keystroke_is_decoupled_from_document_size` (`buffer.rs`) — a keystroke only
+  *records* the edit (no parse), so it stays cheap (~tens of µs) even on a
+  75k-word buffer.
+- `reparse_is_fast_at_window_size` (`buffer.rs`) — a full reparse on a
+  ~3-chapter window (the realistic worst case) is under one 16ms frame.
+- `render_stays_within_a_frame` (`ui.rs`) — a full `draw()` (large chapter +
+  a many-chapter outline pane) stays under one frame. The status bar's live
+  word count is O(document) per draw; the pane reads cached per-chapter
+  metadata, never the files. If rendering ever re-reads files or does
+  per-chapter work proportional to the novel, this catches it.
+- `open_is_fast_for_a_large_novel` (`project.rs`) — opening reads and parses
+  every chapter file once (word count + front matter); even a 150-chapter
+  novel opens in a few ms.
 
 If you make per-keystroke work depend on document size, the first guard will
 catch it. Keep parsing off the keystroke path (record on edit, reparse on idle
-in the `main.rs` event loop).
+in the `main.rs` event loop). Keep per-frame rendering off the filesystem —
+cache file-derived data (word counts, front-matter metadata) on the manifest
+at open, like `ChapterEntry` does.
 
 ## Live TUI verification (tmux)
 

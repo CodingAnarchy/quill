@@ -1,0 +1,7 @@
+# `cargo perf` runs the performance guards the way they're meant to run:
+# release build (their timing thresholds are tuned for the optimized binary),
+# the `#[ignore]`d timing tests only, with output shown. They're ignored by
+# default because plain `cargo test` is a debug build, where the unoptimized
+# code is 3–18× slower and would false-fail the thresholds.
+[alias]
+perf = "test --release -- --ignored --nocapture"
