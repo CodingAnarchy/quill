@@ -3,6 +3,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
+use crate::frontmatter::{FrontMatter, Status};
 use crate::manuscript::Manuscript;
 use crate::project::Project;
 
@@ -48,6 +49,10 @@ enum Pending {
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.
     Rename { at: usize },
+    /// Text input: one-line summary for the chapter at `at`.
+    SetSummary { at: usize },
+    /// Text input: POV character for the chapter at `at`.
+    SetPov { at: usize },
 }
 
 pub struct App {
@@ -372,6 +377,41 @@ impl App {
         at.min(self.chapter_count() - 1)
     }
 
+    // --- Chapter metadata (front matter) ----------------------------------
+
+    /// Cycle the selected chapter's status (none → Draft → Revised → Final → …).
+    fn cycle_status(&mut self, index: usize) {
+        let next = match self.project.chapter_status(index) {
+            None => Status::Draft,
+            Some(s) => s.next(),
+        };
+        if self.edit_chapter_meta(index, |fm| fm.set_status(next)) {
+            let title = self.project.chapter_title(index).unwrap_or("Chapter");
+            self.message = Some(format!("{title}: {}", next.label()));
+        }
+    }
+
+    /// Apply a front-matter edit to chapter `index`. The active chapter is edited
+    /// through its live buffer (persisted on the next save, like prose); any other
+    /// chapter is edited on disk immediately. Either way the pane cache is updated.
+    /// Returns whether the edit succeeded.
+    fn edit_chapter_meta(&mut self, index: usize, f: impl FnOnce(&mut FrontMatter)) -> bool {
+        if index == self.project.active_index() {
+            f(self.buffer.front_matter_mut());
+            self.buffer.dirty = true;
+            self.project.cache_chapter_meta(index, self.buffer.front_matter());
+            true
+        } else {
+            match self.project.edit_chapter_front_matter(index, f) {
+                Ok(()) => true,
+                Err(e) => {
+                    self.message = Some(format!("Save failed: {e}"));
+                    false
+                }
+            }
+        }
+    }
+
     /// Open a prompt. `nav_return` is the chapter to reselect when it closes
     /// (`None` returns to insert mode, e.g. the quit prompt).
     fn open_prompt(
@@ -434,6 +474,16 @@ impl App {
                 let title = self.project.manifest.chapters[sel].title.clone();
                 self.open_prompt(Pending::Rename { at: sel }, "Rename chapter: ", &title, Some(sel));
             }
+            // Metadata: cycle status, edit summary / POV (front matter).
+            KeyCode::Char('s') => self.cycle_status(sel),
+            KeyCode::Char('m') => {
+                let prefill = self.project.chapter_summary(sel).unwrap_or("").to_string();
+                self.open_prompt(Pending::SetSummary { at: sel }, "Summary: ", &prefill, Some(sel));
+            }
+            KeyCode::Char('v') => {
+                let prefill = self.project.chapter_pov(sel).unwrap_or("").to_string();
+                self.open_prompt(Pending::SetPov { at: sel }, "POV: ", &prefill, Some(sel));
+            }
             KeyCode::Char('d') => {
                 if self.chapter_count() <= 1 {
                     self.message = Some(ONLY_CHAPTER_MSG.into());
@@ -477,9 +527,11 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
-            // Both text prompts share the editing keys; only Enter differs.
-            Pending::NewChapter { at } | Pending::Rename { at } => {
-                let is_rename = matches!(pending, Pending::Rename { .. });
+            // The text prompts share the editing keys; only Enter differs.
+            Pending::NewChapter { .. }
+            | Pending::Rename { .. }
+            | Pending::SetSummary { .. }
+            | Pending::SetPov { .. } => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -488,16 +540,26 @@ impl App {
                     KeyCode::Enter => {
                         let text = std::mem::take(&mut self.prompt_mut().input);
                         let text = text.trim();
-                        // Empty or rename keeps the original selection; a new
-                        // chapter lands on the one just created.
+                        // All text prompts return to the chapter they acted on;
+                        // a new chapter lands on the one just created.
                         let fallback = nav_return.unwrap_or(0);
-                        let selected = if text.is_empty() {
-                            fallback
-                        } else if is_rename {
-                            self.rename_chapter(at, text);
-                            fallback
-                        } else {
-                            self.create_chapter(at, text)
+                        let selected = match pending {
+                            Pending::NewChapter { at } if !text.is_empty() => {
+                                self.create_chapter(at, text)
+                            }
+                            Pending::Rename { at } if !text.is_empty() => {
+                                self.rename_chapter(at, text);
+                                fallback
+                            }
+                            Pending::SetSummary { at } => {
+                                self.edit_chapter_meta(at, |fm| fm.set_summary(text));
+                                fallback
+                            }
+                            Pending::SetPov { at } => {
+                                self.edit_chapter_meta(at, |fm| fm.set_pov(text));
+                                fallback
+                            }
+                            _ => fallback,
                         };
                         self.select(selected);
                     }
@@ -811,6 +873,61 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
         assert_eq!(app.project.active_title(), Some("One"));
         assert!(app.buffer.line(0).contains("first"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cycling_status_on_the_active_chapter_persists_to_front_matter() {
+        let (mut app, dir) = two_chapter_app("status-active");
+        app.on_key(ctrl('g')); // Nav, selection on chapter 0 (the active one)
+        app.on_key(key(KeyCode::Char('s'))); // none → Draft
+        assert_eq!(app.project.chapter_status(0), Some(crate::frontmatter::Status::Draft));
+        app.on_key(key(KeyCode::Char('s'))); // Draft → Revised
+        assert_eq!(app.project.chapter_status(0), Some(crate::frontmatter::Status::Revised));
+
+        // Active-chapter metadata persists on save (like prose).
+        app.on_key(key(KeyCode::Enter)); // open the selected chapter (back to Insert)
+        app.on_key(ctrl('s'));
+        let on_disk = std::fs::read_to_string(dir.join("one.md")).unwrap();
+        assert!(on_disk.starts_with("---\nstatus: revised\n---\n"), "got:\n{on_disk}");
+        assert!(on_disk.contains("first chapter"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn editing_a_non_active_chapters_summary_writes_immediately() {
+        let (mut app, dir) = two_chapter_app("summary-nonactive");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Down)); // select chapter 1 (not active)
+        app.on_key(key(KeyCode::Char('m'))); // summary prompt
+        typed(&mut app, "The reckoning: part one");
+        app.on_key(key(KeyCode::Enter));
+
+        // Non-active edits hit disk right away, with quoting, prose untouched.
+        let on_disk = std::fs::read_to_string(dir.join("two.md")).unwrap();
+        assert!(on_disk.starts_with("---\nsummary: \"The reckoning: part one\"\n---\n"), "got:\n{on_disk}");
+        assert!(on_disk.contains("second chapter"));
+        assert_eq!(app.project.chapter_summary(1), Some("The reckoning: part one"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn metadata_survives_reopening_the_project() {
+        let (mut app, dir) = two_chapter_app("meta-reopen");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Down)); // chapter 1
+        app.on_key(key(KeyCode::Char('s'))); // Draft
+        app.on_key(key(KeyCode::Char('v'))); // POV prompt
+        typed(&mut app, "Mara");
+        app.on_key(key(KeyCode::Enter));
+
+        // Reopen from disk: the cached metadata is read back from front matter.
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.chapter_status(1), Some(crate::frontmatter::Status::Draft));
+        assert_eq!(reopened.chapter_pov(1), Some("Mara"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

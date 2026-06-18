@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Mode};
+use crate::frontmatter::Status;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -66,15 +67,39 @@ fn active_style() -> Style {
     Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
 }
 
-/// One chapter row: a marker for the active chapter and its word count, reversed
-/// while it's the Nav-mode selection.
-fn chapter_line(title: &str, words: usize, is_active: bool, is_selected: bool) -> Line<'static> {
+/// Accent color for a chapter's revision status badge.
+fn status_style(status: Status) -> Style {
+    let color = match status {
+        Status::Draft => Color::DarkGray,
+        Status::Revised => Color::Yellow,
+        Status::Final => Color::Green,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
+/// One chapter row: a marker for the active chapter, its word count, and a
+/// colored status badge — reversed while it's the Nav-mode selection.
+fn chapter_line(
+    title: &str,
+    words: usize,
+    status: Option<Status>,
+    is_active: bool,
+    is_selected: bool,
+) -> Line<'static> {
     let mut style = if is_active { active_style() } else { Style::default() };
     if is_selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
     let marker = if is_active { "▸ " } else { "  " };
-    Line::from(Span::styled(format!("{marker}{title}  {words}"), style))
+    let mut spans = vec![Span::styled(format!("{marker}{title}  {words}"), style)];
+    if let Some(status) = status {
+        let mut badge = status_style(status);
+        if is_selected {
+            badge = badge.add_modifier(Modifier::REVERSED);
+        }
+        spans.push(Span::styled(format!(" {}", status.badge()), badge));
+    }
+    Line::from(spans)
 }
 
 /// The active chapter's heading outline, indented by level, current section
@@ -148,7 +173,8 @@ impl Pane for NavPane<'_> {
         for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
             let is_active = i == active;
             let is_selected = nav_selected == Some(i);
-            lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
+            let status = app.project.chapter_status(i);
+            lines.push(chapter_line(&chapter.title, counts[i], status, is_active, is_selected));
             if is_active {
                 let skip = redundant_title_heading(headings, &chapter.title);
                 lines.extend(heading_outline_lines(headings, current_heading, skip));
@@ -371,25 +397,52 @@ impl Pane for StatusBar<'_> {
             return;
         }
 
-        // The chapter the cursor is in: in continuous view that's the segment
-        // under the cursor (with a marker); otherwise the single active chapter.
-        let (name, dirtied) = match &app.manuscript {
-            Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
-            None => (
-                app.project.active_title().unwrap_or("[untitled]").to_string(),
-                buffer.dirty,
-            ),
-        };
-        let dirty = if dirtied { " ●" } else { "" };
-        let left = format!(" {name}{dirty}");
-        let right = match &app.message {
-            Some(m) => format!("{m}  "),
-            None => format!(
-                "{} words · ln {}/{}  ",
-                buffer.word_count(),
-                buffer.cursor.line + 1,
-                buffer.line_count()
-            ),
+        // While browsing, the bar describes the *selected* chapter: its title,
+        // and (unless a transient message is up) its summary / POV / status.
+        let (left, right) = if let Mode::Nav { selected } = app.mode {
+            let title = app.project.chapter_title(selected).unwrap_or("[untitled]");
+            let right = match &app.message {
+                Some(m) => format!("{m}  "),
+                None => {
+                    let mut parts = Vec::new();
+                    if let Some(s) = app.project.chapter_summary(selected) {
+                        parts.push(s.to_string());
+                    }
+                    if let Some(p) = app.project.chapter_pov(selected) {
+                        parts.push(format!("POV: {p}"));
+                    }
+                    if let Some(st) = app.project.chapter_status(selected) {
+                        parts.push(st.label().to_string());
+                    }
+                    if parts.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{}  ", parts.join("  ·  "))
+                    }
+                }
+            };
+            (format!(" {title}"), right)
+        } else {
+            // The chapter the cursor is in: in continuous view that's the segment
+            // under the cursor (with a marker); otherwise the single active chapter.
+            let (name, dirtied) = match &app.manuscript {
+                Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
+                None => (
+                    app.project.active_title().unwrap_or("[untitled]").to_string(),
+                    buffer.dirty,
+                ),
+            };
+            let dirty = if dirtied { " ●" } else { "" };
+            let right = match &app.message {
+                Some(m) => format!("{m}  "),
+                None => format!(
+                    "{} words · ln {}/{}  ",
+                    buffer.word_count(),
+                    buffer.cursor.line + 1,
+                    buffer.line_count()
+                ),
+            };
+            (format!(" {name}{dirty}"), right)
         };
 
         let pad = (area.width as usize)
@@ -543,6 +596,30 @@ mod tests {
         assert!(screen.contains("Three"), "screen:\n{screen}");
         // The active chapter (index 0) carries the active marker.
         assert!(screen.contains("▸ One"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn pane_shows_a_chapter_status_badge() {
+        let mut app = app_with_chapters(&["One", "Two"], "body\n");
+        app.project.manifest.chapters[0].status = Some(crate::frontmatter::Status::Final);
+        app.outline_visible = true;
+        let screen = render(&app, 90, 14);
+        let row = screen.lines().find(|l| l.contains("One")).unwrap();
+        assert!(row.contains('F'), "status badge missing in row: {row:?}");
+    }
+
+    #[test]
+    fn nav_status_bar_shows_the_selected_chapters_metadata() {
+        let mut app = app_with_chapters(&["One", "Two"], "body\n");
+        app.project.manifest.chapters[1].summary = Some("A grand opening".into());
+        app.project.manifest.chapters[1].pov = Some("Mara".into());
+        app.project.manifest.chapters[1].status = Some(crate::frontmatter::Status::Revised);
+        app.outline_visible = true;
+        app.mode = Mode::Nav { selected: 1 };
+        let screen = render(&app, 90, 14);
+        assert!(screen.contains("A grand opening"), "screen:\n{screen}");
+        assert!(screen.contains("POV: Mara"), "screen:\n{screen}");
+        assert!(screen.contains("Revised"), "screen:\n{screen}");
     }
 
     #[test]

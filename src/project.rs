@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::buffer::count_words;
+use crate::frontmatter::{self, FrontMatter, Status};
 
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
@@ -36,6 +37,15 @@ pub struct ChapterEntry {
     /// need to ignore counts).
     #[serde(skip)]
     pub words: usize,
+    /// Cached chapter metadata, read from the file's front matter at open and
+    /// kept current as the author edits it. Transient like `words` — the chapter
+    /// files are the source of truth; these power the pane without re-reading.
+    #[serde(skip)]
+    pub status: Option<Status>,
+    #[serde(skip)]
+    pub summary: Option<String>,
+    #[serde(skip)]
+    pub pov: Option<String>,
 }
 
 /// The on-disk manifest (`book.toml`), deserialized.
@@ -84,10 +94,10 @@ impl Project {
             project.add_default_chapter()?;
         } else {
             project.active = project.manifest.chapters[0].file.clone();
-            // Populate the per-chapter word counts from disk (one transient read
-            // each — never N live buffers).
+            // Populate per-chapter caches (word count + front-matter metadata)
+            // from disk: one transient read each, never N live buffers.
             for i in 0..project.manifest.chapters.len() {
-                project.manifest.chapters[i].words = count_file_words(&project.chapter_path(i));
+                project.read_chapter_cache(i);
             }
         }
         Ok(project)
@@ -124,6 +134,9 @@ impl Project {
             title: format!("Chapter {n}"),
             file: format!("chapter-{n}.md"),
             words: 0,
+            status: None,
+            summary: None,
+            pov: None,
         };
         let path = self.root.join(&entry.file);
         if !path.exists() {
@@ -168,6 +181,69 @@ impl Project {
         if let Some(chapter) = self.manifest.chapters.get_mut(index) {
             chapter.words = words;
         }
+    }
+
+    /// Read chapter `index` from disk once and refresh its cached word count and
+    /// front-matter metadata (status / summary / POV). Used at open.
+    fn read_chapter_cache(&mut self, index: usize) {
+        let text = std::fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
+        let (front, body) = frontmatter::split(&text);
+        let fm = front.map(FrontMatter::from_raw);
+        if let Some(chapter) = self.manifest.chapters.get_mut(index) {
+            chapter.words = count_words(body);
+            chapter.status = fm.as_ref().and_then(FrontMatter::status);
+            chapter.summary = fm.as_ref().and_then(FrontMatter::summary);
+            chapter.pov = fm.as_ref().and_then(FrontMatter::pov);
+        }
+    }
+
+    /// Cached metadata accessors for the pane (no file I/O).
+    pub fn chapter_status(&self, index: usize) -> Option<Status> {
+        self.manifest.chapters.get(index).and_then(|c| c.status)
+    }
+
+    pub fn chapter_summary(&self, index: usize) -> Option<&str> {
+        self.manifest
+            .chapters
+            .get(index)
+            .and_then(|c| c.summary.as_deref())
+    }
+
+    pub fn chapter_pov(&self, index: usize) -> Option<&str> {
+        self.manifest
+            .chapters
+            .get(index)
+            .and_then(|c| c.pov.as_deref())
+    }
+
+    /// Copy a chapter's managed metadata into its cache from a [`FrontMatter`]
+    /// (used after the active chapter's front matter is edited in its buffer).
+    pub fn cache_chapter_meta(&mut self, index: usize, front: Option<&FrontMatter>) {
+        if let Some(chapter) = self.manifest.chapters.get_mut(index) {
+            chapter.status = front.and_then(|f| f.status());
+            chapter.summary = front.and_then(|f| f.summary());
+            chapter.pov = front.and_then(|f| f.pov());
+        }
+    }
+
+    /// Edit a (non-active) chapter's front matter on disk: read the file, apply
+    /// `f` to its [`FrontMatter`], write it back leaving the prose body untouched,
+    /// and refresh the cache. The body is preserved verbatim — only the front
+    /// matter region changes.
+    pub fn edit_chapter_front_matter(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&mut FrontMatter),
+    ) -> std::io::Result<()> {
+        let path = self.chapter_path(index);
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let (front, body) = frontmatter::split(&text);
+        let mut fm = front.map(FrontMatter::from_raw).unwrap_or_default();
+        f(&mut fm);
+        let front = (!fm.is_empty()).then(|| fm.as_str());
+        std::fs::write(&path, frontmatter::join(front, body).as_bytes())?;
+        self.cache_chapter_meta(index, Some(&fm));
+        Ok(())
     }
 
     /// Refresh the active chapter's cached word count (called after editing it).
@@ -218,6 +294,9 @@ impl Project {
                 title: title.to_string(),
                 file,
                 words: 0,
+                status: None,
+                summary: None,
+                pov: None,
             },
         );
         self.save_manifest()
@@ -279,6 +358,9 @@ impl Project {
                 title: (*title).to_string(),
                 file: format!("chapter-{}.md", i + 1),
                 words: 0,
+                status: None,
+                summary: None,
+                pov: None,
             })
             .collect();
         let active = chapters[0].file.clone();
@@ -291,14 +373,6 @@ impl Project {
             active,
         }
     }
-}
-
-/// Words in a chapter file's prose (front matter excluded), or 0 if it can't
-/// be read.
-fn count_file_words(path: &Path) -> usize {
-    std::fs::read_to_string(path)
-        .map(|text| count_words(crate::frontmatter::split(&text).1))
-        .unwrap_or(0)
 }
 
 /// A path inside `dir` for `file`, appending `-1`, `-2`, … to the stem if a file

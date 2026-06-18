@@ -16,7 +16,7 @@
 //! draws between chapters are display-only and never enter the buffer.
 
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
-use crate::frontmatter;
+use crate::frontmatter::{self, FrontMatter};
 use crate::project::Project;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
@@ -31,9 +31,9 @@ struct Segment {
     /// Number of lines this chapter occupies in the buffer (always ≥ 1, so even
     /// an empty chapter is editable).
     lines: usize,
-    /// The chapter file's front matter (verbatim), kept out of the flowing text
-    /// and re-attached when this chapter is written back. `None` if it has none.
-    front_matter: Option<String>,
+    /// The chapter file's front matter, kept out of the flowing text and
+    /// re-attached when this chapter is written back. `None` if it has none.
+    front_matter: Option<FrontMatter>,
     /// Whether this chapter has edits not yet written to its file.
     dirty: bool,
 }
@@ -150,7 +150,12 @@ impl Manuscript {
             if s.dirty {
                 let raw = self.buffer.line_range_text(start, end);
                 let body = normalize_trailing_newline(&raw);
-                let content = frontmatter::join(s.front_matter.as_deref(), &body);
+                let front = s
+                    .front_matter
+                    .as_ref()
+                    .filter(|f| !f.is_empty())
+                    .map(FrontMatter::as_str);
+                let content = frontmatter::join(front, &body);
                 std::fs::write(project.chapter_path(s.index), content.as_bytes())?;
                 // Count the prose only, not the front matter keys.
                 project.set_chapter_words(s.index, count_words(&body));
@@ -213,7 +218,7 @@ impl Manuscript {
                 index,
                 title,
                 lines,
-                front_matter: front.map(str::to_string),
+                front_matter: front.map(FrontMatter::from_raw),
                 dirty: false,
             });
         }

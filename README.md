@@ -26,6 +26,9 @@ keystrokes that stay out of the way.
   to the right files, while never holding more than ~3 chapters in memory.
 - **Rolled-up word counts** — live per-chapter counts and a project total in the
   chapter pane.
+- **Chapter metadata** — set each chapter's status (draft / revised / final),
+  a one-line summary, and POV character; stored as YAML front matter in the file
+  (portable, and your other keys are preserved), with status shown in the pane.
 
 ## Build & run
 
@@ -66,7 +69,9 @@ byte-for-byte.
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
-(moved to `unused/`), **J / K** move the selection down / up.
+(moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
+(draft → revised → final), **m** edit the one-line summary, **v** set the POV
+character.
 
 ## Layout
 
