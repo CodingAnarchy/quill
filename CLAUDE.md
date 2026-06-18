@@ -43,11 +43,13 @@ cargo clippy --all-targets   # must be clean
 ## Performance guards (ignored tests)
 
 Some tests are `#[ignore]`d because they measure timing and only make sense in
-release. **Run them whenever you touch the parse, the edit path, or rendering**
+release — in a debug build the unoptimized code is 3–18× slower and the
+thresholds false-fail, so they can't run as part of plain `cargo test`. **Run
+them whenever you touch the parse, the edit path, rendering, or project load**
 — they back the "typing stays instant" promise.
 
 ```sh
-cargo test --release -- --ignored --nocapture
+cargo perf   # alias for: cargo test --release -- --ignored --nocapture
 ```
 
 What they assert:
