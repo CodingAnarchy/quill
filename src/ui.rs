@@ -117,6 +117,12 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
     // it per row would be O(n²) per frame.
     let active = app.project.active_index();
 
+    // The browser selection, if we're in Nav mode.
+    let nav_selected = match app.mode {
+        Mode::Nav { selected } => Some(selected),
+        _ => None,
+    };
+
     // Count each chapter once for this frame, then reuse for the rows and the
     // total — so the active chapter's live count isn't recomputed twice.
     let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
@@ -125,7 +131,7 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
 
     for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
         let is_active = i == active;
-        let is_selected = app.mode == Mode::Nav && i == app.nav_selected;
+        let is_selected = nav_selected == Some(i);
         lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
         if is_active {
             let skip = redundant_title_heading(headings, &chapter.title);
@@ -179,7 +185,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
 
     // Place the terminal cursor (only in Insert mode). The cursor's own span is
     // revealed, so the cursor never lands on a concealed character.
-    if app.mode == Mode::Insert {
+    if matches!(app.mode, Mode::Insert) {
         let screen_y = column.y + (cursor_line - top) as u16;
         let col_width = visible_width_before(
             &buffer.line(cursor_line),
@@ -283,13 +289,13 @@ fn visible_width_before(
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let buffer = &app.buffer;
 
-    if app.mode == Mode::Prompt {
+    if let Mode::Prompt(prompt_state) = &app.mode {
         // Label plus any typed text (empty for y/N confirmations) — two borrowed
         // spans, no per-frame allocation.
         let style = Style::default().fg(Color::Black).bg(Color::Yellow);
         let prompt = Paragraph::new(Line::from(vec![
-            Span::styled(app.prompt.as_deref().unwrap_or_default(), style),
-            Span::styled(app.prompt_input.as_str(), style),
+            Span::styled(prompt_state.label.as_str(), style),
+            Span::styled(prompt_state.input.as_str(), style),
         ]));
         frame.render_widget(prompt, area);
         return;
