@@ -1,6 +1,6 @@
 //! Top-level application state and the editing modes that drive key handling.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
 use crate::project::Project;
@@ -72,6 +72,16 @@ impl App {
             prompt: None,
             prompt_input: String::new(),
             pending: None,
+        }
+    }
+
+    /// Handle a terminal event, dispatching key presses to the active mode.
+    /// Non-key events and key releases/repeats are ignored.
+    pub fn handle_event(&mut self, ev: Event) {
+        if let Event::Key(key) = ev {
+            if key.kind == KeyEventKind::Press {
+                self.on_key(key);
+            }
         }
     }
 
