@@ -51,7 +51,9 @@ byte-for-byte.
 | Home / End     | start / end of line             |
 | Ctrl-S         | save                            |
 | Ctrl-Q         | quit (prompts if unsaved)       |
-| Ctrl-O         | toggle the chapter outline      |
+| Ctrl-O         | toggle the chapter pane         |
+| Ctrl-N / Ctrl-P| next / previous chapter         |
+| Ctrl-G         | browse chapters (↑/↓, Enter)    |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 ## Layout

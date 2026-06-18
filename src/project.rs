@@ -113,9 +113,14 @@ impl Project {
         self.save_manifest()
     }
 
+    /// Path to a chapter's file by index.
+    pub fn chapter_path(&self, index: usize) -> PathBuf {
+        self.root.join(&self.manifest.chapters[index].file)
+    }
+
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
-        self.root.join(&self.manifest.chapters[self.active].file)
+        self.chapter_path(self.active)
     }
 
     /// Title of the active chapter, for the status bar.
