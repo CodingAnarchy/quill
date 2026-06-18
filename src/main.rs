@@ -1,13 +1,16 @@
 //! Quill — a terminal editor optimized for writing novels.
 //!
-//! Run `quill [FILE]` to open (or create) a manuscript file.
+//! Run `quill [DIR]` to open a project (or create one in an empty directory).
+//! Defaults to the current directory.
 
 mod app;
 mod buffer;
+mod project;
 mod syntax;
 mod ui;
 
 use std::io::{self, Stdout};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::{
@@ -21,15 +24,25 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::app::App;
 use crate::buffer::Buffer;
+use crate::project::Project;
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 fn main() -> io::Result<()> {
-    let buffer = match std::env::args().nth(1) {
-        Some(path) => Buffer::from_path(path)?,
-        None => Buffer::empty(),
+    // A project lives in a directory (default: the current one). A directory
+    // with a manifest is opened; one without is initialized as a new project.
+    let dir = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let project = if Project::manifest_path(&dir).exists() {
+        Project::open(&dir)?
+    } else {
+        Project::create(&dir)?
     };
-    let mut app = App::new(buffer);
+    let buffer = Buffer::from_path(project.active_path())?;
+    let mut app = App::new(buffer, project);
 
     let mut terminal = setup_terminal()?;
     let result = run(&mut terminal, &mut app);

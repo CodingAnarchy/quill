@@ -22,21 +22,25 @@ keystrokes that stay out of the way.
 ## Build & run
 
 ```sh
-cargo run --release -- manuscript.md
+cargo run --release -- path/to/book
 ```
 
-Passing no file opens an untitled buffer.
+Quill works on a **project directory**. If the directory has a `book.toml`
+manifest it's opened; otherwise a new project is initialized there (a manifest
+plus a first chapter). With no argument, Quill uses the current directory.
 
-## File format
+## Project & file format
 
-Manuscripts are plain UTF-8 **Markdown** — portable text that opens in any
-editor. A file argument with no extension gets `.md` (so `quill mybook` opens
-`mybook.md`); an explicit extension is respected.
+A project is a directory: a root `book.toml` manifest records the chapter order
+and titles, and each chapter's prose lives in its own UTF-8 **Markdown** file.
+Both are portable plain text that opens in any editor, so a manuscript stays
+yours and travels well in git.
 
-Quill writes your text back unchanged except for one normalization: a non-empty
-file ends with exactly one trailing newline (the POSIX/git convention), and an
-empty document writes an empty file. Interior bytes, including line endings, are
-left exactly as you wrote them, so a conforming file round-trips byte-for-byte.
+Quill writes each chapter back unchanged except for one normalization: a
+non-empty file ends with exactly one trailing newline (the POSIX/git
+convention), and an empty file stays empty. Interior bytes, including line
+endings, are left exactly as you wrote them, so a conforming file round-trips
+byte-for-byte.
 
 ## Keys
 

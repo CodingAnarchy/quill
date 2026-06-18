@@ -235,13 +235,9 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let name = buffer
-        .path
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "[untitled]".into());
-
+    // The manifest is the source of truth for the active chapter's name; every
+    // real (and scratch) project always has an active chapter.
+    let name = app.project.active_title().unwrap_or("[untitled]");
     let dirty = if buffer.dirty { " ●" } else { "" };
     let left = format!(" {name}{dirty}");
     let right = match &app.message {
@@ -273,6 +269,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
 mod tests {
     use super::*;
     use crate::buffer::{Buffer, Cursor};
+    use crate::project::Project;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn buffer_with(text: &str) -> Buffer {
@@ -282,6 +279,11 @@ mod tests {
         }
         b.refresh_syntax();
         b
+    }
+
+    /// An App over an in-memory scratch project, for render tests.
+    fn app_with(text: &str) -> App {
+        App::new(buffer_with(text), Project::scratch())
     }
 
     /// Render the app to a TestBackend and return the screen as plain text.
@@ -302,7 +304,7 @@ mod tests {
     #[test]
     fn markers_are_hidden_when_cursor_is_outside_the_span() {
         // After typing, the cursor sits past the span, so markers conceal.
-        let app = App::new(buffer_with("*italic* word"));
+        let app = app_with("*italic* word");
         let screen = render(&app, 80, 8);
         assert!(screen.contains("italic word"), "screen:\n{screen}");
         assert!(!screen.contains('*'), "markers should be hidden:\n{screen}");
@@ -310,7 +312,7 @@ mod tests {
 
     #[test]
     fn markers_reappear_when_cursor_enters_the_span() {
-        let mut app = App::new(buffer_with("*italic* word"));
+        let mut app = app_with("*italic* word");
         app.buffer.cursor = Cursor { line: 0, col: 3 }; // inside "italic"
         let screen = render(&app, 80, 8);
         assert!(screen.contains("*italic*"), "screen:\n{screen}");
@@ -336,7 +338,7 @@ mod tests {
 
     #[test]
     fn outline_pane_lists_headings_when_visible() {
-        let mut app = App::new(buffer_with("# Chapter\n\nbody\n\n## Scene\n\nmore\n"));
+        let mut app = app_with("# Chapter\n\nbody\n\n## Scene\n\nmore\n");
         app.outline_visible = true;
         let screen = render(&app, 90, 16);
         assert!(screen.contains("OUTLINE"), "screen:\n{screen}");
@@ -346,7 +348,7 @@ mod tests {
 
     #[test]
     fn outline_pane_shows_empty_state_without_headings() {
-        let mut app = App::new(buffer_with("just prose, no headings\n"));
+        let mut app = app_with("just prose, no headings\n");
         app.outline_visible = true;
         let screen = render(&app, 90, 12);
         assert!(screen.contains("No headings"), "screen:\n{screen}");

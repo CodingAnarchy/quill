@@ -3,6 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::Buffer;
+use crate::project::Project;
 
 /// Editor modes. Quill is mostly modeless for writing, but borrows a light
 /// command line for actions that shouldn't be a stray keystroke away.
@@ -16,6 +17,9 @@ pub enum Mode {
 
 pub struct App {
     pub buffer: Buffer,
+    /// The open project (manifest, root, active chapter index). The `buffer`
+    /// above holds the active chapter's text.
+    pub project: Project,
     pub mode: Mode,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
@@ -29,9 +33,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(buffer: Buffer) -> Self {
+    pub fn new(buffer: Buffer, project: Project) -> Self {
         Self {
             buffer,
+            project,
             mode: Mode::Insert,
             should_quit: false,
             focus_width: 72,
