@@ -396,6 +396,14 @@ impl App {
     /// chapter is edited on disk immediately. Either way the pane cache is updated.
     /// Returns whether the edit succeeded.
     fn edit_chapter_meta(&mut self, index: usize, f: impl FnOnce(&mut FrontMatter)) -> bool {
+        // Metadata is edited only from the chapter browser, which is always
+        // single-chapter mode (Ctrl-G leaves the continuous view first). So the
+        // active chapter's live front matter is `self.buffer`, never a manuscript
+        // segment — if that ever changes, the active branch below must too.
+        debug_assert!(
+            self.manuscript.is_none(),
+            "chapter metadata edited while the continuous view is active"
+        );
         if index == self.project.active_index() {
             f(self.buffer.front_matter_mut());
             self.buffer.dirty = true;
@@ -559,6 +567,9 @@ impl App {
                                 self.edit_chapter_meta(at, |fm| fm.set_pov(text));
                                 fallback
                             }
+                            // Empty title for New/Rename: a no-op. (The summary
+                            // and POV arms above run on empty text on purpose —
+                            // that clears the field.)
                             _ => fallback,
                         };
                         self.select(selected);

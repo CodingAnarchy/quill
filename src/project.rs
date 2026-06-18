@@ -188,13 +188,13 @@ impl Project {
     fn read_chapter_cache(&mut self, index: usize) {
         let text = std::fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
         let (front, body) = frontmatter::split(&text);
+        let words = count_words(body);
         let fm = front.map(FrontMatter::from_raw);
         if let Some(chapter) = self.manifest.chapters.get_mut(index) {
-            chapter.words = count_words(body);
-            chapter.status = fm.as_ref().and_then(FrontMatter::status);
-            chapter.summary = fm.as_ref().and_then(FrontMatter::summary);
-            chapter.pov = fm.as_ref().and_then(FrontMatter::pov);
+            chapter.words = words;
         }
+        // One place owns the front-matter → cache mapping.
+        self.cache_chapter_meta(index, fm.as_ref());
     }
 
     /// Cached metadata accessors for the pane (no file I/O).

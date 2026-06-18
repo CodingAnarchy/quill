@@ -146,8 +146,7 @@ impl FrontMatter {
         let mut out = String::with_capacity(self.raw.len() + new_line.len());
         let mut replaced = false;
         for line in self.raw.split_inclusive('\n') {
-            let bare = line.strip_suffix('\n').unwrap_or(line);
-            if !replaced && bare.strip_prefix(&prefix).is_some() {
+            if !replaced && is_key_line(line, &prefix) {
                 out.push_str(&new_line);
                 replaced = true;
             } else {
@@ -169,10 +168,7 @@ impl FrontMatter {
         self.raw = self
             .raw
             .split_inclusive('\n')
-            .filter(|line| {
-                let bare = line.strip_suffix('\n').unwrap_or(line);
-                bare.strip_prefix(&prefix).is_none()
-            })
+            .filter(|line| !is_key_line(line, &prefix))
             .collect();
     }
 
@@ -210,6 +206,15 @@ impl FrontMatter {
     pub fn set_pov(&mut self, pov: &str) {
         self.put_text("pov", pov);
     }
+}
+
+/// Whether `line` (with or without its trailing newline) is the top-level
+/// entry for `prefix` (which is `"{key}:"`).
+fn is_key_line(line: &str, prefix: &str) -> bool {
+    line.strip_suffix('\n')
+        .unwrap_or(line)
+        .strip_prefix(prefix)
+        .is_some()
 }
 
 /// Strip surrounding YAML quotes from a scalar value, undoing the escaping
