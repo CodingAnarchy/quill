@@ -267,11 +267,13 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let buffer = &app.buffer;
 
     if app.mode == Mode::Prompt {
-        let text = app.prompt.clone().unwrap_or_default();
-        let prompt = Paragraph::new(Line::from(Span::styled(
-            text,
-            Style::default().fg(Color::Black).bg(Color::Yellow),
-        )));
+        // Label plus any typed text (empty for y/N confirmations) — two borrowed
+        // spans, no per-frame allocation.
+        let style = Style::default().fg(Color::Black).bg(Color::Yellow);
+        let prompt = Paragraph::new(Line::from(vec![
+            Span::styled(app.prompt.as_deref().unwrap_or_default(), style),
+            Span::styled(app.prompt_input.as_str(), style),
+        ]));
         frame.render_widget(prompt, area);
         return;
     }
