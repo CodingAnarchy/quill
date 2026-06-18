@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::buffer::count_words;
-use crate::frontmatter::{self, FrontMatter, Status};
+use crate::frontmatter::{self, Epigraph, FrontMatter, Status};
 
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
@@ -64,8 +64,25 @@ pub struct Manifest {
     pub author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
+    /// Book epigraph: a quotation (`epigraph`) and optional attribution
+    /// (`epigraph_by`), rendered at the start of the manuscript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epigraph: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epigraph_by: Option<String>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
+}
+
+impl Manifest {
+    /// The book epigraph, if a quotation is set.
+    pub fn epigraph(&self) -> Option<Epigraph> {
+        let text = self.epigraph.clone().filter(|s| !s.is_empty())?;
+        Some(Epigraph {
+            text,
+            attribution: self.epigraph_by.clone().filter(|s| !s.is_empty()),
+        })
+    }
 }
 
 /// A loaded project: where it lives, its manifest (structure + cached word
@@ -133,6 +150,8 @@ impl Project {
                 subtitle: None,
                 author: None,
                 series: None,
+                epigraph: None,
+                epigraph_by: None,
                 chapters: Vec::new(),
             },
             active: String::new(),
@@ -386,6 +405,8 @@ impl Project {
                 subtitle: None,
                 author: None,
                 series: None,
+                epigraph: None,
+                epigraph_by: None,
                 chapters,
             },
             active,
@@ -515,6 +536,23 @@ mod tests {
         assert_eq!(reopened.manifest.subtitle.as_deref(), Some("A Novel"));
         assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
         assert_eq!(reopened.manifest.series.as_deref(), Some("The Saga"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn book_epigraph_persists_and_builds() {
+        let dir = temp_dir("book-epigraph");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap();
+        project.manifest.epigraph = Some("Call me Ishmael.".into());
+        project.manifest.epigraph_by = Some("Melville".into());
+        project.save_manifest().unwrap();
+
+        let reopened = Project::open(&dir).unwrap();
+        let ep = reopened.manifest.epigraph().unwrap();
+        assert_eq!(ep.text, "Call me Ishmael.");
+        assert_eq!(ep.attribution.as_deref(), Some("Melville"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

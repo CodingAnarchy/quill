@@ -31,6 +31,9 @@ keystrokes that stay out of the way.
   (portable, and your other keys are preserved), with status shown in the pane.
 - **Book & series metadata** — title, subtitle, author, and series, stored in
   the `book.toml` manifest and shown as a header above the chapter list.
+- **Epigraphs** — a quotation and attribution on a chapter (front matter) or the
+  book (manifest), rendered set-apart above the body (the book's at the start of
+  the manuscript).
 
 ## Build & run
 
@@ -73,8 +76,9 @@ byte-for-byte.
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
 (draft → revised → final), **m** edit the one-line summary, **v** set the POV
-character. Book/series metadata (shown in the pane header): **t** book title,
-**b** subtitle, **w** author, **e** series.
+character, **g** epigraph (quotation, then attribution). Book/series metadata
+(shown in the pane header): **t** book title, **b** subtitle, **w** author,
+**e** series, **G** book epigraph.
 
 ## Layout
 

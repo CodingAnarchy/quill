@@ -16,7 +16,7 @@
 //! draws between chapters are display-only and never enter the buffer.
 
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
-use crate::frontmatter::{self, FrontMatter};
+use crate::frontmatter::{self, Epigraph, FrontMatter};
 use crate::project::Project;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
@@ -43,6 +43,18 @@ pub struct Manuscript {
     segments: Vec<Segment>,
     /// Concatenation of the window's chapters — the text actually edited.
     buffer: Buffer,
+}
+
+/// What the editor needs to render a chapter's header in the continuous flow.
+pub struct SegmentHeader {
+    /// Global line where the chapter begins.
+    pub start: usize,
+    /// Manifest index of the chapter.
+    pub index: usize,
+    /// Divider title to draw above it, or `None` for the first loaded chapter.
+    pub title: Option<String>,
+    /// The chapter's epigraph, if any.
+    pub epigraph: Option<Epigraph>,
 }
 
 impl Manuscript {
@@ -87,15 +99,19 @@ impl Manuscript {
         &self.current_segment().title
     }
 
-    /// Where the renderer should draw a chapter divider: the global start line
-    /// and (borrowed) title of each segment after the first.
-    pub fn dividers(&self) -> Vec<(usize, &str)> {
+    /// What the editor draws above each loaded chapter: the global start line,
+    /// the chapter index, a divider title (`None` for the first segment, so no
+    /// rule is drawn before it), and the chapter's epigraph.
+    pub fn segment_headers(&self) -> Vec<SegmentHeader> {
         let mut out = Vec::new();
         let mut start = 0;
         for (i, s) in self.segments.iter().enumerate() {
-            if i > 0 {
-                out.push((start, s.title.as_str()));
-            }
+            out.push(SegmentHeader {
+                start,
+                index: s.index,
+                title: (i > 0).then(|| s.title.clone()),
+                epigraph: s.front_matter.as_ref().and_then(FrontMatter::epigraph),
+            });
             start += s.lines;
         }
         out
