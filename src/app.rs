@@ -8,17 +8,31 @@ use crate::project::Project;
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
 
-/// Editor modes. Quill is mostly modeless for writing, but borrows a light
-/// command line for actions that shouldn't be a stray keystroke away.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Editor modes. Each variant carries the transient state that only makes sense
+/// while in that mode, so illegal combinations aren't representable.
 pub enum Mode {
     /// Normal prose entry. Typed characters go straight into the buffer.
     Insert,
     /// A transient prompt at the bottom: a y/N confirmation or a line of text
-    /// input. The pending action ([`Pending`]) says which.
-    Prompt,
-    /// Browsing the chapter list: arrows move a selection, Enter opens it.
-    Nav,
+    /// input.
+    Prompt(PromptState),
+    /// Browsing the chapter list: arrows move the `selected` chapter, Enter
+    /// opens it.
+    Nav { selected: usize },
+}
+
+/// State for an open [`Mode::Prompt`]. `label`/`input` are public for the status
+/// bar to render; the rest is the handler's business.
+pub struct PromptState {
+    /// What confirming the prompt does.
+    pending: Pending,
+    /// The prompt label shown in the status bar.
+    pub label: String,
+    /// Text typed so far (empty for y/N confirmations).
+    pub input: String,
+    /// Where to return when the prompt closes: `Some(selected)` back to the
+    /// chapter browser, `None` to insert mode (e.g. the quit prompt).
+    nav_return: Option<usize>,
 }
 
 /// What a [`Mode::Prompt`] resolves to when confirmed. `at` is the chapter index
@@ -46,16 +60,8 @@ pub struct App {
     pub focus_width: u16,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
-    /// The chapter highlighted in the pane while in [`Mode::Nav`].
-    pub nav_selected: usize,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
-    /// Label of the active prompt, if any.
-    pub prompt: Option<String>,
-    /// Text typed into the active text-input prompt.
-    pub prompt_input: String,
-    /// The action a confirmed prompt will perform.
-    pending: Option<Pending>,
 }
 
 impl App {
@@ -67,11 +73,7 @@ impl App {
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
-            nav_selected: 0,
             message: None,
-            prompt: None,
-            prompt_input: String::new(),
-            pending: None,
         }
     }
 
@@ -110,9 +112,10 @@ impl App {
         // A fresh keystroke clears any stale status message.
         self.message = None;
 
+        // Non-binding patterns: dispatch on the variant without moving its data.
         match self.mode {
-            Mode::Prompt => self.on_key_prompt(key),
-            Mode::Nav => self.on_key_nav(key),
+            Mode::Prompt(_) => self.on_key_prompt(key),
+            Mode::Nav { .. } => self.on_key_nav(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -161,20 +164,16 @@ impl App {
 
     // --- Chapter structure editing ----------------------------------------
     //
-    // Each wraps a `Project` op. Because the active chapter is tracked by file
-    // identity, insert/rename/move need no active fixup; only deleting the
-    // active chapter changes the buffer, which `delete_chapter` handles.
+    // Each wraps a `Project` op and returns the chapter the browser should now
+    // select. The active chapter is tracked by file identity, so insert/rename/
+    // move need no active fixup; only delete (of the active chapter) reloads.
 
-    fn create_chapter(&mut self, at: usize, title: &str) {
+    fn create_chapter(&mut self, at: usize, title: &str) -> usize {
         match self.project.add_chapter(at, title) {
-            Ok(()) => {
-                // The active chapter is tracked by identity, so the insert needs
-                // no index fixup — its position re-derives.
-                self.nav_selected = at.min(self.chapter_count() - 1);
-                self.message = Some(format!("Added '{title}'"));
-            }
+            Ok(()) => self.message = Some(format!("Added '{title}'")),
             Err(e) => self.message = Some(format!("Add failed: {e}")),
         }
+        at.min(self.chapter_count() - 1)
     }
 
     fn rename_chapter(&mut self, at: usize, title: &str) {
@@ -184,34 +183,29 @@ impl App {
         }
     }
 
-    /// Move the selected chapter up or down one slot; the active chapter and the
-    /// selection follow their content.
-    fn move_selected(&mut self, up: bool) {
-        let i = self.nav_selected;
-        let j = if up {
-            if i == 0 {
-                return;
-            }
-            i - 1
+    /// Move chapter `sel` up or down one slot; returns its new position (the
+    /// active chapter follows its content automatically via identity tracking).
+    fn move_chapter(&mut self, sel: usize, up: bool) -> usize {
+        let target = if up {
+            sel.checked_sub(1)
         } else {
-            if i + 1 >= self.chapter_count() {
-                return;
-            }
-            i + 1
+            (sel + 1 < self.chapter_count()).then_some(sel + 1)
         };
-        match self.project.swap_chapters(i, j) {
-            Ok(()) => {
-                // Active follows its content automatically (identity tracking).
-                self.nav_selected = j;
+        let Some(j) = target else { return sel };
+        match self.project.swap_chapters(sel, j) {
+            Ok(()) => j,
+            Err(e) => {
+                self.message = Some(format!("Move failed: {e}"));
+                sel
             }
-            Err(e) => self.message = Some(format!("Move failed: {e}")),
         }
     }
 
-    fn delete_chapter(&mut self, at: usize) {
+    /// Delete chapter `at`; returns the chapter the browser should select next.
+    fn delete_chapter(&mut self, at: usize) -> usize {
         if self.chapter_count() <= 1 {
             self.message = Some(ONLY_CHAPTER_MSG.into());
-            return;
+            return at;
         }
         // Deleting the active chapter is the one structural edit that changes the
         // buffer's content — every other op keeps the active file present, so its
@@ -223,7 +217,7 @@ impl App {
         }
         if let Err(e) = self.project.remove_chapter(at) {
             self.message = Some(format!("Delete failed: {e}"));
-            return;
+            return at.min(self.chapter_count() - 1);
         }
 
         if deleting_active {
@@ -235,56 +229,69 @@ impl App {
                 Err(e) => self.message = Some(format!("Open failed: {e}")),
             }
         }
-        self.nav_selected = self.nav_selected.min(self.chapter_count() - 1);
         self.message = Some("Moved chapter to unused/".into());
+        at.min(self.chapter_count() - 1)
     }
 
-    /// Open a y/N or text-input prompt for `pending`, optionally prefilling the
-    /// input (for rename).
-    fn open_prompt(&mut self, pending: Pending, label: impl Into<String>, prefill: &str) {
-        self.pending = Some(pending);
-        self.prompt = Some(label.into());
-        self.prompt_input = prefill.to_string();
-        self.mode = Mode::Prompt;
-    }
-
-    fn close_prompt(&mut self, to: Mode) {
-        self.pending = None;
-        self.prompt = None;
-        self.prompt_input.clear();
-        self.mode = to;
+    /// Open a prompt. `nav_return` is the chapter to reselect when it closes
+    /// (`None` returns to insert mode, e.g. the quit prompt).
+    fn open_prompt(
+        &mut self,
+        pending: Pending,
+        label: impl Into<String>,
+        prefill: &str,
+        nav_return: Option<usize>,
+    ) {
+        self.mode = Mode::Prompt(PromptState {
+            pending,
+            label: label.into(),
+            input: prefill.to_string(),
+            nav_return,
+        });
     }
 
     fn on_key_nav(&mut self, key: KeyEvent) {
-        let sel = self.nav_selected;
+        let Mode::Nav { selected: sel } = self.mode else {
+            return;
+        };
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.nav_selected = sel.saturating_sub(1);
-            }
+            KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Nav { selected: sel.saturating_sub(1) },
             KeyCode::Down | KeyCode::Char('j') => {
-                self.nav_selected = (sel + 1).min(self.chapter_count() - 1);
+                let last = self.chapter_count() - 1;
+                self.mode = Mode::Nav { selected: (sel + 1).min(last) };
             }
             KeyCode::Enter => {
                 self.activate_chapter(sel);
                 self.mode = Mode::Insert;
             }
             // Reorder the selected chapter.
-            KeyCode::Char('K') => self.move_selected(true),
-            KeyCode::Char('J') => self.move_selected(false),
-            // Add / rename / delete.
+            KeyCode::Char('K') => {
+                let s = self.move_chapter(sel, true);
+                self.mode = Mode::Nav { selected: s };
+            }
+            KeyCode::Char('J') => {
+                let s = self.move_chapter(sel, false);
+                self.mode = Mode::Nav { selected: s };
+            }
+            // Add / rename / delete (each returns to the browser when done).
             KeyCode::Char('a') => {
-                self.open_prompt(Pending::NewChapter { at: sel + 1 }, "New chapter title: ", "")
+                self.open_prompt(Pending::NewChapter { at: sel + 1 }, "New chapter title: ", "", Some(sel))
             }
             KeyCode::Char('r') => {
                 let title = self.project.manifest.chapters[sel].title.clone();
-                self.open_prompt(Pending::Rename { at: sel }, "Rename chapter: ", &title);
+                self.open_prompt(Pending::Rename { at: sel }, "Rename chapter: ", &title, Some(sel));
             }
             KeyCode::Char('d') => {
                 if self.chapter_count() <= 1 {
                     self.message = Some(ONLY_CHAPTER_MSG.into());
                 } else {
                     let title = self.project.manifest.chapters[sel].title.clone();
-                    self.open_prompt(Pending::Delete { at: sel }, format!("Delete '{title}'? (y/N)"), "");
+                    self.open_prompt(
+                        Pending::Delete { at: sel },
+                        format!("Delete '{title}'? (y/N)"),
+                        "",
+                        Some(sel),
+                    );
                 }
             }
             KeyCode::Esc => self.mode = Mode::Insert,
@@ -293,43 +300,64 @@ impl App {
     }
 
     fn on_key_prompt(&mut self, key: KeyEvent) {
-        match self.pending {
-            Some(Pending::Quit) => match key.code {
+        let Mode::Prompt(state) = &self.mode else {
+            return;
+        };
+        let pending = state.pending;
+        let nav_return = state.nav_return;
+
+        // Where to go when the prompt closes without acting.
+        let closed = match nav_return {
+            Some(selected) => Mode::Nav { selected },
+            None => Mode::Insert,
+        };
+
+        match pending {
+            Pending::Quit => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => self.should_quit = true,
-                _ => self.close_prompt(Mode::Insert),
+                _ => self.mode = closed,
             },
-            Some(Pending::Delete { at }) => match key.code {
+            Pending::Delete { at } => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.delete_chapter(at);
-                    self.close_prompt(Mode::Nav);
+                    let selected = self.delete_chapter(at);
+                    self.mode = Mode::Nav { selected };
                 }
-                _ => self.close_prompt(Mode::Nav),
+                _ => self.mode = closed,
             },
-            // Both text prompts share the same editing keys; only Enter differs.
-            Some(Pending::NewChapter { at }) | Some(Pending::Rename { at }) => {
-                let is_rename = matches!(self.pending, Some(Pending::Rename { .. }));
+            // Both text prompts share the editing keys; only Enter differs.
+            Pending::NewChapter { at } | Pending::Rename { at } => {
+                let is_rename = matches!(pending, Pending::Rename { .. });
                 match key.code {
-                    KeyCode::Char(c) => self.prompt_input.push(c),
+                    KeyCode::Char(c) => {
+                        if let Mode::Prompt(s) = &mut self.mode {
+                            s.input.push(c);
+                        }
+                    }
                     KeyCode::Backspace => {
-                        self.prompt_input.pop();
+                        if let Mode::Prompt(s) = &mut self.mode {
+                            s.input.pop();
+                        }
                     }
                     KeyCode::Enter => {
-                        let text = std::mem::take(&mut self.prompt_input);
+                        let text = match &mut self.mode {
+                            Mode::Prompt(s) => std::mem::take(&mut s.input),
+                            _ => String::new(),
+                        };
                         let text = text.trim();
-                        if !text.is_empty() {
-                            if is_rename {
-                                self.rename_chapter(at, text);
-                            } else {
-                                self.create_chapter(at, text);
-                            }
-                        }
-                        self.close_prompt(Mode::Nav);
+                        let selected = if text.is_empty() {
+                            nav_return.unwrap_or(0)
+                        } else if is_rename {
+                            self.rename_chapter(at, text);
+                            nav_return.unwrap_or(0)
+                        } else {
+                            self.create_chapter(at, text)
+                        };
+                        self.mode = Mode::Nav { selected };
                     }
-                    KeyCode::Esc => self.close_prompt(Mode::Nav),
+                    KeyCode::Esc => self.mode = closed,
                     _ => {}
                 }
             }
-            None => self.close_prompt(Mode::Insert),
         }
     }
 
@@ -346,7 +374,7 @@ impl App {
             },
             (true, KeyCode::Char('q')) => {
                 if self.buffer.dirty {
-                    self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "");
+                    self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
                 } else {
                     self.should_quit = true;
                 }
@@ -366,8 +394,9 @@ impl App {
             // Focus the chapter pane to browse and jump to one.
             (true, KeyCode::Char('g')) => {
                 self.outline_visible = true;
-                self.nav_selected = self.project.active_index();
-                self.mode = Mode::Nav;
+                self.mode = Mode::Nav {
+                    selected: self.project.active_index(),
+                };
             }
 
             (false, KeyCode::Char(c)) => self.buffer.insert_char(c),
@@ -403,6 +432,20 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn nav_sel(app: &App) -> usize {
+        match &app.mode {
+            Mode::Nav { selected } => *selected,
+            _ => panic!("expected Nav mode"),
+        }
+    }
+
+    fn prompt_input(app: &App) -> &str {
+        match &app.mode {
+            Mode::Prompt(state) => state.input.as_str(),
+            _ => panic!("expected Prompt mode"),
+        }
     }
 
     /// A two-chapter project on disk with distinct content per chapter.
@@ -477,14 +520,14 @@ mod tests {
     fn nav_mode_selects_and_opens_a_chapter() {
         let (mut app, dir) = two_chapter_app("navmode");
         app.on_key(ctrl('g')); // focus the chapter pane
-        assert_eq!(app.mode, Mode::Nav);
-        assert_eq!(app.nav_selected, 0);
+        assert!(matches!(app.mode, Mode::Nav { .. }));
+        assert_eq!(nav_sel(&app), 0);
 
         app.on_key(key(KeyCode::Down)); // select chapter two
-        assert_eq!(app.nav_selected, 1);
+        assert_eq!(nav_sel(&app), 1);
 
         app.on_key(key(KeyCode::Enter)); // open it
-        assert_eq!(app.mode, Mode::Insert);
+        assert!(matches!(app.mode, Mode::Insert));
         assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
@@ -515,12 +558,12 @@ mod tests {
         let (mut app, dir) = two_chapter_app("create");
         app.on_key(ctrl('g')); // Nav, selection on chapter 0
         app.on_key(key(KeyCode::Char('a'))); // add after selection
-        assert_eq!(app.mode, Mode::Prompt);
+        assert!(matches!(app.mode, Mode::Prompt(_)));
         typed(&mut app, "Interlude");
         app.on_key(key(KeyCode::Enter));
 
         assert_eq!(titles(&app), vec!["One", "Interlude", "Two"]);
-        assert_eq!(app.mode, Mode::Nav);
+        assert!(matches!(app.mode, Mode::Nav { .. }));
         // Active chapter (was 0) is unchanged; insertion was after it.
         assert_eq!(app.project.active_index(), 0);
         // Persisted.
@@ -534,7 +577,7 @@ mod tests {
         let (mut app, dir) = two_chapter_app("rename");
         app.on_key(ctrl('g'));
         app.on_key(key(KeyCode::Char('r'))); // prefilled with "One"
-        assert_eq!(app.prompt_input, "One");
+        assert_eq!(prompt_input(&app), "One");
         for _ in 0..3 {
             app.on_key(key(KeyCode::Backspace));
         }
@@ -554,7 +597,7 @@ mod tests {
         app.on_key(key(KeyCode::Char('J'))); // move chapter 0 down
 
         assert_eq!(titles(&app), vec!["Two", "One"]);
-        assert_eq!(app.nav_selected, 1);
+        assert_eq!(nav_sel(&app), 1);
         // The active chapter ("One") followed its content to index 1.
         assert_eq!(app.project.active_title(), Some("One"));
 
@@ -604,7 +647,7 @@ mod tests {
 
         // Attempt to delete the last one — refused.
         app.on_key(key(KeyCode::Char('d')));
-        assert_eq!(app.mode, Mode::Nav); // no confirm prompt opened
+        assert!(matches!(app.mode, Mode::Nav { .. })); // no confirm prompt opened
         assert_eq!(app.chapter_count(), 1);
 
         std::fs::remove_dir_all(&dir).ok();
