@@ -44,6 +44,7 @@ left exactly as you wrote them, so a conforming file round-trips byte-for-byte.
 | Home / End     | start / end of line             |
 | Ctrl-S         | save                            |
 | Ctrl-Q         | quit (prompts if unsaved)       |
+| Ctrl-O         | toggle the chapter outline      |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 ## Layout

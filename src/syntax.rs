@@ -48,6 +48,17 @@ struct Marker {
     span_end: usize,
 }
 
+/// A heading in the document — the in-chapter outline is a list of these.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Heading {
+    /// Heading level (1–6), used to indent the outline.
+    pub level: u8,
+    /// The heading text, without markers.
+    pub title: String,
+    /// Byte offset where the heading begins, for "which section is the cursor in".
+    pub start: usize,
+}
+
 /// The live parse of a single document (one chapter file).
 pub struct Syntax {
     parser: MarkdownParser,
@@ -56,6 +67,8 @@ pub struct Syntax {
     highlights: Vec<Highlight>,
     /// Emphasis delimiters, for soft-rendering (concealing) the markers.
     markers: Vec<Marker>,
+    /// Headings in document order — the in-chapter outline (#11).
+    headings: Vec<Heading>,
 }
 
 impl Syntax {
@@ -65,12 +78,13 @@ impl Syntax {
         let tree = parser
             .parse(text.as_bytes(), None)
             .expect("markdown parse should not fail without a timeout/cancellation");
-        let (highlights, markers) = collect(&tree);
+        let (highlights, markers, headings) = collect(&tree, text);
         Self {
             parser,
             tree,
             highlights,
             markers,
+            headings,
         }
     }
 
@@ -93,9 +107,10 @@ impl Syntax {
     pub fn reparse(&mut self, text: &str) {
         if let Some(tree) = self.parser.parse(text.as_bytes(), Some(&self.tree)) {
             self.tree = tree;
-            let (highlights, markers) = collect(&self.tree);
+            let (highlights, markers, headings) = collect(&self.tree, text);
             self.highlights = highlights;
             self.markers = markers;
+            self.headings = headings;
         }
     }
 
@@ -121,7 +136,12 @@ impl Syntax {
             .collect()
     }
 
-    /// The block-level syntax tree. Kept for the in-chapter outline (#11).
+    /// Headings in document order — the in-chapter outline.
+    pub fn headings(&self) -> &[Heading] {
+        &self.headings
+    }
+
+    /// The block-level syntax tree, for future structural consumers.
     #[allow(dead_code)]
     pub fn block_tree(&self) -> &Tree {
         self.tree.block_tree()
@@ -132,9 +152,10 @@ impl Syntax {
 /// flat, start-sorted list of highlight spans plus the emphasis delimiters to
 /// conceal. Inline trees carry absolute document offsets, so their node ranges
 /// line up with the block tree's.
-fn collect(tree: &MarkdownTree) -> (Vec<Highlight>, Vec<Marker>) {
+fn collect(tree: &MarkdownTree, text: &str) -> (Vec<Highlight>, Vec<Marker>, Vec<Heading>) {
     let mut out = Vec::new();
     let mut markers = Vec::new();
+    let mut headings = Vec::new();
 
     walk(tree.block_tree().root_node(), &mut |node| {
         if matches!(node.kind(), "atx_heading" | "setext_heading") {
@@ -143,6 +164,7 @@ fn collect(tree: &MarkdownTree) -> (Vec<Highlight>, Vec<Marker>) {
                 end: node.end_byte(),
                 kind: HighlightKind::Heading,
             });
+            headings.push(heading_info(&node, text));
         }
     });
 
@@ -184,7 +206,37 @@ fn collect(tree: &MarkdownTree) -> (Vec<Highlight>, Vec<Marker>) {
 
     out.sort_by_key(|h| h.start);
     markers.sort_by_key(|m| m.delim_start);
-    (out, markers)
+    headings.sort_by_key(|h| h.start);
+    (out, markers, headings)
+}
+
+/// Pull a heading's level and title out of its node. Works on the source text
+/// rather than walking marker children, which keeps atx and setext uniform.
+fn heading_info(node: &Node, text: &str) -> Heading {
+    let raw = &text[node.start_byte()..node.end_byte()];
+    if node.kind() == "setext_heading" {
+        // "Title\n===" (level 1) or "Title\n---" (level 2).
+        let mut lines = raw.lines();
+        let title = lines.next().unwrap_or("").trim().to_string();
+        let underline = lines.next().unwrap_or("");
+        let level = if underline.trim_start().starts_with('=') { 1 } else { 2 };
+        Heading {
+            level,
+            title,
+            start: node.start_byte(),
+        }
+    } else {
+        // "### Title ###" — count leading '#', strip optional closing '#'.
+        let line = raw.lines().next().unwrap_or("").trim();
+        let hashes = line.chars().take_while(|&c| c == '#').count();
+        let level = hashes.clamp(1, 6) as u8;
+        let title = line[hashes..].trim().trim_end_matches('#').trim().to_string();
+        Heading {
+            level,
+            title,
+            start: node.start_byte(),
+        }
+    }
 }
 
 /// Pre-order traversal. Markdown nesting is shallow, so plain recursion is fine.
@@ -302,5 +354,42 @@ mod tests {
         let s = Syntax::new(text);
         assert!(s.conceal_ranges(None).is_empty());
         assert!(all(&s).iter().all(|h| h.kind == HighlightKind::Heading));
+    }
+
+    #[test]
+    fn extracts_atx_headings_with_level_and_title() {
+        let text = "# Book One\n\nIntro.\n\n## Scene A\n\ntext\n\n### Beat ###\n\nmore\n";
+        let s = Syntax::new(text);
+        let got: Vec<(u8, &str)> = s
+            .headings()
+            .iter()
+            .map(|h| (h.level, h.title.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(1, "Book One"), (2, "Scene A"), (3, "Beat")]
+        );
+    }
+
+    #[test]
+    fn extracts_setext_headings() {
+        let text = "Title Line\n=====\n\nbody\n\nA Subsection\n---\n";
+        let s = Syntax::new(text);
+        let got: Vec<(u8, &str)> = s
+            .headings()
+            .iter()
+            .map(|h| (h.level, h.title.as_str()))
+            .collect();
+        assert_eq!(got, vec![(1, "Title Line"), (2, "A Subsection")]);
+    }
+
+    #[test]
+    fn headings_are_in_document_order_and_empty_when_none() {
+        assert!(Syntax::new("Just prose, no headings.\n").headings().is_empty());
+
+        let text = "## Second-level first\n\n# Top level after\n";
+        let s = Syntax::new(text);
+        let starts: Vec<usize> = s.headings().iter().map(|h| h.start).collect();
+        assert!(starts.windows(2).all(|w| w[0] <= w[1]));
     }
 }

@@ -5,12 +5,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::app::{App, Mode};
-use crate::syntax::{Highlight, HighlightKind, Syntax};
+use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -20,8 +20,69 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
 
-    draw_editor(frame, app, chunks[0]);
+    // The outline pane takes a left strip when toggled on (Ctrl-O); the editor
+    // centers within whatever space remains, so the page stays balanced.
+    if app.outline_visible {
+        let outline_w = 28.min(chunks[0].width / 3);
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(outline_w), Constraint::Min(1)])
+            .split(chunks[0]);
+        draw_outline(frame, app, cols[0]);
+        draw_editor(frame, app, cols[1]);
+    } else {
+        draw_editor(frame, app, chunks[0]);
+    }
+
     draw_status(frame, app, chunks[1]);
+}
+
+/// The index of the heading whose section the cursor is currently in: the last
+/// heading at or before the cursor. `None` if the cursor sits above the first
+/// heading (or there are no headings).
+fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
+    headings.iter().rposition(|h| h.start <= cursor_byte)
+}
+
+/// The in-chapter outline: heading titles indented by level, with the current
+/// section highlighted. Shows an empty state rather than erroring when there are
+/// no headings.
+fn draw_outline(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default().borders(Borders::RIGHT);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let header = Span::styled(
+        "OUTLINE",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let headings = app.buffer.syntax().headings();
+    let mut lines: Vec<Line> = vec![Line::from(header), Line::raw("")];
+
+    if headings.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No headings",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        let current = current_section(headings, app.buffer.cursor_byte());
+        for (i, h) in headings.iter().enumerate() {
+            let indent = "  ".repeat(h.level.saturating_sub(1) as usize);
+            let style = if Some(i) == current {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(format!("{indent}{}", h.title), style)));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
@@ -250,5 +311,41 @@ mod tests {
         app.buffer.cursor = Cursor { line: 0, col: 3 }; // inside "italic"
         let screen = render(&app, 80, 8);
         assert!(screen.contains("*italic*"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn current_section_is_the_last_heading_at_or_before_the_cursor() {
+        use crate::syntax::Heading;
+        let hs = vec![
+            Heading { level: 1, title: "A".into(), start: 0 },
+            Heading { level: 2, title: "B".into(), start: 50 },
+        ];
+        assert_eq!(current_section(&hs, 0), Some(0));
+        assert_eq!(current_section(&hs, 49), Some(0));
+        assert_eq!(current_section(&hs, 50), Some(1));
+        assert_eq!(current_section(&hs, 999), Some(1));
+
+        // Cursor above the first heading, and the no-headings case.
+        let later = vec![Heading { level: 1, title: "A".into(), start: 10 }];
+        assert_eq!(current_section(&later, 5), None);
+        assert_eq!(current_section(&[], 0), None);
+    }
+
+    #[test]
+    fn outline_pane_lists_headings_when_visible() {
+        let mut app = App::new(buffer_with("# Chapter\n\nbody\n\n## Scene\n\nmore\n"));
+        app.outline_visible = true;
+        let screen = render(&app, 90, 16);
+        assert!(screen.contains("OUTLINE"), "screen:\n{screen}");
+        assert!(screen.contains("Chapter"), "screen:\n{screen}");
+        assert!(screen.contains("Scene"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn outline_pane_shows_empty_state_without_headings() {
+        let mut app = App::new(buffer_with("just prose, no headings\n"));
+        app.outline_visible = true;
+        let screen = render(&app, 90, 12);
+        assert!(screen.contains("No headings"), "screen:\n{screen}");
     }
 }
