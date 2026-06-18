@@ -6,6 +6,8 @@
 //! unknown keys and an author's hand formatting survive untouched. Typed access
 //! to individual fields lands with the metadata tickets that build on this.
 
+use std::borrow::Cow;
+
 /// Split chapter-file `text` into its front matter and the body beneath it.
 ///
 /// Front matter is recognized only by the conventional fences: the file must
@@ -31,13 +33,14 @@ pub fn split(text: &str) -> (Option<&str>, &str) {
     (None, text)
 }
 
-/// Re-attach a front matter block above `body`, inverting [`split`]. `None`
-/// returns the body unchanged. `inner` is expected to already end in a newline
-/// (as [`split`] returns it), so the closing fence sits on its own line.
-pub fn join(front: Option<&str>, body: &str) -> String {
+/// Re-attach a front matter block above `body`, inverting [`split`]. With no
+/// front matter the body is returned borrowed (no copy); `inner` is expected to
+/// already end in a newline (as [`split`] returns it) so the closing fence sits
+/// on its own line.
+pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
     match front {
-        Some(inner) => format!("---\n{inner}---\n{body}"),
-        None => body.to_string(),
+        Some(inner) => Cow::Owned(format!("---\n{inner}---\n{body}")),
+        None => Cow::Borrowed(body),
     }
 }
 
@@ -65,7 +68,7 @@ mod tests {
     fn split_then_join_round_trips() {
         let text = "---\nstatus: draft\n---\nThe body.\n";
         let (front, body) = split(text);
-        assert_eq!(join(front, body), text);
+        assert_eq!(&*join(front, body), text);
     }
 
     #[test]
@@ -74,7 +77,7 @@ mod tests {
         let (front, body) = split(text);
         assert_eq!(front, Some(""));
         assert_eq!(body, "Body only.\n");
-        assert_eq!(join(front, body), text);
+        assert_eq!(&*join(front, body), text);
     }
 
     #[test]
@@ -88,6 +91,6 @@ mod tests {
 
     #[test]
     fn join_none_is_the_body_unchanged() {
-        assert_eq!(join(None, "Body.\n"), "Body.\n");
+        assert_eq!(&*join(None, "Body.\n"), "Body.\n");
     }
 }

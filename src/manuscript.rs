@@ -151,7 +151,7 @@ impl Manuscript {
                 let raw = self.buffer.line_range_text(start, end);
                 let body = normalize_trailing_newline(&raw);
                 let content = frontmatter::join(s.front_matter.as_deref(), &body);
-                std::fs::write(project.chapter_path(s.index), &content)?;
+                std::fs::write(project.chapter_path(s.index), content.as_bytes())?;
                 // Count the prose only, not the front matter keys.
                 project.set_chapter_words(s.index, count_words(&body));
                 s.dirty = false;

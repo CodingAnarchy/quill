@@ -125,7 +125,7 @@ impl Buffer {
 
         let body = normalize_trailing_newline(&self.rope.to_string());
         let content = crate::frontmatter::join(self.front_matter.as_deref(), &body);
-        std::fs::write(path, content)?;
+        std::fs::write(path, content.as_bytes())?;
         self.dirty = false;
         Ok(())
     }
