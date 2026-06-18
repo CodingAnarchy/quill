@@ -28,7 +28,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(outline_w), Constraint::Min(1)])
             .split(chunks[0]);
-        draw_outline(frame, app, cols[0]);
+        draw_nav_pane(frame, app, cols[0]);
         draw_editor(frame, app, cols[1]);
     } else {
         draw_editor(frame, app, chunks[0]);
@@ -44,10 +44,44 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
     headings.iter().rposition(|h| h.start <= cursor_byte)
 }
 
+/// The accent style for the active/current item in the nav pane.
+fn active_style() -> Style {
+    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+}
+
+/// One chapter row: a marker for the active chapter, reversed while it's the
+/// Nav-mode selection.
+fn chapter_line(title: &str, is_active: bool, is_selected: bool) -> Line<'static> {
+    let mut style = if is_active { active_style() } else { Style::default() };
+    if is_selected {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    let marker = if is_active { "▸ " } else { "  " };
+    Line::from(Span::styled(format!("{marker}{title}"), style))
+}
+
+/// The active chapter's heading outline, indented by level, current section
+/// accented.
+fn heading_outline_lines(headings: &[Heading], current: Option<usize>) -> Vec<Line<'static>> {
+    headings
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            let indent = "  ".repeat(h.level as usize);
+            let style = if Some(i) == current {
+                active_style()
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            Line::from(Span::styled(format!("{indent}{}", h.title), style))
+        })
+        .collect()
+}
+
 /// The navigation pane: the project's chapters, with the active chapter's
 /// in-chapter heading outline nested beneath it (the current section
 /// highlighted). While browsing (Nav mode), the selected chapter is reversed.
-fn draw_outline(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default().borders(Borders::RIGHT);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -60,38 +94,15 @@ fn draw_outline(frame: &mut Frame, app: &App, area: Rect) {
     );
     let mut lines: Vec<Line> = vec![Line::from(header), Line::raw("")];
 
-    let navigating = app.mode == Mode::Nav;
     let headings = app.buffer.syntax().headings();
     let current_heading = current_section(headings, app.buffer.cursor_byte());
 
     for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
         let is_active = i == app.project.active;
-        let mut style = Style::default();
+        let is_selected = app.mode == Mode::Nav && i == app.nav_selected;
+        lines.push(chapter_line(&chapter.title, is_active, is_selected));
         if is_active {
-            style = style.fg(Color::Cyan).add_modifier(Modifier::BOLD);
-        }
-        if navigating && i == app.nav_selected {
-            style = style.add_modifier(Modifier::REVERSED);
-        }
-        let marker = if is_active { "▸ " } else { "  " };
-        lines.push(Line::from(Span::styled(
-            format!("{marker}{}", chapter.title),
-            style,
-        )));
-
-        // Nest the active chapter's heading outline beneath it.
-        if is_active {
-            for (h_idx, h) in headings.iter().enumerate() {
-                let indent = "  ".repeat(h.level as usize);
-                let style = if Some(h_idx) == current_heading {
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Gray)
-                };
-                lines.push(Line::from(Span::styled(format!("{indent}{}", h.title), style)));
-            }
+            lines.extend(heading_outline_lines(headings, current_heading));
         }
     }
 

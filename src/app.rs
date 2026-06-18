@@ -93,6 +93,15 @@ impl App {
         self.project.manifest.chapters.len()
     }
 
+    fn next_chapter(&mut self) {
+        self.activate_chapter(self.project.active + 1);
+    }
+
+    fn prev_chapter(&mut self) {
+        // At chapter 0 this targets 0 — a no-op via activate_chapter's guard.
+        self.activate_chapter(self.project.active.saturating_sub(1));
+    }
+
     fn on_key_nav(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
@@ -147,10 +156,8 @@ impl App {
                 self.outline_visible = !self.outline_visible;
             }
             // Step to the next / previous chapter.
-            (true, KeyCode::Char('n')) => self.activate_chapter(self.project.active + 1),
-            (true, KeyCode::Char('p')) => {
-                self.activate_chapter(self.project.active.wrapping_sub(1))
-            }
+            (true, KeyCode::Char('n')) => self.next_chapter(),
+            (true, KeyCode::Char('p')) => self.prev_chapter(),
             // Focus the chapter pane to browse and jump to one.
             (true, KeyCode::Char('g')) => {
                 self.outline_visible = true;
