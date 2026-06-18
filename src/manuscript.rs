@@ -15,8 +15,10 @@
 //! restructuring stays in the nav pane. The centered title dividers the renderer
 //! draws between chapters are display-only and never enter the buffer.
 
+use std::fs;
+
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
-use crate::frontmatter::{self, FrontMatter};
+use crate::frontmatter::{self, Epigraph, FrontMatter};
 use crate::project::Project;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
@@ -43,6 +45,18 @@ pub struct Manuscript {
     segments: Vec<Segment>,
     /// Concatenation of the window's chapters — the text actually edited.
     buffer: Buffer,
+}
+
+/// What the editor needs to render a chapter's header in the continuous flow.
+pub struct SegmentHeader {
+    /// Global line where the chapter begins.
+    pub start: usize,
+    /// Manifest index of the chapter.
+    pub index: usize,
+    /// Divider title to draw above it, or `None` for the first loaded chapter.
+    pub title: Option<String>,
+    /// The chapter's epigraph, if any.
+    pub epigraph: Option<Epigraph>,
 }
 
 impl Manuscript {
@@ -87,15 +101,19 @@ impl Manuscript {
         &self.current_segment().title
     }
 
-    /// Where the renderer should draw a chapter divider: the global start line
-    /// and (borrowed) title of each segment after the first.
-    pub fn dividers(&self) -> Vec<(usize, &str)> {
+    /// What the editor draws above each loaded chapter: the global start line,
+    /// the chapter index, a divider title (`None` for the first segment, so no
+    /// rule is drawn before it), and the chapter's epigraph.
+    pub fn segment_headers(&self) -> Vec<SegmentHeader> {
         let mut out = Vec::new();
         let mut start = 0;
         for (i, s) in self.segments.iter().enumerate() {
-            if i > 0 {
-                out.push((start, s.title.as_str()));
-            }
+            out.push(SegmentHeader {
+                start,
+                index: s.index,
+                title: (i > 0).then(|| s.title.clone()),
+                epigraph: s.front_matter.as_ref().and_then(FrontMatter::epigraph),
+            });
             start += s.lines;
         }
         out
@@ -156,7 +174,7 @@ impl Manuscript {
                     .filter(|f| !f.is_empty())
                     .map(FrontMatter::as_str);
                 let content = frontmatter::join(front, &body);
-                std::fs::write(project.chapter_path(s.index), content.as_bytes())?;
+                fs::write(project.chapter_path(s.index), content.as_bytes())?;
                 // Count the prose only, not the front matter keys.
                 project.set_chapter_words(s.index, count_words(&body));
                 s.dirty = false;
@@ -202,7 +220,7 @@ impl Manuscript {
         let mut text = String::new();
         let mut segments = Vec::new();
         for index in lo..hi {
-            let raw = std::fs::read_to_string(project.chapter_path(index)).unwrap_or_default();
+            let raw = fs::read_to_string(project.chapter_path(index)).unwrap_or_default();
             // Front matter stays out of the flowing text; keep it to re-attach on save.
             let (front, body) = frontmatter::split(&raw);
             // Give every chapter at least one line so it's always editable; an
@@ -292,16 +310,16 @@ mod tests {
     fn project_with(name: &str, chapters: &[&str]) -> (Project, PathBuf) {
         let mut dir = std::env::temp_dir();
         dir.push(format!("quill-ms-{}-{}", std::process::id(), name));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
 
         let mut manifest = String::from("title = \"Book\"\n\n");
         for (i, body) in chapters.iter().enumerate() {
             let file = format!("ch{i}.md");
             manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
-            std::fs::write(dir.join(&file), body).unwrap();
+            fs::write(dir.join(&file), body).unwrap();
         }
-        std::fs::write(Project::manifest_path(&dir), manifest).unwrap();
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
         (Project::open(&dir).unwrap(), dir)
     }
 
@@ -329,7 +347,7 @@ mod tests {
         // Invariant: per-segment line counts add up to the buffer's content lines.
         assert_eq!(lines_sum(&m), m.buffer.line_count() - 1); // +1 trailing line
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -352,13 +370,13 @@ mod tests {
         m.insert_char('X');
         m.save(&mut project).unwrap();
         assert_eq!(
-            std::fs::read_to_string(dir.join("ch0.md")).unwrap(),
+            fs::read_to_string(dir.join("ch0.md")).unwrap(),
             "---\nstatus: draft\n---\nXAlpha prose.\n"
         );
         // Chapter 1 (no front matter) is untouched.
-        assert_eq!(std::fs::read_to_string(dir.join("ch1.md")).unwrap(), "Beta prose.\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "Beta prose.\n");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -373,7 +391,7 @@ mod tests {
         // The trailing line maps to the last segment.
         assert_eq!(m.segments[m.owner_of_line(99)].index, 2);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -393,11 +411,11 @@ mod tests {
 
         m.save(&mut project).unwrap();
         // The edit landed in chapter 1's file; the others are untouched.
-        assert_eq!(std::fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta!!\n");
-        assert_eq!(std::fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
-        assert_eq!(std::fs::read_to_string(dir.join("ch2.md")).unwrap(), "gamma\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta!!\n");
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch2.md")).unwrap(), "gamma\n");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -411,11 +429,11 @@ mod tests {
         m.save(&mut project).unwrap();
 
         // Both chapters intact and separate.
-        assert_eq!(std::fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
-        assert_eq!(std::fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
         assert!(!m.dirty()); // the refused edit didn't mark anything dirty...
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -436,10 +454,10 @@ mod tests {
         assert_eq!(m.segments.len(), WINDOW);
         assert_eq!((m.window_lo(), m.window_hi()), (1, 4));
         // Chapter 0 dropped out — its pending edit was flushed to disk first.
-        assert_eq!(std::fs::read_to_string(dir.join("ch0.md")).unwrap(), "Xa\n");
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "Xa\n");
         // The cursor still sits in chapter 2.
         assert_eq!(m.current_chapter(), 2);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 }

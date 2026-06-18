@@ -3,7 +3,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
-use crate::frontmatter::{FrontMatter, Status};
+use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::manuscript::Manuscript;
 use crate::project::{Manifest, Project};
 
@@ -49,15 +49,26 @@ enum Pending {
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.
     Rename { at: usize },
-    /// Text input: one-line summary for the chapter at `at`.
-    SetSummary { at: usize },
-    /// Text input: POV character for the chapter at `at`.
-    SetPov { at: usize },
-    /// Text input: project-level book / series metadata (no chapter index).
-    SetBookTitle,
-    SetSubtitle,
-    SetAuthor,
-    SetSeries,
+    /// Text input editing a metadata field (chapter front matter or book
+    /// manifest). One variant for every text-valued metadata field, so adding a
+    /// field is a new [`MetaField`] case rather than new prompt control flow.
+    SetMeta(MetaField),
+}
+
+/// Which metadata field a [`Pending::SetMeta`] prompt writes. Chapter fields
+/// carry the chapter index; book fields are project-level.
+#[derive(Clone, Copy)]
+enum MetaField {
+    Summary { at: usize },
+    Pov { at: usize },
+    ChapterEpigraph { at: usize },
+    ChapterEpigraphBy { at: usize },
+    BookTitle,
+    Subtitle,
+    Author,
+    Series,
+    BookEpigraph,
+    BookEpigraphBy,
 }
 
 pub struct App {
@@ -433,6 +444,51 @@ impl App {
         }
     }
 
+    /// Write a metadata field's text — chapter fields go through the chapter's
+    /// front matter, book fields through the manifest. The single place that maps
+    /// a [`MetaField`] to where it's stored.
+    fn apply_meta(&mut self, field: MetaField, text: &str) {
+        // Optional fields clear to `None` on empty input; only one arm uses this.
+        let optional = (!text.is_empty()).then(|| text.to_string());
+        match field {
+            MetaField::Summary { at } => {
+                self.edit_chapter_meta(at, |fm| fm.set_summary(text));
+            }
+            MetaField::Pov { at } => {
+                self.edit_chapter_meta(at, |fm| fm.set_pov(text));
+            }
+            MetaField::ChapterEpigraph { at } => {
+                self.edit_chapter_meta(at, |fm| fm.set_epigraph_text(text));
+            }
+            MetaField::ChapterEpigraphBy { at } => {
+                self.edit_chapter_meta(at, |fm| fm.set_epigraph_by(text));
+            }
+            // The book title is required, so empty input keeps the current one.
+            MetaField::BookTitle => {
+                if !text.is_empty() {
+                    self.set_book_meta(|m| m.title = text.to_string());
+                }
+            }
+            MetaField::Subtitle => self.set_book_meta(|m| m.subtitle = optional),
+            MetaField::Author => self.set_book_meta(|m| m.author = optional),
+            MetaField::Series => self.set_book_meta(|m| m.series = optional),
+            MetaField::BookEpigraph => self.set_book_meta(|m| m.epigraph = optional),
+            MetaField::BookEpigraphBy => self.set_book_meta(|m| m.epigraph_by = optional),
+        }
+    }
+
+    /// The current epigraph of chapter `index`: from the live buffer if it's the
+    /// active chapter (latest unsaved edits), otherwise read from its file.
+    fn chapter_epigraph(&self, index: usize) -> Option<Epigraph> {
+        if index == self.project.active_index() {
+            self.buffer.front_matter().and_then(FrontMatter::epigraph)
+        } else {
+            self.project
+                .chapter_front_matter(index)
+                .and_then(|fm| fm.epigraph())
+        }
+    }
+
     /// Open a prompt. `nav_return` is the chapter to reselect when it closes
     /// (`None` returns to insert mode, e.g. the quit prompt).
     fn open_prompt(
@@ -495,32 +551,40 @@ impl App {
                 let title = self.project.manifest.chapters[sel].title.clone();
                 self.open_prompt(Pending::Rename { at: sel }, "Rename chapter: ", &title, Some(sel));
             }
-            // Metadata: cycle status, edit summary / POV (front matter).
+            // Chapter metadata (front matter): status, summary, POV, epigraph.
             KeyCode::Char('s') => self.cycle_status(sel),
             KeyCode::Char('m') => {
                 let prefill = self.project.chapter_summary(sel).unwrap_or("").to_string();
-                self.open_prompt(Pending::SetSummary { at: sel }, "Summary: ", &prefill, Some(sel));
+                self.open_prompt(Pending::SetMeta(MetaField::Summary { at: sel }), "Summary: ", &prefill, Some(sel));
             }
             KeyCode::Char('v') => {
                 let prefill = self.project.chapter_pov(sel).unwrap_or("").to_string();
-                self.open_prompt(Pending::SetPov { at: sel }, "POV: ", &prefill, Some(sel));
+                self.open_prompt(Pending::SetMeta(MetaField::Pov { at: sel }), "POV: ", &prefill, Some(sel));
+            }
+            KeyCode::Char('g') => {
+                let prefill = self.chapter_epigraph(sel).map(|e| e.text).unwrap_or_default();
+                self.open_prompt(Pending::SetMeta(MetaField::ChapterEpigraph { at: sel }), "Epigraph: ", &prefill, Some(sel));
             }
             // Project-level book / series metadata.
             KeyCode::Char('t') => {
                 let cur = self.project.manifest.title.clone();
-                self.open_prompt(Pending::SetBookTitle, "Book title: ", &cur, Some(sel));
+                self.open_prompt(Pending::SetMeta(MetaField::BookTitle), "Book title: ", &cur, Some(sel));
             }
             KeyCode::Char('b') => {
                 let cur = self.project.manifest.subtitle.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetSubtitle, "Subtitle: ", &cur, Some(sel));
+                self.open_prompt(Pending::SetMeta(MetaField::Subtitle), "Subtitle: ", &cur, Some(sel));
             }
             KeyCode::Char('w') => {
                 let cur = self.project.manifest.author.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetAuthor, "Author: ", &cur, Some(sel));
+                self.open_prompt(Pending::SetMeta(MetaField::Author), "Author: ", &cur, Some(sel));
             }
             KeyCode::Char('e') => {
                 let cur = self.project.manifest.series.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetSeries, "Series: ", &cur, Some(sel));
+                self.open_prompt(Pending::SetMeta(MetaField::Series), "Series: ", &cur, Some(sel));
+            }
+            KeyCode::Char('G') => {
+                let cur = self.project.manifest.epigraph.clone().unwrap_or_default();
+                self.open_prompt(Pending::SetMeta(MetaField::BookEpigraph), "Book epigraph: ", &cur, Some(sel));
             }
             KeyCode::Char('d') => {
                 if self.chapter_count() <= 1 {
@@ -566,14 +630,7 @@ impl App {
                 _ => self.mode = closed,
             },
             // The text prompts share the editing keys; only Enter differs.
-            Pending::NewChapter { .. }
-            | Pending::Rename { .. }
-            | Pending::SetSummary { .. }
-            | Pending::SetPov { .. }
-            | Pending::SetBookTitle
-            | Pending::SetSubtitle
-            | Pending::SetAuthor
-            | Pending::SetSeries => {
+            Pending::NewChapter { .. } | Pending::Rename { .. } | Pending::SetMeta(_) => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -582,53 +639,50 @@ impl App {
                     KeyCode::Enter => {
                         let text = std::mem::take(&mut self.prompt_mut().input);
                         let text = text.trim();
-                        // All text prompts return to the chapter they acted on;
-                        // a new chapter lands on the one just created.
                         let fallback = nav_return.unwrap_or(0);
-                        // For the optional book fields, empty input clears them
-                        // (stored as `None`); only one arm below consumes this.
-                        let optional = (!text.is_empty()).then(|| text.to_string());
-                        let selected = match pending {
-                            Pending::NewChapter { at } if !text.is_empty() => {
-                                self.create_chapter(at, text)
+                        match pending {
+                            Pending::NewChapter { at } => {
+                                let sel =
+                                    if text.is_empty() { fallback } else { self.create_chapter(at, text) };
+                                self.select(sel);
                             }
-                            Pending::Rename { at } if !text.is_empty() => {
-                                self.rename_chapter(at, text);
-                                fallback
+                            Pending::Rename { at } => {
+                                if !text.is_empty() {
+                                    self.rename_chapter(at, text);
+                                }
+                                self.select(fallback);
                             }
-                            Pending::SetSummary { at } => {
-                                self.edit_chapter_meta(at, |fm| fm.set_summary(text));
-                                fallback
+                            Pending::SetMeta(field) => {
+                                self.apply_meta(field, text);
+                                // An epigraph quotation chains into an attribution
+                                // prompt (unless it was just cleared); other fields
+                                // return to the browser.
+                                match field {
+                                    MetaField::ChapterEpigraph { at } if !text.is_empty() => {
+                                        let by =
+                                            self.chapter_epigraph(at).and_then(|e| e.attribution).unwrap_or_default();
+                                        self.open_prompt(
+                                            Pending::SetMeta(MetaField::ChapterEpigraphBy { at }),
+                                            "Epigraph by: ",
+                                            &by,
+                                            nav_return,
+                                        );
+                                    }
+                                    MetaField::BookEpigraph if !text.is_empty() => {
+                                        let by = self.project.manifest.epigraph_by.clone().unwrap_or_default();
+                                        self.open_prompt(
+                                            Pending::SetMeta(MetaField::BookEpigraphBy),
+                                            "Epigraph by: ",
+                                            &by,
+                                            nav_return,
+                                        );
+                                    }
+                                    _ => self.select(fallback),
+                                }
                             }
-                            Pending::SetPov { at } => {
-                                self.edit_chapter_meta(at, |fm| fm.set_pov(text));
-                                fallback
-                            }
-                            // Project metadata. The book title is required, so
-                            // empty input keeps it; the optional fields clear on
-                            // empty (stored as `None`).
-                            Pending::SetBookTitle if !text.is_empty() => {
-                                self.set_book_meta(|m| m.title = text.to_string());
-                                fallback
-                            }
-                            Pending::SetSubtitle => {
-                                self.set_book_meta(|m| m.subtitle = optional);
-                                fallback
-                            }
-                            Pending::SetAuthor => {
-                                self.set_book_meta(|m| m.author = optional);
-                                fallback
-                            }
-                            Pending::SetSeries => {
-                                self.set_book_meta(|m| m.series = optional);
-                                fallback
-                            }
-                            // Empty title for New/Rename/BookTitle: a no-op. (The
-                            // summary/POV/optional-book arms above run on empty
-                            // text on purpose — that clears the field.)
-                            _ => fallback,
-                        };
-                        self.select(selected);
+                            // Confirmations never reach the text arm.
+                            _ => self.select(fallback),
+                        }
                     }
                     KeyCode::Esc => self.mode = closed,
                     _ => {}
@@ -700,6 +754,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::project::Project;
+    use std::fs;
     use std::path::PathBuf;
 
     fn ctrl(c: char) -> KeyEvent {
@@ -728,17 +783,17 @@ mod tests {
     fn two_chapter_app(name: &str) -> (App, PathBuf) {
         let mut dir = std::env::temp_dir();
         dir.push(format!("quill-app-{}-{}", std::process::id(), name));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
             Project::manifest_path(&dir),
             "title = \"Book\"\n\n\
              [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
              [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
         )
         .unwrap();
-        std::fs::write(dir.join("one.md"), "first chapter\n").unwrap();
-        std::fs::write(dir.join("two.md"), "second chapter\n").unwrap();
+        fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+        fs::write(dir.join("two.md"), "second chapter\n").unwrap();
 
         let project = Project::open(&dir).unwrap();
         let buffer = Buffer::from_path(project.active_path()).unwrap();
@@ -759,7 +814,7 @@ mod tests {
         assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -772,7 +827,7 @@ mod tests {
         app.on_key(ctrl('n')); // already at last — no-op
         assert_eq!(app.project.active_index(), 1);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -786,10 +841,10 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
 
         // Chapter one was persisted on the way out.
-        let saved = std::fs::read_to_string(dir.join("one.md")).unwrap();
+        let saved = fs::read_to_string(dir.join("one.md")).unwrap();
         assert!(saved.starts_with('X'), "expected edit saved, got: {saved:?}");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -807,7 +862,7 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     fn typed(app: &mut App, s: &str) {
@@ -845,7 +900,7 @@ mod tests {
         // Persisted.
         assert_eq!(project_titles(&Project::open(&dir).unwrap()), titles(&app));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -863,7 +918,7 @@ mod tests {
         assert_eq!(titles(&app)[0], "Uno");
         assert_eq!(project_titles(&Project::open(&dir).unwrap())[0], "Uno");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -877,7 +932,7 @@ mod tests {
         // The active chapter ("One") followed its content to index 1.
         assert_eq!(app.project.active_title(), Some("One"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -894,7 +949,7 @@ mod tests {
         assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -909,7 +964,7 @@ mod tests {
         // Buffer was reloaded to the surviving chapter.
         assert!(app.buffer.line(0).contains("second"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -926,7 +981,7 @@ mod tests {
         assert!(matches!(app.mode, Mode::Nav { .. })); // no confirm prompt opened
         assert_eq!(app.chapter_count(), 1);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -941,7 +996,7 @@ mod tests {
         assert_eq!(app.project.active_title(), Some("One"));
         assert!(app.buffer.line(0).contains("first"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -964,7 +1019,7 @@ mod tests {
         assert_eq!(reopened.manifest.title, "Book of Dust");
         assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -980,7 +1035,49 @@ mod tests {
         app.on_key(key(KeyCode::Enter));
         assert_eq!(app.project.manifest.subtitle, None);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn setting_a_chapter_epigraph_chains_quotation_then_attribution() {
+        let (mut app, dir) = two_chapter_app("ch-epigraph");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Down)); // select chapter 1 (non-active → writes now)
+        app.on_key(key(KeyCode::Char('g'))); // epigraph: quotation prompt
+        typed(&mut app, "Call me Ishmael.");
+        app.on_key(key(KeyCode::Enter));
+        // Chains into the attribution prompt rather than returning to Nav.
+        assert!(matches!(app.mode, Mode::Prompt(_)));
+        typed(&mut app, "Melville");
+        app.on_key(key(KeyCode::Enter));
+        assert!(matches!(app.mode, Mode::Nav { .. }));
+
+        let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
+        assert!(on_disk.contains("epigraph: Call me Ishmael."), "got:\n{on_disk}");
+        assert!(on_disk.contains("epigraph_by: Melville"), "got:\n{on_disk}");
+        assert!(on_disk.contains("second chapter"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn setting_a_book_epigraph_persists_to_the_manifest() {
+        let (mut app, dir) = two_chapter_app("book-epigraph");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Char('G'))); // book epigraph
+        typed(&mut app, "Begin at the beginning.");
+        app.on_key(key(KeyCode::Enter)); // chains to attribution
+        typed(&mut app, "The King");
+        app.on_key(key(KeyCode::Enter));
+
+        let ep = app.project.manifest.epigraph().unwrap();
+        assert_eq!(ep.text, "Begin at the beginning.");
+        assert_eq!(ep.attribution.as_deref(), Some("The King"));
+        // Persisted to the manifest.
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.manifest.epigraph().unwrap().attribution.as_deref(), Some("The King"));
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -995,11 +1092,11 @@ mod tests {
         // Active-chapter metadata persists on save (like prose).
         app.on_key(key(KeyCode::Enter)); // open the selected chapter (back to Insert)
         app.on_key(ctrl('s'));
-        let on_disk = std::fs::read_to_string(dir.join("one.md")).unwrap();
+        let on_disk = fs::read_to_string(dir.join("one.md")).unwrap();
         assert!(on_disk.starts_with("---\nstatus: revised\n---\n"), "got:\n{on_disk}");
         assert!(on_disk.contains("first chapter"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1012,12 +1109,12 @@ mod tests {
         app.on_key(key(KeyCode::Enter));
 
         // Non-active edits hit disk right away, with quoting, prose untouched.
-        let on_disk = std::fs::read_to_string(dir.join("two.md")).unwrap();
+        let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
         assert!(on_disk.starts_with("---\nsummary: \"The reckoning: part one\"\n---\n"), "got:\n{on_disk}");
         assert!(on_disk.contains("second chapter"));
         assert_eq!(app.project.chapter_summary(1), Some("The reckoning: part one"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1035,7 +1132,7 @@ mod tests {
         assert_eq!(reopened.chapter_status(1), Some(crate::frontmatter::Status::Draft));
         assert_eq!(reopened.chapter_pov(1), Some("Mara"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1053,13 +1150,13 @@ mod tests {
         assert!(app.manuscript.is_none());
 
         // The edit landed in chapter two's file; chapter one is untouched.
-        assert_eq!(std::fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
-        assert_eq!(std::fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
+        assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
+        assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
         // Back in single-chapter view at the chapter the cursor was in.
         assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1070,9 +1167,9 @@ mod tests {
         assert!(app.buffer.dirty);
 
         app.on_key(ctrl('l')); // entering must flush the dirty single chapter
-        assert!(std::fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
+        assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1088,7 +1185,7 @@ mod tests {
         assert_eq!(app.chapter_word_count(0), 3);
         assert_eq!(app.project_word_count(), 5);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1108,6 +1205,6 @@ mod tests {
         assert_eq!(app.chapter_count(), 2);
         assert_eq!(app.project_word_count(), 4);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 }

@@ -15,12 +15,13 @@
 //! chapter list (a standalone novel is one book) — and will grow act/book/series
 //! grouping as those tickets land.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::buffer::count_words;
-use crate::frontmatter::{self, FrontMatter, Status};
+use crate::frontmatter::{self, Epigraph, FrontMatter, Status};
 
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
@@ -64,8 +65,21 @@ pub struct Manifest {
     pub author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
+    /// Book epigraph: a quotation (`epigraph`) and optional attribution
+    /// (`epigraph_by`), rendered at the start of the manuscript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epigraph: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epigraph_by: Option<String>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
+}
+
+impl Manifest {
+    /// The book epigraph, if a quotation is set.
+    pub fn epigraph(&self) -> Option<Epigraph> {
+        Epigraph::from_parts(self.epigraph.clone(), self.epigraph_by.clone())
+    }
 }
 
 /// A loaded project: where it lives, its manifest (structure + cached word
@@ -92,7 +106,7 @@ impl Project {
     /// always editable.
     pub fn open(dir: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = dir.as_ref().to_path_buf();
-        let text = std::fs::read_to_string(Self::manifest_path(&root))?;
+        let text = fs::read_to_string(Self::manifest_path(&root))?;
         let manifest: Manifest = toml::from_str(&text).map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid {MANIFEST_NAME}: {e}"))
         })?;
@@ -119,7 +133,7 @@ impl Project {
     /// manifest plus one empty starter chapter, ready to edit.
     pub fn create(dir: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = dir.as_ref().to_path_buf();
-        std::fs::create_dir_all(&root)?;
+        fs::create_dir_all(&root)?;
 
         let title = root
             .file_name()
@@ -133,6 +147,8 @@ impl Project {
                 subtitle: None,
                 author: None,
                 series: None,
+                epigraph: None,
+                epigraph_by: None,
                 chapters: Vec::new(),
             },
             active: String::new(),
@@ -155,7 +171,7 @@ impl Project {
         };
         let path = self.root.join(&entry.file);
         if !path.exists() {
-            std::fs::write(&path, "")?;
+            fs::write(&path, "")?;
         }
         self.active = entry.file.clone();
         self.manifest.chapters.push(entry);
@@ -201,7 +217,7 @@ impl Project {
     /// Read chapter `index` from disk once and refresh its cached word count and
     /// front-matter metadata (status / summary / POV). Used at open.
     fn read_chapter_cache(&mut self, index: usize) {
-        let text = std::fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
+        let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
         let (front, body) = frontmatter::split(&text);
         let words = count_words(body);
         let fm = front.map(FrontMatter::from_raw);
@@ -210,6 +226,15 @@ impl Project {
         }
         // One place owns the front-matter → cache mapping.
         self.cache_chapter_meta(index, fm.as_ref());
+    }
+
+    /// The front matter of chapter `index` as written on disk (`None` if the
+    /// file has no block). For reading a chapter's metadata that isn't cached —
+    /// keep it off the per-frame path.
+    pub fn chapter_front_matter(&self, index: usize) -> Option<FrontMatter> {
+        let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
+        let (front, _) = frontmatter::split(&text);
+        front.map(FrontMatter::from_raw)
     }
 
     /// Cached metadata accessors for the pane (no file I/O).
@@ -251,12 +276,12 @@ impl Project {
         f: impl FnOnce(&mut FrontMatter),
     ) -> std::io::Result<()> {
         let path = self.chapter_path(index);
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let text = fs::read_to_string(&path).unwrap_or_default();
         let (front, body) = frontmatter::split(&text);
         let mut fm = front.map(FrontMatter::from_raw).unwrap_or_default();
         f(&mut fm);
         let front = (!fm.is_empty()).then(|| fm.as_str());
-        std::fs::write(&path, frontmatter::join(front, body).as_bytes())?;
+        fs::write(&path, frontmatter::join(front, body).as_bytes())?;
         self.cache_chapter_meta(index, Some(&fm));
         Ok(())
     }
@@ -286,7 +311,7 @@ impl Project {
         let text = toml::to_string_pretty(&self.manifest).map_err(|e| {
             std::io::Error::other(format!("could not serialize manifest: {e}"))
         })?;
-        std::fs::write(Self::manifest_path(&self.root), text)
+        fs::write(Self::manifest_path(&self.root), text)
     }
 
     // --- Structure editing -------------------------------------------------
@@ -302,7 +327,7 @@ impl Project {
     pub fn add_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
         let at = at.min(self.manifest.chapters.len());
         let file = self.unique_chapter_file();
-        std::fs::write(self.root.join(&file), "")?;
+        fs::write(self.root.join(&file), "")?;
         self.manifest.chapters.insert(
             at,
             ChapterEntry {
@@ -337,9 +362,9 @@ impl Project {
         let src = self.chapter_path(at);
         if src.exists() {
             let unused = self.root.join("unused");
-            std::fs::create_dir_all(&unused)?;
+            fs::create_dir_all(&unused)?;
             let dest = unique_dest(&unused, &self.manifest.chapters[at].file);
-            std::fs::rename(&src, &dest)?;
+            fs::rename(&src, &dest)?;
         }
         self.manifest.chapters.remove(at);
         self.save_manifest()
@@ -386,6 +411,8 @@ impl Project {
                 subtitle: None,
                 author: None,
                 series: None,
+                epigraph: None,
+                epigraph_by: None,
                 chapters,
             },
             active,
@@ -426,7 +453,7 @@ mod tests {
     #[test]
     fn create_initializes_manifest_and_first_chapter() {
         let dir = temp_dir("create");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
         let project = Project::create(&dir).unwrap();
 
         assert_eq!(project.manifest.chapters.len(), 1);
@@ -434,13 +461,13 @@ mod tests {
         assert!(Project::manifest_path(&dir).exists());
         assert!(project.active_path().exists());
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn create_then_open_round_trips_structure_and_text() {
         let dir = temp_dir("roundtrip");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
 
         // Create, write some prose into the active chapter, save it.
         let project = Project::create(&dir).unwrap();
@@ -463,26 +490,26 @@ mod tests {
         };
         assert_eq!(reopened.manifest.title, project.manifest.title);
         assert_eq!(structure(&reopened), structure(&project));
-        let text = std::fs::read_to_string(reopened.active_path()).unwrap();
+        let text = fs::read_to_string(reopened.active_path()).unwrap();
         assert!(text.contains("The night was dark."));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn open_parses_a_hand_written_manifest() {
         let dir = temp_dir("handwritten");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
             Project::manifest_path(&dir),
             "title = \"Red State Earth\"\n\n\
              [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
              [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
         )
         .unwrap();
-        std::fs::write(dir.join("one.md"), "first\n").unwrap();
-        std::fs::write(dir.join("two.md"), "second\n").unwrap();
+        fs::write(dir.join("one.md"), "first\n").unwrap();
+        fs::write(dir.join("two.md"), "second\n").unwrap();
 
         let project = Project::open(&dir).unwrap();
         assert_eq!(project.manifest.title, "Red State Earth");
@@ -490,13 +517,13 @@ mod tests {
         assert_eq!(project.active_index(), 0);
         assert_eq!(project.active_title(), Some("One"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn book_metadata_persists_and_old_manifests_still_parse() {
         let dir = temp_dir("book-meta");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
 
         // A manifest written before these fields existed still opens.
         let mut project = Project::create(&dir).unwrap();
@@ -509,34 +536,51 @@ mod tests {
         project.save_manifest().unwrap();
 
         // The written TOML carries them, and they survive a reopen.
-        let toml = std::fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
         assert!(toml.contains("author = \"A. Writer\""), "manifest:\n{toml}");
         let reopened = Project::open(&dir).unwrap();
         assert_eq!(reopened.manifest.subtitle.as_deref(), Some("A Novel"));
         assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
         assert_eq!(reopened.manifest.series.as_deref(), Some("The Saga"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn book_epigraph_persists_and_builds() {
+        let dir = temp_dir("book-epigraph");
+        let _ = fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap();
+        project.manifest.epigraph = Some("Call me Ishmael.".into());
+        project.manifest.epigraph_by = Some("Melville".into());
+        project.save_manifest().unwrap();
+
+        let reopened = Project::open(&dir).unwrap();
+        let ep = reopened.manifest.epigraph().unwrap();
+        assert_eq!(ep.text, "Call me Ishmael.");
+        assert_eq!(ep.attribution.as_deref(), Some("Melville"));
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn open_repairs_a_chapterless_manifest() {
         let dir = temp_dir("empty-manifest");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(Project::manifest_path(&dir), "title = \"Empty\"\n").unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(Project::manifest_path(&dir), "title = \"Empty\"\n").unwrap();
 
         let project = Project::open(&dir).unwrap();
         assert_eq!(project.manifest.chapters.len(), 1);
         assert!(project.active_path().exists());
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn add_rename_swap_remove_persist() {
         let dir = temp_dir("structure");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
         let mut project = Project::create(&dir).unwrap(); // "Chapter 1"
 
         // Add a second chapter after the first; file is created with a fresh name.
@@ -577,20 +621,20 @@ mod tests {
         assert!(dir.join("unused").join(&removed_file).exists());
         assert!(!dir.join(&removed_file).exists());
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn unique_dest_avoids_clobbering() {
         let dir = temp_dir("unused-dest");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("a.md"), "x").unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.md"), "x").unwrap();
 
         assert_eq!(unique_dest(&dir, "b.md"), dir.join("b.md")); // free
         assert_eq!(unique_dest(&dir, "a.md"), dir.join("a-1.md")); // taken → suffixed
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     /// Performance guard (run with `cargo test --release -- --ignored
@@ -603,8 +647,8 @@ mod tests {
         use std::time::Instant;
 
         let dir = temp_dir("perf-open");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
         let mut manifest = String::from("title = \"Big\"\n\n");
         for i in 0..150 {
             let file = format!("ch{i}.md");
@@ -613,9 +657,9 @@ mod tests {
             for _ in 0..50 {
                 body.push_str("The night was dark and the road was very long indeed.\n");
             }
-            std::fs::write(dir.join(&file), body).unwrap();
+            fs::write(dir.join(&file), body).unwrap();
         }
-        std::fs::write(Project::manifest_path(&dir), manifest).unwrap();
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
 
         let t = Instant::now();
         let project = Project::open(&dir).unwrap();
@@ -625,6 +669,6 @@ mod tests {
         assert_eq!(project.manifest.chapters.len(), 150);
         assert!(dt.as_millis() < 250, "open took {dt:?}");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 }

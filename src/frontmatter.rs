@@ -44,6 +44,30 @@ pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
     }
 }
 
+/// An epigraph: a quotation with an optional attribution, shown above a book or
+/// chapter body. Stored as two scalar keys (`epigraph` / `epigraph_by`) in front
+/// matter, or two manifest fields for the book — a single line each, which is
+/// what the prompt UI can enter (multi-line/verse epigraphs are future work).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Epigraph {
+    pub text: String,
+    pub attribution: Option<String>,
+}
+
+impl Epigraph {
+    /// Build an epigraph from a quotation and optional attribution, treating
+    /// blank strings as absent. `None` when there's no quotation — an
+    /// attribution alone is not an epigraph. Shared by the chapter (front
+    /// matter) and book (manifest) accessors.
+    pub fn from_parts(text: Option<String>, attribution: Option<String>) -> Option<Epigraph> {
+        let text = text.filter(|s| !s.is_empty())?;
+        Some(Epigraph {
+            text,
+            attribution: attribution.filter(|s| !s.is_empty()),
+        })
+    }
+}
+
 /// A chapter's revision status, cycled by the author and shown in the pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -206,6 +230,19 @@ impl FrontMatter {
     pub fn set_pov(&mut self, pov: &str) {
         self.put_text("pov", pov);
     }
+
+    /// The chapter epigraph, if a quotation is set. The attribution is optional.
+    pub fn epigraph(&self) -> Option<Epigraph> {
+        Epigraph::from_parts(self.get("epigraph"), self.get("epigraph_by"))
+    }
+
+    pub fn set_epigraph_text(&mut self, text: &str) {
+        self.put_text("epigraph", text);
+    }
+
+    pub fn set_epigraph_by(&mut self, attribution: &str) {
+        self.put_text("epigraph_by", attribution);
+    }
 }
 
 /// Whether `line` (with or without its trailing newline) is the top-level
@@ -360,5 +397,30 @@ mod tests {
         assert_eq!(Status::Draft.next(), Status::Revised);
         assert_eq!(Status::Revised.next(), Status::Final);
         assert_eq!(Status::Final.next(), Status::Draft);
+    }
+
+    #[test]
+    fn epigraph_round_trips_quotation_and_attribution() {
+        let mut fm = FrontMatter::default();
+        fm.set_epigraph_text("Call me Ishmael.");
+        fm.set_epigraph_by("Melville");
+        let ep = fm.epigraph().unwrap();
+        assert_eq!(ep.text, "Call me Ishmael.");
+        assert_eq!(ep.attribution.as_deref(), Some("Melville"));
+    }
+
+    #[test]
+    fn epigraph_without_a_quotation_is_none_and_clearing_removes_keys() {
+        let mut fm = FrontMatter::default();
+        // Attribution alone is not an epigraph.
+        fm.set_epigraph_by("Nobody");
+        assert!(fm.epigraph().is_none());
+
+        fm.set_epigraph_text("A line.");
+        assert!(fm.epigraph().is_some());
+        // Clearing the quotation drops the epigraph; keys are removed.
+        fm.set_epigraph_text("");
+        assert!(fm.epigraph().is_none());
+        assert!(!fm.as_str().contains("epigraph:"));
     }
 }

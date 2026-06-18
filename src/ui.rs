@@ -10,7 +10,8 @@ use ratatui::{
 };
 
 use crate::app::{App, Mode};
-use crate::frontmatter::Status;
+use crate::frontmatter::{Epigraph, FrontMatter, Status};
+use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -252,20 +253,23 @@ impl Pane for Editor<'_> {
         let cursor_byte = buffer.cursor_byte();
         let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
 
-        // In continuous view, chapter dividers are drawn at segment boundaries.
-        // They're display-only rows, so we track where the cursor's buffer line
-        // lands among them to place the terminal cursor correctly.
-        let dividers = match &app.manuscript {
-            Some(m) => m.dividers(),
-            None => Vec::new(),
-        };
+        // Display-only header blocks drawn above each chapter's body: a chapter
+        // divider (continuous view), the book epigraph (above chapter 0), and the
+        // chapter's own epigraph. Keyed by the buffer line they precede; injected
+        // into the rendered rows, so the cursor's row is tracked as we go.
+        let inserts = header_inserts(app, column.width);
 
         let mut lines: Vec<Line> = Vec::with_capacity(height);
         let mut cursor_row = None;
         let mut i = top;
         while lines.len() < height && i < total {
-            if let Some(title) = divider_at(i, &dividers) {
-                lines.push(divider_line(title, column.width));
+            if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == i) {
+                for line in block {
+                    if lines.len() >= height {
+                        break;
+                    }
+                    lines.push(line.clone());
+                }
                 if lines.len() >= height {
                     break;
                 }
@@ -301,13 +305,63 @@ impl Pane for Editor<'_> {
     }
 }
 
-/// The chapter title to draw as a divider above buffer line `line`, if a
-/// continuous-view segment begins there.
-fn divider_at<'a>(line: usize, dividers: &[(usize, &'a str)]) -> Option<&'a str> {
-    dividers
-        .iter()
-        .find(|(l, _)| *l == line)
-        .map(|&(_, title)| title)
+/// The display-only header blocks to inject above the body, keyed by the buffer
+/// line each precedes: per chapter, a divider (continuous view, not the first
+/// chapter), the book epigraph (above chapter 0), then the chapter's epigraph.
+fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
+    let book_epigraph = app.project.manifest.epigraph();
+    let headers = match &app.manuscript {
+        Some(m) => m.segment_headers(),
+        // Single-chapter view: one header for the active chapter at line 0.
+        None => vec![SegmentHeader {
+            start: 0,
+            index: app.project.active_index(),
+            title: None,
+            epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),
+        }],
+    };
+
+    let mut inserts = Vec::new();
+    for header in &headers {
+        let mut block = Vec::new();
+        if let Some(title) = &header.title {
+            block.push(divider_line(title, width));
+        }
+        if header.index == 0 {
+            if let Some(epigraph) = &book_epigraph {
+                block.extend(epigraph_lines(epigraph));
+            }
+        }
+        if let Some(epigraph) = &header.epigraph {
+            block.extend(epigraph_lines(epigraph));
+        }
+        if !block.is_empty() {
+            inserts.push((header.start, block));
+        }
+    }
+    inserts
+}
+
+/// Display-only lines for an epigraph: the quotation (indented, italic) and its
+/// attribution (`— Name`, dimmed), set off by blank lines. Never enters the
+/// buffer or any file.
+fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
+    let indent = "    ";
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(Span::styled(
+            format!("{indent}{}", epigraph.text),
+            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+        )),
+    ];
+    if let Some(attribution) = &epigraph.attribution {
+        lines.push(Line::from(Span::styled(
+            format!("{indent}— {attribution}"),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::raw(""));
+    lines
 }
 
 /// A centered, dimmed chapter-break label, e.g. `—— Chapter Two ——`. Rendered
@@ -498,6 +552,7 @@ mod tests {
     use crate::buffer::{Buffer, Cursor};
     use crate::project::Project;
     use ratatui::{backend::TestBackend, Terminal};
+    use std::fs;
 
     fn buffer_with(text: &str) -> Buffer {
         let mut b = Buffer::empty();
@@ -684,6 +739,29 @@ mod tests {
     }
 
     #[test]
+    fn epigraphs_render_above_the_body() {
+        // Book epigraph (manifest) + chapter epigraph (active buffer front matter)
+        // both render above chapter 0's prose, with attributions.
+        let mut app = app_with("# Chapter\n\nThe prose begins here.\n");
+        app.project.manifest.epigraph = Some("In the beginning.".into());
+        app.project.manifest.epigraph_by = Some("Genesis".into());
+        let fm = app.buffer.front_matter_mut();
+        fm.set_epigraph_text("A chapter quote.");
+        fm.set_epigraph_by("Someone");
+
+        let screen = render(&app, 80, 20);
+        assert!(screen.contains("In the beginning."), "book epigraph:\n{screen}");
+        assert!(screen.contains("— Genesis"), "book attribution:\n{screen}");
+        assert!(screen.contains("A chapter quote."), "chapter epigraph:\n{screen}");
+        assert!(screen.contains("— Someone"), "chapter attribution:\n{screen}");
+        assert!(screen.contains("The prose begins here."), "body:\n{screen}");
+
+        // The epigraph is display-only: it never entered the editable buffer.
+        assert!(!app.buffer.line(0).contains("In the beginning"));
+        assert!(!app.buffer.line(0).contains("A chapter quote"));
+    }
+
+    #[test]
     fn pane_shows_a_chapter_status_badge() {
         let mut app = app_with_chapters(&["One", "Two"], "body\n");
         app.project.manifest.chapters[0].status = Some(crate::frontmatter::Status::Final);
@@ -714,17 +792,17 @@ mod tests {
         // A two-chapter project on disk (the manuscript window reads files).
         let mut dir = std::env::temp_dir();
         dir.push(format!("quill-ui-cont-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
             Project::manifest_path(&dir),
             "title = \"Book\"\n\n\
              [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
              [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
         )
         .unwrap();
-        std::fs::write(dir.join("one.md"), "Alpha prose here.\n").unwrap();
-        std::fs::write(dir.join("two.md"), "Beta prose here.\n").unwrap();
+        fs::write(dir.join("one.md"), "Alpha prose here.\n").unwrap();
+        fs::write(dir.join("two.md"), "Beta prose here.\n").unwrap();
 
         let project = Project::open(&dir).unwrap();
         let buffer = Buffer::from_path(project.active_path()).unwrap();
@@ -738,6 +816,6 @@ mod tests {
         // ...separated by a centered divider carrying the next chapter's title.
         assert!(screen.contains("—— Two ——"), "screen:\n{screen}");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 }

@@ -4,6 +4,7 @@
 //! a rope (`ropey`) gives us cheap inserts/deletes at any offset without copying
 //! the whole document around.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use ropey::Rope;
@@ -85,7 +86,7 @@ impl Buffer {
     /// raw block.
     pub fn from_path(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = with_default_extension(path.as_ref());
-        let text = match std::fs::read_to_string(&path) {
+        let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
@@ -136,7 +137,7 @@ impl Buffer {
             .filter(|f| !f.is_empty())
             .map(FrontMatter::as_str);
         let content = crate::frontmatter::join(front, &body);
-        std::fs::write(path, content.as_bytes())?;
+        fs::write(path, content.as_bytes())?;
         self.dirty = false;
         Ok(())
     }
@@ -425,11 +426,11 @@ mod tests {
     }
 
     fn write(path: &Path, bytes: &str) {
-        std::fs::write(path, bytes).unwrap();
+        fs::write(path, bytes).unwrap();
     }
 
     fn read(path: &Path) -> String {
-        std::fs::read_to_string(path).unwrap()
+        fs::read_to_string(path).unwrap()
     }
 
     #[test]
@@ -442,7 +443,7 @@ mod tests {
         buf.save().unwrap();
 
         assert_eq!(read(&path), original);
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -461,7 +462,7 @@ mod tests {
         // Saving re-attaches the front matter untouched: byte-for-byte round-trip.
         buf.save().unwrap();
         assert_eq!(read(&path), original);
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -473,7 +474,7 @@ mod tests {
         buf.save().unwrap();
 
         assert_eq!(read(&path), "No newline at end\n");
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -485,7 +486,7 @@ mod tests {
         buf.save().unwrap();
 
         assert_eq!(read(&path), "Body\n");
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -497,7 +498,7 @@ mod tests {
         buf.save().unwrap();
 
         assert_eq!(read(&path), "");
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -510,7 +511,7 @@ mod tests {
         buf.save().unwrap();
 
         assert_eq!(read(&path), original);
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -551,7 +552,7 @@ mod tests {
         let buf = Buffer::from_path(&path).unwrap();
         assert_eq!(buf.word_count(), 5000);
 
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     // The syntax highlights must stay correct through incremental edits — this
@@ -614,7 +615,7 @@ mod tests {
 
         println!("keystroke(record-only) on {words} words = {dt:?}");
         assert!(dt.as_millis() < 4, "keystroke took {dt:?}");
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -648,7 +649,7 @@ mod tests {
 
         println!("reparse on {words} words = {dt:?}");
         assert!(dt.as_millis() < 16, "reparse took {dt:?}");
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -669,6 +670,6 @@ mod tests {
         let ks = kinds(&buf);
         assert!(ks.contains(&HighlightKind::Heading));
         assert!(ks.contains(&HighlightKind::Emphasis));
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 }
