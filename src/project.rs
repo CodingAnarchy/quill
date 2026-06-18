@@ -293,10 +293,11 @@ impl Project {
     }
 }
 
-/// Words in a chapter file, or 0 if it can't be read.
+/// Words in a chapter file's prose (front matter excluded), or 0 if it can't
+/// be read.
 fn count_file_words(path: &Path) -> usize {
     std::fs::read_to_string(path)
-        .map(|text| count_words(&text))
+        .map(|text| count_words(crate::frontmatter::split(&text).1))
         .unwrap_or(0)
 }
 
