@@ -314,6 +314,12 @@ impl Buffer {
         let idx = idx.min(self.rope.len_lines().saturating_sub(1));
         self.rope.line_to_byte(idx)
     }
+
+    /// Absolute byte offset of the cursor — used to decide which emphasis span,
+    /// if any, should reveal its markers for editing.
+    pub fn cursor_byte(&self) -> usize {
+        self.rope.char_to_byte(self.cursor_char_idx())
+    }
 }
 
 /// A tree-sitter [`Point`] (row, byte-column-within-line) for a byte offset.

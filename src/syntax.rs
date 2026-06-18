@@ -34,12 +34,28 @@ pub struct Highlight {
     pub kind: HighlightKind,
 }
 
+/// An emphasis delimiter run (`*`, `_`, `**`, `__`) and the span it belongs to.
+/// The renderer hides the delimiter, except when the cursor is inside the span
+/// so the author can edit the markers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Marker {
+    /// The delimiter's own byte range (what gets concealed).
+    delim_start: usize,
+    delim_end: usize,
+    /// The enclosing emphasis/strong span; concealment lifts when the cursor is
+    /// anywhere within it.
+    span_start: usize,
+    span_end: usize,
+}
+
 /// The live parse of a single document (one chapter file).
 pub struct Syntax {
     parser: MarkdownParser,
     tree: MarkdownTree,
     /// Highlight spans for the whole document, sorted by start byte.
     highlights: Vec<Highlight>,
+    /// Emphasis delimiters, for soft-rendering (concealing) the markers.
+    markers: Vec<Marker>,
 }
 
 impl Syntax {
@@ -49,11 +65,12 @@ impl Syntax {
         let tree = parser
             .parse(text.as_bytes(), None)
             .expect("markdown parse should not fail without a timeout/cancellation");
-        let highlights = collect_highlights(&tree);
+        let (highlights, markers) = collect(&tree);
         Self {
             parser,
             tree,
             highlights,
+            markers,
         }
     }
 
@@ -76,7 +93,9 @@ impl Syntax {
     pub fn reparse(&mut self, text: &str) {
         if let Some(tree) = self.parser.parse(text.as_bytes(), Some(&self.tree)) {
             self.tree = tree;
-            self.highlights = collect_highlights(&self.tree);
+            let (highlights, markers) = collect(&self.tree);
+            self.highlights = highlights;
+            self.markers = markers;
         }
     }
 
@@ -87,6 +106,21 @@ impl Syntax {
             .filter(move |h| h.start < end && h.end > start)
     }
 
+    /// Emphasis-delimiter byte ranges to hide when rendering. A delimiter is
+    /// concealed unless `reveal_at` (the cursor's byte offset) lies within the
+    /// delimiter's enclosing span — so the markers reappear for editing only on
+    /// the span the cursor is in. Pass `None` to conceal every delimiter.
+    pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Vec<(usize, usize)> {
+        self.markers
+            .iter()
+            .filter(|m| match reveal_at {
+                Some(b) => !(m.span_start <= b && b <= m.span_end),
+                None => true,
+            })
+            .map(|m| (m.delim_start, m.delim_end))
+            .collect()
+    }
+
     /// The block-level syntax tree. Kept for the in-chapter outline (#11).
     #[allow(dead_code)]
     pub fn block_tree(&self) -> &Tree {
@@ -95,10 +129,12 @@ impl Syntax {
 }
 
 /// Walk the block tree (headings) and every inline tree (emphasis/strong) into a
-/// flat, start-sorted list of highlight spans. Inline trees carry absolute
-/// document offsets, so their node ranges line up with the block tree's.
-fn collect_highlights(tree: &MarkdownTree) -> Vec<Highlight> {
+/// flat, start-sorted list of highlight spans plus the emphasis delimiters to
+/// conceal. Inline trees carry absolute document offsets, so their node ranges
+/// line up with the block tree's.
+fn collect(tree: &MarkdownTree) -> (Vec<Highlight>, Vec<Marker>) {
     let mut out = Vec::new();
+    let mut markers = Vec::new();
 
     walk(tree.block_tree().root_node(), &mut |node| {
         if matches!(node.kind(), "atx_heading" | "setext_heading") {
@@ -117,6 +153,27 @@ fn collect_highlights(tree: &MarkdownTree) -> Vec<Highlight> {
                 "emphasis" => HighlightKind::Emphasis,
                 _ => return,
             };
+
+            // Record this span's own delimiter children (e.g. the two `*` in
+            // `*x*`, or the `**` in `**y**`) so the renderer can hide them.
+            let mut cursor = node.walk();
+            if cursor.goto_first_child() {
+                loop {
+                    let child = cursor.node();
+                    if child.kind() == "emphasis_delimiter" {
+                        markers.push(Marker {
+                            delim_start: child.start_byte(),
+                            delim_end: child.end_byte(),
+                            span_start: node.start_byte(),
+                            span_end: node.end_byte(),
+                        });
+                    }
+                    if !cursor.goto_next_sibling() {
+                        break;
+                    }
+                }
+            }
+
             out.push(Highlight {
                 start: node.start_byte(),
                 end: node.end_byte(),
@@ -126,7 +183,8 @@ fn collect_highlights(tree: &MarkdownTree) -> Vec<Highlight> {
     }
 
     out.sort_by_key(|h| h.start);
-    out
+    markers.sort_by_key(|m| m.delim_start);
+    (out, markers)
 }
 
 /// Pre-order traversal. Markdown nesting is shallow, so plain recursion is fine.
@@ -194,5 +252,55 @@ mod tests {
             .collect();
         assert_eq!(hits.len(), 1);
         assert_eq!(text[hits[0].start..hits[0].end].trim_end(), "## Two");
+    }
+
+    // Collect the concealed substrings for readability in the assertions below.
+    fn concealed(text: &str, s: &Syntax, reveal_at: Option<usize>) -> Vec<String> {
+        s.conceal_ranges(reveal_at)
+            .into_iter()
+            .map(|(a, b)| text[a..b].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn conceals_emphasis_and_strong_delimiters() {
+        let text = "a *ital* and **bold** z\n";
+        let s = Syntax::new(text);
+        // Every delimiter char is concealed: `*ital*` has two, `**bold**` has
+        // four (the grammar emits each `*` as its own delimiter node).
+        let hidden = concealed(text, &s, None);
+        assert_eq!(hidden.len(), 6);
+        assert!(hidden.iter().all(|d| d == "*"));
+    }
+
+    #[test]
+    fn cursor_in_span_reveals_only_that_spans_markers() {
+        let text = "a *ital* and **bold** z\n";
+        let s = Syntax::new(text);
+        let bold_start = text.find("**bold").unwrap();
+
+        // Cursor inside *ital*: its two `*` reveal; the four `*` of **bold** stay
+        // hidden (and they're the ones near the bold span).
+        let inside_ital = text.find("ital").unwrap() + 1;
+        let still_hidden = s.conceal_ranges(Some(inside_ital));
+        assert_eq!(still_hidden.len(), 4);
+        assert!(still_hidden.iter().all(|&(a, _)| a >= bold_start));
+
+        // Cursor inside **bold**: its four `*` reveal; only the two `*` of *ital*
+        // stay hidden.
+        let inside_bold = text.find("bold").unwrap() + 1;
+        let still_hidden = s.conceal_ranges(Some(inside_bold));
+        assert_eq!(still_hidden.len(), 2);
+        assert!(still_hidden.iter().all(|&(a, _)| a < bold_start));
+    }
+
+    #[test]
+    fn malformed_emphasis_has_no_markers() {
+        // A lone `*` and an unclosed `**` are plain text — nothing to conceal,
+        // nothing highlighted.
+        let text = "a lone * star and **unclosed run\n";
+        let s = Syntax::new(text);
+        assert!(s.conceal_ranges(None).is_empty());
+        assert!(all(&s).iter().all(|h| h.kind == HighlightKind::Heading));
     }
 }

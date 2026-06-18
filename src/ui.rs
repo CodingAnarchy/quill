@@ -43,63 +43,76 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     let cursor_line = buffer.cursor.line;
     let top = cursor_line.saturating_sub(height / 2).min(total.saturating_sub(height).max(0));
 
+    // Emphasis markers are hidden, except on the span the cursor sits in (so it
+    // stays editable). Concealment shifts screen columns, so the cursor X below
+    // must be measured over the *visible* text, not the source.
+    let conceal = buffer.syntax().conceal_ranges(Some(buffer.cursor_byte()));
+
     let lines: Vec<Line> = (top..(top + height).min(total))
-        .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i)))
+        .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i), &conceal))
         .collect();
 
     let paragraph = Paragraph::new(lines).block(Block::default());
     frame.render_widget(paragraph, column);
 
-    // Place the terminal cursor (only in Insert mode).
+    // Place the terminal cursor (only in Insert mode). The cursor's own span is
+    // revealed, so the cursor never lands on a concealed character.
     if app.mode == Mode::Insert {
         let screen_y = column.y + (cursor_line - top) as u16;
-        let line = buffer.line(cursor_line);
-        let col_width: u16 = line
-            .chars()
-            .take(buffer.cursor.col)
-            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) as u16)
-            .sum();
+        let col_width = visible_width_before(
+            &buffer.line(cursor_line),
+            buffer.line_start_byte(cursor_line),
+            buffer.cursor_byte(),
+            &conceal,
+        );
         let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
         frame.set_cursor_position((screen_x, screen_y));
     }
 }
 
-/// Build a styled line by splitting `text` (one line, no newline) into runs of
-/// equal style according to the syntax highlights overlapping it. `line_start`
-/// is the line's absolute byte offset, since highlights use document offsets.
-fn styled_line(syntax: &Syntax, line_start: usize, text: &str) -> Line<'static> {
+/// Build a styled line: split `text` (one line, no newline) into runs of equal
+/// style from the overlapping highlights, dropping any characters whose bytes
+/// fall in a `conceal` range (hidden emphasis markers). `line_start` is the
+/// line's absolute byte offset, since highlights and conceal ranges use document
+/// offsets.
+fn styled_line(
+    syntax: &Syntax,
+    line_start: usize,
+    text: &str,
+    conceal: &[(usize, usize)],
+) -> Line<'static> {
     if text.is_empty() {
         return Line::raw("");
     }
 
-    let hls: Vec<Highlight> = syntax
-        .highlights_in(line_start, line_start + text.len())
-        .copied()
-        .collect();
-    if hls.is_empty() {
+    let line_end = line_start + text.len();
+    let hls: Vec<Highlight> = syntax.highlights_in(line_start, line_end).copied().collect();
+    let concealed_here = conceal.iter().any(|&(s, e)| s < line_end && e > line_start);
+    if hls.is_empty() && !concealed_here {
         return Line::raw(text.to_string());
     }
 
+    // Build runs character by character, since concealed chars are dropped and
+    // visible runs may not be contiguous in the source.
     let mut spans: Vec<Span> = Vec::new();
-    let mut run_start = 0usize;
-    let mut run_style: Option<Style> = None;
-    for (local_byte, _) in text.char_indices() {
-        let style = style_at(&hls, line_start + local_byte);
-        match run_style {
-            Some(prev) if prev == style => {}
-            Some(prev) => {
-                spans.push(Span::styled(text[run_start..local_byte].to_string(), prev));
-                run_start = local_byte;
-                run_style = Some(style);
-            }
-            None => {
-                run_start = local_byte;
-                run_style = Some(style);
-            }
+    let mut run = String::new();
+    let mut run_style = Style::default();
+    for (local_byte, ch) in text.char_indices() {
+        let abs = line_start + local_byte;
+        if is_concealed(abs, conceal) {
+            continue;
         }
+        let style = style_at(&hls, abs);
+        if !run.is_empty() && style != run_style {
+            spans.push(Span::styled(std::mem::take(&mut run), run_style));
+        }
+        if run.is_empty() {
+            run_style = style;
+        }
+        run.push(ch);
     }
-    if let Some(style) = run_style {
-        spans.push(Span::styled(text[run_start..].to_string(), style));
+    if !run.is_empty() {
+        spans.push(Span::styled(run, run_style));
     }
     Line::from(spans)
 }
@@ -116,6 +129,33 @@ fn style_at(hls: &[Highlight], byte: usize) -> Style {
         };
     }
     style
+}
+
+fn is_concealed(byte: usize, conceal: &[(usize, usize)]) -> bool {
+    conceal.iter().any(|&(s, e)| byte >= s && byte < e)
+}
+
+/// Visible cell width of the characters before `cursor_byte` on a line, skipping
+/// concealed (hidden-marker) characters — so the on-screen cursor lands in the
+/// right place even though markers have been removed from the rendered text.
+fn visible_width_before(
+    text: &str,
+    line_start: usize,
+    cursor_byte: usize,
+    conceal: &[(usize, usize)],
+) -> u16 {
+    let mut width = 0u16;
+    for (local_byte, ch) in text.char_indices() {
+        let abs = line_start + local_byte;
+        if abs >= cursor_byte {
+            break;
+        }
+        if is_concealed(abs, conceal) {
+            continue;
+        }
+        width += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+    }
+    width
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
@@ -163,4 +203,52 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 36))),
         area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::{Buffer, Cursor};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn buffer_with(text: &str) -> Buffer {
+        let mut b = Buffer::empty();
+        for c in text.chars() {
+            b.insert_char(c);
+        }
+        b.refresh_syntax();
+        b
+    }
+
+    /// Render the app to a TestBackend and return the screen as plain text.
+    fn render(app: &App, w: u16, h: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..h {
+            for x in 0..w {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn markers_are_hidden_when_cursor_is_outside_the_span() {
+        // After typing, the cursor sits past the span, so markers conceal.
+        let app = App::new(buffer_with("*italic* word"));
+        let screen = render(&app, 80, 8);
+        assert!(screen.contains("italic word"), "screen:\n{screen}");
+        assert!(!screen.contains('*'), "markers should be hidden:\n{screen}");
+    }
+
+    #[test]
+    fn markers_reappear_when_cursor_enters_the_span() {
+        let mut app = App::new(buffer_with("*italic* word"));
+        app.buffer.cursor = Cursor { line: 0, col: 3 }; // inside "italic"
+        let screen = render(&app, 80, 8);
+        assert!(screen.contains("*italic*"), "screen:\n{screen}");
+    }
 }
