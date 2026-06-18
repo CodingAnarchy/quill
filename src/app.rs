@@ -2,19 +2,11 @@
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::buffer::{count_words, Buffer};
+use crate::buffer::Buffer;
 use crate::project::Project;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
-
-/// Words in a chapter file, or 0 if it can't be read (e.g. a not-yet-saved or
-/// missing file).
-fn count_chapter_words(path: &std::path::Path) -> usize {
-    std::fs::read_to_string(path)
-        .map(|text| count_words(&text))
-        .unwrap_or(0)
-}
 
 /// Editor modes. Quill is mostly modeless for writing, but borrows a light
 /// command line for actions that shouldn't be a stray keystroke away.
@@ -56,10 +48,6 @@ pub struct App {
     pub outline_visible: bool,
     /// The chapter highlighted in the pane while in [`Mode::Nav`].
     pub nav_selected: usize,
-    /// Cached word count per chapter (parallel to `project.manifest.chapters`).
-    /// Non-active chapters are counted from file; the active chapter's live
-    /// count comes from the buffer (see [`App::chapter_word_count`]).
-    chapter_words: Vec<usize>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
     /// Label of the active prompt, if any.
@@ -72,11 +60,6 @@ pub struct App {
 
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
-        // Count each chapter once at open (transient reads, never N live
-        // buffers). The active chapter is recounted live as the author types.
-        let chapter_words = (0..project.manifest.chapters.len())
-            .map(|i| count_chapter_words(&project.chapter_path(i)))
-            .collect();
         Self {
             buffer,
             project,
@@ -85,7 +68,6 @@ impl App {
             focus_width: 72,
             outline_visible: false,
             nav_selected: 0,
-            chapter_words,
             message: None,
             prompt: None,
             prompt_input: String::new(),
@@ -94,12 +76,12 @@ impl App {
     }
 
     /// Word count for chapter `index`: live from the buffer when it's active
-    /// (updates as you type), otherwise the cached file count.
+    /// (updates as you type), otherwise the count cached on the chapter entry.
     pub fn chapter_word_count(&self, index: usize) -> usize {
-        if index == self.project.active {
+        if index == self.project.active_index() {
             self.buffer.word_count()
         } else {
-            self.chapter_words.get(index).copied().unwrap_or(0)
+            self.project.chapter_words(index)
         }
     }
 
@@ -139,7 +121,7 @@ impl App {
     /// chapter. The active index and the live buffer always move together here,
     /// so the two never drift. A no-op if `index` is already active or invalid.
     fn activate_chapter(&mut self, index: usize) {
-        if index >= self.project.manifest.chapters.len() || index == self.project.active {
+        if index >= self.project.manifest.chapters.len() || index == self.project.active_index() {
             return;
         }
         if self.buffer.dirty {
@@ -149,11 +131,12 @@ impl App {
             }
         }
         // The chapter we're leaving is now on disk; refresh its cached count.
-        self.chapter_words[self.project.active] = self.buffer.word_count();
+        self.project
+            .set_chapter_words(self.project.active_index(), self.buffer.word_count());
         match Buffer::from_path(self.project.chapter_path(index)) {
             Ok(buffer) => {
                 self.buffer = buffer;
-                self.project.active = index;
+                self.project.set_active(index);
                 // No need to cache the new active chapter's count: while active,
                 // chapter_word_count reads it live from the buffer.
                 if let Some(title) = self.project.active_title() {
@@ -169,28 +152,25 @@ impl App {
     }
 
     fn next_chapter(&mut self) {
-        self.activate_chapter(self.project.active + 1);
+        self.activate_chapter(self.project.active_index() + 1);
     }
 
     fn prev_chapter(&mut self) {
         // At chapter 0 this targets 0 — a no-op via activate_chapter's guard.
-        self.activate_chapter(self.project.active.saturating_sub(1));
+        self.activate_chapter(self.project.active_index().saturating_sub(1));
     }
 
     // --- Chapter structure editing ----------------------------------------
     //
-    // Each wraps a `Project` op and fixes up `active` / the live buffer so they
-    // stay consistent with the manifest.
+    // Each wraps a `Project` op. Because the active chapter is tracked by file
+    // identity, insert/rename/move need no active fixup; only deleting the
+    // active chapter changes the buffer, which `delete_chapter` handles.
 
     fn create_chapter(&mut self, at: usize, title: &str) {
         match self.project.add_chapter(at, title) {
             Ok(()) => {
-                self.chapter_words.insert(at, 0); // new chapter starts empty
-                // Inserting at or before the active chapter shifts its index;
-                // the active content is unchanged, so don't reload the buffer.
-                if at <= self.project.active {
-                    self.project.active += 1;
-                }
+                // The active chapter is tracked by identity, so the insert needs
+                // no index fixup — its position re-derives.
                 self.nav_selected = at.min(self.chapter_count() - 1);
                 self.message = Some(format!("Added '{title}'"));
             }
@@ -222,12 +202,7 @@ impl App {
         };
         match self.project.swap_chapters(i, j) {
             Ok(()) => {
-                self.chapter_words.swap(i, j);
-                if self.project.active == i {
-                    self.project.active = j;
-                } else if self.project.active == j {
-                    self.project.active = i;
-                }
+                // Active follows its content automatically (identity tracking).
                 self.nav_selected = j;
             }
             Err(e) => self.message = Some(format!("Move failed: {e}")),
@@ -239,23 +214,23 @@ impl App {
             self.message = Some(ONLY_CHAPTER_MSG.into());
             return;
         }
-        // If we're removing the active chapter, persist its latest text first so
-        // the copy moved to unused/ is current.
-        if at == self.project.active && self.buffer.dirty {
+        // Deleting the active chapter is the one structural edit that changes the
+        // buffer's content — every other op keeps the active file present, so its
+        // index just re-derives.
+        let deleting_active = at == self.project.active_index();
+        if deleting_active && self.buffer.dirty {
+            // Persist the latest text first so the copy moved to unused/ is current.
             let _ = self.buffer.save();
         }
         if let Err(e) = self.project.remove_chapter(at) {
             self.message = Some(format!("Delete failed: {e}"));
             return;
         }
-        self.chapter_words.remove(at);
 
-        let active = self.project.active;
-        if at < active {
-            self.project.active = active - 1;
-        } else if at == active {
-            // The active chapter is gone — point at a neighbor and reload.
-            self.project.active = active.min(self.chapter_count() - 1);
+        if deleting_active {
+            // The active file is gone — point at a neighbor and reload.
+            let neighbor = at.min(self.chapter_count() - 1);
+            self.project.set_active(neighbor);
             match Buffer::from_path(self.project.active_path()) {
                 Ok(buffer) => self.buffer = buffer,
                 Err(e) => self.message = Some(format!("Open failed: {e}")),
@@ -365,7 +340,8 @@ impl App {
         match (ctrl, key.code) {
             (true, KeyCode::Char('s')) => match self.buffer.save() {
                 Ok(()) => {
-                    self.chapter_words[self.project.active] = self.buffer.word_count();
+                    self.project
+                        .set_chapter_words(self.project.active_index(), self.buffer.word_count());
                     self.message = Some("Saved".into());
                 }
                 Err(e) => self.message = Some(format!("Save failed: {e}")),
@@ -392,7 +368,7 @@ impl App {
             // Focus the chapter pane to browse and jump to one.
             (true, KeyCode::Char('g')) => {
                 self.outline_visible = true;
-                self.nav_selected = self.project.active;
+                self.nav_selected = self.project.active_index();
                 self.mode = Mode::Nav;
             }
 
@@ -455,15 +431,15 @@ mod tests {
     #[test]
     fn ctrl_n_and_ctrl_p_switch_chapters() {
         let (mut app, dir) = two_chapter_app("nav");
-        assert_eq!(app.project.active, 0);
+        assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
         app.on_key(ctrl('n'));
-        assert_eq!(app.project.active, 1);
+        assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
         app.on_key(ctrl('p'));
-        assert_eq!(app.project.active, 0);
+        assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -473,11 +449,11 @@ mod tests {
     fn next_previous_clamp_at_the_ends() {
         let (mut app, dir) = two_chapter_app("clamp");
         app.on_key(ctrl('p')); // already at first — no-op
-        assert_eq!(app.project.active, 0);
+        assert_eq!(app.project.active_index(), 0);
 
         app.on_key(ctrl('n'));
         app.on_key(ctrl('n')); // already at last — no-op
-        assert_eq!(app.project.active, 1);
+        assert_eq!(app.project.active_index(), 1);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -490,7 +466,7 @@ mod tests {
         assert!(app.buffer.dirty);
 
         app.on_key(ctrl('n'));
-        assert_eq!(app.project.active, 1);
+        assert_eq!(app.project.active_index(), 1);
 
         // Chapter one was persisted on the way out.
         let saved = std::fs::read_to_string(dir.join("one.md")).unwrap();
@@ -511,7 +487,7 @@ mod tests {
 
         app.on_key(key(KeyCode::Enter)); // open it
         assert_eq!(app.mode, Mode::Insert);
-        assert_eq!(app.project.active, 1);
+        assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -548,7 +524,7 @@ mod tests {
         assert_eq!(titles(&app), vec!["One", "Interlude", "Two"]);
         assert_eq!(app.mode, Mode::Nav);
         // Active chapter (was 0) is unchanged; insertion was after it.
-        assert_eq!(app.project.active, 0);
+        assert_eq!(app.project.active_index(), 0);
         // Persisted.
         assert_eq!(project_titles(&Project::open(&dir).unwrap()), titles(&app));
 
@@ -598,7 +574,7 @@ mod tests {
         assert_eq!(titles(&app), vec!["One"]);
         assert!(dir.join("unused").join("two.md").exists());
         // Active was chapter 0; untouched by deleting a later chapter.
-        assert_eq!(app.project.active, 0);
+        assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -612,7 +588,7 @@ mod tests {
         app.on_key(key(KeyCode::Char('y')));
 
         assert_eq!(titles(&app), vec!["Two"]);
-        assert_eq!(app.project.active, 0);
+        assert_eq!(app.project.active_index(), 0);
         // Buffer was reloaded to the surviving chapter.
         assert!(app.buffer.line(0).contains("second"));
 
@@ -632,6 +608,21 @@ mod tests {
         app.on_key(key(KeyCode::Char('d')));
         assert_eq!(app.mode, Mode::Nav); // no confirm prompt opened
         assert_eq!(app.chapter_count(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn active_chapter_survives_insert_before_it() {
+        let (mut app, dir) = two_chapter_app("identity");
+        // Active is chapter 0 ("One"). Insert a chapter ahead of it.
+        app.create_chapter(0, "Prologue");
+
+        // Tracked by identity: "One" is now at index 1 and still active, with
+        // its buffer untouched (no reload, no index arithmetic).
+        assert_eq!(app.project.active_index(), 1);
+        assert_eq!(app.project.active_title(), Some("One"));
+        assert!(app.buffer.line(0).contains("first"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

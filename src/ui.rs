@@ -120,7 +120,7 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
-        let is_active = i == app.project.active;
+        let is_active = i == app.project.active_index();
         let is_selected = app.mode == Mode::Nav && i == app.nav_selected;
         lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
         if is_active {
@@ -395,24 +395,7 @@ mod tests {
     /// An App over an in-memory project with several chapters (no files needed
     /// for rendering, which only reads chapter titles + the active buffer).
     fn app_with_chapters(titles: &[&str], active_text: &str) -> App {
-        use crate::project::{ChapterEntry, Manifest, Project};
-        let chapters = titles
-            .iter()
-            .enumerate()
-            .map(|(i, t)| ChapterEntry {
-                title: (*t).to_string(),
-                file: format!("ch-{i}.md"),
-            })
-            .collect();
-        let project = Project {
-            root: ".".into(),
-            manifest: Manifest {
-                title: "book".into(),
-                chapters,
-            },
-            active: 0,
-        };
-        App::new(buffer_with(active_text), project)
+        App::new(buffer_with(active_text), Project::scratch_with(titles))
     }
 
     #[test]
