@@ -103,7 +103,9 @@ impl App {
         }
     }
 
-    /// Total words across the whole project.
+    /// Total words across the whole project. (The nav pane sums its per-frame
+    /// counts directly; this is the API the progress report (#4) will use.)
+    #[allow(dead_code)]
     pub fn project_word_count(&self) -> usize {
         (0..self.chapter_count())
             .map(|i| self.chapter_word_count(i))
@@ -152,7 +154,8 @@ impl App {
             Ok(buffer) => {
                 self.buffer = buffer;
                 self.project.active = index;
-                self.chapter_words[index] = self.buffer.word_count();
+                // No need to cache the new active chapter's count: while active,
+                // chapter_word_count reads it live from the buffer.
                 if let Some(title) = self.project.active_title() {
                     self.message = Some(format!("Chapter: {title}"));
                 }
