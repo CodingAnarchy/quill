@@ -43,10 +43,8 @@ fn main() -> io::Result<()> {
     let buffer = Buffer::from_path(project.active_path())?;
     let mut app = App::new(buffer, project);
 
-    // Restore the terminal even on panic. The release `panic = "abort"` profile
-    // never unwinds, so `Tui`'s Drop won't run on a crash — but a panic hook
-    // fires before the abort, making this the only thing that un-mangles the
-    // shell. Installed before raw mode so it's armed for the whole TUI lifetime.
+    // Drop restores the terminal on a normal or `?`-error exit, but the release
+    // `panic = "abort"` profile never unwinds — so install a panic hook too.
     install_panic_hook();
 
     // `Tui` restores the terminal when dropped, so any return from `run` —
@@ -59,6 +57,10 @@ fn main() -> io::Result<()> {
 /// screen, and re-show the cursor. Shared by the [`Tui`] drop guard and the
 /// panic hook so the two teardown paths can't drift. Best-effort — errors are
 /// ignored because there's nothing useful to do with them mid-teardown.
+///
+/// Hand-rolled rather than `ratatui::restore()`: that helper only disables raw
+/// mode and leaves the alternate screen, so it would skip the mouse-capture and
+/// cursor teardown that [`Tui::new`]'s `EnableMouseCapture` requires.
 fn restore_terminal(w: &mut impl io::Write) {
     let _ = disable_raw_mode();
     let _ = execute!(w, LeaveAlternateScreen, DisableMouseCapture, Show);
