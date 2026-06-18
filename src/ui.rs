@@ -61,11 +61,18 @@ fn chapter_line(title: &str, is_active: bool, is_selected: bool) -> Line<'static
 }
 
 /// The active chapter's heading outline, indented by level, current section
-/// accented.
-fn heading_outline_lines(headings: &[Heading], current: Option<usize>) -> Vec<Line<'static>> {
+/// accented. `skip` omits one heading by index (used to drop a leading H1 that
+/// just repeats the chapter title) while leaving the remaining indices — and so
+/// the `current` highlight — intact.
+fn heading_outline_lines(
+    headings: &[Heading],
+    current: Option<usize>,
+    skip: Option<usize>,
+) -> Vec<Line<'static>> {
     headings
         .iter()
         .enumerate()
+        .filter(|(i, _)| Some(*i) != skip)
         .map(|(i, h)| {
             let indent = "  ".repeat(h.level as usize);
             let style = if Some(i) == current {
@@ -76,6 +83,15 @@ fn heading_outline_lines(headings: &[Heading], current: Option<usize>) -> Vec<Li
             Line::from(Span::styled(format!("{indent}{}", h.title), style))
         })
         .collect()
+}
+
+/// If the chapter opens with a level-1 heading whose text matches the chapter
+/// title, the outline would just repeat the title — return its index to skip it.
+fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<usize> {
+    match headings.first() {
+        Some(h) if h.level == 1 && h.title == chapter_title => Some(0),
+        _ => None,
+    }
 }
 
 /// The navigation pane: the project's chapters, with the active chapter's
@@ -102,7 +118,8 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
         let is_selected = app.mode == Mode::Nav && i == app.nav_selected;
         lines.push(chapter_line(&chapter.title, is_active, is_selected));
         if is_active {
-            lines.extend(heading_outline_lines(headings, current_heading));
+            let skip = redundant_title_heading(headings, &chapter.title);
+            lines.extend(heading_outline_lines(headings, current_heading, skip));
         }
     }
 
@@ -401,6 +418,34 @@ mod tests {
         let screen = render(&app, 90, 12);
         assert!(screen.contains("CHAPTERS"), "screen:\n{screen}");
         assert!(screen.contains("Chapter 1"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
+        use crate::syntax::Heading;
+        let headings = vec![
+            Heading { level: 1, title: "The Crossing".into(), start: 0 },
+            Heading { level: 2, title: "At the ford".into(), start: 30 },
+        ];
+
+        // The chapter is titled "The Crossing", so its opening H1 is redundant.
+        let skip = redundant_title_heading(&headings, "The Crossing");
+        assert_eq!(skip, Some(0));
+
+        let texts: Vec<String> = heading_outline_lines(&headings, None, skip)
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert_eq!(texts.len(), 1);
+        assert!(texts[0].contains("At the ford"));
+        assert!(!texts[0].contains("The Crossing"));
+
+        // A non-matching title keeps every heading.
+        assert_eq!(redundant_title_heading(&headings, "Different"), None);
+        assert_eq!(
+            heading_outline_lines(&headings, None, None).len(),
+            2
+        );
     }
 
     #[test]
