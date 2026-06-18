@@ -292,10 +292,9 @@ impl Buffer {
 
     /// Total word count across the document.
     pub fn word_count(&self) -> usize {
-        self.rope
-            .chunks()
-            .flat_map(|chunk| chunk.unicode_words())
-            .count()
+        // Count over the whole text, not per rope chunk: a word straddling a
+        // chunk boundary would otherwise be counted twice.
+        count_words(&self.rope.to_string())
     }
 
     #[allow(dead_code)] // part of the buffer's public API; used by upcoming stats UI
@@ -329,6 +328,12 @@ fn point_at_byte(rope: &Rope, byte: usize) -> Point {
     let row = rope.byte_to_line(byte);
     let column = byte - rope.line_to_byte(row);
     Point { row, column }
+}
+
+/// Count the words in a string (Unicode word segmentation). Shared by the live
+/// buffer count and the per-chapter file counts in the navigation pane.
+pub fn count_words(text: &str) -> usize {
+    text.unicode_words().count()
 }
 
 /// Quill's manuscript format is Markdown. A path with no extension gets `.md`;
@@ -439,6 +444,30 @@ mod tests {
         let buf = Buffer::from_path(&path).unwrap();
 
         assert_eq!(buf.path.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn count_words_uses_unicode_segmentation() {
+        assert_eq!(count_words(""), 0);
+        assert_eq!(count_words("   \n  "), 0);
+        assert_eq!(count_words("one two three"), 3);
+        assert_eq!(count_words("hello, world!"), 2);
+        assert_eq!(count_words("it's a tidy plan"), 4); // contraction stays one word
+        // Unicode segmentation splits hyphenated compounds.
+        assert_eq!(count_words("well-made"), 2);
+    }
+
+    #[test]
+    fn word_count_is_correct_across_rope_chunk_boundaries() {
+        // A document large enough to span multiple rope chunks. A word split
+        // across a chunk boundary must not be counted twice.
+        let path = temp_path("wordcount.md");
+        write(&path, &"word ".repeat(5000));
+
+        let buf = Buffer::from_path(&path).unwrap();
+        assert_eq!(buf.word_count(), 5000);
+
+        std::fs::remove_file(&path).ok();
     }
 
     // The syntax highlights must stay correct through incremental edits — this
