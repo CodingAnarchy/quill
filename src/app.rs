@@ -20,6 +20,8 @@ pub struct App {
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
+    /// Whether the in-chapter outline pane is shown.
+    pub outline_visible: bool,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
     /// Text of the active prompt, if any.
@@ -33,6 +35,7 @@ impl App {
             mode: Mode::Insert,
             should_quit: false,
             focus_width: 72,
+            outline_visible: false,
             message: None,
             prompt: None,
         }
@@ -82,6 +85,9 @@ impl App {
             }
             (true, KeyCode::Char('-')) => {
                 self.focus_width = self.focus_width.saturating_sub(4).max(32);
+            }
+            (true, KeyCode::Char('o')) => {
+                self.outline_visible = !self.outline_visible;
             }
 
             (false, KeyCode::Char(c)) => self.buffer.insert_char(c),
