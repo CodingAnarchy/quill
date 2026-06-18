@@ -139,6 +139,67 @@ impl Project {
         std::fs::write(Self::manifest_path(&self.root), text)
     }
 
+    // --- Structure editing -------------------------------------------------
+    //
+    // These mutate the manifest and chapter files but never touch `active` —
+    // keeping the active index and the live buffer in sync is the caller's job
+    // (see `App`). Each does the fallible filesystem work first, then mutates
+    // the manifest and persists, so a failed file op leaves the project intact.
+
+    /// Insert a new empty chapter titled `title` at position `at` (clamped to
+    /// the end). Its file is created on disk.
+    pub fn add_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
+        let at = at.min(self.manifest.chapters.len());
+        let file = self.unique_chapter_file();
+        std::fs::write(self.root.join(&file), "")?;
+        self.manifest.chapters.insert(
+            at,
+            ChapterEntry {
+                title: title.to_string(),
+                file,
+            },
+        );
+        self.save_manifest()
+    }
+
+    /// Rename the chapter at `at` (title only; its file is unchanged).
+    pub fn rename_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
+        if let Some(chapter) = self.manifest.chapters.get_mut(at) {
+            chapter.title = title.to_string();
+        }
+        self.save_manifest()
+    }
+
+    /// Swap two chapters' positions in the order.
+    pub fn swap_chapters(&mut self, a: usize, b: usize) -> std::io::Result<()> {
+        self.manifest.chapters.swap(a, b);
+        self.save_manifest()
+    }
+
+    /// Remove the chapter at `at`, moving its file into the project's `unused/`
+    /// directory rather than deleting it, so nothing the author wrote is lost.
+    pub fn remove_chapter(&mut self, at: usize) -> std::io::Result<()> {
+        let src = self.chapter_path(at);
+        if src.exists() {
+            let unused = self.root.join("unused");
+            std::fs::create_dir_all(&unused)?;
+            let dest = unique_dest(&unused, &self.manifest.chapters[at].file);
+            std::fs::rename(&src, &dest)?;
+        }
+        self.manifest.chapters.remove(at);
+        self.save_manifest()
+    }
+
+    /// Smallest `chapter-{n}.md` not already used by the manifest or on disk.
+    fn unique_chapter_file(&self) -> String {
+        let used: std::collections::HashSet<&str> =
+            self.manifest.chapters.iter().map(|c| c.file.as_str()).collect();
+        (1..)
+            .map(|n| format!("chapter-{n}.md"))
+            .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())
+            .expect("an unbounded range always yields a free name")
+    }
+
     /// A minimal in-memory project (one chapter, no files on disk) for tests and
     /// headless rendering. Like real projects, it always has an active chapter.
     #[cfg(test)]
@@ -155,6 +216,25 @@ impl Project {
             active: 0,
         }
     }
+}
+
+/// A path inside `dir` for `file`, appending `-1`, `-2`, … to the stem if a file
+/// of that name already exists there (so moving to `unused/` never clobbers).
+fn unique_dest(dir: &Path, file: &str) -> PathBuf {
+    let candidate = dir.join(file);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(file);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+    let ext = path.extension().and_then(|s| s.to_str());
+    (1..)
+        .map(|k| match ext {
+            Some(e) => dir.join(format!("{stem}-{k}.{e}")),
+            None => dir.join(format!("{stem}-{k}")),
+        })
+        .find(|c| !c.exists())
+        .expect("an unbounded range always yields a free name")
 }
 
 #[cfg(test)]
@@ -238,6 +318,66 @@ mod tests {
         let project = Project::open(&dir).unwrap();
         assert_eq!(project.manifest.chapters.len(), 1);
         assert!(project.active_path().exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn add_rename_swap_remove_persist() {
+        let dir = temp_dir("structure");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap(); // "Chapter 1"
+
+        // Add a second chapter after the first; file is created with a fresh name.
+        project.add_chapter(1, "Second").unwrap();
+        assert_eq!(project.manifest.chapters.len(), 2);
+        assert_ne!(
+            project.manifest.chapters[0].file,
+            project.manifest.chapters[1].file
+        );
+        assert!(project.chapter_path(1).exists());
+
+        // Rename and reorder.
+        project.rename_chapter(0, "First").unwrap();
+        project.swap_chapters(0, 1).unwrap();
+        let order: Vec<&str> = project
+            .manifest
+            .chapters
+            .iter()
+            .map(|c| c.title.as_str())
+            .collect();
+        assert_eq!(order, vec!["Second", "First"]);
+
+        // Reopen: every change persisted.
+        let reopened = Project::open(&dir).unwrap();
+        let order: Vec<String> = reopened
+            .manifest
+            .chapters
+            .iter()
+            .map(|c| c.title.clone())
+            .collect();
+        assert_eq!(order, vec!["Second".to_string(), "First".to_string()]);
+
+        // Remove the first; its file moves to unused/ rather than vanishing.
+        let removed_file = reopened.manifest.chapters[0].file.clone();
+        let mut reopened = reopened;
+        reopened.remove_chapter(0).unwrap();
+        assert_eq!(reopened.manifest.chapters.len(), 1);
+        assert!(dir.join("unused").join(&removed_file).exists());
+        assert!(!dir.join(&removed_file).exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unique_dest_avoids_clobbering() {
+        let dir = temp_dir("unused-dest");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "x").unwrap();
+
+        assert_eq!(unique_dest(&dir, "b.md"), dir.join("b.md")); // free
+        assert_eq!(unique_dest(&dir, "a.md"), dir.join("a-1.md")); // taken → suffixed
 
         std::fs::remove_dir_all(&dir).ok();
     }

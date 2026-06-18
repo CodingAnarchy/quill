@@ -56,6 +56,9 @@ byte-for-byte.
 | Ctrl-G         | browse chapters (↑/↓, Enter)    |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
+In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
+(moved to `unused/`), **J / K** move the selection down / up.
+
 ## Layout
 
 ```

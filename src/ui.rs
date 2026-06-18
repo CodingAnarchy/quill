@@ -267,7 +267,12 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let buffer = &app.buffer;
 
     if app.mode == Mode::Prompt {
-        let text = app.prompt.clone().unwrap_or_default();
+        // Label plus any typed text (empty for y/N confirmations).
+        let text = format!(
+            "{}{}",
+            app.prompt.clone().unwrap_or_default(),
+            app.prompt_input
+        );
         let prompt = Paragraph::new(Line::from(Span::styled(
             text,
             Style::default().fg(Color::Black).bg(Color::Yellow),
