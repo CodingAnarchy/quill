@@ -15,6 +15,9 @@ keystrokes that stay out of the way.
 - **Unicode-correct cursoring** — movement and deletion work on grapheme
   clusters and account for wide characters.
 - **Live stats** — word count and line position in the status bar.
+- **Markdown-aware editing** — incremental `tree-sitter` parse drives live
+  syntax highlighting, soft-rendered emphasis (markers hidden until you edit a
+  span), and an in-chapter outline (Ctrl-O).
 
 ## Build & run
 
@@ -58,17 +61,6 @@ src/
 ```
 
 ## Roadmap
-
-### Markdown manuscript format
-
-- Treat the manuscript as Markdown, so emphasis, scene breaks, and headings are
-  plain text the author can read anywhere.
-- **tree-sitter** ([`tree-sitter-md`](https://github.com/tree-sitter-grammars/tree-sitter-markdown))
-  for incremental parsing: syntax-aware highlighting in the focus column and
-  scene-level structure *within* a chapter (the chapter tree itself comes from
-  the project manifest — see Project structure).
-- Soft inline rendering — show `*emphasis*` / `**strong**` styled rather than as
-  literal asterisks, while keeping the underlying text Markdown.
 
 ### Project structure: a project is a folder of chapter files
 
@@ -139,6 +131,17 @@ read/write a human-readable **story bible** kept in the project.
 - Per-session and daily word-count goals (per chapter / act / book / project)
 - Find & replace
 - Undo / redo
+
+### Vim-style keybindings & modes
+
+- **Opt-in** modal editing for authors with Vim muscle memory; the default
+  modeless editing is unchanged when it's off.
+- Normal / Insert / Visual modes with a mode indicator; motions (`hjkl`,
+  `w b e`, `0 ^ $`, `gg`/`G`) and counts.
+- Operators with motions and text objects (`d`/`c`/`y` + `iw`/`aw`/…),
+  `x`, `p`/`P`, undo/redo, registers.
+- Search (`/`, `n`/`N`) and a command line (`:w`, `:q`, `:wq`); later,
+  configurable keybindings.
 
 ### Export to Word / Scrivener / Vellum
 
