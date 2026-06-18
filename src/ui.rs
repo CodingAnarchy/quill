@@ -235,21 +235,9 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Show the active chapter's title from the manifest, falling back to the
-    // file name for a project that has no chapters yet (e.g. tests).
-    let name = app
-        .project
-        .active_title()
-        .map(str::to_string)
-        .or_else(|| {
-            buffer
-                .path
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "[untitled]".into());
-
+    // The manifest is the source of truth for the active chapter's name; every
+    // real (and scratch) project always has an active chapter.
+    let name = app.project.active_title().unwrap_or("[untitled]");
     let dirty = if buffer.dirty { " ●" } else { "" };
     let left = format!(" {name}{dirty}");
     let right = match &app.message {

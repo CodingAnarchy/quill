@@ -134,15 +134,18 @@ impl Project {
         std::fs::write(Self::manifest_path(&self.root), text)
     }
 
-    /// An empty in-memory project with no chapters, for tests and headless
-    /// rendering where no directory is involved.
+    /// A minimal in-memory project (one chapter, no files on disk) for tests and
+    /// headless rendering. Like real projects, it always has an active chapter.
     #[cfg(test)]
     pub fn scratch() -> Self {
         Self {
             root: PathBuf::from("."),
             manifest: Manifest {
                 title: "untitled".into(),
-                chapters: Vec::new(),
+                chapters: vec![ChapterEntry {
+                    title: "Chapter 1".into(),
+                    file: "chapter-1.md".into(),
+                }],
             },
             active: 0,
         }
