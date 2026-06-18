@@ -482,6 +482,44 @@ mod tests {
         App::new(buffer_with(text), Project::scratch())
     }
 
+    /// Performance guard (run with `cargo test --release -- --ignored
+    /// --nocapture`). A full frame must render well within one 16ms frame, even
+    /// for a large chapter shown alongside a many-chapter outline pane — the
+    /// realistic worst case for per-frame work (the status bar's live word count
+    /// over the whole buffer, plus a nav row per chapter). If a future change
+    /// makes rendering re-read files or do per-chapter work proportional to the
+    /// novel, this catches it.
+    #[test]
+    #[ignore]
+    fn render_stays_within_a_frame() {
+        use std::time::Instant;
+
+        let titles: Vec<String> = (0..150).map(|i| format!("Chapter {i}")).collect();
+        let title_refs: Vec<&str> = titles.iter().map(String::as_str).collect();
+        let project = Project::scratch_with(&title_refs);
+
+        let mut text = String::new();
+        for _ in 0..7500 {
+            text.push_str("The night was dark and the road was very long indeed.\n");
+        }
+        let words = text.split_whitespace().count();
+        let mut buffer = Buffer::from_text(&text);
+        buffer.refresh_syntax();
+        let mut app = App::new(buffer, project);
+        app.outline_visible = true;
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap(); // warm
+        let t = Instant::now();
+        for _ in 0..30 {
+            terminal.draw(|f| draw(f, &app)).unwrap();
+        }
+        let dt = t.elapsed() / 30;
+
+        println!("render {words}w + 150-chapter outline = {dt:?}");
+        assert!(dt.as_millis() < 16, "render took {dt:?}");
+    }
+
     /// Render the app to a TestBackend and return the screen as plain text.
     fn render(app: &App, w: u16, h: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();

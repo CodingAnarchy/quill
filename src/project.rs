@@ -548,4 +548,39 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// Performance guard (run with `cargo test --release -- --ignored
+    /// --nocapture`). Opening a project reads and parses every chapter file once
+    /// (word count + front matter); even a large novel must open near-instantly.
+    /// Catches a regression to per-chapter re-reads or O(n²) work at open.
+    #[test]
+    #[ignore]
+    fn open_is_fast_for_a_large_novel() {
+        use std::time::Instant;
+
+        let dir = temp_dir("perf-open");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut manifest = String::from("title = \"Big\"\n\n");
+        for i in 0..150 {
+            let file = format!("ch{i}.md");
+            manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+            let mut body = String::from("---\nstatus: draft\npov: Mara\n---\n# Chapter\n\n");
+            for _ in 0..50 {
+                body.push_str("The night was dark and the road was very long indeed.\n");
+            }
+            std::fs::write(dir.join(&file), body).unwrap();
+        }
+        std::fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+        let t = Instant::now();
+        let project = Project::open(&dir).unwrap();
+        let dt = t.elapsed();
+
+        println!("open 150 chapters (front matter + word counts) = {dt:?}");
+        assert_eq!(project.manifest.chapters.len(), 150);
+        assert!(dt.as_millis() < 250, "open took {dt:?}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
