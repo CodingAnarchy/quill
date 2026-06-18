@@ -102,12 +102,15 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     // Vertically follow the cursor: keep it roughly centered in the viewport.
     let total = buffer.line_count();
     let cursor_line = buffer.cursor.line;
-    let top = cursor_line.saturating_sub(height / 2).min(total.saturating_sub(height).max(0));
+    let top = cursor_line
+        .saturating_sub(height / 2)
+        .min(total.saturating_sub(height));
 
     // Emphasis markers are hidden, except on the span the cursor sits in (so it
     // stays editable). Concealment shifts screen columns, so the cursor X below
     // must be measured over the *visible* text, not the source.
-    let conceal = buffer.syntax().conceal_ranges(Some(buffer.cursor_byte()));
+    let cursor_byte = buffer.cursor_byte();
+    let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
 
     let lines: Vec<Line> = (top..(top + height).min(total))
         .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i), &conceal))
@@ -123,7 +126,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
         let col_width = visible_width_before(
             &buffer.line(cursor_line),
             buffer.line_start_byte(cursor_line),
-            buffer.cursor_byte(),
+            cursor_byte,
             &conceal,
         );
         let screen_x = column.x + col_width.min(column.width.saturating_sub(1));

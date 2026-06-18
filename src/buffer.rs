@@ -107,9 +107,9 @@ impl Buffer {
         if idx >= self.rope.len_lines() {
             return String::new();
         }
-        let slice = self.rope.line(idx);
-        let s = slice.to_string();
-        s.trim_end_matches('\n').to_string()
+        let mut s = self.rope.line(idx).to_string();
+        s.truncate(s.trim_end_matches('\n').len());
+        s
     }
 
     /// Number of grapheme clusters on a line (how far the cursor can travel).
