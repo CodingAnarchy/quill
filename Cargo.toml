@@ -11,6 +11,8 @@ crossterm = "0.28"
 ropey = "1.6"
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
+tree-sitter = "0.26.9"
+tree-sitter-md = { version = "0.5.3", features = ["parser"] }
 
 [profile.release]
 lto = true

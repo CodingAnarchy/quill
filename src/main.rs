@@ -4,6 +4,7 @@
 
 mod app;
 mod buffer;
+mod syntax;
 mod ui;
 
 use std::io::{self, Stdout};
@@ -59,12 +60,24 @@ fn run(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
 
         // Poll so we can stay responsive without busy-spinning.
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == event::KeyEventKind::Press {
-                    app.on_key(key);
-                }
+            handle_event(app, event::read()?);
+            // Drain the rest of the input burst before doing any heavier work,
+            // so a fast typist (or a key-repeat) is handled as one batch.
+            while event::poll(Duration::ZERO)? {
+                handle_event(app, event::read()?);
             }
+            // Input has gone idle: reparse once to refresh highlighting. Kept
+            // off the per-keystroke path so typing stays instant.
+            app.buffer.refresh_syntax();
         }
     }
     Ok(())
+}
+
+fn handle_event(app: &mut App, ev: Event) {
+    if let Event::Key(key) = ev {
+        if key.kind == event::KeyEventKind::Press {
+            app.on_key(key);
+        }
+    }
 }
