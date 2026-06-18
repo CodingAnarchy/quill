@@ -246,11 +246,11 @@ impl Pane for Editor<'_> {
 
 /// The chapter title to draw as a divider above buffer line `line`, if a
 /// continuous-view segment begins there.
-fn divider_at(line: usize, dividers: &[(usize, String)]) -> Option<&str> {
+fn divider_at<'a>(line: usize, dividers: &[(usize, &'a str)]) -> Option<&'a str> {
     dividers
         .iter()
         .find(|(l, _)| *l == line)
-        .map(|(_, title)| title.as_str())
+        .map(|&(_, title)| title)
 }
 
 /// A centered, dimmed chapter-break label, e.g. `—— Chapter Two ——`. Rendered

@@ -68,24 +68,29 @@ impl Manuscript {
         self.segments.iter().any(|s| s.dirty)
     }
 
+    /// The segment the cursor is in.
+    fn current_segment(&self) -> &Segment {
+        &self.segments[self.owner_of_line(self.buffer.cursor.line)]
+    }
+
     /// Manifest index of the chapter the cursor is in.
     pub fn current_chapter(&self) -> usize {
-        self.segments[self.owner_of_line(self.buffer.cursor.line)].index
+        self.current_segment().index
     }
 
     /// Title of the chapter the cursor is in (for the status bar).
     pub fn current_title(&self) -> &str {
-        &self.segments[self.owner_of_line(self.buffer.cursor.line)].title
+        &self.current_segment().title
     }
 
     /// Where the renderer should draw a chapter divider: the global start line
-    /// and title of each segment after the first.
-    pub fn dividers(&self) -> Vec<(usize, String)> {
+    /// and (borrowed) title of each segment after the first.
+    pub fn dividers(&self) -> Vec<(usize, &str)> {
         let mut out = Vec::new();
         let mut start = 0;
         for (i, s) in self.segments.iter().enumerate() {
             if i > 0 {
-                out.push((start, s.title.clone()));
+                out.push((start, s.title.as_str()));
             }
             start += s.lines;
         }
@@ -156,16 +161,18 @@ impl Manuscript {
     /// in and out so at most [`WINDOW`] are ever held. A no-op while the cursor
     /// stays within the loaded window's center.
     pub fn reslide(&mut self, project: &mut Project) -> std::io::Result<()> {
-        let current = self.current_chapter();
+        let line = self.buffer.cursor.line;
+        let seg = self.owner_of_line(line);
+        let current = self.segments[seg].index;
         let (lo, hi) = window_bounds(current, chapter_count(project));
         if lo == self.window_lo() && hi == self.window_hi() {
             return Ok(());
         }
         // The window is rebuilt from disk, so flush every pending edit first —
         // otherwise reloading a chapter that stays in view would lose its edits.
-        self.save(project)?;
-        let local = self.buffer.cursor.line - self.segment_start_line(self.owner_of_line(self.buffer.cursor.line));
+        let local = line - self.segment_start_line(seg);
         let col = self.buffer.cursor.col;
+        self.save(project)?;
         self.rebuild(project, lo, hi, current, local, col);
         Ok(())
     }
@@ -187,10 +194,10 @@ impl Manuscript {
             let raw = std::fs::read_to_string(project.chapter_path(index)).unwrap_or_default();
             // Give every chapter at least one line so it's always editable; an
             // empty chapter becomes a single empty line (save normalizes it back).
-            let content = match normalize_trailing_newline(&raw) {
-                s if s.is_empty() => "\n".to_string(),
-                s => s,
-            };
+            let mut content = normalize_trailing_newline(&raw);
+            if content.is_empty() {
+                content.push('\n');
+            }
             let lines = content.matches('\n').count();
             let title = project.chapter_title(index).unwrap_or_default().to_string();
             text.push_str(&content);
@@ -206,13 +213,12 @@ impl Manuscript {
         self.segments = segments;
 
         // Restore the cursor: the kept chapter's start line plus the local line.
-        let mut line = 0;
-        for s in &self.segments {
-            if s.index == keep_chapter {
-                break;
-            }
-            line += s.lines;
-        }
+        let seg = self
+            .segments
+            .iter()
+            .position(|s| s.index == keep_chapter)
+            .unwrap_or(0);
+        let line = self.segment_start_line(seg);
         self.buffer.cursor.line = (line + keep_local).min(self.buffer.line_count() - 1);
         self.buffer.cursor.col = keep_col;
     }

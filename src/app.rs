@@ -160,18 +160,29 @@ impl App {
     /// Save the current chapter (if dirty), then load `index` as the active
     /// chapter. The active index and the live buffer always move together here,
     /// so the two never drift. A no-op if `index` is already active or invalid.
+    /// Save the active chapter if it has unsaved edits and refresh its cached
+    /// word count. Returns `Err(())` (and sets a status message) if the save
+    /// failed, so callers can abort before switching away from it.
+    fn flush_active(&mut self) -> Result<(), ()> {
+        if self.buffer.dirty {
+            if let Err(e) = self.buffer.save() {
+                self.message = Some(format!("Save failed: {e}"));
+                return Err(());
+            }
+        }
+        // The chapter is now on disk; refresh its cached count.
+        self.project.set_active_words(self.buffer.word_count());
+        Ok(())
+    }
+
     fn activate_chapter(&mut self, index: usize) {
         if index >= self.project.manifest.chapters.len() || index == self.project.active_index() {
             return;
         }
-        if self.buffer.dirty {
-            if let Err(e) = self.buffer.save() {
-                self.message = Some(format!("Save failed: {e}"));
-                return;
-            }
+        // Flush the chapter we're leaving before loading the next.
+        if self.flush_active().is_err() {
+            return;
         }
-        // The chapter we're leaving is now on disk; refresh its cached count.
-        self.project.set_active_words(self.buffer.word_count());
         match Buffer::from_path(self.project.chapter_path(index)) {
             Ok(buffer) => {
                 self.buffer = buffer;
@@ -204,12 +215,8 @@ impl App {
     /// Enter the continuous view: flush the single chapter, then open a window
     /// of chapters around it.
     fn enter_continuous(&mut self) {
-        if self.buffer.dirty {
-            if let Err(e) = self.buffer.save() {
-                self.message = Some(format!("Save failed: {e}"));
-                return;
-            }
-            self.project.set_active_words(self.buffer.word_count());
+        if self.flush_active().is_err() {
+            return;
         }
         self.manuscript = Some(Manuscript::open(&self.project));
         self.message = Some("Continuous view".into());
