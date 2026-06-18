@@ -77,9 +77,13 @@ src/
   standalone novel is one book. The editor manages these files transparently;
   the author works in chapters, not filenames.
 - **Two views, switchable by hotkey.** *Chapter-at-a-time* (default) edits one
-  chapter file at a time via the outline pane. *Continuous manuscript* scrolls
-  every chapter as one seamless document, with the editor mapping edits back to
-  the right files.
+  chapter file at a time via the outline pane. *Continuous manuscript* reads as
+  one seamless document, with the editor mapping edits back to the right files.
+- **Bounded working set.** The editor never loads the whole novel: the
+  single-chapter view holds one chapter, and the continuous view keeps at most
+  about three chapters in memory — a window around where you're editing, loaded
+  and unloaded as you scroll. Costs track what you're actually working on, not
+  the size of the book.
 - Outline/navigation pane walks the manifest tree; jump between chapters, acts,
   and books, with per-node and rolled-up word counts.
 
