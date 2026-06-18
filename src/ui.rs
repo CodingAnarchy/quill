@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Mode};
+use crate::syntax::{Highlight, HighlightKind, Syntax};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -43,7 +44,7 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
     let top = cursor_line.saturating_sub(height / 2).min(total.saturating_sub(height).max(0));
 
     let lines: Vec<Line> = (top..(top + height).min(total))
-        .map(|i| Line::raw(buffer.line(i)))
+        .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i)))
         .collect();
 
     let paragraph = Paragraph::new(lines).block(Block::default());
@@ -61,6 +62,60 @@ fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
         let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
         frame.set_cursor_position((screen_x, screen_y));
     }
+}
+
+/// Build a styled line by splitting `text` (one line, no newline) into runs of
+/// equal style according to the syntax highlights overlapping it. `line_start`
+/// is the line's absolute byte offset, since highlights use document offsets.
+fn styled_line(syntax: &Syntax, line_start: usize, text: &str) -> Line<'static> {
+    if text.is_empty() {
+        return Line::raw("");
+    }
+
+    let hls: Vec<Highlight> = syntax
+        .highlights_in(line_start, line_start + text.len())
+        .copied()
+        .collect();
+    if hls.is_empty() {
+        return Line::raw(text.to_string());
+    }
+
+    let mut spans: Vec<Span> = Vec::new();
+    let mut run_start = 0usize;
+    let mut run_style: Option<Style> = None;
+    for (local_byte, _) in text.char_indices() {
+        let style = style_at(&hls, line_start + local_byte);
+        match run_style {
+            Some(prev) if prev == style => {}
+            Some(prev) => {
+                spans.push(Span::styled(text[run_start..local_byte].to_string(), prev));
+                run_start = local_byte;
+                run_style = Some(style);
+            }
+            None => {
+                run_start = local_byte;
+                run_style = Some(style);
+            }
+        }
+    }
+    if let Some(style) = run_style {
+        spans.push(Span::styled(text[run_start..].to_string(), style));
+    }
+    Line::from(spans)
+}
+
+/// Merge every highlight covering `byte` into one style. Headings get a color;
+/// strong and emphasis layer on bold/italic, so nested `***x***` reads as both.
+fn style_at(hls: &[Highlight], byte: usize) -> Style {
+    let mut style = Style::default();
+    for h in hls.iter().filter(|h| byte >= h.start && byte < h.end) {
+        style = match h.kind {
+            HighlightKind::Heading => style.fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            HighlightKind::Strong => style.add_modifier(Modifier::BOLD),
+            HighlightKind::Emphasis => style.add_modifier(Modifier::ITALIC),
+        };
+    }
+    style
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
