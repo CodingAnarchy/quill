@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::buffer::count_words;
+
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
 
@@ -290,7 +292,7 @@ impl Project {
 /// Words in a chapter file, or 0 if it can't be read.
 fn count_file_words(path: &Path) -> usize {
     std::fs::read_to_string(path)
-        .map(|text| crate::buffer::count_words(&text))
+        .map(|text| count_words(&text))
         .unwrap_or(0)
 }
 
