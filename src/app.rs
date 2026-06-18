@@ -3,7 +3,7 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
-use crate::frontmatter::{self, Epigraph, FrontMatter, Status};
+use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::manuscript::Manuscript;
 use crate::project::{Manifest, Project};
 
@@ -464,10 +464,11 @@ impl App {
                 self.edit_chapter_meta(at, |fm| fm.set_epigraph_by(text));
             }
             // The book title is required, so empty input keeps the current one.
-            MetaField::BookTitle if !text.is_empty() => {
-                self.set_book_meta(|m| m.title = text.to_string());
+            MetaField::BookTitle => {
+                if !text.is_empty() {
+                    self.set_book_meta(|m| m.title = text.to_string());
+                }
             }
-            MetaField::BookTitle => {}
             MetaField::Subtitle => self.set_book_meta(|m| m.subtitle = optional),
             MetaField::Author => self.set_book_meta(|m| m.author = optional),
             MetaField::Series => self.set_book_meta(|m| m.series = optional),
@@ -482,9 +483,9 @@ impl App {
         if index == self.project.active_index() {
             self.buffer.front_matter().and_then(FrontMatter::epigraph)
         } else {
-            let text = std::fs::read_to_string(self.project.chapter_path(index)).unwrap_or_default();
-            let (front, _) = frontmatter::split(&text);
-            front.map(FrontMatter::from_raw).and_then(|fm| fm.epigraph())
+            self.project
+                .chapter_front_matter(index)
+                .and_then(|fm| fm.epigraph())
         }
     }
 
@@ -753,6 +754,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::project::Project;
+    use std::fs;
     use std::path::PathBuf;
 
     fn ctrl(c: char) -> KeyEvent {
@@ -781,17 +783,17 @@ mod tests {
     fn two_chapter_app(name: &str) -> (App, PathBuf) {
         let mut dir = std::env::temp_dir();
         dir.push(format!("quill-app-{}-{}", std::process::id(), name));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
             Project::manifest_path(&dir),
             "title = \"Book\"\n\n\
              [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
              [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
         )
         .unwrap();
-        std::fs::write(dir.join("one.md"), "first chapter\n").unwrap();
-        std::fs::write(dir.join("two.md"), "second chapter\n").unwrap();
+        fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+        fs::write(dir.join("two.md"), "second chapter\n").unwrap();
 
         let project = Project::open(&dir).unwrap();
         let buffer = Buffer::from_path(project.active_path()).unwrap();
@@ -812,7 +814,7 @@ mod tests {
         assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -825,7 +827,7 @@ mod tests {
         app.on_key(ctrl('n')); // already at last — no-op
         assert_eq!(app.project.active_index(), 1);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -839,10 +841,10 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
 
         // Chapter one was persisted on the way out.
-        let saved = std::fs::read_to_string(dir.join("one.md")).unwrap();
+        let saved = fs::read_to_string(dir.join("one.md")).unwrap();
         assert!(saved.starts_with('X'), "expected edit saved, got: {saved:?}");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -860,7 +862,7 @@ mod tests {
         assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     fn typed(app: &mut App, s: &str) {
@@ -898,7 +900,7 @@ mod tests {
         // Persisted.
         assert_eq!(project_titles(&Project::open(&dir).unwrap()), titles(&app));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -916,7 +918,7 @@ mod tests {
         assert_eq!(titles(&app)[0], "Uno");
         assert_eq!(project_titles(&Project::open(&dir).unwrap())[0], "Uno");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -930,7 +932,7 @@ mod tests {
         // The active chapter ("One") followed its content to index 1.
         assert_eq!(app.project.active_title(), Some("One"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -947,7 +949,7 @@ mod tests {
         assert_eq!(app.project.active_index(), 0);
         assert!(app.buffer.line(0).contains("first"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -962,7 +964,7 @@ mod tests {
         // Buffer was reloaded to the surviving chapter.
         assert!(app.buffer.line(0).contains("second"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -979,7 +981,7 @@ mod tests {
         assert!(matches!(app.mode, Mode::Nav { .. })); // no confirm prompt opened
         assert_eq!(app.chapter_count(), 1);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -994,7 +996,7 @@ mod tests {
         assert_eq!(app.project.active_title(), Some("One"));
         assert!(app.buffer.line(0).contains("first"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1017,7 +1019,7 @@ mod tests {
         assert_eq!(reopened.manifest.title, "Book of Dust");
         assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1033,7 +1035,7 @@ mod tests {
         app.on_key(key(KeyCode::Enter));
         assert_eq!(app.project.manifest.subtitle, None);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1050,12 +1052,12 @@ mod tests {
         app.on_key(key(KeyCode::Enter));
         assert!(matches!(app.mode, Mode::Nav { .. }));
 
-        let on_disk = std::fs::read_to_string(dir.join("two.md")).unwrap();
+        let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
         assert!(on_disk.contains("epigraph: Call me Ishmael."), "got:\n{on_disk}");
         assert!(on_disk.contains("epigraph_by: Melville"), "got:\n{on_disk}");
         assert!(on_disk.contains("second chapter"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1075,7 +1077,7 @@ mod tests {
         let reopened = Project::open(&dir).unwrap();
         assert_eq!(reopened.manifest.epigraph().unwrap().attribution.as_deref(), Some("The King"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1090,11 +1092,11 @@ mod tests {
         // Active-chapter metadata persists on save (like prose).
         app.on_key(key(KeyCode::Enter)); // open the selected chapter (back to Insert)
         app.on_key(ctrl('s'));
-        let on_disk = std::fs::read_to_string(dir.join("one.md")).unwrap();
+        let on_disk = fs::read_to_string(dir.join("one.md")).unwrap();
         assert!(on_disk.starts_with("---\nstatus: revised\n---\n"), "got:\n{on_disk}");
         assert!(on_disk.contains("first chapter"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1107,12 +1109,12 @@ mod tests {
         app.on_key(key(KeyCode::Enter));
 
         // Non-active edits hit disk right away, with quoting, prose untouched.
-        let on_disk = std::fs::read_to_string(dir.join("two.md")).unwrap();
+        let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
         assert!(on_disk.starts_with("---\nsummary: \"The reckoning: part one\"\n---\n"), "got:\n{on_disk}");
         assert!(on_disk.contains("second chapter"));
         assert_eq!(app.project.chapter_summary(1), Some("The reckoning: part one"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1130,7 +1132,7 @@ mod tests {
         assert_eq!(reopened.chapter_status(1), Some(crate::frontmatter::Status::Draft));
         assert_eq!(reopened.chapter_pov(1), Some("Mara"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1148,13 +1150,13 @@ mod tests {
         assert!(app.manuscript.is_none());
 
         // The edit landed in chapter two's file; chapter one is untouched.
-        assert_eq!(std::fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
-        assert_eq!(std::fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
+        assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
+        assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
         // Back in single-chapter view at the chapter the cursor was in.
         assert_eq!(app.project.active_index(), 1);
         assert!(app.buffer.line(0).contains("second"));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1165,9 +1167,9 @@ mod tests {
         assert!(app.buffer.dirty);
 
         app.on_key(ctrl('l')); // entering must flush the dirty single chapter
-        assert!(std::fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
+        assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1183,7 +1185,7 @@ mod tests {
         assert_eq!(app.chapter_word_count(0), 3);
         assert_eq!(app.project_word_count(), 5);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -1203,6 +1205,6 @@ mod tests {
         assert_eq!(app.chapter_count(), 2);
         assert_eq!(app.project_word_count(), 4);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 }

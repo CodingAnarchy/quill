@@ -552,6 +552,7 @@ mod tests {
     use crate::buffer::{Buffer, Cursor};
     use crate::project::Project;
     use ratatui::{backend::TestBackend, Terminal};
+    use std::fs;
 
     fn buffer_with(text: &str) -> Buffer {
         let mut b = Buffer::empty();
@@ -791,17 +792,17 @@ mod tests {
         // A two-chapter project on disk (the manuscript window reads files).
         let mut dir = std::env::temp_dir();
         dir.push(format!("quill-ui-cont-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
             Project::manifest_path(&dir),
             "title = \"Book\"\n\n\
              [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
              [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
         )
         .unwrap();
-        std::fs::write(dir.join("one.md"), "Alpha prose here.\n").unwrap();
-        std::fs::write(dir.join("two.md"), "Beta prose here.\n").unwrap();
+        fs::write(dir.join("one.md"), "Alpha prose here.\n").unwrap();
+        fs::write(dir.join("two.md"), "Beta prose here.\n").unwrap();
 
         let project = Project::open(&dir).unwrap();
         let buffer = Buffer::from_path(project.active_path()).unwrap();
@@ -815,6 +816,6 @@ mod tests {
         // ...separated by a centered divider carrying the next chapter's title.
         assert!(screen.contains("—— Two ——"), "screen:\n{screen}");
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 }

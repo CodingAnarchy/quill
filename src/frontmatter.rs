@@ -54,6 +54,20 @@ pub struct Epigraph {
     pub attribution: Option<String>,
 }
 
+impl Epigraph {
+    /// Build an epigraph from a quotation and optional attribution, treating
+    /// blank strings as absent. `None` when there's no quotation — an
+    /// attribution alone is not an epigraph. Shared by the chapter (front
+    /// matter) and book (manifest) accessors.
+    pub fn from_parts(text: Option<String>, attribution: Option<String>) -> Option<Epigraph> {
+        let text = text.filter(|s| !s.is_empty())?;
+        Some(Epigraph {
+            text,
+            attribution: attribution.filter(|s| !s.is_empty()),
+        })
+    }
+}
+
 /// A chapter's revision status, cycled by the author and shown in the pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -219,11 +233,7 @@ impl FrontMatter {
 
     /// The chapter epigraph, if a quotation is set. The attribution is optional.
     pub fn epigraph(&self) -> Option<Epigraph> {
-        let text = self.get("epigraph").filter(|s| !s.is_empty())?;
-        Some(Epigraph {
-            text,
-            attribution: self.get("epigraph_by").filter(|s| !s.is_empty()),
-        })
+        Epigraph::from_parts(self.get("epigraph"), self.get("epigraph_by"))
     }
 
     pub fn set_epigraph_text(&mut self, text: &str) {
