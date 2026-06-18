@@ -2,11 +2,19 @@
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::buffer::Buffer;
+use crate::buffer::{count_words, Buffer};
 use crate::project::Project;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
+
+/// Words in a chapter file, or 0 if it can't be read (e.g. a not-yet-saved or
+/// missing file).
+fn count_chapter_words(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path)
+        .map(|text| count_words(&text))
+        .unwrap_or(0)
+}
 
 /// Editor modes. Quill is mostly modeless for writing, but borrows a light
 /// command line for actions that shouldn't be a stray keystroke away.
@@ -48,6 +56,10 @@ pub struct App {
     pub outline_visible: bool,
     /// The chapter highlighted in the pane while in [`Mode::Nav`].
     pub nav_selected: usize,
+    /// Cached word count per chapter (parallel to `project.manifest.chapters`).
+    /// Non-active chapters are counted from file; the active chapter's live
+    /// count comes from the buffer (see [`App::chapter_word_count`]).
+    chapter_words: Vec<usize>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
     /// Label of the active prompt, if any.
@@ -60,6 +72,11 @@ pub struct App {
 
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
+        // Count each chapter once at open (transient reads, never N live
+        // buffers). The active chapter is recounted live as the author types.
+        let chapter_words = (0..project.manifest.chapters.len())
+            .map(|i| count_chapter_words(&project.chapter_path(i)))
+            .collect();
         Self {
             buffer,
             project,
@@ -68,11 +85,31 @@ impl App {
             focus_width: 72,
             outline_visible: false,
             nav_selected: 0,
+            chapter_words,
             message: None,
             prompt: None,
             prompt_input: String::new(),
             pending: None,
         }
+    }
+
+    /// Word count for chapter `index`: live from the buffer when it's active
+    /// (updates as you type), otherwise the cached file count.
+    pub fn chapter_word_count(&self, index: usize) -> usize {
+        if index == self.project.active {
+            self.buffer.word_count()
+        } else {
+            self.chapter_words.get(index).copied().unwrap_or(0)
+        }
+    }
+
+    /// Total words across the whole project. (The nav pane sums its per-frame
+    /// counts directly; this is the API the progress report (#4) will use.)
+    #[allow(dead_code)]
+    pub fn project_word_count(&self) -> usize {
+        (0..self.chapter_count())
+            .map(|i| self.chapter_word_count(i))
+            .sum()
     }
 
     /// Handle a terminal event, dispatching key presses to the active mode.
@@ -111,10 +148,14 @@ impl App {
                 return;
             }
         }
+        // The chapter we're leaving is now on disk; refresh its cached count.
+        self.chapter_words[self.project.active] = self.buffer.word_count();
         match Buffer::from_path(self.project.chapter_path(index)) {
             Ok(buffer) => {
                 self.buffer = buffer;
                 self.project.active = index;
+                // No need to cache the new active chapter's count: while active,
+                // chapter_word_count reads it live from the buffer.
                 if let Some(title) = self.project.active_title() {
                     self.message = Some(format!("Chapter: {title}"));
                 }
@@ -144,6 +185,7 @@ impl App {
     fn create_chapter(&mut self, at: usize, title: &str) {
         match self.project.add_chapter(at, title) {
             Ok(()) => {
+                self.chapter_words.insert(at, 0); // new chapter starts empty
                 // Inserting at or before the active chapter shifts its index;
                 // the active content is unchanged, so don't reload the buffer.
                 if at <= self.project.active {
@@ -180,6 +222,7 @@ impl App {
         };
         match self.project.swap_chapters(i, j) {
             Ok(()) => {
+                self.chapter_words.swap(i, j);
                 if self.project.active == i {
                     self.project.active = j;
                 } else if self.project.active == j {
@@ -205,6 +248,7 @@ impl App {
             self.message = Some(format!("Delete failed: {e}"));
             return;
         }
+        self.chapter_words.remove(at);
 
         let active = self.project.active;
         if at < active {
@@ -320,7 +364,10 @@ impl App {
 
         match (ctrl, key.code) {
             (true, KeyCode::Char('s')) => match self.buffer.save() {
-                Ok(()) => self.message = Some("Saved".into()),
+                Ok(()) => {
+                    self.chapter_words[self.project.active] = self.buffer.word_count();
+                    self.message = Some("Saved".into());
+                }
                 Err(e) => self.message = Some(format!("Save failed: {e}")),
             },
             (true, KeyCode::Char('q')) => {
@@ -585,6 +632,42 @@ mod tests {
         app.on_key(key(KeyCode::Char('d')));
         assert_eq!(app.mode, Mode::Nav); // no confirm prompt opened
         assert_eq!(app.chapter_count(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn word_counts_roll_up_and_update_live() {
+        let (mut app, dir) = two_chapter_app("counts"); // "first chapter", "second chapter"
+        assert_eq!(app.chapter_word_count(0), 2); // active, live from buffer
+        assert_eq!(app.chapter_word_count(1), 2); // cached from file
+        assert_eq!(app.project_word_count(), 4);
+
+        // Add a word to the active chapter; its count and the total grow live.
+        app.on_key(key(KeyCode::Char('X')));
+        app.on_key(key(KeyCode::Char(' ')));
+        assert_eq!(app.chapter_word_count(0), 3);
+        assert_eq!(app.project_word_count(), 5);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn word_count_cache_tracks_add_and_delete() {
+        let (mut app, dir) = two_chapter_app("counts-structure");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Char('a'))); // add an empty chapter after ch.0
+        typed(&mut app, "New");
+        app.on_key(key(KeyCode::Enter));
+
+        assert_eq!(app.chapter_count(), 3);
+        assert_eq!(app.project_word_count(), 4); // the new chapter is empty
+
+        // Delete it (the new chapter is the current selection).
+        app.on_key(key(KeyCode::Char('d')));
+        app.on_key(key(KeyCode::Char('y')));
+        assert_eq!(app.chapter_count(), 2);
+        assert_eq!(app.project_word_count(), 4);
 
         std::fs::remove_dir_all(&dir).ok();
     }

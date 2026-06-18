@@ -49,15 +49,15 @@ fn active_style() -> Style {
     Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
 }
 
-/// One chapter row: a marker for the active chapter, reversed while it's the
-/// Nav-mode selection.
-fn chapter_line(title: &str, is_active: bool, is_selected: bool) -> Line<'static> {
+/// One chapter row: a marker for the active chapter and its word count, reversed
+/// while it's the Nav-mode selection.
+fn chapter_line(title: &str, words: usize, is_active: bool, is_selected: bool) -> Line<'static> {
     let mut style = if is_active { active_style() } else { Style::default() };
     if is_selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
     let marker = if is_active { "▸ " } else { "  " };
-    Line::from(Span::styled(format!("{marker}{title}"), style))
+    Line::from(Span::styled(format!("{marker}{title}  {words}"), style))
 }
 
 /// The active chapter's heading outline, indented by level, current section
@@ -113,15 +113,28 @@ fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
     let headings = app.buffer.syntax().headings();
     let current_heading = current_section(headings, app.buffer.cursor_byte());
 
+    // Count each chapter once for this frame, then reuse for the rows and the
+    // total — so the active chapter's live count isn't recomputed twice.
+    let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
+        .map(|i| app.chapter_word_count(i))
+        .collect();
+
     for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
         let is_active = i == app.project.active;
         let is_selected = app.mode == Mode::Nav && i == app.nav_selected;
-        lines.push(chapter_line(&chapter.title, is_active, is_selected));
+        lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
         if is_active {
             let skip = redundant_title_heading(headings, &chapter.title);
             lines.extend(heading_outline_lines(headings, current_heading, skip));
         }
     }
+
+    // Rolled-up project total.
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        format!("{} words", counts.iter().sum::<usize>()),
+        Style::default().fg(Color::DarkGray),
+    )));
 
     frame.render_widget(Paragraph::new(lines), inner);
 }
