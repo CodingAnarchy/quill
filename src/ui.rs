@@ -12,6 +12,21 @@ use ratatui::{
 use crate::app::{App, Mode};
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
+/// A rendered region of the screen. Each pane borrows the [`App`] and draws
+/// itself into a given area. A custom trait rather than ratatui's `Widget`
+/// because the editor needs `frame.set_cursor_position` for cursor placement,
+/// which `Widget::render` can't do (it only receives a cell buffer).
+trait Pane {
+    fn render(&self, frame: &mut Frame, area: Rect);
+}
+
+/// The prose column: centered, fixed-width text following the cursor.
+struct Editor<'a>(&'a App);
+/// The left strip: chapter list with the active chapter's heading outline.
+struct NavPane<'a>(&'a App);
+/// The bottom line: chapter name / counts, or the active prompt.
+struct StatusBar<'a>(&'a App);
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
@@ -28,13 +43,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(outline_w), Constraint::Min(1)])
             .split(chunks[0]);
-        draw_nav_pane(frame, app, cols[0]);
-        draw_editor(frame, app, cols[1]);
+        NavPane(app).render(frame, cols[0]);
+        Editor(app).render(frame, cols[1]);
     } else {
-        draw_editor(frame, app, chunks[0]);
+        Editor(app).render(frame, chunks[0]);
     }
 
-    draw_status(frame, app, chunks[1]);
+    StatusBar(app).render(frame, chunks[1]);
 }
 
 /// The index of the heading whose section the cursor is currently in: the last
@@ -97,104 +112,110 @@ fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<
 /// The navigation pane: the project's chapters, with the active chapter's
 /// in-chapter heading outline nested beneath it (the current section
 /// highlighted). While browsing (Nav mode), the selected chapter is reversed.
-fn draw_nav_pane(frame: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().borders(Borders::RIGHT);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+impl Pane for NavPane<'_> {
+    fn render(&self, frame: &mut Frame, area: Rect) {
+        let app = self.0;
+        let block = Block::default().borders(Borders::RIGHT);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
 
-    let header = Span::styled(
-        "CHAPTERS",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
-    );
-    let mut lines: Vec<Line> = vec![Line::from(header), Line::raw("")];
+        let header = Span::styled(
+            "CHAPTERS",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
+        let mut lines: Vec<Line> = vec![Line::from(header), Line::raw("")];
 
-    let headings = app.buffer.syntax().headings();
-    let current_heading = current_section(headings, app.buffer.cursor_byte());
+        let headings = app.buffer.syntax().headings();
+        let current_heading = current_section(headings, app.buffer.cursor_byte());
 
-    // Resolve the active index once: active_index() is an O(n) scan, so calling
-    // it per row would be O(n²) per frame.
-    let active = app.project.active_index();
+        // Resolve the active index once: active_index() is an O(n) scan, so
+        // calling it per row would be O(n²) per frame.
+        let active = app.project.active_index();
 
-    // The browser selection, if we're in Nav mode.
-    let nav_selected = match app.mode {
-        Mode::Nav { selected } => Some(selected),
-        _ => None,
-    };
+        // The browser selection, if we're in Nav mode.
+        let nav_selected = match app.mode {
+            Mode::Nav { selected } => Some(selected),
+            _ => None,
+        };
 
-    // Count each chapter once for this frame, then reuse for the rows and the
-    // total — so the active chapter's live count isn't recomputed twice.
-    let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
-        .map(|i| app.chapter_word_count(i))
-        .collect();
+        // Count each chapter once for this frame, then reuse for the rows and
+        // the total — so the active chapter's live count isn't recomputed twice.
+        let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
+            .map(|i| app.chapter_word_count(i))
+            .collect();
 
-    for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
-        let is_active = i == active;
-        let is_selected = nav_selected == Some(i);
-        lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
-        if is_active {
-            let skip = redundant_title_heading(headings, &chapter.title);
-            lines.extend(heading_outline_lines(headings, current_heading, skip));
+        for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
+            let is_active = i == active;
+            let is_selected = nav_selected == Some(i);
+            lines.push(chapter_line(&chapter.title, counts[i], is_active, is_selected));
+            if is_active {
+                let skip = redundant_title_heading(headings, &chapter.title);
+                lines.extend(heading_outline_lines(headings, current_heading, skip));
+            }
         }
+
+        // Rolled-up project total.
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            format!("{} words", counts.iter().sum::<usize>()),
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        frame.render_widget(Paragraph::new(lines), inner);
     }
-
-    // Rolled-up project total.
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        format!("{} words", counts.iter().sum::<usize>()),
-        Style::default().fg(Color::DarkGray),
-    )));
-
-    frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn draw_editor(frame: &mut Frame, app: &App, area: Rect) {
-    // Center a column of `focus_width` cells; fall back to full width if narrow.
-    let width = app.focus_width.min(area.width.saturating_sub(2));
-    let left_pad = area.width.saturating_sub(width) / 2;
-    let column = Rect {
-        x: area.x + left_pad,
-        y: area.y + 1,
-        width,
-        height: area.height.saturating_sub(1),
-    };
+impl Pane for Editor<'_> {
+    fn render(&self, frame: &mut Frame, area: Rect) {
+        let app = self.0;
+        // Center a column of `focus_width` cells; fall back to full width if narrow.
+        let width = app.focus_width.min(area.width.saturating_sub(2));
+        let left_pad = area.width.saturating_sub(width) / 2;
+        let column = Rect {
+            x: area.x + left_pad,
+            y: area.y + 1,
+            width,
+            height: area.height.saturating_sub(1),
+        };
 
-    let buffer = &app.buffer;
-    let height = column.height as usize;
+        let buffer = &app.buffer;
+        let height = column.height as usize;
 
-    // Vertically follow the cursor: keep it roughly centered in the viewport.
-    let total = buffer.line_count();
-    let cursor_line = buffer.cursor.line;
-    let top = cursor_line
-        .saturating_sub(height / 2)
-        .min(total.saturating_sub(height));
+        // Vertically follow the cursor: keep it roughly centered in the viewport.
+        let total = buffer.line_count();
+        let cursor_line = buffer.cursor.line;
+        let top = cursor_line
+            .saturating_sub(height / 2)
+            .min(total.saturating_sub(height));
 
-    // Emphasis markers are hidden, except on the span the cursor sits in (so it
-    // stays editable). Concealment shifts screen columns, so the cursor X below
-    // must be measured over the *visible* text, not the source.
-    let cursor_byte = buffer.cursor_byte();
-    let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
+        // Emphasis markers are hidden, except on the span the cursor sits in (so
+        // it stays editable). Concealment shifts screen columns, so the cursor X
+        // below must be measured over the *visible* text, not the source.
+        let cursor_byte = buffer.cursor_byte();
+        let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
 
-    let lines: Vec<Line> = (top..(top + height).min(total))
-        .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i), &conceal))
-        .collect();
+        let lines: Vec<Line> = (top..(top + height).min(total))
+            .map(|i| styled_line(buffer.syntax(), buffer.line_start_byte(i), &buffer.line(i), &conceal))
+            .collect();
 
-    let paragraph = Paragraph::new(lines).block(Block::default());
-    frame.render_widget(paragraph, column);
+        let paragraph = Paragraph::new(lines).block(Block::default());
+        frame.render_widget(paragraph, column);
 
-    // Place the terminal cursor (only in Insert mode). The cursor's own span is
-    // revealed, so the cursor never lands on a concealed character.
-    if matches!(app.mode, Mode::Insert) {
-        let screen_y = column.y + (cursor_line - top) as u16;
-        let col_width = visible_width_before(
-            &buffer.line(cursor_line),
-            buffer.line_start_byte(cursor_line),
-            cursor_byte,
-            &conceal,
-        );
-        let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
-        frame.set_cursor_position((screen_x, screen_y));
+        // Place the terminal cursor (only in Insert mode). The cursor's own span
+        // is revealed, so the cursor never lands on a concealed character.
+        if matches!(app.mode, Mode::Insert) {
+            let screen_y = column.y + (cursor_line - top) as u16;
+            let col_width = visible_width_before(
+                &buffer.line(cursor_line),
+                buffer.line_start_byte(cursor_line),
+                cursor_byte,
+                &conceal,
+            );
+            let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
+            frame.set_cursor_position((screen_x, screen_y));
+        }
     }
 }
 
@@ -286,49 +307,52 @@ fn visible_width_before(
     width
 }
 
-fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
-    let buffer = &app.buffer;
+impl Pane for StatusBar<'_> {
+    fn render(&self, frame: &mut Frame, area: Rect) {
+        let app = self.0;
+        let buffer = &app.buffer;
 
-    if let Mode::Prompt(prompt_state) = &app.mode {
-        // Label plus any typed text (empty for y/N confirmations) — two borrowed
-        // spans, no per-frame allocation.
-        let style = Style::default().fg(Color::Black).bg(Color::Yellow);
-        let prompt = Paragraph::new(Line::from(vec![
-            Span::styled(prompt_state.label.as_str(), style),
-            Span::styled(prompt_state.input.as_str(), style),
-        ]));
-        frame.render_widget(prompt, area);
-        return;
+        if let Mode::Prompt(prompt_state) = &app.mode {
+            // Label plus any typed text (empty for y/N confirmations) — two
+            // borrowed spans, no per-frame allocation.
+            let style = Style::default().fg(Color::Black).bg(Color::Yellow);
+            let prompt = Paragraph::new(Line::from(vec![
+                Span::styled(prompt_state.label.as_str(), style),
+                Span::styled(prompt_state.input.as_str(), style),
+            ]));
+            frame.render_widget(prompt, area);
+            return;
+        }
+
+        // The manifest is the source of truth for the active chapter's name;
+        // every real (and scratch) project always has an active chapter.
+        let name = app.project.active_title().unwrap_or("[untitled]");
+        let dirty = if buffer.dirty { " ●" } else { "" };
+        let left = format!(" {name}{dirty}");
+        let right = match &app.message {
+            Some(m) => format!("{m}  "),
+            None => format!(
+                "{} words · ln {}/{}  ",
+                buffer.word_count(),
+                buffer.cursor.line + 1,
+                buffer.line_count()
+            ),
+        };
+
+        let pad = (area.width as usize)
+            .saturating_sub(left.len() + right.len())
+            .max(1);
+        let line = Line::from(vec![
+            Span::styled(left, Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" ".repeat(pad)),
+            Span::styled(right, Style::default().fg(Color::DarkGray)),
+        ]);
+
+        frame.render_widget(
+            Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 36))),
+            area,
+        );
     }
-
-    // The manifest is the source of truth for the active chapter's name; every
-    // real (and scratch) project always has an active chapter.
-    let name = app.project.active_title().unwrap_or("[untitled]");
-    let dirty = if buffer.dirty { " ●" } else { "" };
-    let left = format!(" {name}{dirty}");
-    let right = match &app.message {
-        Some(m) => format!("{m}  "),
-        None => format!(
-            "{} words · ln {}/{}  ",
-            buffer.word_count(),
-            buffer.cursor.line + 1,
-            buffer.line_count()
-        ),
-    };
-
-    let pad = (area.width as usize)
-        .saturating_sub(left.len() + right.len())
-        .max(1);
-    let line = Line::from(vec![
-        Span::styled(left, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" ".repeat(pad)),
-        Span::styled(right, Style::default().fg(Color::DarkGray)),
-    ]);
-
-    frame.render_widget(
-        Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 36))),
-        area,
-    );
 }
 
 #[cfg(test)]
