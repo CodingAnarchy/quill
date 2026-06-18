@@ -585,6 +585,9 @@ impl App {
                         // All text prompts return to the chapter they acted on;
                         // a new chapter lands on the one just created.
                         let fallback = nav_return.unwrap_or(0);
+                        // For the optional book fields, empty input clears them
+                        // (stored as `None`); only one arm below consumes this.
+                        let optional = (!text.is_empty()).then(|| text.to_string());
                         let selected = match pending {
                             Pending::NewChapter { at } if !text.is_empty() => {
                                 self.create_chapter(at, text)
@@ -609,18 +612,15 @@ impl App {
                                 fallback
                             }
                             Pending::SetSubtitle => {
-                                let v = (!text.is_empty()).then(|| text.to_string());
-                                self.set_book_meta(|m| m.subtitle = v);
+                                self.set_book_meta(|m| m.subtitle = optional);
                                 fallback
                             }
                             Pending::SetAuthor => {
-                                let v = (!text.is_empty()).then(|| text.to_string());
-                                self.set_book_meta(|m| m.author = v);
+                                self.set_book_meta(|m| m.author = optional);
                                 fallback
                             }
                             Pending::SetSeries => {
-                                let v = (!text.is_empty()).then(|| text.to_string());
-                                self.set_book_meta(|m| m.series = v);
+                                self.set_book_meta(|m| m.series = optional);
                                 fallback
                             }
                             // Empty title for New/Rename/BookTitle: a no-op. (The
