@@ -10,6 +10,7 @@ use ropey::Rope;
 use tree_sitter::{InputEdit, Point};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::frontmatter::FrontMatter;
 use crate::syntax::Syntax;
 
 /// A cursor position expressed in (line, grapheme-column).
@@ -23,10 +24,10 @@ pub struct Cursor {
 pub struct Buffer {
     rope: Rope,
     pub path: Option<PathBuf>,
-    /// The chapter file's YAML front matter (the verbatim text between the
-    /// `---` fences), kept off the rope so the editor shows only the prose and
-    /// re-attached on save. `None` when the file has no front matter block.
-    front_matter: Option<String>,
+    /// The chapter file's YAML front matter, kept off the rope so the editor
+    /// shows only the prose and re-attached on save. `None` when the file has no
+    /// front matter block (one is created lazily when a field is first set).
+    front_matter: Option<FrontMatter>,
     pub cursor: Cursor,
     /// Whether there are unsaved changes.
     pub dirty: bool,
@@ -94,7 +95,7 @@ impl Buffer {
             syntax: Syntax::new(body),
             rope: Rope::from_str(body),
             path: Some(path),
-            front_matter: front.map(str::to_string),
+            front_matter: front.map(FrontMatter::from_raw),
             cursor: Cursor::default(),
             dirty: false,
             goal_col: None,
@@ -102,11 +103,16 @@ impl Buffer {
         })
     }
 
-    /// The chapter's front matter block, if any (verbatim YAML between the
-    /// `---` fences). The metadata tickets (#46, #48) build typed access on this.
-    #[allow(dead_code)]
-    pub fn front_matter(&self) -> Option<&str> {
-        self.front_matter.as_deref()
+    /// The chapter's front matter, if any.
+    pub fn front_matter(&self) -> Option<&FrontMatter> {
+        self.front_matter.as_ref()
+    }
+
+    /// The chapter's front matter for editing, creating an empty block the
+    /// first time a field is set. The caller marks the buffer dirty so the
+    /// change persists on the next save.
+    pub fn front_matter_mut(&mut self) -> &mut FrontMatter {
+        self.front_matter.get_or_insert_with(FrontMatter::default)
     }
 
     /// Persist the buffer to its path. Returns an error if there is no path.
@@ -124,7 +130,12 @@ impl Buffer {
             .ok_or_else(|| std::io::Error::other("no file path set"))?;
 
         let body = normalize_trailing_newline(&self.rope.to_string());
-        let content = crate::frontmatter::join(self.front_matter.as_deref(), &body);
+        let front = self
+            .front_matter
+            .as_ref()
+            .filter(|f| !f.is_empty())
+            .map(FrontMatter::as_str);
+        let content = crate::frontmatter::join(front, &body);
         std::fs::write(path, content.as_bytes())?;
         self.dirty = false;
         Ok(())
