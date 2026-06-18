@@ -18,6 +18,14 @@ keystrokes that stay out of the way.
 - **Markdown-aware editing** — incremental `tree-sitter` parse drives live
   syntax highlighting, soft-rendered emphasis (markers hidden until you edit a
   span), and an in-chapter outline (Ctrl-O).
+- **Project as a folder of chapters** — a `book.toml` manifest plus one
+  Markdown file per chapter; create, rename, reorder, and delete chapters from
+  the chapter browser (Ctrl-G) without touching the filesystem.
+- **Two editing views** — chapter-at-a-time (default) or a continuous
+  manuscript (Ctrl-L) that flows across chapter boundaries and writes edits back
+  to the right files, while never holding more than ~3 chapters in memory.
+- **Rolled-up word counts** — live per-chapter counts and a project total in the
+  chapter pane.
 
 ## Build & run
 
@@ -52,6 +60,7 @@ byte-for-byte.
 | Ctrl-S         | save                            |
 | Ctrl-Q         | quit (prompts if unsaved)       |
 | Ctrl-O         | toggle the chapter pane         |
+| Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter)    |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
@@ -63,15 +72,26 @@ In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 
 ```
 src/
-  main.rs    terminal setup + event loop
-  app.rs     application state, modes, key handling
-  buffer.rs  rope-backed document, cursor, editing & movement
-  ui.rs      rendering: centered page + status line
+  main.rs        terminal setup + event loop
+  app.rs         application state, modes, key handling
+  buffer.rs      rope-backed document, cursor, editing & movement
+  project.rs     project model: manifest + per-chapter files
+  manuscript.rs  continuous view: a window of chapters as one buffer
+  syntax.rs      incremental tree-sitter Markdown parse
+  ui.rs          rendering: panes, centered page + status line
 ```
 
 ## Roadmap
 
-### Project structure: a project is a folder of chapter files
+The Markdown manuscript format and the project model below have **shipped** — see
+the Features section above. The remaining sections are forward-looking.
+
+### Project structure: a project is a folder of chapter files — ✅ Shipped
+
+Delivered: per-chapter files with a `book.toml` manifest, chapter
+create/rename/reorder/delete, rolled-up word counts, and the windowed
+continuous-manuscript view (Ctrl-L). The series → book → act grouping below
+remains future work; today's manifest is a flat ordered chapter list.
 
 - A Quill project is a **directory**: each chapter is its own Markdown file, and
   a root **manifest** records the tree — an optional **series** containing one or
