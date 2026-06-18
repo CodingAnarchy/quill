@@ -38,7 +38,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    /// An empty, untitled buffer.
+    /// An empty, untitled buffer. Used by tests today; the path for a freshly
+    /// created chapter before its first save (#24) will reuse it.
+    #[allow(dead_code)]
     pub fn empty() -> Self {
         Self {
             rope: Rope::new(),

@@ -50,10 +50,13 @@ worth driving the real binary in a PTY and capturing the screen. We use `tmux`
 
 ```sh
 cargo build
-printf '# Title\n\nThe night was *dark* and **long**.\n' > /tmp/quill-sample.md
+# Quill operates on a project directory; seed one with a manifest + chapter.
+rm -rf /tmp/quill-sample && mkdir -p /tmp/quill-sample
+printf 'title = "Sample"\n\n[[chapters]]\ntitle = "One"\nfile = "one.md"\n' > /tmp/quill-sample/book.toml
+printf '# Title\n\nThe night was *dark* and **long**.\n' > /tmp/quill-sample/one.md
 
 tmux kill-session -t quill 2>/dev/null
-tmux new-session -d -s quill -x 90 -y 16 "target/debug/quill /tmp/quill-sample.md"
+tmux new-session -d -s quill -x 90 -y 16 "target/debug/quill /tmp/quill-sample"
 
 # Bounded wait for first paint (no foreground `sleep`; poll until content shows).
 i=0; until tmux capture-pane -p -t quill 2>/dev/null | grep -q "Title"; do
