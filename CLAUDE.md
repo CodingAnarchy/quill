@@ -7,6 +7,18 @@ feature specs. Storage model: one chapter per file; a buffer holds one chapter
 (single-chapter view) or at most ~3 chapters (continuous view), never the whole
 novel.
 
+## Code conventions
+
+- **`use` imports go at the top of the module**, after the module doc comment —
+  not inside functions or partway down the file. Test modules follow the same
+  rule: put the test `use`s at the top of the `#[cfg(test)] mod tests` block,
+  not inside individual `#[test]` fns.
+- **Prefer a `use` import over spelling out a full module path** at the call
+  site. Write `use std::fs;` then `fs::write(...)`, or `use crate::buffer::count_words;`
+  then `count_words(...)` — not `std::fs::write(...)` / `crate::buffer::count_words(...)`
+  inline. (Disambiguate with a partial path or `as` alias only when two names
+  would otherwise collide.)
+
 ## Standard checks
 
 Run these before opening a PR:
