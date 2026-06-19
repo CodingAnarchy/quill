@@ -11,6 +11,7 @@
 pub mod bible;
 pub mod character;
 pub mod continuity;
+pub mod cost;
 pub mod naming;
 pub mod scaffold;
 pub mod setting;
@@ -129,6 +130,9 @@ pub struct Settings {
     /// API key, if set in the config file. The `ANTHROPIC_API_KEY` env var
     /// overrides this (see [`Settings::load`]).
     pub api_key: Option<String>,
+    /// Confirm before any pass whose estimated cost exceeds this many dollars.
+    /// Cheap passes (under it) run without a prompt.
+    pub cost_threshold: f64,
 }
 
 impl Default for Settings {
@@ -138,6 +142,7 @@ impl Default for Settings {
             offline: false,
             model: default_model(),
             api_key: None,
+            cost_threshold: 0.20,
         }
     }
 }
@@ -262,7 +267,7 @@ mod tests {
 
     #[test]
     fn check_ready_reports_why_not() {
-        let mut s = Settings { enabled: true, offline: false, model: default_model(), api_key: Some("k".into()) };
+        let mut s = Settings { enabled: true, offline: false, model: default_model(), api_key: Some("k".into()), cost_threshold: 0.20 };
         s.check_ready().unwrap();
         s.offline = true;
         assert!(matches!(s.check_ready(), Err(AiError::NotConfigured(_))));

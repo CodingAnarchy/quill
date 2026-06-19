@@ -61,6 +61,8 @@ pub(crate) enum AiAction {
     Naming,
     Style,
     Submission,
+    /// Open the accumulated revision-triage findings (local; no request).
+    Triage,
 }
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.
@@ -69,8 +71,9 @@ pub struct Findings {
     pub(crate) selected: usize,
 }
 
-/// One triageable finding (a continuity contradiction). UI-shaped — the AI
-/// layer maps its typed findings into this for display.
+/// One triageable finding (a continuity contradiction, style note, …). UI-shaped
+/// — the AI layer maps its typed findings into this for display.
+#[derive(Clone, PartialEq)]
 pub struct Finding {
     /// One-line summary shown in the list (e.g. "object: the locket …").
     pub(crate) summary: String,
@@ -141,6 +144,8 @@ pub(crate) enum Pending {
     Rename { at: usize },
     /// Text input: a question to ask the AI about the manuscript.
     AskAi,
+    /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.
+    ConfirmAi(AiAction),
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.
