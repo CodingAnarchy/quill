@@ -2,12 +2,15 @@
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use ratatui::text::Line;
+
 use crate::buffer::Buffer;
-use crate::date::Date;
+use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
+use crate::history;
 use crate::manuscript::Manuscript;
 use crate::project::{Manifest, Project};
-use crate::report;
+use crate::report::{self, Momentum};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
@@ -107,17 +110,25 @@ pub struct App {
     pub focus_width: u16,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
-    /// When `Some`, the progress report is open: its pre-computed lines, shown
+    /// When `Some`, the progress report is open: its pre-computed rows, shown
     /// full-screen until any key dismisses it. Computed once on open so the
     /// report (which scans files for TODO markers) isn't rebuilt per frame.
-    pub report: Option<Vec<String>>,
+    pub report: Option<Vec<Line<'static>>>,
+    /// Words inserted / deleted today, the count of words moved out of the
+    /// manuscript today (deleted chapters), and the running word total they're
+    /// measured against. Seeded from the day's snapshot on load; fed to the
+    /// progress report and persisted to the history log.
+    added: usize,
+    removed: usize,
+    moved_to_unused: usize,
+    last_words: usize,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
 
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
-        Self {
+        let mut app = Self {
             buffer,
             project,
             manuscript: None,
@@ -126,8 +137,15 @@ impl App {
             focus_width: 72,
             outline_visible: false,
             report: None,
+            added: 0,
+            removed: 0,
+            moved_to_unused: 0,
+            last_words: 0,
             message: None,
-        }
+        };
+        // Baseline for the daily word tally: edits move it from here.
+        app.last_words = app.project_word_count();
+        app
     }
 
     /// The buffer the author is currently editing: the continuous-view buffer
@@ -153,10 +171,49 @@ impl App {
         }
     }
 
-    /// Reparse the active edit buffer once input goes idle (called from the
-    /// event loop). Routes to whichever buffer is being edited.
-    pub fn refresh_syntax(&mut self) {
+    /// Called from the event loop once input goes idle: reparse the active
+    /// buffer for highlighting, and book the day's word delta. Both are off the
+    /// keystroke path, so typing stays instant.
+    pub fn on_idle(&mut self) {
         self.edit_buffer_mut().refresh_syntax();
+        self.tally_words();
+    }
+
+    /// Attribute the change in total words since the last idle tick to today's
+    /// added / removed counters. Structural edits (chapter delete) reset the
+    /// baseline themselves so they aren't booked as prose.
+    fn tally_words(&mut self) {
+        let words = self.project_word_count();
+        let delta = words as i64 - self.last_words as i64;
+        if delta > 0 {
+            self.added += delta as usize;
+        } else {
+            self.removed += (-delta) as usize;
+        }
+        self.last_words = words;
+    }
+
+    /// Seed today's counters from the history log (resume the day across a
+    /// reopen). Called once at startup after the project is open.
+    pub fn load_history(&mut self) {
+        if let Some(snap) = history::for_date(&self.project.root, &date::iso(date::today())) {
+            self.added = snap.added;
+            self.removed = snap.removed;
+            self.moved_to_unused = snap.moved_to_unused;
+        }
+    }
+
+    /// Write today's snapshot to the history log (best-effort).
+    pub fn persist_snapshot(&self) {
+        let snapshot = history::Snapshot {
+            date: date::iso(date::today()),
+            words: self.project_word_count(),
+            added: self.added,
+            removed: self.removed,
+            todo: self.count_todo(),
+            moved_to_unused: self.moved_to_unused,
+        };
+        let _ = history::persist(&self.project.root, &snapshot);
     }
 
     /// Whether the active edit target has unsaved changes (either view).
@@ -185,14 +242,20 @@ impl App {
             .sum()
     }
 
-    /// The progress report's content lines, computed once when it's opened.
-    fn report_lines(&self) -> Vec<String> {
+    /// The progress report's rows, computed once when it's opened.
+    fn report_lines(&self) -> Vec<Line<'static>> {
+        let momentum = Momentum {
+            added: self.added,
+            removed: self.removed,
+            moved_to_unused: self.moved_to_unused,
+        };
         report::lines(
             &self.project.manifest,
             self.project_word_count(),
             self.chapter_count(),
             self.count_todo(),
-            Date::today(),
+            &momentum,
+            date::today(),
         )
     }
 
@@ -380,6 +443,8 @@ impl App {
                 Err(e) => self.message = Some(format!("Save failed: {e}")),
             }
         }
+        // Checkpoint today's momentum to the history log.
+        self.persist_snapshot();
     }
 
     fn next_chapter(&mut self) {
@@ -444,6 +509,9 @@ impl App {
             // Persist the latest text first so the copy moved to unused/ is current.
             let _ = self.buffer.save();
         }
+        // The chapter's words leave the manuscript — booked as "moved to unused"
+        // today, not as words deleted (that's prose editing).
+        let removed_words = self.chapter_word_count(at);
         if let Err(e) = self.project.remove_chapter(at) {
             self.message = Some(format!("Delete failed: {e}"));
             return at.min(self.chapter_count() - 1);
@@ -458,6 +526,9 @@ impl App {
                 Err(e) => self.message = Some(format!("Open failed: {e}")),
             }
         }
+        self.moved_to_unused += removed_words;
+        // Absorb the structural drop so the next tally doesn't book it as removed.
+        self.last_words = self.project_word_count();
         self.message = Some("Moved chapter to unused/".into());
         at.min(self.chapter_count() - 1)
     }
@@ -1361,14 +1432,69 @@ mod tests {
 
         app.on_key(ctrl('r'));
         let report = app.report.as_ref().expect("report should be open");
-        // It rendered the story line against the goals.
-        assert!(report.iter().any(|l| l.contains("/ 150,000  words")), "{report:?}");
+        // It rendered the story line against the goals (styled rows → span text).
+        let line_text = |l: &Line| l.spans.iter().map(|s| s.content.to_string()).collect::<String>();
+        assert!(report.iter().any(|l| line_text(l).contains("/ 150,000  words")), "no story line");
 
         app.on_key(key(KeyCode::Char('x'))); // any key closes it (no edit)
         assert!(app.report.is_none());
         assert!(!app.buffer.line(0).contains('x'), "the dismissing key must not edit");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn idle_tallies_words_added_then_removed() {
+        let (mut app, dir) = two_chapter_app("tally"); // ch0 "first chapter" (2 words)
+        typed(&mut app, "new words "); // → "new words first chapter" (4 words): +2
+        app.on_idle();
+        assert_eq!(app.added, 2);
+        assert_eq!(app.removed, 0);
+
+        for _ in 0..10 {
+            app.on_key(key(KeyCode::Backspace)); // delete "new words " back out
+        }
+        app.on_idle();
+        assert_eq!(app.added, 2); // unchanged
+        assert_eq!(app.removed, 2);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn deleting_a_chapter_books_moved_to_unused_not_removed() {
+        let (mut app, dir) = two_chapter_app("moved"); // ch1 "second chapter" (2 words)
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Down)); // select chapter 1
+        app.on_key(key(KeyCode::Char('d')));
+        app.on_key(key(KeyCode::Char('y'))); // confirm delete
+        assert_eq!(app.moved_to_unused, 2);
+        assert_eq!(app.removed, 0);
+
+        app.on_idle(); // the structural drop is not re-booked as removed
+        assert_eq!(app.removed, 0);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn momentum_persists_and_resumes_across_a_reopen() {
+        let (mut app, dir) = two_chapter_app("resume");
+        app.added = 100;
+        app.removed = 5;
+        app.moved_to_unused = 3;
+        app.persist_snapshot();
+
+        // A fresh session over the same project resumes today's counters.
+        let project = Project::open(&dir).unwrap();
+        let buffer = Buffer::from_path(project.active_path()).unwrap();
+        let mut reopened = App::new(buffer, project);
+        reopened.load_history();
+        assert_eq!(reopened.added, 100);
+        assert_eq!(reopened.removed, 5);
+        assert_eq!(reopened.moved_to_unused, 3);
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

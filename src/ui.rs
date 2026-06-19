@@ -63,12 +63,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 /// Render the progress report full-screen in a bordered box.
-fn draw_report(frame: &mut Frame, area: Rect, title: &str, lines: &[String]) {
+fn draw_report(frame: &mut Frame, area: Rect, title: &str, lines: &[Line<'static>]) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {title} — progress (any key to close) "));
-    let body: Vec<Line> = lines.iter().map(|l| Line::raw(l.clone())).collect();
-    frame.render_widget(Paragraph::new(body).block(block), area);
+    frame.render_widget(Paragraph::new(lines.to_vec()).block(block), area);
 }
 
 /// The index of the heading whose section the cursor is currently in: the last

@@ -74,27 +74,35 @@ simply not rendered.
 ## Tracked data
 
 To compute deltas and rates, Quill keeps a per-day snapshot log (append-only,
-e.g. `.quill/history.jsonl` inside the project). One record is written per
-report/day, with the running edit counters reset at the local day boundary.
+`.quill/history.jsonl` inside the project). One record is written per report/day
+(re-written in place if it already exists, so there's one line per day), with
+the running edit counters reset at the day boundary. The boundary is the
+author's *local* midnight: `date::today()` reads `OffsetDateTime::now_local()`
+(via the `time` crate), falling back to UTC if the platform won't yield a local
+offset.
 
 ```jsonc
 {
   "date": "2026-06-16",
   "words": 163204,            // total manuscript words (excludes unused)
-  "acts": [55501, 61240, 28110, 18353],   // words per act, same order as goals.acts
   "added": 3143,             // words inserted today
   "removed": 283,            // words deleted today
-  "act_added":   [12, 1486, 627, 1018],
-  "act_removed": [16, 159, 106, 2],
-  "moved_to_unused": 0,       // words relocated into the unused heading today
-  "xxx": 12                  // count of TODO markers in the manuscript
+  "moved_to_unused": 0,       // words relocated out of the manuscript today
+  "todo": 12                  // count of TODO markers in the manuscript
 }
 ```
 
-- `added`/`removed` are accumulated live as the author types (insert and delete
-  events tally word-boundary changes), attributed to the act the edit occurred
-  in.
-- `words` and `xxx` are measured from the buffer at report time.
+- `added`/`removed` are accumulated live as the author types: the idle handler
+  (after each input burst) re-tallies the project word count and books the
+  signed delta against a running baseline, so keystrokes stay record-only.
+- `moved_to_unused` is, for now, the words removed by **deleting a chapter** —
+  structural drops are booked here rather than as `removed`, and the baseline is
+  reset so the deletion isn't counted as prose loss. The `unused` *heading*
+  exclusion (moving sections under it) lands with #53.
+- The per-act snapshot fields (`acts`, `act_added`, `act_removed`) and the "act
+  deltas" report block land with #60; this log currently tracks the manuscript
+  totals only.
+- `words` and `todo` are measured from the buffer at report time.
 - "today" = changes since the most recent prior snapshot (or `start_date` on day
   one).
 
@@ -134,5 +142,7 @@ color-coded (green for gains, red for losses) in the TUI.
   override in `goals`.
 - **Act attribution of edits** depends on the structure parse (tree-sitter
   outline) being current; recompute the active act on cursor move.
-- **Day boundary / timezone** for resetting daily counters — use the local
-  date; make it configurable for writers who work past midnight.
+- **Day boundary / timezone** for resetting daily counters — resolved: use the
+  author's local date (`time::OffsetDateTime::now_local`, UTC fallback). A
+  configurable "my day ends at 3am" offset is deferred until someone asks; the
+  local midnight is the sensible default.

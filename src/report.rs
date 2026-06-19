@@ -9,17 +9,36 @@
 //! [`lines`] to return styled rows (`Vec<Line>` or a small typed enum the UI
 //! colors) and add delta rows — not re-parse these strings for `+`/`-`.
 
-use crate::date::Date;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use time::Date;
+
+use crate::date;
 use crate::project::Manifest;
 
-/// Build the report's content lines for a project with `words` total words and
-/// `chapters` chapters, `todo` TODO markers, as of `today`. Returns a short
-/// hint when no goals are set.
-pub fn lines(manifest: &Manifest, words: usize, chapters: usize, todo: usize, today: Date) -> Vec<String> {
+/// Today's writing momentum, fed into the report from the daily counters.
+pub struct Momentum {
+    pub added: usize,
+    pub removed: usize,
+    pub moved_to_unused: usize,
+}
+
+/// Build the report's rows for a project with `words` total words, `chapters`
+/// chapters, `todo` TODO markers, and today's `momentum`, as of `today`. Rows
+/// are styled (the word delta is colored). Returns a short hint when no goals
+/// are set.
+pub fn lines(
+    manifest: &Manifest,
+    words: usize,
+    chapters: usize,
+    todo: usize,
+    momentum: &Momentum,
+    today: Date,
+) -> Vec<Line<'static>> {
     let Some(goals) = &manifest.goals else {
         return vec![
-            "No writing goals set.".to_string(),
-            "Add a [goals] block to book.toml (words, chapters).".to_string(),
+            Line::raw("No writing goals set."),
+            Line::raw("Add a [goals] block to book.toml (words, chapters)."),
         ];
     };
 
@@ -28,60 +47,94 @@ pub fn lines(manifest: &Manifest, words: usize, chapters: usize, todo: usize, to
     let pages = (words / wpp) as i64;
 
     // --- Story: completion against the goals -------------------------------
-    out.push(format!(
+    out.push(Line::raw(format!(
         "story :   {} / {}  words ( {} )",
         thousands(words as i64),
         thousands(goals.words as i64),
         percent(words, goals.words),
-    ));
-    out.push(format!(
+    )));
+    out.push(Line::raw(format!(
         "          {} / {}  pages",
         thousands(pages),
         thousands((goals.words / wpp) as i64),
-    ));
-    out.push(format!(
+    )));
+    out.push(Line::raw(format!(
         "          {} / {} chapters ( {} )",
         chapters,
         goals.chapters,
         percent(chapters, goals.chapters),
-    ));
+    )));
 
     // --- Projection: extrapolate current chapter pace to the whole book ----
     // f = chapter completion; projected words Wp = W / f. Computed once.
     let projection = Projection::of(words, chapters, goals, wpp);
     if let Some(p) = projection {
-        out.push(String::new());
-        out.push(format!("          expansion ratio: {:.2}", p.ratio));
-        out.push(format!("          words at this ratio: {}", thousands(p.words)));
-        out.push(format!("          pages at this ratio: {}", thousands(p.pages)));
-        out.push(String::new());
-        out.push(format!(
+        out.push(Line::raw(""));
+        out.push(Line::raw(format!("          expansion ratio: {:.2}", p.ratio)));
+        out.push(Line::raw(format!("          words at this ratio: {}", thousands(p.words))));
+        out.push(Line::raw(format!("          pages at this ratio: {}", thousands(p.pages))));
+        out.push(Line::raw(""));
+        out.push(Line::raw(format!(
             "          {} / {} words at this ratio ( {} )",
             thousands(words as i64),
             thousands(p.words),
             percent(chapters, goals.chapters), // == W / Wp by construction
-        ));
-        out.push(format!("          {} / {} pages at this ratio", thousands(pages), thousands(p.pages)));
+        )));
+        out.push(Line::raw(format!(
+            "          {} / {} pages at this ratio",
+            thousands(pages),
+            thousands(p.pages),
+        )));
     }
 
-    // --- Markers ----------------------------------------------------------
-    out.push(String::new());
-    out.push(format!("xxx:               {todo}"));
+    // --- Markers & today's momentum ---------------------------------------
+    out.push(Line::raw(""));
+    out.push(Line::raw(format!("xxx:               {todo}")));
+    out.push(Line::raw(format!(
+        "moved to unused:   {}",
+        thousands(momentum.moved_to_unused as i64),
+    )));
+    out.push(Line::raw(""));
+    out.push(delta_line(momentum));
 
     // --- Rate & projected completion --------------------------------------
-    if let Some(start) = manifest.start_date.as_deref().and_then(Date::parse) {
-        let days = today.days_since(start).max(0);
+    if let Some(start) = manifest.start_date.as_deref().and_then(date::parse) {
+        let days = date::days_between(start, today).max(0);
         let rate = words as i64 / days.max(1); // floor(W / days)
-        out.push(String::new());
-        out.push(format!("days since start:  {}", thousands(days)));
-        out.push(format!("average rate:      {} words / day", thousands(rate)));
-        out.push(to_go("to go:            ", goals.words as i64 - words as i64, rate, today));
+        out.push(Line::raw(""));
+        out.push(Line::raw(format!("days since start:  {}", thousands(days))));
+        out.push(Line::raw(format!("average rate:      {} words / day", thousands(rate))));
+        out.push(Line::raw(to_go("to go:            ", goals.words as i64 - words as i64, rate, today)));
         if let Some(p) = projection {
-            out.push(to_go("to go (expansion):", p.words - words as i64, rate, today));
+            out.push(Line::raw(to_go("to go (expansion):", p.words - words as i64, rate, today)));
         }
     }
 
     out
+}
+
+/// The "today's word delta" row, with the net colored green (gain) or red (loss)
+/// and the additions/deletions breakdown dimmed.
+fn delta_line(momentum: &Momentum) -> Line<'static> {
+    let net = momentum.added as i64 - momentum.removed as i64;
+    let color = if net >= 0 { Color::Green } else { Color::Red };
+    let signed = if net >= 0 {
+        format!("+{}", thousands(net))
+    } else {
+        thousands(net)
+    };
+    Line::from(vec![
+        Span::raw("today's word delta: "),
+        Span::styled(signed, Style::default().fg(color)),
+        Span::styled(
+            format!(
+                "   (+{} -{})",
+                thousands(momentum.added as i64),
+                thousands(momentum.removed as i64),
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ])
 }
 
 /// The projected final manuscript, extrapolating the current chapter pace to
@@ -122,7 +175,7 @@ fn to_go(label: &str, remaining: i64, rate: i64, today: Date) -> String {
         "{label} {} words ; {} days ( {} )",
         thousands(words),
         thousands(days),
-        today.add_days(days),
+        date::human(date::add_days(today, days)),
     )
 }
 
@@ -177,11 +230,28 @@ mod tests {
         }
     }
 
+    /// The plain text of styled rows, for content assertions.
+    fn text(rows: &[Line]) -> String {
+        rows.iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn momentum() -> Momentum {
+        Momentum {
+            added: 3143,
+            removed: 283,
+            moved_to_unused: 0,
+        }
+    }
+
     #[test]
     fn reproduces_the_worked_example() {
         // The spec's sample, as of report date 2026-06-16 (156 days in).
-        let today = Date::parse("2026-06-16").unwrap();
-        let report = lines(&manifest(), 163_204, 56, 12, today).join("\n");
+        let today = date::parse("2026-06-16").unwrap();
+        let rows = lines(&manifest(), 163_204, 56, 12, &momentum(), today);
+        let report = text(&rows);
 
         assert!(report.contains("story :   163,204 / 150,000  words ( 108.80 % )"), "{report}");
         assert!(report.contains("652 / 600  pages"), "{report}");
@@ -191,6 +261,8 @@ mod tests {
         assert!(report.contains("pages at this ratio: 699"), "{report}");
         assert!(report.contains("163,204 / 174,861 words at this ratio ( 93.33 % )"), "{report}");
         assert!(report.contains("xxx:               12"), "{report}");
+        assert!(report.contains("moved to unused:   0"), "{report}");
+        assert!(report.contains("today's word delta: +2,860   (+3,143 -283)"), "{report}");
         assert!(report.contains("days since start:  156"), "{report}");
         assert!(report.contains("average rate:      1,046 words / day"), "{report}");
         assert!(report.contains("to go:             0 words ; 0 days ( 16 Jun 2026 )"), "{report}");
@@ -198,11 +270,27 @@ mod tests {
     }
 
     #[test]
+    fn word_delta_is_colored_by_sign() {
+        let today = date::parse("2026-06-16").unwrap();
+
+        let gain = lines(&manifest(), 1000, 2, 0, &momentum(), today);
+        let row = gain.iter().find(|l| text(std::slice::from_ref(l)).contains("today's word delta")).unwrap();
+        assert_eq!(row.spans[1].content, "+2,860");
+        assert_eq!(row.spans[1].style.fg, Some(Color::Green));
+
+        let loss = Momentum { added: 10, removed: 300, moved_to_unused: 0 };
+        let rows = lines(&manifest(), 1000, 2, 0, &loss, today);
+        let row = rows.iter().find(|l| text(std::slice::from_ref(l)).contains("today's word delta")).unwrap();
+        assert_eq!(row.spans[1].content, "-290");
+        assert_eq!(row.spans[1].style.fg, Some(Color::Red));
+    }
+
+    #[test]
     fn no_goals_shows_a_hint() {
         let mut m = manifest();
         m.goals = None;
-        let report = lines(&m, 1000, 2, 0, Date::parse("2026-06-16").unwrap()).join("\n");
-        assert!(report.contains("No writing goals set."), "{report}");
+        let rows = lines(&m, 1000, 2, 0, &momentum(), date::parse("2026-06-16").unwrap());
+        assert!(text(&rows).contains("No writing goals set."), "{}", text(&rows));
     }
 
     #[test]
