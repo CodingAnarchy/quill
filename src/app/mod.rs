@@ -15,6 +15,7 @@ use ratatui::text::Line;
 use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
+use crate::ai::setting::{self, Setting};
 use crate::buffer::Buffer;
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
@@ -374,6 +375,15 @@ impl App {
         });
     }
 
+    /// Start a setting & worldbuilding pass; the setting bible + rule findings are
+    /// applied by [`App::poll_ai`].
+    fn analyze_setting(&mut self) {
+        self.spawn_ai("⟳ Building setting bible…", |backend, manuscript, model| {
+            let req = setting::build_request(manuscript, &model);
+            Outcome::Setting(backend.complete(&req).and_then(|r| setting::parse(&r.text)))
+        });
+    }
+
     /// Run an AI request on a worker thread: assemble the manuscript here, hand it
     /// (with a backend + model) to `run` off-thread, and deliver the `Outcome` via
     /// `ai_rx` for [`App::poll_ai`]. A no-op with a status message when AI isn't
@@ -420,6 +430,7 @@ impl App {
                     Outcome::Answer(r) => self.apply_qa_result(r),
                     Outcome::Characters(r) => self.apply_characters(r),
                     Outcome::Continuity(r) => self.apply_continuity(r),
+                    Outcome::Setting(r) => self.apply_setting(r),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -535,7 +546,6 @@ impl App {
     /// (conflict-reviewed like any bible file) and open the findings overlay. If
     /// the timeline was hand-edited, resolve that first; the findings follow.
     fn apply_continuity(&mut self, result: Result<Continuity, ai::AiError>) {
-        self.ai_panel = None; // a new result supersedes any prior overlay
         let cont = match result {
             Ok(c) => c,
             Err(e) => {
@@ -543,9 +553,7 @@ impl App {
                 return;
             }
         };
-
-        // Stash the findings (shown after any timeline conflict is resolved).
-        self.pending_findings = cont
+        let findings = cont
             .findings
             .iter()
             .map(|f| Finding {
@@ -553,34 +561,73 @@ impl App {
                 chapters: f.chapters.clone(),
             })
             .collect();
-
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("timeline.md");
-        match self.stage_bible(path, "timeline", |notes| {
+        self.apply_bible_with_findings(path, "timeline", |notes| {
             continuity::render_timeline(&cont, notes, &today)
-        }) {
-            Ok(_) => self.open_findings(),
+        }, findings);
+    }
+
+    /// Apply a setting pass: write `bible/setting.md` and surface rule-violation
+    /// findings.
+    fn apply_setting(&mut self, result: Result<Setting, ai::AiError>) {
+        let setting = match result {
+            Ok(s) => s,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let findings = setting
+            .findings
+            .iter()
+            .map(|f| Finding {
+                summary: format!("{}: {}", f.rule, f.violation),
+                chapters: f.chapters.clone(),
+            })
+            .collect();
+        let today = date::iso(date::today());
+        let path = self.project.root.join("bible").join("setting.md");
+        self.apply_bible_with_findings(path, "setting", |notes| {
+            setting::render(&setting, notes, &today)
+        }, findings);
+    }
+
+    /// Write a single bible file and surface a set of findings — the shared shape
+    /// of the continuity and setting passes. Clears any prior overlay, stashes the
+    /// findings, writes the file, then opens the findings overlay — or, if the
+    /// file was hand-edited, reviews that conflict first (`advance_bible_review`
+    /// flushes the findings when the review queue drains).
+    fn apply_bible_with_findings(
+        &mut self,
+        path: PathBuf,
+        name: &str,
+        render: impl Fn(&str) -> String,
+        findings: Vec<Finding>,
+    ) {
+        self.ai_panel = None;
+        self.pending_findings = findings;
+        match self.stage_bible(path, name, render) {
+            Ok(()) => self.open_findings(),
             Err(conflict) => {
-                // Resolve the timeline conflict first; advance_bible_review opens
-                // the stashed findings when its queue drains.
                 self.mode = Mode::BibleReview(Box::new(BibleReview {
                     conflicts: vec![conflict],
                     editing: None,
                 }));
-                self.message = Some("timeline edited — review, then findings".into());
+                self.message = Some(format!("{name} edited — review, then findings"));
             }
         }
     }
 
-    /// Open the stashed continuity findings as a triage overlay, or summarize when
-    /// there are none.
+    /// Open the stashed findings as a triage overlay, or summarize when there are
+    /// none (the bible file has already been written).
     fn open_findings(&mut self) {
         let items = std::mem::take(&mut self.pending_findings);
         if items.is_empty() {
             self.ai_panel = Some(vec![
-                Line::raw("Continuity check complete."),
+                Line::raw("Analysis complete."),
                 Line::raw(""),
-                Line::raw("No contradictions found. Timeline written to bible/timeline.md."),
+                Line::raw("Written to the story bible. No findings."),
             ]);
         } else {
             self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
@@ -1177,6 +1224,11 @@ impl App {
             // Timeline & continuity check (AI, opt-in).
             (true, KeyCode::Char('t')) => match self.ai.check_ready() {
                 Ok(_) => self.analyze_continuity(),
+                Err(e) => self.message = Some(e.to_string()),
+            },
+            // Setting & worldbuilding bible (AI, opt-in).
+            (true, KeyCode::Char('w')) => match self.ai.check_ready() {
+                Ok(_) => self.analyze_setting(),
                 Err(e) => self.message = Some(e.to_string()),
             },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not

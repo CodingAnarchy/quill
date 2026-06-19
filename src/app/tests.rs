@@ -943,3 +943,43 @@ fn hand_edited_timeline_reviews_then_shows_findings() {
     assert!(matches!(app.mode, Mode::Findings(_)), "findings follow the review");
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- AI: setting & worldbuilding -------------------------------------------
+
+#[test]
+fn setting_writes_bible_and_opens_rule_findings() {
+    let (mut app, dir) = two_chapter_app("setting-write");
+    let s = Setting {
+        categories: vec![setting::Category {
+            name: "Magic system".into(),
+            entries: vec![setting::Entry { name: "Casting".into(), detail: "needs a focus".into() }],
+        }],
+        gazetteer: vec!["Aldermoor".into()],
+        findings: vec![setting::RuleFinding {
+            rule: "magic needs a focus".into(),
+            violation: "casts barehanded".into(),
+            chapters: vec!["Two".into()],
+        }],
+    };
+    app.apply_setting(Ok(s));
+    let file = fs::read_to_string(dir.join("bible/setting.md")).expect("setting written");
+    assert!(file.contains("## Magic system"));
+    assert!(file.contains("## Gazetteer"));
+    assert!(matches!(app.mode, Mode::Findings(_)), "rule findings overlay opens");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn setting_with_no_violations_summarizes() {
+    let (mut app, dir) = two_chapter_app("setting-clean");
+    let s = Setting {
+        categories: vec![setting::Category { name: "Geography".into(), entries: vec![] }],
+        gazetteer: vec![],
+        findings: vec![],
+    };
+    app.apply_setting(Ok(s));
+    assert!(dir.join("bible/setting.md").exists());
+    assert!(app.ai_panel.is_some(), "summary overlay");
+    assert!(!matches!(app.mode, Mode::Findings(_)));
+    fs::remove_dir_all(&dir).ok();
+}

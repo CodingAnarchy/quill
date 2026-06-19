@@ -11,11 +11,13 @@
 pub mod bible;
 pub mod character;
 pub mod continuity;
+pub mod setting;
 mod claude;
 
 pub use character::Character;
 pub use claude::ClaudeBackend;
 pub use continuity::Continuity;
+pub use setting::Setting;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -59,6 +61,8 @@ pub enum Outcome {
     Characters(Result<Vec<Character>, AiError>),
     /// Timeline & continuity check (#75).
     Continuity(Result<Continuity, AiError>),
+    /// Setting & worldbuilding extraction + rule checks (#77).
+    Setting(Result<Setting, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).
