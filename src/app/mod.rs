@@ -320,11 +320,10 @@ impl App {
     }
 
     /// The largest valid scroll offset for the open overlay: enough to bring its
-    /// last line into view, zero when it already fits (or none is open).
+    /// last line into view, zero when it already fits (or none is open). Shares
+    /// the bound formula with the renderer ([`crate::ui::max_scroll`]).
     fn overlay_max_scroll(&self) -> u16 {
-        let Some(lines) = self.open_overlay() else { return 0 };
-        let viewport = self.viewport_height.saturating_sub(2); // top + bottom border
-        (lines.len() as u16).saturating_sub(viewport)
+        self.open_overlay().map_or(0, |lines| crate::ui::max_scroll(lines.len(), self.viewport_height))
     }
 
     /// Close the open overlay and reset its scroll.
