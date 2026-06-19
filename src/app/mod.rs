@@ -16,6 +16,7 @@ use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::setting::{self, Setting};
+use crate::analysis;
 use crate::buffer::Buffer;
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
@@ -51,6 +52,10 @@ pub struct App {
     /// full-screen until any key dismisses it. Computed once on open so the
     /// report (which scans files for TODO markers) isn't rebuilt per frame.
     pub report: Option<Vec<Line<'static>>>,
+    /// When `Some`, the local analysis report (readability, …) is open: its
+    /// pre-computed rows, shown full-screen until any key dismisses it. Computed
+    /// once on open so the per-chapter scan stays off the per-frame path.
+    pub analysis: Option<Vec<Line<'static>>>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.
@@ -96,6 +101,7 @@ impl App {
             focus_width: 72,
             outline_visible: false,
             report: None,
+            analysis: None,
             added: 0,
             removed: 0,
             moved_to_unused: 0,
@@ -285,6 +291,19 @@ impl App {
         )
     }
 
+    /// The analysis report's rows (readability per chapter + overall), computed
+    /// once when it's opened. Scans every chapter's prose (active chapter live,
+    /// the rest from disk) — on demand, never per frame.
+    fn analysis_lines(&self) -> Vec<Line<'static>> {
+        let chapters: Vec<(String, analysis::Stats)> = (0..self.chapter_count())
+            .map(|i| {
+                let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
+                (title, analysis::stats(&self.chapter_text(i)))
+            })
+            .collect();
+        analysis::lines(&self.project.manifest.title, &chapters)
+    }
+
     /// Build the per-part rows for the report: each part's display name (its
     /// `name`, or `"{label} {n}"` when unnamed), current word total, and today's
     /// added / removed within it.
@@ -350,6 +369,10 @@ impl App {
         // closes them.
         if self.report.is_some() {
             self.report = None;
+            return;
+        }
+        if self.analysis.is_some() {
+            self.analysis = None;
             return;
         }
         if self.ai_panel.is_some() {
@@ -909,6 +932,9 @@ impl App {
             }
             // Open the progress report (any key closes it).
             (true, KeyCode::Char('r')) => self.report = Some(self.report_lines()),
+            // Open the local analysis report — readability metrics (any key
+            // closes it). Ctrl-t: "text" analysis.
+            (true, KeyCode::Char('t')) => self.analysis = Some(self.analysis_lines()),
             // Open the AI command palette (opt-in). When AI isn't ready, explain
             // how to enable it rather than listing dead actions.
             (true, KeyCode::Char('a')) => match self.ai.check_ready() {

@@ -37,7 +37,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // The progress report and AI answer are full-screen read-only overlays.
     if let Some(lines) = &app.report {
-        draw_report(frame, area, &app.project.manifest.title, lines);
+        draw_overlay_report(frame, area, &app.project.manifest.title, "progress", lines);
+        return;
+    }
+    if let Some(lines) = &app.analysis {
+        draw_overlay_report(frame, area, &app.project.manifest.title, "analysis", lines);
         return;
     }
     if let Some(lines) = &app.ai_panel {
@@ -79,11 +83,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
     StatusBar(app).render(frame, chunks[1]);
 }
 
-/// Render the progress report full-screen in a bordered box.
-fn draw_report(frame: &mut Frame, area: Rect, title: &str, lines: &[Line<'static>]) {
+/// Render a full-screen read-only report (progress, analysis, …) in a bordered
+/// box. `kind` names the report in the title bar.
+fn draw_overlay_report(frame: &mut Frame, area: Rect, title: &str, kind: &str, lines: &[Line<'static>]) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {title} — progress (any key to close) "));
+        .title(format!(" {title} — {kind} (any key to close) "));
     frame.render_widget(Paragraph::new(lines.to_vec()).block(block), area);
 }
 

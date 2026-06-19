@@ -4,6 +4,7 @@
 //! Defaults to the current directory.
 
 mod ai;
+mod analysis;
 mod app;
 mod buffer;
 mod date;
