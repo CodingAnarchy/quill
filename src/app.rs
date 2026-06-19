@@ -638,10 +638,7 @@ impl App {
         let nav_return = state.nav_return;
 
         // Where to go when the prompt closes without acting.
-        let closed = match nav_return {
-            Some(selected) => Mode::Nav { selected },
-            None => Mode::Insert,
-        };
+        let closed = closed_mode(nav_return);
 
         match pending {
             Pending::Quit => match key.code {
@@ -843,10 +840,16 @@ impl App {
             Mode::EditMeta(m) => m.nav_return,
             _ => return,
         };
-        match nav_return {
-            Some(selected) => self.select(selected),
-            None => self.mode = Mode::Insert,
-        }
+        self.mode = closed_mode(nav_return);
+    }
+}
+
+/// Where an overlay (prompt or metadata editor) returns when it closes without
+/// acting: back to the chapter browser at `selected`, or to insert mode.
+fn closed_mode(nav_return: Option<usize>) -> Mode {
+    match nav_return {
+        Some(selected) => Mode::Nav { selected },
+        None => Mode::Insert,
     }
 }
 

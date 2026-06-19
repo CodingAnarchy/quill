@@ -22,7 +22,7 @@ pub fn split(text: &str) -> (Option<&str>, &str) {
     };
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
-        if line.strip_suffix('\n').unwrap_or(line) == "---" {
+        if bare(line) == "---" {
             let inner = &rest[..offset];
             let body = &rest[offset + line.len()..];
             return (Some(inner), body);
@@ -45,9 +45,10 @@ pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
 }
 
 /// An epigraph: a quotation with an optional attribution, shown above a book or
-/// chapter body. Stored as two scalar keys (`epigraph` / `epigraph_by`) in front
-/// matter, or two manifest fields for the book — a single line each, which is
-/// what the prompt UI can enter (multi-line/verse epigraphs are future work).
+/// chapter body. Stored as two keys (`epigraph` / `epigraph_by`) in front
+/// matter, or two manifest fields for the book. The quotation may be multi-line
+/// (verse) — a chapter stores it as a YAML `|` literal block, the book as a TOML
+/// `"""` block. The attribution is a single line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Epigraph {
     pub text: String,
@@ -125,13 +126,16 @@ impl Status {
 }
 
 /// A chapter's front matter, held as the verbatim block between the `---`
-/// fences. Reads and writes are **surgical**: a write replaces (or appends)
-/// only the one `key:` line, so unknown keys and an author's hand formatting are
-/// left exactly as they were — preserving the round-trip guarantee from the
+/// fences. Reads and writes are **surgical**: a write replaces (or appends) only
+/// the one key's entry, so unknown keys and an author's hand formatting are left
+/// exactly as they were — preserving the round-trip guarantee from the
 /// foundation while still giving typed access to the fields Quill manages.
 ///
-/// This handles only top-level scalar keys (the metadata Quill writes); nested
-/// or multi-line YAML values are read/preserved verbatim but not interpreted.
+/// Scope: top-level keys whose value is a scalar or a single-level literal
+/// (`|`) block (the metadata Quill writes — e.g. a multi-line epigraph). Nested
+/// mappings and sequences are preserved verbatim but not interpreted; if a
+/// future field needs those, this is where a real parse-edit-reserialize layer
+/// would go.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FrontMatter {
     raw: String,
@@ -163,7 +167,7 @@ impl FrontMatter {
         let mut lines = self.raw.lines();
         let value = lines.find_map(|line| line.strip_prefix(&prefix))?;
         let value = value.trim();
-        if value.starts_with('|') || value.starts_with('>') {
+        if value.starts_with(['|', '>']) {
             // Literal block: gather the indented / blank continuation lines.
             let mut out: Vec<String> = Vec::new();
             for line in lines {
