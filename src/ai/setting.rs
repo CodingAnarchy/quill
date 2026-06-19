@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request};
+use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a setting pass: the categorized bible, the gazetteer, and the
 /// rule-consistency findings.
@@ -115,7 +115,7 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
         cached_context: manuscript,
         user: "Extract the setting bible, gazetteer, and rule findings as specified.".to_string(),
         model: model.to_string(),
-        max_tokens: 8192,
+        max_tokens: MAX_OUTPUT_TOKENS,
         json_schema: Some(schema()),
     }
 }

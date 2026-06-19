@@ -116,6 +116,12 @@ pub fn default_model() -> String {
     "claude-opus-4-8".to_string()
 }
 
+/// Output bound shared by the structured analysis passes (continuity, setting,
+/// scaffold, character, style, submission). The cheap naming pass overrides it
+/// with its own smaller bound. One source of truth so the cost estimate and the
+/// real request agree.
+pub const MAX_OUTPUT_TOKENS: u32 = 8192;
+
 /// AI configuration, loaded from the user's home config — never the project dir,
 /// so an unpublished draft and the key stay separate. Off by default.
 #[derive(Clone, Deserialize)]

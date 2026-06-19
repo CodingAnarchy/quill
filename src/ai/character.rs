@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request};
+use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// One character's profile. The serde fields the model fills define the JSON
 /// schema; `mentions`/`last_chapter` are enriched locally after extraction.
@@ -142,7 +142,7 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
         cached_context: manuscript,
         user: "Extract the character profiles as specified.".to_string(),
         model: model.to_string(),
-        max_tokens: 8192,
+        max_tokens: MAX_OUTPUT_TOKENS,
         json_schema: Some(schema()),
     }
 }

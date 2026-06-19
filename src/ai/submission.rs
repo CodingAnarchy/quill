@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{AiError, Request};
+use super::{AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The three submission documents.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -56,7 +56,7 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
         cached_context: manuscript,
         user: "Write the synopsis, blurb, and query letter as specified.".to_string(),
         model: model.to_string(),
-        max_tokens: 8192,
+        max_tokens: MAX_OUTPUT_TOKENS,
         json_schema: Some(schema()),
     }
 }

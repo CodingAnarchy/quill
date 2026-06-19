@@ -12,7 +12,9 @@ use super::Request;
 use super::AiError;
 
 /// The model for this pass — cheap and high-volume by design.
-const MODEL: &str = "claude-haiku-4-5";
+pub const MODEL: &str = "claude-haiku-4-5";
+/// Output bound for this pass (findings are short; cheaper than the default).
+pub const MAX_TOKENS: u32 = 4096;
 
 /// The result of a naming pass: one finding per inconsistent name/term cluster.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -84,7 +86,7 @@ pub fn build_request(manuscript: String, entities: &[String]) -> Request {
         cached_context: manuscript,
         user,
         model: MODEL.to_string(),
-        max_tokens: 4096,
+        max_tokens: MAX_TOKENS,
         json_schema: Some(schema()),
     }
 }

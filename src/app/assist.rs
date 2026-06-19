@@ -57,22 +57,29 @@ impl App {
     /// cost confirm first when the estimate exceeds the threshold; the local /
     /// interactive actions (Ask, Triage) run immediately.
     pub(crate) fn start_ai_action(&mut self, action: AiAction) {
-        // Local or interactive — no whole-manuscript request to estimate.
-        if matches!(action, AiAction::Ask | AiAction::Triage) {
+        let Some((model, max_tokens)) = self.cost_profile(action) else {
+            // Local or interactive — no whole-manuscript request to estimate.
             self.run_ai_action(action);
             return;
-        }
-        let model = if matches!(action, AiAction::Naming) {
-            "claude-haiku-4-5"
-        } else {
-            &self.ai.model
         };
-        let est = cost::estimate(self.manuscript_text().len(), 8192, model);
+        let est = cost::estimate(self.manuscript_text().len(), max_tokens, model);
         if est.dollars > self.ai.cost_threshold {
             let label = format!("{} — run? (y/N)", cost::label(&est, model));
             self.open_prompt(Pending::ConfirmAi(action), label, "", None);
         } else {
             self.run_ai_action(action);
+        }
+    }
+
+    /// The model and output bound a network pass will send — the inputs to its
+    /// cost estimate, read from the same constants the request builders use so
+    /// the estimate can't drift from the real request. `None` for the local /
+    /// interactive actions (Ask, Triage), which issue no costed pass.
+    fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
+        match action {
+            AiAction::Ask | AiAction::Triage => None,
+            AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
+            _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
     }
 
