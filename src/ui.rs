@@ -9,8 +9,6 @@ use ratatui::{
     Frame,
 };
 
-use similar::{ChangeTag, TextDiff};
-
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::mode::{BibleReview, Mode};
@@ -112,14 +110,13 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         )),
         Line::raw(""),
     ];
-    for change in TextDiff::from_lines(&front.current, &front.proposed).iter_all_changes() {
-        let (sign, color) = match change.tag() {
-            ChangeTag::Delete => ("-", Color::Red),
-            ChangeTag::Insert => ("+", Color::Green),
-            ChangeTag::Equal => (" ", Color::DarkGray),
+    for change in &front.diff {
+        let color = match change.chars().next() {
+            Some('-') => Color::Red,
+            Some('+') => Color::Green,
+            _ => Color::DarkGray,
         };
-        let body = change.value().trim_end_matches('\n').to_string();
-        lines.push(Line::from(Span::styled(format!("{sign}{body}"), Style::default().fg(color))));
+        lines.push(Line::from(Span::styled(change.clone(), Style::default().fg(color))));
     }
 
     let block = Block::default().borders(Borders::ALL).title(format!(

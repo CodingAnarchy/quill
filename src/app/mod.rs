@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
+use similar::{ChangeTag, TextDiff};
+
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use ratatui::text::Line;
@@ -463,10 +465,14 @@ impl App {
             match existing {
                 // Hand-edited generated block: don't clobber — queue for review.
                 Some(current) if character::is_hand_edited(&current) => {
-                    conflicts.push(BibleConflict { path, name: c.name.clone(), current, proposed });
+                    let diff = unified_diff(&current, &proposed);
+                    conflicts.push(BibleConflict { path, name: c.name.clone(), proposed, diff });
                 }
-                _ if std::fs::write(&path, &proposed).is_ok() => written += 1,
-                _ => {}
+                _ => {
+                    if std::fs::write(&path, &proposed).is_ok() {
+                        written += 1;
+                    }
+                }
             }
         }
 
@@ -1143,29 +1149,40 @@ impl App {
     }
 
     fn on_key_edit_meta(&mut self, key: KeyEvent) {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match (ctrl, key.code) {
+        match (key.modifiers.contains(KeyModifiers::CONTROL), key.code) {
             (true, KeyCode::Char('s')) => self.commit_meta_edit(),
             (_, KeyCode::Esc) => self.cancel_meta_edit(),
+            _ => {
+                self.handle_text_edit_key(key);
+            }
+        }
+    }
 
-            (false, KeyCode::Char(c)) => self.edit_buffer_mut().insert_char(c),
-            (false, KeyCode::Enter) => self.edit_buffer_mut().insert_char('\n'),
-            (false, KeyCode::Backspace) => self.edit_buffer_mut().backspace(),
-            (false, KeyCode::Tab) => {
+    /// Apply a plain text-editing key (insert / delete / move) to the active edit
+    /// buffer; returns whether it was consumed. Shared by the metadata editor and
+    /// the bible-conflict editor, which add their own Ctrl-S / Esc on top.
+    fn handle_text_edit_key(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char(c) => self.edit_buffer_mut().insert_char(c),
+            KeyCode::Enter => self.edit_buffer_mut().insert_char('\n'),
+            KeyCode::Backspace => self.edit_buffer_mut().backspace(),
+            KeyCode::Tab => {
                 for _ in 0..4 {
                     self.edit_buffer_mut().insert_char(' ');
                 }
             }
-
-            (false, KeyCode::Left) => self.edit_buffer_mut().move_left(),
-            (false, KeyCode::Right) => self.edit_buffer_mut().move_right(),
-            (false, KeyCode::Up) => self.edit_buffer_mut().move_up(),
-            (false, KeyCode::Down) => self.edit_buffer_mut().move_down(),
-            (false, KeyCode::Home) => self.edit_buffer_mut().move_home(),
-            (false, KeyCode::End) => self.edit_buffer_mut().move_end(),
-
-            _ => {}
+            KeyCode::Left => self.edit_buffer_mut().move_left(),
+            KeyCode::Right => self.edit_buffer_mut().move_right(),
+            KeyCode::Up => self.edit_buffer_mut().move_up(),
+            KeyCode::Down => self.edit_buffer_mut().move_down(),
+            KeyCode::Home => self.edit_buffer_mut().move_home(),
+            KeyCode::End => self.edit_buffer_mut().move_end(),
+            _ => return false,
         }
+        true
     }
 
     /// Store the edited quotation, then chain to the single-line attribution
@@ -1221,7 +1238,8 @@ impl App {
         let editing = matches!(&self.mode, Mode::BibleReview(r) if r.editing.is_some());
 
         if editing {
-            // Editing the proposed version before saving (same keys as EditMeta).
+            // Editing the proposed version before saving (same text keys as
+            // EditMeta, with bible-specific Ctrl-S / Esc).
             match (ctrl, key.code) {
                 (true, KeyCode::Char('s')) => self.save_bible_edit(),
                 (_, KeyCode::Esc) => {
@@ -1229,21 +1247,9 @@ impl App {
                         r.editing = None; // back to the diff for this conflict
                     }
                 }
-                (false, KeyCode::Char(c)) => self.edit_buffer_mut().insert_char(c),
-                (false, KeyCode::Enter) => self.edit_buffer_mut().insert_char('\n'),
-                (false, KeyCode::Backspace) => self.edit_buffer_mut().backspace(),
-                (false, KeyCode::Tab) => {
-                    for _ in 0..4 {
-                        self.edit_buffer_mut().insert_char(' ');
-                    }
+                _ => {
+                    self.handle_text_edit_key(key);
                 }
-                (false, KeyCode::Left) => self.edit_buffer_mut().move_left(),
-                (false, KeyCode::Right) => self.edit_buffer_mut().move_right(),
-                (false, KeyCode::Up) => self.edit_buffer_mut().move_up(),
-                (false, KeyCode::Down) => self.edit_buffer_mut().move_down(),
-                (false, KeyCode::Home) => self.edit_buffer_mut().move_home(),
-                (false, KeyCode::End) => self.edit_buffer_mut().move_end(),
-                _ => {}
             }
             return;
         }
@@ -1299,6 +1305,22 @@ impl App {
         self.mode = Mode::Insert;
         self.message = Some("Bible review complete".into());
     }
+}
+
+/// A unified line diff (current → proposed), each line signed `+`/`-`/` `.
+/// Computed once when a conflict is staged (not per frame).
+fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
+    TextDiff::from_lines(current, proposed)
+        .iter_all_changes()
+        .map(|change| {
+            let sign = match change.tag() {
+                ChangeTag::Delete => '-',
+                ChangeTag::Insert => '+',
+                ChangeTag::Equal => ' ',
+            };
+            format!("{sign}{}", change.value().trim_end_matches('\n'))
+        })
+        .collect()
 }
 
 /// The summary overlay shown after a clean character pass (no conflicts).

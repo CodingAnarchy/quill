@@ -43,8 +43,11 @@ pub struct BibleReview {
 pub struct BibleConflict {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
-    pub(crate) current: String,
     pub(crate) proposed: String,
+    /// Pre-rendered unified diff (current → proposed), each line prefixed with
+    /// `+`/`-`/` `. Computed once when the conflict is staged so the overlay
+    /// isn't re-diffing every frame.
+    pub(crate) diff: Vec<String>,
 }
 
 /// State for an open [`Mode::EditMeta`]. `label` is public for the editor's
