@@ -31,6 +31,10 @@ keystrokes that stay out of the way.
   (portable, and your other keys are preserved), with status shown in the pane.
 - **Book & series metadata** — title, subtitle, author, and series, stored in
   the `book.toml` manifest and shown as a header above the chapter list.
+- **Progress report** — set writing goals (target words, chapters, start date)
+  in the manifest and press Ctrl-R for a one-screen report: completion against
+  goals, a projected final length from your chapter pace, writing rate, and a
+  projected finish date.
 - **Epigraphs** — a quotation (single- or multi-line / verse) and attribution on
   a chapter (front matter) or the book (manifest), rendered set-apart above the
   body (the book's at the start of the manuscript). The quotation is edited in
@@ -70,6 +74,7 @@ byte-for-byte.
 | Ctrl-S         | save                            |
 | Ctrl-Q         | quit (prompts if unsaved)       |
 | Ctrl-O         | toggle the chapter pane         |
+| Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter)    |

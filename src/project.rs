@@ -49,13 +49,31 @@ pub struct ChapterEntry {
     pub pov: Option<String>,
 }
 
+/// The author's writing goals (see [`docs/progress-reports.md`]). Pages are
+/// always derived from words via `words_per_page`, never tracked directly.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Goals {
+    /// Target word count.
+    pub words: usize,
+    /// Target chapter count.
+    pub chapters: usize,
+    /// Words per page (pages = words / words_per_page). Defaults to a standard
+    /// manuscript page (250); override for e.g. mass-market or children's books.
+    #[serde(default = "default_words_per_page")]
+    pub words_per_page: usize,
+}
+
+fn default_words_per_page() -> usize {
+    250
+}
+
 /// The on-disk manifest (`book.toml`), deserialized.
 ///
 /// `title` is the book title; `subtitle`, `author`, and `series` are optional
 /// book/series metadata. New optional fields default to absent so manifests
 /// written before they existed still parse, and unset fields aren't written
-/// back. Scalars are declared before `chapters` so the TOML array-of-tables
-/// stays last (a TOML requirement).
+/// back. Scalar keys are declared before the `goals` table and the `chapters`
+/// array, so the TOML tables stay last (a TOML requirement).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub title: String,
@@ -71,6 +89,17 @@ pub struct Manifest {
     pub epigraph: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epigraph_by: Option<String>,
+    /// Date the project was started (`YYYY-MM-DD`), anchoring the progress
+    /// report's "days since start" and writing rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<String>,
+    /// TODO token counted on the report's `xxx:` line (case-insensitive).
+    /// Defaults to `xxx` (see [`Manifest::todo_marker`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todo_marker: Option<String>,
+    /// The author's writing goals; the progress report is empty without them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goals: Option<Goals>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
 }
@@ -79,6 +108,11 @@ impl Manifest {
     /// The book epigraph, if a quotation is set.
     pub fn epigraph(&self) -> Option<Epigraph> {
         Epigraph::from_parts(self.epigraph.clone(), self.epigraph_by.clone())
+    }
+
+    /// The configured TODO marker, defaulting to `xxx`.
+    pub fn todo_marker(&self) -> &str {
+        self.todo_marker.as_deref().unwrap_or("xxx")
     }
 }
 
@@ -149,6 +183,9 @@ impl Project {
                 series: None,
                 epigraph: None,
                 epigraph_by: None,
+                start_date: None,
+                todo_marker: None,
+                goals: None,
                 chapters: Vec::new(),
             },
             active: String::new(),
@@ -235,6 +272,13 @@ impl Project {
         let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
         let (front, _) = frontmatter::split(&text);
         front.map(FrontMatter::from_raw)
+    }
+
+    /// The prose body of chapter `index` from disk (front matter stripped),
+    /// empty if it can't be read. Off the per-frame path (used by the report).
+    pub fn chapter_body(&self, index: usize) -> String {
+        let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
+        frontmatter::split(&text).1.to_string()
     }
 
     /// Cached metadata accessors for the pane (no file I/O).
@@ -413,6 +457,9 @@ impl Project {
                 series: None,
                 epigraph: None,
                 epigraph_by: None,
+                start_date: None,
+                todo_marker: None,
+                goals: None,
                 chapters,
             },
             active,
@@ -559,6 +606,57 @@ mod tests {
         let ep = reopened.manifest.epigraph().unwrap();
         assert_eq!(ep.text, "Call me Ishmael.");
         assert_eq!(ep.attribution.as_deref(), Some("Melville"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn goals_round_trip_through_the_manifest() {
+        let dir = temp_dir("goals");
+        let _ = fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap();
+        assert!(project.manifest.goals.is_none());
+        assert_eq!(project.manifest.todo_marker(), "xxx"); // default
+
+        project.manifest.start_date = Some("2026-01-11".into());
+        project.manifest.goals = Some(Goals {
+            words: 150_000,
+            chapters: 60,
+            words_per_page: 250,
+        });
+        project.save_manifest().unwrap();
+
+        // The `[goals]` table serializes after the scalars and before
+        // `[[chapters]]` (valid TOML).
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(
+            toml.find("[goals]").unwrap() < toml.find("[[chapters]]").unwrap(),
+            "goals must precede chapters:\n{toml}"
+        );
+
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.manifest.start_date.as_deref(), Some("2026-01-11"));
+        assert_eq!(reopened.manifest.goals.unwrap().words, 150_000);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn words_per_page_defaults_to_a_standard_page() {
+        let dir = temp_dir("wpp-default");
+        let _ = fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A goals block that omits words_per_page (the common case).
+        std::fs::write(
+            Project::manifest_path(&dir),
+            "title = \"B\"\n\n[goals]\nwords = 100000\nchapters = 40\n\n\
+             [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("one.md"), "body\n").unwrap();
+
+        let project = Project::open(&dir).unwrap();
+        assert_eq!(project.manifest.goals.unwrap().words_per_page, 250);
 
         fs::remove_dir_all(&dir).ok();
     }

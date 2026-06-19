@@ -34,6 +34,12 @@ struct StatusBar<'a>(&'a App);
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
+    // The progress report is a full-screen read-only overlay.
+    if let Some(lines) = &app.report {
+        draw_report(frame, area, &app.project.manifest.title, lines);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -54,6 +60,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 
     StatusBar(app).render(frame, chunks[1]);
+}
+
+/// Render the progress report full-screen in a bordered box.
+fn draw_report(frame: &mut Frame, area: Rect, title: &str, lines: &[String]) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {title} — progress (any key to close) "));
+    let body: Vec<Line> = lines.iter().map(|l| Line::raw(l.clone())).collect();
+    frame.render_widget(Paragraph::new(body).block(block), area);
 }
 
 /// The index of the heading whose section the cursor is currently in: the last

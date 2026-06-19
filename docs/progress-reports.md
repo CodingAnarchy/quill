@@ -31,8 +31,8 @@ formula behind every line of the report.
 |   2: +1,327  (+1,486 -159)
 |   3: +521  (+627 -106)
 |   4: +1,016  (+1,018 -2)
-| days since start:  157
-| average rate:      1,039 words / day
+| days since start:  156
+| average rate:      1,046 words / day
 | to go:             0 words ; 0 days ( 16 Jun 2026 )
 | to go (expansion): 11,657 words ; 11 days ( 27 Jun 2026 )
 +--------------------
