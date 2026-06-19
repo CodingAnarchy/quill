@@ -14,6 +14,7 @@ pub mod continuity;
 pub mod naming;
 pub mod scaffold;
 pub mod setting;
+pub mod style;
 mod claude;
 
 pub use character::Character;
@@ -22,6 +23,7 @@ pub use continuity::Continuity;
 pub use naming::Naming;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
+// `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
 use std::fmt;
 use std::path::PathBuf;
@@ -71,6 +73,8 @@ pub enum Outcome {
     Scaffold(Result<Scaffold, AiError>),
     /// Naming & term consistency (#78).
     Naming(Result<Naming, AiError>),
+    /// Prose & style analysis (#79).
+    Style(Result<style::Style, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).

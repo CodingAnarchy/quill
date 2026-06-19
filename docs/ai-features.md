@@ -50,6 +50,9 @@ The palette actions:
   structural-gap findings (no prose).
 - **Name & term consistency** (#78) — a cheap Haiku scan for spelling variants,
   checked against the gazetteer + character names.
+- **Prose & style** (#79) — *semantic* findings (POV / tense consistency, voice
+  drift, context-aware repeated phrasing); analysis only, no rewrites. Frequency
+  metrics (crutch words, etc.) are the local-analysis report's job (#70).
 
 Each bible file has a regenerated block (`<!-- generated:start/end -->`) and an
 author-owned `<!-- notes:start/end -->` block that survives regeneration; a
