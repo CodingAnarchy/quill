@@ -9,8 +9,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Mode};
+use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
+use crate::mode::Mode;
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
