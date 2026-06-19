@@ -232,18 +232,31 @@ impl App {
 
     /// Current word total for each part, in manifest part order (empty when no
     /// parts). Each part sums the live counts of the chapters in its range.
-    fn part_word_counts(&self) -> Vec<usize> {
+    /// Each part's display name (its `name`, or `"{label} {n}"` when unnamed) and
+    /// the 0-based chapter range it spans (`start..end`, clamped to the chapters
+    /// that exist). Empty when the book defines no parts. The single home for the
+    /// 1-based→0-based range conversion and the unnamed-part naming.
+    fn part_ranges(&self) -> Vec<(String, std::ops::Range<usize>)> {
         let Some(parts) = self.project.manifest.parts.as_ref() else {
             return Vec::new();
         };
+        let label = self.project.manifest.part_label();
         let chapters = self.chapter_count();
         parts
             .iter()
-            .map(|p| {
-                let start = p.chapters[0].saturating_sub(1); // 1-based, inclusive
-                let end = p.chapters[1].min(chapters); // clamp to existing chapters
-                (start..end).map(|i| self.chapter_word_count(i)).sum()
+            .enumerate()
+            .map(|(i, p)| {
+                let name = p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1));
+                let range = p.chapters[0].saturating_sub(1)..p.chapters[1].min(chapters);
+                (name, range)
             })
+            .collect()
+    }
+
+    fn part_word_counts(&self) -> Vec<usize> {
+        self.part_ranges()
+            .into_iter()
+            .map(|(_, range)| range.map(|i| self.chapter_word_count(i)).sum())
             .collect()
     }
 
@@ -319,49 +332,37 @@ impl App {
                 sentence_lengths,
             });
         }
+        let longest = longest.into_vec();
+        let parts = self.analysis_parts();
         let report = analysis::Report {
             title: &self.project.manifest.title,
             chapters: &chapters,
-            longest: &longest.into_vec(),
-            parts: &self.analysis_parts(),
+            longest: &longest,
+            parts: &parts,
             run_on_threshold: threshold,
         };
         analysis::lines(&report)
     }
 
-    /// The part groupings for the pacing section: each part's display name and the
-    /// 0-based chapter range it spans. Empty when the book defines no parts.
+    /// The part groupings for the pacing section. Empty when the book defines no
+    /// parts.
     fn analysis_parts(&self) -> Vec<analysis::PartSpan> {
-        let Some(parts) = self.project.manifest.parts.as_ref() else {
-            return Vec::new();
-        };
-        let label = self.project.manifest.part_label();
-        let chapters = self.chapter_count();
-        parts
-            .iter()
-            .enumerate()
-            .map(|(i, p)| analysis::PartSpan {
-                name: p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1)),
-                range: p.chapters[0].saturating_sub(1)..p.chapters[1].min(chapters),
-            })
+        self.part_ranges()
+            .into_iter()
+            .map(|(name, range)| analysis::PartSpan { name, range })
             .collect()
     }
 
-    /// Build the per-part rows for the report: each part's display name (its
-    /// `name`, or `"{label} {n}"` when unnamed), current word total, and today's
-    /// added / removed within it.
+    /// Build the per-part rows for the progress report: each part's display name,
+    /// current word total, and today's added / removed within it.
     fn part_deltas(&self) -> Vec<PartDelta> {
-        let Some(parts) = self.project.manifest.parts.as_ref() else {
-            return Vec::new();
-        };
-        let label = self.project.manifest.part_label();
         let words = self.part_word_counts();
-        parts
-            .iter()
+        self.part_ranges()
+            .into_iter()
             .enumerate()
             // `words` and the per-part counters are all sized to the parts list.
-            .map(|(i, p)| PartDelta {
-                name: p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1)),
+            .map(|(i, (name, _))| PartDelta {
+                name,
                 words: words[i],
                 added: self.part_added[i],
                 removed: self.part_removed[i],

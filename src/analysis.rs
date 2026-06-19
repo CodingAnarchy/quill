@@ -386,15 +386,16 @@ pub fn length_stats(words: &[usize]) -> LengthStats {
     }
 }
 
-/// The pacing flag for a chapter of `words`, relative to the rest.
-fn length_flag(words: usize, stats: &LengthStats) -> &'static str {
+/// The pacing flag for a chapter of `words`, relative to the rest — `None` when
+/// the chapter is within the normal range.
+fn length_flag(words: usize, stats: &LengthStats) -> Option<&'static str> {
     let w = words as f64;
     if w < stats.low_fence {
-        "short"
+        Some("short")
     } else if w > stats.high_fence {
-        "long"
+        Some("long")
     } else {
-        ""
+        None
     }
 }
 
@@ -544,7 +545,7 @@ fn sentence_section(
 fn length_section(chapters: &[ChapterAnalysis], parts: &[PartSpan]) -> Vec<Line<'static>> {
     let words: Vec<usize> = chapters.iter().map(|c| c.words).collect();
     let stats = length_stats(&words);
-    let peak = words.iter().copied().max().unwrap_or(0).max(1);
+    let peak = stats.max.max(1); // the longest chapter (≥1 so the bar never divides by zero)
     let mut out = vec![dim("Chapter length (words)")];
 
     if parts.is_empty() {
@@ -573,13 +574,10 @@ fn length_section(chapters: &[ChapterAnalysis], parts: &[PartSpan]) -> Vec<Line<
 /// One chapter's pacing row: indented (truncated) title, word count, a bar scaled
 /// to the longest chapter, and a short/long flag for outliers.
 fn length_bar_row(title: &str, words: usize, peak: usize, stats: &LengthStats, indent: usize) -> Line<'static> {
-    let name = truncate(title, 24 - indent);
-    let bar = "█".repeat(words * 24 / peak);
-    let flag = match length_flag(words, stats) {
-        "" => String::new(),
-        f => format!("  ⚠ {f}"),
-    };
-    Line::raw(format!("{:indent$}{name:<width$}{words:>7}  {bar}{flag}", "", width = 24 - indent))
+    let avail = 24 - indent; // the indent + name region together pad to 24
+    let name = truncate(title, avail);
+    let flag = length_flag(words, stats).map_or(String::new(), |f| format!("  ⚠ {f}"));
+    Line::raw(format!("{:indent$}{name:<avail$}{words:>7}  {}{flag}", "", bar(words, peak)))
 }
 
 /// A horizontal bar per length bucket, scaled to the busiest bucket.
@@ -588,11 +586,16 @@ fn histogram_lines(stats: &SentenceStats) -> Vec<Line<'static>> {
     BUCKET_LABELS
         .iter()
         .zip(stats.histogram)
-        .map(|(label, count)| {
-            let bar = "█".repeat(count * 24 / peak);
-            Line::raw(format!("{label:>6} {bar} {count}"))
-        })
+        .map(|(label, count)| Line::raw(format!("{label:>6} {} {count}", bar(count, peak))))
         .collect()
+}
+
+/// Width of the bar-chart bars, in cells.
+const BAR_WIDTH: usize = 24;
+
+/// A horizontal bar of `value` scaled to `peak` (the longest bar is full width).
+fn bar(value: usize, peak: usize) -> String {
+    "█".repeat(value * BAR_WIDTH / peak)
 }
 
 /// One readability row: a (truncated) name and the four scores to one decimal.
@@ -777,12 +780,12 @@ mod tests {
         assert_eq!(s.max, 5000);
         assert_eq!(s.median, 1010.0);
         assert!(s.std_dev > 0.0);
-        assert_eq!(length_flag(100, &s), "short");
-        assert_eq!(length_flag(5000, &s), "long");
-        assert_eq!(length_flag(1000, &s), "");
+        assert_eq!(length_flag(100, &s), Some("short"));
+        assert_eq!(length_flag(5000, &s), Some("long"));
+        assert_eq!(length_flag(1000, &s), None);
         // Too few chapters → no "rest" to compare against, nothing flagged.
         let few = length_stats(&[100, 5000]);
-        assert_eq!(length_flag(100, &few), "");
+        assert_eq!(length_flag(100, &few), None);
     }
 
     fn chapter(title: &str, prose_text: &str, words: usize) -> ChapterAnalysis {
