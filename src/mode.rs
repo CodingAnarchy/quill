@@ -27,6 +27,25 @@ pub enum Mode {
     /// edit / keep choices. Boxed (carries the conflict queue and a scratch
     /// buffer while editing).
     BibleReview(Box<BibleReview>),
+    /// Triaging continuity findings: a navigable list where each can be jumped to
+    /// (open its chapter) or dismissed. Read-only over the prose. Boxed (carries
+    /// the findings list).
+    Findings(Box<Findings>),
+}
+
+/// State for an open [`Mode::Findings`]: the findings list and the selected row.
+pub struct Findings {
+    pub(crate) items: Vec<Finding>,
+    pub(crate) selected: usize,
+}
+
+/// One triageable finding (a continuity contradiction). UI-shaped — the AI
+/// layer maps its typed findings into this for display.
+pub struct Finding {
+    /// One-line summary shown in the list (e.g. "object: the locket …").
+    pub(crate) summary: String,
+    /// Chapters involved; the first is the jump target.
+    pub(crate) chapters: Vec<String>,
 }
 
 /// State for an open [`Mode::BibleReview`]: the queue of conflicting bible files

@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::{BibleReview, Mode};
+use crate::mode::{BibleReview, Findings, Mode};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -46,6 +46,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::BibleReview(review) = &app.mode {
         draw_bible_review(frame, area, review);
+        return;
+    }
+    if let Mode::Findings(findings) = &app.mode {
+        draw_findings(frame, area, findings);
         return;
     }
 
@@ -123,6 +127,37 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         " Bible conflict: {} ({remaining} left) — (o)verwrite (e)dit (k)eep · Esc cancel ",
         front.name
     ));
+    frame.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// Render the continuity findings as a navigable triage list.
+fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Continuity findings — ↑↓ move · enter jump · d dismiss · esc close",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+    ];
+    for (i, item) in findings.items.iter().enumerate() {
+        let marker = if i == findings.selected { "▸ " } else { "  " };
+        let mut style = Style::default();
+        if i == findings.selected {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        let chapters = if item.chapters.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", item.chapters.join(", "))
+        };
+        lines.push(Line::from(Span::styled(format!("{marker}{}{chapters}", item.summary), style)));
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Continuity ({} findings) ", findings.items.len()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
         area,

@@ -2,6 +2,7 @@
 //! editor-mode types live in [`crate::mode`].
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -11,14 +12,17 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use ratatui::text::Line;
 
-use crate::ai::{self, Backend, ClaudeBackend, Outcome};
+use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::ai::character::{self, Character};
+use crate::ai::continuity::{self, Continuity};
 use crate::buffer::Buffer;
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
-use crate::mode::{BibleConflict, BibleReview, MetaEdit, MetaField, Mode, Pending, PromptState};
+use crate::mode::{
+    BibleConflict, BibleReview, Finding, Findings, MetaEdit, MetaField, Mode, Pending, PromptState,
+};
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
 
@@ -68,6 +72,9 @@ pub struct App {
     /// Receiver for an in-flight AI request running on a worker thread; `Some`
     /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
     ai_rx: Option<Receiver<Outcome>>,
+    /// Continuity findings waiting to be shown — stashed while a timeline
+    /// conflict is resolved first, then opened by [`App::open_findings`].
+    pending_findings: Vec<Finding>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -92,6 +99,7 @@ impl App {
             ai: ai::Settings::load(),
             ai_panel: None,
             ai_rx: None,
+            pending_findings: Vec::new(),
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -339,36 +347,42 @@ impl App {
     /// A no-op with a status message when AI isn't ready or a request is already
     /// in flight.
     fn ask_ai(&mut self, question: &str) {
-        let question = question.trim();
+        let question = question.trim().to_string();
         if question.is_empty() {
             return;
         }
-        if self.ai_rx.is_some() {
-            self.message = Some("Already asking Claude…".into());
-            return;
-        }
-        let key = match self.ai.check_ready() {
-            Ok(key) => key.to_string(),
-            Err(e) => {
-                self.message = Some(e.to_string());
-                return;
-            }
-        };
-        let backend = ClaudeBackend::new(key);
-        let req = ai::build_qa_request(self.manuscript_text(), question, &self.ai.model);
-
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let _ = tx.send(Outcome::Answer(backend.complete(&req)));
+        self.spawn_ai("⟳ Sending to Claude…", move |backend, manuscript, model| {
+            Outcome::Answer(backend.complete(&ai::build_qa_request(manuscript, &question, &model)))
         });
-        self.ai_rx = Some(rx);
-        self.message = Some("⟳ Sending to Claude…".into());
     }
 
-    /// Start a character-extraction pass on a worker thread: a single structured
-    /// request over the whole manuscript, parsed into profiles. The result is
-    /// applied (bible files written / conflicts queued) by [`App::poll_ai`].
+    /// Start a character-extraction pass; profiles are written / conflicts queued
+    /// by [`App::poll_ai`].
     fn analyze_characters(&mut self) {
+        self.spawn_ai("⟳ Analyzing characters…", |backend, manuscript, model| {
+            let req = character::build_request(manuscript, &model);
+            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
+        });
+    }
+
+    /// Start a timeline & continuity pass; the timeline + findings are applied by
+    /// [`App::poll_ai`].
+    fn analyze_continuity(&mut self) {
+        self.spawn_ai("⟳ Checking continuity…", |backend, manuscript, model| {
+            let req = continuity::build_request(manuscript, &model);
+            Outcome::Continuity(backend.complete(&req).and_then(|r| continuity::parse(&r.text)))
+        });
+    }
+
+    /// Run an AI request on a worker thread: assemble the manuscript here, hand it
+    /// (with a backend + model) to `run` off-thread, and deliver the `Outcome` via
+    /// `ai_rx` for [`App::poll_ai`]. A no-op with a status message when AI isn't
+    /// ready or a request is already in flight.
+    fn spawn_ai(
+        &mut self,
+        message: &str,
+        run: impl FnOnce(ClaudeBackend, String, String) -> Outcome + Send + 'static,
+    ) {
         if self.ai_rx.is_some() {
             self.message = Some("An AI request is already in flight…".into());
             return;
@@ -386,12 +400,10 @@ impl App {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let req = character::build_request(manuscript, &model);
-            let result = backend.complete(&req).and_then(|resp| character::parse(&resp.text));
-            let _ = tx.send(Outcome::Characters(result));
+            let _ = tx.send(run(backend, manuscript, model));
         });
         self.ai_rx = Some(rx);
-        self.message = Some("⟳ Analyzing characters…".into());
+        self.message = Some(message.to_string());
     }
 
     /// Poll the in-flight AI request (non-blocking). On a result, dispatch by
@@ -407,6 +419,7 @@ impl App {
                 match outcome {
                     Outcome::Answer(r) => self.apply_qa_result(r),
                     Outcome::Characters(r) => self.apply_characters(r),
+                    Outcome::Continuity(r) => self.apply_continuity(r),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -448,31 +461,16 @@ impl App {
         }
 
         let dir = self.project.root.join("bible").join("characters");
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.message = Some(format!("bible: {e}"));
-            return;
-        }
         let today = date::iso(date::today());
         let mut written = 0;
         let mut drift = 0;
         let mut conflicts = Vec::new();
         for c in &chars {
             drift += c.drift.len();
-            let path = dir.join(format!("{}.md", character::slug(&c.name)));
-            let existing = std::fs::read_to_string(&path).ok();
-            let notes = character::extract_notes(existing.as_deref().unwrap_or(""));
-            let proposed = character::render_profile(c, &notes, &today);
-            match existing {
-                // Hand-edited generated block: don't clobber — queue for review.
-                Some(current) if character::is_hand_edited(&current) => {
-                    let diff = unified_diff(&current, &proposed);
-                    conflicts.push(BibleConflict { path, name: c.name.clone(), proposed, diff });
-                }
-                _ => {
-                    if std::fs::write(&path, &proposed).is_ok() {
-                        written += 1;
-                    }
-                }
+            let path = dir.join(format!("{}.md", bible::slug(&c.name)));
+            match self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)) {
+                Ok(()) => written += 1,
+                Err(conflict) => conflicts.push(conflict),
             }
         }
 
@@ -483,6 +481,32 @@ impl App {
             self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
             self.message = Some(format!("Wrote {written} · {pending} need review"));
         }
+    }
+
+    /// Write a story-bible file, or return a conflict if its generated block was
+    /// hand-edited since the last pass. `render` receives the author's preserved
+    /// Notes block and returns the full file content. `Ok(true)` when written.
+    /// Shared by the character and continuity passes.
+    fn stage_bible(
+        &self,
+        path: PathBuf,
+        name: &str,
+        render: impl Fn(&str) -> String,
+    ) -> Result<(), BibleConflict> {
+        let existing = std::fs::read_to_string(&path).ok();
+        let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
+        let proposed = render(&notes);
+        if let Some(current) = &existing {
+            if bible::is_hand_edited(current) {
+                let diff = unified_diff(current, &proposed);
+                return Err(BibleConflict { path, name: name.to_string(), proposed, diff });
+            }
+        }
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, &proposed);
+        Ok(())
     }
 
     /// Count a character's name/alias mentions across the manuscript and record
@@ -505,6 +529,62 @@ impl App {
         }
         c.mentions = total;
         c.last_chapter = last;
+    }
+
+    /// Apply a continuity pass: write the ordered timeline to `bible/timeline.md`
+    /// (conflict-reviewed like any bible file) and open the findings overlay. If
+    /// the timeline was hand-edited, resolve that first; the findings follow.
+    fn apply_continuity(&mut self, result: Result<Continuity, ai::AiError>) {
+        self.ai_panel = None; // a new result supersedes any prior overlay
+        let cont = match result {
+            Ok(c) => c,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+
+        // Stash the findings (shown after any timeline conflict is resolved).
+        self.pending_findings = cont
+            .findings
+            .iter()
+            .map(|f| Finding {
+                summary: format!("{}: {}", f.kind, f.detail),
+                chapters: f.chapters.clone(),
+            })
+            .collect();
+
+        let today = date::iso(date::today());
+        let path = self.project.root.join("bible").join("timeline.md");
+        match self.stage_bible(path, "timeline", |notes| {
+            continuity::render_timeline(&cont, notes, &today)
+        }) {
+            Ok(_) => self.open_findings(),
+            Err(conflict) => {
+                // Resolve the timeline conflict first; advance_bible_review opens
+                // the stashed findings when its queue drains.
+                self.mode = Mode::BibleReview(Box::new(BibleReview {
+                    conflicts: vec![conflict],
+                    editing: None,
+                }));
+                self.message = Some("timeline edited — review, then findings".into());
+            }
+        }
+    }
+
+    /// Open the stashed continuity findings as a triage overlay, or summarize when
+    /// there are none.
+    fn open_findings(&mut self) {
+        let items = std::mem::take(&mut self.pending_findings);
+        if items.is_empty() {
+            self.ai_panel = Some(vec![
+                Line::raw("Continuity check complete."),
+                Line::raw(""),
+                Line::raw("No contradictions found. Timeline written to bible/timeline.md."),
+            ]);
+        } else {
+            self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
+        }
     }
 
     /// Whether an AI request is currently in flight (for the status indicator).
@@ -545,6 +625,7 @@ impl App {
             Mode::Nav { .. } => self.on_key_nav(key),
             Mode::EditMeta(_) => self.on_key_edit_meta(key),
             Mode::BibleReview(_) => self.on_key_bible_review(key),
+            Mode::Findings(_) => self.on_key_findings(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -1093,6 +1174,11 @@ impl App {
                 Ok(_) => self.analyze_characters(),
                 Err(e) => self.message = Some(e.to_string()),
             },
+            // Timeline & continuity check (AI, opt-in).
+            (true, KeyCode::Char('t')) => match self.ai.check_ready() {
+                Ok(_) => self.analyze_continuity(),
+                Err(e) => self.message = Some(e.to_string()),
+            },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),
@@ -1302,8 +1388,51 @@ impl App {
                 return;
             }
         }
-        self.mode = Mode::Insert;
-        self.message = Some("Bible review complete".into());
+        // Queue drained. A continuity pass leaves findings stashed — show them now;
+        // a character pass leaves none, so this falls back to insert mode.
+        if self.pending_findings.is_empty() {
+            self.mode = Mode::Insert;
+            self.message = Some("Bible review complete".into());
+        } else {
+            self.open_findings();
+        }
+    }
+
+    fn on_key_findings(&mut self, key: KeyEvent) {
+        let Mode::Findings(f) = &mut self.mode else {
+            return;
+        };
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                f.selected = f.selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                f.selected = (f.selected + 1).min(f.items.len().saturating_sub(1));
+            }
+            KeyCode::Char('d') => {
+                if f.selected < f.items.len() {
+                    f.items.remove(f.selected);
+                    if f.items.is_empty() {
+                        self.mode = Mode::Insert;
+                    } else {
+                        f.selected = f.selected.min(f.items.len() - 1);
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                let target = f.items.get(f.selected).and_then(|it| it.chapters.first()).cloned();
+                self.mode = Mode::Insert;
+                if let Some(title) = target {
+                    if let Some(i) = (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title.as_str())) {
+                        self.activate_chapter(i);
+                    } else {
+                        self.message = Some(format!("Chapter '{title}' not found"));
+                    }
+                }
+            }
+            KeyCode::Esc => self.mode = Mode::Insert,
+            _ => {}
+        }
     }
 }
 
