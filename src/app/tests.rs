@@ -676,3 +676,84 @@ fn word_count_cache_tracks_add_and_delete() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- AI: "Ask the manuscript" ----------------------------------------------
+
+/// A backend that returns a canned answer (or an error) with no network — lets
+/// the Q&A flow be tested deterministically and offline.
+struct MockBackend {
+    result: Result<String, ()>,
+}
+
+impl Backend for MockBackend {
+    fn complete(&self, _req: &ai::Request) -> Result<Response, ai::AiError> {
+        match &self.result {
+            Ok(text) => Ok(Response { text: text.clone(), usage: Default::default() }),
+            Err(()) => Err(ai::AiError::Api("boom".into())),
+        }
+    }
+}
+
+#[test]
+fn ask_with_ai_off_explains_how_to_enable() {
+    let (mut app, dir) = two_chapter_app("ai-off");
+    app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
+    app.ask_ai("who is the protagonist?");
+    assert!(app.ai_rx.is_none(), "nothing should be sent when AI is off");
+    assert!(app.ai_panel.is_none());
+    assert!(app.message.as_deref().unwrap_or("").contains("off"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ask_in_offline_mode_refuses_to_send() {
+    let (mut app, dir) = two_chapter_app("ai-offline");
+    app.ai = ai::Settings {
+        enabled: true,
+        offline: true,
+        model: ai::default_model(),
+        api_key: Some("k".into()),
+    };
+    app.ask_ai("anything?");
+    assert!(app.ai_rx.is_none());
+    assert!(app.message.as_deref().unwrap_or("").contains("offline"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn manuscript_text_includes_every_chapter() {
+    let (app, dir) = two_chapter_app("ai-manuscript");
+    let m = app.manuscript_text();
+    assert!(m.contains("# One") && m.contains("first chapter"), "{m}");
+    assert!(m.contains("# Two") && m.contains("second chapter"), "{m}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn qa_answer_opens_the_overlay() {
+    let (mut app, dir) = two_chapter_app("ai-answer");
+    // Drive the Q&A core with a mock backend (no network): build the request from
+    // the manuscript, complete it, and apply the result like the async path does.
+    let backend = MockBackend { result: Ok("Chapter One is about a locket.".into()) };
+    let req = ai::build_qa_request(app.manuscript_text(), "what is chapter one about?", &app.ai.model);
+    app.apply_qa_result(backend.complete(&req));
+
+    let panel = app.ai_panel.as_ref().expect("answer overlay should open");
+    let text: String = panel
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+        .collect();
+    assert!(text.contains("about a locket"), "{text}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn qa_error_sets_a_message_not_a_panel() {
+    let (mut app, dir) = two_chapter_app("ai-err");
+    let backend = MockBackend { result: Err(()) };
+    let req = ai::build_qa_request(app.manuscript_text(), "q", &app.ai.model);
+    app.apply_qa_result(backend.complete(&req));
+    assert!(app.ai_panel.is_none());
+    assert!(app.message.as_deref().unwrap_or("").contains("boom"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}

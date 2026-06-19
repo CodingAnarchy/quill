@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
@@ -35,9 +35,13 @@ struct StatusBar<'a>(&'a App);
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // The progress report is a full-screen read-only overlay.
+    // The progress report and AI answer are full-screen read-only overlays.
     if let Some(lines) = &app.report {
         draw_report(frame, area, &app.project.manifest.title, lines);
+        return;
+    }
+    if let Some(lines) = &app.ai_panel {
+        draw_ai_panel(frame, area, lines);
         return;
     }
 
@@ -69,6 +73,20 @@ fn draw_report(frame: &mut Frame, area: Rect, title: &str, lines: &[Line<'static
         .borders(Borders::ALL)
         .title(format!(" {title} — progress (any key to close) "));
     frame.render_widget(Paragraph::new(lines.to_vec()).block(block), area);
+}
+
+/// Render the AI answer full-screen in a bordered box. Wraps, since the answer
+/// is free-form prose rather than the report's pre-sized rows.
+fn draw_ai_panel(frame: &mut Frame, area: Rect, lines: &[Line<'static>]) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Ask the manuscript — Claude (any key to close) ");
+    frame.render_widget(
+        Paragraph::new(lines.to_vec())
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 /// The index of the heading whose section the cursor is currently in: the last
@@ -551,6 +569,15 @@ impl Pane for StatusBar<'_> {
                 ),
             };
             let dirty = if dirtied { " ●" } else { "" };
+            // Persistent AI indicator (independent of the transient message, which
+            // clears on the next keystroke): in-flight spinner, else an enabled tag.
+            let ai_tag = if app.ai_busy() {
+                " · ⟳ Claude"
+            } else if app.ai.enabled {
+                " · AI"
+            } else {
+                ""
+            };
             let right = match &app.message {
                 Some(m) => format!("{m}  "),
                 None => format!(
@@ -560,7 +587,7 @@ impl Pane for StatusBar<'_> {
                     buffer.line_count()
                 ),
             };
-            (format!(" {name}{dirty}"), right)
+            (format!(" {name}{dirty}{ai_tag}"), right)
         };
 
         let pad = (area.width as usize)

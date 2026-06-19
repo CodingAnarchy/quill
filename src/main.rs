@@ -3,6 +3,7 @@
 //! Run `quill [DIR]` to open a project (or create one in an empty directory).
 //! Defaults to the current directory.
 
+mod ai;
 mod app;
 mod buffer;
 mod date;
@@ -117,6 +118,9 @@ impl Drop for Tui {
 
 fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
     while !app.should_quit {
+        // Surface a finished AI request (runs on a worker thread) before drawing,
+        // so its answer appears within the poll window even with no keypress.
+        app.poll_ai();
         tui.draw(app)?;
 
         // Poll so we can stay responsive without busy-spinning.

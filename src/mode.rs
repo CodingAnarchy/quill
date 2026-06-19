@@ -62,6 +62,8 @@ pub(crate) enum Pending {
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.
     Rename { at: usize },
+    /// Text input: a question to ask the AI about the manuscript.
+    AskAi,
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.
