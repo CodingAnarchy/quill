@@ -2,11 +2,14 @@
 //! editor-mode types live in [`crate::mode`].
 
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use ratatui::text::Line;
 
+use crate::ai::{self, Backend, ClaudeBackend, Response};
 use crate::buffer::Buffer;
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
@@ -53,6 +56,15 @@ pub struct App {
     /// measures against. Keyed by file identity so it survives reordering; an
     /// edit's delta is attributed to the part of the chapter that changed.
     baselines: HashMap<String, usize>,
+    /// AI configuration (opt-in, off by default), loaded from the user's home
+    /// config. Drives whether the "Ask the manuscript" command is reachable.
+    pub ai: ai::Settings,
+    /// When `Some`, the AI answer overlay is open (mirrors `report`): shown
+    /// full-screen until any key dismisses it.
+    pub ai_panel: Option<Vec<Line<'static>>>,
+    /// Receiver for an in-flight AI request running on a worker thread; `Some`
+    /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
+    ai_rx: Option<Receiver<Result<Response, ai::AiError>>>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -74,6 +86,9 @@ impl App {
             part_added: Vec::new(),
             part_removed: Vec::new(),
             baselines: HashMap::new(),
+            ai: ai::Settings::load(),
+            ai_panel: None,
+            ai_rx: None,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -292,6 +307,95 @@ impl App {
             .sum()
     }
 
+    // --- AI: "Ask the manuscript" -----------------------------------------
+
+    /// The whole manuscript as plain text for an AI request: each chapter under
+    /// its title heading, the active chapter live from its buffer and the rest
+    /// from disk (the `count_todo` pattern).
+    fn manuscript_text(&self) -> String {
+        let active = self.project.active_index();
+        let mut out = String::new();
+        for i in 0..self.chapter_count() {
+            if let Some(title) = self.project.chapter_title(i) {
+                out.push_str("# ");
+                out.push_str(title);
+                out.push_str("\n\n");
+            }
+            let body = if i == active {
+                self.buffer.text()
+            } else {
+                self.project.chapter_body(i)
+            };
+            out.push_str(body.trim_end());
+            out.push_str("\n\n");
+        }
+        out
+    }
+
+    /// Start an "Ask the manuscript" request on a worker thread. The manuscript
+    /// is assembled here (on the main thread) and moved into the thread with the
+    /// question and a backend; the result returns via `ai_rx`, polled each tick.
+    /// A no-op with a status message when AI isn't ready or a request is already
+    /// in flight.
+    fn ask_ai(&mut self, question: &str) {
+        let question = question.trim();
+        if question.is_empty() {
+            return;
+        }
+        if self.ai_rx.is_some() {
+            self.message = Some("Already asking Claude…".into());
+            return;
+        }
+        if let Err(e) = self.ai.check_ready() {
+            self.message = Some(e.to_string());
+            return;
+        }
+        // Safe: check_ready() guarantees a key.
+        let backend = ClaudeBackend::new(self.ai.resolved_key().unwrap_or_default().to_string());
+        let req = ai::build_qa_request(self.manuscript_text(), question, &self.ai.model);
+
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = tx.send(backend.complete(&req));
+        });
+        self.ai_rx = Some(rx);
+        self.message = Some("⟳ Sending to Claude…".into());
+    }
+
+    /// Poll the in-flight AI request (non-blocking). On a result, open the answer
+    /// overlay (or report an error) and clear the pending state. Called once per
+    /// loop iteration so the answer lands within the poll window.
+    pub fn poll_ai(&mut self) {
+        let Some(rx) = &self.ai_rx else { return };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.ai_rx = None;
+                self.message = None;
+                self.apply_qa_result(result);
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.ai_rx = None;
+                self.message = Some("AI: request failed".into());
+            }
+        }
+    }
+
+    /// Apply a completed Q&A result: open the answer overlay on success, or set a
+    /// status message on error. Shared by the async poll path and tests (which
+    /// drive a mock backend synchronously).
+    fn apply_qa_result(&mut self, result: Result<Response, ai::AiError>) {
+        match result {
+            Ok(resp) => self.ai_panel = Some(ai::answer_to_lines(&resp)),
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
+    }
+
+    /// Whether an AI request is currently in flight (for the status indicator).
+    pub fn ai_busy(&self) -> bool {
+        self.ai_rx.is_some()
+    }
+
     /// Handle a terminal event, dispatching key presses to the active mode.
     /// Non-key events and key releases/repeats are ignored.
     pub fn handle_event(&mut self, ev: Event) {
@@ -308,9 +412,14 @@ impl App {
         // A fresh keystroke clears any stale status message.
         self.message = None;
 
-        // The progress report is a read-only overlay: any key closes it.
+        // The progress report and AI answer are read-only overlays: any key
+        // closes them.
         if self.report.is_some() {
             self.report = None;
+            return;
+        }
+        if self.ai_panel.is_some() {
+            self.ai_panel = None;
             return;
         }
 
@@ -782,7 +891,10 @@ impl App {
                 _ => self.mode = closed,
             },
             // The text prompts share the editing keys; only Enter differs.
-            Pending::NewChapter { .. } | Pending::Rename { .. } | Pending::SetMeta(_) => {
+            Pending::NewChapter { .. }
+            | Pending::Rename { .. }
+            | Pending::SetMeta(_)
+            | Pending::AskAi => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -812,6 +924,12 @@ impl App {
                                 // attribution.
                                 self.apply_meta(field, text);
                                 self.select(fallback);
+                            }
+                            Pending::AskAi => {
+                                // Back to editing immediately; the answer arrives
+                                // asynchronously in the overlay.
+                                self.mode = closed;
+                                self.ask_ai(text);
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
@@ -847,6 +965,12 @@ impl App {
             }
             // Open the progress report (any key closes it).
             (true, KeyCode::Char('r')) => self.report = Some(self.report_lines()),
+            // Ask the manuscript a question (AI, opt-in). When AI isn't ready,
+            // explain how to enable it rather than opening the prompt.
+            (true, KeyCode::Char('a')) => match self.ai.check_ready() {
+                Ok(()) => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
+                Err(e) => self.message = Some(e.to_string()),
+            },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),

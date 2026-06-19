@@ -6,6 +6,27 @@ consistency-checked story bible. AI is **opt-in and off by default**: a
 novelist's unpublished work only leaves the machine when the author enables it
 and provides an API key.
 
+## Configuration
+
+AI is configured in a per-user file **outside the project** —
+`$XDG_CONFIG_HOME/quill/config.toml` (else `~/.config/quill/config.toml`):
+
+```toml
+[ai]
+enabled = true                 # opt-in; off by default
+offline = false                # true disables all network calls
+model = "claude-opus-4-8"      # or claude-haiku-4-5 for cheap passes
+# api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins)
+```
+
+The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
+never from the project directory. With AI enabled, **Ctrl-A** asks a question
+about the manuscript and the grounded answer (with chapter citations) opens in an
+overlay. The status line shows a persistent `AI` tag when enabled and `⟳ Claude`
+while a request is in flight. *(Shipped in #73: the `quill-ai` backend trait, the
+Claude HTTP backend, and "Ask the manuscript" Q&A. The request runs on a worker
+thread so the editor never blocks.)*
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API
