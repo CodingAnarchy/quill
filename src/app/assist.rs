@@ -273,6 +273,7 @@ impl App {
                 self.ai_rx = None;
                 self.message = None;
                 self.ai_panel = None; // clear any prior overlay before showing this result
+                self.overlay_scroll = 0; // a fresh overlay starts at the top
                 match outcome {
                     Outcome::Answer(r) => self.apply_qa_result(r),
                     Outcome::Characters(r) => self.apply_characters(r),

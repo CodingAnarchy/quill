@@ -105,8 +105,13 @@ impl Tui {
         })
     }
 
-    fn draw(&mut self, app: &App) -> io::Result<()> {
-        self.terminal.draw(|frame| ui::draw(frame, app))?;
+    fn draw(&mut self, app: &mut App) -> io::Result<()> {
+        self.terminal.draw(|frame| {
+            // Record the terminal height so the key handler can clamp overlay
+            // scrolling to the content that actually exists.
+            app.viewport_height = frame.area().height;
+            ui::draw(frame, app);
+        })?;
         Ok(())
     }
 }
