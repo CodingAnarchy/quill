@@ -109,14 +109,17 @@ the Features section above. The remaining sections are forward-looking.
 
 Delivered: per-chapter files with a `book.toml` manifest, chapter
 create/rename/reorder/delete, rolled-up word counts, and the windowed
-continuous-manuscript view (Ctrl-L). The series → book → act grouping below
-remains future work; today's manifest is a flat ordered chapter list.
+continuous-manuscript view (Ctrl-L), plus optional **part** grouping (named,
+inclusive chapter ranges) that drives the progress report's per-part deltas. The
+full series → book → part navigation tree below remains future work; today's
+manifest is a flat ordered chapter list with an optional `parts` overlay.
 
 - A Quill project is a **directory**: each chapter is its own Markdown file, and
   a root **manifest** records the tree — an optional **series** containing one or
-  more **books**, each with **chapters** and an optional **act** grouping. A
-  standalone novel is one book. The editor manages these files transparently;
-  the author works in chapters, not filenames.
+  more **books**, each with **chapters** and an optional **part** grouping (the
+  term is configurable: "part", "act", "book", …). A standalone novel is one
+  book. The editor manages these files transparently; the author works in
+  chapters, not filenames.
 - **Two views, switchable by hotkey.** *Chapter-at-a-time* (default) edits one
   chapter file at a time via the outline pane. *Continuous manuscript* reads as
   one seamless document, with the editor mapping edits back to the right files.
@@ -125,7 +128,7 @@ remains future work; today's manifest is a flat ordered chapter list.
   about three chapters in memory — a window around where you're editing, loaded
   and unloaded as you scroll. Costs track what you're actually working on, not
   the size of the book.
-- Outline/navigation pane walks the manifest tree; jump between chapters, acts,
+- Outline/navigation pane walks the manifest tree; jump between chapters, parts,
   and books, with per-node and rolled-up word counts.
 
 ### Metadata & front matter
@@ -146,8 +149,9 @@ remains future work; today's manifest is a flat ordered chapter list.
   page / chapter completion, a projected final length ("expansion ratio") from
   current pace, `xxx` TODO-marker count, and an "unused" (cut) section.
 - Daily momentum from an append-only snapshot log: today's word delta with
-  additions vs. deletions, the same broken down **per act**, average words/day,
-  and "to go" estimates with projected completion dates.
+  additions vs. deletions, the same broken down **per part** (a configurable
+  grouping of chapters), average words/day, and "to go" estimates with projected
+  completion dates.
 - Full field-by-field spec and formulas in
   [`docs/progress-reports.md`](docs/progress-reports.md).
 
@@ -176,7 +180,7 @@ read/write a human-readable **story bible** kept in the project.
 ### Editing & workflow
 
 - Word-wrap soft-wrapped paragraphs to the focus column
-- Per-session and daily word-count goals (per chapter / act / book / project)
+- Per-session and daily word-count goals (per chapter / part / book / project)
 - Find & replace
 - Undo / redo
 

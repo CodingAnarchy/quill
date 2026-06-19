@@ -23,6 +23,15 @@ pub struct Momentum {
     pub moved_to_unused: usize,
 }
 
+/// One part's line in the "part deltas" block: its display name, current word
+/// total, and today's added / removed within it.
+pub struct PartDelta {
+    pub name: String,
+    pub words: usize,
+    pub added: usize,
+    pub removed: usize,
+}
+
 /// Build the report's rows for a project with `words` total words, `chapters`
 /// chapters, `todo` TODO markers, and today's `momentum`, as of `today`. Rows
 /// are styled (the word delta is colored). Returns a short hint when no goals
@@ -33,6 +42,7 @@ pub fn lines(
     chapters: usize,
     todo: usize,
     momentum: &Momentum,
+    parts: &[PartDelta],
     today: Date,
 ) -> Vec<Line<'static>> {
     let Some(goals) = &manifest.goals else {
@@ -96,6 +106,7 @@ pub fn lines(
     )));
     out.push(Line::raw(""));
     out.push(delta_line(momentum));
+    out.extend(part_lines(parts, manifest.part_label()));
 
     // --- Rate & projected completion --------------------------------------
     if let Some(start) = manifest.start_date.as_deref().and_then(date::parse) {
@@ -116,25 +127,57 @@ pub fn lines(
 /// The "today's word delta" row, with the net colored green (gain) or red (loss)
 /// and the additions/deletions breakdown dimmed.
 fn delta_line(momentum: &Momentum) -> Line<'static> {
-    let net = momentum.added as i64 - momentum.removed as i64;
+    let mut spans = vec![Span::raw("today's word delta: ")];
+    spans.extend(signed_delta_spans(momentum.added, momentum.removed));
+    Line::from(spans)
+}
+
+/// The colored net-delta span (green gain / red loss) followed by the dimmed
+/// `(+added -removed)` breakdown. Shared by the global delta line and each
+/// per-part row.
+fn signed_delta_spans(added: usize, removed: usize) -> Vec<Span<'static>> {
+    let net = added as i64 - removed as i64;
     let color = if net >= 0 { Color::Green } else { Color::Red };
     let signed = if net >= 0 {
         format!("+{}", thousands(net))
     } else {
         thousands(net)
     };
-    Line::from(vec![
-        Span::raw("today's word delta: "),
+    vec![
         Span::styled(signed, Style::default().fg(color)),
         Span::styled(
-            format!(
-                "   (+{} -{})",
-                thousands(momentum.added as i64),
-                thousands(momentum.removed as i64),
-            ),
+            format!("   (+{} -{})", thousands(added as i64), thousands(removed as i64)),
             Style::default().fg(Color::DarkGray),
         ),
-    ])
+    ]
+}
+
+/// The "part deltas" block: a header (`"{label} deltas:"`) and one row per part
+/// showing its name, current word count, and today's colored delta. Empty when
+/// there are no parts (the block is then omitted entirely).
+fn part_lines(parts: &[PartDelta], label: &str) -> Vec<Line<'static>> {
+    if parts.is_empty() {
+        return Vec::new();
+    }
+    // Align names and word counts into columns.
+    let name_w = parts.iter().map(|p| p.name.chars().count()).max().unwrap_or(0);
+    let words_w = parts
+        .iter()
+        .map(|p| thousands(p.words as i64).len())
+        .max()
+        .unwrap_or(0);
+
+    let mut out = vec![Line::raw(format!("{} deltas:", label.to_lowercase()))];
+    for p in parts {
+        let mut spans = vec![Span::raw(format!(
+            "  {name:<name_w$}  {words:>words_w$} words   ",
+            name = p.name,
+            words = thousands(p.words as i64),
+        ))];
+        spans.extend(signed_delta_spans(p.added, p.removed));
+        out.push(Line::from(spans));
+    }
+    out
 }
 
 /// The projected final manuscript, extrapolating the current chapter pace to
@@ -221,11 +264,13 @@ mod tests {
             epigraph_by: None,
             start_date: Some("2026-01-11".into()),
             todo_marker: None,
+            part_label: None,
             goals: Some(Goals {
                 words: 150_000,
                 chapters: 60,
                 words_per_page: 250,
             }),
+            parts: None,
             chapters: Vec::new(),
         }
     }
@@ -250,7 +295,7 @@ mod tests {
     fn reproduces_the_worked_example() {
         // The spec's sample, as of report date 2026-06-16 (156 days in).
         let today = date::parse("2026-06-16").unwrap();
-        let rows = lines(&manifest(), 163_204, 56, 12, &momentum(), today);
+        let rows = lines(&manifest(), 163_204, 56, 12, &momentum(), &[], today);
         let report = text(&rows);
 
         assert!(report.contains("story :   163,204 / 150,000  words ( 108.80 % )"), "{report}");
@@ -273,23 +318,56 @@ mod tests {
     fn word_delta_is_colored_by_sign() {
         let today = date::parse("2026-06-16").unwrap();
 
-        let gain = lines(&manifest(), 1000, 2, 0, &momentum(), today);
+        let gain = lines(&manifest(), 1000, 2, 0, &momentum(), &[], today);
         let row = gain.iter().find(|l| text(std::slice::from_ref(l)).contains("today's word delta")).unwrap();
         assert_eq!(row.spans[1].content, "+2,860");
         assert_eq!(row.spans[1].style.fg, Some(Color::Green));
 
         let loss = Momentum { added: 10, removed: 300, moved_to_unused: 0 };
-        let rows = lines(&manifest(), 1000, 2, 0, &loss, today);
+        let rows = lines(&manifest(), 1000, 2, 0, &loss, &[], today);
         let row = rows.iter().find(|l| text(std::slice::from_ref(l)).contains("today's word delta")).unwrap();
         assert_eq!(row.spans[1].content, "-290");
         assert_eq!(row.spans[1].style.fg, Some(Color::Red));
     }
 
     #[test]
+    fn renders_a_part_deltas_block() {
+        let today = date::parse("2026-06-16").unwrap();
+        let mut m = manifest();
+        m.part_label = Some("Act".into()); // header should lowercase to "act deltas:"
+        let parts = vec![
+            PartDelta { name: "The Gathering".into(), words: 12_450, added: 1_486, removed: 159 },
+            PartDelta { name: "Part 2".into(), words: 8_200, added: 12, removed: 16 },
+        ];
+        let rows = lines(&m, 163_204, 56, 12, &momentum(), &parts, today);
+        let report = text(&rows);
+
+        assert!(report.contains("act deltas:"), "{report}");
+        assert!(report.contains("The Gathering"), "{report}");
+        assert!(report.contains("12,450 words"), "{report}");
+
+        // The first part is a net gain (green +1,327), the second a loss (red -4).
+        let gain = rows.iter().find(|l| text(std::slice::from_ref(l)).contains("The Gathering")).unwrap();
+        let net = gain.spans.iter().find(|s| s.content.contains("+1,327")).unwrap();
+        assert_eq!(net.style.fg, Some(Color::Green));
+        let loss = rows.iter().find(|l| text(std::slice::from_ref(l)).contains("Part 2")).unwrap();
+        let net = loss.spans.iter().find(|s| s.content.trim() == "-4").unwrap();
+        assert_eq!(net.style.fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn no_parts_omits_the_block() {
+        let today = date::parse("2026-06-16").unwrap();
+        let rows = lines(&manifest(), 163_204, 56, 12, &momentum(), &[], today);
+        assert!(!text(&rows).contains("deltas:") || text(&rows).contains("word delta:"), "{}", text(&rows));
+        assert!(!text(&rows).contains("part deltas:"), "{}", text(&rows));
+    }
+
+    #[test]
     fn no_goals_shows_a_hint() {
         let mut m = manifest();
         m.goals = None;
-        let rows = lines(&m, 1000, 2, 0, &momentum(), date::parse("2026-06-16").unwrap());
+        let rows = lines(&m, 1000, 2, 0, &momentum(), &[], date::parse("2026-06-16").unwrap());
         assert!(text(&rows).contains("No writing goals set."), "{}", text(&rows));
     }
 

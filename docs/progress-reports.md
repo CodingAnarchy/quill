@@ -26,11 +26,11 @@ formula behind every line of the report.
 | moved to unused:   0
 |
 | today's word delta: +2,860   (+3,143 -283)
-| act deltas:
-|   1: -4    (+12 -16)
-|   2: +1,327  (+1,486 -159)
-|   3: +521  (+627 -106)
-|   4: +1,016  (+1,018 -2)
+| part deltas:
+|   The Reckoning   55,501 words   -4      (+12 -16)
+|   Part 2          61,240 words   +1,327  (+1,486 -159)
+|   Part 3          28,110 words   +521    (+627 -106)
+|   Part 4          18,353 words   +1,016  (+1,018 -2)
 | days since start:  156
 | average rate:      1,046 words / day
 | to go:             0 words ; 0 days ( 16 Jun 2026 )
@@ -59,17 +59,23 @@ markers:
 unused_heading: Unused        # chapters/sections under this heading are excluded
                               # from totals; words moved in today feed
                               # "moved to unused"
-acts:                         # optional: group chapters into acts for act deltas
-  - { name: "Act I",   chapters: [1, 14] }   # inclusive chapter ranges
-  - { name: "Act II",  chapters: [15, 32] }
-  - { name: "Act III", chapters: [33, 46] }
-  - { name: "Act IV",  chapters: [47, 60] }
+part_label: part              # the displayed term for a grouping; default "part"
+                              # (set to "act", "book", … for the report header
+                              # and auto-named parts)
+parts:                        # optional: group chapters into parts for part deltas
+  - { name: "The Reckoning", chapters: [1, 14] }   # inclusive chapter ranges
+  - { chapters: [15, 32] }                          # name optional → "Part 2"
+  - { chapters: [33, 46] }
+  - { chapters: [47, 60] }
 ---
 ```
 
-Acts are an optional grouping layer **between book and chapter** (see the
-structure tree in the README). If `acts` is omitted, the "act deltas" block is
-simply not rendered.
+Parts are an optional grouping layer **between book and chapter** (see the
+structure tree in the README). Each part is an inclusive, 1-based chapter range
+with an optional `name`; an unnamed part is shown as `"{part_label} {n}"` (e.g.
+"Part 2"). The collective term is configurable via `part_label` (default
+`part`), so an author can use "act", "book", or whatever fits. If `parts` is
+omitted, the "part deltas" block is simply not rendered.
 
 ## Tracked data
 
@@ -88,7 +94,10 @@ offset.
   "added": 3143,             // words inserted today
   "removed": 283,            // words deleted today
   "moved_to_unused": 0,       // words relocated out of the manuscript today
-  "todo": 12                  // count of TODO markers in the manuscript
+  "todo": 12,                 // count of TODO markers in the manuscript
+  "parts":       [55501, 61240, 28110, 18353],  // per-part words, manifest order
+  "part_added":  [12, 1486, 627, 1018],          // per-part words inserted today
+  "part_removed": [16, 159, 106, 2]              // per-part words deleted today
 }
 ```
 
@@ -99,10 +108,13 @@ offset.
   structural drops are booked here rather than as `removed`, and the baseline is
   reset so the deletion isn't counted as prose loss. The `unused` *heading*
   exclusion (moving sections under it) lands with #53.
-- The per-act snapshot fields (`acts`, `act_added`, `act_removed`) and the "act
-  deltas" report block land with #60; this log currently tracks the manuscript
-  totals only.
-- `words` and `todo` are measured from the buffer at report time.
+- The per-part fields (`parts`, `part_added`, `part_removed`) carry the same
+  numbers split by part (manifest order), attributing each edit to the part of
+  the chapter it occurred in. They're omitted from the JSON when the manifest
+  defines no parts, and are resumed on reopen only when their length still
+  matches the current parts config.
+- `words`, `todo`, and the per-part `parts` totals are measured from the buffer
+  at report time.
 - "today" = changes since the most recent prior snapshot (or `start_date` on day
   one).
 
@@ -125,7 +137,7 @@ chapters / words-per-page; pages use `floor(words / wpp)`.
 | `xxx` | count of the configured TODO marker |
 | `moved to unused` | today's `moved_to_unused` |
 | `today's word delta` | net `added - removed`, with `(+added -removed)` shown |
-| `act deltas: n` | per-act `act_added[n] - act_removed[n]` with adds/dels |
+| `{part_label} deltas` | per-part name + current words + net `part_added[n] - part_removed[n]` with adds/dels |
 | `days since start` | `report_date - start_date`, in days |
 | `average rate` | `floor(W / days_since_start)` words/day |
 | `to go` | words `max(0, Wt - W)`; days `round(words / rate)`; ETA `report_date + days` |
@@ -140,8 +152,10 @@ color-coded (green for gains, red for losses) in the TUI.
   completion (`W / (C/Ct)`). An alternative is a manually pinned expansion ratio
   the author sets directly. Support both — auto-derive by default, allow an
   override in `goals`.
-- **Act attribution of edits** depends on the structure parse (tree-sitter
-  outline) being current; recompute the active act on cursor move.
+- **Part attribution of edits** is by the part of the *chapter* being edited
+  (per-chapter word baselines, retallied on idle). In the continuous view this
+  settles at save granularity; finer cursor-position attribution within a
+  chapter would need the structure parse to be current.
 - **Day boundary / timezone** for resetting daily counters — resolved: use the
   author's local date (`time::OffsetDateTime::now_local`, UTC fallback). A
   configurable "my day ends at 3am" offset is deferred until someone asks; the
