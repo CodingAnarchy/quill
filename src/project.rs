@@ -254,7 +254,7 @@ impl Project {
     /// Read chapter `index` from disk once and refresh its cached word count and
     /// front-matter metadata (status / summary / POV). Used at open.
     fn read_chapter_cache(&mut self, index: usize) {
-        let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
+        let text = self.read_chapter(index);
         let (front, body) = frontmatter::split(&text);
         let words = count_words(body);
         let fm = front.map(FrontMatter::from_raw);
@@ -265,11 +265,17 @@ impl Project {
         self.cache_chapter_meta(index, fm.as_ref());
     }
 
+    /// Read chapter `index`'s file from disk, or "" if it can't be read. The
+    /// shared front of the off-the-per-frame-path chapter readers.
+    fn read_chapter(&self, index: usize) -> String {
+        fs::read_to_string(self.chapter_path(index)).unwrap_or_default()
+    }
+
     /// The front matter of chapter `index` as written on disk (`None` if the
     /// file has no block). For reading a chapter's metadata that isn't cached —
     /// keep it off the per-frame path.
     pub fn chapter_front_matter(&self, index: usize) -> Option<FrontMatter> {
-        let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
+        let text = self.read_chapter(index);
         let (front, _) = frontmatter::split(&text);
         front.map(FrontMatter::from_raw)
     }
@@ -277,8 +283,7 @@ impl Project {
     /// The prose body of chapter `index` from disk (front matter stripped),
     /// empty if it can't be read. Off the per-frame path (used by the report).
     pub fn chapter_body(&self, index: usize) -> String {
-        let text = fs::read_to_string(self.chapter_path(index)).unwrap_or_default();
-        frontmatter::split(&text).1.to_string()
+        frontmatter::split(&self.read_chapter(index)).1.to_string()
     }
 
     /// Cached metadata accessors for the pane (no file I/O).

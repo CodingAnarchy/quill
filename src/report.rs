@@ -5,6 +5,9 @@
 //!
 //! The daily-momentum lines (today's delta, per-act deltas, moved-to-unused)
 //! need the snapshot log and land with #59/#60; this renders the static lines.
+//! Those deltas are color-coded (green gains / red losses), so #59 should change
+//! [`lines`] to return styled rows (`Vec<Line>` or a small typed enum the UI
+//! colors) and add delta rows — not re-parse these strings for `+`/`-`.
 
 use crate::date::Date;
 use crate::project::Manifest;
@@ -22,6 +25,7 @@ pub fn lines(manifest: &Manifest, words: usize, chapters: usize, todo: usize, to
 
     let mut out = Vec::new();
     let wpp = goals.words_per_page.max(1);
+    let pages = (words / wpp) as i64;
 
     // --- Story: completion against the goals -------------------------------
     out.push(format!(
@@ -32,7 +36,7 @@ pub fn lines(manifest: &Manifest, words: usize, chapters: usize, todo: usize, to
     ));
     out.push(format!(
         "          {} / {}  pages",
-        thousands((words / wpp) as i64),
+        thousands(pages),
         thousands((goals.words / wpp) as i64),
     ));
     out.push(format!(
@@ -43,31 +47,21 @@ pub fn lines(manifest: &Manifest, words: usize, chapters: usize, todo: usize, to
     ));
 
     // --- Projection: extrapolate current chapter pace to the whole book ----
-    // f = chapter completion; projected words Wp = W / f.
-    let projected = if chapters > 0 && goals.chapters > 0 {
-        Some(words as f64 * goals.chapters as f64 / chapters as f64)
-    } else {
-        None
-    };
-    if let Some(wp) = projected {
-        let wp_words = wp.round() as i64;
-        let ratio = if goals.words > 0 { wp / goals.words as f64 } else { 0.0 };
+    // f = chapter completion; projected words Wp = W / f. Computed once.
+    let projection = Projection::of(words, chapters, goals, wpp);
+    if let Some(p) = projection {
         out.push(String::new());
-        out.push(format!("          expansion ratio: {ratio:.2}"));
-        out.push(format!("          words at this ratio: {}", thousands(wp_words)));
-        out.push(format!("          pages at this ratio: {}", thousands((wp / wpp as f64).floor() as i64)));
+        out.push(format!("          expansion ratio: {:.2}", p.ratio));
+        out.push(format!("          words at this ratio: {}", thousands(p.words)));
+        out.push(format!("          pages at this ratio: {}", thousands(p.pages)));
         out.push(String::new());
         out.push(format!(
             "          {} / {} words at this ratio ( {} )",
             thousands(words as i64),
-            thousands(wp_words),
+            thousands(p.words),
             percent(chapters, goals.chapters), // == W / Wp by construction
         ));
-        out.push(format!(
-            "          {} / {} pages at this ratio",
-            thousands((words / wpp) as i64),
-            thousands((wp / wpp as f64).floor() as i64),
-        ));
+        out.push(format!("          {} / {} pages at this ratio", thousands(pages), thousands(p.pages)));
     }
 
     // --- Markers ----------------------------------------------------------
@@ -82,17 +76,38 @@ pub fn lines(manifest: &Manifest, words: usize, chapters: usize, todo: usize, to
         out.push(format!("days since start:  {}", thousands(days)));
         out.push(format!("average rate:      {} words / day", thousands(rate)));
         out.push(to_go("to go:            ", goals.words as i64 - words as i64, rate, today));
-        if let Some(wp) = projected {
-            out.push(to_go(
-                "to go (expansion):",
-                wp.round() as i64 - words as i64,
-                rate,
-                today,
-            ));
+        if let Some(p) = projection {
+            out.push(to_go("to go (expansion):", p.words - words as i64, rate, today));
         }
     }
 
     out
+}
+
+/// The projected final manuscript, extrapolating the current chapter pace to
+/// all the goal's chapters. `None` when there's nothing to project from yet.
+#[derive(Clone, Copy)]
+struct Projection {
+    /// Projected total words (rounded).
+    words: i64,
+    /// Projected total pages.
+    pages: i64,
+    /// Projected length over the goal (the "expansion ratio").
+    ratio: f64,
+}
+
+impl Projection {
+    fn of(words: usize, chapters: usize, goals: &crate::project::Goals, wpp: usize) -> Option<Projection> {
+        if chapters == 0 || goals.chapters == 0 {
+            return None;
+        }
+        let wp = words as f64 * goals.chapters as f64 / chapters as f64;
+        Some(Projection {
+            words: wp.round() as i64,
+            pages: (wp / wpp as f64).floor() as i64,
+            ratio: if goals.words > 0 { wp / goals.words as f64 } else { 0.0 },
+        })
+    }
 }
 
 /// A "to go" line: words remaining, days at `rate`, and the projected date.
