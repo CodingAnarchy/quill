@@ -28,6 +28,16 @@ pub struct Snapshot {
     pub todo: usize,
     /// Words relocated out of the manuscript today (deleted chapters).
     pub moved_to_unused: usize,
+    /// Per-part word totals at snapshot time, in manifest part order. Defaulted
+    /// so records written before parts existed still parse.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<usize>,
+    /// Per-part words inserted today, in manifest part order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_added: Vec<usize>,
+    /// Per-part words deleted today, in manifest part order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_removed: Vec<usize>,
 }
 
 fn log_path(root: &Path) -> PathBuf {
@@ -84,6 +94,7 @@ mod tests {
             removed: 10,
             todo: 3,
             moved_to_unused: 0,
+            ..Snapshot::default()
         }
     }
 
@@ -106,6 +117,43 @@ mod tests {
         assert_eq!(loaded.len(), 2); // one per day, not three
         assert_eq!(for_date(&dir, "2026-06-16").unwrap().added, 350); // latest wins
         assert_eq!(for_date(&dir, "2026-06-15").unwrap().added, 100); // older untouched
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn per_part_fields_round_trip() {
+        let dir = temp_dir("per-part");
+        let snap = Snapshot {
+            date: "2026-06-16".into(),
+            words: 1000,
+            added: 200,
+            removed: 10,
+            todo: 3,
+            moved_to_unused: 0,
+            parts: vec![600, 400],
+            part_added: vec![150, 50],
+            part_removed: vec![4, 6],
+        };
+        persist(&dir, &snap).unwrap();
+        assert_eq!(load(&dir), vec![snap]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn record_without_part_fields_still_parses() {
+        // A line written before parts existed (no part_* keys) must load with
+        // empty per-part vecs, not fail.
+        let dir = temp_dir("old-line");
+        fs::create_dir_all(dir.join(DIR)).unwrap();
+        fs::write(
+            log_path(&dir),
+            "{\"date\":\"2026-06-16\",\"words\":1000,\"added\":5,\"removed\":0,\"todo\":2,\"moved_to_unused\":0}\n",
+        )
+        .unwrap();
+        let snap = for_date(&dir, "2026-06-16").unwrap();
+        assert_eq!(snap.added, 5);
+        assert!(snap.part_added.is_empty());
+        assert!(snap.parts.is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 

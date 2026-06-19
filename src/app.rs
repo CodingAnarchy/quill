@@ -1,5 +1,7 @@
 //! Top-level application state and the editing modes that drive key handling.
 
+use std::collections::HashMap;
+
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use ratatui::text::Line;
@@ -10,7 +12,7 @@ use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::project::{Manifest, Project};
-use crate::report::{self, Momentum};
+use crate::report::{self, Momentum, PartDelta};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
@@ -114,14 +116,21 @@ pub struct App {
     /// full-screen until any key dismisses it. Computed once on open so the
     /// report (which scans files for TODO markers) isn't rebuilt per frame.
     pub report: Option<Vec<Line<'static>>>,
-    /// Words inserted / deleted today, the count of words moved out of the
-    /// manuscript today (deleted chapters), and the running word total they're
-    /// measured against. Seeded from the day's snapshot on load; fed to the
-    /// progress report and persisted to the history log.
+    /// Words inserted / deleted today and the count of words moved out of the
+    /// manuscript today (deleted chapters). Seeded from the day's snapshot on
+    /// load; fed to the progress report and persisted to the history log.
     added: usize,
     removed: usize,
     moved_to_unused: usize,
-    last_words: usize,
+    /// Today's added / deleted words per part, in manifest part order (empty
+    /// when the manifest defines no parts). The global counters above equal the
+    /// sums of these plus any edits in chapters outside every part.
+    part_added: Vec<usize>,
+    part_removed: Vec<usize>,
+    /// Per-chapter word baselines (chapter file → last counted words) the tally
+    /// measures against. Keyed by file identity so it survives reordering; an
+    /// edit's delta is attributed to the part of the chapter that changed.
+    baselines: HashMap<String, usize>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -140,12 +149,26 @@ impl App {
             added: 0,
             removed: 0,
             moved_to_unused: 0,
-            last_words: 0,
+            part_added: Vec::new(),
+            part_removed: Vec::new(),
+            baselines: HashMap::new(),
             message: None,
         };
-        // Baseline for the daily word tally: edits move it from here.
-        app.last_words = app.project_word_count();
+        // Baselines for the daily word tally: edits move each chapter from here.
+        let parts = app.project.manifest.parts.as_ref().map_or(0, Vec::len);
+        app.part_added = vec![0; parts];
+        app.part_removed = vec![0; parts];
+        app.seed_baselines();
         app
+    }
+
+    /// Reset the per-chapter word baselines to the current counts, so the next
+    /// tally measures edits from here. Used at startup and after a structural
+    /// edit that shouldn't be booked as prose.
+    fn seed_baselines(&mut self) {
+        self.baselines = (0..self.chapter_count())
+            .map(|i| (self.project.chapter_file(i).to_string(), self.chapter_word_count(i)))
+            .collect();
     }
 
     /// The buffer the author is currently editing: the continuous-view buffer
@@ -179,18 +202,38 @@ impl App {
         self.tally_words();
     }
 
-    /// Attribute the change in total words since the last idle tick to today's
-    /// added / removed counters. Structural edits (chapter delete) reset the
-    /// baseline themselves so they aren't booked as prose.
+    /// Attribute each chapter's word change since the last idle tick to today's
+    /// global and per-part added / removed counters. Walking per chapter (rather
+    /// than the project total) lets a delta be booked to the part of the chapter
+    /// that changed; the global counters stay equal to the sum of the parts.
+    /// Structural edits (chapter delete) drop their baseline so they aren't
+    /// booked as prose.
     fn tally_words(&mut self) {
-        let words = self.project_word_count();
-        let delta = words as i64 - self.last_words as i64;
-        if delta > 0 {
-            self.added += delta as usize;
-        } else {
-            self.removed += (-delta) as usize;
+        for i in 0..self.chapter_count() {
+            let words = self.chapter_word_count(i);
+            let file = self.project.chapter_file(i);
+            let last = self.baselines.get(file).copied().unwrap_or(0);
+            let delta = words as i64 - last as i64;
+            if delta == 0 {
+                continue;
+            }
+            let (add, rem) = if delta > 0 {
+                (delta as usize, 0)
+            } else {
+                (0, (-delta) as usize)
+            };
+            self.added += add;
+            self.removed += rem;
+            if let Some(p) = self.project.manifest.part_of(i) {
+                if let Some(pa) = self.part_added.get_mut(p) {
+                    *pa += add;
+                }
+                if let Some(pr) = self.part_removed.get_mut(p) {
+                    *pr += rem;
+                }
+            }
+            self.baselines.insert(file.to_string(), words);
         }
-        self.last_words = words;
     }
 
     /// Seed today's counters from the history log (resume the day across a
@@ -200,6 +243,12 @@ impl App {
             self.added = snap.added;
             self.removed = snap.removed;
             self.moved_to_unused = snap.moved_to_unused;
+            // Resume per-part counters only when they match the current parts
+            // config; a changed manifest starts the day's per-part tally fresh.
+            if snap.part_added.len() == self.part_added.len() {
+                self.part_added = snap.part_added;
+                self.part_removed = snap.part_removed;
+            }
         }
     }
 
@@ -212,8 +261,28 @@ impl App {
             removed: self.removed,
             todo: self.count_todo(),
             moved_to_unused: self.moved_to_unused,
+            parts: self.part_word_counts(),
+            part_added: self.part_added.clone(),
+            part_removed: self.part_removed.clone(),
         };
         let _ = history::persist(&self.project.root, &snapshot);
+    }
+
+    /// Current word total for each part, in manifest part order (empty when no
+    /// parts). Each part sums the live counts of the chapters in its range.
+    fn part_word_counts(&self) -> Vec<usize> {
+        let Some(parts) = self.project.manifest.parts.as_ref() else {
+            return Vec::new();
+        };
+        let chapters = self.chapter_count();
+        parts
+            .iter()
+            .map(|p| {
+                let start = p.chapters[0].saturating_sub(1); // 1-based, inclusive
+                let end = p.chapters[1].min(chapters); // clamp to existing chapters
+                (start..end).map(|i| self.chapter_word_count(i)).sum()
+            })
+            .collect()
     }
 
     /// Whether the active edit target has unsaved changes (either view).
@@ -255,8 +324,30 @@ impl App {
             self.chapter_count(),
             self.count_todo(),
             &momentum,
+            &self.part_deltas(),
             date::today(),
         )
+    }
+
+    /// Build the per-part rows for the report: each part's display name (its
+    /// `name`, or `"{label} {n}"` when unnamed), current word total, and today's
+    /// added / removed within it.
+    fn part_deltas(&self) -> Vec<PartDelta> {
+        let Some(parts) = self.project.manifest.parts.as_ref() else {
+            return Vec::new();
+        };
+        let label = self.project.manifest.part_label();
+        let words = self.part_word_counts();
+        parts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| PartDelta {
+                name: p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1)),
+                words: words.get(i).copied().unwrap_or(0),
+                added: self.part_added.get(i).copied().unwrap_or(0),
+                removed: self.part_removed.get(i).copied().unwrap_or(0),
+            })
+            .collect()
     }
 
     /// Count the configured TODO marker across the manuscript (case-insensitive):
@@ -527,8 +618,10 @@ impl App {
             }
         }
         self.moved_to_unused += removed_words;
-        // Absorb the structural drop so the next tally doesn't book it as removed.
-        self.last_words = self.project_word_count();
+        // Absorb the structural drop so the next tally doesn't book it as removed:
+        // re-baseline every chapter to its current count (this also drops the
+        // deleted file's stale entry, since the map is rebuilt by file identity).
+        self.seed_baselines();
         self.message = Some("Moved chapter to unused/".into());
         at.min(self.chapter_count() - 1)
     }
@@ -1493,6 +1586,109 @@ mod tests {
         assert_eq!(reopened.added, 100);
         assert_eq!(reopened.removed, 5);
         assert_eq!(reopened.moved_to_unused, 3);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A two-chapter project where each chapter is its own part ("Beginning",
+    /// "End"), for exercising per-part attribution.
+    fn parts_app(name: &str) -> (App, PathBuf) {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("quill-app-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            Project::manifest_path(&dir),
+            "title = \"Book\"\npart_label = \"part\"\n\n\
+             [[parts]]\nname = \"Beginning\"\nchapters = [1, 1]\n\n\
+             [[parts]]\nname = \"End\"\nchapters = [2, 2]\n\n\
+             [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+             [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+        fs::write(dir.join("two.md"), "second chapter\n").unwrap();
+
+        let project = Project::open(&dir).unwrap();
+        let buffer = Buffer::from_path(project.active_path()).unwrap();
+        (App::new(buffer, project), dir)
+    }
+
+    #[test]
+    fn edits_are_attributed_to_their_part() {
+        let (mut app, dir) = parts_app("attribute");
+        // Type in chapter 0 (the "Beginning" part).
+        typed(&mut app, "alpha beta "); // +2 words in ch0
+        app.on_idle();
+        assert_eq!(app.part_added, vec![2, 0]);
+
+        // Switch to chapter 1 (the "End" part) and type — switching flushes ch0,
+        // so its cached count matches its baseline and isn't re-booked.
+        app.on_key(ctrl('n'));
+        typed(&mut app, "gamma "); // +1 word in ch1
+        app.on_idle();
+        assert_eq!(app.part_added, vec![2, 1]);
+
+        // The global counters equal the sums of the parts.
+        assert_eq!(app.added, app.part_added.iter().sum::<usize>());
+        assert_eq!(app.removed, 0);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn deleting_a_chapter_does_not_book_a_part_removal() {
+        let (mut app, dir) = parts_app("part-delete");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Down)); // select chapter 1 ("End")
+        app.on_key(key(KeyCode::Char('d')));
+        app.on_key(key(KeyCode::Char('y'))); // confirm delete
+        app.on_idle();
+        // Structural drop → moved_to_unused, not a per-part removal.
+        assert_eq!(app.moved_to_unused, 2);
+        assert_eq!(app.part_removed, vec![0, 0]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn per_part_counters_persist_and_resume() {
+        let (mut app, dir) = parts_app("part-resume");
+        app.part_added = vec![40, 12];
+        app.part_removed = vec![3, 1];
+        app.persist_snapshot();
+
+        let project = Project::open(&dir).unwrap();
+        let buffer = Buffer::from_path(project.active_path()).unwrap();
+        let mut reopened = App::new(buffer, project);
+        reopened.load_history();
+        assert_eq!(reopened.part_added, vec![40, 12]);
+        assert_eq!(reopened.part_removed, vec![3, 1]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resume_ignores_per_part_counts_when_the_parts_config_changed() {
+        // Persist a two-part day, then reopen with a one-part manifest: the
+        // mismatched per-part counters are dropped rather than mis-applied.
+        let (mut app, dir) = parts_app("part-mismatch");
+        app.part_added = vec![40, 12];
+        app.persist_snapshot();
+
+        fs::write(
+            Project::manifest_path(&dir),
+            "title = \"Book\"\n\n\
+             [[parts]]\nname = \"Whole\"\nchapters = [1, 2]\n\n\
+             [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+             [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+        )
+        .unwrap();
+        let project = Project::open(&dir).unwrap();
+        let buffer = Buffer::from_path(project.active_path()).unwrap();
+        let mut reopened = App::new(buffer, project);
+        reopened.load_history();
+        assert_eq!(reopened.part_added, vec![0]); // one part, fresh
 
         fs::remove_dir_all(&dir).ok();
     }

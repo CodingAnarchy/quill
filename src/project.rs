@@ -67,6 +67,18 @@ fn default_words_per_page() -> usize {
     250
 }
 
+/// A named, inclusive range of chapters — a grouping layer between book and
+/// chapter (see [`docs/progress-reports.md`]). `chapters` is `[start, end]`,
+/// 1-based and inclusive. `name` is optional; the report auto-labels an unnamed
+/// part `"{label} {n}"` using [`Manifest::part_label`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Part {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Inclusive 1-based chapter range `[start, end]`.
+    pub chapters: [usize; 2],
+}
+
 /// The on-disk manifest (`book.toml`), deserialized.
 ///
 /// `title` is the book title; `subtitle`, `author`, and `series` are optional
@@ -97,9 +109,18 @@ pub struct Manifest {
     /// Defaults to `xxx` (see [`Manifest::todo_marker`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todo_marker: Option<String>,
+    /// The displayed term for a chapter grouping ("part", "act", "book", …).
+    /// Defaults to `part` (see [`Manifest::part_label`]). A scalar key, so it
+    /// must precede the `goals`/`parts`/`chapters` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_label: Option<String>,
     /// The author's writing goals; the progress report is empty without them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goals: Option<Goals>,
+    /// Optional grouping of chapters into named, inclusive ranges. When absent,
+    /// the report's per-part block is not rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<Vec<Part>>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
 }
@@ -113,6 +134,21 @@ impl Manifest {
     /// The configured TODO marker, defaulting to `xxx`.
     pub fn todo_marker(&self) -> &str {
         self.todo_marker.as_deref().unwrap_or("xxx")
+    }
+
+    /// The displayed term for a chapter grouping, defaulting to `part`.
+    pub fn part_label(&self) -> &str {
+        self.part_label.as_deref().unwrap_or("part")
+    }
+
+    /// The index of the part containing chapter `chapter_index` (0-based), or
+    /// `None` if no part's inclusive 1-based range covers it.
+    pub fn part_of(&self, chapter_index: usize) -> Option<usize> {
+        let n = chapter_index + 1; // ranges are 1-based
+        self.parts
+            .as_ref()?
+            .iter()
+            .position(|p| p.chapters[0] <= n && n <= p.chapters[1])
     }
 }
 
@@ -185,7 +221,9 @@ impl Project {
                 epigraph_by: None,
                 start_date: None,
                 todo_marker: None,
+                part_label: None,
                 goals: None,
+                parts: None,
                 chapters: Vec::new(),
             },
             active: String::new(),
@@ -218,6 +256,12 @@ impl Project {
     /// Path to a chapter's file by index.
     pub fn chapter_path(&self, index: usize) -> PathBuf {
         self.root.join(&self.manifest.chapters[index].file)
+    }
+
+    /// The chapter's file name relative to the project root ("" if out of
+    /// range) — a stable identity for keying per-chapter bookkeeping.
+    pub fn chapter_file(&self, index: usize) -> &str {
+        self.manifest.chapters.get(index).map_or("", |c| c.file.as_str())
     }
 
     /// Index of the active chapter — derived from its file identity, so it stays
@@ -464,7 +508,9 @@ impl Project {
                 epigraph_by: None,
                 start_date: None,
                 todo_marker: None,
+                part_label: None,
                 goals: None,
+                parts: None,
                 chapters,
             },
             active,
@@ -642,6 +688,48 @@ mod tests {
         let reopened = Project::open(&dir).unwrap();
         assert_eq!(reopened.manifest.start_date.as_deref(), Some("2026-01-11"));
         assert_eq!(reopened.manifest.goals.unwrap().words, 150_000);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parts_round_trip_and_map_chapters_to_ranges() {
+        let dir = temp_dir("parts");
+        let _ = fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap();
+        assert!(project.manifest.parts.is_none());
+        assert_eq!(project.manifest.part_label(), "part"); // default
+        assert_eq!(project.manifest.part_of(0), None); // no parts → no mapping
+
+        project.manifest.part_label = Some("act".into());
+        project.manifest.parts = Some(vec![
+            Part { name: Some("The Gathering".into()), chapters: [1, 2] },
+            Part { name: None, chapters: [3, 4] },
+        ]);
+        project.save_manifest().unwrap();
+
+        // `[[parts]]` serializes after `part_label` (a scalar) and before
+        // `[[chapters]]` (valid TOML: scalars precede arrays-of-tables).
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(
+            toml.find("part_label").unwrap() < toml.find("[[parts]]").unwrap(),
+            "part_label must precede [[parts]]:\n{toml}"
+        );
+        assert!(
+            toml.find("[[parts]]").unwrap() < toml.find("[[chapters]]").unwrap(),
+            "parts must precede chapters:\n{toml}"
+        );
+
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.manifest.part_label(), "act");
+        let parts = reopened.manifest.parts.as_ref().unwrap();
+        assert_eq!(parts[0].name.as_deref(), Some("The Gathering"));
+        assert_eq!(parts[0].chapters, [1, 2]);
+        // Chapter index 0 (chapter 1) is in part 0; index 2 (chapter 3) in part 1.
+        assert_eq!(reopened.manifest.part_of(0), Some(0));
+        assert_eq!(reopened.manifest.part_of(2), Some(1));
+        // A chapter outside every range maps to no part.
+        assert_eq!(reopened.manifest.part_of(9), None);
 
         fs::remove_dir_all(&dir).ok();
     }
