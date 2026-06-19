@@ -17,7 +17,7 @@ use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::setting::{self, Setting};
 use crate::analysis;
-use crate::buffer::Buffer;
+use crate::buffer::{self, Buffer};
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
@@ -295,13 +295,22 @@ impl App {
     /// once when it's opened. Scans every chapter's prose (active chapter live,
     /// the rest from disk) — on demand, never per frame.
     fn analysis_lines(&self) -> Vec<Line<'static>> {
-        let chapters: Vec<(String, analysis::Stats)> = (0..self.chapter_count())
-            .map(|i| {
-                let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
-                (title, analysis::stats(&self.chapter_text(i)))
-            })
-            .collect();
-        analysis::lines(&self.project.manifest.title, &chapters)
+        let threshold = self.project.manifest.run_on_threshold();
+        let mut chapters = Vec::with_capacity(self.chapter_count());
+        let mut longest = analysis::LongestSentences::new(5);
+        for i in 0..self.chapter_count() {
+            let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
+            let text = self.chapter_text(i);
+            let stats = analysis::stats(&text);
+            let sentences = analysis::sentences(&text);
+            let sentence_lengths: Vec<usize> =
+                sentences.iter().map(|s| buffer::count_words(s)).collect();
+            for (s, &words) in sentences.iter().zip(&sentence_lengths) {
+                longest.consider(&title, s, words);
+            }
+            chapters.push(analysis::ChapterAnalysis { title, stats, sentence_lengths });
+        }
+        analysis::lines(&self.project.manifest.title, &chapters, &longest.into_vec(), threshold)
     }
 
     /// Build the per-part rows for the report: each part's display name (its

@@ -1173,7 +1173,8 @@ fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
         .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("readability"), "{text}");
+    assert!(text.contains("Readability"), "{text}");
+    assert!(text.contains("Sentence length"), "sentence section: {text}");
     assert!(text.contains("One") && text.contains("Two"), "both chapters listed: {text}");
     assert!(text.contains("Whole manuscript"), "overall row: {text}");
     fs::remove_dir_all(&dir).ok();

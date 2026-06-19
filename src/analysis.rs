@@ -134,27 +134,44 @@ pub fn syllables(word: &str) -> usize {
     groups.max(1)
 }
 
-/// Count sentences in prose. A run of terminators (`.`, `!`, `?`, `…`) ends a
-/// sentence when it is followed by the end of the text or by whitespace and then
-/// a capital / opening quote — so mid-sentence ellipses ("I... think"), decimals
-/// ("3.14"), dialogue tags (`"Stop!" she said.`), and abbreviations ("Dr.
-/// Vance") don't over-count. Trailing prose with no terminator counts as one
-/// final sentence.
+/// Count sentences in prose (see [`sentence_spans`] for the segmentation rules).
 pub fn count_sentences(text: &str) -> usize {
-    let chars: Vec<char> = text.chars().collect();
+    sentence_spans(text).len()
+}
+
+/// The sentences in `text`, each trimmed of surrounding whitespace, in order.
+/// Empty for empty prose. The basis for sentence-length statistics (#68).
+pub fn sentences(text: &str) -> Vec<&str> {
+    sentence_spans(text).into_iter().map(|(s, e)| text[s..e].trim()).collect()
+}
+
+/// Byte spans `(start, end)` of each sentence in `text`. A run of terminators
+/// (`.`, `!`, `?`, `…`) ends a sentence when it is followed by the end of the
+/// text or by whitespace and then a capital / digit / opening quote — so
+/// mid-sentence ellipses ("I... think"), decimals ("3.14"), dialogue tags
+/// (`"Stop!" she said.`), and abbreviations ("Dr. Vance") don't over-split.
+/// Trailing prose with no terminator is a final sentence.
+fn sentence_spans(text: &str) -> Vec<(usize, usize)> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
     let n = chars.len();
-    let mut count = 0;
+    let mut spans = Vec::new();
+    let mut start: Option<usize> = None; // index into `chars` of the sentence start
     let mut word_pending = false; // saw word content since the last boundary
     let mut i = 0;
     while i < n {
-        let c = chars[i];
+        let (_, c) = chars[i];
+        if start.is_none() && !c.is_whitespace() {
+            start = Some(i);
+        }
         if is_terminator(c) {
-            let start = i;
-            while i < n && is_terminator(chars[i]) {
+            let run = i;
+            while i < n && is_terminator(chars[i].1) {
                 i += 1;
             }
-            if word_pending && is_boundary(&chars, start, i) {
-                count += 1;
+            if word_pending && is_boundary(&chars, run, i) {
+                let s = chars[start.take().unwrap()].0;
+                let e = if i < n { chars[i].0 } else { text.len() };
+                spans.push((s, e));
                 word_pending = false;
             }
         } else {
@@ -165,9 +182,11 @@ pub fn count_sentences(text: &str) -> usize {
         }
     }
     if word_pending {
-        count += 1; // a final fragment with no closing punctuation
+        // A final fragment with no closing punctuation.
+        let s = start.map_or(text.len(), |k| chars[k].0);
+        spans.push((s, text.len()));
     }
-    count
+    spans
 }
 
 fn is_terminator(c: char) -> bool {
@@ -175,11 +194,11 @@ fn is_terminator(c: char) -> bool {
 }
 
 /// Whether the terminator run `chars[start..end]` actually ends a sentence.
-fn is_boundary(chars: &[char], start: usize, end: usize) -> bool {
+fn is_boundary(chars: &[(usize, char)], start: usize, end: usize) -> bool {
     // A lone '.' between digits is a decimal point, not a full stop.
-    if end - start == 1 && chars[start] == '.' {
-        let prev = start.checked_sub(1).map(|j| chars[j]);
-        let next = chars.get(end).copied();
+    if end - start == 1 && chars[start].1 == '.' {
+        let prev = start.checked_sub(1).map(|j| chars[j].1);
+        let next = chars.get(end).map(|x| x.1);
         if matches!(prev, Some(p) if p.is_ascii_digit()) && matches!(next, Some(x) if x.is_ascii_digit()) {
             return false;
         }
@@ -189,15 +208,15 @@ fn is_boundary(chars: &[char], start: usize, end: usize) -> bool {
     }
     // Skip any closing quotes / brackets that trail the terminator.
     let mut j = end;
-    while j < chars.len() && matches!(chars[j], '"' | '\'' | '”' | '’' | ')' | ']' | '}') {
+    while j < chars.len() && matches!(chars[j].1, '"' | '\'' | '”' | '’' | ')' | ']' | '}') {
         j += 1;
     }
-    match chars.get(j) {
+    match chars.get(j).map(|x| x.1) {
         None => true, // end of text
         Some(c) if c.is_whitespace() => {
             // A real boundary: the next non-space starts a new sentence (capital,
             // digit, or an opening quote). Lowercase means it ran on.
-            match chars[j..].iter().find(|c| !c.is_whitespace()) {
+            match chars[j..].iter().map(|x| x.1).find(|c| !c.is_whitespace()) {
                 None | Some('"' | '\'' | '“' | '‘' | '(') => true,
                 Some(c) => c.is_uppercase() || c.is_ascii_digit(),
             }
@@ -207,64 +226,236 @@ fn is_boundary(chars: &[char], start: usize, end: usize) -> bool {
 }
 
 /// Whether the alphabetic run ending just before `dot` is a known abbreviation.
-fn preceding_is_abbreviation(chars: &[char], dot: usize) -> bool {
+fn preceding_is_abbreviation(chars: &[(usize, char)], dot: usize) -> bool {
     let mut start = dot;
-    while start > 0 && chars[start - 1].is_alphabetic() {
+    while start > 0 && chars[start - 1].1.is_alphabetic() {
         start -= 1;
     }
     if start == dot {
         return false;
     }
-    let word: String = chars[start..dot].iter().flat_map(|c| c.to_lowercase()).collect();
+    let word: String = chars[start..dot].iter().flat_map(|(_, c)| c.to_lowercase()).collect();
     ABBREVIATIONS.contains(&word.as_str())
 }
 
-/// The analysis report's rows: a readability table with one row per chapter and a
-/// whole-manuscript total. Computed once when the report is opened (the scan is
-/// O(manuscript), so it stays off the per-frame path).
-pub fn lines(title: &str, chapters: &[(String, Stats)]) -> Vec<Line<'static>> {
-    let mut out = vec![
-        Line::from(Span::styled(
-            format!("{title} — readability"),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
-        header_row(),
-    ];
+/// The number of buckets in the sentence-length distribution: `<10`, `10–19`,
+/// `20–29`, `30–39`, `40+` words.
+pub const LENGTH_BUCKETS: usize = 5;
 
-    let mut total = Stats::default();
-    for (name, stats) in chapters {
-        total.add(*stats);
-        out.push(Line::raw(score_text(name, readability(*stats))));
+/// Sentence-length statistics for a span of prose, measured in words per
+/// sentence (#68). Additive figures are not — these summarize one set of
+/// lengths, so the overall figures come from the concatenated lengths, not from
+/// combining per-chapter summaries.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SentenceStats {
+    pub count: usize,
+    pub mean: f64,
+    pub median: f64,
+    pub min: usize,
+    pub max: usize,
+    /// Counts per length bucket (see [`LENGTH_BUCKETS`]).
+    pub histogram: [usize; LENGTH_BUCKETS],
+    /// Sentences longer than the run-on threshold.
+    pub run_ons: usize,
+}
+
+/// Summarize a set of sentence lengths (words per sentence). `run_on_threshold`
+/// is the length above which a sentence is flagged as a possible run-on. All
+/// zeros for an empty set.
+pub fn sentence_stats(lengths: &[usize], run_on_threshold: usize) -> SentenceStats {
+    if lengths.is_empty() {
+        return SentenceStats::default();
+    }
+    let count = lengths.len();
+    let sum: usize = lengths.iter().sum();
+    let mut sorted = lengths.to_vec();
+    sorted.sort_unstable();
+    let median = if count % 2 == 1 {
+        sorted[count / 2] as f64
+    } else {
+        (sorted[count / 2 - 1] + sorted[count / 2]) as f64 / 2.0
+    };
+    let mut histogram = [0usize; LENGTH_BUCKETS];
+    for &len in lengths {
+        histogram[bucket(len)] += 1;
+    }
+    SentenceStats {
+        count,
+        mean: sum as f64 / count as f64,
+        median,
+        min: sorted[0],
+        max: sorted[count - 1],
+        histogram,
+        run_ons: lengths.iter().filter(|&&l| l > run_on_threshold).count(),
+    }
+}
+
+/// The distribution bucket for a sentence of `len` words.
+fn bucket(len: usize) -> usize {
+    (len / 10).min(LENGTH_BUCKETS - 1)
+}
+
+/// Human labels for the [`LENGTH_BUCKETS`] distribution buckets.
+const BUCKET_LABELS: [&str; LENGTH_BUCKETS] = ["<10", "10–19", "20–29", "30–39", "40+"];
+
+/// One chapter's analysis inputs: its title, readability [`Stats`], and the word
+/// length of each of its sentences. Gathered by the editor (which owns the
+/// manuscript) and handed to [`lines`] to render.
+pub struct ChapterAnalysis {
+    pub title: String,
+    pub stats: Stats,
+    pub sentence_lengths: Vec<usize>,
+}
+
+/// One of the manuscript's longest sentences, with where it lives, for the
+/// run-on list.
+pub struct LongSentence {
+    pub chapter: String,
+    pub words: usize,
+    pub text: String,
+}
+
+/// A bounded "top-N longest sentences" accumulator, so ranking the longest
+/// sentences across the whole manuscript never holds more than N at once and
+/// only copies a sentence's text when it actually makes the cut.
+pub struct LongestSentences {
+    cap: usize,
+    items: Vec<LongSentence>, // kept sorted by `words`, descending
+}
+
+impl LongestSentences {
+    pub fn new(cap: usize) -> Self {
+        Self { cap, items: Vec::with_capacity(cap + 1) }
     }
 
+    /// Offer a sentence; kept only if it ranks among the longest seen so far.
+    pub fn consider(&mut self, chapter: &str, text: &str, words: usize) {
+        if self.items.len() < self.cap || words > self.items.last().map_or(0, |l| l.words) {
+            let pos = self.items.partition_point(|l| l.words >= words);
+            self.items.insert(pos, LongSentence { chapter: chapter.to_string(), words, text: text.to_string() });
+            self.items.truncate(self.cap);
+        }
+    }
+
+    /// The longest sentences, longest first.
+    pub fn into_vec(self) -> Vec<LongSentence> {
+        self.items
+    }
+}
+
+/// The analysis report's rows: a readability table and a sentence-length section
+/// (per-chapter statistics, the overall distribution, and the longest
+/// sentences), each with a whole-manuscript total. Computed once when the report
+/// is opened (the scan is O(manuscript), so it stays off the per-frame path).
+pub fn lines(
+    title: &str,
+    chapters: &[ChapterAnalysis],
+    longest: &[LongSentence],
+    run_on_threshold: usize,
+) -> Vec<Line<'static>> {
+    let mut out = vec![bold(format!("{title} — analysis")), Line::raw("")];
+    out.extend(readability_section(chapters));
     out.push(Line::raw(""));
-    out.push(Line::from(Span::styled(
-        score_text("Whole manuscript", readability(total)),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    out.push(Line::raw(""));
-    out.push(Line::from(Span::styled(
-        "Reading Ease: higher is easier (60–70 ≈ plain English). The rest are U.S. grade levels.",
-        Style::default().fg(Color::DarkGray),
-    )));
+    out.extend(sentence_section(chapters, longest, run_on_threshold));
     out
 }
 
-fn header_row() -> Line<'static> {
-    Line::from(Span::styled(
-        format!("{:<26}{:>9}{:>8}{:>8}{:>8}", "Chapter", "Ease", "F–K", "Fog", "SMOG"),
-        Style::default().fg(Color::DarkGray),
-    ))
+/// The readability table: one row per chapter plus a whole-manuscript total.
+fn readability_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
+    let mut out = vec![
+        dim("Readability"),
+        dim(format!("{:<26}{:>9}{:>8}{:>8}{:>8}", "Chapter", "Ease", "F–K", "Fog", "SMOG")),
+    ];
+    let mut total = Stats::default();
+    for c in chapters {
+        total.add(c.stats);
+        out.push(Line::raw(score_text(&c.title, readability(c.stats))));
+    }
+    out.push(bold(score_text("Whole manuscript", readability(total))));
+    out.push(dim("Reading Ease: higher is easier (60–70 ≈ plain English); the rest are grades."));
+    out
 }
 
-/// One formatted row: a (truncated) name and the four scores to one decimal.
+/// The sentence-length section: per-chapter statistics, the overall distribution,
+/// and the longest sentences (possible run-ons).
+fn sentence_section(
+    chapters: &[ChapterAnalysis],
+    longest: &[LongSentence],
+    threshold: usize,
+) -> Vec<Line<'static>> {
+    let mut out = vec![
+        dim(format!("Sentence length (words) · run-on threshold {threshold}")),
+        dim(format!(
+            "{:<26}{:>6}{:>7}{:>7}{:>6}{:>6}{:>9}",
+            "Chapter", "Sent", "Mean", "Med", "Min", "Max", "Run-ons"
+        )),
+    ];
+    let mut all = Vec::new();
+    for c in chapters {
+        all.extend_from_slice(&c.sentence_lengths);
+        out.push(Line::raw(sentence_text(&c.title, &sentence_stats(&c.sentence_lengths, threshold))));
+    }
+    let overall = sentence_stats(&all, threshold);
+    out.push(bold(sentence_text("Whole manuscript", &overall)));
+
+    out.push(Line::raw(""));
+    out.push(dim("Distribution (whole manuscript)"));
+    out.extend(histogram_lines(&overall));
+
+    if !longest.is_empty() {
+        out.push(Line::raw(""));
+        out.push(dim("Longest sentences"));
+        for s in longest {
+            let flag = if s.words > threshold { " ⚠" } else { "" };
+            out.push(Line::raw(format!(
+                "{:>4}w{flag}  [{}] {}",
+                s.words,
+                truncate(&s.chapter, 18),
+                truncate(&s.text, 64)
+            )));
+        }
+    }
+    out
+}
+
+/// A horizontal bar per length bucket, scaled to the busiest bucket.
+fn histogram_lines(stats: &SentenceStats) -> Vec<Line<'static>> {
+    let peak = stats.histogram.iter().copied().max().unwrap_or(0).max(1);
+    BUCKET_LABELS
+        .iter()
+        .zip(stats.histogram)
+        .map(|(label, count)| {
+            let bar = "█".repeat(count * 24 / peak);
+            Line::raw(format!("{label:>6} {bar} {count}"))
+        })
+        .collect()
+}
+
+/// One readability row: a (truncated) name and the four scores to one decimal.
 fn score_text(name: &str, r: Readability) -> String {
     let name = truncate(name, 24);
     format!(
         "{name:<26}{:>9.1}{:>8.1}{:>8.1}{:>8.1}",
         r.flesch_reading_ease, r.flesch_kincaid_grade, r.gunning_fog, r.smog
     )
+}
+
+/// One sentence-length row: a (truncated) name and the length statistics.
+fn sentence_text(name: &str, s: &SentenceStats) -> String {
+    let name = truncate(name, 24);
+    format!(
+        "{name:<26}{:>6}{:>7.1}{:>7.1}{:>6}{:>6}{:>9}",
+        s.count, s.mean, s.median, s.min, s.max, s.run_ons
+    )
+}
+
+/// A bold line and a dim (dark-gray) line, the two row styles the report uses.
+fn bold(text: impl Into<String>) -> Line<'static> {
+    Line::from(Span::styled(text.into(), Style::default().add_modifier(Modifier::BOLD)))
+}
+
+fn dim(text: impl Into<String>) -> Line<'static> {
+    Line::from(Span::styled(text.into(), Style::default().fg(Color::DarkGray)))
 }
 
 /// Truncate to `max` characters with an ellipsis, counting by character so a
@@ -368,21 +559,76 @@ mod tests {
     }
 
     #[test]
-    fn lines_render_a_row_per_chapter_plus_a_total() {
+    fn sentences_split_and_measure_by_word_length() {
+        let s = sentences("The cat sat. The dog ran away fast.");
+        assert_eq!(s, vec!["The cat sat.", "The dog ran away fast."]);
+        let lengths: Vec<usize> = s.iter().map(|x| crate::buffer::count_words(x)).collect();
+        assert_eq!(lengths, vec![3, 5]);
+    }
+
+    #[test]
+    fn sentence_stats_summarize_lengths() {
+        let lengths = vec![3, 5, 5, 50];
+        let s = sentence_stats(&lengths, 40);
+        assert_eq!(s.count, 4);
+        assert_eq!(s.min, 3);
+        assert_eq!(s.max, 50);
+        assert_eq!(s.median, 5.0); // (5 + 5) / 2
+        assert!((s.mean - 15.75).abs() < 1e-9);
+        assert_eq!(s.run_ons, 1); // only the 50-word sentence is over 40
+        assert_eq!(s.histogram, [3, 0, 0, 0, 1]); // three <10, one 40+
+        assert_eq!(sentence_stats(&[], 40), SentenceStats::default());
+    }
+
+    #[test]
+    fn longest_sentences_keeps_a_bounded_top_n() {
+        let mut top = LongestSentences::new(2);
+        top.consider("One", "short", 3);
+        top.consider("One", "medium length here", 10);
+        top.consider("Two", "the longest of them all by far", 25);
+        top.consider("Two", "also short", 4);
+        let got = top.into_vec();
+        assert_eq!(got.len(), 2, "capped at 2");
+        assert_eq!(got[0].words, 25); // longest first
+        assert_eq!(got[1].words, 10);
+        assert_eq!(got[0].chapter, "Two");
+    }
+
+    #[test]
+    fn lines_render_both_sections_with_totals() {
         let chapters = vec![
-            ("One".to_string(), stats("The cat sat on the mat.")),
-            ("Two".to_string(), stats("The dog ran fast across the yard.")),
+            ChapterAnalysis {
+                title: "One".to_string(),
+                stats: stats("The cat sat on the mat."),
+                sentence_lengths: sentences("The cat sat on the mat.")
+                    .iter()
+                    .map(|s| crate::buffer::count_words(s))
+                    .collect(),
+            },
+            ChapterAnalysis {
+                title: "Two".to_string(),
+                stats: stats("The dog ran fast across the yard."),
+                sentence_lengths: vec![7],
+            },
         ];
-        let rows = lines("My Book", &chapters);
+        let longest = vec![LongSentence {
+            chapter: "Two".to_string(),
+            words: 7,
+            text: "The dog ran fast across the yard.".to_string(),
+        }];
+        let rows = lines("My Book", &chapters, &longest, 40);
         let text: String = rows
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("My Book — readability"));
-        assert!(text.contains("One"));
-        assert!(text.contains("Two"));
-        assert!(text.contains("Whole manuscript"));
+        assert!(text.contains("My Book — analysis"));
+        assert!(text.contains("Readability"));
+        assert!(text.contains("Sentence length"));
+        assert!(text.contains("Distribution"));
+        assert!(text.contains("Longest sentences"));
+        assert!(text.contains("One") && text.contains("Two"));
+        assert_eq!(text.matches("Whole manuscript").count(), 2); // one per section
     }
 
     #[test]

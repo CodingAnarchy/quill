@@ -12,9 +12,10 @@ every chapter once (the active chapter live from the buffer, the rest from
 disk), so typing stays instant on a large manuscript (the perf guards in
 `CLAUDE.md` apply).
 
-This document specifies each metric and its formula. The first slice (#67) is
-readability; later tickets in the epic (#66) add sentence/paragraph statistics,
-chapter-length distribution, style flags, dialogue balance, and vocabulary.
+This document specifies each metric and its formula. The slices so far are
+readability (#67) and sentence-length statistics (#68); later tickets in the epic
+(#66) add paragraph statistics, chapter-length distribution, style flags,
+dialogue balance, and vocabulary.
 
 ## Shared text primitives
 
@@ -106,6 +107,46 @@ A U.S. grade. Weights long sentences and the proportion of complex words.
 A U.S. grade estimating the years of education needed to understand the text on
 first reading. SMOG is designed for samples of ~30 sentences; on very short
 chapters it is noisier than the others.
+
+## Sentence-length statistics
+
+Sentence-length variety is a core craft lever: long unbroken sentences and
+monotonous rhythm are common revision targets. The report measures each
+sentence's length in **words** (the same Unicode word basis as everything else)
+and reports, per chapter and for the whole manuscript:
+
+- **Sent** — the sentence count.
+- **Mean / Median** — average and middle sentence length. A median well below the
+  mean means a few very long sentences are pulling the average up.
+- **Min / Max** — the shortest and longest sentence.
+- **Run-ons** — how many sentences are longer than the run-on threshold.
+
+The first sentence of a chapter includes its heading text (consistent with the
+word-count basis above), so a heading adds a few words to that one sentence.
+
+### Distribution
+
+A histogram of the whole manuscript bucketed by length: `<10`, `10–19`, `20–29`,
+`30–39`, `40+` words. Each bar is scaled to the busiest bucket. A healthy
+narrative usually has a wide spread; a tall single bucket signals monotonous
+rhythm.
+
+### Longest sentences
+
+The five longest sentences in the manuscript, each with its word count and the
+chapter it lives in, so the worst offenders are easy to find. Any sentence over
+the run-on threshold is marked with `⚠`.
+
+### Run-on threshold
+
+The length above which a sentence is flagged is configurable in `book.toml`:
+
+```toml
+title = "My Novel"
+run_on_threshold = 40   # words; default 40
+```
+
+Set it to match your genre — terse thrillers run shorter than literary fiction.
 
 ## Reading the report
 
