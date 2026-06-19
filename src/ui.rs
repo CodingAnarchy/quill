@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::{BibleReview, Findings, Mode};
+use crate::mode::{BibleReview, Findings, Mode, Palette};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -50,6 +50,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::Findings(findings) = &app.mode {
         draw_findings(frame, area, findings);
+        return;
+    }
+    if let Mode::Palette(palette) = &app.mode {
+        draw_palette(frame, area, palette);
         return;
     }
 
@@ -133,31 +137,67 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
     );
 }
 
-/// Render the continuity findings as a navigable triage list.
+/// Render the AI command palette as a navigable action list.
+fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
+    let rows = palette.items.iter().enumerate().map(|(i, item)| {
+        Line::from(vec![
+            Span::styled(format!("{}{}", marker(i == palette.selected), item.label), row_style(i == palette.selected)),
+            Span::styled(format!("  — {}", item.desc), Style::default().fg(Color::DarkGray)),
+        ])
+    });
+    draw_list_overlay(frame, area, " AI ", "AI — ↑↓ move · enter run · esc close", rows);
+}
+
+/// Render the findings as a navigable triage list.
 fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings) {
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
-    ];
-    for (i, item) in findings.items.iter().enumerate() {
-        let marker = if i == findings.selected { "▸ " } else { "  " };
-        let mut style = Style::default();
-        if i == findings.selected {
-            style = style.add_modifier(Modifier::REVERSED);
-        }
+    let title = format!(" Findings ({}) ", findings.items.len());
+    let rows = findings.items.iter().enumerate().map(|(i, item)| {
         let chapters = if item.chapters.is_empty() {
             String::new()
         } else {
             format!("  [{}]", item.chapters.join(", "))
         };
-        lines.push(Line::from(Span::styled(format!("{marker}{}{chapters}", item.summary), style)));
+        Line::from(Span::styled(
+            format!("{}{}{chapters}", marker(i == findings.selected), item.summary),
+            row_style(i == findings.selected),
+        ))
+    });
+    draw_list_overlay(frame, area, &title, "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close", rows);
+}
+
+/// The selection marker for a list row.
+fn marker(selected: bool) -> &'static str {
+    if selected {
+        "▸ "
+    } else {
+        "  "
     }
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" Findings ({}) ", findings.items.len()));
+}
+
+/// The style for a list row (reversed when selected).
+fn row_style(selected: bool) -> Style {
+    if selected {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    }
+}
+
+/// Render a navigable list overlay: a bold help line, a blank, then the rows, in
+/// a bordered wrapping box. Shared by the findings and palette overlays.
+fn draw_list_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    help: &str,
+    rows: impl Iterator<Item = Line<'static>>,
+) {
+    let mut lines = vec![
+        Line::from(Span::styled(help.to_string(), Style::default().add_modifier(Modifier::BOLD))),
+        Line::raw(""),
+    ];
+    lines.extend(rows);
+    let block = Block::default().borders(Borders::ALL).title(title.to_string());
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
         area,

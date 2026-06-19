@@ -9,8 +9,51 @@ use super::*;
 
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
+use crate::mode::{AiAction, Palette, PaletteItem};
 
 impl App {
+    /// Open the AI command palette — the single entry point for the AI features.
+    /// (The caller gates on [`ai::Settings::check_ready`].)
+    pub(crate) fn open_ai_palette(&mut self) {
+        let items = vec![
+            PaletteItem { label: "Ask the manuscript", desc: "Answer a question grounded in the draft", action: AiAction::Ask },
+            PaletteItem { label: "Character bible", desc: "Profiles, arcs, and drift flags", action: AiAction::Characters },
+            PaletteItem { label: "Timeline & continuity", desc: "Ordered timeline + contradiction findings", action: AiAction::Continuity },
+            PaletteItem { label: "Setting & worldbuilding", desc: "Setting bible + rule-violation findings", action: AiAction::Setting },
+            PaletteItem { label: "Scaffold / outline", desc: "Beat outline + structural gaps", action: AiAction::Scaffold },
+            PaletteItem { label: "Name & term consistency", desc: "Spelling variants (cheap pass)", action: AiAction::Naming },
+        ];
+        self.mode = Mode::Palette(Box::new(Palette { items, selected: 0 }));
+    }
+
+    pub(crate) fn on_key_palette(&mut self, key: KeyEvent) {
+        let Mode::Palette(p) = &mut self.mode else {
+            return;
+        };
+        if let Some(s) = list_move(p.selected, p.items.len(), key.code) {
+            p.selected = s;
+            return;
+        }
+        match key.code {
+            KeyCode::Enter => {
+                let action = p.items.get(p.selected).map(|it| it.action);
+                self.mode = Mode::Insert;
+                match action {
+                    Some(AiAction::Ask) => {
+                        self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None)
+                    }
+                    Some(AiAction::Characters) => self.analyze_characters(),
+                    Some(AiAction::Continuity) => self.analyze_continuity(),
+                    Some(AiAction::Setting) => self.analyze_setting(),
+                    Some(AiAction::Scaffold) => self.analyze_scaffold(),
+                    Some(AiAction::Naming) => self.analyze_naming(),
+                    None => {}
+                }
+            }
+            KeyCode::Esc => self.mode = Mode::Insert,
+            _ => {}
+        }
+    }
     // --- AI: "Ask the manuscript" -----------------------------------------
 
     /// The whole manuscript as plain text for an AI request: each chapter under
@@ -496,13 +539,11 @@ impl App {
         let Mode::Findings(f) = &mut self.mode else {
             return;
         };
+        if let Some(s) = list_move(f.selected, f.items.len(), key.code) {
+            f.selected = s;
+            return;
+        }
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                f.selected = f.selected.saturating_sub(1);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                f.selected = (f.selected + 1).min(f.items.len().saturating_sub(1));
-            }
             KeyCode::Char('d') => {
                 if f.selected < f.items.len() {
                     f.items.remove(f.selected);
@@ -585,6 +626,16 @@ impl App {
 
 /// A unified line diff (current → proposed), each line signed `+`/`-`/` `.
 /// Computed once when a conflict is staged (not per frame).
+/// The new selection for a navigable list given a key, or `None` if the key
+/// isn't a movement key. Shared by the findings and palette overlays.
+fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<usize> {
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => Some(selected.saturating_sub(1)),
+        KeyCode::Down | KeyCode::Char('j') => Some((selected + 1).min(len.saturating_sub(1))),
+        _ => None,
+    }
+}
+
 fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
     TextDiff::from_lines(current, proposed)
         .iter_all_changes()

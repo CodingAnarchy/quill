@@ -360,6 +360,7 @@ impl App {
             Mode::EditMeta(_) => self.on_key_edit_meta(key),
             Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
+            Mode::Palette(_) => self.on_key_palette(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -897,35 +898,10 @@ impl App {
             }
             // Open the progress report (any key closes it).
             (true, KeyCode::Char('r')) => self.report = Some(self.report_lines()),
-            // Ask the manuscript a question (AI, opt-in). When AI isn't ready,
-            // explain how to enable it rather than opening the prompt.
+            // Open the AI command palette (opt-in). When AI isn't ready, explain
+            // how to enable it rather than listing dead actions.
             (true, KeyCode::Char('a')) => match self.ai.check_ready() {
-                Ok(_) => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
-                Err(e) => self.message = Some(e.to_string()),
-            },
-            // Build/update the character story bible (AI, opt-in).
-            (true, KeyCode::Char('b')) => match self.ai.check_ready() {
-                Ok(_) => self.analyze_characters(),
-                Err(e) => self.message = Some(e.to_string()),
-            },
-            // Timeline & continuity check (AI, opt-in).
-            (true, KeyCode::Char('t')) => match self.ai.check_ready() {
-                Ok(_) => self.analyze_continuity(),
-                Err(e) => self.message = Some(e.to_string()),
-            },
-            // Setting & worldbuilding bible (AI, opt-in).
-            (true, KeyCode::Char('w')) => match self.ai.check_ready() {
-                Ok(_) => self.analyze_setting(),
-                Err(e) => self.message = Some(e.to_string()),
-            },
-            // Scaffolding: beat outline + structural gaps (AI, opt-in).
-            (true, KeyCode::Char('k')) => match self.ai.check_ready() {
-                Ok(_) => self.analyze_scaffold(),
-                Err(e) => self.message = Some(e.to_string()),
-            },
-            // Naming & term consistency (AI, opt-in).
-            (true, KeyCode::Char('e')) => match self.ai.check_ready() {
-                Ok(_) => self.analyze_naming(),
+                Ok(_) => self.open_ai_palette(),
                 Err(e) => self.message = Some(e.to_string()),
             },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not

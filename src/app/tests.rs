@@ -1072,3 +1072,46 @@ fn naming_with_no_variants_summarizes() {
     assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- AI: command palette ----------------------------------------------------
+
+#[test]
+fn palette_opens_with_the_ai_actions() {
+    let (mut app, dir) = two_chapter_app("palette");
+    app.open_ai_palette();
+    match &app.mode {
+        Mode::Palette(p) => assert_eq!(p.items.len(), 6, "all six AI actions listed"),
+        _ => panic!("expected the palette to open"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn palette_down_moves_the_selection() {
+    let (mut app, dir) = two_chapter_app("palette-nav");
+    app.open_ai_palette();
+    app.on_key(key(KeyCode::Down));
+    match &app.mode {
+        Mode::Palette(p) => assert_eq!(p.selected, 1),
+        _ => panic!("expected the palette"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn palette_enter_on_ask_opens_the_question_prompt() {
+    let (mut app, dir) = two_chapter_app("palette-ask");
+    app.open_ai_palette(); // "Ask the manuscript" is the first item
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.mode, Mode::Prompt(_)), "Ask opens the question prompt");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn palette_esc_closes_to_insert() {
+    let (mut app, dir) = two_chapter_app("palette-esc");
+    app.open_ai_palette();
+    app.on_key(key(KeyCode::Esc));
+    assert!(matches!(app.mode, Mode::Insert));
+    fs::remove_dir_all(&dir).ok();
+}

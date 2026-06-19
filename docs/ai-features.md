@@ -30,43 +30,32 @@ model = "claude-opus-4-8"      # or claude-haiku-4-5 for cheap passes
 ```
 
 The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
-never from the project directory. With AI enabled, **Ctrl-A** asks a question
-about the manuscript and the grounded answer (with chapter citations) opens in an
-overlay. The status line shows a persistent `AI` tag when enabled and `⟳ Claude`
-while a request is in flight. *(Shipped in #73: the `quill-ai` backend trait, the
-Claude HTTP backend, and "Ask the manuscript" Q&A. The request runs on a worker
-thread so the editor never blocks.)*
+never from the project directory. With AI enabled, **Ctrl-A** opens the **AI
+command palette** (#98) — one entry point listing every AI action; arrow to one
+and Enter runs it. (When AI is off/offline, Ctrl-A explains how to enable it.)
+The status line shows a persistent `AI` tag when enabled and `⟳ Claude` while a
+request is in flight; requests run on a worker thread so the editor never blocks.
 
-**Ctrl-B** runs a character-tracking pass (#74): a single structured request over
-the whole manuscript writes a profile per character to `bible/characters/<slug>.md`
-and flags drift. Each file has a regenerated block (delimited by
-`<!-- generated:start/end -->`) and an author-owned `<!-- notes:start/end -->`
-block that survives regeneration. A `digest:` in the front matter detects
-hand-edits to the generated block: on the next pass, an edited file is **not**
-overwritten — a diff is shown and the author can overwrite, keep theirs, or edit
-the proposed version before saving. (Incremental dirty-chapter re-analysis and
-the Batch API are a follow-up.)
+The palette actions:
 
-**Ctrl-T** runs a timeline & continuity pass (#75): it extracts story events,
-writes them to `bible/timeline.md` in both narrative and story (chronological)
-order — using the same generated/notes/digest format and conflict review as the
-character profiles — and surfaces continuity contradictions (a character in two
-places, an object used after it's lost, …) as a triageable findings overlay where
-each can be jumped to (open its chapter) or dismissed. Nothing is written to the
-prose. The shared bible-file machinery lives in `src/ai/bible.rs`.
+- **Ask the manuscript** (#73) — a grounded question, answered with chapter
+  citations in an overlay.
+- **Character bible** (#74) — a profile per character (traits, arc, drift) to
+  `bible/characters/<slug>.md`.
+- **Timeline & continuity** (#75) — an ordered timeline (`bible/timeline.md`) plus
+  contradiction findings.
+- **Setting & worldbuilding** (#77) — a categorized setting bible
+  (`bible/setting.md`) + a place/term gazetteer + rule-violation findings.
+- **Scaffold / outline** (#76) — a structural beat outline (`bible/outline.md`) +
+  structural-gap findings (no prose).
+- **Name & term consistency** (#78) — a cheap Haiku scan for spelling variants,
+  checked against the gazetteer + character names.
 
-**Ctrl-W** runs a setting & worldbuilding pass (#77): it extracts a categorized
-setting bible (geography, magic/tech system rules, factions, cultures, history)
-to `bible/setting.md`, records a place/term **gazetteer** (for naming consistency,
-#78), and flags prose that violates an established rule ("magic requires a focus,
-but ch. 14 casts without one") in the same findings overlay. Same generated/notes/
-digest format and conflict review as the other bible files.
-
-**Ctrl-E** runs a naming & term consistency pass (#78): a cheap **Haiku** scan
-(regardless of the configured model) for spelling variants of the same name or
-invented term ("Mara"/"Marah", "lightsteel"/"light-steel"), checked against the
-known entity list (the setting gazetteer + character names). Variant clusters
-surface in the findings overlay; nothing is written.
+Each bible file has a regenerated block (`<!-- generated:start/end -->`) and an
+author-owned `<!-- notes:start/end -->` block that survives regeneration; a
+`digest:` detects hand-edits so a pass shows a diff instead of overwriting. The
+findings overlay lets the author jump to a finding's chapter, mark it as an `xxx`
+TODO, or dismiss it. The shared bible machinery lives in `src/ai/bible.rs`.
 
 ## Integration shape
 
