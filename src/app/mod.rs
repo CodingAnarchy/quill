@@ -300,7 +300,9 @@ impl App {
         let mut longest = analysis::LongestSentences::new(5);
         for i in 0..self.chapter_count() {
             let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
-            let text = self.chapter_text(i);
+            // Measure prose only — drop heading lines so a chapter/scene title
+            // doesn't glue onto its first sentence or skew readability.
+            let text = analysis::prose(&self.chapter_text(i));
             let stats = analysis::stats(&text);
             let sentences = analysis::sentences(&text);
             let sentence_lengths: Vec<usize> =
