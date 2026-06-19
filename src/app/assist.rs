@@ -9,8 +9,51 @@ use super::*;
 
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
+use crate::mode::{AiAction, Palette, PaletteItem};
 
 impl App {
+    /// Open the AI command palette — the single entry point for the AI features.
+    /// (The caller gates on [`ai::Settings::check_ready`].)
+    pub(crate) fn open_ai_palette(&mut self) {
+        let items = vec![
+            PaletteItem { label: "Ask the manuscript", desc: "Answer a question grounded in the draft", action: AiAction::Ask },
+            PaletteItem { label: "Character bible", desc: "Profiles, arcs, and drift flags", action: AiAction::Characters },
+            PaletteItem { label: "Timeline & continuity", desc: "Ordered timeline + contradiction findings", action: AiAction::Continuity },
+            PaletteItem { label: "Setting & worldbuilding", desc: "Setting bible + rule-violation findings", action: AiAction::Setting },
+            PaletteItem { label: "Scaffold / outline", desc: "Beat outline + structural gaps", action: AiAction::Scaffold },
+            PaletteItem { label: "Name & term consistency", desc: "Spelling variants (cheap pass)", action: AiAction::Naming },
+        ];
+        self.mode = Mode::Palette(Box::new(Palette { items, selected: 0 }));
+    }
+
+    pub(crate) fn on_key_palette(&mut self, key: KeyEvent) {
+        let Mode::Palette(p) = &mut self.mode else {
+            return;
+        };
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => p.selected = p.selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                p.selected = (p.selected + 1).min(p.items.len().saturating_sub(1));
+            }
+            KeyCode::Enter => {
+                let action = p.items.get(p.selected).map(|it| it.action);
+                self.mode = Mode::Insert;
+                match action {
+                    Some(AiAction::Ask) => {
+                        self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None)
+                    }
+                    Some(AiAction::Characters) => self.analyze_characters(),
+                    Some(AiAction::Continuity) => self.analyze_continuity(),
+                    Some(AiAction::Setting) => self.analyze_setting(),
+                    Some(AiAction::Scaffold) => self.analyze_scaffold(),
+                    Some(AiAction::Naming) => self.analyze_naming(),
+                    None => {}
+                }
+            }
+            KeyCode::Esc => self.mode = Mode::Insert,
+            _ => {}
+        }
+    }
     // --- AI: "Ask the manuscript" -----------------------------------------
 
     /// The whole manuscript as plain text for an AI request: each chapter under

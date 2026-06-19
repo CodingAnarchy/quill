@@ -31,6 +31,34 @@ pub enum Mode {
     /// (open its chapter) or dismissed. Read-only over the prose. Boxed (carries
     /// the findings list).
     Findings(Box<Findings>),
+    /// The AI command palette: a navigable list of AI actions, one of which runs
+    /// on Enter. The single entry point for the AI features.
+    Palette(Box<Palette>),
+}
+
+/// State for an open [`Mode::Palette`]: the available AI actions and the selected
+/// row.
+pub struct Palette {
+    pub(crate) items: Vec<PaletteItem>,
+    pub(crate) selected: usize,
+}
+
+/// One palette entry: a label, a one-line description, and the action it runs.
+pub struct PaletteItem {
+    pub(crate) label: &'static str,
+    pub(crate) desc: &'static str,
+    pub(crate) action: AiAction,
+}
+
+/// The AI actions reachable from the palette.
+#[derive(Clone, Copy)]
+pub(crate) enum AiAction {
+    Ask,
+    Characters,
+    Continuity,
+    Setting,
+    Scaffold,
+    Naming,
 }
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.

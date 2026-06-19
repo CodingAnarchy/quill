@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::{BibleReview, Findings, Mode};
+use crate::mode::{BibleReview, Findings, Mode, Palette};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -50,6 +50,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::Findings(findings) = &app.mode {
         draw_findings(frame, area, findings);
+        return;
+    }
+    if let Mode::Palette(palette) = &app.mode {
+        draw_palette(frame, area, palette);
         return;
     }
 
@@ -127,6 +131,33 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         " Bible conflict: {} ({remaining} left) — (o)verwrite (e)dit (k)eep · Esc cancel ",
         front.name
     ));
+    frame.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// Render the AI command palette as a navigable action list.
+fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "AI — ↑↓ move · enter run · esc close",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+    ];
+    for (i, item) in palette.items.iter().enumerate() {
+        let marker = if i == palette.selected { "▸ " } else { "  " };
+        let mut style = Style::default();
+        if i == palette.selected {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker}{}", item.label), style),
+            Span::styled(format!("  — {}", item.desc), Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+    let block = Block::default().borders(Borders::ALL).title(" AI ");
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
         area,
