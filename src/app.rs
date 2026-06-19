@@ -21,6 +21,25 @@ pub enum Mode {
     /// Browsing the chapter list: arrows move the `selected` chapter, Enter
     /// opens it.
     Nav { selected: usize },
+    /// Editing a multi-line metadata field (an epigraph quotation) in the main
+    /// editor: the full editing keys apply to a scratch buffer, Ctrl-S commits,
+    /// Esc cancels. Boxed because it carries a whole [`Buffer`], far larger than
+    /// the other variants.
+    EditMeta(Box<MetaEdit>),
+}
+
+/// State for an open [`Mode::EditMeta`]. `label` is public for the editor's
+/// banner; the rest is the handler's business. The scratch `buffer` is reached
+/// through [`App::edit_buffer`].
+pub struct MetaEdit {
+    /// Which field is being edited (a quotation field).
+    target: MetaField,
+    /// Scratch buffer holding the field's text.
+    buffer: Buffer,
+    /// Banner label, e.g. "chapter epigraph".
+    pub label: String,
+    /// Chapter to reselect when editing finishes.
+    nav_return: Option<usize>,
 }
 
 /// State for an open [`Mode::Prompt`]. `label`/`input` are public for the status
@@ -108,6 +127,9 @@ impl App {
     /// when that view is active, otherwise the single active chapter. The
     /// renderer and movement go through this so both views share one path.
     pub fn edit_buffer(&self) -> &Buffer {
+        if let Mode::EditMeta(m) = &self.mode {
+            return &m.buffer;
+        }
         match &self.manuscript {
             Some(m) => m.buffer(),
             None => &self.buffer,
@@ -115,6 +137,9 @@ impl App {
     }
 
     pub fn edit_buffer_mut(&mut self) -> &mut Buffer {
+        if let Mode::EditMeta(m) = &mut self.mode {
+            return &mut m.buffer;
+        }
         match &mut self.manuscript {
             Some(m) => m.buffer_mut(),
             None => &mut self.buffer,
@@ -174,6 +199,7 @@ impl App {
         match self.mode {
             Mode::Prompt(_) => self.on_key_prompt(key),
             Mode::Nav { .. } => self.on_key_nav(key),
+            Mode::EditMeta(_) => self.on_key_edit_meta(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -562,8 +588,8 @@ impl App {
                 self.open_prompt(Pending::SetMeta(MetaField::Pov { at: sel }), "POV: ", &prefill, Some(sel));
             }
             KeyCode::Char('g') => {
-                let prefill = self.chapter_epigraph(sel).map(|e| e.text).unwrap_or_default();
-                self.open_prompt(Pending::SetMeta(MetaField::ChapterEpigraph { at: sel }), "Epigraph: ", &prefill, Some(sel));
+                let text = self.chapter_epigraph(sel).map(|e| e.text).unwrap_or_default();
+                self.edit_meta(MetaField::ChapterEpigraph { at: sel }, "chapter epigraph", text, Some(sel));
             }
             // Project-level book / series metadata.
             KeyCode::Char('t') => {
@@ -583,8 +609,8 @@ impl App {
                 self.open_prompt(Pending::SetMeta(MetaField::Series), "Series: ", &cur, Some(sel));
             }
             KeyCode::Char('G') => {
-                let cur = self.project.manifest.epigraph.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetMeta(MetaField::BookEpigraph), "Book epigraph: ", &cur, Some(sel));
+                let text = self.project.manifest.epigraph.clone().unwrap_or_default();
+                self.edit_meta(MetaField::BookEpigraph, "book epigraph", text, Some(sel));
             }
             KeyCode::Char('d') => {
                 if self.chapter_count() <= 1 {
@@ -653,32 +679,13 @@ impl App {
                                 self.select(fallback);
                             }
                             Pending::SetMeta(field) => {
+                                // Single-line metadata prompts (summary, POV,
+                                // attribution, book fields). The multi-line
+                                // epigraph quotations are edited in the editor
+                                // (Mode::EditMeta), which chains here for the
+                                // attribution.
                                 self.apply_meta(field, text);
-                                // An epigraph quotation chains into an attribution
-                                // prompt (unless it was just cleared); other fields
-                                // return to the browser.
-                                match field {
-                                    MetaField::ChapterEpigraph { at } if !text.is_empty() => {
-                                        let by =
-                                            self.chapter_epigraph(at).and_then(|e| e.attribution).unwrap_or_default();
-                                        self.open_prompt(
-                                            Pending::SetMeta(MetaField::ChapterEpigraphBy { at }),
-                                            "Epigraph by: ",
-                                            &by,
-                                            nav_return,
-                                        );
-                                    }
-                                    MetaField::BookEpigraph if !text.is_empty() => {
-                                        let by = self.project.manifest.epigraph_by.clone().unwrap_or_default();
-                                        self.open_prompt(
-                                            Pending::SetMeta(MetaField::BookEpigraphBy),
-                                            "Epigraph by: ",
-                                            &by,
-                                            nav_return,
-                                        );
-                                    }
-                                    _ => self.select(fallback),
-                                }
+                                self.select(fallback);
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
@@ -746,6 +753,99 @@ impl App {
             (false, KeyCode::End) => self.edit_move(Buffer::move_end),
 
             _ => {}
+        }
+    }
+
+    // --- Editing a multi-line metadata field in the editor ------------------
+
+    /// Open `target`'s text in the editor as a scratch buffer (`Mode::EditMeta`).
+    fn edit_meta(
+        &mut self,
+        target: MetaField,
+        label: &str,
+        current: String,
+        nav_return: Option<usize>,
+    ) {
+        self.mode = Mode::EditMeta(Box::new(MetaEdit {
+            target,
+            buffer: Buffer::from_text(&current),
+            label: label.to_string(),
+            nav_return,
+        }));
+    }
+
+    fn on_key_edit_meta(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match (ctrl, key.code) {
+            (true, KeyCode::Char('s')) => self.commit_meta_edit(),
+            (_, KeyCode::Esc) => self.cancel_meta_edit(),
+
+            (false, KeyCode::Char(c)) => self.edit_buffer_mut().insert_char(c),
+            (false, KeyCode::Enter) => self.edit_buffer_mut().insert_char('\n'),
+            (false, KeyCode::Backspace) => self.edit_buffer_mut().backspace(),
+            (false, KeyCode::Tab) => {
+                for _ in 0..4 {
+                    self.edit_buffer_mut().insert_char(' ');
+                }
+            }
+
+            (false, KeyCode::Left) => self.edit_buffer_mut().move_left(),
+            (false, KeyCode::Right) => self.edit_buffer_mut().move_right(),
+            (false, KeyCode::Up) => self.edit_buffer_mut().move_up(),
+            (false, KeyCode::Down) => self.edit_buffer_mut().move_down(),
+            (false, KeyCode::Home) => self.edit_buffer_mut().move_home(),
+            (false, KeyCode::End) => self.edit_buffer_mut().move_end(),
+
+            _ => {}
+        }
+    }
+
+    /// Store the edited quotation, then chain to the single-line attribution
+    /// prompt (or return to the browser if the quotation was cleared).
+    fn commit_meta_edit(&mut self) {
+        let (target, nav_return, text) = match &self.mode {
+            Mode::EditMeta(m) => (m.target, m.nav_return, m.buffer.text()),
+            _ => return,
+        };
+        let text = text.trim();
+        self.apply_meta(target, text);
+
+        let fallback = nav_return.unwrap_or(0);
+        if text.is_empty() {
+            self.select(fallback);
+            return;
+        }
+        match target {
+            MetaField::ChapterEpigraph { at } => {
+                let by = self.chapter_epigraph(at).and_then(|e| e.attribution).unwrap_or_default();
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::ChapterEpigraphBy { at }),
+                    "Epigraph by: ",
+                    &by,
+                    nav_return,
+                );
+            }
+            MetaField::BookEpigraph => {
+                let by = self.project.manifest.epigraph_by.clone().unwrap_or_default();
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::BookEpigraphBy),
+                    "Epigraph by: ",
+                    &by,
+                    nav_return,
+                );
+            }
+            _ => self.select(fallback),
+        }
+    }
+
+    fn cancel_meta_edit(&mut self) {
+        let nav_return = match &self.mode {
+            Mode::EditMeta(m) => m.nav_return,
+            _ => return,
+        };
+        match nav_return {
+            Some(selected) => self.select(selected),
+            None => self.mode = Mode::Insert,
         }
     }
 }
@@ -1039,14 +1139,15 @@ mod tests {
     }
 
     #[test]
-    fn setting_a_chapter_epigraph_chains_quotation_then_attribution() {
+    fn setting_a_chapter_epigraph_edits_in_the_editor_then_chains_attribution() {
         let (mut app, dir) = two_chapter_app("ch-epigraph");
         app.on_key(ctrl('g'));
         app.on_key(key(KeyCode::Down)); // select chapter 1 (non-active → writes now)
-        app.on_key(key(KeyCode::Char('g'))); // epigraph: quotation prompt
+        app.on_key(key(KeyCode::Char('g'))); // opens the editor on the quotation
+        assert!(matches!(app.mode, Mode::EditMeta(_)));
         typed(&mut app, "Call me Ishmael.");
-        app.on_key(key(KeyCode::Enter));
-        // Chains into the attribution prompt rather than returning to Nav.
+        app.on_key(ctrl('s')); // commit
+        // Commit chains into the single-line attribution prompt.
         assert!(matches!(app.mode, Mode::Prompt(_)));
         typed(&mut app, "Melville");
         app.on_key(key(KeyCode::Enter));
@@ -1061,12 +1162,40 @@ mod tests {
     }
 
     #[test]
+    fn a_multiline_chapter_epigraph_is_stored_as_a_block() {
+        let (mut app, dir) = two_chapter_app("ch-epigraph-multi");
+        app.on_key(ctrl('g'));
+        app.on_key(key(KeyCode::Down)); // chapter 1
+        app.on_key(key(KeyCode::Char('g'))); // editor
+        typed(&mut app, "Roses are red");
+        app.on_key(key(KeyCode::Enter)); // a real line break in the editor
+        typed(&mut app, "Violets are blue");
+        app.on_key(ctrl('s'));
+        app.on_key(key(KeyCode::Esc)); // skip the attribution
+
+        let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
+        assert!(
+            on_disk.contains("epigraph: |\n  Roses are red\n  Violets are blue\n"),
+            "expected a literal block, got:\n{on_disk}"
+        );
+        // Reopen and confirm the line break survived.
+        let reopened = Project::open(&dir).unwrap();
+        let buf = Buffer::from_path(reopened.chapter_path(1)).unwrap();
+        assert_eq!(
+            buf.front_matter().and_then(crate::frontmatter::FrontMatter::epigraph).unwrap().text,
+            "Roses are red\nViolets are blue"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn setting_a_book_epigraph_persists_to_the_manifest() {
         let (mut app, dir) = two_chapter_app("book-epigraph");
         app.on_key(ctrl('g'));
-        app.on_key(key(KeyCode::Char('G'))); // book epigraph
+        app.on_key(key(KeyCode::Char('G'))); // book epigraph editor
         typed(&mut app, "Begin at the beginning.");
-        app.on_key(key(KeyCode::Enter)); // chains to attribution
+        app.on_key(ctrl('s')); // commit → chains to attribution
         typed(&mut app, "The King");
         app.on_key(key(KeyCode::Enter));
 

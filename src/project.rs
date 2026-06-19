@@ -564,6 +564,27 @@ mod tests {
     }
 
     #[test]
+    fn a_multiline_book_epigraph_round_trips_through_the_manifest() {
+        let dir = temp_dir("book-epigraph-multi");
+        let _ = fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap();
+        project.manifest.epigraph = Some("Line one\nLine two\nLine three".into());
+        project.save_manifest().unwrap();
+
+        // toml serializes the multi-line string as a readable `"""` block.
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("epigraph = \"\"\""), "expected a multi-line literal:\n{toml}");
+
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(
+            reopened.manifest.epigraph().unwrap().text,
+            "Line one\nLine two\nLine three"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn open_repairs_a_chapterless_manifest() {
         let dir = temp_dir("empty-manifest");
         let _ = fs::remove_dir_all(&dir);
