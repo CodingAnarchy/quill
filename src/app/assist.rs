@@ -30,11 +30,11 @@ impl App {
         let Mode::Palette(p) = &mut self.mode else {
             return;
         };
+        if let Some(s) = list_move(p.selected, p.items.len(), key.code) {
+            p.selected = s;
+            return;
+        }
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => p.selected = p.selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => {
-                p.selected = (p.selected + 1).min(p.items.len().saturating_sub(1));
-            }
             KeyCode::Enter => {
                 let action = p.items.get(p.selected).map(|it| it.action);
                 self.mode = Mode::Insert;
@@ -539,13 +539,11 @@ impl App {
         let Mode::Findings(f) = &mut self.mode else {
             return;
         };
+        if let Some(s) = list_move(f.selected, f.items.len(), key.code) {
+            f.selected = s;
+            return;
+        }
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                f.selected = f.selected.saturating_sub(1);
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                f.selected = (f.selected + 1).min(f.items.len().saturating_sub(1));
-            }
             KeyCode::Char('d') => {
                 if f.selected < f.items.len() {
                     f.items.remove(f.selected);
@@ -628,6 +626,16 @@ impl App {
 
 /// A unified line diff (current → proposed), each line signed `+`/`-`/` `.
 /// Computed once when a conflict is staged (not per frame).
+/// The new selection for a navigable list given a key, or `None` if the key
+/// isn't a movement key. Shared by the findings and palette overlays.
+fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<usize> {
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => Some(selected.saturating_sub(1)),
+        KeyCode::Down | KeyCode::Char('j') => Some((selected + 1).min(len.saturating_sub(1))),
+        _ => None,
+    }
+}
+
 fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
     TextDiff::from_lines(current, proposed)
         .iter_all_changes()
