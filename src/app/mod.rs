@@ -17,7 +17,7 @@ use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::setting::{self, Setting};
 use crate::analysis;
-use crate::buffer::Buffer;
+use crate::buffer::{self, Buffer};
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
@@ -295,13 +295,35 @@ impl App {
     /// once when it's opened. Scans every chapter's prose (active chapter live,
     /// the rest from disk) — on demand, never per frame.
     fn analysis_lines(&self) -> Vec<Line<'static>> {
-        let chapters: Vec<(String, analysis::Stats)> = (0..self.chapter_count())
-            .map(|i| {
-                let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
-                (title, analysis::stats(&self.chapter_text(i)))
-            })
-            .collect();
-        analysis::lines(&self.project.manifest.title, &chapters)
+        let threshold = self.project.manifest.run_on_threshold();
+        let mut chapters = Vec::with_capacity(self.chapter_count());
+        let mut longest: Vec<analysis::LongSentence> = Vec::new();
+        const TOP_N: usize = 5;
+        for i in 0..self.chapter_count() {
+            let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
+            let text = self.chapter_text(i);
+            let stats = analysis::stats(&text);
+            let sentence_lengths: Vec<usize> = analysis::sentences(&text)
+                .into_iter()
+                .map(|s| {
+                    let words = buffer::count_words(s);
+                    // Keep only sentences long enough to make the global top-N,
+                    // so we don't clone every sentence's text.
+                    if longest.len() < TOP_N || words > longest.last().map_or(0, |l| l.words) {
+                        longest.push(analysis::LongSentence {
+                            chapter: title.clone(),
+                            words,
+                            text: s.to_string(),
+                        });
+                        longest.sort_by(|a, b| b.words.cmp(&a.words));
+                        longest.truncate(TOP_N);
+                    }
+                    words
+                })
+                .collect();
+            chapters.push(analysis::ChapterAnalysis { title, stats, sentence_lengths });
+        }
+        analysis::lines(&self.project.manifest.title, &chapters, &longest, threshold)
     }
 
     /// Build the per-part rows for the report: each part's display name (its

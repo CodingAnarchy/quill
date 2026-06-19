@@ -265,6 +265,7 @@ mod tests {
             start_date: Some("2026-01-11".into()),
             todo_marker: None,
             part_label: None,
+            run_on_threshold: None,
             goals: Some(Goals {
                 words: 150_000,
                 chapters: 60,

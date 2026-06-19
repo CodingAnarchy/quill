@@ -114,6 +114,11 @@ pub struct Manifest {
     /// must precede the `goals`/`parts`/`chapters` tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_label: Option<String>,
+    /// Sentence length (in words) above which the analysis report flags a
+    /// possible run-on. Defaults to 40 (see [`Manifest::run_on_threshold`]). A
+    /// scalar key — keep it before the `goals`/`parts`/`chapters` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_on_threshold: Option<usize>,
     /// The author's writing goals; the progress report is empty without them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goals: Option<Goals>,
@@ -139,6 +144,10 @@ impl Manifest {
     /// The displayed term for a chapter grouping, defaulting to `part`.
     pub fn part_label(&self) -> &str {
         self.part_label.as_deref().unwrap_or("part")
+    }
+    /// The run-on flag threshold for the analysis report (default 40 words).
+    pub fn run_on_threshold(&self) -> usize {
+        self.run_on_threshold.unwrap_or(40)
     }
 
     /// The index of the part containing chapter `chapter_index` (0-based), or
@@ -222,6 +231,7 @@ impl Project {
                 start_date: None,
                 todo_marker: None,
                 part_label: None,
+                run_on_threshold: None,
                 goals: None,
                 parts: None,
                 chapters: Vec::new(),
@@ -509,6 +519,7 @@ impl Project {
                 start_date: None,
                 todo_marker: None,
                 part_label: None,
+                run_on_threshold: None,
                 goals: None,
                 parts: None,
                 chapters,
