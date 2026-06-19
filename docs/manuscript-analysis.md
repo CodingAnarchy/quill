@@ -24,12 +24,18 @@ reused foundation for the rest of the epic.
 
 ### Prose words
 
-Words are counted with Unicode word segmentation — the same basis as
-`buffer::count_words` and the progress report — so both reports agree on how big
-a chapter is. Markdown markup (`#`, `*`, `_`, list bullets, …) is punctuation to
-the segmenter, so it never counts as a word; only the prose does. Front matter is
-already stripped from a chapter's body before it is measured. Heading *text*
-(e.g. "Chapter One") is included, matching the progress report's word count.
+Words are counted with Unicode word segmentation (the same tokenizer as
+`buffer::count_words`). Markdown markup (`*`, `_`, list bullets, …) is
+punctuation to the segmenter, so it never counts as a word; only the prose does.
+Front matter is already stripped from a chapter's body before it is measured.
+
+**Heading lines are excluded.** A chapter title (`# The Dark`) or a scene heading
+(`## Later`) is structure, not prose — measuring it would glue the title's words
+onto the following sentence and skew both the sentence length and the readability
+of that chapter. Heading lines are dropped before any metric is computed, so the
+analysis measures what a reader actually reads. (This means the analysis word
+total can be slightly lower than the progress report's, which counts heading text
+toward the manuscript's size; the two reports answer different questions.)
 
 ### Sentences
 
@@ -121,8 +127,8 @@ and reports, per chapter and for the whole manuscript:
 - **Min / Max** — the shortest and longest sentence.
 - **Run-ons** — how many sentences are longer than the run-on threshold.
 
-The first sentence of a chapter includes its heading text (consistent with the
-word-count basis above), so a heading adds a few words to that one sentence.
+Heading lines are excluded (see *Prose words* above), so a chapter title never
+counts as part of its first sentence.
 
 ### Distribution
 

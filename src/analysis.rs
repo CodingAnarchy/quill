@@ -57,10 +57,36 @@ pub struct Readability {
     pub smog: f64,
 }
 
+/// A chapter's prose with Markdown heading lines removed, so the analysis
+/// measures what a reader actually reads. A chapter title (`# The Dark`) or a
+/// scene heading (`## Later`) is structure, not a sentence — left in, its words
+/// glue onto the following sentence and skew the length and readability figures.
+/// Heading lines become blank lines (paragraph/sentence boundaries are
+/// unaffected); every other line is kept verbatim. Front matter is already
+/// stripped upstream.
+pub fn prose(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        if !is_heading(line) {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Whether `line` is a Markdown ATX heading (`#`…`######` followed by a space or
+/// the end of the line).
+fn is_heading(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.len() - trimmed.trim_start_matches('#').len();
+    hashes > 0 && matches!(trimmed[hashes..].chars().next(), None | Some(' ' | '\t'))
+}
+
 /// Measure a span of prose. Words and syllables come from Unicode word
-/// segmentation (so the count matches the progress report); sentences from
-/// [`count_sentences`]. Markdown markup (`#`, `*`, `_`, …) is punctuation to the
-/// segmenter, so it never counts as a word — only the prose does.
+/// segmentation; sentences from [`count_sentences`]. Markdown emphasis markers
+/// (`*`, `_`, …) are punctuation to the segmenter, so they never count as words.
+/// Pass [`prose`] so heading lines don't inflate the counts.
 pub fn stats(text: &str) -> Stats {
     let mut s = Stats { sentences: count_sentences(text), ..Stats::default() };
     for word in text.unicode_words() {
@@ -510,12 +536,21 @@ mod tests {
     }
 
     #[test]
-    fn stats_match_the_word_count_basis() {
+    fn prose_drops_heading_lines() {
+        let text = "# The Dark\n\nThe night was long.\n\n## Later\n\nDawn came.";
+        let p = prose(text);
+        assert!(!p.contains("The Dark") && !p.contains("Later"), "{p}");
+        assert!(p.contains("The night was long.") && p.contains("Dawn came."));
+        // A '#' that isn't a heading (no space after) stays.
+        assert!(prose("#hashtag of sorts").contains("#hashtag"));
+    }
+
+    #[test]
+    fn stats_measure_prose_without_headings() {
         let text = "# Title\n\nThe night was dark. It was very long.";
-        let s = stats(text);
-        // "Title The night was dark It was very long" = 9 words (heading text
-        // included, matching the progress report's count_words basis).
-        assert_eq!(s.words, crate::buffer::count_words(text));
+        let s = stats(&prose(text));
+        // Heading words are gone; only the two prose sentences are measured.
+        assert_eq!(s.words, crate::buffer::count_words("The night was dark. It was very long."));
         assert_eq!(s.sentences, 2);
         assert!(s.syllables >= s.words); // at least one syllable per word
     }
