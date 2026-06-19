@@ -1160,6 +1160,35 @@ fn submission_writes_three_artifacts_and_summarizes() {
     fs::remove_dir_all(&dir).ok();
 }
 
+// --- Local analysis report --------------------------------------------------
+
+#[test]
+fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
+    let (mut app, dir) = two_chapter_app("analysis-open");
+    assert!(app.analysis.is_none());
+    app.on_key(ctrl('t'));
+    let lines = app.analysis.as_ref().expect("analysis report opens");
+    let text: String = lines
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("readability"), "{text}");
+    assert!(text.contains("One") && text.contains("Two"), "both chapters listed: {text}");
+    assert!(text.contains("Whole manuscript"), "overall row: {text}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn any_key_closes_the_analysis_report() {
+    let (mut app, dir) = two_chapter_app("analysis-close");
+    app.on_key(ctrl('t'));
+    assert!(app.analysis.is_some());
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.analysis.is_none(), "any key dismisses the report");
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn submission_never_touches_the_manuscript() {
     let (mut app, dir) = two_chapter_app("submission-safe");
