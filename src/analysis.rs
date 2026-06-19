@@ -296,11 +296,6 @@ pub fn sentence_stats(lengths: &[usize], run_on_threshold: usize) -> SentenceSta
     let sum: usize = lengths.iter().sum();
     let mut sorted = lengths.to_vec();
     sorted.sort_unstable();
-    let median = if count % 2 == 1 {
-        sorted[count / 2] as f64
-    } else {
-        (sorted[count / 2 - 1] + sorted[count / 2]) as f64 / 2.0
-    };
     let mut histogram = [0usize; LENGTH_BUCKETS];
     for &len in lengths {
         histogram[bucket(len)] += 1;
@@ -308,7 +303,7 @@ pub fn sentence_stats(lengths: &[usize], run_on_threshold: usize) -> SentenceSta
     SentenceStats {
         count,
         mean: sum as f64 / count as f64,
-        median,
+        median: median_sorted(&sorted),
         min: sorted[0],
         max: sorted[count - 1],
         histogram,
@@ -324,13 +319,101 @@ fn bucket(len: usize) -> usize {
 /// Human labels for the [`LENGTH_BUCKETS`] distribution buckets.
 const BUCKET_LABELS: [&str; LENGTH_BUCKETS] = ["<10", "10–19", "20–29", "30–39", "40+"];
 
-/// One chapter's analysis inputs: its title, readability [`Stats`], and the word
-/// length of each of its sentences. Gathered by the editor (which owns the
-/// manuscript) and handed to [`lines`] to render.
+/// The median of an already-sorted slice (0.0 for empty).
+fn median_sorted(sorted: &[usize]) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        0.0
+    } else if n % 2 == 1 {
+        sorted[n / 2] as f64
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) as f64 / 2.0
+    }
+}
+
+/// Chapter-length statistics for pacing balance (#69), in words per chapter.
+/// `low_fence` / `high_fence` bound the "normal" range: a chapter under the low
+/// fence is unusually short, over the high fence unusually long. The fences are
+/// median-relative — half and double the median chapter length — which is robust
+/// to a single very long/short chapter (a mean- or quartile-based fence gets
+/// dragged by the very outliers it should flag) and easy to explain. With fewer
+/// than four chapters there is no meaningful "rest" to compare against, so the
+/// fences open to ±∞ (nothing is flagged).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LengthStats {
+    pub count: usize,
+    pub mean: f64,
+    pub median: f64,
+    /// Population standard deviation — the "spread".
+    pub std_dev: f64,
+    pub min: usize,
+    pub max: usize,
+    pub low_fence: f64,
+    pub high_fence: f64,
+}
+
+impl Default for LengthStats {
+    fn default() -> Self {
+        Self { count: 0, mean: 0.0, median: 0.0, std_dev: 0.0, min: 0, max: 0, low_fence: f64::MIN, high_fence: f64::MAX }
+    }
+}
+
+/// Summarize per-chapter word counts for the pacing section. All-default for an
+/// empty manuscript.
+pub fn length_stats(words: &[usize]) -> LengthStats {
+    if words.is_empty() {
+        return LengthStats::default();
+    }
+    let count = words.len();
+    let mean = words.iter().sum::<usize>() as f64 / count as f64;
+    let variance = words.iter().map(|&w| (w as f64 - mean).powi(2)).sum::<f64>() / count as f64;
+    let mut sorted = words.to_vec();
+    sorted.sort_unstable();
+    let median = median_sorted(&sorted);
+    // Need a few chapters before "unusually short/long relative to the rest"
+    // means anything; below that, flag nothing.
+    let (low_fence, high_fence) =
+        if count < 4 { (f64::MIN, f64::MAX) } else { (median * 0.5, median * 2.0) };
+    LengthStats {
+        count,
+        mean,
+        median,
+        std_dev: variance.sqrt(),
+        min: sorted[0],
+        max: sorted[count - 1],
+        low_fence,
+        high_fence,
+    }
+}
+
+/// The pacing flag for a chapter of `words`, relative to the rest.
+fn length_flag(words: usize, stats: &LengthStats) -> &'static str {
+    let w = words as f64;
+    if w < stats.low_fence {
+        "short"
+    } else if w > stats.high_fence {
+        "long"
+    } else {
+        ""
+    }
+}
+
+/// One chapter's analysis inputs: its title, total word count (the rolled-up
+/// count, for the pacing section), readability [`Stats`], and the word length of
+/// each of its sentences. Gathered by the editor (which owns the manuscript) and
+/// handed to [`lines`] to render.
 pub struct ChapterAnalysis {
     pub title: String,
+    pub words: usize,
     pub stats: Stats,
     pub sentence_lengths: Vec<usize>,
+}
+
+/// One part (chapter grouping) for the pacing section: its display name and the
+/// 0-based chapter index range it spans (`start..end`, end-exclusive).
+pub struct PartSpan {
+    pub name: String,
+    pub range: std::ops::Range<usize>,
 }
 
 /// One of the manuscript's longest sentences, with where it lives, for the
@@ -369,20 +452,29 @@ impl LongestSentences {
     }
 }
 
-/// The analysis report's rows: a readability table and a sentence-length section
+/// Everything the analysis report renders, gathered by the editor. Grouping the
+/// inputs keeps [`lines`] to one argument as the epic adds more sections.
+pub struct Report<'a> {
+    pub title: &'a str,
+    pub chapters: &'a [ChapterAnalysis],
+    pub longest: &'a [LongSentence],
+    /// Chapter groupings for the pacing section (empty when the book has none).
+    pub parts: &'a [PartSpan],
+    pub run_on_threshold: usize,
+}
+
+/// The analysis report's rows: a readability table, a sentence-length section
 /// (per-chapter statistics, the overall distribution, and the longest
-/// sentences), each with a whole-manuscript total. Computed once when the report
-/// is opened (the scan is O(manuscript), so it stays off the per-frame path).
-pub fn lines(
-    title: &str,
-    chapters: &[ChapterAnalysis],
-    longest: &[LongSentence],
-    run_on_threshold: usize,
-) -> Vec<Line<'static>> {
-    let mut out = vec![bold(format!("{title} — analysis")), Line::raw("")];
-    out.extend(readability_section(chapters));
+/// sentences), and a chapter-length / pacing section — each with a
+/// whole-manuscript total. Computed once when the report is opened (the scan is
+/// O(manuscript), so it stays off the per-frame path).
+pub fn lines(report: &Report) -> Vec<Line<'static>> {
+    let mut out = vec![bold(format!("{} — analysis", report.title)), Line::raw("")];
+    out.extend(readability_section(report.chapters));
     out.push(Line::raw(""));
-    out.extend(sentence_section(chapters, longest, run_on_threshold));
+    out.extend(sentence_section(report.chapters, report.longest, report.run_on_threshold));
+    out.push(Line::raw(""));
+    out.extend(length_section(report.chapters, report.parts));
     out
 }
 
@@ -442,6 +534,52 @@ fn sentence_section(
         }
     }
     out
+}
+
+/// The chapter-length / pacing section: a per-chapter bar chart of word counts
+/// with short/long outliers flagged, grouped by part when the book defines them,
+/// plus summary statistics (mean, median, spread). Uses the rolled-up chapter
+/// word counts (headings included — the size shown in the chapter list), so it
+/// matches what the author sees elsewhere.
+fn length_section(chapters: &[ChapterAnalysis], parts: &[PartSpan]) -> Vec<Line<'static>> {
+    let words: Vec<usize> = chapters.iter().map(|c| c.words).collect();
+    let stats = length_stats(&words);
+    let peak = words.iter().copied().max().unwrap_or(0).max(1);
+    let mut out = vec![dim("Chapter length (words)")];
+
+    if parts.is_empty() {
+        for c in chapters {
+            out.push(length_bar_row(&c.title, c.words, peak, &stats, 0));
+        }
+    } else {
+        for p in parts {
+            out.push(dim(p.name.clone()));
+            let mut subtotal = 0;
+            for c in p.range.clone().filter_map(|i| chapters.get(i)) {
+                subtotal += c.words;
+                out.push(length_bar_row(&c.title, c.words, peak, &stats, 2));
+            }
+            out.push(dim(format!("  {:<22}{subtotal:>7}", "Subtotal")));
+        }
+    }
+
+    out.push(bold(format!(
+        "Whole manuscript: {} chapters · mean {:.0} · median {:.0} · spread ±{:.0} · range {}–{}",
+        stats.count, stats.mean, stats.median, stats.std_dev, stats.min, stats.max
+    )));
+    out
+}
+
+/// One chapter's pacing row: indented (truncated) title, word count, a bar scaled
+/// to the longest chapter, and a short/long flag for outliers.
+fn length_bar_row(title: &str, words: usize, peak: usize, stats: &LengthStats, indent: usize) -> Line<'static> {
+    let name = truncate(title, 24 - indent);
+    let bar = "█".repeat(words * 24 / peak);
+    let flag = match length_flag(words, stats) {
+        "" => String::new(),
+        f => format!("  ⚠ {f}"),
+    };
+    Line::raw(format!("{:indent$}{name:<width$}{words:>7}  {bar}{flag}", "", width = 24 - indent))
 }
 
 /// A horizontal bar per length bucket, scaled to the busiest bucket.
@@ -630,28 +768,54 @@ mod tests {
     }
 
     #[test]
-    fn lines_render_both_sections_with_totals() {
+    fn length_stats_summarize_and_fence_outliers() {
+        // Mostly ~1000-word chapters with one tiny and one huge outlier.
+        let words = vec![1000, 1050, 980, 1020, 1010, 100, 5000];
+        let s = length_stats(&words);
+        assert_eq!(s.count, 7);
+        assert_eq!(s.min, 100);
+        assert_eq!(s.max, 5000);
+        assert_eq!(s.median, 1010.0);
+        assert!(s.std_dev > 0.0);
+        assert_eq!(length_flag(100, &s), "short");
+        assert_eq!(length_flag(5000, &s), "long");
+        assert_eq!(length_flag(1000, &s), "");
+        // Too few chapters → no "rest" to compare against, nothing flagged.
+        let few = length_stats(&[100, 5000]);
+        assert_eq!(length_flag(100, &few), "");
+    }
+
+    fn chapter(title: &str, prose_text: &str, words: usize) -> ChapterAnalysis {
+        ChapterAnalysis {
+            title: title.to_string(),
+            words,
+            stats: stats(prose_text),
+            sentence_lengths: sentences(prose_text)
+                .iter()
+                .map(|s| crate::buffer::count_words(s))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn lines_render_all_sections_with_totals() {
         let chapters = vec![
-            ChapterAnalysis {
-                title: "One".to_string(),
-                stats: stats("The cat sat on the mat."),
-                sentence_lengths: sentences("The cat sat on the mat.")
-                    .iter()
-                    .map(|s| crate::buffer::count_words(s))
-                    .collect(),
-            },
-            ChapterAnalysis {
-                title: "Two".to_string(),
-                stats: stats("The dog ran fast across the yard."),
-                sentence_lengths: vec![7],
-            },
+            chapter("One", "The cat sat on the mat.", 1200),
+            chapter("Two", "The dog ran fast across the yard.", 3400),
         ];
         let longest = vec![LongSentence {
             chapter: "Two".to_string(),
             words: 7,
             text: "The dog ran fast across the yard.".to_string(),
         }];
-        let rows = lines("My Book", &chapters, &longest, 40);
+        let report = Report {
+            title: "My Book",
+            chapters: &chapters,
+            longest: &longest,
+            parts: &[],
+            run_on_threshold: 40,
+        };
+        let rows = lines(&report);
         let text: String = rows
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -662,8 +826,36 @@ mod tests {
         assert!(text.contains("Sentence length"));
         assert!(text.contains("Distribution"));
         assert!(text.contains("Longest sentences"));
+        assert!(text.contains("Chapter length"));
         assert!(text.contains("One") && text.contains("Two"));
-        assert_eq!(text.matches("Whole manuscript").count(), 2); // one per section
+        assert_eq!(text.matches("Whole manuscript").count(), 3); // one per section
+    }
+
+    #[test]
+    fn lines_group_chapter_length_by_part() {
+        let chapters = vec![
+            chapter("One", "A.", 1000),
+            chapter("Two", "B.", 1100),
+            chapter("Three", "C.", 900),
+        ];
+        let parts = vec![
+            PartSpan { name: "Act I".to_string(), range: 0..1 },
+            PartSpan { name: "Act II".to_string(), range: 1..3 },
+        ];
+        let report = Report {
+            title: "Book",
+            chapters: &chapters,
+            longest: &[],
+            parts: &parts,
+            run_on_threshold: 40,
+        };
+        let text: String = lines(&report)
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Act I") && text.contains("Act II"));
+        assert!(text.contains("Subtotal"));
     }
 
     #[test]

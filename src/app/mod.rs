@@ -310,9 +310,41 @@ impl App {
             for (s, &words) in sentences.iter().zip(&sentence_lengths) {
                 longest.consider(&title, s, words);
             }
-            chapters.push(analysis::ChapterAnalysis { title, stats, sentence_lengths });
+            // Pacing uses the rolled-up chapter word count (headings included),
+            // matching the chapter list and progress report.
+            chapters.push(analysis::ChapterAnalysis {
+                title,
+                words: self.chapter_word_count(i),
+                stats,
+                sentence_lengths,
+            });
         }
-        analysis::lines(&self.project.manifest.title, &chapters, &longest.into_vec(), threshold)
+        let report = analysis::Report {
+            title: &self.project.manifest.title,
+            chapters: &chapters,
+            longest: &longest.into_vec(),
+            parts: &self.analysis_parts(),
+            run_on_threshold: threshold,
+        };
+        analysis::lines(&report)
+    }
+
+    /// The part groupings for the pacing section: each part's display name and the
+    /// 0-based chapter range it spans. Empty when the book defines no parts.
+    fn analysis_parts(&self) -> Vec<analysis::PartSpan> {
+        let Some(parts) = self.project.manifest.parts.as_ref() else {
+            return Vec::new();
+        };
+        let label = self.project.manifest.part_label();
+        let chapters = self.chapter_count();
+        parts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| analysis::PartSpan {
+                name: p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1)),
+                range: p.chapters[0].saturating_sub(1)..p.chapters[1].min(chapters),
+            })
+            .collect()
     }
 
     /// Build the per-part rows for the report: each part's display name (its
