@@ -347,65 +347,42 @@ impl App {
     /// A no-op with a status message when AI isn't ready or a request is already
     /// in flight.
     fn ask_ai(&mut self, question: &str) {
-        let question = question.trim();
+        let question = question.trim().to_string();
         if question.is_empty() {
             return;
         }
-        if self.ai_rx.is_some() {
-            self.message = Some("Already asking Claude…".into());
-            return;
-        }
-        let key = match self.ai.check_ready() {
-            Ok(key) => key.to_string(),
-            Err(e) => {
-                self.message = Some(e.to_string());
-                return;
-            }
-        };
-        let backend = ClaudeBackend::new(key);
-        let req = ai::build_qa_request(self.manuscript_text(), question, &self.ai.model);
-
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let _ = tx.send(Outcome::Answer(backend.complete(&req)));
+        self.spawn_ai("⟳ Sending to Claude…", move |backend, manuscript, model| {
+            Outcome::Answer(backend.complete(&ai::build_qa_request(manuscript, &question, &model)))
         });
-        self.ai_rx = Some(rx);
-        self.message = Some("⟳ Sending to Claude…".into());
     }
 
-    /// Start a character-extraction pass on a worker thread: a single structured
-    /// request over the whole manuscript, parsed into profiles. The result is
-    /// applied (bible files written / conflicts queued) by [`App::poll_ai`].
+    /// Start a character-extraction pass; profiles are written / conflicts queued
+    /// by [`App::poll_ai`].
     fn analyze_characters(&mut self) {
-        if self.ai_rx.is_some() {
-            self.message = Some("An AI request is already in flight…".into());
-            return;
-        }
-        let key = match self.ai.check_ready() {
-            Ok(key) => key.to_string(),
-            Err(e) => {
-                self.message = Some(e.to_string());
-                return;
-            }
-        };
-        let backend = ClaudeBackend::new(key);
-        let model = self.ai.model.clone();
-        let manuscript = self.manuscript_text();
-
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
+        self.spawn_ai("⟳ Analyzing characters…", |backend, manuscript, model| {
             let req = character::build_request(manuscript, &model);
-            let result = backend.complete(&req).and_then(|resp| character::parse(&resp.text));
-            let _ = tx.send(Outcome::Characters(result));
+            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
         });
-        self.ai_rx = Some(rx);
-        self.message = Some("⟳ Analyzing characters…".into());
     }
 
-    /// Start a timeline & continuity pass on a worker thread: a single structured
-    /// request over the manuscript, parsed into events + findings. Applied by
+    /// Start a timeline & continuity pass; the timeline + findings are applied by
     /// [`App::poll_ai`].
     fn analyze_continuity(&mut self) {
+        self.spawn_ai("⟳ Checking continuity…", |backend, manuscript, model| {
+            let req = continuity::build_request(manuscript, &model);
+            Outcome::Continuity(backend.complete(&req).and_then(|r| continuity::parse(&r.text)))
+        });
+    }
+
+    /// Run an AI request on a worker thread: assemble the manuscript here, hand it
+    /// (with a backend + model) to `run` off-thread, and deliver the `Outcome` via
+    /// `ai_rx` for [`App::poll_ai`]. A no-op with a status message when AI isn't
+    /// ready or a request is already in flight.
+    fn spawn_ai(
+        &mut self,
+        message: &str,
+        run: impl FnOnce(ClaudeBackend, String, String) -> Outcome + Send + 'static,
+    ) {
         if self.ai_rx.is_some() {
             self.message = Some("An AI request is already in flight…".into());
             return;
@@ -423,12 +400,10 @@ impl App {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let req = continuity::build_request(manuscript, &model);
-            let result = backend.complete(&req).and_then(|resp| continuity::parse(&resp.text));
-            let _ = tx.send(Outcome::Continuity(result));
+            let _ = tx.send(run(backend, manuscript, model));
         });
         self.ai_rx = Some(rx);
-        self.message = Some("⟳ Checking continuity…".into());
+        self.message = Some(message.to_string());
     }
 
     /// Poll the in-flight AI request (non-blocking). On a result, dispatch by
@@ -494,7 +469,7 @@ impl App {
             drift += c.drift.len();
             let path = dir.join(format!("{}.md", bible::slug(&c.name)));
             match self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)) {
-                Ok(w) => written += usize::from(w),
+                Ok(()) => written += 1,
                 Err(conflict) => conflicts.push(conflict),
             }
         }
@@ -517,7 +492,7 @@ impl App {
         path: PathBuf,
         name: &str,
         render: impl Fn(&str) -> String,
-    ) -> Result<bool, BibleConflict> {
+    ) -> Result<(), BibleConflict> {
         let existing = std::fs::read_to_string(&path).ok();
         let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
         let proposed = render(&notes);
@@ -530,7 +505,8 @@ impl App {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        Ok(std::fs::write(&path, &proposed).is_ok())
+        let _ = std::fs::write(&path, &proposed);
+        Ok(())
     }
 
     /// Count a character's name/alias mentions across the manuscript and record
@@ -1436,11 +1412,11 @@ impl App {
             KeyCode::Char('d') => {
                 if f.selected < f.items.len() {
                     f.items.remove(f.selected);
-                }
-                if f.items.is_empty() {
-                    self.mode = Mode::Insert;
-                } else if let Mode::Findings(f) = &mut self.mode {
-                    f.selected = f.selected.min(f.items.len() - 1);
+                    if f.items.is_empty() {
+                        self.mode = Mode::Insert;
+                    } else {
+                        f.selected = f.selected.min(f.items.len() - 1);
+                    }
                 }
             }
             KeyCode::Enter => {
