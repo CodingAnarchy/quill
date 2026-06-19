@@ -122,13 +122,15 @@ can edit any bible entry; edits are treated as ground truth on the next pass.
 
 ### 3. Scaffolding (outlines & TODO notations)
 
-- Generate an **outline / beat sheet** from a premise, logline, or partial
-  draft; expand a one-line chapter summary into proposed scenes.
-- Insert **`xxx` TODO markers** (the same token the progress report counts) at
-  gaps — "`xxx` motivation unclear here", "`xxx` needs a transition" — so
-  scaffolding feeds the existing stats loop.
-- Suggest next-scene options or "what's missing" against the outline, always as
-  drafts the author accepts or rejects; nothing is written without confirmation.
+- Generate an **outline / beat sheet** from the draft: per chapter, the key
+  story beats as short structural **notes** (never prose). Written to
+  `bible/outline.md` (#76).
+- Surface **structural gaps** ("a chapter lacking a clear goal", "a missing
+  transition", "a setup with no payoff") as findings, and let the author turn any
+  finding into an **`xxx` TODO marker** in its chapter (the same token the
+  progress report counts) — a note, never prose.
+- Per the assistant-not-co-writer principle, scaffolding produces structure and
+  notes only; it never drafts, expands, or suggests manuscript prose.
 
 ### 4. Setting & worldbuilding
 
