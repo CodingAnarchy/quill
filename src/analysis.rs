@@ -102,26 +102,36 @@ pub fn readability(s: Stats) -> Readability {
 /// "table"), and never return zero for a word with letters. A heuristic — it
 /// misses some irregular words, which is acceptable for an aggregate score.
 pub fn syllables(word: &str) -> usize {
-    let w: String = word.chars().filter(|c| c.is_alphabetic()).flat_map(char::to_lowercase).collect();
-    if w.is_empty() {
-        return 0;
-    }
-    if w.chars().count() <= 3 {
-        return 1; // "the", "cat", "eye" — short words are one beat
-    }
-    let mut count: usize = 0;
+    // One streaming pass over the word's letters — no intermediate allocation.
+    // Track vowel groups, the letter count, and the last two letters (for the
+    // silent-`e` / `-le` rule).
+    let mut letters = 0usize;
+    let mut groups = 0usize;
     let mut prev_vowel = false;
-    for c in w.chars() {
+    let mut last = '\0';
+    let mut penult = '\0';
+    for ch in word.chars().filter(|c| c.is_alphabetic()) {
+        let c = ch.to_ascii_lowercase();
+        letters += 1;
         let is_vowel = matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'y');
         if is_vowel && !prev_vowel {
-            count += 1;
+            groups += 1;
         }
         prev_vowel = is_vowel;
+        penult = last;
+        last = c;
     }
-    if w.ends_with('e') && !w.ends_with("le") {
-        count = count.saturating_sub(1); // silent terminal 'e'
+    if letters == 0 {
+        return 0;
     }
-    count.max(1)
+    if letters <= 3 {
+        return 1; // "the", "cat", "eye" — short words are one beat
+    }
+    // Silent terminal 'e', except a "-le" ending ("table") which keeps its beat.
+    if last == 'e' && penult != 'l' {
+        groups = groups.saturating_sub(1);
+    }
+    groups.max(1)
 }
 
 /// Count sentences in prose. A run of terminators (`.`, `!`, `?`, `…`) ends a
@@ -187,9 +197,10 @@ fn is_boundary(chars: &[char], start: usize, end: usize) -> bool {
         Some(c) if c.is_whitespace() => {
             // A real boundary: the next non-space starts a new sentence (capital,
             // digit, or an opening quote). Lowercase means it ran on.
-            let next = chars[j..].iter().find(|c| !c.is_whitespace());
-            matches!(next, None | Some('"' | '\'' | '“' | '‘' | '(') )
-                || matches!(next, Some(c) if c.is_uppercase() || c.is_ascii_digit())
+            match chars[j..].iter().find(|c| !c.is_whitespace()) {
+                None | Some('"' | '\'' | '“' | '‘' | '(') => true,
+                Some(c) => c.is_uppercase() || c.is_ascii_digit(),
+            }
         }
         _ => false, // glued to the next token, e.g. inside "e.g" — not a boundary
     }
@@ -224,7 +235,7 @@ pub fn lines(title: &str, chapters: &[(String, Stats)]) -> Vec<Line<'static>> {
     let mut total = Stats::default();
     for (name, stats) in chapters {
         total.add(*stats);
-        out.push(score_row(name, readability(*stats)));
+        out.push(Line::raw(score_text(name, readability(*stats))));
     }
 
     out.push(Line::raw(""));
@@ -245,10 +256,6 @@ fn header_row() -> Line<'static> {
         format!("{:<26}{:>9}{:>8}{:>8}{:>8}", "Chapter", "Ease", "F–K", "Fog", "SMOG"),
         Style::default().fg(Color::DarkGray),
     ))
-}
-
-fn score_row(name: &str, r: Readability) -> Line<'static> {
-    Line::raw(score_text(name, r))
 }
 
 /// One formatted row: a (truncated) name and the four scores to one decimal.
