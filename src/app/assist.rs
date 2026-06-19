@@ -292,12 +292,19 @@ impl App {
         }
     }
 
+    /// Show an AI result — a Q&A answer or a pass summary — as the full-screen
+    /// overlay, scrolled to the top. The single place an AI result becomes an
+    /// overlay.
+    fn show_ai(&mut self, lines: Vec<Line<'static>>) {
+        self.overlay = Some(Overlay::ai(lines));
+    }
+
     /// Apply a completed Q&A result: open the answer overlay on success, or set a
     /// status message on error. Shared by the async poll path and tests (which
     /// drive a mock backend synchronously).
     pub(crate) fn apply_qa_result(&mut self, result: Result<ai::Response, ai::AiError>) {
         match result {
-            Ok(resp) => self.overlay = Some(Overlay::ai(ai::answer_to_lines(&resp))),
+            Ok(resp) => self.show_ai(ai::answer_to_lines(&resp)),
             Err(e) => self.message = Some(format!("AI: {e}")),
         }
     }
@@ -337,7 +344,7 @@ impl App {
         }
 
         if conflicts.is_empty() {
-            self.overlay = Some(Overlay::ai(character_summary_lines(chars.len(), written, drift)));
+            self.show_ai(character_summary_lines(chars.len(), written, drift));
         } else {
             let pending = conflicts.len();
             self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
@@ -543,7 +550,7 @@ impl App {
             lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
             lines.push(Line::raw(""));
             lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));
-            self.overlay = Some(Overlay::ai(lines));
+            self.show_ai(lines);
         } else {
             let pending = conflicts.len();
             let n = written.len();
@@ -593,11 +600,11 @@ impl App {
     fn open_findings(&mut self) {
         let items = std::mem::take(&mut self.pending_findings);
         if items.is_empty() {
-            self.overlay = Some(Overlay::ai(vec![
+            self.show_ai(vec![
                 Line::raw("Analysis complete."),
                 Line::raw(""),
                 Line::raw("Written to the story bible. No findings."),
-            ]));
+            ]);
         } else {
             self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
         }
