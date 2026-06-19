@@ -2,6 +2,8 @@
 //! handlers read or write are `pub(crate)`; `label`/`input` are `pub` because
 //! the status bar and the edit banner render them.
 
+use std::path::PathBuf;
+
 use crate::buffer::Buffer;
 
 /// Editor modes. Each variant carries the transient state that only makes sense
@@ -20,6 +22,29 @@ pub enum Mode {
     /// Esc cancels. Boxed because it carries a whole [`Buffer`], far larger than
     /// the other variants.
     EditMeta(Box<MetaEdit>),
+    /// Reviewing story-bible files whose generated sections were hand-edited
+    /// before an AI pass would overwrite them: a diff of each, with overwrite /
+    /// edit / keep choices. Boxed (carries the conflict queue and a scratch
+    /// buffer while editing).
+    BibleReview(Box<BibleReview>),
+}
+
+/// State for an open [`Mode::BibleReview`]: the queue of conflicting bible files
+/// (front of the queue is the one shown), and a scratch buffer while the author
+/// edits the proposed version before saving.
+pub struct BibleReview {
+    pub(crate) conflicts: Vec<BibleConflict>,
+    /// `Some` while editing the proposed version of the front conflict.
+    pub(crate) editing: Option<Buffer>,
+}
+
+/// One bible file whose on-disk generated block differs from what a fresh pass
+/// would write.
+pub struct BibleConflict {
+    pub(crate) path: PathBuf,
+    pub(crate) name: String,
+    pub(crate) current: String,
+    pub(crate) proposed: String,
 }
 
 /// State for an open [`Mode::EditMeta`]. `label` is public for the editor's

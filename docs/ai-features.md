@@ -27,6 +27,16 @@ while a request is in flight. *(Shipped in #73: the `quill-ai` backend trait, th
 Claude HTTP backend, and "Ask the manuscript" Q&A. The request runs on a worker
 thread so the editor never blocks.)*
 
+**Ctrl-B** runs a character-tracking pass (#74): a single structured request over
+the whole manuscript writes a profile per character to `bible/characters/<slug>.md`
+and flags drift. Each file has a regenerated block (delimited by
+`<!-- generated:start/end -->`) and an author-owned `<!-- notes:start/end -->`
+block that survives regeneration. A `digest:` in the front matter detects
+hand-edits to the generated block: on the next pass, an edited file is **not**
+overwritten — a diff is shown and the author can overwrite, keep theirs, or edit
+the proposed version before saving. (Incremental dirty-chapter re-analysis and
+the Batch API are a follow-up.)
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API
