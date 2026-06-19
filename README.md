@@ -34,7 +34,10 @@ keystrokes that stay out of the way.
 - **Progress report** — set writing goals (target words, chapters, start date)
   in the manifest and press Ctrl-R for a one-screen report: completion against
   goals, a projected final length from your chapter pace, writing rate, and a
-  projected finish date.
+  projected finish date. Includes daily momentum — today's word delta (added vs.
+  deleted), broken down **per part** (a configurable grouping of chapters),
+  backed by an append-only snapshot log so the day's progress survives a reopen.
+  Full spec in [`docs/progress-reports.md`](docs/progress-reports.md).
 - **Epigraphs** — a quotation (single- or multi-line / verse) and attribution on
   a chapter (front matter) or the book (manifest), rendered set-apart above the
   body (the book's at the start of the manuscript). The quotation is edited in
@@ -92,7 +95,8 @@ character, **g** epigraph (quotation, then attribution). Book/series metadata
 ```
 src/
   main.rs        terminal setup + event loop
-  app.rs         application state, modes, key handling
+  app/           application state + key handling (mod.rs), unit tests
+  mode.rs        editor modes: Insert / Prompt / Nav / EditMeta
   buffer.rs      rope-backed document, cursor, editing & movement
   project.rs     project model: manifest + per-chapter files
   manuscript.rs  continuous view: a window of chapters as one buffer
@@ -102,58 +106,21 @@ src/
 
 ## Roadmap
 
-The Markdown manuscript format and the project model below have **shipped** — see
-the Features section above. The remaining sections are forward-looking.
+The Markdown manuscript format, the project model, chapter/book metadata, and the
+progress report have **shipped** — see the Features section above. The sections
+below are forward-looking.
 
-### Project structure: a project is a folder of chapter files — ✅ Shipped
+### Project structure: multi-book series & tree navigation
 
-Delivered: per-chapter files with a `book.toml` manifest, chapter
-create/rename/reorder/delete, rolled-up word counts, and the windowed
-continuous-manuscript view (Ctrl-L), plus optional **part** grouping (named,
-inclusive chapter ranges) that drives the progress report's per-part deltas. The
-full series → book → part navigation tree below remains future work; today's
-manifest is a flat ordered chapter list with an optional `parts` overlay.
+Today a project is a flat, ordered list of chapter files with an optional
+`parts` overlay (named, inclusive chapter ranges). Still ahead:
 
-- A Quill project is a **directory**: each chapter is its own Markdown file, and
-  a root **manifest** records the tree — an optional **series** containing one or
-  more **books**, each with **chapters** and an optional **part** grouping (the
-  term is configurable: "part", "act", "book", …). A standalone novel is one
-  book. The editor manages these files transparently; the author works in
-  chapters, not filenames.
-- **Two views, switchable by hotkey.** *Chapter-at-a-time* (default) edits one
-  chapter file at a time via the outline pane. *Continuous manuscript* reads as
-  one seamless document, with the editor mapping edits back to the right files.
-- **Bounded working set.** The editor never loads the whole novel: the
-  single-chapter view holds one chapter, and the continuous view keeps at most
-  about three chapters in memory — a window around where you're editing, loaded
-  and unloaded as you scroll. Costs track what you're actually working on, not
-  the size of the book.
-- Outline/navigation pane walks the manifest tree; jump between chapters, parts,
-  and books, with per-node and rolled-up word counts.
-
-### Metadata & front matter
-
-- Per-node metadata, all human-readable so the manuscript stays portable:
-  - **Chapter:** title, POV character, status (draft/revised/final), summary —
-    stored as standard YAML front matter at the top of each chapter file.
-  - **Book / series:** title, subtitle, author — stored in the project manifest.
-- **Epigraphs** on both books and chapters — a quotation plus attribution stored
-  in metadata (chapter front matter or the manifest) and rendered above the body,
-  distinct from the prose itself.
-
-### Progress reports & writing goals
-
-- Author-set goals in the project manifest: target **words**, **chapters**, and
-  `words_per_page` (pages are derived), plus a project **start date**.
-- Single-screen status report tracking the manuscript against goals: word /
-  page / chapter completion, a projected final length ("expansion ratio") from
-  current pace, `xxx` TODO-marker count, and an "unused" (cut) section.
-- Daily momentum from an append-only snapshot log: today's word delta with
-  additions vs. deletions, the same broken down **per part** (a configurable
-  grouping of chapters), average words/day, and "to go" estimates with projected
-  completion dates.
-- Full field-by-field spec and formulas in
-  [`docs/progress-reports.md`](docs/progress-reports.md).
+- **Series support** — more than one **book** under a single project, with the
+  manifest recording a series → book → part → chapter tree rather than today's
+  single-book chapter list.
+- **Tree navigation** — an outline/navigation pane that walks the full tree and
+  jumps between books, parts, and chapters, with rolled-up word counts at each
+  level.
 
 ### AI assistance (Claude)
 

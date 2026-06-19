@@ -9,6 +9,7 @@ mod date;
 mod frontmatter;
 mod history;
 mod manuscript;
+mod mode;
 mod project;
 mod report;
 mod syntax;
