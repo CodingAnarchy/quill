@@ -7,6 +7,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 
 const GEN_START: &str = "<!-- generated:start -->";
 const GEN_END: &str = "<!-- generated:end -->";
@@ -36,7 +37,7 @@ pub fn extract_notes(existing: &str) -> String {
 /// Whether `existing`'s generated block has been hand-edited since it was written
 /// (its content no longer matches the `digest:` recorded in the front matter).
 pub fn is_hand_edited(existing: &str) -> bool {
-    let Some(stored) = frontmatter_field(existing, "digest") else {
+    let Some(stored) = front_field(existing, "digest") else {
         return false; // no digest (older/foreign file) — treat as clean
     };
     let current = between(existing, GEN_START, GEN_END).unwrap_or_default();
@@ -93,7 +94,7 @@ fn between(text: &str, start: &str, end: &str) -> Option<String> {
 }
 
 /// A scalar field value from the YAML front matter (first `key: value` line).
-fn frontmatter_field(text: &str, key: &str) -> Option<String> {
+pub fn front_field(text: &str, key: &str) -> Option<String> {
     let body = text.strip_prefix("---\n")?;
     let end = body.find("\n---")?;
     body[..end].lines().find_map(|line| {
@@ -102,9 +103,98 @@ fn frontmatter_field(text: &str, key: &str) -> Option<String> {
     })
 }
 
+/// The `- item` bullets under the `## {heading}` section of a bible file, up to
+/// the next `##` heading or block marker. The reader counterpart to the section
+/// writing the trackers do (e.g. the setting "Gazetteer" list).
+pub fn list_items(text: &str, heading: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut in_section = false;
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            in_section = h.trim() == heading;
+        } else if in_section {
+            if line.starts_with("<!--") {
+                break; // end of the generated block
+            }
+            if let Some(item) = line.strip_prefix("- ") {
+                items.push(item.trim().to_string());
+            }
+        }
+    }
+    items
+}
+
+// --- Reading the project's bible (the typed counterpart to the writers) -----
+
+/// The place/term gazetteer from `bible/setting.md` (empty when absent).
+pub fn gazetteer(root: &Path) -> Vec<String> {
+    let path = root.join("bible").join("setting.md");
+    std::fs::read_to_string(path).map(|t| list_items(&t, "Gazetteer")).unwrap_or_default()
+}
+
+/// The character names from `bible/characters/*.md` front matter (empty when
+/// absent), sorted for a deterministic order. De-duplication is the caller's job
+/// (e.g. `known_entities` dedups the combined gazetteer + names).
+pub fn character_names(root: &Path) -> Vec<String> {
+    let dir = root.join("bible").join("characters");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| front_field(&text, "name"))
+        .collect();
+    names.sort();
+    names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_items_reads_a_section_and_stops_at_the_next() {
+        let text = "## Gazetteer\n- Aldermoor\n- lightsteel\n\n## Other\n- nope\n";
+        assert_eq!(list_items(text, "Gazetteer"), vec!["Aldermoor", "lightsteel"]);
+        assert_eq!(list_items(text, "Other"), vec!["nope"]);
+        assert!(list_items(text, "Missing").is_empty());
+    }
+
+    #[test]
+    fn list_items_stops_at_the_generated_block_marker() {
+        let text = "## Gazetteer\n- Aldermoor\n<!-- generated:end -->\n- not-this\n";
+        assert_eq!(list_items(text, "Gazetteer"), vec!["Aldermoor"]);
+    }
+
+    #[test]
+    fn front_field_reads_a_front_matter_scalar() {
+        let text = "---\nname: Mara Vance\nrole: protagonist\n---\nbody\n";
+        assert_eq!(front_field(text, "name").as_deref(), Some("Mara Vance"));
+        assert_eq!(front_field(text, "missing"), None);
+    }
+
+    #[test]
+    fn gazetteer_and_character_names_read_the_bible_dir() {
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-bible-read-{}", std::process::id()));
+        let chars = root.join("bible").join("characters");
+        std::fs::create_dir_all(&chars).unwrap();
+        // A setting file rendered the same way the writer does.
+        let setting = render("title: Setting\n", "## Gazetteer\n- Aldermoor\n- lightsteel\n", "## Notes\n", "2026-06-19");
+        std::fs::write(root.join("bible").join("setting.md"), setting).unwrap();
+        std::fs::write(chars.join("mara.md"), "---\nname: Mara Vance\n---\n").unwrap();
+
+        assert_eq!(gazetteer(&root), vec!["Aldermoor", "lightsteel"]);
+        assert_eq!(character_names(&root), vec!["Mara Vance"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn readers_are_empty_when_the_bible_is_absent() {
+        let root = std::path::Path::new("/nonexistent-quill-bible");
+        assert!(gazetteer(root).is_empty());
+        assert!(character_names(root).is_empty());
+    }
 
     #[test]
     fn slug_is_filename_safe() {

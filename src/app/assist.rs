@@ -95,36 +95,9 @@ impl App {
     /// The known entity list for naming checks: the setting gazetteer plus the
     /// character names from the story bible. Empty when no bible has been built.
     pub(crate) fn known_entities(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
         let root = &self.project.root;
-
-        // Setting gazetteer: the `- term` lines under the "## Gazetteer" heading.
-        if let Ok(setting) = std::fs::read_to_string(root.join("bible").join("setting.md")) {
-            let mut in_gazetteer = false;
-            for line in setting.lines() {
-                if let Some(h) = line.strip_prefix("## ") {
-                    in_gazetteer = h.trim() == "Gazetteer";
-                } else if in_gazetteer {
-                    if let Some(term) = line.strip_prefix("- ") {
-                        out.push(term.trim().to_string());
-                    }
-                }
-            }
-        }
-
-        // Character names: the `name:` front-matter field of each profile.
-        if let Ok(dir) = std::fs::read_dir(root.join("bible").join("characters")) {
-            for entry in dir.flatten() {
-                let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
-                if let Some(name) = text
-                    .lines()
-                    .find_map(|l| l.strip_prefix("name:").map(|n| n.trim().to_string()))
-                {
-                    out.push(name);
-                }
-            }
-        }
-
+        let mut out = bible::gazetteer(root);
+        out.extend(bible::character_names(root));
         out.sort();
         out.dedup();
         out
