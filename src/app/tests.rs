@@ -1080,7 +1080,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 6, "all six AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 7, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -1113,5 +1113,30 @@ fn palette_esc_closes_to_insert() {
     app.open_ai_palette();
     app.on_key(key(KeyCode::Esc));
     assert!(matches!(app.mode, Mode::Insert));
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- AI: prose & style ------------------------------------------------------
+
+#[test]
+fn style_findings_open_the_overlay() {
+    let (mut app, dir) = two_chapter_app("style");
+    app.apply_style(Ok(ai::style::Style {
+        findings: vec![ai::style::StyleFinding {
+            kind: "POV".into(),
+            detail: "head-hop in the duel scene".into(),
+            chapters: vec!["Two".into()],
+        }],
+    }));
+    assert!(matches!(app.mode, Mode::Findings(_)));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn style_with_no_findings_summarizes() {
+    let (mut app, dir) = two_chapter_app("style-clean");
+    app.apply_style(Ok(ai::style::Style { findings: vec![] }));
+    assert!(app.ai_panel.is_some());
+    assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }

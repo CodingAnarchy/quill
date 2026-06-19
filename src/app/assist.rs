@@ -9,6 +9,7 @@ use super::*;
 
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
+use crate::ai::style::{self, Style};
 use crate::mode::{AiAction, Palette, PaletteItem};
 
 impl App {
@@ -22,6 +23,7 @@ impl App {
             PaletteItem { label: "Setting & worldbuilding", desc: "Setting bible + rule-violation findings", action: AiAction::Setting },
             PaletteItem { label: "Scaffold / outline", desc: "Beat outline + structural gaps", action: AiAction::Scaffold },
             PaletteItem { label: "Name & term consistency", desc: "Spelling variants (cheap pass)", action: AiAction::Naming },
+            PaletteItem { label: "Prose & style", desc: "POV / tense / voice findings (analysis only)", action: AiAction::Style },
         ];
         self.mode = Mode::Palette(Box::new(Palette { items, selected: 0 }));
     }
@@ -47,6 +49,7 @@ impl App {
                     Some(AiAction::Setting) => self.analyze_setting(),
                     Some(AiAction::Scaffold) => self.analyze_scaffold(),
                     Some(AiAction::Naming) => self.analyze_naming(),
+                    Some(AiAction::Style) => self.analyze_style(),
                     None => {}
                 }
             }
@@ -135,6 +138,15 @@ impl App {
         });
     }
 
+    /// Start a prose & style pass (POV/tense/voice — semantic, analysis only);
+    /// findings are applied by [`App::poll_ai`].
+    pub(crate) fn analyze_style(&mut self) {
+        self.spawn_ai("⟳ Reviewing prose & style…", |backend, manuscript, model| {
+            let req = style::build_request(manuscript, &model);
+            Outcome::Style(backend.complete(&req).and_then(|r| style::parse(&r.text)))
+        });
+    }
+
     /// The known entity list for naming checks: the setting gazetteer plus the
     /// character names from the story bible. Empty when no bible has been built.
     pub(crate) fn known_entities(&self) -> Vec<String> {
@@ -195,6 +207,7 @@ impl App {
                     Outcome::Setting(r) => self.apply_setting(r),
                     Outcome::Scaffold(r) => self.apply_scaffold(r),
                     Outcome::Naming(r) => self.apply_naming(r),
+                    Outcome::Style(r) => self.apply_style(r),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -385,7 +398,6 @@ impl App {
     /// Apply a naming pass: surface the variant clusters as findings. Pure
     /// analysis — nothing is written (not even a bible file).
     pub(crate) fn apply_naming(&mut self, result: Result<Naming, ai::AiError>) {
-        self.ai_panel = None;
         let naming = match result {
             Ok(n) => n,
             Err(e) => {
@@ -393,7 +405,7 @@ impl App {
                 return;
             }
         };
-        self.pending_findings = naming
+        let findings = naming
             .findings
             .iter()
             .map(|f| Finding {
@@ -405,6 +417,35 @@ impl App {
                 chapters: f.chapters.clone(),
             })
             .collect();
+        self.show_findings(findings);
+    }
+
+    /// Apply a prose/style pass: surface the observations as findings. Pure
+    /// analysis — nothing is written.
+    pub(crate) fn apply_style(&mut self, result: Result<Style, ai::AiError>) {
+        let style = match result {
+            Ok(s) => s,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let findings = style
+            .findings
+            .iter()
+            .map(|f| Finding {
+                summary: format!("{}: {}", f.kind, f.detail),
+                chapters: f.chapters.clone(),
+            })
+            .collect();
+        self.show_findings(findings);
+    }
+
+    /// Open a findings-only result (analysis passes that write no bible file):
+    /// clear any prior overlay, stash the findings, and open the overlay.
+    fn show_findings(&mut self, findings: Vec<Finding>) {
+        self.ai_panel = None;
+        self.pending_findings = findings;
         self.open_findings();
     }
 

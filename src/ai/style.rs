@@ -1,0 +1,107 @@
+//! Prose & style analysis: the *semantic* checks that need understanding rather
+//! than counting — POV consistency, tense consistency, per-POV voice drift, and
+//! context-aware repeated phrasing. Pure analysis surfaced as findings; per
+//! Quill's assistant-not-co-writer rule it never rewrites or suggests prose, and
+//! it leaves *frequency* metrics (crutch words, etc.) to the local-analysis
+//! style report (#70). See `docs/ai-features.md`.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use super::{AiError, Request};
+
+/// The result of a prose/style pass: the style observations.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Style {
+    #[serde(default)]
+    pub findings: Vec<StyleFinding>,
+}
+
+/// One style observation.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct StyleFinding {
+    /// A short category: "POV", "tense", "voice", or "repetition".
+    pub kind: String,
+    pub detail: String,
+    /// Chapters involved (titles).
+    #[serde(default)]
+    pub chapters: Vec<String>,
+}
+
+const SYSTEM: &str = "You are a line editor doing prose-style ANALYSIS — \
+observations only, never rewrites or suggestions. Read the manuscript and flag: \
+POV consistency (head-hopping, or a POV character knowing something they could \
+not); tense consistency within a scene; per-POV voice drift (a character's \
+narration or dialogue voice changing unintentionally between scenes); and \
+context-aware repeated phrasing (the same distinctive phrase or image reused so \
+it stands out). Report each as a finding with a short kind (POV / tense / voice / \
+repetition), the detail, and the chapters involved. Do NOT tally word \
+frequencies — that is a separate report. Do NOT rewrite or suggest prose; surface \
+the issue for the author to address.";
+
+/// The JSON Schema for a prose/style reply.
+pub fn schema() -> Value {
+    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    json!({
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "type": "string" },
+                        "detail": { "type": "string" },
+                        "chapters": strings
+                    },
+                    "required": ["kind", "detail", "chapters"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["findings"],
+        "additionalProperties": false
+    })
+}
+
+/// Build the prose/style request: the manuscript as cached context, schema attached.
+pub fn build_request(manuscript: String, model: &str) -> Request {
+    Request {
+        system: Some(SYSTEM.to_string()),
+        cached_context: manuscript,
+        user: "Report the prose/style findings as specified.".to_string(),
+        model: model.to_string(),
+        max_tokens: 8192,
+        json_schema: Some(schema()),
+    }
+}
+
+/// Parse a structured prose/style reply.
+pub fn parse(text: &str) -> Result<Style, AiError> {
+    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad style JSON: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_reads_findings() {
+        let json = r#"{"findings":[{"kind":"POV","detail":"head-hop","chapters":["Two"]}]}"#;
+        let s = parse(json).unwrap();
+        assert_eq!(s.findings.len(), 1);
+        assert_eq!(s.findings[0].kind, "POV");
+    }
+
+    #[test]
+    fn parse_rejects_bad_json() {
+        assert!(matches!(parse("nope"), Err(AiError::Api(_))));
+    }
+
+    #[test]
+    fn request_carries_schema_and_model() {
+        let req = build_request("m".into(), "claude-opus-4-8");
+        assert_eq!(req.model, "claude-opus-4-8");
+        assert!(req.json_schema.is_some());
+    }
+}
