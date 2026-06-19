@@ -146,6 +146,11 @@ impl Buffer {
         self.rope.len_lines().max(1)
     }
 
+    /// The whole buffer as a string (used to commit a scratch metadata edit).
+    pub fn text(&self) -> String {
+        self.rope.to_string()
+    }
+
     /// The text of a single line, without its trailing newline.
     pub fn line(&self, idx: usize) -> String {
         if idx >= self.rope.len_lines() {

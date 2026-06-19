@@ -289,9 +289,22 @@ impl Pane for Editor<'_> {
         let paragraph = Paragraph::new(lines).block(Block::default());
         frame.render_widget(paragraph, column);
 
-        // Place the terminal cursor (only in Insert mode). The cursor's own span
-        // is revealed, so the cursor never lands on a concealed character.
-        if let (true, Some(row)) = (matches!(app.mode, Mode::Insert), cursor_row) {
+        // Editing a metadata field: a banner on the otherwise-blank top row.
+        if let Mode::EditMeta(meta) = &app.mode {
+            let banner = format!(" editing {} — Ctrl-S save · Esc cancel", meta.label);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    banner,
+                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                ))),
+                Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+            );
+        }
+
+        // Place the terminal cursor (only while editing text). The cursor's own
+        // span is revealed, so it never lands on a concealed character.
+        let editing = matches!(app.mode, Mode::Insert | Mode::EditMeta(_));
+        if let (true, Some(row)) = (editing, cursor_row) {
             let screen_y = column.y + row;
             let col_width = visible_width_before(
                 &buffer.line(cursor_line),
@@ -309,6 +322,11 @@ impl Pane for Editor<'_> {
 /// line each precedes: per chapter, a divider (continuous view, not the first
 /// chapter), the book epigraph (above chapter 0), then the chapter's epigraph.
 fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
+    // When editing an epigraph in the editor, the buffer *is* the epigraph —
+    // don't inject chapter/book headers above it.
+    if matches!(app.mode, Mode::EditMeta(_)) {
+        return Vec::new();
+    }
     let book_epigraph = app.project.manifest.epigraph();
     let headers = match &app.manuscript {
         Some(m) => m.segment_headers(),
@@ -347,13 +365,13 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
 /// buffer or any file.
 fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
     let indent = "    ";
-    let mut lines = vec![
-        Line::raw(""),
-        Line::from(Span::styled(
-            format!("{indent}{}", epigraph.text),
+    let mut lines = vec![Line::raw("")];
+    for line in epigraph.text.lines() {
+        lines.push(Line::from(Span::styled(
+            format!("{indent}{line}"),
             Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-        )),
-    ];
+        )));
+    }
     if let Some(attribution) = &epigraph.attribution {
         lines.push(Line::from(Span::styled(
             format!("{indent}— {attribution}"),
@@ -759,6 +777,35 @@ mod tests {
         // The epigraph is display-only: it never entered the editable buffer.
         assert!(!app.buffer.line(0).contains("In the beginning"));
         assert!(!app.buffer.line(0).contains("A chapter quote"));
+    }
+
+    #[test]
+    fn a_multiline_epigraph_renders_one_line_each() {
+        let mut app = app_with("# Chapter\n\nBody.\n");
+        let fm = app.buffer.front_matter_mut();
+        fm.set_epigraph_text("Roses are red\nViolets are blue");
+        fm.set_epigraph_by("Anon");
+
+        let screen = render(&app, 80, 20);
+        // Each verse line renders on its own row, attribution beneath.
+        let red = screen.lines().position(|l| l.contains("Roses are red"));
+        let blue = screen.lines().position(|l| l.contains("Violets are blue"));
+        let by = screen.lines().position(|l| l.contains("— Anon"));
+        assert!(red.is_some() && blue.is_some() && by.is_some(), "screen:\n{screen}");
+        assert!(red < blue && blue < by, "lines out of order:\n{screen}");
+    }
+
+    #[test]
+    fn editing_an_epigraph_shows_a_banner() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = app_with("Body.\n");
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL)); // → Nav
+        app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)); // → epigraph editor
+        assert!(matches!(app.mode, Mode::EditMeta(_)));
+
+        let screen = render(&app, 80, 10);
+        assert!(screen.contains("editing chapter epigraph"), "screen:\n{screen}");
+        assert!(screen.contains("Ctrl-S save"), "screen:\n{screen}");
     }
 
     #[test]

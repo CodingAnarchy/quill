@@ -31,9 +31,11 @@ keystrokes that stay out of the way.
   (portable, and your other keys are preserved), with status shown in the pane.
 - **Book & series metadata** — title, subtitle, author, and series, stored in
   the `book.toml` manifest and shown as a header above the chapter list.
-- **Epigraphs** — a quotation and attribution on a chapter (front matter) or the
-  book (manifest), rendered set-apart above the body (the book's at the start of
-  the manuscript).
+- **Epigraphs** — a quotation (single- or multi-line / verse) and attribution on
+  a chapter (front matter) or the book (manifest), rendered set-apart above the
+  body (the book's at the start of the manuscript). The quotation is edited in
+  the main editor (Ctrl-S to save, Esc to cancel) and stored readably — a YAML
+  `|` block in the chapter file, a TOML `"""` block in `book.toml`.
 
 ## Build & run
 

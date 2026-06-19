@@ -22,7 +22,7 @@ pub fn split(text: &str) -> (Option<&str>, &str) {
     };
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
-        if line.strip_suffix('\n').unwrap_or(line) == "---" {
+        if bare(line) == "---" {
             let inner = &rest[..offset];
             let body = &rest[offset + line.len()..];
             return (Some(inner), body);
@@ -45,9 +45,10 @@ pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
 }
 
 /// An epigraph: a quotation with an optional attribution, shown above a book or
-/// chapter body. Stored as two scalar keys (`epigraph` / `epigraph_by`) in front
-/// matter, or two manifest fields for the book — a single line each, which is
-/// what the prompt UI can enter (multi-line/verse epigraphs are future work).
+/// chapter body. Stored as two keys (`epigraph` / `epigraph_by`) in front
+/// matter, or two manifest fields for the book. The quotation may be multi-line
+/// (verse) — a chapter stores it as a YAML `|` literal block, the book as a TOML
+/// `"""` block. The attribution is a single line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Epigraph {
     pub text: String,
@@ -125,13 +126,16 @@ impl Status {
 }
 
 /// A chapter's front matter, held as the verbatim block between the `---`
-/// fences. Reads and writes are **surgical**: a write replaces (or appends)
-/// only the one `key:` line, so unknown keys and an author's hand formatting are
-/// left exactly as they were — preserving the round-trip guarantee from the
+/// fences. Reads and writes are **surgical**: a write replaces (or appends) only
+/// the one key's entry, so unknown keys and an author's hand formatting are left
+/// exactly as they were — preserving the round-trip guarantee from the
 /// foundation while still giving typed access to the fields Quill manages.
 ///
-/// This handles only top-level scalar keys (the metadata Quill writes); nested
-/// or multi-line YAML values are read/preserved verbatim but not interpreted.
+/// Scope: top-level keys whose value is a scalar or a single-level literal
+/// (`|`) block (the metadata Quill writes — e.g. a multi-line epigraph). Nested
+/// mappings and sequences are preserved verbatim but not interpreted; if a
+/// future field needs those, this is where a real parse-edit-reserialize layer
+/// would go.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FrontMatter {
     raw: String,
@@ -155,45 +159,103 @@ impl FrontMatter {
         self.raw.trim().is_empty()
     }
 
-    /// The scalar value of a top-level `key:`, unquoted; `None` if absent.
+    /// The value of a top-level `key:`. A plain scalar is unquoted; a `|`/`>`
+    /// literal block is de-indented and its lines joined with `\n`. `None` if
+    /// absent.
     fn get(&self, key: &str) -> Option<String> {
         let prefix = format!("{key}:");
-        self.raw
-            .lines()
-            .find_map(|line| line.strip_prefix(&prefix).map(|v| unquote(v.trim())))
+        let mut lines = self.raw.lines();
+        let value = lines.find_map(|line| line.strip_prefix(&prefix))?;
+        let value = value.trim();
+        if value.starts_with(['|', '>']) {
+            // Literal block: gather the indented / blank continuation lines.
+            let mut out: Vec<String> = Vec::new();
+            for line in lines {
+                if line.is_empty() {
+                    out.push(String::new());
+                } else if line.starts_with(' ') {
+                    out.push(line.trim_start().to_string());
+                } else {
+                    break; // a column-0 line ends the block
+                }
+            }
+            while out.last().is_some_and(|l| l.is_empty()) {
+                out.pop(); // a `|` block clips trailing blank lines
+            }
+            Some(out.join("\n"))
+        } else {
+            Some(unquote(value))
+        }
     }
 
-    /// Replace the `key:` line in place, or append it if the key is absent.
+    /// Write `key`: a single line for a scalar, a `|` literal block for a
+    /// multi-line value. Replaces the key's existing entry in place (or appends).
     fn set(&mut self, key: &str, value: &str) {
-        let new_line = format!("{key}: {}\n", quote_scalar(value));
+        let entry = if value.contains('\n') {
+            let mut block = format!("{key}: |\n");
+            for line in value.split('\n') {
+                if line.is_empty() {
+                    block.push('\n');
+                } else {
+                    block.push_str(BLOCK_INDENT);
+                    block.push_str(line);
+                    block.push('\n');
+                }
+            }
+            block
+        } else {
+            format!("{key}: {}\n", quote_scalar(value))
+        };
+        self.replace_key(key, Some(&entry));
+    }
+
+    /// Drop `key`'s entry (the `key:` line and, for a block, its continuation),
+    /// leaving every other key untouched.
+    fn remove(&mut self, key: &str) {
+        self.replace_key(key, None);
+    }
+
+    /// Splice `key`'s full entry — a scalar line, or a `|` block's `key:` line
+    /// plus its indented/blank continuation — replacing it with `replacement`
+    /// (or removing it when `None`); appends when the key is absent and a
+    /// replacement is given.
+    fn replace_key(&mut self, key: &str, replacement: Option<&str>) {
         let prefix = format!("{key}:");
-        let mut out = String::with_capacity(self.raw.len() + new_line.len());
-        let mut replaced = false;
-        for line in self.raw.split_inclusive('\n') {
-            if !replaced && is_key_line(line, &prefix) {
-                out.push_str(&new_line);
-                replaced = true;
-            } else {
-                out.push_str(line);
+        let segments: Vec<&str> = self.raw.split_inclusive('\n').collect();
+        let mut out = String::with_capacity(self.raw.len());
+        let mut i = 0;
+        let mut done = false;
+        while i < segments.len() {
+            let seg = segments[i];
+            if !done {
+                if let Some(value) = bare(seg).strip_prefix(&prefix) {
+                    // Found it: skip this entry's whole span.
+                    let mut end = i + 1;
+                    if value.trim().starts_with(['|', '>']) {
+                        while end < segments.len() && is_block_continuation(segments[end]) {
+                            end += 1;
+                        }
+                    }
+                    if let Some(rep) = replacement {
+                        out.push_str(rep);
+                    }
+                    i = end;
+                    done = true;
+                    continue;
+                }
             }
+            out.push_str(seg);
+            i += 1;
         }
-        if !replaced {
-            if !out.is_empty() && !out.ends_with('\n') {
-                out.push('\n');
+        if !done {
+            if let Some(rep) = replacement {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(rep);
             }
-            out.push_str(&new_line);
         }
         self.raw = out;
-    }
-
-    /// Drop the `key:` line if present, leaving every other line untouched.
-    fn remove(&mut self, key: &str) {
-        let prefix = format!("{key}:");
-        self.raw = self
-            .raw
-            .split_inclusive('\n')
-            .filter(|line| !is_key_line(line, &prefix))
-            .collect();
     }
 
     /// Set a free-text field, removing the key when the value is blank so the
@@ -245,13 +307,19 @@ impl FrontMatter {
     }
 }
 
-/// Whether `line` (with or without its trailing newline) is the top-level
-/// entry for `prefix` (which is `"{key}:"`).
-fn is_key_line(line: &str, prefix: &str) -> bool {
-    line.strip_suffix('\n')
-        .unwrap_or(line)
-        .strip_prefix(prefix)
-        .is_some()
+/// Indent for the lines of a `|` literal block scalar.
+const BLOCK_INDENT: &str = "  ";
+
+/// A line without its trailing newline.
+fn bare(line: &str) -> &str {
+    line.strip_suffix('\n').unwrap_or(line)
+}
+
+/// Whether `segment` continues a block scalar: an indented line, or a blank
+/// line (a stanza break within verse). A column-0 non-empty line ends the block.
+fn is_block_continuation(segment: &str) -> bool {
+    let line = bare(segment);
+    line.is_empty() || line.starts_with(' ')
 }
 
 /// Strip surrounding YAML quotes from a scalar value, undoing the escaping
@@ -397,6 +465,55 @@ mod tests {
         assert_eq!(Status::Draft.next(), Status::Revised);
         assert_eq!(Status::Revised.next(), Status::Final);
         assert_eq!(Status::Final.next(), Status::Draft);
+    }
+
+    #[test]
+    fn multiline_value_round_trips_as_a_literal_block() {
+        let mut fm = FrontMatter::from_raw("status: draft\n");
+        fm.set_epigraph_text("Line one\nLine two\nLine three");
+        // Written as a `|` literal block, indented, other keys intact.
+        assert_eq!(
+            fm.as_str(),
+            "status: draft\nepigraph: |\n  Line one\n  Line two\n  Line three\n"
+        );
+        assert_eq!(
+            fm.epigraph().unwrap().text,
+            "Line one\nLine two\nLine three"
+        );
+        assert_eq!(fm.status(), Some(Status::Draft));
+    }
+
+    #[test]
+    fn a_block_preserves_interior_blank_lines() {
+        let mut fm = FrontMatter::default();
+        fm.set_epigraph_text("Roses are red\n\nViolets are blue");
+        fm.set_epigraph_by("Anon"); // a key after the block stays separate
+        let ep = fm.epigraph().unwrap();
+        assert_eq!(ep.text, "Roses are red\n\nViolets are blue");
+        assert_eq!(ep.attribution.as_deref(), Some("Anon"));
+    }
+
+    #[test]
+    fn replacing_a_block_with_a_scalar_drops_the_old_continuation() {
+        let mut fm = FrontMatter::default();
+        fm.set_epigraph_text("Line one\nLine two");
+        fm.set_status(Status::Final); // a key written after the block
+        // Shrink the block back to a single line.
+        fm.set_epigraph_text("Just one line");
+        assert_eq!(fm.epigraph().unwrap().text, "Just one line");
+        assert!(fm.as_str().contains("epigraph: Just one line\n"));
+        assert!(!fm.as_str().contains("Line two"));
+        assert_eq!(fm.status(), Some(Status::Final));
+    }
+
+    #[test]
+    fn removing_a_block_drops_its_whole_span() {
+        let mut fm = FrontMatter::from_raw("status: draft\n");
+        fm.set_epigraph_text("A\nB\nC");
+        fm.set_epigraph_text(""); // clear
+        assert!(fm.epigraph().is_none());
+        assert!(!fm.as_str().contains("epigraph"));
+        assert_eq!(fm.status(), Some(Status::Draft)); // sibling untouched
     }
 
     #[test]
