@@ -37,6 +37,14 @@ overwritten — a diff is shown and the author can overwrite, keep theirs, or ed
 the proposed version before saving. (Incremental dirty-chapter re-analysis and
 the Batch API are a follow-up.)
 
+**Ctrl-T** runs a timeline & continuity pass (#75): it extracts story events,
+writes them to `bible/timeline.md` in both narrative and story (chronological)
+order — using the same generated/notes/digest format and conflict review as the
+character profiles — and surfaces continuity contradictions (a character in two
+places, an object used after it's lost, …) as a triageable findings overlay where
+each can be jumped to (open its chapter) or dismissed. Nothing is written to the
+prose. The shared bible-file machinery lives in `src/ai/bible.rs`.
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API

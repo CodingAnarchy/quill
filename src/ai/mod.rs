@@ -8,11 +8,14 @@
 //! `docs/ai-features.md`. AI is opt-in and off by default: the manuscript only
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
+pub mod bible;
 pub mod character;
+pub mod continuity;
 mod claude;
 
 pub use character::Character;
 pub use claude::ClaudeBackend;
+pub use continuity::Continuity;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -54,6 +57,8 @@ pub enum Outcome {
     Answer(Result<Response, AiError>),
     /// Character extraction (#74).
     Characters(Result<Vec<Character>, AiError>),
+    /// Timeline & continuity check (#75).
+    Continuity(Result<Continuity, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).
