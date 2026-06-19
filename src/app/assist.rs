@@ -7,6 +7,7 @@
 
 use super::*;
 
+use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 
 impl App {
@@ -80,6 +81,55 @@ impl App {
         });
     }
 
+    /// Start a naming-consistency pass; variant findings are applied by
+    /// [`App::poll_ai`]. Always runs on the Haiku-tier model (a cheap, high-volume
+    /// scan), checked against the known entity list.
+    pub(crate) fn analyze_naming(&mut self) {
+        let entities = self.known_entities();
+        self.spawn_ai("⟳ Checking names…", move |backend, manuscript, _model| {
+            let req = naming::build_request(manuscript, &entities);
+            Outcome::Naming(backend.complete(&req).and_then(|r| naming::parse(&r.text)))
+        });
+    }
+
+    /// The known entity list for naming checks: the setting gazetteer plus the
+    /// character names from the story bible. Empty when no bible has been built.
+    pub(crate) fn known_entities(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let root = &self.project.root;
+
+        // Setting gazetteer: the `- term` lines under the "## Gazetteer" heading.
+        if let Ok(setting) = std::fs::read_to_string(root.join("bible").join("setting.md")) {
+            let mut in_gazetteer = false;
+            for line in setting.lines() {
+                if let Some(h) = line.strip_prefix("## ") {
+                    in_gazetteer = h.trim() == "Gazetteer";
+                } else if in_gazetteer {
+                    if let Some(term) = line.strip_prefix("- ") {
+                        out.push(term.trim().to_string());
+                    }
+                }
+            }
+        }
+
+        // Character names: the `name:` front-matter field of each profile.
+        if let Ok(dir) = std::fs::read_dir(root.join("bible").join("characters")) {
+            for entry in dir.flatten() {
+                let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
+                if let Some(name) = text
+                    .lines()
+                    .find_map(|l| l.strip_prefix("name:").map(|n| n.trim().to_string()))
+                {
+                    out.push(name);
+                }
+            }
+        }
+
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Run an AI request on a worker thread: assemble the manuscript here, hand it
     /// (with a backend + model) to `run` off-thread, and deliver the `Outcome` via
     /// `ai_rx` for [`App::poll_ai`]. A no-op with a status message when AI isn't
@@ -128,6 +178,7 @@ impl App {
                     Outcome::Continuity(r) => self.apply_continuity(r),
                     Outcome::Setting(r) => self.apply_setting(r),
                     Outcome::Scaffold(r) => self.apply_scaffold(r),
+                    Outcome::Naming(r) => self.apply_naming(r),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -313,6 +364,32 @@ impl App {
         self.apply_bible_with_findings(path, "outline", |notes| {
             scaffold::render_outline(&scaffold, notes, &today)
         }, findings);
+    }
+
+    /// Apply a naming pass: surface the variant clusters as findings. Pure
+    /// analysis — nothing is written (not even a bible file).
+    pub(crate) fn apply_naming(&mut self, result: Result<Naming, ai::AiError>) {
+        self.ai_panel = None;
+        let naming = match result {
+            Ok(n) => n,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        self.pending_findings = naming
+            .findings
+            .iter()
+            .map(|f| Finding {
+                summary: if f.variants.is_empty() {
+                    f.name.clone()
+                } else {
+                    format!("{} — also: {}", f.name, f.variants.join(", "))
+                },
+                chapters: f.chapters.clone(),
+            })
+            .collect();
+        self.open_findings();
     }
 
     /// Write a single bible file and surface a set of findings — the shared shape

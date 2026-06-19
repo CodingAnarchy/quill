@@ -923,6 +923,11 @@ impl App {
                 Ok(_) => self.analyze_scaffold(),
                 Err(e) => self.message = Some(e.to_string()),
             },
+            // Naming & term consistency (AI, opt-in).
+            (true, KeyCode::Char('e')) => match self.ai.check_ready() {
+                Ok(_) => self.analyze_naming(),
+                Err(e) => self.message = Some(e.to_string()),
+            },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),

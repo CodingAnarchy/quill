@@ -62,6 +62,12 @@ to `bible/setting.md`, records a place/term **gazetteer** (for naming consistenc
 but ch. 14 casts without one") in the same findings overlay. Same generated/notes/
 digest format and conflict review as the other bible files.
 
+**Ctrl-E** runs a naming & term consistency pass (#78): a cheap **Haiku** scan
+(regardless of the configured model) for spelling variants of the same name or
+invented term ("Mara"/"Marah", "lightsteel"/"light-steel"), checked against the
+known entity list (the setting gazetteer + character names). Variant clusters
+surface in the findings overlay; nothing is written.
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API

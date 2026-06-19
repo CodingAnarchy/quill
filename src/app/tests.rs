@@ -1,4 +1,5 @@
 use super::*;
+use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::project::Project;
 use std::fs;
@@ -1025,5 +1026,49 @@ fn marking_a_finding_in_the_active_chapter_updates_the_buffer() {
     }));
     app.on_key(key(KeyCode::Char('i')));
     assert!(app.buffer.text().contains("xxx"), "marker shows in the active buffer");
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- AI: naming & term consistency -----------------------------------------
+
+#[test]
+fn known_entities_reads_gazetteer_and_character_names() {
+    let (app, dir) = two_chapter_app("entities");
+    fs::create_dir_all(dir.join("bible/characters")).unwrap();
+    fs::write(
+        dir.join("bible/setting.md"),
+        "---\n---\n\n## Gazetteer\n- Aldermoor\n- lightsteel\n\n## Other\n- nope\n",
+    )
+    .unwrap();
+    fs::write(dir.join("bible/characters/mara.md"), "---\nname: Mara Vance\n---\n").unwrap();
+
+    let e = app.known_entities();
+    assert!(e.contains(&"Aldermoor".to_string()));
+    assert!(e.contains(&"lightsteel".to_string()));
+    assert!(e.contains(&"Mara Vance".to_string()));
+    assert!(!e.contains(&"nope".to_string()), "only the Gazetteer section is read");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn naming_findings_open_the_overlay() {
+    let (mut app, dir) = two_chapter_app("naming");
+    app.apply_naming(Ok(Naming {
+        findings: vec![naming::NameFinding {
+            name: "Mara".into(),
+            variants: vec!["Marah".into()],
+            chapters: vec!["Two".into()],
+        }],
+    }));
+    assert!(matches!(app.mode, Mode::Findings(_)));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn naming_with_no_variants_summarizes() {
+    let (mut app, dir) = two_chapter_app("naming-clean");
+    app.apply_naming(Ok(Naming { findings: vec![] }));
+    assert!(app.ai_panel.is_some());
+    assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }
