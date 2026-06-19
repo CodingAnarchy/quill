@@ -1080,7 +1080,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 7, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 8, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -1138,5 +1138,36 @@ fn style_with_no_findings_summarizes() {
     app.apply_style(Ok(ai::style::Style { findings: vec![] }));
     assert!(app.ai_panel.is_some());
     assert!(!matches!(app.mode, Mode::Findings(_)));
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- AI: submission material ------------------------------------------------
+
+#[test]
+fn submission_writes_three_artifacts_and_summarizes() {
+    let (mut app, dir) = two_chapter_app("submission");
+    app.apply_submission(Ok(ai::submission::Submission {
+        synopsis: "Mara finds a locket and confronts her brother.".into(),
+        blurb: "A locket. A secret. A reckoning.".into(),
+        query: "Dear Agent, RED STATE EARTH is …".into(),
+    }));
+    assert!(fs::read_to_string(dir.join("submission/synopsis.md")).unwrap().contains("confronts her brother"));
+    assert!(fs::read_to_string(dir.join("submission/blurb.md")).unwrap().contains("reckoning"));
+    assert!(fs::read_to_string(dir.join("submission/query.md")).unwrap().contains("Dear Agent"));
+    assert!(app.ai_panel.is_some(), "summary overlay");
+    assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts on a fresh write");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn submission_never_touches_the_manuscript() {
+    let (mut app, dir) = two_chapter_app("submission-safe");
+    let before = fs::read_to_string(dir.join("one.md")).unwrap();
+    app.apply_submission(Ok(ai::submission::Submission {
+        synopsis: "S".into(),
+        blurb: "B".into(),
+        query: "Q".into(),
+    }));
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
     fs::remove_dir_all(&dir).ok();
 }
