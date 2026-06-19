@@ -137,7 +137,7 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
 fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings) {
     let mut lines = vec![
         Line::from(Span::styled(
-            "Findings — ↑↓ move · enter jump · d dismiss · esc close",
+            "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close",
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),

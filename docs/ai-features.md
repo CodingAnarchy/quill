@@ -6,6 +6,16 @@ consistency-checked story bible. AI is **opt-in and off by default**: a
 novelist's unpublished work only leaves the machine when the author enables it
 and provides an API key.
 
+## Principle: assistant, not co-writer
+
+Quill's AI **never generates or suggests manuscript prose** — no drafting,
+rewriting, tightening, expanding, or larger-edit suggestions. It is limited to
+**structure** (outlines, beat sheets, scene notes), **tracking** (the story
+bible), **markers** (`xxx` TODOs), and **analysis** (flags and findings the
+author fixes themselves). The prose is the author's. Off-manuscript artifacts
+like a synopsis or query letter are the only prose the AI produces, and never
+inside the manuscript.
+
 ## Configuration
 
 AI is configured in a per-user file **outside the project** —
@@ -134,17 +144,19 @@ can edit any bible entry; edits are treated as ground truth on the next pass.
 - **Naming & term consistency** — detect spelling variants of character/place
   names and inconsistent invented terms (cheap Haiku pass over the entity list).
 - **Prose & style** — POV/tense consistency per scene, crutch-word and
-  repeated-phrase detection, per-POV voice drift, pacing/quiet-vs-action
-  heatmap.
+  repeated-phrase detection, per-POV voice drift, pacing/quiet-vs-action heatmap.
+  *Analysis only* — flags and observations the author acts on, never a rewrite.
 - **"Ask the manuscript"** — natural-language Q&A grounded in the cached
   manuscript ("where do I first mention the locket?", "summarize Mara's
   relationship with her brother").
-- **Selection assistant** — rewrite/tighten/expand a highlighted passage, or
-  brainstorm in a side panel, with edits staged as diffs.
 - **Synopsis & query material** — generate a synopsis, back-cover blurb, or
-  query-letter draft from the finished manuscript.
+  query-letter draft. *Off-manuscript submission material only* — never prose
+  written into the book.
 - **Revision triage** — turn continuity/character/setting findings into a
   prioritized, dismissible to-do list (feeds the `xxx` and report tooling).
+
+(The rewrite/tighten/expand "selection assistant" was dropped: editing the
+author's prose is out of scope per the assistant-not-co-writer principle above.)
 
 ## Open questions
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ai::scaffold::{self, Scaffold};
 use crate::project::Project;
 use std::fs;
 use std::path::PathBuf;
@@ -981,5 +982,48 @@ fn setting_with_no_violations_summarizes() {
     assert!(dir.join("bible/setting.md").exists());
     assert!(app.ai_panel.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::Findings(_)));
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- AI: scaffolding (outline + gaps + xxx insertion) ----------------------
+
+#[test]
+fn scaffold_writes_outline_and_opens_gap_findings() {
+    let (mut app, dir) = two_chapter_app("scaffold");
+    let s = Scaffold {
+        outline: vec![scaffold::OutlineItem { chapter: "One".into(), beats: vec!["a beat".into()] }],
+        gaps: vec![scaffold::Gap { detail: "no clear goal".into(), chapter: "Two".into() }],
+    };
+    app.apply_scaffold(Ok(s));
+    let file = fs::read_to_string(dir.join("bible/outline.md")).expect("outline written");
+    assert!(file.contains("## One") && file.contains("a beat"));
+    assert!(file.contains("## Gaps"));
+    assert!(matches!(app.mode, Mode::Findings(_)), "gap findings overlay opens");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn marking_a_finding_inserts_an_xxx_todo_in_a_nonactive_chapter() {
+    let (mut app, dir) = two_chapter_app("mark-todo"); // active is "One"
+    app.apply_scaffold(Ok(Scaffold {
+        outline: vec![],
+        gaps: vec![scaffold::Gap { detail: "needs a hook".into(), chapter: "Two".into() }],
+    }));
+    let before = app.count_todo();
+    app.on_key(key(KeyCode::Char('i'))); // mark xxx in "Two" (non-active → file)
+    assert!(app.count_todo() > before, "the report's xxx count should rise");
+    assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("xxx"), "marker on disk");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn marking_a_finding_in_the_active_chapter_updates_the_buffer() {
+    let (mut app, dir) = two_chapter_app("mark-active"); // active is "One"
+    app.apply_scaffold(Ok(Scaffold {
+        outline: vec![],
+        gaps: vec![scaffold::Gap { detail: "weak open".into(), chapter: "One".into() }],
+    }));
+    app.on_key(key(KeyCode::Char('i')));
+    assert!(app.buffer.text().contains("xxx"), "marker shows in the active buffer");
     fs::remove_dir_all(&dir).ok();
 }

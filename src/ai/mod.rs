@@ -11,12 +11,14 @@
 pub mod bible;
 pub mod character;
 pub mod continuity;
+pub mod scaffold;
 pub mod setting;
 mod claude;
 
 pub use character::Character;
 pub use claude::ClaudeBackend;
 pub use continuity::Continuity;
+pub use scaffold::Scaffold;
 pub use setting::Setting;
 
 use std::fmt;
@@ -63,6 +65,8 @@ pub enum Outcome {
     Continuity(Result<Continuity, AiError>),
     /// Setting & worldbuilding extraction + rule checks (#77).
     Setting(Result<Setting, AiError>),
+    /// Scaffolding: beat outline + structural gaps (#76).
+    Scaffold(Result<Scaffold, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).
