@@ -287,23 +287,25 @@ impl App {
             .collect()
     }
 
-    /// Count the configured TODO marker across the manuscript (case-insensitive):
-    /// the active chapter live from its buffer, the rest from disk.
+    /// The body text of chapter `index`: live from the active buffer, otherwise
+    /// from disk. The shared basis for whole-manuscript reads (TODO counting,
+    /// the AI request).
+    fn chapter_text(&self, index: usize) -> String {
+        if index == self.project.active_index() {
+            self.buffer.text()
+        } else {
+            self.project.chapter_body(index)
+        }
+    }
+
+    /// Count the configured TODO marker across the manuscript (case-insensitive).
     fn count_todo(&self) -> usize {
         let needle = self.project.manifest.todo_marker().to_lowercase();
         if needle.is_empty() {
             return 0;
         }
-        let active = self.project.active_index();
         (0..self.chapter_count())
-            .map(|i| {
-                let text = if i == active {
-                    self.buffer.text()
-                } else {
-                    self.project.chapter_body(i)
-                };
-                text.to_lowercase().matches(&needle).count()
-            })
+            .map(|i| self.chapter_text(i).to_lowercase().matches(&needle).count())
             .sum()
     }
 
@@ -313,7 +315,6 @@ impl App {
     /// its title heading, the active chapter live from its buffer and the rest
     /// from disk (the `count_todo` pattern).
     fn manuscript_text(&self) -> String {
-        let active = self.project.active_index();
         let mut out = String::new();
         for i in 0..self.chapter_count() {
             if let Some(title) = self.project.chapter_title(i) {
@@ -321,12 +322,7 @@ impl App {
                 out.push_str(title);
                 out.push_str("\n\n");
             }
-            let body = if i == active {
-                self.buffer.text()
-            } else {
-                self.project.chapter_body(i)
-            };
-            out.push_str(body.trim_end());
+            out.push_str(self.chapter_text(i).trim_end());
             out.push_str("\n\n");
         }
         out
@@ -346,12 +342,14 @@ impl App {
             self.message = Some("Already asking Claude…".into());
             return;
         }
-        if let Err(e) = self.ai.check_ready() {
-            self.message = Some(e.to_string());
-            return;
-        }
-        // Safe: check_ready() guarantees a key.
-        let backend = ClaudeBackend::new(self.ai.resolved_key().unwrap_or_default().to_string());
+        let key = match self.ai.check_ready() {
+            Ok(key) => key.to_string(),
+            Err(e) => {
+                self.message = Some(e.to_string());
+                return;
+            }
+        };
+        let backend = ClaudeBackend::new(key);
         let req = ai::build_qa_request(self.manuscript_text(), question, &self.ai.model);
 
         let (tx, rx) = mpsc::channel();
@@ -968,7 +966,7 @@ impl App {
             // Ask the manuscript a question (AI, opt-in). When AI isn't ready,
             // explain how to enable it rather than opening the prompt.
             (true, KeyCode::Char('a')) => match self.ai.check_ready() {
-                Ok(()) => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
+                Ok(_) => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
                 Err(e) => self.message = Some(e.to_string()),
             },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not

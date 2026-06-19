@@ -132,8 +132,9 @@ impl Settings {
         self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty())
     }
 
-    /// Whether an AI request can be sent right now, or why not.
-    pub fn check_ready(&self) -> Result<(), AiError> {
+    /// The API key to send with, or why a request can't be made right now
+    /// (disabled, offline, or no key). The single readiness chokepoint.
+    pub fn check_ready(&self) -> Result<&str, AiError> {
         if !self.enabled {
             return Err(AiError::NotConfigured(
                 "AI is off — set `enabled = true` under [ai] in ~/.config/quill/config.toml".into(),
@@ -142,12 +143,11 @@ impl Settings {
         if self.offline {
             return Err(AiError::NotConfigured("AI is in offline mode — no network calls".into()));
         }
-        if self.resolved_key().is_none() {
-            return Err(AiError::NotConfigured(
+        self.resolved_key().ok_or_else(|| {
+            AiError::NotConfigured(
                 "no API key — set ANTHROPIC_API_KEY or `api_key` under [ai] in the config".into(),
-            ));
-        }
-        Ok(())
+            )
+        })
     }
 }
 
