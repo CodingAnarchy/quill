@@ -45,6 +45,13 @@ places, an object used after it's lost, …) as a triageable findings overlay wh
 each can be jumped to (open its chapter) or dismissed. Nothing is written to the
 prose. The shared bible-file machinery lives in `src/ai/bible.rs`.
 
+**Ctrl-W** runs a setting & worldbuilding pass (#77): it extracts a categorized
+setting bible (geography, magic/tech system rules, factions, cultures, history)
+to `bible/setting.md`, records a place/term **gazetteer** (for naming consistency,
+#78), and flags prose that violates an established rule ("magic requires a focus,
+but ch. 14 casts without one") in the same findings overlay. Same generated/notes/
+digest format and conflict review as the other bible files.
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API
