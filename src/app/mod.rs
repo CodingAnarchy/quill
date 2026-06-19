@@ -23,7 +23,8 @@ use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleConflict, BibleReview, Finding, Findings, MetaEdit, MetaField, Mode, Pending, PromptState,
+    BibleConflict, BibleReview, Finding, Findings, MetaEdit, MetaField, Mode, Overlay, Pending,
+    PromptState,
 };
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
@@ -48,18 +49,12 @@ pub struct App {
     pub focus_width: u16,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
-    /// When `Some`, the progress report is open: its pre-computed rows, shown
-    /// full-screen until any key dismisses it. Computed once on open so the
-    /// report (which scans files for TODO markers) isn't rebuilt per frame.
-    pub report: Option<Vec<Line<'static>>>,
-    /// When `Some`, the local analysis report (readability, …) is open: its
-    /// pre-computed rows, shown full-screen until any key dismisses it. Computed
-    /// once on open so the per-chapter scan stays off the per-frame path.
-    pub analysis: Option<Vec<Line<'static>>>,
-    /// First visible row of the open full-screen overlay (report / analysis /
-    /// AI answer) — the scroll offset, so a report taller than the terminal can
-    /// be read in full. Reset to 0 whenever an overlay opens.
-    pub overlay_scroll: u16,
+    /// The open full-screen overlay (progress report, analysis report, or AI
+    /// answer), if any — read-only, scrollable, dismissed by any other key.
+    /// Pre-rendered once on open so it isn't rebuilt per frame. A single slot:
+    /// the overlays are mutually exclusive, and a new one is a new
+    /// [`crate::mode::Overlay`] value, not a new field.
+    pub overlay: Option<Overlay>,
     /// Height of the terminal in rows, refreshed each frame by the renderer.
     /// Lets the key handler clamp overlay scrolling to the content that exists.
     pub viewport_height: u16,
@@ -81,9 +76,6 @@ pub struct App {
     /// AI configuration (opt-in, off by default), loaded from the user's home
     /// config. Drives whether the "Ask the manuscript" command is reachable.
     pub ai: ai::Settings,
-    /// When `Some`, the AI answer overlay is open (mirrors `report`): shown
-    /// full-screen until any key dismisses it.
-    pub ai_panel: Option<Vec<Line<'static>>>,
     /// Receiver for an in-flight AI request running on a worker thread; `Some`
     /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
     ai_rx: Option<Receiver<Outcome>>,
@@ -107,9 +99,7 @@ impl App {
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
-            report: None,
-            analysis: None,
-            overlay_scroll: 0,
+            overlay: None,
             viewport_height: 0,
             added: 0,
             removed: 0,
@@ -118,7 +108,6 @@ impl App {
             part_removed: Vec::new(),
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
-            ai_panel: None,
             ai_rx: None,
             pending_findings: Vec::new(),
             triage: Vec::new(),
@@ -313,46 +302,48 @@ impl App {
         )
     }
 
-    /// The lines of whichever full-screen overlay is open (report / analysis / AI
-    /// answer), if any. The single accessor the scroll + close handling shares.
-    pub fn open_overlay(&self) -> Option<&[Line<'static>]> {
-        self.report.as_deref().or(self.analysis.as_deref()).or(self.ai_panel.as_deref())
+    /// The open overlay's lines, if any (test inspection helper).
+    #[cfg(test)]
+    pub fn overlay_lines(&self) -> Option<&[Line<'static>]> {
+        self.overlay.as_ref().map(|o| o.lines.as_slice())
+    }
+
+    /// The open overlay's scroll offset (0 when none is open).
+    pub(crate) fn overlay_scroll(&self) -> u16 {
+        self.overlay.as_ref().map_or(0, |o| o.scroll)
     }
 
     /// The largest valid scroll offset for the open overlay: enough to bring its
     /// last line into view, zero when it already fits (or none is open). Shares
     /// the bound formula with the renderer ([`crate::ui::max_scroll`]).
     fn overlay_max_scroll(&self) -> u16 {
-        self.open_overlay().map_or(0, |lines| crate::ui::max_scroll(lines.len(), self.viewport_height))
-    }
-
-    /// Close the open overlay and reset its scroll.
-    fn close_overlay(&mut self) {
-        self.report = None;
-        self.analysis = None;
-        self.ai_panel = None;
-        self.overlay_scroll = 0;
+        self.overlay.as_ref().map_or(0, |o| crate::ui::max_scroll(o.lines.len(), self.viewport_height))
     }
 
     /// Handle a key while a full-screen overlay is open: scroll on the navigation
     /// keys, close on anything else (so it stays "press a key to dismiss").
     fn on_key_overlay(&mut self, key: KeyEvent) {
-        let max = self.overlay_max_scroll();
-        let page = self.viewport_height.saturating_sub(3).max(1); // keep a line of context
+        let max = self.overlay_max_scroll() as i32;
+        let page = self.viewport_height.saturating_sub(3).max(1) as i32; // keep a line of context
+        let cur = self.overlay_scroll() as i32;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let scroll = |cur: u16, delta: i32| {
-            (cur as i32 + delta).clamp(0, max as i32) as u16
+        // `Some(row)` scrolls to `row`; `None` dismisses the overlay.
+        let target = match (ctrl, key.code) {
+            (false, KeyCode::Down | KeyCode::Char('j')) => Some((cur + 1).clamp(0, max)),
+            (false, KeyCode::Up | KeyCode::Char('k')) => Some((cur - 1).clamp(0, max)),
+            (false, KeyCode::PageDown | KeyCode::Char(' ')) | (true, KeyCode::Char('d')) => Some((cur + page).clamp(0, max)),
+            (false, KeyCode::PageUp | KeyCode::Char('b')) | (true, KeyCode::Char('u')) => Some((cur - page).clamp(0, max)),
+            (false, KeyCode::Home | KeyCode::Char('g')) => Some(0),
+            (false, KeyCode::End | KeyCode::Char('G')) => Some(max),
+            _ => None,
         };
-        match (ctrl, key.code) {
-            (false, KeyCode::Down | KeyCode::Char('j')) => self.overlay_scroll = scroll(self.overlay_scroll, 1),
-            (false, KeyCode::Up | KeyCode::Char('k')) => self.overlay_scroll = scroll(self.overlay_scroll, -1),
-            (false, KeyCode::PageDown | KeyCode::Char(' '))
-            | (true, KeyCode::Char('d')) => self.overlay_scroll = scroll(self.overlay_scroll, page as i32),
-            (false, KeyCode::PageUp | KeyCode::Char('b'))
-            | (true, KeyCode::Char('u')) => self.overlay_scroll = scroll(self.overlay_scroll, -(page as i32)),
-            (false, KeyCode::Home | KeyCode::Char('g')) => self.overlay_scroll = 0,
-            (false, KeyCode::End | KeyCode::Char('G')) => self.overlay_scroll = max,
-            _ => self.close_overlay(),
+        match target {
+            Some(row) => {
+                if let Some(overlay) = self.overlay.as_mut() {
+                    overlay.scroll = row as u16;
+                }
+            }
+            None => self.overlay = None,
         }
     }
 
@@ -464,7 +455,7 @@ impl App {
         // A full-screen overlay (progress report, analysis report, AI answer) is
         // read-only and scrollable: navigation keys scroll it, any other key
         // closes it.
-        if self.open_overlay().is_some() {
+        if self.overlay.is_some() {
             self.on_key_overlay(key);
             return;
         }
@@ -1021,14 +1012,12 @@ impl App {
             }
             // Open the progress report (scroll to read; any other key closes).
             (true, KeyCode::Char('r')) => {
-                self.overlay_scroll = 0;
-                self.report = Some(self.report_lines());
+                self.overlay = Some(Overlay::report("progress", self.report_lines()));
             }
             // Open the local analysis report — editing metrics. Ctrl-t: "text"
             // analysis. Scrollable (it can run past one screen); any other key closes.
             (true, KeyCode::Char('t')) => {
-                self.overlay_scroll = 0;
-                self.analysis = Some(self.analysis_lines());
+                self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
             }
             // Open the AI command palette (opt-in). When AI isn't ready, explain
             // how to enable it rather than listing dead actions.

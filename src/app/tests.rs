@@ -460,13 +460,13 @@ fn ctrl_r_opens_the_report_and_any_key_closes_it() {
     });
 
     app.on_key(ctrl('r'));
-    let report = app.report.as_ref().expect("report should be open");
+    let report = app.overlay_lines().expect("report should be open");
     // It rendered the story line against the goals (styled rows → span text).
     let line_text = |l: &Line| l.spans.iter().map(|s| s.content.to_string()).collect::<String>();
     assert!(report.iter().any(|l| line_text(l).contains("/ 150,000  words")), "no story line");
 
     app.on_key(key(KeyCode::Char('x'))); // any key closes it (no edit)
-    assert!(app.report.is_none());
+    assert!(app.overlay.is_none());
     assert!(!app.buffer.line(0).contains('x'), "the dismissing key must not edit");
 
     std::fs::remove_dir_all(&dir).ok();
@@ -702,7 +702,7 @@ fn ask_with_ai_off_explains_how_to_enable() {
     app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
     app.ask_ai("who is the protagonist?");
     assert!(app.ai_rx.is_none(), "nothing should be sent when AI is off");
-    assert!(app.ai_panel.is_none());
+    assert!(app.overlay.is_none());
     assert!(app.message.as_deref().unwrap_or("").contains("off"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
@@ -741,7 +741,7 @@ fn qa_answer_opens_the_overlay() {
     let req = ai::build_qa_request(app.manuscript_text(), "what is chapter one about?", &app.ai.model);
     app.apply_qa_result(backend.complete(&req));
 
-    let panel = app.ai_panel.as_ref().expect("answer overlay should open");
+    let panel = app.overlay_lines().expect("answer overlay should open");
     let text: String = panel
         .iter()
         .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
@@ -756,7 +756,7 @@ fn qa_error_sets_a_message_not_a_panel() {
     let backend = MockBackend { result: Err(()) };
     let req = ai::build_qa_request(app.manuscript_text(), "q", &app.ai.model);
     app.apply_qa_result(backend.complete(&req));
-    assert!(app.ai_panel.is_none());
+    assert!(app.overlay.is_none());
     assert!(app.message.as_deref().unwrap_or("").contains("boom"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
@@ -787,7 +787,7 @@ fn character_pass_writes_bible_files_and_summarizes() {
     let content = fs::read_to_string(&file).expect("profile written");
     assert!(content.contains("name: Mara Vance"));
     assert!(content.contains("escape"));
-    assert!(app.ai_panel.is_some(), "summary overlay should open");
+    assert!(app.overlay.is_some(), "summary overlay should open");
     assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts → no review");
     fs::remove_dir_all(&dir).ok();
 }
@@ -887,7 +887,7 @@ fn continuity_with_no_findings_summarizes() {
     let (mut app, dir) = two_chapter_app("cont-clean");
     app.apply_continuity(Ok(cont_with(vec![])));
     assert!(dir.join("bible/timeline.md").exists());
-    assert!(app.ai_panel.is_some(), "summary overlay");
+    assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }
@@ -982,7 +982,7 @@ fn setting_with_no_violations_summarizes() {
     };
     app.apply_setting(Ok(s));
     assert!(dir.join("bible/setting.md").exists());
-    assert!(app.ai_panel.is_some(), "summary overlay");
+    assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }
@@ -1069,7 +1069,7 @@ fn naming_findings_open_the_overlay() {
 fn naming_with_no_variants_summarizes() {
     let (mut app, dir) = two_chapter_app("naming-clean");
     app.apply_naming(Ok(Naming { findings: vec![] }));
-    assert!(app.ai_panel.is_some());
+    assert!(app.overlay.is_some());
     assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }
@@ -1137,7 +1137,7 @@ fn style_findings_open_the_overlay() {
 fn style_with_no_findings_summarizes() {
     let (mut app, dir) = two_chapter_app("style-clean");
     app.apply_style(Ok(ai::style::Style { findings: vec![] }));
-    assert!(app.ai_panel.is_some());
+    assert!(app.overlay.is_some());
     assert!(!matches!(app.mode, Mode::Findings(_)));
     fs::remove_dir_all(&dir).ok();
 }
@@ -1155,7 +1155,7 @@ fn submission_writes_three_artifacts_and_summarizes() {
     assert!(fs::read_to_string(dir.join("submission/synopsis.md")).unwrap().contains("confronts her brother"));
     assert!(fs::read_to_string(dir.join("submission/blurb.md")).unwrap().contains("reckoning"));
     assert!(fs::read_to_string(dir.join("submission/query.md")).unwrap().contains("Dear Agent"));
-    assert!(app.ai_panel.is_some(), "summary overlay");
+    assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts on a fresh write");
     fs::remove_dir_all(&dir).ok();
 }
@@ -1165,9 +1165,9 @@ fn submission_writes_three_artifacts_and_summarizes() {
 #[test]
 fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
     let (mut app, dir) = two_chapter_app("analysis-open");
-    assert!(app.analysis.is_none());
+    assert!(app.overlay.is_none());
     app.on_key(ctrl('t'));
-    let lines = app.analysis.as_ref().expect("analysis report opens");
+    let lines = app.overlay_lines().expect("analysis report opens");
     let text: String = lines
         .iter()
         .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -1186,10 +1186,10 @@ fn a_non_scroll_key_closes_the_analysis_report() {
     app.viewport_height = 5;
     app.on_key(ctrl('t'));
     app.on_key(key(KeyCode::Down)); // scroll a bit first
-    assert!(app.overlay_scroll > 0);
+    assert!(app.overlay_scroll() > 0);
     app.on_key(key(KeyCode::Char('x'))); // not a scroll key → close
-    assert!(app.analysis.is_none(), "a non-scroll key dismisses the report");
-    assert_eq!(app.overlay_scroll, 0, "scroll resets on close");
+    assert!(app.overlay.is_none(), "a non-scroll key dismisses the report");
+    assert_eq!(app.overlay_scroll(), 0, "scroll resets on close");
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -1198,19 +1198,19 @@ fn the_analysis_report_scrolls_and_clamps() {
     let (mut app, dir) = two_chapter_app("analysis-scroll");
     app.viewport_height = 5; // tiny screen → 3-row interior
     app.on_key(ctrl('t'));
-    let len = app.analysis.as_ref().unwrap().len() as u16;
+    let len = app.overlay_lines().unwrap().len() as u16;
     let max = len - 3; // content rows beyond the interior
     assert!(max > 0, "report is taller than the viewport");
 
     app.on_key(key(KeyCode::Down));
-    assert_eq!(app.overlay_scroll, 1, "Down scrolls one row");
+    assert_eq!(app.overlay_scroll(), 1, "Down scrolls one row");
     app.on_key(key(KeyCode::End));
-    assert_eq!(app.overlay_scroll, max, "End jumps to the bottom");
+    assert_eq!(app.overlay_scroll(), max, "End jumps to the bottom");
     app.on_key(key(KeyCode::Down));
-    assert_eq!(app.overlay_scroll, max, "can't scroll past the end");
-    assert!(app.analysis.is_some(), "scroll keys don't close the overlay");
+    assert_eq!(app.overlay_scroll(), max, "can't scroll past the end");
+    assert!(app.overlay.is_some(), "scroll keys don't close the overlay");
     app.on_key(key(KeyCode::Home));
-    assert_eq!(app.overlay_scroll, 0, "Home jumps back to the top");
+    assert_eq!(app.overlay_scroll(), 0, "Home jumps back to the top");
     fs::remove_dir_all(&dir).ok();
 }
 
