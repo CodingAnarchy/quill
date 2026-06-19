@@ -315,6 +315,34 @@ pub struct LongSentence {
     pub text: String,
 }
 
+/// A bounded "top-N longest sentences" accumulator, so ranking the longest
+/// sentences across the whole manuscript never holds more than N at once and
+/// only copies a sentence's text when it actually makes the cut.
+pub struct LongestSentences {
+    cap: usize,
+    items: Vec<LongSentence>, // kept sorted by `words`, descending
+}
+
+impl LongestSentences {
+    pub fn new(cap: usize) -> Self {
+        Self { cap, items: Vec::with_capacity(cap + 1) }
+    }
+
+    /// Offer a sentence; kept only if it ranks among the longest seen so far.
+    pub fn consider(&mut self, chapter: &str, text: &str, words: usize) {
+        if self.items.len() < self.cap || words > self.items.last().map_or(0, |l| l.words) {
+            let pos = self.items.partition_point(|l| l.words >= words);
+            self.items.insert(pos, LongSentence { chapter: chapter.to_string(), words, text: text.to_string() });
+            self.items.truncate(self.cap);
+        }
+    }
+
+    /// The longest sentences, longest first.
+    pub fn into_vec(self) -> Vec<LongSentence> {
+        self.items
+    }
+}
+
 /// The analysis report's rows: a readability table and a sentence-length section
 /// (per-chapter statistics, the overall distribution, and the longest
 /// sentences), each with a whole-manuscript total. Computed once when the report
@@ -550,6 +578,20 @@ mod tests {
         assert_eq!(s.run_ons, 1); // only the 50-word sentence is over 40
         assert_eq!(s.histogram, [3, 0, 0, 0, 1]); // three <10, one 40+
         assert_eq!(sentence_stats(&[], 40), SentenceStats::default());
+    }
+
+    #[test]
+    fn longest_sentences_keeps_a_bounded_top_n() {
+        let mut top = LongestSentences::new(2);
+        top.consider("One", "short", 3);
+        top.consider("One", "medium length here", 10);
+        top.consider("Two", "the longest of them all by far", 25);
+        top.consider("Two", "also short", 4);
+        let got = top.into_vec();
+        assert_eq!(got.len(), 2, "capped at 2");
+        assert_eq!(got[0].words, 25); // longest first
+        assert_eq!(got[1].words, 10);
+        assert_eq!(got[0].chapter, "Two");
     }
 
     #[test]
