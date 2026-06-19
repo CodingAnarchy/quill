@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::{BibleReview, Findings, Mode, Palette};
+use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -35,18 +35,10 @@ struct StatusBar<'a>(&'a App);
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // The progress report and AI answer are full-screen read-only overlays,
-    // scrollable when they run past the screen (Ctrl-r / Ctrl-t / AI answers).
-    if let Some(lines) = &app.report {
-        draw_overlay_report(frame, area, &app.project.manifest.title, "progress", lines, app.overlay_scroll);
-        return;
-    }
-    if let Some(lines) = &app.analysis {
-        draw_overlay_report(frame, area, &app.project.manifest.title, "analysis", lines, app.overlay_scroll);
-        return;
-    }
-    if let Some(lines) = &app.ai_panel {
-        draw_ai_panel(frame, area, lines, app.overlay_scroll);
+    // A full-screen read-only overlay (progress / analysis report or AI answer),
+    // scrollable when it runs past the screen.
+    if let Some(overlay) = &app.overlay {
+        draw_overlay(frame, area, &app.project.manifest.title, overlay);
         return;
     }
     if let Mode::BibleReview(review) = &app.mode {
@@ -84,14 +76,24 @@ pub fn draw(frame: &mut Frame, app: &App) {
     StatusBar(app).render(frame, chunks[1]);
 }
 
-/// Render a full-screen read-only report (progress, analysis, …) in a bordered
-/// box. `kind` names the report in the title bar; `scroll` is the first visible
-/// row (clamped to the content), so a report taller than the box can be scrolled.
-fn draw_overlay_report(frame: &mut Frame, area: Rect, title: &str, kind: &str, lines: &[Line<'static>], scroll: u16) {
-    let scroll = scroll.min(max_scroll(lines.len(), area.height));
+/// Render the open full-screen overlay in a bordered box, scrolled and clamped to
+/// its content. Report overlays show aligned tables (no wrap) titled with the
+/// book + a label; the AI panel word-wraps its prose answer. One renderer for all
+/// overlay kinds — a new overlay is a new [`OverlayKind`], not a new draw arm.
+fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &Overlay) {
+    let lines = &overlay.lines;
+    let scroll = overlay.scroll.min(max_scroll(lines.len(), area.height));
     let hint = scroll_hint(lines.len(), area.height);
-    let block = Block::default().borders(Borders::ALL).title(format!(" {title} — {kind} ({hint}) "));
-    frame.render_widget(Paragraph::new(lines.to_vec()).block(block).scroll((scroll, 0)), area);
+    let (title, wrap) = match overlay.kind {
+        OverlayKind::Report(label) => (format!(" {book} — {label} ({hint}) "), false),
+        OverlayKind::AiPanel => (format!(" AI — Claude ({hint}) "), true),
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let mut paragraph = Paragraph::new(lines.clone()).block(block).scroll((scroll, 0));
+    if wrap {
+        paragraph = paragraph.wrap(Wrap { trim: false });
+    }
+    frame.render_widget(paragraph, area);
 }
 
 /// The largest valid scroll offset for `lines` of content in a bordered box of
@@ -225,21 +227,6 @@ fn draw_list_overlay(
     let block = Block::default().borders(Borders::ALL).title(title.to_string());
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
-        area,
-    );
-}
-
-/// Render an AI result overlay (a Q&A answer or a pass summary) full-screen in a
-/// bordered box. Wraps, since the content is free-form rather than pre-sized rows.
-fn draw_ai_panel(frame: &mut Frame, area: Rect, lines: &[Line<'static>], scroll: u16) {
-    let scroll = scroll.min(max_scroll(lines.len(), area.height));
-    let hint = scroll_hint(lines.len(), area.height);
-    let block = Block::default().borders(Borders::ALL).title(format!(" AI — Claude ({hint}) "));
-    frame.render_widget(
-        Paragraph::new(lines.to_vec())
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
         area,
     );
 }

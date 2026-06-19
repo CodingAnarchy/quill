@@ -101,7 +101,7 @@ impl App {
 
     /// Open the accumulated revision-triage findings (local; no request).
     pub(crate) fn open_triage(&mut self) {
-        self.ai_panel = None;
+        self.overlay = None;
         if self.triage.is_empty() {
             self.message = Some("No findings yet — run a continuity / setting / style pass".into());
         } else {
@@ -272,8 +272,7 @@ impl App {
             Ok(outcome) => {
                 self.ai_rx = None;
                 self.message = None;
-                self.ai_panel = None; // clear any prior overlay before showing this result
-                self.overlay_scroll = 0; // a fresh overlay starts at the top
+                self.overlay = None; // a fresh result supersedes any open overlay
                 match outcome {
                     Outcome::Answer(r) => self.apply_qa_result(r),
                     Outcome::Characters(r) => self.apply_characters(r),
@@ -293,12 +292,19 @@ impl App {
         }
     }
 
+    /// Show an AI result — a Q&A answer or a pass summary — as the full-screen
+    /// overlay, scrolled to the top. The single place an AI result becomes an
+    /// overlay.
+    fn show_ai(&mut self, lines: Vec<Line<'static>>) {
+        self.overlay = Some(Overlay::ai(lines));
+    }
+
     /// Apply a completed Q&A result: open the answer overlay on success, or set a
     /// status message on error. Shared by the async poll path and tests (which
     /// drive a mock backend synchronously).
     pub(crate) fn apply_qa_result(&mut self, result: Result<ai::Response, ai::AiError>) {
         match result {
-            Ok(resp) => self.ai_panel = Some(ai::answer_to_lines(&resp)),
+            Ok(resp) => self.show_ai(ai::answer_to_lines(&resp)),
             Err(e) => self.message = Some(format!("AI: {e}")),
         }
     }
@@ -307,7 +313,7 @@ impl App {
     /// profile to `bible/characters/`, and either summarize (no conflicts) or
     /// queue hand-edited files for review.
     pub(crate) fn apply_characters(&mut self, result: Result<Vec<Character>, ai::AiError>) {
-        self.ai_panel = None; // a new result supersedes any prior overlay
+        self.overlay = None; // a new result supersedes any prior overlay
         let mut chars = match result {
             Ok(c) => c,
             Err(e) => {
@@ -338,7 +344,7 @@ impl App {
         }
 
         if conflicts.is_empty() {
-            self.ai_panel = Some(character_summary_lines(chars.len(), written, drift));
+            self.show_ai(character_summary_lines(chars.len(), written, drift));
         } else {
             let pending = conflicts.len();
             self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
@@ -519,7 +525,7 @@ impl App {
     /// Apply a submission pass: write the synopsis / blurb / query to
     /// `submission/` (conflict-reviewed like any generated file) and summarize.
     pub(crate) fn apply_submission(&mut self, result: Result<Submission, ai::AiError>) {
-        self.ai_panel = None;
+        self.overlay = None;
         let sub = match result {
             Ok(s) => s,
             Err(e) => {
@@ -544,7 +550,7 @@ impl App {
             lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
             lines.push(Line::raw(""));
             lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));
-            self.ai_panel = Some(lines);
+            self.show_ai(lines);
         } else {
             let pending = conflicts.len();
             let n = written.len();
@@ -556,7 +562,7 @@ impl App {
     /// Open a findings-only result (analysis passes that write no bible file):
     /// clear any prior overlay, stash the findings, and open the overlay.
     fn show_findings(&mut self, findings: Vec<Finding>) {
-        self.ai_panel = None;
+        self.overlay = None;
         self.accumulate_triage(&findings);
         self.pending_findings = findings;
         self.open_findings();
@@ -574,7 +580,7 @@ impl App {
         render: impl Fn(&str) -> String,
         findings: Vec<Finding>,
     ) {
-        self.ai_panel = None;
+        self.overlay = None;
         self.accumulate_triage(&findings);
         self.pending_findings = findings;
         match self.stage_bible(path, name, render) {
@@ -594,7 +600,7 @@ impl App {
     fn open_findings(&mut self) {
         let items = std::mem::take(&mut self.pending_findings);
         if items.is_empty() {
-            self.ai_panel = Some(vec![
+            self.show_ai(vec![
                 Line::raw("Analysis complete."),
                 Line::raw(""),
                 Line::raw("Written to the story bible. No findings."),

@@ -4,7 +4,42 @@
 
 use std::path::PathBuf;
 
+use ratatui::text::Line;
+
 use crate::buffer::Buffer;
+
+/// A full-screen, read-only overlay drawn above any mode: the progress report,
+/// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
+/// render itself, and the current scroll offset. `App` keeps a single
+/// `Option<Overlay>`, so a new overlay is a new value here — not a new field
+/// plus a close branch plus a draw arm.
+pub struct Overlay {
+    pub lines: Vec<Line<'static>>,
+    pub kind: OverlayKind,
+    /// First visible row; 0 when freshly opened.
+    pub scroll: u16,
+}
+
+/// How an [`Overlay`] titles and renders itself.
+pub enum OverlayKind {
+    /// A bordered report box; the label follows the book title in the bar
+    /// (e.g. "progress", "analysis"). Not word-wrapped — it holds aligned tables.
+    Report(&'static str),
+    /// The word-wrapped AI answer / summary panel.
+    AiPanel,
+}
+
+impl Overlay {
+    /// A bordered report overlay labelled `label`, scrolled to the top.
+    pub fn report(label: &'static str, lines: Vec<Line<'static>>) -> Self {
+        Self { lines, kind: OverlayKind::Report(label), scroll: 0 }
+    }
+
+    /// The AI answer / summary overlay, scrolled to the top.
+    pub fn ai(lines: Vec<Line<'static>>) -> Self {
+        Self { lines, kind: OverlayKind::AiPanel, scroll: 0 }
+    }
+}
 
 /// Editor modes. Each variant carries the transient state that only makes sense
 /// while in that mode, so illegal combinations aren't representable.
