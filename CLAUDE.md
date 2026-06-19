@@ -19,6 +19,29 @@ chapters in/out around the cursor and writing edits back to each chapter's file.
 Chapter boundaries are fixed seams (editing never merges chapters); the centered
 title dividers between chapters are render-only.
 
+## AI assistance boundaries (non-negotiable)
+
+Quill's AI is an **assistant, not a co-writer**. It must **never generate or
+suggest manuscript prose** — no drafting, rewriting, tightening, expanding, or
+"here's how I'd word it" suggestions, and no suggesting larger edits to the
+author's text.
+
+AI features are limited to:
+
+- **Structure** — outlines, beat sheets, scene notes (notes, never written
+  prose).
+- **Tracking** — the human-readable story bible (characters, timeline, setting).
+- **Markers** — inserting `xxx` TODO notes the author can act on.
+- **Analysis** — flags and findings (continuity, consistency, style *observations*),
+  surfaced for the author to fix themselves; never an edited replacement.
+
+When adding or changing an AI feature, hold it to this line: it may *track*,
+*outline*, *mark*, and *observe*, but the prose is the author's. A feature that
+would draft or reword manuscript text is out of scope — surface the issue, don't
+write the fix. (This retired the rewrite/tighten/expand "selection assistant";
+off-manuscript artifacts like a synopsis or query letter are the only prose the
+AI produces, and never inside the manuscript.)
+
 ## Code conventions
 
 - **`use` imports go at the top of the module**, after the module doc comment —

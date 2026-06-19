@@ -7,6 +7,8 @@
 
 use super::*;
 
+use crate::ai::scaffold::{self, Scaffold};
+
 impl App {
     // --- AI: "Ask the manuscript" -----------------------------------------
 
@@ -69,6 +71,15 @@ impl App {
         });
     }
 
+    /// Start a scaffolding pass; the beat outline + gap findings are applied by
+    /// [`App::poll_ai`].
+    pub(crate) fn analyze_scaffold(&mut self) {
+        self.spawn_ai("⟳ Outlining…", |backend, manuscript, model| {
+            let req = scaffold::build_request(manuscript, &model);
+            Outcome::Scaffold(backend.complete(&req).and_then(|r| scaffold::parse(&r.text)))
+        });
+    }
+
     /// Run an AI request on a worker thread: assemble the manuscript here, hand it
     /// (with a backend + model) to `run` off-thread, and deliver the `Outcome` via
     /// `ai_rx` for [`App::poll_ai`]. A no-op with a status message when AI isn't
@@ -116,6 +127,7 @@ impl App {
                     Outcome::Characters(r) => self.apply_characters(r),
                     Outcome::Continuity(r) => self.apply_continuity(r),
                     Outcome::Setting(r) => self.apply_setting(r),
+                    Outcome::Scaffold(r) => self.apply_scaffold(r),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -278,6 +290,31 @@ impl App {
         }, findings);
     }
 
+    /// Apply a scaffolding pass: write the beat outline to `bible/outline.md` and
+    /// surface the structural gaps as findings.
+    pub(crate) fn apply_scaffold(&mut self, result: Result<Scaffold, ai::AiError>) {
+        let scaffold = match result {
+            Ok(s) => s,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let findings = scaffold
+            .gaps
+            .iter()
+            .map(|g| Finding {
+                summary: format!("gap: {}", g.detail),
+                chapters: vec![g.chapter.clone()],
+            })
+            .collect();
+        let today = date::iso(date::today());
+        let path = self.project.root.join("bible").join("outline.md");
+        self.apply_bible_with_findings(path, "outline", |notes| {
+            scaffold::render_outline(&scaffold, notes, &today)
+        }, findings);
+    }
+
     /// Write a single bible file and surface a set of findings — the shared shape
     /// of the continuity and setting passes. Clears any prior overlay, stashes the
     /// findings, writes the file, then opens the findings overlay — or, if the
@@ -437,9 +474,62 @@ impl App {
                     }
                 }
             }
+            // Turn the finding into an `xxx` TODO marker in its chapter (a note,
+            // not prose). The keypress is the confirmation.
+            KeyCode::Char('i') => {
+                if let Some(item) = f.items.get(f.selected) {
+                    let chapter = item.chapters.first().cloned();
+                    let note = item.summary.clone();
+                    if let Some(title) = chapter {
+                        self.insert_todo(&title, &note);
+                    } else {
+                        self.message = Some("No chapter to mark".into());
+                    }
+                }
+            }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
         }
+    }
+
+    /// Append an `xxx — <note>` TODO marker to the body of the chapter titled
+    /// `title` (a note for the author; never prose). The active chapter is
+    /// flushed and reloaded so its open buffer sees the marker; other chapters
+    /// are appended on disk.
+    fn insert_todo(&mut self, title: &str, note: &str) {
+        let Some(i) = (0..self.chapter_count())
+            .find(|&i| self.project.chapter_title(i) == Some(title))
+        else {
+            self.message = Some(format!("Chapter '{title}' not found"));
+            return;
+        };
+        let marker = format!("\n\nxxx — {note}\n");
+
+        if i == self.project.active_index() {
+            // Persist current edits, append, and reload so the buffer is current.
+            if self.flush_active().is_err() {
+                return;
+            }
+        }
+        let path = self.project.chapter_path(i);
+        let mut body = std::fs::read_to_string(&path).unwrap_or_default();
+        body.push_str(&marker);
+        if std::fs::write(&path, body).is_err() {
+            self.message = Some("Failed to write marker".into());
+            return;
+        }
+        if i == self.project.active_index() {
+            // Reload so the open buffer shows the marker and isn't overwritten on
+            // the next save.
+            if let Ok(buffer) = Buffer::from_path(&path) {
+                self.buffer = buffer;
+            }
+            self.project.set_active_words(self.buffer.word_count());
+        }
+        // Non-active chapters: the marker is on disk; the report's `xxx` count
+        // reads bodies live, and leaving the word cache untouched keeps an
+        // AI-inserted note out of the author's word tally.
+        self.message = Some(format!("Marked xxx in '{title}'"));
     }
 }
 
