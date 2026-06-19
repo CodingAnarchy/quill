@@ -5,9 +5,11 @@
 
 mod app;
 mod buffer;
+mod date;
 mod frontmatter;
 mod manuscript;
 mod project;
+mod report;
 mod syntax;
 mod ui;
 

@@ -3,9 +3,11 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
+use crate::date::Date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::manuscript::Manuscript;
 use crate::project::{Manifest, Project};
+use crate::report;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
@@ -105,6 +107,10 @@ pub struct App {
     pub focus_width: u16,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
+    /// When `Some`, the progress report is open: its pre-computed lines, shown
+    /// full-screen until any key dismisses it. Computed once on open so the
+    /// report (which scans files for TODO markers) isn't rebuilt per frame.
+    pub report: Option<Vec<String>>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -119,6 +125,7 @@ impl App {
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
+            report: None,
             message: None,
         }
     }
@@ -170,12 +177,42 @@ impl App {
         }
     }
 
-    /// Total words across the whole project. (The nav pane sums its per-frame
-    /// counts directly; this is the API the progress report (#4) will use.)
-    #[allow(dead_code)]
+    /// Total words across the whole project (the active chapter live, the rest
+    /// cached). Used by the progress report.
     pub fn project_word_count(&self) -> usize {
         (0..self.chapter_count())
             .map(|i| self.chapter_word_count(i))
+            .sum()
+    }
+
+    /// The progress report's content lines, computed once when it's opened.
+    fn report_lines(&self) -> Vec<String> {
+        report::lines(
+            &self.project.manifest,
+            self.project_word_count(),
+            self.chapter_count(),
+            self.count_todo(),
+            Date::today(),
+        )
+    }
+
+    /// Count the configured TODO marker across the manuscript (case-insensitive):
+    /// the active chapter live from its buffer, the rest from disk.
+    fn count_todo(&self) -> usize {
+        let needle = self.project.manifest.todo_marker().to_lowercase();
+        if needle.is_empty() {
+            return 0;
+        }
+        let active = self.project.active_index();
+        (0..self.chapter_count())
+            .map(|i| {
+                let text = if i == active {
+                    self.buffer.text()
+                } else {
+                    self.project.chapter_body(i)
+                };
+                text.to_lowercase().matches(&needle).count()
+            })
             .sum()
     }
 
@@ -194,6 +231,12 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         // A fresh keystroke clears any stale status message.
         self.message = None;
+
+        // The progress report is a read-only overlay: any key closes it.
+        if self.report.is_some() {
+            self.report = None;
+            return;
+        }
 
         // Non-binding patterns: dispatch on the variant without moving its data.
         match self.mode {
@@ -716,6 +759,8 @@ impl App {
             (true, KeyCode::Char('o')) => {
                 self.outline_visible = !self.outline_visible;
             }
+            // Open the progress report (any key closes it).
+            (true, KeyCode::Char('r')) => self.report = Some(self.report_lines()),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),
@@ -1300,6 +1345,42 @@ mod tests {
 
         app.on_key(ctrl('l')); // entering must flush the dirty single chapter
         assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ctrl_r_opens_the_report_and_any_key_closes_it() {
+        let (mut app, dir) = two_chapter_app("report");
+        app.project.manifest.start_date = Some("2026-01-11".into());
+        app.project.manifest.goals = Some(crate::project::Goals {
+            words: 150_000,
+            chapters: 60,
+            words_per_page: 250,
+        });
+
+        app.on_key(ctrl('r'));
+        let report = app.report.as_ref().expect("report should be open");
+        // It rendered the story line against the goals.
+        assert!(report.iter().any(|l| l.contains("/ 150,000  words")), "{report:?}");
+
+        app.on_key(key(KeyCode::Char('x'))); // any key closes it (no edit)
+        assert!(app.report.is_none());
+        assert!(!app.buffer.line(0).contains('x'), "the dismissing key must not edit");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn report_counts_todo_markers_across_chapters() {
+        let (mut app, dir) = two_chapter_app("report-todo");
+        // Add markers (mixed case) and reload the active chapter's buffer.
+        fs::write(dir.join("one.md"), "first xxx chapter XXX\n").unwrap();
+        fs::write(dir.join("two.md"), "second xxx chapter\n").unwrap();
+        app.buffer = Buffer::from_path(app.project.active_path()).unwrap();
+
+        // Active chapter (one.md) from the buffer: 2; chapter two from disk: 1.
+        assert_eq!(app.count_todo(), 3);
 
         fs::remove_dir_all(&dir).ok();
     }

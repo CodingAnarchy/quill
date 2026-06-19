@@ -30,6 +30,11 @@ title dividers between chapters are render-only.
   then `count_words(...)` — not `std::fs::write(...)` / `crate::buffer::count_words(...)`
   inline. (Disambiguate with a partial path or `as` alias only when two names
   would otherwise collide.)
+- **Keep source files under ~1,000 lines.** When a module approaches that,
+  extract a cohesive group of types/traits into its own file (e.g. the editor
+  modes out of `app.rs` into a `mode.rs`) rather than letting one file sprawl.
+  This counts the whole file; a test module that has grown large is itself a
+  signal to split the module.
 
 ## Standard checks
 
