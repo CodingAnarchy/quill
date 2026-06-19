@@ -10,6 +10,7 @@ use super::*;
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
+use crate::ai::submission::{self, Submission};
 use crate::mode::{AiAction, Palette, PaletteItem};
 
 impl App {
@@ -24,6 +25,7 @@ impl App {
             PaletteItem { label: "Scaffold / outline", desc: "Beat outline + structural gaps", action: AiAction::Scaffold },
             PaletteItem { label: "Name & term consistency", desc: "Spelling variants (cheap pass)", action: AiAction::Naming },
             PaletteItem { label: "Prose & style", desc: "POV / tense / voice findings (analysis only)", action: AiAction::Style },
+            PaletteItem { label: "Submission material", desc: "Synopsis, blurb & query letter (off-manuscript)", action: AiAction::Submission },
         ];
         self.mode = Mode::Palette(Box::new(Palette { items, selected: 0 }));
     }
@@ -50,6 +52,7 @@ impl App {
                     Some(AiAction::Scaffold) => self.analyze_scaffold(),
                     Some(AiAction::Naming) => self.analyze_naming(),
                     Some(AiAction::Style) => self.analyze_style(),
+                    Some(AiAction::Submission) => self.analyze_submission(),
                     None => {}
                 }
             }
@@ -147,6 +150,15 @@ impl App {
         });
     }
 
+    /// Generate submission material (synopsis / blurb / query); written to
+    /// `submission/` by [`App::poll_ai`].
+    pub(crate) fn analyze_submission(&mut self) {
+        self.spawn_ai("⟳ Drafting submission material…", |backend, manuscript, model| {
+            let req = submission::build_request(manuscript, &model);
+            Outcome::Submission(backend.complete(&req).and_then(|r| submission::parse(&r.text)))
+        });
+    }
+
     /// The known entity list for naming checks: the setting gazetteer plus the
     /// character names from the story bible. Empty when no bible has been built.
     pub(crate) fn known_entities(&self) -> Vec<String> {
@@ -208,6 +220,7 @@ impl App {
                     Outcome::Scaffold(r) => self.apply_scaffold(r),
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),
+                    Outcome::Submission(r) => self.apply_submission(r),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -439,6 +452,43 @@ impl App {
             })
             .collect();
         self.show_findings(findings);
+    }
+
+    /// Apply a submission pass: write the synopsis / blurb / query to
+    /// `submission/` (conflict-reviewed like any generated file) and summarize.
+    pub(crate) fn apply_submission(&mut self, result: Result<Submission, ai::AiError>) {
+        self.ai_panel = None;
+        let sub = match result {
+            Ok(s) => s,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let today = date::iso(date::today());
+        let mut written = Vec::new();
+        let mut conflicts = Vec::new();
+        for (kind, file, text) in sub.artifacts() {
+            let path = self.project.root.join("submission").join(file);
+            let title = format!("title: {kind}\n");
+            match self.stage_bible(path, kind, |notes| bible::render(&title, text, notes, &today)) {
+                Ok(()) => written.push(format!("submission/{file}")),
+                Err(c) => conflicts.push(c),
+            }
+        }
+
+        if conflicts.is_empty() {
+            let mut lines = vec![Line::raw("Submission material written:"), Line::raw("")];
+            lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
+            lines.push(Line::raw(""));
+            lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));
+            self.ai_panel = Some(lines);
+        } else {
+            let pending = conflicts.len();
+            let n = written.len();
+            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
+            self.message = Some(format!("Wrote {n} · {pending} need review"));
+        }
     }
 
     /// Open a findings-only result (analysis passes that write no bible file):

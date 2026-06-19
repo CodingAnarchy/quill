@@ -53,6 +53,11 @@ The palette actions:
 - **Prose & style** (#79) — *semantic* findings (POV / tense consistency, voice
   drift, context-aware repeated phrasing); analysis only, no rewrites. Frequency
   metrics (crutch words, etc.) are the local-analysis report's job (#70).
+- **Submission material** (#81) — a synopsis, back-cover blurb, and query-letter
+  draft written to `submission/`. The one AI feature that produces prose, and it
+  is **off-manuscript** (submission/marketing artifacts, never in the novel), so
+  it stays within the assistant-not-co-writer rule. Each is a conflict-reviewed
+  bible-format file the author edits freely.
 
 Each bible file has a regenerated block (`<!-- generated:start/end -->`) and an
 author-owned `<!-- notes:start/end -->` block that survives regeneration; a

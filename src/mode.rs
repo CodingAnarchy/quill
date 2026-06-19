@@ -60,6 +60,7 @@ pub(crate) enum AiAction {
     Scaffold,
     Naming,
     Style,
+    Submission,
 }
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.

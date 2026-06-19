@@ -15,6 +15,7 @@ pub mod naming;
 pub mod scaffold;
 pub mod setting;
 pub mod style;
+pub mod submission;
 mod claude;
 
 pub use character::Character;
@@ -23,6 +24,7 @@ pub use continuity::Continuity;
 pub use naming::Naming;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
+pub use submission::Submission;
 // `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
 use std::fmt;
@@ -75,6 +77,8 @@ pub enum Outcome {
     Naming(Result<Naming, AiError>),
     /// Prose & style analysis (#79).
     Style(Result<style::Style, AiError>),
+    /// Synopsis / blurb / query-letter generation (#81).
+    Submission(Result<Submission, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).

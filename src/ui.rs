@@ -204,12 +204,12 @@ fn draw_list_overlay(
     );
 }
 
-/// Render the AI answer full-screen in a bordered box. Wraps, since the answer
-/// is free-form prose rather than the report's pre-sized rows.
+/// Render an AI result overlay (a Q&A answer or a pass summary) full-screen in a
+/// bordered box. Wraps, since the content is free-form rather than pre-sized rows.
 fn draw_ai_panel(frame: &mut Frame, area: Rect, lines: &[Line<'static>]) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Ask the manuscript — Claude (any key to close) ");
+        .title(" AI — Claude (any key to close) ");
     frame.render_widget(
         Paragraph::new(lines.to_vec())
             .block(block)
