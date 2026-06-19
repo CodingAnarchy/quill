@@ -7,6 +7,7 @@
 
 use super::*;
 
+use crate::ai::cost;
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
@@ -26,6 +27,7 @@ impl App {
             PaletteItem { label: "Name & term consistency", desc: "Spelling variants (cheap pass)", action: AiAction::Naming },
             PaletteItem { label: "Prose & style", desc: "POV / tense / voice findings (analysis only)", action: AiAction::Style },
             PaletteItem { label: "Submission material", desc: "Synopsis, blurb & query letter (off-manuscript)", action: AiAction::Submission },
+            PaletteItem { label: "Revision triage", desc: "All findings so far, in one list (local)", action: AiAction::Triage },
         ];
         self.mode = Mode::Palette(Box::new(Palette { items, selected: 0 }));
     }
@@ -42,22 +44,81 @@ impl App {
             KeyCode::Enter => {
                 let action = p.items.get(p.selected).map(|it| it.action);
                 self.mode = Mode::Insert;
-                match action {
-                    Some(AiAction::Ask) => {
-                        self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None)
-                    }
-                    Some(AiAction::Characters) => self.analyze_characters(),
-                    Some(AiAction::Continuity) => self.analyze_continuity(),
-                    Some(AiAction::Setting) => self.analyze_setting(),
-                    Some(AiAction::Scaffold) => self.analyze_scaffold(),
-                    Some(AiAction::Naming) => self.analyze_naming(),
-                    Some(AiAction::Style) => self.analyze_style(),
-                    Some(AiAction::Submission) => self.analyze_submission(),
-                    None => {}
+                if let Some(action) = action {
+                    self.start_ai_action(action);
                 }
             }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
+        }
+    }
+
+    /// Begin an AI action chosen from the palette: for a network pass, show a
+    /// cost confirm first when the estimate exceeds the threshold; the local /
+    /// interactive actions (Ask, Triage) run immediately.
+    pub(crate) fn start_ai_action(&mut self, action: AiAction) {
+        let Some((model, max_tokens)) = self.cost_profile(action) else {
+            // Local or interactive — no whole-manuscript request to estimate.
+            self.run_ai_action(action);
+            return;
+        };
+        let est = cost::estimate(self.manuscript_text().len(), max_tokens, model);
+        if est.dollars > self.ai.cost_threshold {
+            let label = format!("{} — run? (y/N)", cost::label(&est, model));
+            self.open_prompt(Pending::ConfirmAi(action), label, "", None);
+        } else {
+            self.run_ai_action(action);
+        }
+    }
+
+    /// The model and output bound a network pass will send — the inputs to its
+    /// cost estimate, read from the same constants the request builders use so
+    /// the estimate can't drift from the real request. `None` for the local /
+    /// interactive actions (Ask, Triage), which issue no costed pass.
+    fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
+        match action {
+            AiAction::Ask | AiAction::Triage => None,
+            AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
+            _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
+        }
+    }
+
+    /// Dispatch an AI action to its handler. Shared by the palette and the cost
+    /// confirm.
+    pub(crate) fn run_ai_action(&mut self, action: AiAction) {
+        match action {
+            AiAction::Ask => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
+            AiAction::Characters => self.analyze_characters(),
+            AiAction::Continuity => self.analyze_continuity(),
+            AiAction::Setting => self.analyze_setting(),
+            AiAction::Scaffold => self.analyze_scaffold(),
+            AiAction::Naming => self.analyze_naming(),
+            AiAction::Style => self.analyze_style(),
+            AiAction::Submission => self.analyze_submission(),
+            AiAction::Triage => self.open_triage(),
+        }
+    }
+
+    /// Open the accumulated revision-triage findings (local; no request).
+    pub(crate) fn open_triage(&mut self) {
+        self.ai_panel = None;
+        if self.triage.is_empty() {
+            self.message = Some("No findings yet — run a continuity / setting / style pass".into());
+        } else {
+            self.mode = Mode::Findings(Box::new(Findings {
+                items: self.triage.clone(),
+                selected: 0,
+            }));
+        }
+    }
+
+    /// Accumulate a pass's findings into the session revision-triage list,
+    /// de-duplicated.
+    fn accumulate_triage(&mut self, findings: &[Finding]) {
+        for f in findings {
+            if !self.triage.contains(f) {
+                self.triage.push(f.clone());
+            }
         }
     }
     // --- AI: "Ask the manuscript" -----------------------------------------
@@ -495,6 +556,7 @@ impl App {
     /// clear any prior overlay, stash the findings, and open the overlay.
     fn show_findings(&mut self, findings: Vec<Finding>) {
         self.ai_panel = None;
+        self.accumulate_triage(&findings);
         self.pending_findings = findings;
         self.open_findings();
     }
@@ -512,6 +574,7 @@ impl App {
         findings: Vec<Finding>,
     ) {
         self.ai_panel = None;
+        self.accumulate_triage(&findings);
         self.pending_findings = findings;
         match self.stage_bible(path, name, render) {
             Ok(()) => self.open_findings(),

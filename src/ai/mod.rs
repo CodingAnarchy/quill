@@ -11,6 +11,7 @@
 pub mod bible;
 pub mod character;
 pub mod continuity;
+pub mod cost;
 pub mod naming;
 pub mod scaffold;
 pub mod setting;
@@ -115,6 +116,12 @@ pub fn default_model() -> String {
     "claude-opus-4-8".to_string()
 }
 
+/// Output bound shared by the structured analysis passes (continuity, setting,
+/// scaffold, character, style, submission). The cheap naming pass overrides it
+/// with its own smaller bound. One source of truth so the cost estimate and the
+/// real request agree.
+pub const MAX_OUTPUT_TOKENS: u32 = 8192;
+
 /// AI configuration, loaded from the user's home config — never the project dir,
 /// so an unpublished draft and the key stay separate. Off by default.
 #[derive(Clone, Deserialize)]
@@ -129,6 +136,9 @@ pub struct Settings {
     /// API key, if set in the config file. The `ANTHROPIC_API_KEY` env var
     /// overrides this (see [`Settings::load`]).
     pub api_key: Option<String>,
+    /// Confirm before any pass whose estimated cost exceeds this many dollars.
+    /// Cheap passes (under it) run without a prompt.
+    pub cost_threshold: f64,
 }
 
 impl Default for Settings {
@@ -138,6 +148,7 @@ impl Default for Settings {
             offline: false,
             model: default_model(),
             api_key: None,
+            cost_threshold: 0.20,
         }
     }
 }
@@ -262,7 +273,7 @@ mod tests {
 
     #[test]
     fn check_ready_reports_why_not() {
-        let mut s = Settings { enabled: true, offline: false, model: default_model(), api_key: Some("k".into()) };
+        let mut s = Settings { enabled: true, offline: false, model: default_model(), api_key: Some("k".into()), cost_threshold: 0.20 };
         s.check_ready().unwrap();
         s.offline = true;
         assert!(matches!(s.check_ready(), Err(AiError::NotConfigured(_))));

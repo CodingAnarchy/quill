@@ -26,6 +26,7 @@ AI is configured in a per-user file **outside the project** —
 enabled = true                 # opt-in; off by default
 offline = false                # true disables all network calls
 model = "claude-opus-4-8"      # or claude-haiku-4-5 for cheap passes
+cost_threshold = 0.20          # confirm before a pass estimated above this (USD)
 # api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins)
 ```
 
@@ -58,6 +59,18 @@ The palette actions:
   is **off-manuscript** (submission/marketing artifacts, never in the novel), so
   it stays within the assistant-not-co-writer rule. Each is a conflict-reviewed
   bible-format file the author edits freely.
+- **Revision triage** (#82) — every finding surfaced this session (continuity,
+  setting, style, naming, structural gaps), aggregated into one de-duplicated
+  list in the findings overlay. Local only — no request. Marking a finding as an
+  `xxx` TODO is the durable outcome (it lands in the chapter and feeds the
+  report's TODO count); dismissals are in-session.
+
+**Cost confirm** (#82): before any whole-manuscript pass, Quill estimates the
+token/dollar cost from the manuscript size and the effective model. When the
+estimate exceeds `cost_threshold`, it shows a `~12k tokens · ~$0.34 on
+claude-opus-4-8 — run? (y/N)` confirm; cheaper passes run straight through. The
+estimate is a local upper bound (no `count_tokens` round-trip). Ask and Revision
+triage skip it — they're interactive or local. See `src/ai/cost.rs`.
 
 Each bible file has a regenerated block (`<!-- generated:start/end -->`) and an
 author-owned `<!-- notes:start/end -->` block that survives regeneration; a
@@ -165,8 +178,10 @@ author's prose is out of scope per the assistant-not-co-writer principle above.)
 
 ## Open questions
 
-- **Cost/visibility** — show estimated token cost before a full-manuscript pass;
-  let the author scope analyses to a chapter/act/book.
+- **Cost/visibility** — the pre-pass cost confirm ships (#82). Still open:
+  intelligent/incremental scoping — update a tracker from the revision delta
+  since its last run, using the existing bible as a cache, and only re-send the
+  whole book after N revisions (#90).
 - **Trust & provenance** — every AI-written bible entry needs a clear source
   ("generated from ch. 1–12, edited by you") so authors can trust or correct it.
 - **Local model backend** — define the `quill-ai` trait so a future on-device

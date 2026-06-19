@@ -78,6 +78,9 @@ pub struct App {
     /// Continuity findings waiting to be shown — stashed while a timeline
     /// conflict is resolved first, then opened by [`App::open_findings`].
     pending_findings: Vec<Finding>,
+    /// All findings accumulated this session (continuity / setting / style /
+    /// naming / gaps), de-duplicated — the "revision triage" list.
+    triage: Vec<Finding>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -103,6 +106,7 @@ impl App {
             ai_panel: None,
             ai_rx: None,
             pending_findings: Vec::new(),
+            triage: Vec::new(),
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -820,6 +824,13 @@ impl App {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     let selected = self.delete_chapter(at);
                     self.select(selected);
+                }
+                _ => self.mode = closed,
+            },
+            Pending::ConfirmAi(action) => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.run_ai_action(action);
                 }
                 _ => self.mode = closed,
             },

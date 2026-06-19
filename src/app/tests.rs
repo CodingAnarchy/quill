@@ -715,6 +715,7 @@ fn ask_in_offline_mode_refuses_to_send() {
         offline: true,
         model: ai::default_model(),
         api_key: Some("k".into()),
+        cost_threshold: 0.20,
     };
     app.ask_ai("anything?");
     assert!(app.ai_rx.is_none());
@@ -1080,7 +1081,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 8, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 9, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -1169,5 +1170,97 @@ fn submission_never_touches_the_manuscript() {
         query: "Q".into(),
     }));
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- AI: cost confirm & revision triage -------------------------------------
+
+fn findings_len(app: &App) -> usize {
+    match &app.mode {
+        Mode::Findings(f) => f.items.len(),
+        _ => panic!("expected the findings overlay"),
+    }
+}
+
+#[test]
+fn an_expensive_pass_asks_for_confirmation_first() {
+    let (mut app, dir) = two_chapter_app("cost-confirm");
+    app.ai.cost_threshold = 0.0; // any non-empty manuscript exceeds it
+    app.start_ai_action(crate::mode::AiAction::Continuity);
+    match &app.mode {
+        Mode::Prompt(s) => {
+            assert!(matches!(s.pending, Pending::ConfirmAi(_)), "cost confirm opens");
+            assert!(s.label.contains("run?"), "{}", s.label);
+        }
+        _ => panic!("expected the cost confirm prompt"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_cheap_pass_runs_without_confirmation() {
+    let (mut app, dir) = two_chapter_app("cost-cheap");
+    app.ai.cost_threshold = 1_000.0; // nothing this small could exceed it
+    app.start_ai_action(crate::mode::AiAction::Style);
+    // It dispatched straight through (no key configured → a status message),
+    // never stopping at a confirm prompt.
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm for a cheap pass");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn confirming_an_expensive_pass_dispatches_it() {
+    let (mut app, dir) = two_chapter_app("cost-yes");
+    app.ai.cost_threshold = 0.0;
+    app.start_ai_action(crate::mode::AiAction::Continuity);
+    assert!(matches!(app.mode, Mode::Prompt(_)));
+    app.on_key(key(KeyCode::Char('y'))); // confirm → dispatch (no key → message)
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "confirm closes the prompt");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn declining_an_expensive_pass_cancels_it() {
+    let (mut app, dir) = two_chapter_app("cost-no");
+    app.ai.cost_threshold = 0.0;
+    app.start_ai_action(crate::mode::AiAction::Continuity);
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(matches!(app.mode, Mode::Insert), "declining returns to editing");
+    assert!(app.ai_rx.is_none(), "nothing was sent");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn triage_accumulates_findings_across_passes_deduped() {
+    let (mut app, dir) = two_chapter_app("triage-accum");
+    app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
+        kind: "object".into(),
+        detail: "the locket changes color".into(),
+        chapters: vec!["One".into()],
+    }])));
+    app.apply_style(Ok(ai::style::Style {
+        findings: vec![ai::style::StyleFinding {
+            kind: "POV".into(),
+            detail: "head-hop".into(),
+            chapters: vec!["Two".into()],
+        }],
+    }));
+    // A repeat of the continuity finding must not double-count.
+    app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
+        kind: "object".into(),
+        detail: "the locket changes color".into(),
+        chapters: vec!["One".into()],
+    }])));
+    app.open_triage();
+    assert_eq!(findings_len(&app), 2, "two distinct findings, deduped");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn triage_with_no_findings_shows_a_message() {
+    let (mut app, dir) = two_chapter_app("triage-empty");
+    app.open_triage();
+    assert!(!matches!(app.mode, Mode::Findings(_)));
+    assert!(app.message.as_deref().unwrap_or("").contains("No findings"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
