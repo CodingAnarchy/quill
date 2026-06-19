@@ -686,9 +686,9 @@ struct MockBackend {
 }
 
 impl Backend for MockBackend {
-    fn complete(&self, _req: &ai::Request) -> Result<Response, ai::AiError> {
+    fn complete(&self, _req: &ai::Request) -> Result<ai::Response, ai::AiError> {
         match &self.result {
-            Ok(text) => Ok(Response { text: text.clone(), usage: Default::default() }),
+            Ok(text) => Ok(ai::Response { text: text.clone(), usage: Default::default() }),
             Err(()) => Err(ai::AiError::Api("boom".into())),
         }
     }
@@ -755,5 +755,99 @@ fn qa_error_sets_a_message_not_a_panel() {
     app.apply_qa_result(backend.complete(&req));
     assert!(app.ai_panel.is_none());
     assert!(app.message.as_deref().unwrap_or("").contains("boom"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- AI: character tracking + story bible -----------------------------------
+
+#[test]
+fn enrich_mentions_counts_names_and_last_chapter() {
+    let (app, dir) = two_chapter_app("char-mentions"); // "first chapter" / "second chapter"
+    let mut c = Character { name: "chapter".into(), ..Default::default() };
+    app.enrich_mentions(&mut c);
+    assert_eq!(c.mentions, 2); // once in each chapter body
+    assert_eq!(c.last_chapter.as_deref(), Some("Two"));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn character_pass_writes_bible_files_and_summarizes() {
+    let (mut app, dir) = two_chapter_app("char-write");
+    let chars = vec![Character {
+        name: "Mara Vance".into(),
+        goals: vec!["escape".into()],
+        ..Default::default()
+    }];
+    app.apply_characters(Ok(chars));
+
+    let file = dir.join("bible/characters/mara-vance.md");
+    let content = fs::read_to_string(&file).expect("profile written");
+    assert!(content.contains("name: Mara Vance"));
+    assert!(content.contains("escape"));
+    assert!(app.ai_panel.is_some(), "summary overlay should open");
+    assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts → no review");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Set up a project with a clean, then hand-edited, Mara profile; a second pass
+/// with new content must not overwrite it.
+fn conflict_app(name: &str) -> (App, PathBuf, PathBuf) {
+    let (mut app, dir) = two_chapter_app(name);
+    app.apply_characters(Ok(vec![Character {
+        name: "Mara".into(),
+        physical: vec!["green eyes".into()],
+        ..Default::default()
+    }]));
+    let file = dir.join("bible/characters/mara.md");
+    let edited = fs::read_to_string(&file).unwrap().replace("green eyes", "blue eyes");
+    fs::write(&file, edited).unwrap();
+    // Second pass, different content → conflict.
+    app.apply_characters(Ok(vec![Character {
+        name: "Mara".into(),
+        physical: vec!["hazel eyes".into()],
+        ..Default::default()
+    }]));
+    (app, dir, file)
+}
+
+#[test]
+fn hand_edited_profile_enters_review_without_clobbering() {
+    let (app, dir, file) = conflict_app("char-conflict");
+    assert!(matches!(app.mode, Mode::BibleReview(_)), "should queue a review");
+    assert!(
+        fs::read_to_string(&file).unwrap().contains("blue eyes"),
+        "the hand edit must survive until resolved"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn review_overwrite_writes_the_proposed_version() {
+    let (mut app, dir, file) = conflict_app("char-resolve-o");
+    app.on_key(key(KeyCode::Char('o')));
+    assert!(matches!(app.mode, Mode::Insert), "single conflict resolved → done");
+    assert!(fs::read_to_string(&file).unwrap().contains("hazel eyes"), "proposed written");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn review_keep_preserves_the_authors_version() {
+    let (mut app, dir, file) = conflict_app("char-resolve-k");
+    app.on_key(key(KeyCode::Char('k')));
+    assert!(matches!(app.mode, Mode::Insert));
+    assert!(fs::read_to_string(&file).unwrap().contains("blue eyes"), "kept the hand edit");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn review_edit_then_save_writes_the_edited_version() {
+    let (mut app, dir, file) = conflict_app("char-resolve-e");
+    app.on_key(key(KeyCode::Char('e'))); // load proposed into the scratch editor
+    assert!(matches!(&app.mode, Mode::BibleReview(r) if r.editing.is_some()));
+    app.edit_buffer_mut().insert_char('!'); // tweak the proposed version
+    app.on_key(ctrl('s')); // save
+    assert!(matches!(app.mode, Mode::Insert));
+    let saved = fs::read_to_string(&file).unwrap();
+    assert!(saved.contains("hazel eyes") && saved.contains('!'), "edited proposal saved");
     fs::remove_dir_all(&dir).ok();
 }

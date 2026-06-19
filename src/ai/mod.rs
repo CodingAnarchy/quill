@@ -8,8 +8,10 @@
 //! `docs/ai-features.md`. AI is opt-in and off by default: the manuscript only
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
+pub mod character;
 mod claude;
 
+pub use character::Character;
 pub use claude::ClaudeBackend;
 
 use std::fmt;
@@ -33,12 +35,25 @@ pub struct Request {
     pub user: String,
     pub model: String,
     pub max_tokens: u32,
+    /// When set, the backend constrains the reply to this JSON Schema and the
+    /// response text is guaranteed-valid JSON for the caller to deserialize.
+    /// `None` for free-form replies (Q&A).
+    pub json_schema: Option<serde_json::Value>,
 }
 
 /// A completion result: the answer text and token usage.
 pub struct Response {
     pub text: String,
     pub usage: Usage,
+}
+
+/// The result of a backend task, delivered from the worker thread to the UI. One
+/// variant per AI feature so [`crate::app::App`] can dispatch on what completed.
+pub enum Outcome {
+    /// "Ask the manuscript" Q&A (#73).
+    Answer(Result<Response, AiError>),
+    /// Character extraction (#74).
+    Characters(Result<Vec<Character>, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).
@@ -174,6 +189,7 @@ pub fn build_qa_request(manuscript: String, question: &str, model: &str) -> Requ
         user: question.to_string(),
         model: model.to_string(),
         max_tokens: 1024,
+        json_schema: None,
     }
 }
 

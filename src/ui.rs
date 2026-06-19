@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::Mode;
+use crate::mode::{BibleReview, Mode};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -44,6 +44,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_ai_panel(frame, area, lines);
         return;
     }
+    if let Mode::BibleReview(review) = &app.mode {
+        draw_bible_review(frame, area, review);
+        return;
+    }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -73,6 +77,56 @@ fn draw_report(frame: &mut Frame, area: Rect, title: &str, lines: &[Line<'static
         .borders(Borders::ALL)
         .title(format!(" {title} — progress (any key to close) "));
     frame.render_widget(Paragraph::new(lines.to_vec()).block(block), area);
+}
+
+/// Render the story-bible conflict review: a diff of the front conflict (or the
+/// scratch editor when editing the proposed version).
+fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
+    let Some(front) = review.conflicts.first() else {
+        return;
+    };
+    let remaining = review.conflicts.len();
+
+    // Editing the proposed version before saving.
+    if let Some(buf) = &review.editing {
+        let block = Block::default().borders(Borders::ALL).title(format!(
+            " Edit proposed: {} — Ctrl-S save · Esc back ",
+            front.name
+        ));
+        let text = buf.text();
+        let lines: Vec<Line> = text.lines().map(|l| Line::raw(l.to_string())).collect();
+        frame.render_widget(
+            Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+            area,
+        );
+        return;
+    }
+
+    // Diff view: current (on disk) → proposed.
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("'{}' was edited by hand — choose what to keep:", front.name),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+    ];
+    for change in &front.diff {
+        let color = match change.chars().next() {
+            Some('-') => Color::Red,
+            Some('+') => Color::Green,
+            _ => Color::DarkGray,
+        };
+        lines.push(Line::from(Span::styled(change.clone(), Style::default().fg(color))));
+    }
+
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Bible conflict: {} ({remaining} left) — (o)verwrite (e)dit (k)eep · Esc cancel ",
+        front.name
+    ));
+    frame.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 /// Render the AI answer full-screen in a bordered box. Wraps, since the answer

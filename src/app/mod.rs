@@ -5,17 +5,20 @@ use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
+use similar::{ChangeTag, TextDiff};
+
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use ratatui::text::Line;
 
-use crate::ai::{self, Backend, ClaudeBackend, Response};
+use crate::ai::{self, Backend, ClaudeBackend, Outcome};
+use crate::ai::character::{self, Character};
 use crate::buffer::Buffer;
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
-use crate::mode::{MetaEdit, MetaField, Mode, Pending, PromptState};
+use crate::mode::{BibleConflict, BibleReview, MetaEdit, MetaField, Mode, Pending, PromptState};
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
 
@@ -64,7 +67,7 @@ pub struct App {
     pub ai_panel: Option<Vec<Line<'static>>>,
     /// Receiver for an in-flight AI request running on a worker thread; `Some`
     /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
-    ai_rx: Option<Receiver<Result<Response, ai::AiError>>>,
+    ai_rx: Option<Receiver<Outcome>>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -112,22 +115,24 @@ impl App {
     /// when that view is active, otherwise the single active chapter. The
     /// renderer and movement go through this so both views share one path.
     pub fn edit_buffer(&self) -> &Buffer {
-        if let Mode::EditMeta(m) = &self.mode {
-            return &m.buffer;
-        }
-        match &self.manuscript {
-            Some(m) => m.buffer(),
-            None => &self.buffer,
+        match &self.mode {
+            Mode::EditMeta(m) => &m.buffer,
+            Mode::BibleReview(r) if r.editing.is_some() => r.editing.as_ref().unwrap(),
+            _ => match &self.manuscript {
+                Some(m) => m.buffer(),
+                None => &self.buffer,
+            },
         }
     }
 
     pub fn edit_buffer_mut(&mut self) -> &mut Buffer {
-        if let Mode::EditMeta(m) = &mut self.mode {
-            return &mut m.buffer;
-        }
-        match &mut self.manuscript {
-            Some(m) => m.buffer_mut(),
-            None => &mut self.buffer,
+        match &mut self.mode {
+            Mode::EditMeta(m) => &mut m.buffer,
+            Mode::BibleReview(r) if r.editing.is_some() => r.editing.as_mut().unwrap(),
+            _ => match &mut self.manuscript {
+                Some(m) => m.buffer_mut(),
+                None => &mut self.buffer,
+            },
         }
     }
 
@@ -354,22 +359,55 @@ impl App {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let _ = tx.send(backend.complete(&req));
+            let _ = tx.send(Outcome::Answer(backend.complete(&req)));
         });
         self.ai_rx = Some(rx);
         self.message = Some("⟳ Sending to Claude…".into());
     }
 
-    /// Poll the in-flight AI request (non-blocking). On a result, open the answer
-    /// overlay (or report an error) and clear the pending state. Called once per
-    /// loop iteration so the answer lands within the poll window.
+    /// Start a character-extraction pass on a worker thread: a single structured
+    /// request over the whole manuscript, parsed into profiles. The result is
+    /// applied (bible files written / conflicts queued) by [`App::poll_ai`].
+    fn analyze_characters(&mut self) {
+        if self.ai_rx.is_some() {
+            self.message = Some("An AI request is already in flight…".into());
+            return;
+        }
+        let key = match self.ai.check_ready() {
+            Ok(key) => key.to_string(),
+            Err(e) => {
+                self.message = Some(e.to_string());
+                return;
+            }
+        };
+        let backend = ClaudeBackend::new(key);
+        let model = self.ai.model.clone();
+        let manuscript = self.manuscript_text();
+
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let req = character::build_request(manuscript, &model);
+            let result = backend.complete(&req).and_then(|resp| character::parse(&resp.text));
+            let _ = tx.send(Outcome::Characters(result));
+        });
+        self.ai_rx = Some(rx);
+        self.message = Some("⟳ Analyzing characters…".into());
+    }
+
+    /// Poll the in-flight AI request (non-blocking). On a result, dispatch by
+    /// feature and clear the pending state. Called once per loop iteration so the
+    /// result lands within the poll window.
     pub fn poll_ai(&mut self) {
         let Some(rx) = &self.ai_rx else { return };
         match rx.try_recv() {
-            Ok(result) => {
+            Ok(outcome) => {
                 self.ai_rx = None;
                 self.message = None;
-                self.apply_qa_result(result);
+                self.ai_panel = None; // clear any prior overlay before showing this result
+                match outcome {
+                    Outcome::Answer(r) => self.apply_qa_result(r),
+                    Outcome::Characters(r) => self.apply_characters(r),
+                }
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
@@ -382,11 +420,91 @@ impl App {
     /// Apply a completed Q&A result: open the answer overlay on success, or set a
     /// status message on error. Shared by the async poll path and tests (which
     /// drive a mock backend synchronously).
-    fn apply_qa_result(&mut self, result: Result<Response, ai::AiError>) {
+    fn apply_qa_result(&mut self, result: Result<ai::Response, ai::AiError>) {
         match result {
             Ok(resp) => self.ai_panel = Some(ai::answer_to_lines(&resp)),
             Err(e) => self.message = Some(format!("AI: {e}")),
         }
+    }
+
+    /// Apply extracted characters: enrich with local mention stats, write each
+    /// profile to `bible/characters/`, and either summarize (no conflicts) or
+    /// queue hand-edited files for review.
+    fn apply_characters(&mut self, result: Result<Vec<Character>, ai::AiError>) {
+        self.ai_panel = None; // a new result supersedes any prior overlay
+        let mut chars = match result {
+            Ok(c) => c,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        if chars.is_empty() {
+            self.message = Some("No characters found.".into());
+            return;
+        }
+        for c in &mut chars {
+            self.enrich_mentions(c);
+        }
+
+        let dir = self.project.root.join("bible").join("characters");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.message = Some(format!("bible: {e}"));
+            return;
+        }
+        let today = date::iso(date::today());
+        let mut written = 0;
+        let mut drift = 0;
+        let mut conflicts = Vec::new();
+        for c in &chars {
+            drift += c.drift.len();
+            let path = dir.join(format!("{}.md", character::slug(&c.name)));
+            let existing = std::fs::read_to_string(&path).ok();
+            let notes = character::extract_notes(existing.as_deref().unwrap_or(""));
+            let proposed = character::render_profile(c, &notes, &today);
+            match existing {
+                // Hand-edited generated block: don't clobber — queue for review.
+                Some(current) if character::is_hand_edited(&current) => {
+                    let diff = unified_diff(&current, &proposed);
+                    conflicts.push(BibleConflict { path, name: c.name.clone(), proposed, diff });
+                }
+                _ => {
+                    if std::fs::write(&path, &proposed).is_ok() {
+                        written += 1;
+                    }
+                }
+            }
+        }
+
+        if conflicts.is_empty() {
+            self.ai_panel = Some(character_summary_lines(chars.len(), written, drift));
+        } else {
+            let pending = conflicts.len();
+            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
+            self.message = Some(format!("Wrote {written} · {pending} need review"));
+        }
+    }
+
+    /// Count a character's name/alias mentions across the manuscript and record
+    /// the last chapter it appears in — local "screen time" / "last seen", free.
+    fn enrich_mentions(&self, c: &mut Character) {
+        let needles: Vec<String> = std::iter::once(&c.name)
+            .chain(&c.aliases)
+            .map(|n| n.to_lowercase())
+            .filter(|n| !n.is_empty())
+            .collect();
+        let mut total = 0;
+        let mut last = None;
+        for i in 0..self.chapter_count() {
+            let text = self.chapter_text(i).to_lowercase();
+            let count: usize = needles.iter().map(|n| text.matches(n.as_str()).count()).sum();
+            if count > 0 {
+                total += count;
+                last = self.project.chapter_title(i).map(str::to_string);
+            }
+        }
+        c.mentions = total;
+        c.last_chapter = last;
     }
 
     /// Whether an AI request is currently in flight (for the status indicator).
@@ -426,6 +544,7 @@ impl App {
             Mode::Prompt(_) => self.on_key_prompt(key),
             Mode::Nav { .. } => self.on_key_nav(key),
             Mode::EditMeta(_) => self.on_key_edit_meta(key),
+            Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -969,6 +1088,11 @@ impl App {
                 Ok(_) => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
                 Err(e) => self.message = Some(e.to_string()),
             },
+            // Build/update the character story bible (AI, opt-in).
+            (true, KeyCode::Char('b')) => match self.ai.check_ready() {
+                Ok(_) => self.analyze_characters(),
+                Err(e) => self.message = Some(e.to_string()),
+            },
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),
@@ -1025,29 +1149,40 @@ impl App {
     }
 
     fn on_key_edit_meta(&mut self, key: KeyEvent) {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match (ctrl, key.code) {
+        match (key.modifiers.contains(KeyModifiers::CONTROL), key.code) {
             (true, KeyCode::Char('s')) => self.commit_meta_edit(),
             (_, KeyCode::Esc) => self.cancel_meta_edit(),
+            _ => {
+                self.handle_text_edit_key(key);
+            }
+        }
+    }
 
-            (false, KeyCode::Char(c)) => self.edit_buffer_mut().insert_char(c),
-            (false, KeyCode::Enter) => self.edit_buffer_mut().insert_char('\n'),
-            (false, KeyCode::Backspace) => self.edit_buffer_mut().backspace(),
-            (false, KeyCode::Tab) => {
+    /// Apply a plain text-editing key (insert / delete / move) to the active edit
+    /// buffer; returns whether it was consumed. Shared by the metadata editor and
+    /// the bible-conflict editor, which add their own Ctrl-S / Esc on top.
+    fn handle_text_edit_key(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char(c) => self.edit_buffer_mut().insert_char(c),
+            KeyCode::Enter => self.edit_buffer_mut().insert_char('\n'),
+            KeyCode::Backspace => self.edit_buffer_mut().backspace(),
+            KeyCode::Tab => {
                 for _ in 0..4 {
                     self.edit_buffer_mut().insert_char(' ');
                 }
             }
-
-            (false, KeyCode::Left) => self.edit_buffer_mut().move_left(),
-            (false, KeyCode::Right) => self.edit_buffer_mut().move_right(),
-            (false, KeyCode::Up) => self.edit_buffer_mut().move_up(),
-            (false, KeyCode::Down) => self.edit_buffer_mut().move_down(),
-            (false, KeyCode::Home) => self.edit_buffer_mut().move_home(),
-            (false, KeyCode::End) => self.edit_buffer_mut().move_end(),
-
-            _ => {}
+            KeyCode::Left => self.edit_buffer_mut().move_left(),
+            KeyCode::Right => self.edit_buffer_mut().move_right(),
+            KeyCode::Up => self.edit_buffer_mut().move_up(),
+            KeyCode::Down => self.edit_buffer_mut().move_down(),
+            KeyCode::Home => self.edit_buffer_mut().move_home(),
+            KeyCode::End => self.edit_buffer_mut().move_end(),
+            _ => return false,
         }
+        true
     }
 
     /// Store the edited quotation, then chain to the single-line attribution
@@ -1095,6 +1230,110 @@ impl App {
         };
         self.mode = closed_mode(nav_return);
     }
+
+    // --- Story-bible conflict review --------------------------------------
+
+    fn on_key_bible_review(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let editing = matches!(&self.mode, Mode::BibleReview(r) if r.editing.is_some());
+
+        if editing {
+            // Editing the proposed version before saving (same text keys as
+            // EditMeta, with bible-specific Ctrl-S / Esc).
+            match (ctrl, key.code) {
+                (true, KeyCode::Char('s')) => self.save_bible_edit(),
+                (_, KeyCode::Esc) => {
+                    if let Mode::BibleReview(r) = &mut self.mode {
+                        r.editing = None; // back to the diff for this conflict
+                    }
+                }
+                _ => {
+                    self.handle_text_edit_key(key);
+                }
+            }
+            return;
+        }
+
+        // Diff view: choose how to resolve the front conflict.
+        match key.code {
+            KeyCode::Char('o') => {
+                if let Mode::BibleReview(r) = &self.mode {
+                    if let Some(front) = r.conflicts.first() {
+                        let _ = std::fs::write(&front.path, &front.proposed);
+                    }
+                }
+                self.advance_bible_review();
+            }
+            KeyCode::Char('k') => self.advance_bible_review(),
+            KeyCode::Char('e') => {
+                if let Mode::BibleReview(r) = &mut self.mode {
+                    if let Some(front) = r.conflicts.first() {
+                        let buf = Buffer::from_text(&front.proposed);
+                        r.editing = Some(buf);
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                self.mode = Mode::Insert;
+                self.message = Some("Review cancelled — kept your versions".into());
+            }
+            _ => {}
+        }
+    }
+
+    /// Persist the edited proposed version, then advance to the next conflict.
+    fn save_bible_edit(&mut self) {
+        if let Mode::BibleReview(r) = &mut self.mode {
+            if let (Some(buf), Some(front)) = (&r.editing, r.conflicts.first()) {
+                let _ = std::fs::write(&front.path, buf.text());
+            }
+            r.editing = None;
+        }
+        self.advance_bible_review();
+    }
+
+    /// Drop the resolved front conflict; close the review when the queue empties.
+    fn advance_bible_review(&mut self) {
+        if let Mode::BibleReview(r) = &mut self.mode {
+            if !r.conflicts.is_empty() {
+                r.conflicts.remove(0);
+            }
+            if !r.conflicts.is_empty() {
+                return;
+            }
+        }
+        self.mode = Mode::Insert;
+        self.message = Some("Bible review complete".into());
+    }
+}
+
+/// A unified line diff (current → proposed), each line signed `+`/`-`/` `.
+/// Computed once when a conflict is staged (not per frame).
+fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
+    TextDiff::from_lines(current, proposed)
+        .iter_all_changes()
+        .map(|change| {
+            let sign = match change.tag() {
+                ChangeTag::Delete => '-',
+                ChangeTag::Insert => '+',
+                ChangeTag::Equal => ' ',
+            };
+            format!("{sign}{}", change.value().trim_end_matches('\n'))
+        })
+        .collect()
+}
+
+/// The summary overlay shown after a clean character pass (no conflicts).
+fn character_summary_lines(total: usize, written: usize, drift: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::raw("Character analysis complete."),
+        Line::raw(""),
+        Line::raw(format!("Characters analyzed: {total}")),
+        Line::raw(format!("Profiles written:    {written}  (bible/characters/)")),
+        Line::raw(format!("Drift flags:         {drift}")),
+        Line::raw(""),
+        Line::raw("Open the bible files to review; the Notes section is yours to edit."),
+    ]
 }
 
 /// Where an overlay (prompt or metadata editor) returns when it closes without

@@ -75,6 +75,13 @@ fn build_body(req: &Request) -> Value {
     if let Some(system) = &req.system {
         body["system"] = json!(system);
     }
+    // Structured output: constrain the reply to the schema. The API then
+    // guarantees the first text block is schema-valid JSON.
+    if let Some(schema) = &req.json_schema {
+        body["output_config"] = json!({
+            "format": { "type": "json_schema", "schema": schema }
+        });
+    }
     body
 }
 
@@ -122,6 +129,7 @@ mod tests {
             user: "the question".into(),
             model: "claude-opus-4-8".into(),
             max_tokens: 1024,
+            json_schema: None,
         };
         let body = build_body(&req);
         assert_eq!(body["model"], "claude-opus-4-8");
@@ -132,6 +140,23 @@ mod tests {
         assert_eq!(content[1]["text"], "the question");
         // Only the manuscript block is cached, not the question.
         assert!(content[1].get("cache_control").is_none());
+        // No schema → no output_config.
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn build_body_emits_output_config_for_a_schema() {
+        let req = Request {
+            system: None,
+            cached_context: "m".into(),
+            user: "u".into(),
+            model: "claude-opus-4-8".into(),
+            max_tokens: 1024,
+            json_schema: Some(json!({ "type": "object" })),
+        };
+        let body = build_body(&req);
+        assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+        assert_eq!(body["output_config"]["format"]["schema"]["type"], "object");
     }
 
     #[test]
