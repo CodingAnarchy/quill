@@ -56,6 +56,13 @@ pub struct App {
     /// pre-computed rows, shown full-screen until any key dismisses it. Computed
     /// once on open so the per-chapter scan stays off the per-frame path.
     pub analysis: Option<Vec<Line<'static>>>,
+    /// First visible row of the open full-screen overlay (report / analysis /
+    /// AI answer) — the scroll offset, so a report taller than the terminal can
+    /// be read in full. Reset to 0 whenever an overlay opens.
+    pub overlay_scroll: u16,
+    /// Height of the terminal in rows, refreshed each frame by the renderer.
+    /// Lets the key handler clamp overlay scrolling to the content that exists.
+    pub viewport_height: u16,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.
@@ -102,6 +109,8 @@ impl App {
             outline_visible: false,
             report: None,
             analysis: None,
+            overlay_scroll: 0,
+            viewport_height: 0,
             added: 0,
             removed: 0,
             moved_to_unused: 0,
@@ -304,6 +313,50 @@ impl App {
         )
     }
 
+    /// The lines of whichever full-screen overlay is open (report / analysis / AI
+    /// answer), if any. The single accessor the scroll + close handling shares.
+    pub fn open_overlay(&self) -> Option<&[Line<'static>]> {
+        self.report.as_deref().or(self.analysis.as_deref()).or(self.ai_panel.as_deref())
+    }
+
+    /// The largest valid scroll offset for the open overlay: enough to bring its
+    /// last line into view, zero when it already fits (or none is open).
+    fn overlay_max_scroll(&self) -> u16 {
+        let Some(lines) = self.open_overlay() else { return 0 };
+        let viewport = self.viewport_height.saturating_sub(2); // top + bottom border
+        (lines.len() as u16).saturating_sub(viewport)
+    }
+
+    /// Close the open overlay and reset its scroll.
+    fn close_overlay(&mut self) {
+        self.report = None;
+        self.analysis = None;
+        self.ai_panel = None;
+        self.overlay_scroll = 0;
+    }
+
+    /// Handle a key while a full-screen overlay is open: scroll on the navigation
+    /// keys, close on anything else (so it stays "press a key to dismiss").
+    fn on_key_overlay(&mut self, key: KeyEvent) {
+        let max = self.overlay_max_scroll();
+        let page = self.viewport_height.saturating_sub(3).max(1); // keep a line of context
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let scroll = |cur: u16, delta: i32| {
+            (cur as i32 + delta).clamp(0, max as i32) as u16
+        };
+        match (ctrl, key.code) {
+            (false, KeyCode::Down | KeyCode::Char('j')) => self.overlay_scroll = scroll(self.overlay_scroll, 1),
+            (false, KeyCode::Up | KeyCode::Char('k')) => self.overlay_scroll = scroll(self.overlay_scroll, -1),
+            (false, KeyCode::PageDown | KeyCode::Char(' '))
+            | (true, KeyCode::Char('d')) => self.overlay_scroll = scroll(self.overlay_scroll, page as i32),
+            (false, KeyCode::PageUp | KeyCode::Char('b'))
+            | (true, KeyCode::Char('u')) => self.overlay_scroll = scroll(self.overlay_scroll, -(page as i32)),
+            (false, KeyCode::Home | KeyCode::Char('g')) => self.overlay_scroll = 0,
+            (false, KeyCode::End | KeyCode::Char('G')) => self.overlay_scroll = max,
+            _ => self.close_overlay(),
+        }
+    }
+
     /// The analysis report's rows (readability per chapter + overall), computed
     /// once when it's opened. Scans every chapter's prose (active chapter live,
     /// the rest from disk) — on demand, never per frame.
@@ -409,18 +462,11 @@ impl App {
         // A fresh keystroke clears any stale status message.
         self.message = None;
 
-        // The progress report and AI answer are read-only overlays: any key
-        // closes them.
-        if self.report.is_some() {
-            self.report = None;
-            return;
-        }
-        if self.analysis.is_some() {
-            self.analysis = None;
-            return;
-        }
-        if self.ai_panel.is_some() {
-            self.ai_panel = None;
+        // A full-screen overlay (progress report, analysis report, AI answer) is
+        // read-only and scrollable: navigation keys scroll it, any other key
+        // closes it.
+        if self.open_overlay().is_some() {
+            self.on_key_overlay(key);
             return;
         }
 
@@ -974,11 +1020,17 @@ impl App {
             (true, KeyCode::Char('o')) => {
                 self.outline_visible = !self.outline_visible;
             }
-            // Open the progress report (any key closes it).
-            (true, KeyCode::Char('r')) => self.report = Some(self.report_lines()),
-            // Open the local analysis report — readability metrics (any key
-            // closes it). Ctrl-t: "text" analysis.
-            (true, KeyCode::Char('t')) => self.analysis = Some(self.analysis_lines()),
+            // Open the progress report (scroll to read; any other key closes).
+            (true, KeyCode::Char('r')) => {
+                self.overlay_scroll = 0;
+                self.report = Some(self.report_lines());
+            }
+            // Open the local analysis report — editing metrics. Ctrl-t: "text"
+            // analysis. Scrollable (it can run past one screen); any other key closes.
+            (true, KeyCode::Char('t')) => {
+                self.overlay_scroll = 0;
+                self.analysis = Some(self.analysis_lines());
+            }
             // Open the AI command palette (opt-in). When AI isn't ready, explain
             // how to enable it rather than listing dead actions.
             (true, KeyCode::Char('a')) => match self.ai.check_ready() {

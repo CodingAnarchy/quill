@@ -1181,12 +1181,36 @@ fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
 }
 
 #[test]
-fn any_key_closes_the_analysis_report() {
+fn a_non_scroll_key_closes_the_analysis_report() {
     let (mut app, dir) = two_chapter_app("analysis-close");
+    app.viewport_height = 5;
     app.on_key(ctrl('t'));
-    assert!(app.analysis.is_some());
-    app.on_key(key(KeyCode::Esc));
-    assert!(app.analysis.is_none(), "any key dismisses the report");
+    app.on_key(key(KeyCode::Down)); // scroll a bit first
+    assert!(app.overlay_scroll > 0);
+    app.on_key(key(KeyCode::Char('x'))); // not a scroll key → close
+    assert!(app.analysis.is_none(), "a non-scroll key dismisses the report");
+    assert_eq!(app.overlay_scroll, 0, "scroll resets on close");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_analysis_report_scrolls_and_clamps() {
+    let (mut app, dir) = two_chapter_app("analysis-scroll");
+    app.viewport_height = 5; // tiny screen → 3-row interior
+    app.on_key(ctrl('t'));
+    let len = app.analysis.as_ref().unwrap().len() as u16;
+    let max = len - 3; // content rows beyond the interior
+    assert!(max > 0, "report is taller than the viewport");
+
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(app.overlay_scroll, 1, "Down scrolls one row");
+    app.on_key(key(KeyCode::End));
+    assert_eq!(app.overlay_scroll, max, "End jumps to the bottom");
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(app.overlay_scroll, max, "can't scroll past the end");
+    assert!(app.analysis.is_some(), "scroll keys don't close the overlay");
+    app.on_key(key(KeyCode::Home));
+    assert_eq!(app.overlay_scroll, 0, "Home jumps back to the top");
     fs::remove_dir_all(&dir).ok();
 }
 

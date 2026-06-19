@@ -35,17 +35,18 @@ struct StatusBar<'a>(&'a App);
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // The progress report and AI answer are full-screen read-only overlays.
+    // The progress report and AI answer are full-screen read-only overlays,
+    // scrollable when they run past the screen (Ctrl-r / Ctrl-t / AI answers).
     if let Some(lines) = &app.report {
-        draw_overlay_report(frame, area, &app.project.manifest.title, "progress", lines);
+        draw_overlay_report(frame, area, &app.project.manifest.title, "progress", lines, app.overlay_scroll);
         return;
     }
     if let Some(lines) = &app.analysis {
-        draw_overlay_report(frame, area, &app.project.manifest.title, "analysis", lines);
+        draw_overlay_report(frame, area, &app.project.manifest.title, "analysis", lines, app.overlay_scroll);
         return;
     }
     if let Some(lines) = &app.ai_panel {
-        draw_ai_panel(frame, area, lines);
+        draw_ai_panel(frame, area, lines, app.overlay_scroll);
         return;
     }
     if let Mode::BibleReview(review) = &app.mode {
@@ -84,12 +85,25 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 /// Render a full-screen read-only report (progress, analysis, …) in a bordered
-/// box. `kind` names the report in the title bar.
-fn draw_overlay_report(frame: &mut Frame, area: Rect, title: &str, kind: &str, lines: &[Line<'static>]) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {title} — {kind} (any key to close) "));
-    frame.render_widget(Paragraph::new(lines.to_vec()).block(block), area);
+/// box. `kind` names the report in the title bar; `scroll` is the first visible
+/// row (clamped to the content), so a report taller than the box can be scrolled.
+fn draw_overlay_report(frame: &mut Frame, area: Rect, title: &str, kind: &str, lines: &[Line<'static>], scroll: u16) {
+    let scroll = clamp_scroll(scroll, lines.len(), area.height);
+    let hint = if scroll_needed(lines.len(), area.height) { "↑↓ scroll · any other key to close" } else { "any key to close" };
+    let block = Block::default().borders(Borders::ALL).title(format!(" {title} — {kind} ({hint}) "));
+    frame.render_widget(Paragraph::new(lines.to_vec()).block(block).scroll((scroll, 0)), area);
+}
+
+/// Clamp a requested scroll offset so the last content line stays in view (the
+/// box's interior is its height minus the two borders).
+fn clamp_scroll(scroll: u16, lines: usize, height: u16) -> u16 {
+    let max = (lines as u16).saturating_sub(height.saturating_sub(2));
+    scroll.min(max)
+}
+
+/// Whether the content is taller than the box interior (so a scroll hint helps).
+fn scroll_needed(lines: usize, height: u16) -> bool {
+    lines as u16 > height.saturating_sub(2)
 }
 
 /// Render the story-bible conflict review: a diff of the front conflict (or the
@@ -211,14 +225,15 @@ fn draw_list_overlay(
 
 /// Render an AI result overlay (a Q&A answer or a pass summary) full-screen in a
 /// bordered box. Wraps, since the content is free-form rather than pre-sized rows.
-fn draw_ai_panel(frame: &mut Frame, area: Rect, lines: &[Line<'static>]) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" AI — Claude (any key to close) ");
+fn draw_ai_panel(frame: &mut Frame, area: Rect, lines: &[Line<'static>], scroll: u16) {
+    let scroll = clamp_scroll(scroll, lines.len(), area.height);
+    let hint = if scroll_needed(lines.len(), area.height) { "↑↓ scroll · any other key to close" } else { "any key to close" };
+    let block = Block::default().borders(Borders::ALL).title(format!(" AI — Claude ({hint}) "));
     frame.render_widget(
         Paragraph::new(lines.to_vec())
             .block(block)
-            .wrap(Wrap { trim: false }),
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
         area,
     );
 }
