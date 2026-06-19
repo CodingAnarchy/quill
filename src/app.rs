@@ -224,13 +224,12 @@ impl App {
             };
             self.added += add;
             self.removed += rem;
+            // part_of() only yields indices that exist, and the per-part vecs are
+            // sized to the part count, so direct indexing is safe — and the global
+            // counters stay equal to the sum of the parts by construction.
             if let Some(p) = self.project.manifest.part_of(i) {
-                if let Some(pa) = self.part_added.get_mut(p) {
-                    *pa += add;
-                }
-                if let Some(pr) = self.part_removed.get_mut(p) {
-                    *pr += rem;
-                }
+                self.part_added[p] += add;
+                self.part_removed[p] += rem;
             }
             self.baselines.insert(file.to_string(), words);
         }
@@ -341,11 +340,12 @@ impl App {
         parts
             .iter()
             .enumerate()
+            // `words` and the per-part counters are all sized to the parts list.
             .map(|(i, p)| PartDelta {
                 name: p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1)),
-                words: words.get(i).copied().unwrap_or(0),
-                added: self.part_added.get(i).copied().unwrap_or(0),
-                removed: self.part_removed.get(i).copied().unwrap_or(0),
+                words: words[i],
+                added: self.part_added[i],
+                removed: self.part_removed[i],
             })
             .collect()
     }
