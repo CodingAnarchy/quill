@@ -133,7 +133,8 @@ pub fn gazetteer(root: &Path) -> Vec<String> {
 }
 
 /// The character names from `bible/characters/*.md` front matter (empty when
-/// absent), sorted and de-duplicated.
+/// absent), sorted for a deterministic order. De-duplication is the caller's job
+/// (e.g. `known_entities` dedups the combined gazetteer + names).
 pub fn character_names(root: &Path) -> Vec<String> {
     let dir = root.join("bible").join("characters");
     let mut names: Vec<String> = std::fs::read_dir(dir)
@@ -144,7 +145,6 @@ pub fn character_names(root: &Path) -> Vec<String> {
         .filter_map(|text| front_field(&text, "name"))
         .collect();
     names.sort();
-    names.dedup();
     names
 }
 
