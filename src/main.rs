@@ -7,6 +7,7 @@ mod app;
 mod buffer;
 mod date;
 mod frontmatter;
+mod history;
 mod manuscript;
 mod project;
 mod report;
@@ -46,6 +47,8 @@ fn main() -> io::Result<()> {
     };
     let buffer = Buffer::from_path(project.active_path())?;
     let mut app = App::new(buffer, project);
+    // Resume today's word-delta counters from the history log.
+    app.load_history();
 
     // Drop restores the terminal on a normal or `?`-error exit, but the release
     // `panic = "abort"` profile never unwinds — so install a panic hook too.
@@ -54,7 +57,10 @@ fn main() -> io::Result<()> {
     // `Tui` restores the terminal when dropped, so any return from `run` —
     // including a `?` error — leaves the terminal usable.
     let mut tui = Tui::new()?;
-    run(&mut tui, &mut app)
+    let result = run(&mut tui, &mut app);
+    // Record today's momentum so it survives the next reopen.
+    app.persist_snapshot();
+    result
 }
 
 /// Undo the terminal setup from [`Tui::new`]: leave raw mode and the alternate
@@ -120,9 +126,9 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
             while event::poll(Duration::ZERO)? {
                 app.handle_event(event::read()?);
             }
-            // Input has gone idle: reparse once to refresh highlighting. Kept
-            // off the per-keystroke path so typing stays instant.
-            app.refresh_syntax();
+            // Input has gone idle: reparse for highlighting and tally the day's
+            // word delta. Kept off the per-keystroke path so typing stays instant.
+            app.on_idle();
         }
     }
     Ok(())
