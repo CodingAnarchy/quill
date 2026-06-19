@@ -11,6 +11,7 @@
 pub mod bible;
 pub mod character;
 pub mod continuity;
+pub mod naming;
 pub mod scaffold;
 pub mod setting;
 mod claude;
@@ -18,6 +19,7 @@ mod claude;
 pub use character::Character;
 pub use claude::ClaudeBackend;
 pub use continuity::Continuity;
+pub use naming::Naming;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
 
@@ -67,6 +69,8 @@ pub enum Outcome {
     Setting(Result<Setting, AiError>),
     /// Scaffolding: beat outline + structural gaps (#76).
     Scaffold(Result<Scaffold, AiError>),
+    /// Naming & term consistency (#78).
+    Naming(Result<Naming, AiError>),
 }
 
 /// Token usage reported by the backend (zeros when unknown).

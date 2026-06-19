@@ -1,0 +1,128 @@
+//! Naming & term consistency: a cheap, high-volume pass that scans the
+//! manuscript for spelling variants of the same proper noun or invented term
+//! ("Mara"/"Marah", "lightsteel"/"light-steel"). It's checked against the known
+//! entity list (the setting gazetteer + character names) when available, and
+//! reported as reviewable findings — never written to the prose. Runs on a
+//! Haiku-tier model by design. See `docs/ai-features.md`.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use super::Request;
+use super::AiError;
+
+/// The model for this pass — cheap and high-volume by design.
+const MODEL: &str = "claude-haiku-4-5";
+
+/// The result of a naming pass: one finding per inconsistent name/term cluster.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Naming {
+    #[serde(default)]
+    pub findings: Vec<NameFinding>,
+}
+
+/// One name/term spelled inconsistently across the manuscript.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct NameFinding {
+    /// The most likely intended spelling.
+    pub name: String,
+    /// The other spellings found.
+    #[serde(default)]
+    pub variants: Vec<String>,
+    /// Chapters where the variants appear.
+    #[serde(default)]
+    pub chapters: Vec<String>,
+}
+
+const SYSTEM: &str = "You are a copy editor checking name and term consistency. \
+Scan the manuscript for spelling variants of the same proper noun or invented \
+term — e.g. \"Mara\"/\"Marah\", \"lightsteel\"/\"light-steel\". For each genuine \
+inconsistency, report the most likely intended spelling, the variant spellings \
+found, and the chapters (by title) where the variants appear. Report only true \
+inconsistencies of one name/term — never two distinct names. Do not rewrite or \
+suggest prose.";
+
+/// The JSON Schema for a naming reply.
+pub fn schema() -> Value {
+    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    json!({
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" },
+                        "variants": strings,
+                        "chapters": strings
+                    },
+                    "required": ["name", "variants", "chapters"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["findings"],
+        "additionalProperties": false
+    })
+}
+
+/// Build the naming request: the manuscript as cached context, the known entity
+/// list (if any) as focus, schema attached. Always runs on the Haiku-tier model.
+pub fn build_request(manuscript: String, entities: &[String]) -> Request {
+    let user = if entities.is_empty() {
+        "Find name/term spelling inconsistencies as specified.".to_string()
+    } else {
+        format!(
+            "Known names and terms to check first (also catch any others):\n{}\n\n\
+             Find name/term spelling inconsistencies as specified.",
+            entities.join(", ")
+        )
+    };
+    Request {
+        system: Some(SYSTEM.to_string()),
+        cached_context: manuscript,
+        user,
+        model: MODEL.to_string(),
+        max_tokens: 4096,
+        json_schema: Some(schema()),
+    }
+}
+
+/// Parse a structured naming reply.
+pub fn parse(text: &str) -> Result<Naming, AiError> {
+    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad naming JSON: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_reads_findings() {
+        let json = r#"{"findings":[{"name":"Mara","variants":["Marah"],"chapters":["Two"]}]}"#;
+        let n = parse(json).unwrap();
+        assert_eq!(n.findings.len(), 1);
+        assert_eq!(n.findings[0].name, "Mara");
+        assert_eq!(n.findings[0].variants, vec!["Marah"]);
+    }
+
+    #[test]
+    fn parse_rejects_bad_json() {
+        assert!(matches!(parse("nope"), Err(AiError::Api(_))));
+    }
+
+    #[test]
+    fn request_uses_haiku_and_lists_known_entities() {
+        let req = build_request("the manuscript".into(), &["Mara".into(), "Aldermoor".into()]);
+        assert_eq!(req.model, "claude-haiku-4-5");
+        assert!(req.user.contains("Mara, Aldermoor"));
+        assert!(req.json_schema.is_some());
+    }
+
+    #[test]
+    fn request_without_entities_omits_the_list() {
+        let req = build_request("m".into(), &[]);
+        assert!(!req.user.contains("Known names"));
+    }
+}
