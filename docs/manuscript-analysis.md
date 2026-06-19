@@ -13,8 +13,8 @@ disk), so typing stays instant on a large manuscript (the perf guards in
 `CLAUDE.md` apply).
 
 This document specifies each metric and its formula. The slices so far are
-readability (#67) and sentence-length statistics (#68); later tickets in the epic
-(#66) add paragraph statistics, chapter-length distribution, style flags,
+readability (#67), sentence-length statistics (#68), and chapter-length / pacing
+(#69); later tickets in the epic (#66) add paragraph statistics, style flags,
 dialogue balance, and vocabulary.
 
 ## Shared text primitives
@@ -153,6 +153,37 @@ run_on_threshold = 40   # words; default 40
 ```
 
 Set it to match your genre — terse thrillers run shorter than literary fiction.
+
+## Chapter length & pacing
+
+Wildly uneven chapter lengths often signal pacing problems — a scene that should
+be split, or two that should be merged. This section makes the shape of the book
+visible.
+
+Each chapter is one row: its word count, a bar scaled to the longest chapter, and
+a `⚠ short` / `⚠ long` flag for outliers. When the book defines **parts**
+(`[[parts]]` in `book.toml`), chapters are grouped under their part with a
+subtotal, so act-level balance is visible too.
+
+Unlike the readability and sentence sections, the pacing section uses the
+**rolled-up chapter word count** — the same number shown in the chapter list and
+the progress report (headings included) — because that is the size the author
+thinks in.
+
+A summary line gives the chapter count, **mean**, **median**, **spread**
+(standard deviation), and **range** (shortest–longest).
+
+### Outlier flags
+
+A chapter is flagged relative to the rest of the book:
+
+- **short** — fewer than **half** the median chapter's words.
+- **long** — more than **double** the median chapter's words.
+
+The fences are median-relative on purpose: a single very long or very short
+chapter would drag a mean- or quartile-based threshold toward itself and hide the
+very outlier it should catch, whereas the median barely moves. Below four
+chapters there is no meaningful "rest" to compare against, so nothing is flagged.
 
 ## Reading the report
 
