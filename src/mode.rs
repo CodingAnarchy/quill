@@ -69,6 +69,10 @@ pub enum Mode {
     /// The AI command palette: a navigable list of AI actions, one of which runs
     /// on Enter. The single entry point for the AI features.
     Palette(Box<Palette>),
+    /// Find / find-and-replace over the active chapter (#144): a query line at
+    /// the bottom, matches highlighted in the prose, navigated with n/N. Boxed
+    /// (carries the query, replacement, and the match list).
+    Search(Box<Search>),
 }
 
 /// State for an open [`Mode::Palette`]: the available AI actions and the selected
@@ -194,6 +198,48 @@ pub struct PromptState {
     /// Where to return when the prompt closes: `Some(selected)` back to the
     /// chapter browser, `None` to insert mode (e.g. the quit prompt).
     pub(crate) nav_return: Option<usize>,
+}
+
+/// State for an open [`Mode::Search`] — find or find-and-replace (#144), scoped
+/// to the single active chapter. `query`/`replacement` are public for the status
+/// bar; the match list and indices are the handler's business.
+pub struct Search {
+    /// What the user is doing right now.
+    pub(crate) stage: SearchStage,
+    /// The text being searched for.
+    pub query: String,
+    /// The replacement text (replace flow only).
+    pub replacement: String,
+    /// Byte ranges of the current matches in the active buffer, in document
+    /// order. Recomputed whenever the query or the document changes.
+    pub(crate) matches: Vec<(usize, usize)>,
+    /// Index into `matches` of the current (strongly highlighted) match.
+    pub(crate) current: usize,
+    /// Where the search started, so incremental typing jumps to the match
+    /// nearest the original cursor rather than chasing each partial query.
+    pub(crate) origin_byte: usize,
+    /// How many replacements have been made, reported when the flow ends.
+    pub(crate) replaced: usize,
+}
+
+impl Search {
+    /// The current match range, if any.
+    pub(crate) fn current_match(&self) -> Option<(usize, usize)> {
+        self.matches.get(self.current).copied()
+    }
+}
+
+/// Which step of the find / replace interaction is active.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchStage {
+    /// Typing the search query (find or replace). Matches update as you type.
+    Query,
+    /// Find: query entered, stepping through matches with n / N.
+    Navigate,
+    /// Replace: typing the replacement text.
+    Replacement,
+    /// Replace: stepping through matches, choosing replace / skip / all.
+    Step,
 }
 
 /// What a [`Mode::Prompt`] resolves to when confirmed. `at` is the chapter index

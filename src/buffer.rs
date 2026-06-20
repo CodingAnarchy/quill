@@ -213,6 +213,32 @@ impl Buffer {
         self.line(idx).graphemes(true).count()
     }
 
+    /// The [`Cursor`] (line, grapheme-column) for an absolute byte offset — the
+    /// inverse of [`cursor_byte`], used to jump to a search match (#144).
+    pub fn cursor_at_byte(&self, byte: usize) -> Cursor {
+        let byte = byte.min(self.rope.len_bytes());
+        let line = self.rope.byte_to_line(byte);
+        let line_start_byte = self.rope.line_to_byte(line);
+        let line_text = self.line(line);
+        // Graphemes from the line's start up to the offset within the line.
+        let within = (byte - line_start_byte).min(line_text.len());
+        let col = line_text[..within].graphemes(true).count();
+        Cursor { line, col }
+    }
+
+    /// Replace the byte range `[start, end)` with `text`, then put the cursor just
+    /// after the inserted text (#144 find-and-replace). Goes through the same edit
+    /// path as typing, so it is captured by undo and the incremental parse.
+    pub fn replace_byte_range(&mut self, start: usize, end: usize, text: &str) {
+        let start_char = self.rope.byte_to_char(start);
+        let end_char = self.rope.byte_to_char(end);
+        self.edit_remove(start_char, end_char);
+        self.edit_insert(start_char, text);
+        self.cursor = self.cursor_at_byte(start + text.len());
+        self.goal_col = None;
+        self.dirty = true;
+    }
+
     /// Convert the cursor's (line, col) into an absolute char offset in the rope.
     fn cursor_char_idx(&self) -> usize {
         let line_start = self.rope.line_to_char(self.cursor.line.min(self.rope.len_lines().saturating_sub(1)));

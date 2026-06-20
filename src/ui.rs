@@ -11,9 +11,12 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette};
+use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, Search, SearchStage};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
+
+/// An absolute byte range `[start, end)` in the buffer — a search match (#144).
+type ByteRange = (usize, usize);
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
 /// itself into a given area. A custom trait rather than ratatui's `Widget`
@@ -430,6 +433,13 @@ impl Pane for Editor<'_> {
         let cursor_byte = buffer.cursor_byte();
         let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
 
+        // Find/replace highlighting (#144): every match gets a dim background, the
+        // current one a bright background. Empty when not searching.
+        let (search_matches, current_match): (&[ByteRange], Option<ByteRange>) = match &app.mode {
+            Mode::Search(s) => (&s.matches, s.current_match()),
+            _ => (&[], None),
+        };
+
         // Display-only header blocks drawn above each chapter's body: a chapter
         // divider (continuous view), the book epigraph (above chapter 0), and the
         // chapter's own epigraph. Keyed by the buffer line they precede; injected
@@ -459,6 +469,8 @@ impl Pane for Editor<'_> {
                 buffer.line_start_byte(i),
                 &buffer.line(i),
                 &conceal,
+                search_matches,
+                current_match,
             ));
             i += 1;
         }
@@ -582,6 +594,8 @@ fn styled_line(
     line_start: usize,
     text: &str,
     conceal: &[(usize, usize)],
+    matches: &[ByteRange],
+    current: Option<ByteRange>,
 ) -> Line<'static> {
     if text.is_empty() {
         return Line::raw("");
@@ -590,7 +604,8 @@ fn styled_line(
     let line_end = line_start + text.len();
     let hls: Vec<Highlight> = syntax.highlights_in(line_start, line_end).copied().collect();
     let concealed_here = conceal.iter().any(|&(s, e)| s < line_end && e > line_start);
-    if hls.is_empty() && !concealed_here {
+    let match_here = matches.iter().any(|&(s, e)| s < line_end && e > line_start);
+    if hls.is_empty() && !concealed_here && !match_here {
         return Line::raw(text.to_string());
     }
 
@@ -604,7 +619,7 @@ fn styled_line(
         if is_concealed(abs, conceal) {
             continue;
         }
-        let style = style_at(&hls, abs);
+        let style = search_style(style_at(&hls, abs), abs, matches, current);
         if !run.is_empty() && style != run_style {
             spans.push(Span::styled(std::mem::take(&mut run), run_style));
         }
@@ -635,6 +650,46 @@ fn style_at(hls: &[Highlight], byte: usize) -> Style {
 
 fn is_concealed(byte: usize, conceal: &[(usize, usize)]) -> bool {
     conceal.iter().any(|&(s, e)| byte >= s && byte < e)
+}
+
+/// The status-bar line for the find/replace mode (#144): the query, a match
+/// count, and the keys available at the current step.
+fn search_status(s: &Search) -> String {
+    let count = if s.matches.is_empty() {
+        if s.query.is_empty() { String::new() } else { "  no matches".to_string() }
+    } else {
+        format!("  {}/{}", s.current + 1, s.matches.len())
+    };
+    match s.stage {
+        SearchStage::Query => format!(" Find: {}{count}", s.query),
+        SearchStage::Navigate => {
+            format!(" Find: {}{count}  · n next · N prev · r replace · Esc done", s.query)
+        }
+        SearchStage::Replacement => format!(" Replace '{}' with: {}", s.query, s.replacement),
+        SearchStage::Step => format!(
+            " Replace '{}' → '{}'?{count}  · y · n skip · a all · Esc done ({} done)",
+            s.query, s.replacement, s.replaced
+        ),
+    }
+}
+
+/// Layer search highlighting onto a character's base style: the current match
+/// gets a bright background, any other match a dim one (#144).
+fn search_style(
+    base: Style,
+    byte: usize,
+    matches: &[ByteRange],
+    current: Option<ByteRange>,
+) -> Style {
+    if let Some((s, e)) = current {
+        if byte >= s && byte < e {
+            return base.bg(Color::Yellow).fg(Color::Black);
+        }
+    }
+    if matches.iter().any(|&(s, e)| byte >= s && byte < e) {
+        return base.bg(Color::DarkGray);
+    }
+    base
 }
 
 /// Visible cell width of the characters before `cursor_byte` on a line, skipping
@@ -673,6 +728,15 @@ impl Pane for StatusBar<'_> {
                 Span::styled(prompt_state.label.as_str(), style),
                 Span::styled(prompt_state.input.as_str(), style),
             ]));
+            frame.render_widget(prompt, area);
+            return;
+        }
+
+        // Find / replace (#144): the query line plus a match count or the
+        // available actions for the current step.
+        if let Mode::Search(s) = &app.mode {
+            let style = Style::default().fg(Color::Black).bg(Color::Yellow);
+            let prompt = Paragraph::new(Line::from(Span::styled(search_status(s), style)));
             frame.render_widget(prompt, area);
             return;
         }

@@ -75,6 +75,7 @@ byte-for-byte.
 | Arrows         | move cursor                     |
 | Home / End     | start / end of line             |
 | Ctrl-Z / Ctrl-Y| undo / redo                     |
+| Ctrl-F         | find (then `r` to replace)      |
 | Ctrl-S         | save                            |
 | Ctrl-Q         | quit (prompts if unsaved)       |
 | Ctrl-O         | toggle the chapter pane         |
@@ -90,6 +91,12 @@ In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 character, **g** epigraph (quotation, then attribution). Book/series metadata
 (shown in the pane header): **t** book title, **b** subtitle, **w** author,
 **e** series, **G** book epigraph.
+
+In find (Ctrl-F): type to search the current chapter (case-insensitive,
+matches highlighted), **n / N** jump to the next / previous match, **r** start
+replacing the query — type the replacement, then **y** replace this match,
+**n** skip, **a** replace all, **Esc** finish. Find & replace is scoped to the
+active chapter.
 
 ## Layout
 
@@ -149,7 +156,6 @@ read/write a human-readable **story bible** kept in the project.
 
 - Word-wrap soft-wrapped paragraphs to the focus column
 - Per-session and daily word-count goals (per chapter / part / book / project)
-- Find & replace
 
 ### Vim-style keybindings & modes
 
