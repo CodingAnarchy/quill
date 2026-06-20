@@ -415,7 +415,7 @@ const FILTER_WORDS: &[&str] = &[
     "see", "saw", "seen", "look", "looked", "watch", "watched", "hear", "heard",
     "feel", "felt", "notice", "noticed", "wonder", "wondered", "realize", "realized",
     "think", "thought", "know", "knew", "seem", "seemed", "decide", "decided",
-    "remember", "remembered", "wonder", "believe", "believed", "sense", "sensed",
+    "remember", "remembered", "believe", "believed", "sense", "sensed",
 ];
 
 /// Common `-ly` words that aren't manner adverbs, so they don't inflate the
@@ -428,7 +428,8 @@ const NON_ADVERB_LY: &[&str] = &[
 ];
 
 /// Frequent function words excluded from the "most-used words" list (so the list
-/// surfaces an author's content tics, not "the"/"and").
+/// surfaces an author's content tics, not "the"/"and"). Defaults baked in for
+/// now; a per-project override could join `run_on_threshold` later.
 const STOPWORDS: &[&str] = &[
     "the", "a", "an", "and", "or", "but", "if", "of", "at", "by", "for", "with",
     "about", "to", "from", "in", "on", "into", "over", "after", "before", "as",
@@ -436,11 +437,10 @@ const STOPWORDS: &[&str] = &[
     "have", "has", "had", "having", "i", "you", "he", "she", "it", "we", "they",
     "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
     "this", "that", "these", "those", "there", "here", "then", "than", "so", "not",
-    "no", "yes", "up", "down", "out", "off", "all", "any", "some", "no", "what",
+    "no", "yes", "up", "down", "out", "off", "all", "any", "some", "what",
     "which", "who", "whom", "when", "where", "why", "how", "would", "could",
     "should", "will", "can", "may", "might", "must", "shall", "just", "very",
-    "too", "more", "most", "now", "back", "him", "got", "get", "one", "like",
-    "said", "her", "she", "his",
+    "too", "more", "most", "now", "back", "got", "get", "one", "like", "said",
 ];
 
 /// Frequency-based style flags for a span of prose, in raw counts (densities are

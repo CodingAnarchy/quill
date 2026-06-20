@@ -384,8 +384,12 @@ impl App {
         }
         let longest = longest.into_vec();
         let parts = self.analysis_parts();
-        let top_words = analysis::top_counts(&word_counts, 12, 1);
-        let top_phrases = analysis::top_counts(&phrase_counts, 8, 3); // phrases recurring 3+ times
+        // Style-flag list sizes / cutoffs (whole-manuscript signals).
+        const TOP_WORDS: usize = 12;
+        const TOP_PHRASES: usize = 8;
+        const PHRASE_MIN: usize = 3; // a phrase must recur at least this often to list
+        let top_words = analysis::top_counts(&word_counts, TOP_WORDS, 1);
+        let top_phrases = analysis::top_counts(&phrase_counts, TOP_PHRASES, PHRASE_MIN);
         let report = analysis::Report {
             title: &self.project.manifest.title,
             chapters: &chapters,
