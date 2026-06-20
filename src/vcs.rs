@@ -41,6 +41,49 @@ pub fn init(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// One commit for the history view (#133): short id, first line of the message,
+/// and the date it was made (in the commit's recorded timezone).
+pub struct CommitMeta {
+    pub id: String,
+    pub summary: String,
+    pub when: String,
+}
+
+/// The most recent commits, newest first (up to `limit`). Empty for a repository
+/// with no commits yet.
+pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitMeta>, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let mut walk = repo.revwalk().map_err(|e| e.to_string())?;
+    if walk.push_head().is_err() {
+        return Ok(Vec::new()); // unborn HEAD — no commits yet
+    }
+    walk.set_sorting(git2::Sort::TIME).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for oid in walk.take(limit) {
+        let oid = oid.map_err(|e| e.to_string())?;
+        let commit = repo.find_commit(oid).map_err(|e| e.to_string())?;
+        out.push(CommitMeta {
+            id: oid.to_string().chars().take(7).collect(),
+            summary: commit.summary().unwrap_or("(no message)").to_string(),
+            when: format_date(commit.time()),
+        });
+    }
+    Ok(out)
+}
+
+/// Format a commit's time as `YYYY-MM-DD` in the timezone it was committed in.
+fn format_date(t: git2::Time) -> String {
+    let offset = time::UtcOffset::from_whole_seconds(t.offset_minutes() * 60)
+        .unwrap_or(time::UtcOffset::UTC);
+    match time::OffsetDateTime::from_unix_timestamp(t.seconds()) {
+        Ok(dt) => {
+            let (y, m, d) = dt.to_offset(offset).to_calendar_date();
+            format!("{y:04}-{:02}-{d:02}", u8::from(m))
+        }
+        Err(_) => "????-??-??".to_string(),
+    }
+}
+
 /// The working-tree status: which tracked-or-untracked (non-ignored) files differ
 /// from the last commit. The basis for the uncommitted-changes indicator (#132),
 /// and the per-file change list the diff/restore (#135) and AI incremental
@@ -146,6 +189,32 @@ mod tests {
         // A change → a new commit.
         fs::write(dir.join("one.md"), "# One\n\nThe night was long.\n").unwrap();
         assert!(commit(&dir, "edit").unwrap().is_some());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn log_lists_commits_newest_first() {
+        let dir = temp_dir("log");
+        init(&dir).unwrap();
+        fs::write(dir.join("a.md"), "1\n").unwrap();
+        commit(&dir, "first").unwrap();
+        fs::write(dir.join("a.md"), "2\n").unwrap();
+        commit(&dir, "second").unwrap();
+
+        let entries = log(&dir, 10).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].summary, "second"); // newest first
+        assert_eq!(entries[1].summary, "first");
+        assert_eq!(entries[0].when.len(), 10, "YYYY-MM-DD"); // "{}", entries[0].when
+        assert_eq!(entries[0].id.len(), 7, "short id");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn log_is_empty_before_any_commit() {
+        let dir = temp_dir("log-empty");
+        init(&dir).unwrap();
+        assert!(log(&dir, 10).unwrap().is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 

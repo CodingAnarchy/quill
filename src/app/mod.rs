@@ -348,6 +348,18 @@ impl App {
         self.open_prompt(Pending::Commit, "Commit message: ", "", None);
     }
 
+    /// The commit-history rows for the read-only overlay (#133), newest first.
+    fn vc_log_lines(&self) -> Vec<Line<'static>> {
+        match crate::vcs::log(&self.project.root, 200) {
+            Ok(commits) if commits.is_empty() => vec![Line::raw("No commits yet.")],
+            Ok(commits) => commits
+                .iter()
+                .map(|c| Line::raw(format!("{}  {}  {}", c.when, c.id, c.summary)))
+                .collect(),
+            Err(e) => vec![Line::raw(format!("Could not read history: {e}"))],
+        }
+    }
+
     /// Commit the staged project with `message` and report the result.
     fn commit(&mut self, message: &str) {
         self.message = Some(match crate::vcs::commit(&self.project.root, message) {
@@ -1122,6 +1134,14 @@ impl App {
             (true, KeyCode::Char('v')) => self.init_version_control(),
             // Commit a snapshot of the project (#131). Ctrl-k: "checkpoint".
             (true, KeyCode::Char('k')) => self.start_commit(),
+            // View commit history (#133), a read-only scrollable overlay.
+            (true, KeyCode::Char('y')) => {
+                if self.under_vc {
+                    self.overlay = Some(Overlay::report("history", self.vc_log_lines()));
+                } else {
+                    self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+                }
+            }
             // Open the progress report (scroll to read; any other key closes).
             (true, KeyCode::Char('r')) => {
                 self.overlay = Some(Overlay::report("progress", self.report_lines()));
