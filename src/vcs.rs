@@ -8,7 +8,7 @@
 //! the later tickets through this same module.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Editor state and scratch that should never be committed — Quill's own
 /// metadata and OS cruft. Everything else (chapter `.md` files, `book.toml`, the
@@ -39,6 +39,36 @@ pub fn init(root: &Path) -> Result<(), String> {
         fs::write(&gitignore, GITIGNORE).map_err(|e| format!("write .gitignore: {e}"))?;
     }
     Ok(())
+}
+
+/// The working-tree status: which tracked-or-untracked (non-ignored) files differ
+/// from the last commit. The basis for the uncommitted-changes indicator (#132),
+/// and the per-file change list the diff/restore (#135) and AI incremental
+/// scoping (#90) reuse.
+pub struct Status {
+    pub changed: Vec<PathBuf>,
+}
+
+impl Status {
+    pub fn count(&self) -> usize {
+        self.changed.len()
+    }
+}
+
+/// Compute the working-tree status for `root` — the non-ignored paths that differ
+/// from `HEAD` (added, modified, deleted, or untracked). Stat-based via libgit2,
+/// so it's cheap enough to refresh on idle, not per keystroke.
+pub fn status(root: &Path) -> Result<Status, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
+    let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
+    let changed = statuses
+        .iter()
+        .filter(|e| !e.status().is_ignored())
+        .filter_map(|e| e.path().map(PathBuf::from))
+        .collect();
+    Ok(Status { changed })
 }
 
 /// Stage the whole project and commit it with `message`. Returns the new commit's
