@@ -293,23 +293,17 @@ pub struct SentenceStats {
 /// is the length above which a sentence is flagged as a possible run-on. All
 /// zeros for an empty set.
 pub fn sentence_stats(lengths: &[usize], run_on_threshold: usize) -> SentenceStats {
-    if lengths.is_empty() {
-        return SentenceStats::default();
-    }
-    let count = lengths.len();
-    let sum: usize = lengths.iter().sum();
-    let mut sorted = lengths.to_vec();
-    sorted.sort_unstable();
+    let s = spread(lengths);
     let mut histogram = [0usize; LENGTH_BUCKETS];
     for &len in lengths {
         histogram[bucket(len)] += 1;
     }
     SentenceStats {
-        count,
-        mean: sum as f64 / count as f64,
-        median: median_sorted(&sorted),
-        min: sorted[0],
-        max: sorted[count - 1],
+        count: s.count,
+        mean: s.mean,
+        median: s.median,
+        min: s.min,
+        max: s.max,
         histogram,
         run_ons: lengths.iter().filter(|&&l| l > run_on_threshold).count(),
     }
@@ -332,6 +326,36 @@ fn median_sorted(sorted: &[usize]) -> f64 {
         sorted[n / 2] as f64
     } else {
         (sorted[n / 2 - 1] + sorted[n / 2]) as f64 / 2.0
+    }
+}
+
+/// The shared core summary of a set of lengths — count, mean, median, and the
+/// extremes — computed with a single sort. Every length metric builds on this:
+/// sentences add a histogram + run-ons, chapter lengths add a std-dev + outlier
+/// fences, paragraphs read it directly (longest == `max`). All-zero for an empty
+/// set.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Spread {
+    count: usize,
+    mean: f64,
+    median: f64,
+    min: usize,
+    max: usize,
+}
+
+fn spread(lengths: &[usize]) -> Spread {
+    if lengths.is_empty() {
+        return Spread::default();
+    }
+    let count = lengths.len();
+    let mut sorted = lengths.to_vec();
+    sorted.sort_unstable();
+    Spread {
+        count,
+        mean: lengths.iter().sum::<usize>() as f64 / count as f64,
+        median: median_sorted(&sorted),
+        min: sorted[0],
+        max: sorted[count - 1],
     }
 }
 
@@ -365,26 +389,22 @@ impl Default for LengthStats {
 /// Summarize per-chapter word counts for the pacing section. All-default for an
 /// empty manuscript.
 pub fn length_stats(words: &[usize]) -> LengthStats {
-    if words.is_empty() {
-        return LengthStats::default();
+    let s = spread(words);
+    if s.count == 0 {
+        return LengthStats::default(); // keeps the ±∞ fences (nothing to flag)
     }
-    let count = words.len();
-    let mean = words.iter().sum::<usize>() as f64 / count as f64;
-    let variance = words.iter().map(|&w| (w as f64 - mean).powi(2)).sum::<f64>() / count as f64;
-    let mut sorted = words.to_vec();
-    sorted.sort_unstable();
-    let median = median_sorted(&sorted);
+    let variance = words.iter().map(|&w| (w as f64 - s.mean).powi(2)).sum::<f64>() / s.count as f64;
     // Need a few chapters before "unusually short/long relative to the rest"
     // means anything; below that, flag nothing.
     let (low_fence, high_fence) =
-        if count < 4 { (f64::MIN, f64::MAX) } else { (median * 0.5, median * 2.0) };
+        if s.count < 4 { (f64::MIN, f64::MAX) } else { (s.median * 0.5, s.median * 2.0) };
     LengthStats {
-        count,
-        mean,
-        median,
+        count: s.count,
+        mean: s.mean,
+        median: s.median,
         std_dev: variance.sqrt(),
-        min: sorted[0],
-        max: sorted[count - 1],
+        min: s.min,
+        max: s.max,
         low_fence,
         high_fence,
     }
@@ -613,17 +633,6 @@ pub fn paragraph_lengths(text: &str) -> Vec<usize> {
     lengths
 }
 
-/// `(mean, median, longest)` of a set of lengths; zeros when empty. Shared by the
-/// paragraph-rhythm rows (per chapter and overall).
-fn summarize_lengths(lengths: &[usize]) -> (f64, f64, usize) {
-    if lengths.is_empty() {
-        return (0.0, 0.0, 0);
-    }
-    let sum: usize = lengths.iter().sum();
-    let mut sorted = lengths.to_vec();
-    sorted.sort_unstable();
-    (sum as f64 / lengths.len() as f64, median_sorted(&sorted), sorted[sorted.len() - 1])
-}
 
 // --- Vocabulary richness (#72) ----------------------------------------------
 
@@ -909,14 +918,14 @@ fn dialogue_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
 /// One dialogue/paragraph row: dialogue share and the paragraph mean / median /
 /// longest for the span.
 fn dialogue_text(name: &str, dialogue: Dialogue, paragraphs: &[usize]) -> String {
-    let (mean, median, longest) = summarize_lengths(paragraphs);
+    let p = spread(paragraphs);
     format!(
         "{:<26}{:>9.1}{:>9.0}{:>8.0}{:>9}",
         truncate(name, 24),
         dialogue.dialogue_pct(),
-        mean,
-        median,
-        longest,
+        p.mean,
+        p.median,
+        p.max, // longest paragraph
     )
 }
 
@@ -1266,9 +1275,10 @@ mod tests {
     }
 
     #[test]
-    fn summarize_lengths_reports_mean_median_longest() {
-        assert_eq!(summarize_lengths(&[10, 20, 30, 100]), (40.0, 25.0, 100));
-        assert_eq!(summarize_lengths(&[]), (0.0, 0.0, 0));
+    fn spread_reports_count_mean_median_extremes() {
+        let s = spread(&[10, 20, 30, 100]);
+        assert_eq!((s.count, s.mean, s.median, s.min, s.max), (4, 40.0, 25.0, 10, 100));
+        assert_eq!(spread(&[]), Spread::default());
     }
 
     /// Lexical variety of a raw string (tokenize-then-measure), for tests.
