@@ -16,6 +16,11 @@ use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::mode::{AiAction, Palette, PaletteItem};
 
+/// Shown when the local backend is selected but wasn't compiled in. One source
+/// so the fast-fail (UI thread) and the `build_local` stub can't drift.
+const LOCAL_UNAVAILABLE: &str =
+    "local backend isn't in this build — rebuild Quill with `--features local`, or set `backend = \"claude\"`";
+
 /// A resolved backend choice, ready to build on the worker thread. Built here
 /// (not in `spawn_ai`) so loading the local model can't block the UI.
 enum BackendSpec {
@@ -52,11 +57,7 @@ fn build_local(slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Bac
 
 #[cfg(not(feature = "local"))]
 fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Backend>, ai::AiError> {
-    Err(ai::AiError::NotConfigured(
-        "local backend isn't in this build — rebuild Quill with `--features local`, \
-         or set `backend = \"claude\"`"
-            .into(),
-    ))
+    Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
 }
 
 impl App {
@@ -326,17 +327,19 @@ impl App {
         self.ai.check_ready()?;
         Ok(match self.ai.backend() {
             ai::BackendKind::Claude => {
-                BackendSpec::Claude(self.ai.resolved_key().unwrap_or_default().to_string())
+                // check_ready already guaranteed a key for Claude; resolve it
+                // defensively rather than unwrapping.
+                let key = self
+                    .ai
+                    .resolved_key()
+                    .ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
+                BackendSpec::Claude(key.to_string())
             }
             ai::BackendKind::Local => {
                 // Fail fast on the UI thread when the local backend wasn't compiled
                 // in, so we don't spawn a worker just to error.
                 if cfg!(not(feature = "local")) {
-                    return Err(ai::AiError::NotConfigured(
-                        "local backend isn't in this build — rebuild Quill with \
-                         `--features local`, or set `backend = \"claude\"`"
-                            .into(),
-                    ));
+                    return Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()));
                 }
                 BackendSpec::Local(self.local_backend.clone())
             }
