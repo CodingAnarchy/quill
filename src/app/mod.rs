@@ -11,7 +11,8 @@ use similar::{ChangeTag, TextDiff};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use ratatui::text::Line;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 
 use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::ai::character::{self, Character};
@@ -24,8 +25,8 @@ use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleConflict, BibleReview, Finding, Findings, MetaEdit, MetaField, Mode, Overlay, Pending,
-    PromptState,
+    BibleConflict, BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode,
+    Overlay, Palette, PaletteItem, Pending, PromptState,
 };
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
@@ -346,6 +347,77 @@ impl App {
             return; // a save failed; save_edit already set the error message
         }
         self.open_prompt(Pending::Commit, "Commit message: ", "", None);
+    }
+
+    /// Open the version-control palette (#54) — the single entry point for Git
+    /// actions, shown with context-appropriate items.
+    fn open_git_palette(&mut self) {
+        let git = |label, desc, a| PaletteItem { label, desc, command: Command::Git(a) };
+        let items = if self.under_vc {
+            vec![
+                git("Commit", "Snapshot the project with a message", GitAction::Commit),
+                git("History", "Browse past commits", GitAction::History),
+                git("Changes", "Diff the working tree against the last commit", GitAction::Diff),
+                git("Restore chapter", "Revert the current chapter to its last commit", GitAction::RestoreChapter),
+            ]
+        } else {
+            vec![git("Initialize", "Put this project under version control", GitAction::Initialize)]
+        };
+        self.mode = Mode::Palette(Box::new(Palette { title: "Version control", items, selected: 0 }));
+    }
+
+    /// Dispatch a version-control action chosen from the palette.
+    pub(crate) fn start_git_action(&mut self, action: GitAction) {
+        match action {
+            GitAction::Initialize => self.init_version_control(),
+            GitAction::Commit => self.start_commit(),
+            GitAction::History => self.overlay = Some(Overlay::report("history", self.vc_log_lines())),
+            GitAction::Diff => self.show_diff(),
+            GitAction::RestoreChapter => self.start_restore(),
+        }
+    }
+
+    /// Show the working-tree diff since the last commit as a read-only overlay.
+    fn show_diff(&mut self) {
+        match crate::vcs::diff(&self.project.root) {
+            Ok(d) if d.trim().is_empty() => self.message = Some("No uncommitted changes.".into()),
+            Ok(d) => self.overlay = Some(Overlay::report("changes", diff_lines(&d))),
+            Err(e) => self.message = Some(format!("Diff failed: {e}")),
+        }
+    }
+
+    /// Confirm restoring the current chapter to its last committed version (#135).
+    /// Restore is destructive to that file, so it always asks first.
+    fn start_restore(&mut self) {
+        self.leave_continuous(); // restore operates on the single active chapter
+        let title = self.project.active_title().unwrap_or("this chapter").to_string();
+        self.open_prompt(
+            Pending::ConfirmRestore,
+            format!("Restore '{title}' to last commit? Discards changes (y/N)"),
+            "",
+            None,
+        );
+    }
+
+    /// Restore the active chapter from HEAD and reload it into the editor.
+    fn restore_chapter(&mut self) {
+        let path = self.project.active_path();
+        let rel = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+        match crate::vcs::restore(&self.project.root, &rel) {
+            Ok(true) => {
+                match Buffer::from_path(&path) {
+                    Ok(buffer) => {
+                        self.buffer = buffer;
+                        self.project.set_active_words(self.buffer.word_count());
+                        self.message = Some("Restored to last commit.".into());
+                    }
+                    Err(e) => self.message = Some(format!("Restored, but reload failed: {e}")),
+                }
+                self.refresh_vc_status();
+            }
+            Ok(false) => self.message = Some("No committed version of this chapter to restore.".into()),
+            Err(e) => self.message = Some(format!("Restore failed: {e}")),
+        }
     }
 
     /// The commit-history rows for the read-only overlay (#133), newest first.
@@ -1048,6 +1120,13 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            Pending::ConfirmRestore => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.restore_chapter();
+                }
+                _ => self.mode = closed,
+            },
             // The text prompts share the editing keys; only Enter differs.
             Pending::NewChapter { .. }
             | Pending::Rename { .. }
@@ -1130,18 +1209,9 @@ impl App {
             (true, KeyCode::Char('o')) => {
                 self.outline_visible = !self.outline_visible;
             }
-            // Put the project under version control (#54). Ctrl-v: "version control".
-            (true, KeyCode::Char('v')) => self.init_version_control(),
-            // Commit a snapshot of the project (#131). Ctrl-k: "checkpoint".
-            (true, KeyCode::Char('k')) => self.start_commit(),
-            // View commit history (#133), a read-only scrollable overlay.
-            (true, KeyCode::Char('y')) => {
-                if self.under_vc {
-                    self.overlay = Some(Overlay::report("history", self.vc_log_lines()));
-                } else {
-                    self.message = Some("Not under version control — Ctrl-v to initialize.".into());
-                }
-            }
+            // Open the version-control palette (#54) — init / commit / history /
+            // changes / restore, in one menu. Ctrl-v: "version control".
+            (true, KeyCode::Char('v')) => self.open_git_palette(),
             // Open the progress report (scroll to read; any other key closes).
             (true, KeyCode::Char('r')) => {
                 self.overlay = Some(Overlay::report("progress", self.report_lines()));
@@ -1304,6 +1374,22 @@ fn closed_mode(nav_return: Option<usize>) -> Mode {
         Some(selected) => Mode::Nav { selected },
         None => Mode::Insert,
     }
+}
+
+/// Color a unified diff for the changes overlay (#135): additions green, removals
+/// red, file/hunk headers and context dimmed. Mirrors the bible-review diff.
+fn diff_lines(patch: &str) -> Vec<Line<'static>> {
+    patch
+        .lines()
+        .map(|l| {
+            let color = match l.chars().next() {
+                Some('+') => Color::Green,
+                Some('-') => Color::Red,
+                _ => Color::DarkGray,
+            };
+            Line::from(Span::styled(l.to_string(), Style::default().fg(color)))
+        })
+        .collect()
 }
 
 #[cfg(test)]

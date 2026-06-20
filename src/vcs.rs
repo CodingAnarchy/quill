@@ -114,6 +114,50 @@ pub fn status(root: &Path) -> Result<Status, String> {
     Ok(Status { changed })
 }
 
+/// The working-tree diff against `HEAD` as a unified patch (added/modified/
+/// deleted/untracked). Empty string when clean. For a repo with no commits yet,
+/// everything reads as newly added.
+pub fn diff(root: &Path) -> Result<String, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let diff = repo
+        .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
+        .map_err(|e| e.to_string())?;
+
+    let mut out = String::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        // Content lines need their origin marker (+/-/space) prepended; file and
+        // hunk headers already carry their own text.
+        if matches!(line.origin(), '+' | '-' | ' ') {
+            out.push(line.origin());
+        }
+        out.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
+        true
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// Restore the file at `rel_path` (relative to `root`) to its last committed
+/// version, discarding working-tree changes to it. Returns `false` if there's no
+/// committed version to restore to (no commits yet, or the file is new). Touches
+/// only that one file.
+pub fn restore(root: &Path, rel_path: &str) -> Result<bool, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let Some(head_tree) = repo.head().ok().and_then(|h| h.peel_to_tree().ok()) else {
+        return Ok(false); // no commits → nothing to restore to
+    };
+    if head_tree.get_path(Path::new(rel_path)).is_err() {
+        return Ok(false); // the file isn't in the last commit
+    }
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force().path(rel_path);
+    repo.checkout_head(Some(&mut checkout)).map_err(|e| format!("restore: {e}"))?;
+    Ok(true)
+}
+
 /// Stage the whole project and commit it with `message`. Returns the new commit's
 /// short id, or `None` when there's nothing to commit (a clean working tree).
 ///

@@ -172,7 +172,9 @@ fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
             Span::styled(format!("  — {}", item.desc), Style::default().fg(Color::DarkGray)),
         ])
     });
-    draw_list_overlay(frame, area, " AI ", "AI — ↑↓ move · enter run · esc close", rows);
+    let title = format!(" {} ", palette.title);
+    let help = format!("{} — ↑↓ move · enter run · esc close", palette.title);
+    draw_list_overlay(frame, area, &title, &help, rows);
 }
 
 /// Render the findings as a navigable triage list.
