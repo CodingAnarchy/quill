@@ -20,7 +20,6 @@ impl App {
         let origin_byte = self.buffer.cursor_byte();
         self.mode = Mode::Search(Box::new(Search {
             stage: SearchStage::Query,
-            replace: false,
             query: String::new(),
             replacement: String::new(),
             matches: Vec::new(),
@@ -39,8 +38,14 @@ impl App {
         };
         match (stage, key.code) {
             // --- Typing the query ------------------------------------------
-            (SearchStage::Query, KeyCode::Char(c)) if !ctrl => self.search_query_push(c),
-            (SearchStage::Query, KeyCode::Backspace) => self.search_query_pop(),
+            (SearchStage::Query, KeyCode::Char(c)) if !ctrl => {
+                self.search_mut().query.push(c);
+                self.requery();
+            }
+            (SearchStage::Query, KeyCode::Backspace) => {
+                self.search_mut().query.pop();
+                self.requery();
+            }
             (SearchStage::Query, KeyCode::Enter) => self.search_query_done(),
 
             // --- Navigating matches (find) ---------------------------------
@@ -49,11 +54,17 @@ impl App {
             }
             (SearchStage::Navigate, KeyCode::Char('N') | KeyCode::Up) => self.search_advance(-1),
             // Promote a find into a replace using the same query.
-            (SearchStage::Navigate, KeyCode::Char('r')) => self.search_begin_replacement(),
+            (SearchStage::Navigate, KeyCode::Char('r')) => {
+                self.search_mut().stage = SearchStage::Replacement;
+            }
 
             // --- Typing the replacement ------------------------------------
-            (SearchStage::Replacement, KeyCode::Char(c)) if !ctrl => self.search_replacement_push(c),
-            (SearchStage::Replacement, KeyCode::Backspace) => self.search_replacement_pop(),
+            (SearchStage::Replacement, KeyCode::Char(c)) if !ctrl => {
+                self.search_mut().replacement.push(c);
+            }
+            (SearchStage::Replacement, KeyCode::Backspace) => {
+                self.search_mut().replacement.pop();
+            }
             (SearchStage::Replacement, KeyCode::Enter) => self.search_replacement_done(),
 
             // --- Stepping through replacements -----------------------------
@@ -69,29 +80,15 @@ impl App {
         }
     }
 
-    // --- Query entry -------------------------------------------------------
-
-    fn search_query_push(&mut self, c: char) {
-        self.search_mut().query.push(c);
-        self.recompute_matches();
-        self.jump_to_current();
-    }
-
-    fn search_query_pop(&mut self) {
-        self.search_mut().query.pop();
-        self.recompute_matches();
-        self.jump_to_current();
-    }
-
-    /// Enter on the query: a find moves to navigation; a replace moves on to the
-    /// replacement text. An empty query just closes.
+    /// Enter on the query: a non-empty query moves to navigation; an empty one
+    /// just closes. (Replace is reached from navigation with `r`.)
     fn search_query_done(&mut self) {
         let s = self.search_mut();
         if s.query.is_empty() {
             self.close_search();
-            return;
+        } else {
+            s.stage = SearchStage::Navigate;
         }
-        s.stage = if s.replace { SearchStage::Replacement } else { SearchStage::Navigate };
     }
 
     // --- Navigation --------------------------------------------------------
@@ -106,34 +103,18 @@ impl App {
             let n = s.matches.len() as i32;
             s.current = (s.current as i32 + dir).rem_euclid(n) as usize;
         }
-        // In the replace flow, wrapping past the end means we're done stepping.
         self.jump_to_current();
     }
 
     // --- Replacement -------------------------------------------------------
 
-    fn search_begin_replacement(&mut self) {
-        let s = self.search_mut();
-        s.replace = true;
-        s.stage = SearchStage::Replacement;
-    }
-
-    fn search_replacement_push(&mut self, c: char) {
-        self.search_mut().replacement.push(c);
-    }
-
-    fn search_replacement_pop(&mut self) {
-        self.search_mut().replacement.pop();
-    }
-
     /// Replacement text entered: start stepping through matches from the top.
     fn search_replacement_done(&mut self) {
-        self.recompute_matches();
+        self.recompute_matches_from(0);
         let s = self.search_mut();
-        s.current = 0;
         s.replaced = 0;
         s.stage = SearchStage::Step;
-        if self.search_mut().matches.is_empty() {
+        if s.matches.is_empty() {
             self.finish_replace();
         } else {
             self.jump_to_current();
@@ -142,28 +123,18 @@ impl App {
 
     /// Replace the current match, then advance to the next one past it.
     fn replace_current_and_advance(&mut self) {
-        let (range, replacement) = match &self.mode {
-            Mode::Search(s) => (s.current_match(), s.replacement.clone()),
-            _ => return,
-        };
-        let Some((start, end)) = range else {
+        let Some((start, end)) = self.search().current_match() else {
             self.finish_replace();
             return;
         };
+        let replacement = self.search().replacement.clone();
         self.buffer.replace_byte_range(start, end, &replacement);
-        let resume = start + replacement.len();
+        self.search_mut().replaced += 1;
 
         // The edit shifted later offsets — recompute and resume past the
         // replacement (so replacing "a" with "aa" doesn't re-match itself).
-        let text = self.buffer.text();
-        let done = {
-            let s = self.search_mut();
-            s.replaced += 1;
-            s.matches = find_match_ranges(&text, &s.query);
-            s.current = s.matches.iter().position(|&(st, _)| st >= resume).unwrap_or(s.matches.len());
-            s.current >= s.matches.len()
-        };
-        if done {
+        self.recompute_matches_from(start + replacement.len());
+        if self.search().current_match().is_none() {
             self.finish_replace();
         } else {
             self.jump_to_current();
@@ -173,10 +144,9 @@ impl App {
     /// Replace every remaining match (current to end) in one undo group. Done
     /// right-to-left so earlier byte offsets stay valid as the text shifts.
     fn replace_all_remaining(&mut self) {
-        let (ranges, replacement) = match &self.mode {
-            Mode::Search(s) => (s.matches[s.current.min(s.matches.len())..].to_vec(), s.replacement.clone()),
-            _ => return,
-        };
+        let s = self.search();
+        let ranges = s.matches[s.current.min(s.matches.len())..].to_vec();
+        let replacement = s.replacement.clone();
         for &(start, end) in ranges.iter().rev() {
             self.buffer.replace_byte_range(start, end, &replacement);
         }
@@ -186,10 +156,7 @@ impl App {
 
     /// End the replace flow, report the count, and return to editing.
     fn finish_replace(&mut self) {
-        let replaced = match &self.mode {
-            Mode::Search(s) => s.replaced,
-            _ => 0,
-        };
+        let replaced = self.search().replaced;
         self.project.set_active_words(self.buffer.word_count());
         self.mode = Mode::Insert;
         self.message = Some(match replaced {
@@ -205,34 +172,44 @@ impl App {
 
     // --- Shared helpers ----------------------------------------------------
 
-    /// Recompute the match list for the current query against the active buffer,
-    /// and point `current` at the match nearest the search origin.
-    fn recompute_matches(&mut self) {
+    /// Re-run the search for a changed query and jump to the current match. The
+    /// match nearest the search origin is selected; if none lie at/after it, the
+    /// first match in the document is used so the user always sees one.
+    fn requery(&mut self) {
+        let origin = self.search().origin_byte;
+        self.recompute_matches_from(origin);
+        let s = self.search_mut();
+        if s.current >= s.matches.len() && !s.matches.is_empty() {
+            s.current = 0;
+        }
+        self.jump_to_current();
+    }
+
+    /// Recompute the match list for the current query and point `current` at the
+    /// first match at/after `anchor` (or past the end — i.e. "no current match" —
+    /// when none follow it).
+    fn recompute_matches_from(&mut self, anchor: usize) {
         let text = self.buffer.text();
-        let origin = match &self.mode {
-            Mode::Search(s) => s.origin_byte,
-            _ => return,
-        };
         let s = self.search_mut();
         s.matches = find_match_ranges(&text, &s.query);
         s.current = s
             .matches
             .iter()
-            .position(|&(start, _)| start >= origin)
-            .unwrap_or(0);
+            .position(|&(start, _)| start >= anchor)
+            .unwrap_or(s.matches.len());
     }
 
     /// Move the cursor to the current match so the editor scrolls it into view.
     fn jump_to_current(&mut self) {
-        if let Some((start, _)) = self.current_search_match() {
+        if let Some((start, _)) = self.search().current_match() {
             self.buffer.cursor = self.buffer.cursor_at_byte(start);
         }
     }
 
-    fn current_search_match(&self) -> Option<(usize, usize)> {
+    fn search(&self) -> &Search {
         match &self.mode {
-            Mode::Search(s) => s.current_match(),
-            _ => None,
+            Mode::Search(s) => s,
+            _ => unreachable!("search helper called outside Mode::Search"),
         }
     }
 

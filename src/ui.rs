@@ -661,10 +661,7 @@ fn search_status(s: &Search) -> String {
         format!("  {}/{}", s.current + 1, s.matches.len())
     };
     match s.stage {
-        SearchStage::Query => {
-            let label = if s.replace { "Replace" } else { "Find" };
-            format!(" {label}: {}{count}", s.query)
-        }
+        SearchStage::Query => format!(" Find: {}{count}", s.query),
         SearchStage::Navigate => {
             format!(" Find: {}{count}  · n next · N prev · r replace · Esc done", s.query)
         }

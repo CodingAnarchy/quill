@@ -206,9 +206,6 @@ pub struct PromptState {
 pub struct Search {
     /// What the user is doing right now.
     pub(crate) stage: SearchStage,
-    /// True for the replace flow, false for plain find — decides where Enter on
-    /// the query leads (replacement text vs. match navigation).
-    pub(crate) replace: bool,
     /// The text being searched for.
     pub query: String,
     /// The replacement text (replace flow only).
