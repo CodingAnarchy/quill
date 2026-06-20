@@ -4,6 +4,7 @@
 //! a rope (`ropey`) gives us cheap inserts/deletes at any offset without copying
 //! the whole document around.
 
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -57,8 +58,8 @@ pub struct Buffer {
     /// Undo / redo history (#145), as whole-document snapshots. A group spans a
     /// burst of edits between idle ticks, so one undo reverses a meaningful chunk
     /// (a word or phrase), not a single keystroke.
-    undo_stack: Vec<Snapshot>,
-    redo_stack: Vec<Snapshot>,
+    undo_stack: VecDeque<Snapshot>,
+    redo_stack: VecDeque<Snapshot>,
     /// True while an edit group is open: the pre-edit state has been snapshotted
     /// and subsequent edits fold into the same undo entry until the group is
     /// sealed on idle ([`Buffer::seal_undo_group`]).
@@ -79,8 +80,8 @@ impl Buffer {
             goal_col: None,
             syntax: Syntax::new(""),
             syntax_dirty: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             group_open: false,
         }
     }
@@ -99,8 +100,8 @@ impl Buffer {
             dirty: false,
             goal_col: None,
             syntax_dirty: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             group_open: false,
         }
     }
@@ -129,8 +130,8 @@ impl Buffer {
             dirty: false,
             goal_col: None,
             syntax_dirty: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             group_open: false,
         })
     }
@@ -230,14 +231,15 @@ impl Buffer {
 
     /// Open a new undo group if one isn't already open, snapshotting the current
     /// (pre-edit) state to return to. Any redo history is invalidated, since the
-    /// document is about to diverge from it. Called at the start of every edit.
+    /// document is about to diverge from it. Called from the edit choke points
+    /// ([`edit_insert`]/[`edit_remove`]) so every mutator gets undo for free.
     fn checkpoint(&mut self) {
         if self.group_open {
             return;
         }
-        self.undo_stack.push(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
+        self.undo_stack.push_back(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
         if self.undo_stack.len() > MAX_UNDO {
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();
         }
         self.redo_stack.clear();
         self.group_open = true;
@@ -252,18 +254,28 @@ impl Buffer {
     /// Revert to the state before the most recent edit group. Returns `false`
     /// when there's nothing to undo.
     pub fn undo(&mut self) -> bool {
-        let Some(prev) = self.undo_stack.pop() else { return false };
-        self.redo_stack.push(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
-        self.restore(prev);
-        true
+        self.step(true)
     }
 
     /// Re-apply the most recently undone group. Returns `false` when there's
     /// nothing to redo.
     pub fn redo(&mut self) -> bool {
-        let Some(next) = self.redo_stack.pop() else { return false };
-        self.undo_stack.push(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
-        self.restore(next);
+        self.step(false)
+    }
+
+    /// Move one step through history: pop from one stack onto the other and
+    /// restore. `undo` true pops the undo stack (pushing the current state for
+    /// redo); false does the reverse. The two are exact mirrors.
+    fn step(&mut self, undo: bool) -> bool {
+        let current = Snapshot { rope: self.rope.clone(), cursor: self.cursor };
+        let snap = if undo { self.undo_stack.pop_back() } else { self.redo_stack.pop_back() };
+        let Some(snap) = snap else { return false };
+        if undo {
+            self.redo_stack.push_back(current);
+        } else {
+            self.undo_stack.push_back(current);
+        }
+        self.restore(snap);
         true
     }
 
@@ -293,6 +305,7 @@ impl Buffer {
     /// Insert text at a char index and tell the parser exactly what changed, so
     /// the reparse can be incremental. Does not touch the cursor.
     fn edit_insert(&mut self, char_idx: usize, text: &str) {
+        self.checkpoint();
         let start_byte = self.rope.char_to_byte(char_idx);
         let start_position = point_at_byte(&self.rope, start_byte);
 
@@ -314,6 +327,7 @@ impl Buffer {
     /// Remove the char range `[start, end)` and tell the parser what changed.
     /// Does not touch the cursor.
     fn edit_remove(&mut self, start: usize, end: usize) {
+        self.checkpoint();
         let start_byte = self.rope.char_to_byte(start);
         let old_end_byte = self.rope.char_to_byte(end);
         let start_position = point_at_byte(&self.rope, start_byte);
@@ -345,7 +359,6 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        self.checkpoint();
         let idx = self.cursor_char_idx();
         let mut buf = [0u8; 4];
         self.edit_insert(idx, c.encode_utf8(&mut buf));
@@ -362,7 +375,6 @@ impl Buffer {
     /// Delete the grapheme before the cursor (Backspace).
     pub fn backspace(&mut self) {
         if self.cursor.col > 0 {
-            self.checkpoint();
             let line = self.line(self.cursor.line);
             let target = self.cursor.col - 1;
             let (start_b, g) = line
@@ -377,7 +389,6 @@ impl Buffer {
             self.cursor.col = target;
             self.dirty = true;
         } else if self.cursor.line > 0 {
-            self.checkpoint();
             // Join with the previous line.
             let prev_len = self.line_graphemes(self.cursor.line - 1);
             let idx = self.rope.line_to_char(self.cursor.line);

@@ -899,33 +899,21 @@ impl App {
         }
     }
 
-    /// Undo the last edit group (#145). Scoped to the single-chapter view: the
-    /// continuous view's segment bookkeeping isn't snapshotted, so undo there is
-    /// a follow-up rather than a silent desync.
-    fn undo(&mut self) {
+    /// Undo / redo one edit group (#145). Scoped to the single-chapter view: the
+    /// continuous view's segment bookkeeping isn't snapshotted, so history there
+    /// is guarded with a message rather than a silent desync (a follow-up).
+    fn history_step(&mut self, redo: bool) {
+        let verb = if redo { "Redo" } else { "Undo" };
         if self.manuscript.is_some() {
-            self.message = Some("Undo isn't available in the continuous view yet — Ctrl-l to return.".into());
+            self.message = Some(format!("{verb} isn't available in the continuous view yet — Ctrl-l to return."));
             return;
         }
-        if self.buffer.undo() {
+        let changed = if redo { self.buffer.redo() } else { self.buffer.undo() };
+        if changed {
             self.project.set_active_words(self.buffer.word_count());
             self.message = None;
         } else {
-            self.message = Some("Nothing to undo.".into());
-        }
-    }
-
-    /// Redo the most recently undone edit group (#145).
-    fn redo(&mut self) {
-        if self.manuscript.is_some() {
-            self.message = Some("Redo isn't available in the continuous view yet — Ctrl-l to return.".into());
-            return;
-        }
-        if self.buffer.redo() {
-            self.project.set_active_words(self.buffer.word_count());
-            self.message = None;
-        } else {
-            self.message = Some("Nothing to redo.".into());
+            self.message = Some(format!("Nothing to {}.", verb.to_lowercase()));
         }
     }
 
@@ -1421,8 +1409,8 @@ impl App {
             }
 
             // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
-            (true, KeyCode::Char('z')) => self.undo(),
-            (true, KeyCode::Char('y')) => self.redo(),
+            (true, KeyCode::Char('z')) => self.history_step(false),
+            (true, KeyCode::Char('y')) => self.history_step(true),
 
             (false, KeyCode::Char(c)) => self.edit_insert_char(c),
             (false, KeyCode::Enter) => self.edit_insert_char('\n'),
