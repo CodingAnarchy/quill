@@ -8,6 +8,8 @@
 //! matches the progress report's notion of prose words (`buffer::count_words` /
 //! Unicode word segmentation), so the two reports agree on how big a chapter is.
 
+use std::collections::HashMap;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
@@ -399,6 +401,138 @@ fn length_flag(words: usize, stats: &LengthStats) -> Option<&'static str> {
     }
 }
 
+// --- Style flags (#70): deterministic, frequency-based ----------------------
+//
+// Heuristic and purely statistical — the AI prose/style pass (#79) does the
+// context-aware work. These lists are intentionally small: the goal is a rough,
+// descriptive signal the author decides on, not a grammar.
+
+/// "To be" forms — the weak-/passive-verb proxy.
+const TO_BE: &[&str] = &["am", "is", "are", "was", "were", "be", "been", "being"];
+
+/// Filtering verbs that distance the reader ("she *saw* the door" → "the door").
+const FILTER_WORDS: &[&str] = &[
+    "see", "saw", "seen", "look", "looked", "watch", "watched", "hear", "heard",
+    "feel", "felt", "notice", "noticed", "wonder", "wondered", "realize", "realized",
+    "think", "thought", "know", "knew", "seem", "seemed", "decide", "decided",
+    "remember", "remembered", "wonder", "believe", "believed", "sense", "sensed",
+];
+
+/// Common `-ly` words that aren't manner adverbs, so they don't inflate the
+/// adverb density.
+const NON_ADVERB_LY: &[&str] = &[
+    "only", "family", "reply", "apply", "supply", "comply", "imply", "rely",
+    "multiply", "ally", "bully", "rally", "jelly", "belly", "folly", "lily",
+    "fly", "ugly", "early", "holy", "italy", "july", "assembly", "anomaly",
+    "melancholy", "fully",
+];
+
+/// Frequent function words excluded from the "most-used words" list (so the list
+/// surfaces an author's content tics, not "the"/"and").
+const STOPWORDS: &[&str] = &[
+    "the", "a", "an", "and", "or", "but", "if", "of", "at", "by", "for", "with",
+    "about", "to", "from", "in", "on", "into", "over", "after", "before", "as",
+    "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did",
+    "have", "has", "had", "having", "i", "you", "he", "she", "it", "we", "they",
+    "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
+    "this", "that", "these", "those", "there", "here", "then", "than", "so", "not",
+    "no", "yes", "up", "down", "out", "off", "all", "any", "some", "no", "what",
+    "which", "who", "whom", "when", "where", "why", "how", "would", "could",
+    "should", "will", "can", "may", "might", "must", "shall", "just", "very",
+    "too", "more", "most", "now", "back", "him", "got", "get", "one", "like",
+    "said", "her", "she", "his",
+];
+
+/// Frequency-based style flags for a span of prose, in raw counts (densities are
+/// computed against `words` at render). Additive across chapters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StyleFlags {
+    pub words: usize,
+    /// `-ly` manner adverbs.
+    pub adverbs_ly: usize,
+    /// Filtering verbs (see [`FILTER_WORDS`]).
+    pub filter_words: usize,
+    /// "To be" forms — the weak-verb proxy.
+    pub weak_verbs: usize,
+    /// Estimated passive constructions ("to be" + an `-ed` participle).
+    pub passive: usize,
+}
+
+impl StyleFlags {
+    pub fn add(&mut self, other: StyleFlags) {
+        self.words += other.words;
+        self.adverbs_ly += other.adverbs_ly;
+        self.filter_words += other.filter_words;
+        self.weak_verbs += other.weak_verbs;
+        self.passive += other.passive;
+    }
+}
+
+/// Scan a span of prose for the frequency-based style flags.
+pub fn style_flags(text: &str) -> StyleFlags {
+    let mut flags = StyleFlags::default();
+    let mut prev_to_be = false;
+    for word in text.unicode_words() {
+        flags.words += 1;
+        let lower = word.to_lowercase();
+        if is_ly_adverb(&lower) {
+            flags.adverbs_ly += 1;
+        }
+        if FILTER_WORDS.contains(&lower.as_str()) {
+            flags.filter_words += 1;
+        }
+        let to_be = TO_BE.contains(&lower.as_str());
+        if to_be {
+            flags.weak_verbs += 1;
+        }
+        // A "to be" form followed by an -ed word is a likely passive ("was held").
+        if prev_to_be && lower.ends_with("ed") {
+            flags.passive += 1;
+        }
+        prev_to_be = to_be;
+    }
+    flags
+}
+
+/// Whether a lowercased word is counted as an `-ly` manner adverb.
+fn is_ly_adverb(word: &str) -> bool {
+    word.len() > 3 && word.ends_with("ly") && !NON_ADVERB_LY.contains(&word)
+}
+
+/// Accumulate non-stopword content-word counts (lowercased) from `text` into
+/// `counts` — the basis for the "most-used words" list.
+pub fn tally_content_words(text: &str, counts: &mut HashMap<String, usize>) {
+    for word in text.unicode_words() {
+        let lower = word.to_lowercase();
+        if lower.len() > 2 && !STOPWORDS.contains(&lower.as_str()) {
+            *counts.entry(lower).or_insert(0) += 1;
+        }
+    }
+}
+
+/// Accumulate trigram counts (lowercased, within `text` only so phrases don't
+/// span chapters) into `counts`, skipping trigrams that are entirely stopwords
+/// (e.g. "out of the") so the list surfaces real repeated phrasing.
+pub fn tally_phrases(text: &str, counts: &mut HashMap<String, usize>) {
+    let words: Vec<String> = text.unicode_words().map(str::to_lowercase).collect();
+    for w in words.windows(3) {
+        if w.iter().all(|word| STOPWORDS.contains(&word.as_str())) {
+            continue;
+        }
+        *counts.entry(w.join(" ")).or_insert(0) += 1;
+    }
+}
+
+/// The `n` highest-count entries with count `>= min`, ties broken alphabetically
+/// for a deterministic, stable order.
+pub fn top_counts(counts: &HashMap<String, usize>, n: usize, min: usize) -> Vec<(String, usize)> {
+    let mut items: Vec<(String, usize)> =
+        counts.iter().filter(|&(_, &c)| c >= min).map(|(k, &c)| (k.clone(), c)).collect();
+    items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    items.truncate(n);
+    items
+}
+
 /// One chapter's analysis inputs: its title, total word count (the rolled-up
 /// count, for the pacing section), readability [`Stats`], and the word length of
 /// each of its sentences. Gathered by the editor (which owns the manuscript) and
@@ -408,6 +542,7 @@ pub struct ChapterAnalysis {
     pub words: usize,
     pub stats: Stats,
     pub sentence_lengths: Vec<usize>,
+    pub style: StyleFlags,
 }
 
 /// One part (chapter grouping) for the pacing section: its display name and the
@@ -462,6 +597,10 @@ pub struct Report<'a> {
     /// Chapter groupings for the pacing section (empty when the book has none).
     pub parts: &'a [PartSpan],
     pub run_on_threshold: usize,
+    /// Most-used content words across the manuscript, highest first.
+    pub top_words: &'a [(String, usize)],
+    /// Repeated multi-word phrases across the manuscript, highest first.
+    pub top_phrases: &'a [(String, usize)],
 }
 
 /// The analysis report's rows: a readability table, a sentence-length section
@@ -476,6 +615,8 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     out.extend(sentence_section(report.chapters, report.longest, report.run_on_threshold));
     out.push(Line::raw(""));
     out.extend(length_section(report.chapters, report.parts));
+    out.push(Line::raw(""));
+    out.extend(style_section(report.chapters, report.top_words, report.top_phrases));
     out
 }
 
@@ -578,6 +719,56 @@ fn length_bar_row(title: &str, words: usize, peak: usize, stats: &LengthStats, i
     let name = truncate(title, avail);
     let flag = length_flag(words, stats).map_or(String::new(), |f| format!("  ⚠ {f}"));
     Line::raw(format!("{:indent$}{name:<avail$}{words:>7}  {}{flag}", "", bar(words, peak)))
+}
+
+/// The style-flags section: a per-chapter (and overall) table of `-ly` adverb,
+/// filter-word, weak-verb, and passive density, plus the manuscript's most-used
+/// content words and most-repeated phrases. Descriptive only — counts, never
+/// edits.
+fn style_section(
+    chapters: &[ChapterAnalysis],
+    top_words: &[(String, usize)],
+    top_phrases: &[(String, usize)],
+) -> Vec<Line<'static>> {
+    let mut out = vec![
+        dim("Style flags (frequency)"),
+        dim(format!("{:<26}{:>7}{:>8}{:>7}{:>9}", "Chapter", "-ly%", "Filter", "to-be%", "Passive")),
+    ];
+    let mut total = StyleFlags::default();
+    for c in chapters {
+        total.add(c.style);
+        out.push(Line::raw(style_text(&c.title, &c.style)));
+    }
+    out.push(bold(style_text("Whole manuscript", &total)));
+
+    out.extend(count_list("Most-used words", top_words));
+    out.extend(count_list("Repeated phrases", top_phrases));
+    out
+}
+
+/// A titled `count×  item` list (one per line, so long lists scroll rather than
+/// clip), or nothing when empty. Shared by the most-used-words and repeated-phrase
+/// lists.
+fn count_list(title: &str, items: &[(String, usize)]) -> Vec<Line<'static>> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![Line::raw(""), dim(title.to_string())];
+    out.extend(items.iter().map(|(item, count)| Line::raw(format!("{count:>4}×  {item}"))));
+    out
+}
+
+/// One style-flags row: densities as a percent of the chapter's words.
+fn style_text(name: &str, f: &StyleFlags) -> String {
+    let pct = |n: usize| if f.words == 0 { 0.0 } else { n as f64 * 100.0 / f.words as f64 };
+    format!(
+        "{:<26}{:>7.1}{:>8}{:>7.1}{:>9}",
+        truncate(name, 24),
+        pct(f.adverbs_ly),
+        f.filter_words,
+        pct(f.weak_verbs),
+        f.passive,
+    )
 }
 
 /// A horizontal bar per length bucket, scaled to the busiest bucket.
@@ -788,6 +979,47 @@ mod tests {
         assert_eq!(length_flag(100, &few), None);
     }
 
+    #[test]
+    fn style_flags_count_adverbs_filters_and_weak_verbs() {
+        // "slowly" / "quietly" = -ly adverbs; "only" is excluded. "saw"/"felt" are
+        // filter words. "was" is a to-be form; "was locked" (to-be + -ed) is a
+        // passive estimate.
+        let f = style_flags("She slowly saw the only door and felt it was locked quietly.");
+        assert_eq!(f.adverbs_ly, 2, "slowly + quietly, not only");
+        assert_eq!(f.filter_words, 2, "saw + felt");
+        assert_eq!(f.weak_verbs, 1, "was");
+        assert_eq!(f.passive, 1, "was locked");
+    }
+
+    #[test]
+    fn content_words_skip_stopwords_and_short_words() {
+        let mut counts = HashMap::new();
+        tally_content_words("The locket and the locket on it", &mut counts);
+        assert_eq!(counts.get("locket"), Some(&2));
+        assert_eq!(counts.get("the"), None, "stopword excluded");
+        assert_eq!(counts.get("on"), None, "short/stopword excluded");
+    }
+
+    #[test]
+    fn phrases_tally_trigrams_and_skip_all_stopword_runs() {
+        let mut counts = HashMap::new();
+        let text = "the locket gleamed. the locket gleamed again out of the box.";
+        tally_phrases(text, &mut counts);
+        assert_eq!(counts.get("the locket gleamed"), Some(&2));
+        assert_eq!(counts.get("out of the"), None, "all-stopword trigram skipped");
+    }
+
+    #[test]
+    fn top_counts_orders_by_count_then_name() {
+        let counts = HashMap::from([
+            ("beta".to_string(), 3),
+            ("alpha".to_string(), 3),
+            ("rare".to_string(), 1),
+        ]);
+        // count desc, ties alphabetical; min filters out the single occurrence.
+        assert_eq!(top_counts(&counts, 10, 2), vec![("alpha".to_string(), 3), ("beta".to_string(), 3)]);
+    }
+
     fn chapter(title: &str, prose_text: &str, words: usize) -> ChapterAnalysis {
         ChapterAnalysis {
             title: title.to_string(),
@@ -797,6 +1029,7 @@ mod tests {
                 .iter()
                 .map(|s| crate::buffer::count_words(s))
                 .collect(),
+            style: style_flags(prose_text),
         }
     }
 
@@ -817,6 +1050,8 @@ mod tests {
             longest: &longest,
             parts: &[],
             run_on_threshold: 40,
+            top_words: &[("locket".to_string(), 9)],
+            top_phrases: &[("the dog ran".to_string(), 4)],
         };
         let rows = lines(&report);
         let text: String = rows
@@ -830,8 +1065,11 @@ mod tests {
         assert!(text.contains("Distribution"));
         assert!(text.contains("Longest sentences"));
         assert!(text.contains("Chapter length"));
+        assert!(text.contains("Style flags"));
+        assert!(text.contains("Most-used words") && text.contains("locket"));
+        assert!(text.contains("Repeated phrases") && text.contains("the dog ran"));
         assert!(text.contains("One") && text.contains("Two"));
-        assert_eq!(text.matches("Whole manuscript").count(), 3); // one per section
+        assert_eq!(text.matches("Whole manuscript").count(), 4); // one per section
     }
 
     #[test]
@@ -851,6 +1089,8 @@ mod tests {
             longest: &[],
             parts: &parts,
             run_on_threshold: 40,
+            top_words: &[],
+            top_phrases: &[],
         };
         let text: String = lines(&report)
             .iter()

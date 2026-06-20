@@ -13,9 +13,9 @@ disk), so typing stays instant on a large manuscript (the perf guards in
 `CLAUDE.md` apply).
 
 This document specifies each metric and its formula. The slices so far are
-readability (#67), sentence-length statistics (#68), and chapter-length / pacing
-(#69); later tickets in the epic (#66) add paragraph statistics, style flags,
-dialogue balance, and vocabulary.
+readability (#67), sentence-length statistics (#68), chapter-length / pacing
+(#69), and frequency-based style flags (#70); later tickets in the epic (#66) add
+paragraph statistics, dialogue balance, and vocabulary.
 
 ## Shared text primitives
 
@@ -184,6 +184,41 @@ The fences are median-relative on purpose: a single very long or very short
 chapter would drag a mean- or quartile-based threshold toward itself and hide the
 very outlier it should catch, whereas the median barely moves. Below four
 chapters there is no meaningful "rest" to compare against, so nothing is flagged.
+
+## Style flags (frequency)
+
+Every writer has tics — a word they lean on, too many adverbs, filtering that
+distances the reader. This section catches them **statistically**: deterministic
+counts the author decides on. It is purely frequency-based; the context-aware,
+semantic version (does this *-ly* word actually weaken the sentence?) is the AI
+prose/style pass (#79), kept separate to avoid overlap. Everything here is
+**descriptive, not prescriptive** — counts and locations, never an auto-edit.
+
+The per-chapter (and overall) table reports, as a percentage of that chapter's
+words unless noted:
+
+- **-ly%** — density of `-ly` manner adverbs. Common non-adverbs (`only`,
+  `family`, `reply`, …) are excluded so they don't inflate the count.
+- **Filter** — count of filtering verbs (`saw`, `felt`, `heard`, `noticed`,
+  `realized`, `knew`, …). "She *saw* the door" distances the reader from "the
+  door"; cutting the filter often tightens the prose.
+- **to-be%** — density of "to be" forms (`is`, `was`, `were`, `been`, …), the
+  weak-verb proxy.
+- **Passive** — count of estimated passive constructions: a "to be" form followed
+  by an `-ed` word ("was locked"). A heuristic, not a parser, so it misses
+  irregular participles ("was held") and catches the odd false positive.
+
+### Most-used words
+
+The manuscript's most frequent **content** words — stopwords (`the`, `and`,
+`she`, …) and very short words are excluded, so the list surfaces an author's
+real lexical tics (a character name, an overused verb) rather than grammar.
+
+### Repeated phrases
+
+Three-word phrases that recur **three or more times** across the manuscript,
+highest first. Phrases made entirely of stopwords ("out of the") are skipped.
+Phrases are counted within a chapter, never spanning a chapter boundary.
 
 ## Reading the report
 

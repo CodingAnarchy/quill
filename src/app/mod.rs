@@ -354,6 +354,8 @@ impl App {
         let threshold = self.project.manifest.run_on_threshold();
         let mut chapters = Vec::with_capacity(self.chapter_count());
         let mut longest = analysis::LongestSentences::new(5);
+        let mut word_counts = HashMap::new();
+        let mut phrase_counts = HashMap::new();
         for i in 0..self.chapter_count() {
             let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
             // Measure prose only — drop heading lines so a chapter/scene title
@@ -366,6 +368,10 @@ impl App {
             for (s, &words) in sentences.iter().zip(&sentence_lengths) {
                 longest.consider(&title, s, words);
             }
+            // Frequency tallies accumulate across the whole manuscript; phrases
+            // are gathered per chapter so they don't span a chapter boundary.
+            analysis::tally_content_words(&text, &mut word_counts);
+            analysis::tally_phrases(&text, &mut phrase_counts);
             // Pacing uses the rolled-up chapter word count (headings included),
             // matching the chapter list and progress report.
             chapters.push(analysis::ChapterAnalysis {
@@ -373,16 +379,21 @@ impl App {
                 words: self.chapter_word_count(i),
                 stats,
                 sentence_lengths,
+                style: analysis::style_flags(&text),
             });
         }
         let longest = longest.into_vec();
         let parts = self.analysis_parts();
+        let top_words = analysis::top_counts(&word_counts, 12, 1);
+        let top_phrases = analysis::top_counts(&phrase_counts, 8, 3); // phrases recurring 3+ times
         let report = analysis::Report {
             title: &self.project.manifest.title,
             chapters: &chapters,
             longest: &longest,
             parts: &parts,
             run_on_threshold: threshold,
+            top_words: &top_words,
+            top_phrases: &top_phrases,
         };
         analysis::lines(&report)
     }
