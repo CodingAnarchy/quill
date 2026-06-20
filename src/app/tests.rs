@@ -739,6 +739,13 @@ fn offline_mode_selects_the_local_backend() {
     fs::remove_dir_all(&dir).ok();
 }
 
+fn palette_labels(app: &App) -> Vec<&'static str> {
+    match &app.mode {
+        Mode::Palette(p) => p.items.iter().map(|it| it.label).collect(),
+        _ => panic!("expected a palette to be open"),
+    }
+}
+
 fn overlay_text(app: &App) -> String {
     app.overlay_lines()
         .expect("an overlay should be open")
@@ -847,6 +854,36 @@ fn git_palette_restores_a_chapter() {
     app.on_key(key(KeyCode::Char('y')));
     assert!(!app.buffer.text().contains('Z'), "the edit was reverted: {:?}", app.buffer.text());
     assert!(app.message.as_deref().unwrap_or("").contains("Restored"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn git_palette_configures_a_remote_then_offers_sync() {
+    let (mut app, dir) = two_chapter_app("vc-remote");
+    git_menu(&mut app, 0); // Initialize
+
+    // Before a remote: the menu offers "Set remote" but not Push/Pull.
+    app.on_key(ctrl('v'));
+    let labels = palette_labels(&app);
+    assert!(labels.contains(&"Set remote"), "{labels:?}");
+    assert!(!labels.contains(&"Push") && !labels.contains(&"Pull"), "{labels:?}");
+    app.on_key(key(KeyCode::Esc));
+
+    // Set a remote through the palette (Commit, History, Changes, Restore, Set remote = idx 4).
+    git_menu(&mut app, 4);
+    assert!(matches!(app.mode, Mode::Prompt(_)), "set-remote prompts for a URL");
+    type_str(&mut app, "https://example.com/book.git");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        crate::vcs::remote_url(&app.project.root).as_deref(),
+        Some("https://example.com/book.git"),
+    );
+
+    // Now the menu offers Push and Pull, and "Change remote" instead of "Set remote".
+    app.on_key(ctrl('v'));
+    let labels = palette_labels(&app);
+    assert!(labels.contains(&"Push") && labels.contains(&"Pull"), "{labels:?}");
+    assert!(labels.contains(&"Change remote") && !labels.contains(&"Set remote"), "{labels:?}");
     fs::remove_dir_all(&dir).ok();
 }
 

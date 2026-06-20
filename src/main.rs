@@ -128,6 +128,7 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         // Surface a finished AI request (runs on a worker thread) before drawing,
         // so its answer appears within the poll window even with no keypress.
         app.poll_ai();
+        app.poll_vc(); // surface a finished push/pull (worker thread) before drawing
         tui.draw(app)?;
 
         // Poll so we can stay responsive without busy-spinning.
