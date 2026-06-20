@@ -77,6 +77,10 @@ pub struct App {
     /// Height of the terminal in rows, refreshed each frame by the renderer.
     /// Lets the key handler clamp overlay scrolling to the content that exists.
     pub viewport_height: u16,
+    /// The editor's wrap column (focus-column width in cells), set by the renderer
+    /// each frame so visual-row cursor navigation (#143) wraps lines the same way
+    /// the screen does. A `Cell` because the renderer borrows `App` immutably.
+    pub wrap_width: std::cell::Cell<u16>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.
@@ -132,6 +136,7 @@ impl App {
             vc_changes: 0,
             overlay: None,
             viewport_height: 0,
+            wrap_width: std::cell::Cell::new(72),
             added: 0,
             removed: 0,
             moved_to_unused: 0,
@@ -1427,10 +1432,22 @@ impl App {
 
             (false, KeyCode::Left) => self.edit_move(Buffer::move_left),
             (false, KeyCode::Right) => self.edit_move(Buffer::move_right),
-            (false, KeyCode::Up) => self.edit_move(Buffer::move_up),
-            (false, KeyCode::Down) => self.edit_move(Buffer::move_down),
-            (false, KeyCode::Home) => self.edit_move(Buffer::move_home),
-            (false, KeyCode::End) => self.edit_move(Buffer::move_end),
+            (false, KeyCode::Up) => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_move(move |b| b.move_up(w));
+            }
+            (false, KeyCode::Down) => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_move(move |b| b.move_down(w));
+            }
+            (false, KeyCode::Home) => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_move(move |b| b.move_home(w));
+            }
+            (false, KeyCode::End) => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_move(move |b| b.move_end(w));
+            }
 
             _ => {}
         }
@@ -1482,10 +1499,22 @@ impl App {
             }
             KeyCode::Left => self.edit_buffer_mut().move_left(),
             KeyCode::Right => self.edit_buffer_mut().move_right(),
-            KeyCode::Up => self.edit_buffer_mut().move_up(),
-            KeyCode::Down => self.edit_buffer_mut().move_down(),
-            KeyCode::Home => self.edit_buffer_mut().move_home(),
-            KeyCode::End => self.edit_buffer_mut().move_end(),
+            KeyCode::Up => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_buffer_mut().move_up(w);
+            }
+            KeyCode::Down => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_buffer_mut().move_down(w);
+            }
+            KeyCode::Home => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_buffer_mut().move_home(w);
+            }
+            KeyCode::End => {
+                let w = self.wrap_width.get() as usize;
+                self.edit_buffer_mut().move_end(w);
+            }
             _ => return false,
         }
         true
