@@ -123,6 +123,12 @@ pub(crate) enum GitAction {
     Diff,
     /// Restore the current chapter to its last committed version (#135).
     RestoreChapter,
+    /// Set (or change) the remote URL the project backs up to (#134).
+    SetRemote,
+    /// Push local commits to the remote (#134).
+    Push,
+    /// Pull the remote's changes down (#134).
+    Pull,
 }
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.
@@ -210,6 +216,8 @@ pub(crate) enum Pending {
     ConfirmAi(AiAction),
     /// y/N: restore the current chapter to its last committed version (#135).
     ConfirmRestore,
+    /// Text input: the remote URL to back the project up to (#134).
+    SetRemote,
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.

@@ -118,3 +118,29 @@ the bible-as-cache's "last built from" marker.
 
 Keep every operation opt-in and non-destructive (the epic's rule): `restore`
 confirms before discarding, and remote ops never force-push or auto-resolve.
+
+## Remote auth (#134, as shipped)
+
+Remote sync re-enables git2's `https` + `ssh` features (with `vendored-openssl`
+so the HTTPS transport doesn't depend on a system OpenSSL install). The auth
+rule is **reuse what the author already has** rather than inventing key
+management — git2's credential callback resolves, in order:
+
+1. **SSH URLs** (`git@host:…`) → the running **ssh-agent**
+   (`Cred::ssh_key_from_agent`).
+2. **HTTPS URLs** → a **token from the environment** if set
+   (`QUILL_GIT_TOKEN`, then `GITHUB_TOKEN` / `GH_TOKEN`), else the **system git
+   credential helper** (`Cred::credential_helper` — the macOS keychain, `gh`,
+   `git-credential-store`, etc.).
+
+When none of these produce a credential, the push/pull fails with author-facing
+guidance ("set up an SSH key, a credential helper, or a `QUILL_GIT_TOKEN`")
+instead of a raw libgit2 error — see `friendly()` in `vcs.rs`.
+
+Non-destructive by the epic's rule: **push never forces** (a non-fast-forward is
+reported as "pull first", never overwritten), and **pull is fast-forward only**
+(a diverged branch stops and explains rather than merging or resetting; the UI
+also refuses to pull over a dirty working tree). Single remote (`origin`); the
+network op runs on a worker thread so the editor never blocks, and the active
+chapter is reloaded after a pull rewrites files. Divergent-history handling
+(merge/rebase) is intentionally deferred — surfaced, not auto-resolved.

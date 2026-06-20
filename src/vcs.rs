@@ -198,6 +198,168 @@ pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
     Ok(Some(oid.to_string().chars().take(7).collect()))
 }
 
+/// Point the project at a hosted remote (#134). Stores it as `origin`, replacing
+/// any existing one, so reconfiguring is just calling this again. The URL can be
+/// HTTPS (`https://…`), SSH (`git@…`), or a local path — auth is resolved at
+/// push/pull time, not here.
+pub fn set_remote(root: &Path, url: &str) -> Result<(), String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    // remote_set_url creates or updates; fall back to add for a brand-new remote.
+    if repo.find_remote("origin").is_ok() {
+        repo.remote_set_url("origin", url).map_err(|e| format!("set remote: {e}"))?;
+    } else {
+        repo.remote("origin", url).map_err(|e| format!("add remote: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The configured `origin` URL, if any — for showing the author where their work
+/// backs up to.
+pub fn remote_url(root: &Path) -> Option<String> {
+    let repo = git2::Repository::open(root).ok()?;
+    let remote = repo.find_remote("origin").ok()?;
+    remote.url().map(str::to_string)
+}
+
+/// Push the current branch's commits to `origin` (#134). Never forces: if the
+/// remote has commits the local branch doesn't, libgit2 rejects the
+/// non-fast-forward push and we surface that ("pull first") rather than
+/// clobbering remote history. Returns the branch name pushed.
+pub fn push(root: &Path) -> Result<String, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let branch = current_branch(&repo)?;
+    let mut remote = repo.find_remote("origin").map_err(|_| NO_REMOTE.to_string())?;
+
+    // A rejected ref (e.g. non-fast-forward) is reported through this callback,
+    // not always as an error from push() — capture it so we never silently
+    // "succeed" at a push the remote refused.
+    let rejected = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let captured = rejected.clone();
+    let mut cbs = git2::RemoteCallbacks::new();
+    cbs.credentials(credentials);
+    cbs.push_update_reference(move |_refname, status| {
+        if let Some(reason) = status {
+            *captured.borrow_mut() = Some(reason.to_string());
+        }
+        Ok(())
+    });
+    let mut opts = git2::PushOptions::new();
+    opts.remote_callbacks(cbs);
+
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    remote.push(&[&refspec], Some(&mut opts)).map_err(friendly)?;
+
+    if let Some(reason) = rejected.borrow().clone() {
+        return Err(format!("The remote rejected the push ({reason}) — pull first, then push again."));
+    }
+    Ok(branch)
+}
+
+/// Pull `origin`'s changes for the current branch (#134). Fast-forward only and
+/// non-destructive: if local and remote have diverged (each has commits the other
+/// lacks), it stops and explains rather than merging or resetting. The caller is
+/// expected to ensure the working tree is clean first. Returns a human message.
+pub fn pull(root: &Path) -> Result<String, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let branch = current_branch(&repo)?;
+    let mut remote = repo.find_remote("origin").map_err(|_| NO_REMOTE.to_string())?;
+
+    let mut cbs = git2::RemoteCallbacks::new();
+    cbs.credentials(credentials);
+    let mut opts = git2::FetchOptions::new();
+    opts.remote_callbacks(cbs);
+    remote.fetch(&[&branch], Some(&mut opts), None).map_err(friendly)?;
+
+    let fetch_head = repo.find_reference("FETCH_HEAD").map_err(|e| e.to_string())?;
+    let fetched = repo.reference_to_annotated_commit(&fetch_head).map_err(|e| e.to_string())?;
+    let (analysis, _) = repo.merge_analysis(&[&fetched]).map_err(|e| e.to_string())?;
+
+    if analysis.is_up_to_date() {
+        return Ok("Already up to date with the remote.".to_string());
+    }
+    if !analysis.is_fast_forward() {
+        return Err("Local and remote have diverged — resolve manually.".to_string());
+    }
+
+    // Fast-forward: move the branch ref to the fetched commit and update the tree.
+    let refname = format!("refs/heads/{branch}");
+    match repo.find_reference(&refname) {
+        Ok(mut r) => {
+            r.set_target(fetched.id(), "pull: fast-forward").map_err(|e| e.to_string())?;
+        }
+        Err(_) => {
+            // Unborn branch (no local commits yet) — create it at the fetched commit.
+            repo.reference(&refname, fetched.id(), true, "pull: initial").map_err(|e| e.to_string())?;
+        }
+    }
+    repo.set_head(&refname).map_err(|e| e.to_string())?;
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).map_err(|e| e.to_string())?;
+    Ok("Pulled the latest changes from the remote.".to_string())
+}
+
+const NO_REMOTE: &str = "No remote configured — set one first.";
+
+/// The short name of the branch `HEAD` points at (e.g. `main`), or an error for a
+/// detached or unborn HEAD (nothing to push/pull).
+fn current_branch(repo: &git2::Repository) -> Result<String, String> {
+    let head = repo.head().map_err(|_| "No commits yet — commit before syncing.".to_string())?;
+    head.shorthand().map(str::to_string).ok_or_else(|| "Not on a branch.".to_string())
+}
+
+/// git2 credential callback: reuse whatever the author already has, rather than
+/// inventing key management. SSH URLs use the ssh-agent; HTTPS uses a token from
+/// the environment if present, otherwise the system git credential helper (e.g.
+/// the macOS keychain or `gh`). Documented in `docs/git-integration-spike.md`.
+fn credentials(
+    url: &str,
+    username: Option<&str>,
+    allowed: git2::CredentialType,
+) -> Result<git2::Cred, git2::Error> {
+    use git2::CredentialType as Type;
+    if allowed.contains(Type::SSH_KEY) {
+        return git2::Cred::ssh_key_from_agent(username.unwrap_or("git"));
+    }
+    if allowed.contains(Type::USER_PASS_PLAINTEXT) {
+        if let Some(token) = token_from_env() {
+            return git2::Cred::userpass_plaintext(username.unwrap_or("git"), &token);
+        }
+        let config = git2::Config::open_default()?;
+        return git2::Cred::credential_helper(&config, url, username);
+    }
+    if allowed.contains(Type::USERNAME) {
+        return git2::Cred::username(username.unwrap_or("git"));
+    }
+    Err(git2::Error::from_str("no supported authentication method available"))
+}
+
+/// A personal-access token from the environment, for HTTPS auth without a
+/// configured credential helper. Checks Quill's own var first, then the
+/// conventional GitHub ones.
+fn token_from_env() -> Option<String> {
+    ["QUILL_GIT_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"]
+        .iter()
+        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))
+}
+
+/// Turn a libgit2 network/auth error into author-facing guidance instead of a
+/// cryptic message.
+fn friendly(e: git2::Error) -> String {
+    let msg = e.message().to_lowercase();
+    if msg.contains("authentication") || msg.contains("401") || msg.contains("403") || msg.contains("credentials") {
+        "Authentication failed — set up an SSH key, a credential helper, or a \
+         QUILL_GIT_TOKEN for the remote."
+            .to_string()
+    } else if msg.contains("fast-forward")
+        || msg.contains("rejected")
+        || msg.contains("cannot push")
+        || msg.contains("not present locally")
+    {
+        "The remote has changes you don't — pull first, then push again.".to_string()
+    } else {
+        format!("Remote operation failed: {}", e.message())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +436,76 @@ mod tests {
         fs::create_dir_all(dir.join("unused")).unwrap();
         fs::write(dir.join("unused/old.md"), "# Old\n").unwrap();
         assert_eq!(commit(&dir, "noise").unwrap(), None, "ignored paths aren't committed");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_and_read_remote() {
+        let dir = temp_dir("remote-set");
+        init(&dir).unwrap();
+        assert!(remote_url(&dir).is_none(), "no remote on a fresh repo");
+        set_remote(&dir, "https://example.com/a.git").unwrap();
+        assert_eq!(remote_url(&dir).as_deref(), Some("https://example.com/a.git"));
+        // Reconfiguring just replaces the URL.
+        set_remote(&dir, "https://example.com/b.git").unwrap();
+        assert_eq!(remote_url(&dir).as_deref(), Some("https://example.com/b.git"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn push_and_pull_through_a_local_remote() {
+        // A bare repo stands in for the hosted remote — this exercises the full
+        // push/pull/divergence plumbing with no network or auth.
+        let remote = temp_dir("remote-bare");
+        git2::Repository::init_bare(&remote).unwrap();
+        let url = remote.to_str().unwrap();
+
+        let a = temp_dir("remote-a");
+        init(&a).unwrap();
+        fs::write(a.join("one.md"), "# One\n\nDraft.\n").unwrap();
+        commit(&a, "first").unwrap();
+        set_remote(&a, url).unwrap();
+        assert!(!push(&a).unwrap().is_empty(), "first push reports the branch");
+
+        // b is a second working copy (clone) — it has "first".
+        let b = temp_dir("remote-b");
+        fs::remove_dir_all(&b).ok();
+        git2::Repository::clone(url, &b).unwrap();
+        assert!(b.join("one.md").exists());
+
+        // a commits again and pushes; b fast-forwards on pull.
+        fs::write(a.join("one.md"), "# One\n\nRevised draft.\n").unwrap();
+        commit(&a, "second").unwrap();
+        push(&a).unwrap();
+        let msg = pull(&b).unwrap();
+        assert!(msg.contains("Pulled"), "{msg}");
+        assert!(fs::read_to_string(b.join("one.md")).unwrap().contains("Revised"));
+        // Pulling again with nothing new is a no-op, not an error.
+        assert!(pull(&b).unwrap().contains("up to date"));
+
+        // Divergence: b moves ahead and pushes; a (behind, with its own new
+        // commit) is refused rather than overwriting b's work.
+        fs::write(b.join("one.md"), "# One\n\nB's edit.\n").unwrap();
+        commit(&b, "b-change").unwrap();
+        push(&b).unwrap();
+        fs::write(a.join("one.md"), "# One\n\nA's edit.\n").unwrap();
+        commit(&a, "a-change").unwrap();
+        let err = push(&a).unwrap_err();
+        assert!(err.to_lowercase().contains("pull first"), "{err}");
+
+        fs::remove_dir_all(&a).ok();
+        fs::remove_dir_all(&b).ok();
+        fs::remove_dir_all(&remote).ok();
+    }
+
+    #[test]
+    fn push_without_a_remote_explains() {
+        let dir = temp_dir("remote-none");
+        init(&dir).unwrap();
+        fs::write(dir.join("one.md"), "# One\n").unwrap();
+        commit(&dir, "first").unwrap();
+        let err = push(&dir).unwrap_err();
+        assert!(err.contains("No remote"), "{err}");
         fs::remove_dir_all(&dir).ok();
     }
 

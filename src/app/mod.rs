@@ -36,6 +36,14 @@ mod assist;
 
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
 
+/// The result of a remote push/pull (#134), sent back from the worker thread to
+/// the UI thread. `reload` asks the UI to re-read the active chapter, since a pull
+/// can change files on disk.
+struct VcMsg {
+    text: String,
+    reload: bool,
+}
+
 pub struct App {
     pub buffer: Buffer,
     /// The open project (manifest, root, active chapter index). The `buffer`
@@ -89,6 +97,10 @@ pub struct App {
     /// Receiver for an in-flight AI request running on a worker thread; `Some`
     /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
     ai_rx: Option<Receiver<Outcome>>,
+    /// Receiver for an in-flight remote push/pull (#134) running on a worker
+    /// thread, so the network op never blocks the editor; `Some` while syncing.
+    /// Polled each loop tick by [`App::poll_vc`].
+    vc_rx: Option<Receiver<VcMsg>>,
     /// The loaded local backend, cached after first use (loading a model is slow)
     /// and shared with the worker thread. Empty until the first local request;
     /// stays empty when the Claude backend is used. Type-erased so it needs no
@@ -127,6 +139,7 @@ impl App {
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
             ai_rx: None,
+            vc_rx: None,
             local_backend: Arc::new(Mutex::new(None)),
             pending_findings: Vec::new(),
             triage: Vec::new(),
@@ -354,12 +367,22 @@ impl App {
     fn open_git_palette(&mut self) {
         let git = |label, desc, a| PaletteItem { label, desc, command: Command::Git(a) };
         let items = if self.under_vc {
-            vec![
-                git("Commit", "Snapshot the project with a message", GitAction::Commit),
-                git("History", "Browse past commits", GitAction::History),
-                git("Changes", "Diff the working tree against the last commit", GitAction::Diff),
-                git("Restore chapter", "Revert the current chapter to its last commit", GitAction::RestoreChapter),
-            ]
+            let has_remote = crate::vcs::remote_url(&self.project.root).is_some();
+            let mut items = vec![git("Commit", "Snapshot the project with a message", GitAction::Commit)];
+            // Sync actions are only meaningful once a remote is configured.
+            if has_remote {
+                items.push(git("Push", "Back up your commits to the remote", GitAction::Push));
+                items.push(git("Pull", "Bring down the remote's latest changes", GitAction::Pull));
+            }
+            items.push(git("History", "Browse past commits", GitAction::History));
+            items.push(git("Changes", "Diff the working tree against the last commit", GitAction::Diff));
+            items.push(git("Restore chapter", "Revert the current chapter to its last commit", GitAction::RestoreChapter));
+            items.push(if has_remote {
+                git("Change remote", "Point backups at a different remote", GitAction::SetRemote)
+            } else {
+                git("Set remote", "Back the project up to a hosted remote", GitAction::SetRemote)
+            });
+            items
         } else {
             vec![git("Initialize", "Put this project under version control", GitAction::Initialize)]
         };
@@ -374,6 +397,121 @@ impl App {
             GitAction::History => self.overlay = Some(Overlay::report("history", self.vc_log_lines())),
             GitAction::Diff => self.show_diff(),
             GitAction::RestoreChapter => self.start_restore(),
+            GitAction::SetRemote => self.start_set_remote(),
+            GitAction::Push => self.start_push(),
+            GitAction::Pull => self.start_pull(),
+        }
+    }
+
+    /// Prompt for the remote URL the project backs up to (#134), prefilled with
+    /// the current one so "change remote" shows what's set.
+    fn start_set_remote(&mut self) {
+        if !self.under_vc {
+            self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+            return;
+        }
+        let current = crate::vcs::remote_url(&self.project.root).unwrap_or_default();
+        self.open_prompt(Pending::SetRemote, "Remote URL: ", &current, None);
+    }
+
+    /// Store the remote URL from the prompt.
+    fn set_remote(&mut self, url: &str) {
+        if url.is_empty() {
+            self.message = Some("Remote unchanged.".into());
+            return;
+        }
+        self.message = Some(match crate::vcs::set_remote(&self.project.root, url) {
+            Ok(()) => format!("Remote set to {url}"),
+            Err(e) => format!("Set remote: {e}"),
+        });
+    }
+
+    /// Push committed work to the remote on a worker thread (#134). The network
+    /// op runs off the UI thread so the editor stays responsive; the result lands
+    /// via [`App::poll_vc`].
+    fn start_push(&mut self) {
+        if !self.guard_remote() || self.vc_rx.is_some() {
+            return;
+        }
+        self.save_edit(); // flush edits so the status the author sees is accurate
+        let root = self.project.root.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(match crate::vcs::push(&root) {
+                Ok(branch) => VcMsg { text: format!("Pushed {branch} to the remote."), reload: false },
+                Err(e) => VcMsg { text: e, reload: false },
+            });
+        });
+        self.vc_rx = Some(rx);
+        self.message = Some("⟳ Pushing to the remote…".into());
+    }
+
+    /// Pull the remote's changes on a worker thread (#134). Conservative: refuses
+    /// when the working tree is dirty (a fast-forward checkout would overwrite
+    /// uncommitted edits), so the author commits first.
+    fn start_pull(&mut self) {
+        if !self.guard_remote() || self.vc_rx.is_some() {
+            return;
+        }
+        self.save_edit();
+        self.refresh_vc_status();
+        if self.vc_changes > 0 {
+            self.message = Some("Commit your changes before pulling.".into());
+            return;
+        }
+        let root = self.project.root.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(match crate::vcs::pull(&root) {
+                Ok(text) => VcMsg { text, reload: true },
+                Err(e) => VcMsg { text: e, reload: false },
+            });
+        });
+        self.vc_rx = Some(rx);
+        self.message = Some("⟳ Pulling from the remote…".into());
+    }
+
+    /// Shared guard for the sync actions: under version control with a remote set.
+    /// Sets the explanatory message and returns `false` when not.
+    fn guard_remote(&mut self) -> bool {
+        if !self.under_vc {
+            self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+            return false;
+        }
+        if crate::vcs::remote_url(&self.project.root).is_none() {
+            self.message = Some("No remote — choose “Set remote” first.".into());
+            return false;
+        }
+        true
+    }
+
+    /// Apply a finished push/pull result (non-blocking). Called once per loop tick.
+    pub fn poll_vc(&mut self) {
+        let Some(rx) = &self.vc_rx else { return };
+        match rx.try_recv() {
+            Ok(msg) => {
+                self.vc_rx = None;
+                if msg.reload {
+                    self.reload_active_chapter(); // a pull can rewrite files on disk
+                }
+                self.refresh_vc_status();
+                self.message = Some(msg.text);
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.vc_rx = None;
+                self.message = Some("Remote operation failed.".into());
+            }
+        }
+    }
+
+    /// Re-read the active chapter from disk into the buffer (after a pull rewrote
+    /// it). Best-effort: a read failure leaves the current buffer in place.
+    fn reload_active_chapter(&mut self) {
+        let path = self.project.active_path();
+        if let Ok(buffer) = Buffer::from_path(&path) {
+            self.buffer = buffer;
+            self.project.set_active_words(self.buffer.word_count());
         }
     }
 
@@ -1132,7 +1270,8 @@ impl App {
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
             | Pending::AskAi
-            | Pending::Commit => {
+            | Pending::Commit
+            | Pending::SetRemote => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1176,6 +1315,10 @@ impl App {
                                 } else {
                                     self.commit(text);
                                 }
+                            }
+                            Pending::SetRemote => {
+                                self.mode = closed;
+                                self.set_remote(text);
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
