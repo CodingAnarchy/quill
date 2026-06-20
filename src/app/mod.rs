@@ -382,6 +382,7 @@ impl App {
                 style: analysis::style_flags(&text),
                 dialogue: analysis::dialogue_split(&text),
                 paragraph_lengths: analysis::paragraph_lengths(&text),
+                lexical_variety: analysis::lexical_variety(&text),
             });
         }
         let longest = longest.into_vec();

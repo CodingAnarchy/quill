@@ -8,7 +8,7 @@
 //! matches the progress report's notion of prose words (`buffer::count_words` /
 //! Unicode word segmentation), so the two reports agree on how big a chapter is.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -625,6 +625,60 @@ fn summarize_lengths(lengths: &[usize]) -> (f64, f64, usize) {
     (sum as f64 / lengths.len() as f64, median_sorted(&sorted), sorted[sorted.len() - 1])
 }
 
+// --- Vocabulary richness (#72) ----------------------------------------------
+
+/// The window, in words, for the moving-average type–token ratio.
+const MATTR_WINDOW: usize = 100;
+
+/// Lexical variety as a moving-average type–token ratio (MATTR) in `0.0..=1.0`:
+/// the average fraction of distinct words across every [`MATTR_WINDOW`]-word
+/// window. Unlike a plain type–token ratio it doesn't fall just because a chapter
+/// is longer, so chapters are comparable. Short chapters (fewer than a window)
+/// fall back to the plain ratio over the whole text.
+pub fn lexical_variety(text: &str) -> f64 {
+    let tokens: Vec<String> = text.unicode_words().map(str::to_lowercase).collect();
+    mattr(&tokens, MATTR_WINDOW)
+}
+
+fn mattr(tokens: &[String], window: usize) -> f64 {
+    let n = tokens.len();
+    if n == 0 {
+        return 0.0;
+    }
+    if n <= window {
+        let distinct = tokens.iter().map(String::as_str).collect::<HashSet<_>>().len();
+        return distinct as f64 / n as f64;
+    }
+    // Slide a fixed window across the tokens, tracking the distinct count
+    // incrementally (add the entering word, drop the leaving one).
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    let mut distinct = 0usize;
+    for t in &tokens[..window] {
+        let c = counts.entry(t.as_str()).or_insert(0);
+        if *c == 0 {
+            distinct += 1;
+        }
+        *c += 1;
+    }
+    let mut sum = distinct as f64;
+    for i in window..n {
+        let leaving = tokens[i - window].as_str();
+        let c = counts.get_mut(leaving).unwrap();
+        *c -= 1;
+        if *c == 0 {
+            distinct -= 1;
+        }
+        let c = counts.entry(tokens[i].as_str()).or_insert(0);
+        if *c == 0 {
+            distinct += 1;
+        }
+        *c += 1;
+        sum += distinct as f64;
+    }
+    // Mean of each window's (distinct / window) ratio.
+    sum / ((n - window + 1) * window) as f64
+}
+
 /// One chapter's analysis inputs: its title, total word count (the rolled-up
 /// count, for the pacing section), readability [`Stats`], and the word length of
 /// each of its sentences. Gathered by the editor (which owns the manuscript) and
@@ -637,6 +691,8 @@ pub struct ChapterAnalysis {
     pub style: StyleFlags,
     pub dialogue: Dialogue,
     pub paragraph_lengths: Vec<usize>,
+    /// Lexical variety (MATTR, 0.0..=1.0) — see [`lexical_variety`].
+    pub lexical_variety: f64,
 }
 
 /// One part (chapter grouping) for the pacing section: its display name and the
@@ -712,7 +768,9 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     out.push(Line::raw(""));
     out.extend(dialogue_section(report.chapters));
     out.push(Line::raw(""));
-    out.extend(style_section(report.chapters, report.top_words, report.top_phrases));
+    out.extend(style_section(report.chapters, report.top_phrases));
+    out.push(Line::raw(""));
+    out.extend(vocabulary_section(report.chapters, report.top_words));
     out
 }
 
@@ -853,14 +911,9 @@ fn dialogue_text(name: &str, dialogue: Dialogue, paragraphs: &[usize]) -> String
 }
 
 /// The style-flags section: a per-chapter (and overall) table of `-ly` adverb,
-/// filter-word, weak-verb, and passive density, plus the manuscript's most-used
-/// content words and most-repeated phrases. Descriptive only — counts, never
-/// edits.
-fn style_section(
-    chapters: &[ChapterAnalysis],
-    top_words: &[(String, usize)],
-    top_phrases: &[(String, usize)],
-) -> Vec<Line<'static>> {
+/// filter-word, weak-verb, and passive density, plus the manuscript's most
+/// repeated phrases. Descriptive only — counts, never edits.
+fn style_section(chapters: &[ChapterAnalysis], top_phrases: &[(String, usize)]) -> Vec<Line<'static>> {
     let mut out = vec![
         dim("Style flags (frequency)"),
         dim(format!("{:<26}{:>7}{:>8}{:>7}{:>9}", "Chapter", "-ly%", "Filter", "to-be%", "Passive")),
@@ -871,10 +924,36 @@ fn style_section(
         out.push(Line::raw(style_text(&c.title, &c.style)));
     }
     out.push(bold(style_text("Whole manuscript", &total)));
-
-    out.extend(count_list("Most-used words", top_words));
     out.extend(count_list("Repeated phrases", top_phrases));
     out
+}
+
+/// The vocabulary section: lexical variety (MATTR ×100, so higher = more varied)
+/// per chapter and overall, plus the manuscript's most-used content words. The
+/// overall variety is the word-weighted mean of the chapters' (MATTR is already
+/// length-normalized, so the per-chapter values are comparable).
+fn vocabulary_section(chapters: &[ChapterAnalysis], top_words: &[(String, usize)]) -> Vec<Line<'static>> {
+    let mut out = vec![
+        dim("Vocabulary"),
+        dim(format!("{:<26}{:>9}{:>8}", "Chapter", "Variety", "Words")),
+    ];
+    let mut weighted = 0.0;
+    let mut words = 0usize;
+    for c in chapters {
+        weighted += c.lexical_variety * c.stats.words as f64;
+        words += c.stats.words;
+        out.push(Line::raw(vocab_text(&c.title, c.lexical_variety, c.stats.words)));
+    }
+    let overall = if words == 0 { 0.0 } else { weighted / words as f64 };
+    out.push(bold(vocab_text("Whole manuscript", overall, words)));
+    out.extend(count_list("Most-used words", top_words));
+    out
+}
+
+/// One vocabulary row: lexical variety scaled to 0–100 (unique words per 100-word
+/// window) and the word count it was measured over.
+fn vocab_text(name: &str, variety: f64, words: usize) -> String {
+    format!("{:<26}{:>9.1}{:>8}", truncate(name, 24), variety * 100.0, words)
 }
 
 /// A titled `count×  item` list (one per line, so long lists scroll rather than
@@ -1181,6 +1260,28 @@ mod tests {
         assert_eq!(summarize_lengths(&[]), (0.0, 0.0, 0));
     }
 
+    #[test]
+    fn lexical_variety_falls_back_to_plain_ttr_for_short_text() {
+        // 5 tokens, 4 distinct ("the" twice) → 0.8; under the window, so plain TTR.
+        assert!((lexical_variety("the cat the dog runs") - 0.8).abs() < 1e-9);
+        assert_eq!(lexical_variety(""), 0.0);
+        assert_eq!(lexical_variety("word word word"), 1.0 / 3.0);
+    }
+
+    #[test]
+    fn mattr_is_length_independent_and_rewards_variety() {
+        // All-unique tokens → every window is fully distinct → 1.0.
+        let varied: Vec<String> = (0..500).map(|i| format!("w{i}")).collect();
+        assert!((mattr(&varied, 100) - 1.0).abs() < 1e-9);
+        // Heavy repetition → low ratio, and (the point of MATTR) doubling the
+        // length doesn't change the score.
+        let pattern: Vec<String> = "a b a c a d a e a f".split(' ').map(String::from).collect();
+        let short: Vec<String> = pattern.iter().cloned().cycle().take(200).collect();
+        let long: Vec<String> = pattern.iter().cloned().cycle().take(400).collect();
+        assert!((mattr(&short, 100) - mattr(&long, 100)).abs() < 1e-9);
+        assert!(mattr(&short, 100) < 0.7);
+    }
+
     fn chapter(title: &str, prose_text: &str, words: usize) -> ChapterAnalysis {
         ChapterAnalysis {
             title: title.to_string(),
@@ -1193,6 +1294,7 @@ mod tests {
             style: style_flags(prose_text),
             dialogue: dialogue_split(prose_text),
             paragraph_lengths: paragraph_lengths(prose_text),
+            lexical_variety: lexical_variety(prose_text),
         }
     }
 
@@ -1230,10 +1332,11 @@ mod tests {
         assert!(text.contains("Chapter length"));
         assert!(text.contains("Dialogue & paragraphs"));
         assert!(text.contains("Style flags"));
+        assert!(text.contains("Vocabulary"));
         assert!(text.contains("Most-used words") && text.contains("locket"));
         assert!(text.contains("Repeated phrases") && text.contains("the dog ran"));
         assert!(text.contains("One") && text.contains("Two"));
-        assert_eq!(text.matches("Whole manuscript").count(), 5); // one per section
+        assert_eq!(text.matches("Whole manuscript").count(), 6); // one per section
     }
 
     #[test]
