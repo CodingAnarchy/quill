@@ -33,6 +33,7 @@ use crate::report::{self, Momentum, PartDelta};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod assist;
+mod search;
 
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
 
@@ -792,6 +793,7 @@ impl App {
             Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Palette(_) => self.on_key_palette(key),
+            Mode::Search(_) => self.on_key_search(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -1411,6 +1413,8 @@ impl App {
             // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
             (true, KeyCode::Char('z')) => self.history_step(false),
             (true, KeyCode::Char('y')) => self.history_step(true),
+            // Find (#144). Ctrl-f opens the query; from there `r` starts a replace.
+            (true, KeyCode::Char('f')) => self.open_find(),
 
             (false, KeyCode::Char(c)) => self.edit_insert_char(c),
             (false, KeyCode::Enter) => self.edit_insert_char('\n'),
