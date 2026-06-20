@@ -760,6 +760,39 @@ fn vc_status_reflects_uncommitted_changes() {
 }
 
 #[test]
+fn ctrl_y_shows_commit_history() {
+    let (mut app, dir) = two_chapter_app("vc-log");
+    let overlay_text = |app: &App| -> String {
+        app.overlay_lines()
+            .expect("history overlay")
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // Not under version control → a hint, no overlay.
+    app.on_key(ctrl('y'));
+    assert!(app.overlay.is_none());
+    assert!(app.message.as_deref().unwrap_or("").contains("Not under version control"));
+
+    app.on_key(ctrl('v'));
+    app.on_key(ctrl('y')); // before any commit
+    assert!(overlay_text(&app).contains("No commits yet"));
+    app.on_key(key(KeyCode::Esc)); // close the overlay
+
+    app.on_key(ctrl('k')); // commit
+    for c in "first draft".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    app.on_key(key(KeyCode::Enter));
+
+    app.on_key(ctrl('y'));
+    assert!(overlay_text(&app).contains("first draft"), "history lists the commit");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn ctrl_k_commits_with_a_message() {
     let (mut app, dir) = two_chapter_app("vcs-commit");
     // Not under version control yet → a hint, no prompt.
