@@ -249,8 +249,9 @@ pub fn push(root: &Path) -> Result<String, String> {
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     remote.push(&[&refspec], Some(&mut opts)).map_err(friendly)?;
 
-    if let Some(reason) = rejected.borrow().clone() {
-        return Err(format!("The remote rejected the push ({reason}) — pull first, then push again."));
+    // A rejection that came back via the callback rather than as an error.
+    if rejected.borrow_mut().take().is_some() {
+        return Err(BEHIND_REMOTE.to_string());
     }
     Ok(branch)
 }
@@ -298,6 +299,11 @@ pub fn pull(root: &Path) -> Result<String, String> {
 }
 
 const NO_REMOTE: &str = "No remote configured — set one first.";
+
+/// Shown when a push is refused because the remote has commits the local branch
+/// doesn't. The single source for this guidance — both the push error path
+/// ([`friendly`]) and the update-reference callback in [`push`] use it.
+const BEHIND_REMOTE: &str = "The remote has changes you don't — pull first, then push again.";
 
 /// The short name of the branch `HEAD` points at (e.g. `main`), or an error for a
 /// detached or unborn HEAD (nothing to push/pull).
@@ -354,7 +360,7 @@ fn friendly(e: git2::Error) -> String {
         || msg.contains("cannot push")
         || msg.contains("not present locally")
     {
-        "The remote has changes you don't — pull first, then push again.".to_string()
+        BEHIND_REMOTE.to_string()
     } else {
         format!("Remote operation failed: {}", e.message())
     }

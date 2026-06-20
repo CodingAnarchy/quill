@@ -435,15 +435,10 @@ impl App {
         }
         self.save_edit(); // flush edits so the status the author sees is accurate
         let root = self.project.root.clone();
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(match crate::vcs::push(&root) {
-                Ok(branch) => VcMsg { text: format!("Pushed {branch} to the remote."), reload: false },
-                Err(e) => VcMsg { text: e, reload: false },
-            });
+        self.start_vc("⟳ Pushing to the remote…", move || match crate::vcs::push(&root) {
+            Ok(branch) => VcMsg { text: format!("Pushed {branch} to the remote."), reload: false },
+            Err(e) => VcMsg { text: e, reload: false },
         });
-        self.vc_rx = Some(rx);
-        self.message = Some("⟳ Pushing to the remote…".into());
     }
 
     /// Pull the remote's changes on a worker thread (#134). Conservative: refuses
@@ -453,6 +448,7 @@ impl App {
         if !self.guard_remote() || self.vc_rx.is_some() {
             return;
         }
+        self.leave_continuous(); // the post-pull reload targets the single active chapter
         self.save_edit();
         self.refresh_vc_status();
         if self.vc_changes > 0 {
@@ -460,15 +456,22 @@ impl App {
             return;
         }
         let root = self.project.root.clone();
+        self.start_vc("⟳ Pulling from the remote…", move || match crate::vcs::pull(&root) {
+            Ok(text) => VcMsg { text, reload: true },
+            Err(e) => VcMsg { text: e, reload: false },
+        });
+    }
+
+    /// Run a remote op on a worker thread (#134): spawn `work`, stash the receiver
+    /// for [`App::poll_vc`], and show `status` until the result lands. The single
+    /// place push/pull cross to a background thread.
+    fn start_vc(&mut self, status: &str, work: impl FnOnce() -> VcMsg + Send + 'static) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(match crate::vcs::pull(&root) {
-                Ok(text) => VcMsg { text, reload: true },
-                Err(e) => VcMsg { text: e, reload: false },
-            });
+            let _ = tx.send(work());
         });
         self.vc_rx = Some(rx);
-        self.message = Some("⟳ Pulling from the remote…".into());
+        self.message = Some(status.into());
     }
 
     /// Shared guard for the sync actions: under version control with a remote set.
@@ -492,7 +495,7 @@ impl App {
             Ok(msg) => {
                 self.vc_rx = None;
                 if msg.reload {
-                    self.reload_active_chapter(); // a pull can rewrite files on disk
+                    let _ = self.reload_active_chapter(); // a pull can rewrite files on disk
                 }
                 self.refresh_vc_status();
                 self.message = Some(msg.text);
@@ -505,14 +508,16 @@ impl App {
         }
     }
 
-    /// Re-read the active chapter from disk into the buffer (after a pull rewrote
-    /// it). Best-effort: a read failure leaves the current buffer in place.
-    fn reload_active_chapter(&mut self) {
+    /// Re-read the active chapter from disk into the buffer, after something (a
+    /// pull, a restore) rewrote the file underneath the editor. Returns the read
+    /// error so callers can report it; on failure the current buffer is left in
+    /// place.
+    fn reload_active_chapter(&mut self) -> Result<(), String> {
         let path = self.project.active_path();
-        if let Ok(buffer) = Buffer::from_path(&path) {
-            self.buffer = buffer;
-            self.project.set_active_words(self.buffer.word_count());
-        }
+        let buffer = Buffer::from_path(&path).map_err(|e| e.to_string())?;
+        self.buffer = buffer;
+        self.project.set_active_words(self.buffer.word_count());
+        Ok(())
     }
 
     /// Show the working-tree diff since the last commit as a read-only overlay.
@@ -543,14 +548,10 @@ impl App {
         let rel = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
         match crate::vcs::restore(&self.project.root, &rel) {
             Ok(true) => {
-                match Buffer::from_path(&path) {
-                    Ok(buffer) => {
-                        self.buffer = buffer;
-                        self.project.set_active_words(self.buffer.word_count());
-                        self.message = Some("Restored to last commit.".into());
-                    }
-                    Err(e) => self.message = Some(format!("Restored, but reload failed: {e}")),
-                }
+                self.message = Some(match self.reload_active_chapter() {
+                    Ok(()) => "Restored to last commit.".into(),
+                    Err(e) => format!("Restored, but reload failed: {e}"),
+                });
                 self.refresh_vc_status();
             }
             Ok(false) => self.message = Some("No committed version of this chapter to restore.".into()),
