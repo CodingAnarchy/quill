@@ -888,6 +888,35 @@ fn git_palette_configures_a_remote_then_offers_sync() {
 }
 
 #[test]
+fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
+    let (mut app, dir) = two_chapter_app("undo");
+    let original = app.buffer.text();
+    type_str(&mut app, "ZZZ");
+    app.on_idle(); // seal the typing burst into one undo group
+    assert!(app.buffer.text().contains("ZZZ"), "the edit landed");
+
+    app.on_key(ctrl('z'));
+    assert_eq!(app.buffer.text(), original, "undo restores the original text");
+    app.on_key(ctrl('y'));
+    assert!(app.buffer.text().contains("ZZZ"), "redo reapplies the edit");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn undo_is_guarded_in_the_continuous_view() {
+    let (mut app, dir) = two_chapter_app("undo-continuous");
+    app.on_key(ctrl('l')); // enter the continuous-manuscript view
+    assert!(app.manuscript.is_some());
+    app.on_key(ctrl('z'));
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("continuous view"),
+        "{:?}",
+        app.message
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn manuscript_text_includes_every_chapter() {
     let (app, dir) = two_chapter_app("ai-manuscript");
     let m = app.manuscript_text();

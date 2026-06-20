@@ -203,7 +203,9 @@ impl App {
     /// buffer for highlighting, and book the day's word delta. Both are off the
     /// keystroke path, so typing stays instant.
     pub fn on_idle(&mut self) {
-        self.edit_buffer_mut().refresh_syntax();
+        let buffer = self.edit_buffer_mut();
+        buffer.refresh_syntax();
+        buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
         self.tally_words();
         self.refresh_vc_status();
     }
@@ -897,6 +899,24 @@ impl App {
         }
     }
 
+    /// Undo / redo one edit group (#145). Scoped to the single-chapter view: the
+    /// continuous view's segment bookkeeping isn't snapshotted, so history there
+    /// is guarded with a message rather than a silent desync (a follow-up).
+    fn history_step(&mut self, redo: bool) {
+        let verb = if redo { "Redo" } else { "Undo" };
+        if self.manuscript.is_some() {
+            self.message = Some(format!("{verb} isn't available in the continuous view yet — Ctrl-l to return."));
+            return;
+        }
+        let changed = if redo { self.buffer.redo() } else { self.buffer.undo() };
+        if changed {
+            self.project.set_active_words(self.buffer.word_count());
+            self.message = None;
+        } else {
+            self.message = Some(format!("Nothing to {}.", verb.to_lowercase()));
+        }
+    }
+
     /// Apply a cursor movement to the active edit buffer, then page the window
     /// if the continuous view's cursor crossed into another chapter.
     fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
@@ -1387,6 +1407,10 @@ impl App {
                     selected: self.project.active_index(),
                 };
             }
+
+            // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
+            (true, KeyCode::Char('z')) => self.history_step(false),
+            (true, KeyCode::Char('y')) => self.history_step(true),
 
             (false, KeyCode::Char(c)) => self.edit_insert_char(c),
             (false, KeyCode::Enter) => self.edit_insert_char('\n'),
