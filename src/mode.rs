@@ -179,6 +179,8 @@ pub(crate) enum Pending {
     Rename { at: usize },
     /// Text input: a question to ask the AI about the manuscript.
     AskAi,
+    /// Text input: a message for a version-control commit (#131).
+    Commit,
     /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.
     ConfirmAi(AiAction),
     /// Text input editing a metadata field (chapter front matter or book

@@ -314,6 +314,30 @@ impl App {
         }
     }
 
+    /// Begin a commit (#131): flush unsaved edits so the snapshot captures them,
+    /// then prompt for a message. A no-op (with a hint) if the project isn't under
+    /// version control or a save fails.
+    fn start_commit(&mut self) {
+        if !self.under_vc {
+            self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+            return;
+        }
+        self.save_edit(); // commit the latest edits, not the last-saved state
+        if self.edit_dirty() {
+            return; // a save failed; save_edit already set the error message
+        }
+        self.open_prompt(Pending::Commit, "Commit message: ", "", None);
+    }
+
+    /// Commit the staged project with `message` and report the result.
+    fn commit(&mut self, message: &str) {
+        self.message = Some(match crate::vcs::commit(&self.project.root, message) {
+            Ok(Some(id)) => format!("Committed {id}"),
+            Ok(None) => "Nothing to commit — working tree clean.".into(),
+            Err(e) => format!("Commit failed: {e}"),
+        });
+    }
+
     /// The progress report's rows, computed once when it's opened.
     fn report_lines(&self) -> Vec<Line<'static>> {
         let momentum = Momentum {
@@ -996,7 +1020,8 @@ impl App {
             Pending::NewChapter { .. }
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
-            | Pending::AskAi => {
+            | Pending::AskAi
+            | Pending::Commit => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1033,6 +1058,14 @@ impl App {
                                 self.mode = closed;
                                 self.ask_ai(text);
                             }
+                            Pending::Commit => {
+                                self.mode = closed;
+                                if text.is_empty() {
+                                    self.message = Some("Commit cancelled — empty message.".into());
+                                } else {
+                                    self.commit(text);
+                                }
+                            }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
                         }
@@ -1067,6 +1100,8 @@ impl App {
             }
             // Put the project under version control (#54). Ctrl-v: "version control".
             (true, KeyCode::Char('v')) => self.init_version_control(),
+            // Commit a snapshot of the project (#131). Ctrl-k: "checkpoint".
+            (true, KeyCode::Char('k')) => self.start_commit(),
             // Open the progress report (scroll to read; any other key closes).
             (true, KeyCode::Char('r')) => {
                 self.overlay = Some(Overlay::report("progress", self.report_lines()));

@@ -41,6 +41,46 @@ pub fn init(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Stage the whole project and commit it with `message`. Returns the new commit's
+/// short id, or `None` when there's nothing to commit (a clean working tree).
+///
+/// Staging respects `.gitignore` and captures additions, modifications, and
+/// deletions (e.g. a chapter moved to `unused/`). Identity comes from the git
+/// config when set, else a generic default — so an author who has never used git
+/// can still commit without configuring anything.
+pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let sig = repo
+        .signature()
+        .or_else(|_| git2::Signature::now("Quill Author", "author@quill.local"))
+        .map_err(|e| format!("signature: {e}"))?;
+
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).map_err(|e| e.to_string())?;
+    index.update_all(["*"].iter(), None).map_err(|e| e.to_string())?; // stage deletions of tracked files
+    index.write().map_err(|e| e.to_string())?;
+    let tree_id = index.write_tree().map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
+
+    // Parent = current HEAD, unless this is the first (unborn HEAD) commit.
+    let parent = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit().map_err(|e| e.to_string())?),
+        Err(_) => None,
+    };
+    // Nothing changed since the last commit → don't create an empty commit.
+    if let Some(p) = &parent {
+        if p.tree_id() == tree_id {
+            return Ok(None);
+        }
+    }
+
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    let oid = repo
+        .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+        .map_err(|e| format!("commit: {e}"))?;
+    Ok(Some(oid.to_string().chars().take(7).collect()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,6 +100,37 @@ mod tests {
         assert!(is_repo(&dir), "a .git directory should exist");
         let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
         assert!(ignore.contains("/.quill/") && ignore.contains("/unused/"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn commit_captures_changes_and_reports_nothing_when_clean() {
+        let dir = temp_dir("commit");
+        init(&dir).unwrap();
+        fs::write(dir.join("one.md"), "# One\n\nThe night was dark.\n").unwrap();
+
+        let id = commit(&dir, "first").unwrap();
+        assert!(id.is_some(), "the first commit should be created");
+        // Nothing changed since → clean, no commit.
+        assert_eq!(commit(&dir, "again").unwrap(), None);
+        // A change → a new commit.
+        fs::write(dir.join("one.md"), "# One\n\nThe night was long.\n").unwrap();
+        assert!(commit(&dir, "edit").unwrap().is_some());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn commit_ignores_editor_state_and_unused() {
+        let dir = temp_dir("commit-ignore");
+        init(&dir).unwrap();
+        fs::write(dir.join("one.md"), "# One\n").unwrap();
+        commit(&dir, "first").unwrap();
+        // Editor state under ignored paths must not count as a change.
+        fs::create_dir_all(dir.join(".quill")).unwrap();
+        fs::write(dir.join(".quill/history.jsonl"), "{}\n").unwrap();
+        fs::create_dir_all(dir.join("unused")).unwrap();
+        fs::write(dir.join("unused/old.md"), "# Old\n").unwrap();
+        assert_eq!(commit(&dir, "noise").unwrap(), None, "ignored paths aren't committed");
         fs::remove_dir_all(&dir).ok();
     }
 
