@@ -739,6 +739,27 @@ fn ctrl_v_initializes_version_control() {
 }
 
 #[test]
+fn ctrl_k_commits_with_a_message() {
+    let (mut app, dir) = two_chapter_app("vcs-commit");
+    // Not under version control yet → a hint, no prompt.
+    app.on_key(ctrl('k'));
+    assert!(app.message.as_deref().unwrap_or("").contains("Not under version control"));
+    assert!(matches!(app.mode, Mode::Insert));
+
+    app.on_key(ctrl('v')); // initialize
+    app.on_key(ctrl('k')); // commit
+    assert!(matches!(app.mode, Mode::Prompt(_)), "a commit-message prompt opens");
+    for c in "first draft".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.message.as_deref().unwrap_or("").starts_with("Committed"), "{:?}", app.message);
+    // Everything was captured → the tree is now clean.
+    assert_eq!(crate::vcs::commit(&app.project.root, "x").unwrap(), None);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn manuscript_text_includes_every_chapter() {
     let (app, dir) = two_chapter_app("ai-manuscript");
     let m = app.manuscript_text();
