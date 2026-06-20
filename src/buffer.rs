@@ -21,6 +21,19 @@ pub struct Cursor {
     pub col: usize,
 }
 
+/// One undo/redo entry: the whole document plus where the cursor was (#145).
+/// ropey ropes clone cheaply — the node tree is shared via `Arc` — so keeping a
+/// snapshot per edit group is light even on a large chapter.
+#[derive(Clone)]
+struct Snapshot {
+    rope: Rope,
+    cursor: Cursor,
+}
+
+/// Cap on retained undo entries, so a long writing session doesn't grow the
+/// stacks without bound. 256 groups (each a typing burst) is plenty of reach.
+const MAX_UNDO: usize = 256;
+
 /// An in-memory document plus the path it was loaded from / will save to.
 pub struct Buffer {
     rope: Rope,
@@ -41,6 +54,15 @@ pub struct Buffer {
     syntax: Syntax,
     /// Set when an edit has been recorded but not yet reparsed.
     syntax_dirty: bool,
+    /// Undo / redo history (#145), as whole-document snapshots. A group spans a
+    /// burst of edits between idle ticks, so one undo reverses a meaningful chunk
+    /// (a word or phrase), not a single keystroke.
+    undo_stack: Vec<Snapshot>,
+    redo_stack: Vec<Snapshot>,
+    /// True while an edit group is open: the pre-edit state has been snapshotted
+    /// and subsequent edits fold into the same undo entry until the group is
+    /// sealed on idle ([`Buffer::seal_undo_group`]).
+    group_open: bool,
 }
 
 impl Buffer {
@@ -57,6 +79,9 @@ impl Buffer {
             goal_col: None,
             syntax: Syntax::new(""),
             syntax_dirty: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            group_open: false,
         }
     }
 
@@ -74,6 +99,9 @@ impl Buffer {
             dirty: false,
             goal_col: None,
             syntax_dirty: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            group_open: false,
         }
     }
 
@@ -101,6 +129,9 @@ impl Buffer {
             dirty: false,
             goal_col: None,
             syntax_dirty: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            group_open: false,
         })
     }
 
@@ -195,6 +226,68 @@ impl Buffer {
         line_start + char_in_line
     }
 
+    // --- Undo / redo (#145) ------------------------------------------------
+
+    /// Open a new undo group if one isn't already open, snapshotting the current
+    /// (pre-edit) state to return to. Any redo history is invalidated, since the
+    /// document is about to diverge from it. Called at the start of every edit.
+    fn checkpoint(&mut self) {
+        if self.group_open {
+            return;
+        }
+        self.undo_stack.push(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
+        if self.undo_stack.len() > MAX_UNDO {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+        self.group_open = true;
+    }
+
+    /// Close the current edit group so the next edit starts a fresh undo entry.
+    /// Called when typing goes idle, so one undo reverses a burst of typing.
+    pub fn seal_undo_group(&mut self) {
+        self.group_open = false;
+    }
+
+    /// Revert to the state before the most recent edit group. Returns `false`
+    /// when there's nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        let Some(prev) = self.undo_stack.pop() else { return false };
+        self.redo_stack.push(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
+        self.restore(prev);
+        true
+    }
+
+    /// Re-apply the most recently undone group. Returns `false` when there's
+    /// nothing to redo.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo_stack.pop() else { return false };
+        self.undo_stack.push(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
+        self.restore(next);
+        true
+    }
+
+    /// Swap the document for a snapshot (undo/redo). The rope changes wholesale,
+    /// so the incremental parse tree is stale — reparse fully rather than feeding
+    /// the parser edits it never saw.
+    fn restore(&mut self, snap: Snapshot) {
+        self.rope = snap.rope;
+        self.cursor = snap.cursor;
+        self.goal_col = None;
+        self.group_open = false; // the next edit opens a fresh group
+        self.dirty = true;
+        self.clamp_cursor();
+        self.syntax = Syntax::new(&self.rope.to_string());
+        self.syntax_dirty = false;
+    }
+
+    /// Keep the cursor inside the document after a snapshot restore.
+    fn clamp_cursor(&mut self) {
+        let last_line = self.line_count().saturating_sub(1);
+        self.cursor.line = self.cursor.line.min(last_line);
+        self.cursor.col = self.cursor.col.min(self.line_graphemes(self.cursor.line));
+    }
+
     // --- Editing -----------------------------------------------------------
 
     /// Insert text at a char index and tell the parser exactly what changed, so
@@ -252,6 +345,7 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        self.checkpoint();
         let idx = self.cursor_char_idx();
         let mut buf = [0u8; 4];
         self.edit_insert(idx, c.encode_utf8(&mut buf));
@@ -268,6 +362,7 @@ impl Buffer {
     /// Delete the grapheme before the cursor (Backspace).
     pub fn backspace(&mut self) {
         if self.cursor.col > 0 {
+            self.checkpoint();
             let line = self.line(self.cursor.line);
             let target = self.cursor.col - 1;
             let (start_b, g) = line
@@ -282,6 +377,7 @@ impl Buffer {
             self.cursor.col = target;
             self.dirty = true;
         } else if self.cursor.line > 0 {
+            self.checkpoint();
             // Join with the previous line.
             let prev_len = self.line_graphemes(self.cursor.line - 1);
             let idx = self.rope.line_to_char(self.cursor.line);
@@ -676,5 +772,92 @@ mod tests {
         assert!(ks.contains(&HighlightKind::Heading));
         assert!(ks.contains(&HighlightKind::Emphasis));
         fs::remove_file(&path).ok();
+    }
+
+    // --- Undo / redo (#145) ------------------------------------------------
+
+    #[test]
+    fn undo_reverts_a_typing_burst_and_redo_reapplies_it() {
+        let mut buf = Buffer::empty();
+        for c in "hello".chars() {
+            buf.insert_char(c);
+        }
+        assert_eq!(buf.text(), "hello");
+        // A burst with no idle in between is one group.
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "");
+        assert!(buf.redo());
+        assert_eq!(buf.text(), "hello");
+    }
+
+    #[test]
+    fn sealing_starts_a_new_undo_group() {
+        let mut buf = Buffer::empty();
+        for c in "foo".chars() {
+            buf.insert_char(c);
+        }
+        buf.seal_undo_group(); // idle boundary
+        for c in "bar".chars() {
+            buf.insert_char(c);
+        }
+        assert_eq!(buf.text(), "foobar");
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "foo", "only the second burst is undone");
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "");
+        assert!(!buf.undo(), "nothing left to undo");
+    }
+
+    #[test]
+    fn a_new_edit_clears_the_redo_stack() {
+        let mut buf = Buffer::empty();
+        for c in "ab".chars() {
+            buf.insert_char(c);
+        }
+        buf.undo();
+        assert_eq!(buf.text(), "");
+        buf.insert_char('z'); // a fresh edit invalidates the redo
+        assert!(!buf.redo());
+        assert_eq!(buf.text(), "z");
+    }
+
+    #[test]
+    fn undo_restores_the_cursor_and_reparses() {
+        let mut buf = Buffer::empty();
+        for c in "# Title\n".chars() {
+            buf.insert_char(c);
+        }
+        buf.refresh_syntax();
+        let cursor_before = buf.cursor; // line 1, col 0 — just under the heading
+        buf.seal_undo_group();
+        for c in "body".chars() {
+            buf.insert_char(c);
+        }
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "# Title\n");
+        assert_eq!(buf.cursor, cursor_before, "cursor returns to where the edit began");
+        // Highlights are rebuilt immediately on undo, not deferred to idle.
+        assert!(kinds(&buf).contains(&HighlightKind::Heading));
+    }
+
+    #[test]
+    fn undo_and_redo_on_a_fresh_buffer_are_noops() {
+        let mut buf = Buffer::empty();
+        assert!(!buf.undo());
+        assert!(!buf.redo());
+    }
+
+    #[test]
+    fn backspace_participates_in_undo() {
+        let mut buf = Buffer::empty();
+        for c in "draft".chars() {
+            buf.insert_char(c);
+        }
+        buf.seal_undo_group();
+        buf.backspace();
+        buf.backspace();
+        assert_eq!(buf.text(), "dra");
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "draft", "the deletions undo as one group");
     }
 }

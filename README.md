@@ -74,6 +74,7 @@ byte-for-byte.
 | *(typing)*     | insert text                     |
 | Arrows         | move cursor                     |
 | Home / End     | start / end of line             |
+| Ctrl-Z / Ctrl-Y| undo / redo                     |
 | Ctrl-S         | save                            |
 | Ctrl-Q         | quit (prompts if unsaved)       |
 | Ctrl-O         | toggle the chapter pane         |
@@ -149,7 +150,6 @@ read/write a human-readable **story bible** kept in the project.
 - Word-wrap soft-wrapped paragraphs to the focus column
 - Per-session and daily word-count goals (per chapter / part / book / project)
 - Find & replace
-- Undo / redo
 
 ### Vim-style keybindings & modes
 

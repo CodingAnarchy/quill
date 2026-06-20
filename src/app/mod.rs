@@ -203,7 +203,9 @@ impl App {
     /// buffer for highlighting, and book the day's word delta. Both are off the
     /// keystroke path, so typing stays instant.
     pub fn on_idle(&mut self) {
-        self.edit_buffer_mut().refresh_syntax();
+        let buffer = self.edit_buffer_mut();
+        buffer.refresh_syntax();
+        buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
         self.tally_words();
         self.refresh_vc_status();
     }
@@ -897,6 +899,36 @@ impl App {
         }
     }
 
+    /// Undo the last edit group (#145). Scoped to the single-chapter view: the
+    /// continuous view's segment bookkeeping isn't snapshotted, so undo there is
+    /// a follow-up rather than a silent desync.
+    fn undo(&mut self) {
+        if self.manuscript.is_some() {
+            self.message = Some("Undo isn't available in the continuous view yet — Ctrl-l to return.".into());
+            return;
+        }
+        if self.buffer.undo() {
+            self.project.set_active_words(self.buffer.word_count());
+            self.message = None;
+        } else {
+            self.message = Some("Nothing to undo.".into());
+        }
+    }
+
+    /// Redo the most recently undone edit group (#145).
+    fn redo(&mut self) {
+        if self.manuscript.is_some() {
+            self.message = Some("Redo isn't available in the continuous view yet — Ctrl-l to return.".into());
+            return;
+        }
+        if self.buffer.redo() {
+            self.project.set_active_words(self.buffer.word_count());
+            self.message = None;
+        } else {
+            self.message = Some("Nothing to redo.".into());
+        }
+    }
+
     /// Apply a cursor movement to the active edit buffer, then page the window
     /// if the continuous view's cursor crossed into another chapter.
     fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
@@ -1387,6 +1419,10 @@ impl App {
                     selected: self.project.active_index(),
                 };
             }
+
+            // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
+            (true, KeyCode::Char('z')) => self.undo(),
+            (true, KeyCode::Char('y')) => self.redo(),
 
             (false, KeyCode::Char(c)) => self.edit_insert_char(c),
             (false, KeyCode::Enter) => self.edit_insert_char('\n'),
