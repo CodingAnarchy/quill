@@ -14,6 +14,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::buffer::count_words;
+
 /// Common abbreviations whose trailing period is not a sentence end. Lowercased,
 /// without the period. Covers the titles and Latinisms that show up in prose;
 /// the segmenter falls back to the structural rule (a boundary needs whitespace
@@ -533,6 +535,96 @@ pub fn top_counts(counts: &HashMap<String, usize>, n: usize, min: usize) -> Vec<
     items
 }
 
+// --- Dialogue balance & paragraph metrics (#71) -----------------------------
+
+/// The split of a chapter's words between quoted dialogue and narration. A
+/// heuristic: words inside double-quote spans (straight `"` or curly `“ ”`) count
+/// as dialogue, the rest as narration. Single quotes are left alone — they're
+/// ambiguous with apostrophes. Unbalanced quotes run to the end of the chapter.
+/// Additive across chapters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Dialogue {
+    pub dialogue_words: usize,
+    pub narration_words: usize,
+}
+
+impl Dialogue {
+    pub fn add(&mut self, other: Dialogue) {
+        self.dialogue_words += other.dialogue_words;
+        self.narration_words += other.narration_words;
+    }
+
+    /// Share of words that are dialogue, as a percent (0 when there are none).
+    pub fn dialogue_pct(&self) -> f64 {
+        let total = self.dialogue_words + self.narration_words;
+        if total == 0 { 0.0 } else { self.dialogue_words as f64 * 100.0 / total as f64 }
+    }
+}
+
+/// Split a span of prose into dialogue vs narration word counts (see [`Dialogue`]).
+pub fn dialogue_split(text: &str) -> Dialogue {
+    let mut d = Dialogue::default();
+    let mut in_quote = false;
+    let mut span_start = 0;
+    let flush = |slice: &str, in_quote: bool, d: &mut Dialogue| {
+        let w = count_words(slice);
+        if in_quote {
+            d.dialogue_words += w;
+        } else {
+            d.narration_words += w;
+        }
+    };
+    for (i, c) in text.char_indices() {
+        let next = match c {
+            '"' => Some(!in_quote),    // straight quote: ambiguous, so toggle
+            '\u{201C}' => Some(true),  // “ opens
+            '\u{201D}' => Some(false), // ” closes
+            _ => None,
+        };
+        if let Some(next_in_quote) = next {
+            flush(&text[span_start..i], in_quote, &mut d);
+            in_quote = next_in_quote;
+            span_start = i + c.len_utf8();
+        }
+    }
+    flush(&text[span_start..], in_quote, &mut d);
+    d
+}
+
+/// The word length of each paragraph (a run of non-blank lines, blank-line
+/// delimited). Heading lines are already dropped by [`prose`], so they don't
+/// count as paragraphs. The basis for the paragraph-rhythm statistics.
+pub fn paragraph_lengths(text: &str) -> Vec<usize> {
+    let mut lengths = Vec::new();
+    let mut current = 0;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            if current > 0 {
+                lengths.push(current);
+                current = 0;
+            }
+        } else {
+            current += count_words(line);
+        }
+    }
+    if current > 0 {
+        lengths.push(current);
+    }
+    lengths
+}
+
+/// `(mean, median, longest)` of a set of lengths; zeros when empty. Shared by the
+/// paragraph-rhythm rows (per chapter and overall).
+fn summarize_lengths(lengths: &[usize]) -> (f64, f64, usize) {
+    if lengths.is_empty() {
+        return (0.0, 0.0, 0);
+    }
+    let sum: usize = lengths.iter().sum();
+    let mut sorted = lengths.to_vec();
+    sorted.sort_unstable();
+    (sum as f64 / lengths.len() as f64, median_sorted(&sorted), sorted[sorted.len() - 1])
+}
+
 /// One chapter's analysis inputs: its title, total word count (the rolled-up
 /// count, for the pacing section), readability [`Stats`], and the word length of
 /// each of its sentences. Gathered by the editor (which owns the manuscript) and
@@ -543,6 +635,8 @@ pub struct ChapterAnalysis {
     pub stats: Stats,
     pub sentence_lengths: Vec<usize>,
     pub style: StyleFlags,
+    pub dialogue: Dialogue,
+    pub paragraph_lengths: Vec<usize>,
 }
 
 /// One part (chapter grouping) for the pacing section: its display name and the
@@ -615,6 +709,8 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     out.extend(sentence_section(report.chapters, report.longest, report.run_on_threshold));
     out.push(Line::raw(""));
     out.extend(length_section(report.chapters, report.parts));
+    out.push(Line::raw(""));
+    out.extend(dialogue_section(report.chapters));
     out.push(Line::raw(""));
     out.extend(style_section(report.chapters, report.top_words, report.top_phrases));
     out
@@ -719,6 +815,41 @@ fn length_bar_row(title: &str, words: usize, peak: usize, stats: &LengthStats, i
     let name = truncate(title, avail);
     let flag = length_flag(words, stats).map_or(String::new(), |f| format!("  ⚠ {f}"));
     Line::raw(format!("{:indent$}{name:<avail$}{words:>7}  {}{flag}", "", bar(words, peak)))
+}
+
+/// The dialogue / paragraph section: per-chapter (and overall) dialogue share and
+/// paragraph-length rhythm (mean / median / longest, in words).
+fn dialogue_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
+    let mut out = vec![
+        dim("Dialogue & paragraphs"),
+        dim(format!(
+            "{:<26}{:>10}{:>9}{:>8}{:>9}",
+            "Chapter", "Dialogue%", "Para~", "Median", "Longest"
+        )),
+    ];
+    let mut total_dialogue = Dialogue::default();
+    let mut all_paragraphs = Vec::new();
+    for c in chapters {
+        total_dialogue.add(c.dialogue);
+        all_paragraphs.extend_from_slice(&c.paragraph_lengths);
+        out.push(Line::raw(dialogue_text(&c.title, c.dialogue, &c.paragraph_lengths)));
+    }
+    out.push(bold(dialogue_text("Whole manuscript", total_dialogue, &all_paragraphs)));
+    out
+}
+
+/// One dialogue/paragraph row: dialogue share and the paragraph mean / median /
+/// longest for the span.
+fn dialogue_text(name: &str, dialogue: Dialogue, paragraphs: &[usize]) -> String {
+    let (mean, median, longest) = summarize_lengths(paragraphs);
+    format!(
+        "{:<26}{:>9.1}{:>9.0}{:>8.0}{:>9}",
+        truncate(name, 24),
+        dialogue.dialogue_pct(),
+        mean,
+        median,
+        longest,
+    )
 }
 
 /// The style-flags section: a per-chapter (and overall) table of `-ly` adverb,
@@ -1020,6 +1151,36 @@ mod tests {
         assert_eq!(top_counts(&counts, 10, 2), vec![("alpha".to_string(), 3), ("beta".to_string(), 3)]);
     }
 
+    #[test]
+    fn dialogue_split_counts_quoted_words_as_dialogue() {
+        // 4 dialogue words inside the quotes, 4 narration words outside.
+        let d = dialogue_split("\"Get out now,\" she said to him calmly.");
+        assert_eq!(d.dialogue_words, 3); // Get out now
+        assert_eq!(d.narration_words, 5); // she said to him calmly
+        assert!((d.dialogue_pct() - 37.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dialogue_split_handles_curly_quotes() {
+        let d = dialogue_split("\u{201C}Hello there\u{201D} he replied.");
+        assert_eq!(d.dialogue_words, 2); // Hello there
+        assert_eq!(d.narration_words, 2); // he replied
+        assert_eq!(dialogue_split("plain narration only"), Dialogue { dialogue_words: 0, narration_words: 3 });
+    }
+
+    #[test]
+    fn paragraph_lengths_split_on_blank_lines() {
+        let text = "One two three.\nstill same para.\n\nSecond para here.\n\n\nThird.";
+        assert_eq!(paragraph_lengths(text), vec![6, 3, 1]);
+        assert!(paragraph_lengths("   \n\n  ").is_empty());
+    }
+
+    #[test]
+    fn summarize_lengths_reports_mean_median_longest() {
+        assert_eq!(summarize_lengths(&[10, 20, 30, 100]), (40.0, 25.0, 100));
+        assert_eq!(summarize_lengths(&[]), (0.0, 0.0, 0));
+    }
+
     fn chapter(title: &str, prose_text: &str, words: usize) -> ChapterAnalysis {
         ChapterAnalysis {
             title: title.to_string(),
@@ -1030,6 +1191,8 @@ mod tests {
                 .map(|s| crate::buffer::count_words(s))
                 .collect(),
             style: style_flags(prose_text),
+            dialogue: dialogue_split(prose_text),
+            paragraph_lengths: paragraph_lengths(prose_text),
         }
     }
 
@@ -1065,11 +1228,12 @@ mod tests {
         assert!(text.contains("Distribution"));
         assert!(text.contains("Longest sentences"));
         assert!(text.contains("Chapter length"));
+        assert!(text.contains("Dialogue & paragraphs"));
         assert!(text.contains("Style flags"));
         assert!(text.contains("Most-used words") && text.contains("locket"));
         assert!(text.contains("Repeated phrases") && text.contains("the dog ran"));
         assert!(text.contains("One") && text.contains("Two"));
-        assert_eq!(text.matches("Whole manuscript").count(), 4); // one per section
+        assert_eq!(text.matches("Whole manuscript").count(), 5); // one per section
     }
 
     #[test]
