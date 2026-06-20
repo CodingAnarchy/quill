@@ -22,11 +22,8 @@ use candle_transformers::models::quantized_qwen2::ModelWeights as Qwen2;
 use tokenizers::Tokenizer;
 
 use crate::ai::constrain::Constraint;
+use crate::ai::model_select::{self, Accel};
 use crate::ai::{AiError, Backend, Request, Response, Usage};
-
-/// How many top-logit candidates the constrained loop tests per step before
-/// giving up — the schema-valid token is almost always in the first few.
-const TOP_K: usize = 64;
 
 /// Qwen end-of-turn / end-of-text tokens (stop signals for unconstrained decode).
 const EOS_TOKENS: [u32; 2] = [151645, 151643]; // <|im_end|>, <|endoftext|>
@@ -40,6 +37,29 @@ pub struct LocalBackend {
 }
 
 impl LocalBackend {
+    /// Detect, select, fetch, and load the right Qwen for this machine (#85):
+    /// probe RAM + accelerator, recommend a variant, download it (and its
+    /// tokenizer) via `hf-hub` — cached outside the project, resumable — and load
+    /// it. The recommendation is returned so a caller can surface or override it.
+    pub fn recommended() -> Result<(Self, model_select::Recommendation), AiError> {
+        let (ram_gb, accel) = detect_hardware();
+        let rec = model_select::recommend(ram_gb, accel);
+        let model = rec.model.ok_or_else(|| AiError::NotConfigured(rec.reasoning.clone()))?;
+
+        let hub = hf_hub::api::sync::Api::new().map_err(|e| api(format!("hf-hub: {e}")))?;
+        let gguf = hub
+            .model(model.gguf_repo.to_string())
+            .get(model.gguf_file)
+            .map_err(|e| api(format!("download {}: {e}", model.gguf_file)))?;
+        let tokenizer = hub
+            .model(model.tokenizer_repo.to_string())
+            .get("tokenizer.json")
+            .map_err(|e| api(format!("download tokenizer: {e}")))?;
+
+        let backend = Self::load(gguf.to_str().unwrap_or_default(), tokenizer.to_str().unwrap_or_default())?;
+        Ok((backend, rec))
+    }
+
     /// Load a quantized Qwen from a `GGUF` file plus its `tokenizer.json`. Uses
     /// Metal when candle was built with it (macOS), else CPU.
     pub fn load(gguf_path: &str, tokenizer_path: &str) -> Result<Self, AiError> {
@@ -126,14 +146,18 @@ impl LocalBackend {
     }
 
     /// Pick the highest-logit token whose detokenized piece keeps the output a
-    /// viable prefix of the schema. Tests only the top-`TOP_K` candidates.
+    /// viable prefix of the schema. Considers the **whole** vocabulary in
+    /// descending logit order — the schema can force a low-probability token (a
+    /// required key the model didn't want to emit), so a top-K cap would wrongly
+    /// stop. Testing halts at the first viable token, which is usually near the
+    /// top, so the deep scan only happens at genuinely forced positions.
     fn pick_constrained(
         &self,
         constraint: &mut Constraint,
         logits: &[f32],
         generated: &[u32],
     ) -> Result<Option<u32>, AiError> {
-        let ranked = top_k(logits, TOP_K);
+        let ranked = rank_desc(logits);
         let prev = self.tokenizer.decode(generated, true).map_err(|e| api(format!("decode: {e}")))?;
         for id in ranked {
             // The piece this token adds = decode(generated+id) minus decode(generated).
@@ -151,6 +175,20 @@ impl LocalBackend {
     }
 }
 
+/// Probe the machine for model selection: total RAM (GB, rounded down) and
+/// whether candle has a usable GPU (Metal/CUDA) here.
+fn detect_hardware() -> (u32, Accel) {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let ram_gb = (sys.total_memory() / 1024 / 1024 / 1024) as u32; // bytes → GiB
+    let accel = if Device::new_metal(0).is_ok() || Device::new_cuda(0).is_ok() {
+        Accel::Gpu
+    } else {
+        Accel::Cpu
+    };
+    (ram_gb, accel)
+}
+
 fn argmax(logits: &[f32]) -> u32 {
     logits
         .iter()
@@ -160,14 +198,9 @@ fn argmax(logits: &[f32]) -> u32 {
         .unwrap_or(0)
 }
 
-/// The indices of the `k` highest logits, highest first.
-fn top_k(logits: &[f32], k: usize) -> Vec<u32> {
-    let k = k.min(logits.len());
+/// All vocabulary indices ordered by logit, highest first.
+fn rank_desc(logits: &[f32]) -> Vec<u32> {
     let mut idx: Vec<u32> = (0..logits.len() as u32).collect();
-    if k < logits.len() {
-        idx.select_nth_unstable_by(k, |&a, &b| logits[b as usize].total_cmp(&logits[a as usize]));
-        idx.truncate(k);
-    }
     idx.sort_unstable_by(|&a, &b| logits[b as usize].total_cmp(&logits[a as usize]));
     idx
 }
@@ -182,10 +215,50 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn top_k_returns_highest_first() {
+    fn rank_desc_orders_by_logit() {
         let logits = [0.1, 0.9, 0.3, 0.7, 0.2];
-        assert_eq!(top_k(&logits, 3), vec![1, 3, 2]);
+        assert_eq!(rank_desc(&logits), vec![1, 3, 2, 4, 0]);
         assert_eq!(argmax(&logits), 1);
+    }
+
+    #[test]
+    fn detect_hardware_reports_some_memory() {
+        let (ram_gb, _accel) = detect_hardware();
+        assert!(ram_gb >= 1, "should detect at least 1 GB of RAM");
+    }
+
+    /// End-to-end of the #85 acquisition path: download a model via `hf-hub` and
+    /// generate schema-valid JSON. Forces the smallest model (~400 MB) so it's a
+    /// modest download. Ignored (needs network + disk); run with:
+    /// `cargo test --features local auto_download -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn auto_download_then_generate() {
+        let m = &model_select::MODELS[0]; // 0.5B — keep the download small
+        let hub = hf_hub::api::sync::Api::new().expect("hf-hub");
+        let gguf = hub.model(m.gguf_repo.into()).get(m.gguf_file).expect("download gguf");
+        let tok = hub.model(m.tokenizer_repo.into()).get("tokenizer.json").expect("download tokenizer");
+        let backend =
+            LocalBackend::load(gguf.to_str().unwrap(), tok.to_str().unwrap()).expect("load");
+
+        let schema = json!({
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "kind": {"enum": ["person", "place"]}},
+            "required": ["name", "kind"]
+        });
+        let req = Request {
+            system: Some("Return JSON describing the subject.".into()),
+            cached_context: String::new(),
+            user: "The city of Aldermoor.".into(),
+            model: "auto".into(),
+            max_tokens: 256,
+            json_schema: Some(schema),
+        };
+        let resp = backend.complete(&req).expect("completion");
+        println!("AUTO OUTPUT: {}", resp.text);
+        let parsed: serde_json::Value = serde_json::from_str(&resp.text).expect("valid JSON");
+        assert!(parsed["name"].is_string());
+        assert!(["person", "place"].contains(&parsed["kind"].as_str().unwrap()));
     }
 
     /// End-to-end: load a real Qwen GGUF and generate schema-valid JSON. Ignored
