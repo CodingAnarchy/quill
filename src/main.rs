@@ -16,6 +16,7 @@ mod project;
 mod report;
 mod syntax;
 mod ui;
+mod vcs;
 
 use std::io::{self, Stdout};
 use std::path::PathBuf;
