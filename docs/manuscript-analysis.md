@@ -12,10 +12,10 @@ every chapter once (the active chapter live from the buffer, the rest from
 disk), so typing stays instant on a large manuscript (the perf guards in
 `CLAUDE.md` apply).
 
-This document specifies each metric and its formula. The slices so far are
+This document specifies each metric and its formula. The report covers
 readability (#67), sentence-length statistics (#68), chapter-length / pacing
-(#69), frequency-based style flags (#70), and dialogue balance & paragraph
-metrics (#71); a later ticket in the epic (#66) adds vocabulary richness.
+(#69), frequency-based style flags (#70), dialogue balance & paragraph metrics
+(#71), and vocabulary richness (#72).
 
 ## Shared text primitives
 
@@ -229,17 +229,32 @@ words unless noted:
   by an `-ed` word ("was locked"). A heuristic, not a parser, so it misses
   irregular participles ("was held") and catches the odd false positive.
 
-### Most-used words
-
-The manuscript's most frequent **content** words — stopwords (`the`, `and`,
-`she`, …) and very short words are excluded, so the list surfaces an author's
-real lexical tics (a character name, an overused verb) rather than grammar.
-
 ### Repeated phrases
 
 Three-word phrases that recur **three or more times** across the manuscript,
 highest first. Phrases made entirely of stopwords ("out of the") are skipped.
 Phrases are counted within a chapter, never spanning a chapter boundary.
+
+## Vocabulary
+
+Lexical variety reveals reliance on a narrow vocabulary, and the most-used-words
+list is a fast way to spot unintended echoes.
+
+- **Variety** — a length-normalized lexical-variety score, 0–100 (higher = more
+  varied). It's a **moving-average type–token ratio (MATTR)**: the average
+  fraction of distinct words across every 100-word window, scaled ×100 (so "72"
+  means ~72 distinct words per 100-word window). A plain type–token ratio falls
+  just because a chapter is longer; MATTR doesn't, so chapters are comparable.
+  Chapters shorter than the window use the plain ratio over the whole text. The
+  whole-manuscript figure is the word-weighted mean of the chapters'.
+- **Words** — the word count the variety was measured over (context for short
+  chapters, where the score is noisier).
+
+### Most-used words
+
+The manuscript's most frequent **content** words — stopwords (`the`, `and`,
+`she`, …) and very short words are excluded, so the list surfaces an author's
+real lexical tics (a character name, an overused verb) rather than grammar.
 
 ## Reading the report
 

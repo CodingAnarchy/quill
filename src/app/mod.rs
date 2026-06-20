@@ -356,6 +356,7 @@ impl App {
         let mut longest = analysis::LongestSentences::new(5);
         let mut word_counts = HashMap::new();
         let mut phrase_counts = HashMap::new();
+        let mut tokens = Vec::new();
         for i in 0..self.chapter_count() {
             let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
             // Measure prose only — drop heading lines so a chapter/scene title
@@ -372,6 +373,11 @@ impl App {
             // are gathered per chapter so they don't span a chapter boundary.
             analysis::tally_content_words(&text, &mut word_counts);
             analysis::tally_phrases(&text, &mut phrase_counts);
+            // Tokenize once: the just-appended slice is this chapter's lexical
+            // variety; the whole pool is the overall variety (a true MATTR, not a
+            // mean of the chapters').
+            let token_start = tokens.len();
+            analysis::tally_tokens(&text, &mut tokens);
             // Pacing uses the rolled-up chapter word count (headings included),
             // matching the chapter list and progress report.
             chapters.push(analysis::ChapterAnalysis {
@@ -382,6 +388,7 @@ impl App {
                 style: analysis::style_flags(&text),
                 dialogue: analysis::dialogue_split(&text),
                 paragraph_lengths: analysis::paragraph_lengths(&text),
+                lexical_variety: analysis::lexical_variety_tokens(&tokens[token_start..]),
             });
         }
         let longest = longest.into_vec();
@@ -400,6 +407,7 @@ impl App {
             run_on_threshold: threshold,
             top_words: &top_words,
             top_phrases: &top_phrases,
+            overall_variety: analysis::lexical_variety_tokens(&tokens),
         };
         analysis::lines(&report)
     }
