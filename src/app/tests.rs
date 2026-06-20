@@ -724,6 +724,21 @@ fn offline_mode_selects_the_local_backend() {
 }
 
 #[test]
+fn ctrl_v_initializes_version_control() {
+    let (mut app, dir) = two_chapter_app("vcs-init");
+    assert!(!app.under_vc, "fresh project isn't under version control");
+    app.on_key(ctrl('v'));
+    assert!(app.under_vc, "Ctrl-v puts the project under version control");
+    assert!(dir.join(".git").exists(), "a repo was created");
+    assert!(dir.join(".gitignore").exists(), ".gitignore was written");
+    assert!(app.message.as_deref().unwrap_or("").contains("Initialized"), "{:?}", app.message);
+    // Idempotent: running it again just says so.
+    app.on_key(ctrl('v'));
+    assert!(app.message.as_deref().unwrap_or("").contains("Already"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn manuscript_text_includes_every_chapter() {
     let (app, dir) = two_chapter_app("ai-manuscript");
     let m = app.manuscript_text();

@@ -720,6 +720,8 @@ impl Pane for StatusBar<'_> {
             } else {
                 ""
             };
+            // Under-version-control indicator (#54).
+            let vc_tag = if app.under_vc { " · git" } else { "" };
             let right = match &app.message {
                 Some(m) => format!("{m}  "),
                 None => format!(
@@ -729,7 +731,7 @@ impl Pane for StatusBar<'_> {
                     buffer.line_count()
                 ),
             };
-            (format!(" {name}{dirty}{ai_tag}"), right)
+            (format!(" {name}{dirty}{vc_tag}{ai_tag}"), right)
         };
 
         let pad = (area.width as usize)

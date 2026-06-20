@@ -50,6 +50,10 @@ pub struct App {
     pub focus_width: u16,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
+    /// Whether the project is under version control (#54). Cached so the status
+    /// bar needn't stat the filesystem every frame; set at open and after the
+    /// author initializes a repository.
+    pub under_vc: bool,
     /// The open full-screen overlay (progress report, analysis report, or AI
     /// answer), if any — read-only, scrollable, dismissed by any other key.
     /// Pre-rendered once on open so it isn't rebuilt per frame. A single slot:
@@ -97,6 +101,7 @@ pub struct App {
 
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
+        let under_vc = crate::vcs::is_repo(&project.root);
         let mut app = Self {
             buffer,
             project,
@@ -105,6 +110,7 @@ impl App {
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
+            under_vc,
             overlay: None,
             viewport_height: 0,
             added: 0,
@@ -289,6 +295,23 @@ impl App {
         (0..self.chapter_count())
             .map(|i| self.chapter_word_count(i))
             .sum()
+    }
+
+    /// Put the project under version control, or report that it already is (#130).
+    /// Opt-in and non-destructive: it never clobbers an existing repo or
+    /// `.gitignore`.
+    fn init_version_control(&mut self) {
+        if self.under_vc {
+            self.message = Some("Already under version control.".into());
+            return;
+        }
+        match crate::vcs::init(&self.project.root) {
+            Ok(()) => {
+                self.under_vc = true;
+                self.message = Some("Initialized version control (git).".into());
+            }
+            Err(e) => self.message = Some(format!("Version control: {e}")),
+        }
     }
 
     /// The progress report's rows, computed once when it's opened.
@@ -1042,6 +1065,8 @@ impl App {
             (true, KeyCode::Char('o')) => {
                 self.outline_visible = !self.outline_visible;
             }
+            // Put the project under version control (#54). Ctrl-v: "version control".
+            (true, KeyCode::Char('v')) => self.init_version_control(),
             // Open the progress report (scroll to read; any other key closes).
             (true, KeyCode::Char('r')) => {
                 self.overlay = Some(Overlay::report("progress", self.report_lines()));
