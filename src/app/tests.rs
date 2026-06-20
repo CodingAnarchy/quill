@@ -739,6 +739,27 @@ fn ctrl_v_initializes_version_control() {
 }
 
 #[test]
+fn vc_status_reflects_uncommitted_changes() {
+    let (mut app, dir) = two_chapter_app("vc-status");
+    app.on_key(ctrl('v')); // init → the project's files are untracked = uncommitted
+    assert!(app.vc_changes > 0, "a fresh repo has uncommitted files");
+
+    app.on_key(ctrl('k')); // commit them
+    for c in "snapshot".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.vc_changes, 0, "clean working tree after a commit");
+
+    // Edit a chapter and save → the tree is dirty again (refreshed on idle).
+    app.on_key(key(KeyCode::Char('X')));
+    app.on_key(ctrl('s'));
+    app.on_idle();
+    assert!(app.vc_changes > 0, "dirty after a saved edit");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn ctrl_k_commits_with_a_message() {
     let (mut app, dir) = two_chapter_app("vcs-commit");
     // Not under version control yet → a hint, no prompt.

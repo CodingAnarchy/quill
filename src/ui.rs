@@ -720,8 +720,13 @@ impl Pane for StatusBar<'_> {
             } else {
                 ""
             };
-            // Under-version-control indicator (#54).
-            let vc_tag = if app.under_vc { " · git" } else { "" };
+            // Version-control indicator (#54/#132): a clean repo shows "git", an
+            // uncommitted one shows the changed-file count.
+            let vc_tag = match (app.under_vc, app.vc_changes) {
+                (false, _) => String::new(),
+                (true, 0) => " · git".into(),
+                (true, n) => format!(" · git ●{n}"),
+            };
             let right = match &app.message {
                 Some(m) => format!("{m}  "),
                 None => format!(

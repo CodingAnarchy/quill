@@ -54,6 +54,10 @@ pub struct App {
     /// bar needn't stat the filesystem every frame; set at open and after the
     /// author initializes a repository.
     pub under_vc: bool,
+    /// Count of uncommitted changes (#132), cached for the status bar. Refreshed
+    /// on idle and after save / commit / init — never per frame. Zero when clean
+    /// or not under version control.
+    pub vc_changes: usize,
     /// The open full-screen overlay (progress report, analysis report, or AI
     /// answer), if any — read-only, scrollable, dismissed by any other key.
     /// Pre-rendered once on open so it isn't rebuilt per frame. A single slot:
@@ -111,6 +115,7 @@ impl App {
             focus_width: 72,
             outline_visible: false,
             under_vc,
+            vc_changes: 0,
             overlay: None,
             viewport_height: 0,
             added: 0,
@@ -131,7 +136,19 @@ impl App {
         app.part_added = vec![0; parts];
         app.part_removed = vec![0; parts];
         app.seed_baselines();
+        app.refresh_vc_status();
         app
+    }
+
+    /// Refresh the cached uncommitted-changes count (#132). Cheap (stat-based) but
+    /// not free, so it's called on idle and after save / commit / init — never per
+    /// frame. Zero when the project isn't under version control.
+    fn refresh_vc_status(&mut self) {
+        self.vc_changes = if self.under_vc {
+            crate::vcs::status(&self.project.root).map_or(0, |s| s.count())
+        } else {
+            0
+        };
     }
 
     /// Reset the per-chapter word baselines to the current counts, so the next
@@ -174,6 +191,7 @@ impl App {
     pub fn on_idle(&mut self) {
         self.edit_buffer_mut().refresh_syntax();
         self.tally_words();
+        self.refresh_vc_status();
     }
 
     /// Attribute each chapter's word change since the last idle tick to today's
@@ -308,6 +326,7 @@ impl App {
         match crate::vcs::init(&self.project.root) {
             Ok(()) => {
                 self.under_vc = true;
+                self.refresh_vc_status();
                 self.message = Some("Initialized version control (git).".into());
             }
             Err(e) => self.message = Some(format!("Version control: {e}")),
@@ -336,6 +355,7 @@ impl App {
             Ok(None) => "Nothing to commit — working tree clean.".into(),
             Err(e) => format!("Commit failed: {e}"),
         });
+        self.refresh_vc_status(); // the tree is clean now (or unchanged on failure)
     }
 
     /// The progress report's rows, computed once when it's opened.
