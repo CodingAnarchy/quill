@@ -39,9 +39,10 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use serde::Deserialize;
 
-/// A provider that turns a [`Request`] into a [`Response`]. Implemented by the
-/// Claude HTTP client now, a local model later.
-pub trait Backend: Send {
+/// A provider that turns a [`Request`] into a [`Response`] — the Claude HTTP
+/// client or the local candle model. `Send + Sync` so a loaded backend can be
+/// cached in an `Arc` and shared with the worker thread.
+pub trait Backend: Send + Sync {
     fn complete(&self, req: &Request) -> Result<Response, AiError>;
 }
 
@@ -84,6 +85,9 @@ pub enum Outcome {
     Style(Result<style::Style, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
+    /// A failure that isn't tied to a specific feature — e.g. the backend
+    /// couldn't be built (local model failed to load). Surfaced as a message.
+    Error(AiError),
 }
 
 /// Token usage reported by the backend (zeros when unknown).
@@ -126,6 +130,17 @@ pub fn default_model() -> String {
 /// real request agree.
 pub const MAX_OUTPUT_TOKENS: u32 = 8192;
 
+/// Which provider the AI features run against (#87).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendKind {
+    /// The Claude HTTP API (needs an API key; sends the manuscript off-machine).
+    #[default]
+    Claude,
+    /// The local candle model (runs offline; nothing leaves the machine).
+    Local,
+}
+
 /// AI configuration, loaded from the user's home config — never the project dir,
 /// so an unpublished draft and the key stay separate. Off by default.
 #[derive(Clone, Deserialize)]
@@ -133,15 +148,18 @@ pub const MAX_OUTPUT_TOKENS: u32 = 8192;
 pub struct Settings {
     /// Master opt-in. When false, no AI feature is reachable.
     pub enabled: bool,
-    /// Disable all network calls (the Claude backend) regardless of `enabled`.
+    /// Which backend to use (`claude` or `local`).
+    pub backend: BackendKind,
+    /// Privacy switch: when true, force the local backend so nothing ever leaves
+    /// the machine, regardless of `backend`.
     pub offline: bool,
-    /// Model id sent to the backend.
+    /// Model id sent to the Claude backend (the local backend picks its own).
     pub model: String,
     /// API key, if set in the config file. The `ANTHROPIC_API_KEY` env var
     /// overrides this (see [`Settings::load`]).
     pub api_key: Option<String>,
-    /// Confirm before any pass whose estimated cost exceeds this many dollars.
-    /// Cheap passes (under it) run without a prompt.
+    /// Confirm before any Claude pass whose estimated cost exceeds this many
+    /// dollars. Cheaper passes (and the free local backend) run without a prompt.
     pub cost_threshold: f64,
 }
 
@@ -149,6 +167,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             enabled: false,
+            backend: BackendKind::Claude,
             offline: false,
             model: default_model(),
             api_key: None,
@@ -187,22 +206,34 @@ impl Settings {
         self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty())
     }
 
-    /// The API key to send with, or why a request can't be made right now
-    /// (disabled, offline, or no key). The single readiness chokepoint.
-    pub fn check_ready(&self) -> Result<&str, AiError> {
+    /// The backend that will actually run, accounting for the privacy switch:
+    /// `offline` forces local; otherwise the configured `backend`.
+    pub fn backend(&self) -> BackendKind {
+        if self.offline {
+            BackendKind::Local
+        } else {
+            self.backend
+        }
+    }
+
+    /// Whether the AI features are usable as configured, or why not — the single
+    /// readiness chokepoint (gates the palette and each request). Local is always
+    /// ready (it loads on first use); Claude needs an API key.
+    pub fn check_ready(&self) -> Result<(), AiError> {
         if !self.enabled {
             return Err(AiError::NotConfigured(
                 "AI is off — set `enabled = true` under [ai] in ~/.config/quill/config.toml".into(),
             ));
         }
-        if self.offline {
-            return Err(AiError::NotConfigured("AI is in offline mode — no network calls".into()));
+        match self.backend() {
+            BackendKind::Local => Ok(()),
+            BackendKind::Claude if self.resolved_key().is_some() => Ok(()),
+            BackendKind::Claude => Err(AiError::NotConfigured(
+                "no API key — set ANTHROPIC_API_KEY or `api_key` under [ai] in the config \
+                 (or set `backend = \"local\"`)"
+                    .into(),
+            )),
         }
-        self.resolved_key().ok_or_else(|| {
-            AiError::NotConfigured(
-                "no API key — set ANTHROPIC_API_KEY or `api_key` under [ai] in the config".into(),
-            )
-        })
     }
 }
 
@@ -277,13 +308,32 @@ mod tests {
 
     #[test]
     fn check_ready_reports_why_not() {
-        let mut s = Settings { enabled: true, offline: false, model: default_model(), api_key: Some("k".into()), cost_threshold: 0.20 };
-        s.check_ready().unwrap();
-        s.offline = true;
-        assert!(matches!(s.check_ready(), Err(AiError::NotConfigured(_))));
-        s.offline = false;
+        let mut s = Settings { enabled: true, ..Settings::default() };
+        s.api_key = Some("k".into());
+        s.check_ready().unwrap(); // Claude + key → ready
         s.api_key = None;
-        assert!(s.check_ready().is_err()); // no key
+        assert!(s.check_ready().is_err()); // Claude, no key → not ready
+    }
+
+    #[test]
+    fn local_backend_is_ready_without_a_key_and_offline_forces_it() {
+        // Local needs no key.
+        let s = Settings { enabled: true, backend: BackendKind::Local, ..Settings::default() };
+        assert_eq!(s.backend(), BackendKind::Local);
+        s.check_ready().unwrap();
+        // Offline forces local even with backend = claude and no key.
+        let s = Settings { enabled: true, offline: true, ..Settings::default() };
+        assert_eq!(s.backend(), BackendKind::Local);
+        s.check_ready().unwrap();
+        // Disabled is never ready, regardless of backend.
+        let s = Settings { backend: BackendKind::Local, ..Settings::default() };
+        assert!(s.check_ready().is_err());
+    }
+
+    #[test]
+    fn backend_parses_from_config() {
+        let cfg: ConfigFile = toml::from_str("[ai]\nenabled = true\nbackend = \"local\"\n").unwrap();
+        assert_eq!(cfg.ai.backend, BackendKind::Local);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use similar::{ChangeTag, TextDiff};
@@ -79,6 +80,11 @@ pub struct App {
     /// Receiver for an in-flight AI request running on a worker thread; `Some`
     /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
     ai_rx: Option<Receiver<Outcome>>,
+    /// The loaded local backend, cached after first use (loading a model is slow)
+    /// and shared with the worker thread. Empty until the first local request;
+    /// stays empty when the Claude backend is used. Type-erased so it needs no
+    /// `local`-feature cfg here.
+    local_backend: Arc<Mutex<Option<Arc<dyn Backend>>>>,
     /// Continuity findings waiting to be shown — stashed while a timeline
     /// conflict is resolved first, then opened by [`App::open_findings`].
     pending_findings: Vec<Finding>,
@@ -109,6 +115,7 @@ impl App {
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
             ai_rx: None,
+            local_backend: Arc::new(Mutex::new(None)),
             pending_findings: Vec::new(),
             triage: Vec::new(),
             message: None,

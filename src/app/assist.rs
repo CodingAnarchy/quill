@@ -7,12 +7,57 @@
 
 use super::*;
 
+use std::sync::{Arc, Mutex};
+
 use crate::ai::cost;
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::mode::{AiAction, Palette, PaletteItem};
+
+/// A resolved backend choice, ready to build on the worker thread. Built here
+/// (not in `spawn_ai`) so loading the local model can't block the UI.
+enum BackendSpec {
+    /// The Claude HTTP backend, with its API key.
+    Claude(String),
+    /// The local backend, sharing `App`'s cache slot so the loaded model is
+    /// reused across requests.
+    Local(Arc<Mutex<Option<Arc<dyn Backend>>>>),
+}
+
+impl BackendSpec {
+    /// Build (or fetch the cached) backend. Runs on the worker thread.
+    fn build(self) -> Result<Arc<dyn Backend>, ai::AiError> {
+        match self {
+            BackendSpec::Claude(key) => Ok(Arc::new(ClaudeBackend::new(key))),
+            BackendSpec::Local(slot) => build_local(slot),
+        }
+    }
+}
+
+/// Load the local model once and cache it in the shared slot, reusing it on later
+/// requests (the model resets its KV cache each request, so reuse is correct).
+#[cfg(feature = "local")]
+fn build_local(slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Backend>, ai::AiError> {
+    let mut guard = slot.lock().map_err(|_| ai::AiError::Api("model lock poisoned".into()))?;
+    if let Some(backend) = guard.as_ref() {
+        return Ok(backend.clone());
+    }
+    let (backend, _rec) = ai::local::LocalBackend::recommended()?;
+    let backend: Arc<dyn Backend> = Arc::new(backend);
+    *guard = Some(backend.clone());
+    Ok(backend)
+}
+
+#[cfg(not(feature = "local"))]
+fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Backend>, ai::AiError> {
+    Err(ai::AiError::NotConfigured(
+        "local backend isn't in this build — rebuild Quill with `--features local`, \
+         or set `backend = \"claude\"`"
+            .into(),
+    ))
+}
 
 impl App {
     /// Open the AI command palette — the single entry point for the AI features.
@@ -57,8 +102,13 @@ impl App {
     /// cost confirm first when the estimate exceeds the threshold; the local /
     /// interactive actions (Ask, Triage) run immediately.
     pub(crate) fn start_ai_action(&mut self, action: AiAction) {
+        // The local backend is free, so there's nothing to confirm — run directly.
+        if self.ai.backend() == ai::BackendKind::Local {
+            self.run_ai_action(action);
+            return;
+        }
         let Some((model, max_tokens)) = self.cost_profile(action) else {
-            // Local or interactive — no whole-manuscript request to estimate.
+            // Interactive / local-only action — no whole-manuscript request to estimate.
             self.run_ai_action(action);
             return;
         };
@@ -238,29 +288,59 @@ impl App {
     fn spawn_ai(
         &mut self,
         message: &str,
-        run: impl FnOnce(ClaudeBackend, String, String) -> Outcome + Send + 'static,
+        run: impl FnOnce(&dyn Backend, String, String) -> Outcome + Send + 'static,
     ) {
         if self.ai_rx.is_some() {
             self.message = Some("An AI request is already in flight…".into());
             return;
         }
-        let key = match self.ai.check_ready() {
-            Ok(key) => key.to_string(),
+        // Resolve which backend to use (and gate on readiness) on the UI thread;
+        // actually *building* it — which for the local model means loading (and
+        // maybe downloading) — happens on the worker thread so the UI never blocks.
+        let spec = match self.backend_spec() {
+            Ok(spec) => spec,
             Err(e) => {
                 self.message = Some(e.to_string());
                 return;
             }
         };
-        let backend = ClaudeBackend::new(key);
         let model = self.ai.model.clone();
         let manuscript = self.manuscript_text();
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let _ = tx.send(run(backend, manuscript, model));
+            let outcome = match spec.build() {
+                Ok(backend) => run(backend.as_ref(), manuscript, model),
+                Err(e) => Outcome::Error(e),
+            };
+            let _ = tx.send(outcome);
         });
         self.ai_rx = Some(rx);
         self.message = Some(message.to_string());
+    }
+
+    /// Choose the backend for a request from settings (after the readiness gate).
+    /// Cheap — the heavy local-model load is deferred to [`BackendSpec::build`] on
+    /// the worker thread.
+    fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
+        self.ai.check_ready()?;
+        Ok(match self.ai.backend() {
+            ai::BackendKind::Claude => {
+                BackendSpec::Claude(self.ai.resolved_key().unwrap_or_default().to_string())
+            }
+            ai::BackendKind::Local => {
+                // Fail fast on the UI thread when the local backend wasn't compiled
+                // in, so we don't spawn a worker just to error.
+                if cfg!(not(feature = "local")) {
+                    return Err(ai::AiError::NotConfigured(
+                        "local backend isn't in this build — rebuild Quill with \
+                         `--features local`, or set `backend = \"claude\"`"
+                            .into(),
+                    ));
+                }
+                BackendSpec::Local(self.local_backend.clone())
+            }
+        })
     }
 
     /// Poll the in-flight AI request (non-blocking). On a result, dispatch by
@@ -282,6 +362,7 @@ impl App {
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),
                     Outcome::Submission(r) => self.apply_submission(r),
+                    Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {}
