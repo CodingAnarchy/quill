@@ -708,18 +708,18 @@ fn ask_with_ai_off_explains_how_to_enable() {
 }
 
 #[test]
-fn ask_in_offline_mode_refuses_to_send() {
+#[cfg(not(feature = "local"))]
+fn offline_mode_selects_the_local_backend() {
     let (mut app, dir) = two_chapter_app("ai-offline");
-    app.ai = ai::Settings {
-        enabled: true,
-        offline: true,
-        model: ai::default_model(),
-        api_key: Some("k".into()),
-        cost_threshold: 0.20,
-    };
+    app.ai = ai::Settings { enabled: true, offline: true, ..ai::Settings::default() };
+    // Offline forces the local backend, even with a key present.
+    app.ai.api_key = Some("k".into());
+    assert_eq!(app.ai.backend(), ai::BackendKind::Local);
     app.ask_ai("anything?");
+    // This build has no `local` feature, so it can't run — nothing is sent and the
+    // message explains how to enable it (rather than silently using Claude).
     assert!(app.ai_rx.is_none());
-    assert!(app.message.as_deref().unwrap_or("").contains("offline"), "{:?}", app.message);
+    assert!(app.message.as_deref().unwrap_or("").contains("local"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
 

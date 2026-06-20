@@ -24,18 +24,29 @@ AI is configured in a per-user file **outside the project** —
 ```toml
 [ai]
 enabled = true                 # opt-in; off by default
-offline = false                # true disables all network calls
-model = "claude-opus-4-8"      # or claude-haiku-4-5 for cheap passes
-cost_threshold = 0.20          # confirm before a pass estimated above this (USD)
-# api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins)
+backend = "claude"             # "claude" (API) or "local" (on-device Qwen via candle)
+offline = false                # true forces the local backend (nothing leaves the machine)
+model = "claude-opus-4-8"      # Claude model; the local backend picks its own
+cost_threshold = 0.20          # confirm before a Claude pass estimated above this (USD)
+# api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins); Claude only
 ```
 
 The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
-never from the project directory. With AI enabled, **Ctrl-A** opens the **AI
-command palette** (#98) — one entry point listing every AI action; arrow to one
-and Enter runs it. (When AI is off/offline, Ctrl-A explains how to enable it.)
-The status line shows a persistent `AI` tag when enabled and `⟳ Claude` while a
-request is in flight; requests run on a worker thread so the editor never blocks.
+never from the project directory. **Backends:** the default `claude` backend sends
+the manuscript to the Anthropic API (needs a key); the `local` backend runs an
+on-device Qwen with candle (#83/#124) — no key, nothing leaves the machine — and
+`offline = true` forces local regardless of `backend`. The local backend is a
+build-time opt-in: a standard build is Claude-only, and selecting `local` without
+`--features local` tells you to rebuild. Both satisfy the same `quill-ai` trait,
+so every feature works against either; the local backend's structured output is
+guaranteed by constrained decoding, and it is free (no cost confirm).
+
+With AI enabled, **Ctrl-A** opens the **AI command palette** (#98) — one entry
+point listing every AI action; arrow to one and Enter runs it. (When AI is off,
+Ctrl-A explains how to enable it.) The status line shows a persistent `AI` tag
+when enabled and `⟳ Claude` while a request is in flight; requests run on a worker
+thread so the editor never blocks (the first local request also loads the model
+there, so it can't freeze the UI).
 
 The palette actions:
 
