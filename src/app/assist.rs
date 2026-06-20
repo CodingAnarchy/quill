@@ -14,7 +14,7 @@ use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
-use crate::mode::{AiAction, Palette, PaletteItem};
+use crate::mode::{AiAction, Command, Palette, PaletteItem};
 
 /// Shown when the local backend is selected but wasn't compiled in. One source
 /// so the fast-fail (UI thread) and the `build_local` stub can't drift.
@@ -64,18 +64,19 @@ impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
+        let ai = |label, desc, a| PaletteItem { label, desc, command: Command::Ai(a) };
         let items = vec![
-            PaletteItem { label: "Ask the manuscript", desc: "Answer a question grounded in the draft", action: AiAction::Ask },
-            PaletteItem { label: "Character bible", desc: "Profiles, arcs, and drift flags", action: AiAction::Characters },
-            PaletteItem { label: "Timeline & continuity", desc: "Ordered timeline + contradiction findings", action: AiAction::Continuity },
-            PaletteItem { label: "Setting & worldbuilding", desc: "Setting bible + rule-violation findings", action: AiAction::Setting },
-            PaletteItem { label: "Scaffold / outline", desc: "Beat outline + structural gaps", action: AiAction::Scaffold },
-            PaletteItem { label: "Name & term consistency", desc: "Spelling variants (cheap pass)", action: AiAction::Naming },
-            PaletteItem { label: "Prose & style", desc: "POV / tense / voice findings (analysis only)", action: AiAction::Style },
-            PaletteItem { label: "Submission material", desc: "Synopsis, blurb & query letter (off-manuscript)", action: AiAction::Submission },
-            PaletteItem { label: "Revision triage", desc: "All findings so far, in one list (local)", action: AiAction::Triage },
+            ai("Ask the manuscript", "Answer a question grounded in the draft", AiAction::Ask),
+            ai("Character bible", "Profiles, arcs, and drift flags", AiAction::Characters),
+            ai("Timeline & continuity", "Ordered timeline + contradiction findings", AiAction::Continuity),
+            ai("Setting & worldbuilding", "Setting bible + rule-violation findings", AiAction::Setting),
+            ai("Scaffold / outline", "Beat outline + structural gaps", AiAction::Scaffold),
+            ai("Name & term consistency", "Spelling variants (cheap pass)", AiAction::Naming),
+            ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
+            ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
+            ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
-        self.mode = Mode::Palette(Box::new(Palette { items, selected: 0 }));
+        self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
     }
 
     pub(crate) fn on_key_palette(&mut self, key: KeyEvent) {
@@ -88,10 +89,12 @@ impl App {
         }
         match key.code {
             KeyCode::Enter => {
-                let action = p.items.get(p.selected).map(|it| it.action);
+                let command = p.items.get(p.selected).map(|it| it.command);
                 self.mode = Mode::Insert;
-                if let Some(action) = action {
-                    self.start_ai_action(action);
+                match command {
+                    Some(Command::Ai(a)) => self.start_ai_action(a),
+                    Some(Command::Git(g)) => self.start_git_action(g),
+                    None => {}
                 }
             }
             KeyCode::Esc => self.mode = Mode::Insert,

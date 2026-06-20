@@ -13,6 +13,22 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+/// Open the Git palette (Ctrl-v), move to item `index`, and run it.
+fn git_menu(app: &mut App, index: usize) {
+    app.on_key(ctrl('v'));
+    for _ in 0..index {
+        app.on_key(key(KeyCode::Down));
+    }
+    app.on_key(key(KeyCode::Enter));
+}
+
+/// Type a string into the active prompt.
+fn type_str(app: &mut App, s: &str) {
+    for c in s.chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+}
+
 fn nav_sel(app: &App) -> usize {
     match &app.mode {
         Mode::Nav { selected } => *selected,
@@ -723,31 +739,34 @@ fn offline_mode_selects_the_local_backend() {
     fs::remove_dir_all(&dir).ok();
 }
 
+fn overlay_text(app: &App) -> String {
+    app.overlay_lines()
+        .expect("an overlay should be open")
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
-fn ctrl_v_initializes_version_control() {
+fn git_palette_initializes_version_control() {
     let (mut app, dir) = two_chapter_app("vcs-init");
     assert!(!app.under_vc, "fresh project isn't under version control");
-    app.on_key(ctrl('v'));
-    assert!(app.under_vc, "Ctrl-v puts the project under version control");
-    assert!(dir.join(".git").exists(), "a repo was created");
-    assert!(dir.join(".gitignore").exists(), ".gitignore was written");
+    git_menu(&mut app, 0); // the only item before init is "Initialize"
+    assert!(app.under_vc, "the project is now under version control");
+    assert!(dir.join(".git").exists() && dir.join(".gitignore").exists());
     assert!(app.message.as_deref().unwrap_or("").contains("Initialized"), "{:?}", app.message);
-    // Idempotent: running it again just says so.
-    app.on_key(ctrl('v'));
-    assert!(app.message.as_deref().unwrap_or("").contains("Already"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn vc_status_reflects_uncommitted_changes() {
     let (mut app, dir) = two_chapter_app("vc-status");
-    app.on_key(ctrl('v')); // init → the project's files are untracked = uncommitted
+    git_menu(&mut app, 0); // Initialize → the project's files are uncommitted
     assert!(app.vc_changes > 0, "a fresh repo has uncommitted files");
 
-    app.on_key(ctrl('k')); // commit them
-    for c in "snapshot".chars() {
-        app.on_key(key(KeyCode::Char(c)));
-    }
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "snapshot");
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.vc_changes, 0, "clean working tree after a commit");
 
@@ -760,56 +779,74 @@ fn vc_status_reflects_uncommitted_changes() {
 }
 
 #[test]
-fn ctrl_y_shows_commit_history() {
+fn git_palette_shows_commit_history() {
     let (mut app, dir) = two_chapter_app("vc-log");
-    let overlay_text = |app: &App| -> String {
-        app.overlay_lines()
-            .expect("history overlay")
-            .iter()
-            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    // Not under version control → a hint, no overlay.
-    app.on_key(ctrl('y'));
-    assert!(app.overlay.is_none());
-    assert!(app.message.as_deref().unwrap_or("").contains("Not under version control"));
-
-    app.on_key(ctrl('v'));
-    app.on_key(ctrl('y')); // before any commit
+    git_menu(&mut app, 0); // Initialize
+    git_menu(&mut app, 1); // History — before any commit
     assert!(overlay_text(&app).contains("No commits yet"));
     app.on_key(key(KeyCode::Esc)); // close the overlay
 
-    app.on_key(ctrl('k')); // commit
-    for c in "first draft".chars() {
-        app.on_key(key(KeyCode::Char(c)));
-    }
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "first draft");
     app.on_key(key(KeyCode::Enter));
 
-    app.on_key(ctrl('y'));
+    git_menu(&mut app, 1); // History
     assert!(overlay_text(&app).contains("first draft"), "history lists the commit");
     fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
-fn ctrl_k_commits_with_a_message() {
+fn git_palette_commits_with_a_message() {
     let (mut app, dir) = two_chapter_app("vcs-commit");
-    // Not under version control yet → a hint, no prompt.
-    app.on_key(ctrl('k'));
-    assert!(app.message.as_deref().unwrap_or("").contains("Not under version control"));
-    assert!(matches!(app.mode, Mode::Insert));
-
-    app.on_key(ctrl('v')); // initialize
-    app.on_key(ctrl('k')); // commit
+    git_menu(&mut app, 0); // Initialize
+    git_menu(&mut app, 0); // Commit
     assert!(matches!(app.mode, Mode::Prompt(_)), "a commit-message prompt opens");
-    for c in "first draft".chars() {
-        app.on_key(key(KeyCode::Char(c)));
-    }
+    type_str(&mut app, "first draft");
     app.on_key(key(KeyCode::Enter));
     assert!(app.message.as_deref().unwrap_or("").starts_with("Committed"), "{:?}", app.message);
     // Everything was captured → the tree is now clean.
     assert_eq!(crate::vcs::commit(&app.project.root, "x").unwrap(), None);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn git_palette_shows_changes_diff() {
+    let (mut app, dir) = two_chapter_app("vc-diff");
+    git_menu(&mut app, 0); // Initialize
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "base");
+    app.on_key(key(KeyCode::Enter));
+
+    // Clean tree → a message, no overlay.
+    git_menu(&mut app, 2); // Changes
+    assert!(app.overlay.is_none());
+    assert!(app.message.as_deref().unwrap_or("").contains("No uncommitted changes"));
+
+    // Edit + save → the diff overlay shows the changed file.
+    app.on_key(key(KeyCode::Char('Q')));
+    app.on_key(ctrl('s'));
+    git_menu(&mut app, 2); // Changes
+    assert!(overlay_text(&app).contains("one.md"), "diff names the changed file");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn git_palette_restores_a_chapter() {
+    let (mut app, dir) = two_chapter_app("vc-restore");
+    git_menu(&mut app, 0); // Initialize
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "base");
+    app.on_key(key(KeyCode::Enter));
+
+    // Edit + save, then restore.
+    app.on_key(key(KeyCode::Char('Z')));
+    app.on_key(ctrl('s'));
+    assert!(app.buffer.text().contains('Z'), "the edit landed");
+    git_menu(&mut app, 3); // Restore chapter
+    assert!(matches!(app.mode, Mode::Prompt(_)), "restore asks for confirmation");
+    app.on_key(key(KeyCode::Char('y')));
+    assert!(!app.buffer.text().contains('Z'), "the edit was reverted: {:?}", app.buffer.text());
+    assert!(app.message.as_deref().unwrap_or("").contains("Restored"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
 

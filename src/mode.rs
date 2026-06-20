@@ -74,18 +74,28 @@ pub enum Mode {
 /// State for an open [`Mode::Palette`]: the available AI actions and the selected
 /// row.
 pub struct Palette {
+    /// Title shown in the palette's bar (e.g. "AI", "Version control").
+    pub(crate) title: &'static str,
     pub(crate) items: Vec<PaletteItem>,
     pub(crate) selected: usize,
 }
 
-/// One palette entry: a label, a one-line description, and the action it runs.
+/// One palette entry: a label, a one-line description, and the command it runs.
 pub struct PaletteItem {
     pub(crate) label: &'static str,
     pub(crate) desc: &'static str,
-    pub(crate) action: AiAction,
+    pub(crate) command: Command,
 }
 
-/// The AI actions reachable from the palette.
+/// A command reachable from a palette — the AI menu (Ctrl-A) and the
+/// version-control menu (Ctrl-V) share one palette mechanism.
+#[derive(Clone, Copy)]
+pub(crate) enum Command {
+    Ai(AiAction),
+    Git(GitAction),
+}
+
+/// The AI actions reachable from the AI palette.
 #[derive(Clone, Copy)]
 pub(crate) enum AiAction {
     Ask,
@@ -98,6 +108,21 @@ pub(crate) enum AiAction {
     Submission,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
+}
+
+/// The version-control actions reachable from the Git palette (#54).
+#[derive(Clone, Copy)]
+pub(crate) enum GitAction {
+    /// Initialize a repository (#130).
+    Initialize,
+    /// Commit the project with a message (#131).
+    Commit,
+    /// Show the commit history (#133).
+    History,
+    /// Show the working-tree diff since HEAD (#135).
+    Diff,
+    /// Restore the current chapter to its last committed version (#135).
+    RestoreChapter,
 }
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.
@@ -183,6 +208,8 @@ pub(crate) enum Pending {
     Commit,
     /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.
     ConfirmAi(AiAction),
+    /// y/N: restore the current chapter to its last committed version (#135).
+    ConfirmRestore,
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.
