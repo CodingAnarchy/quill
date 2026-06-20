@@ -4,14 +4,20 @@
 fully offline — in-process in Rust (candle-transformers, mistral.rs, llama.cpp
 bindings) or via an external runner (ollama)?
 
-**Recommendation.** Use **llama.cpp as the inference engine** (GGUF + GBNF
-grammar), reached **in-process through Rust bindings** (no daemon) as the target,
-with **ollama as the proven fallback**. Do **not** use candle as the primary
-engine. The decisive reason is structured output: every Quill tracker constrains
-the model to a JSON schema, llama.cpp does this natively (and it's proven on this
-hardware below), and candle has no native constrained decoding.
+**Recommendation.** Run the model **in-process in Rust, no daemon** — that's the
+right author experience and all three in-process candidates generate fine on
+Metal. The one piece that isn't turnkey in-process today is **structured output**
+(every Quill tracker constrains the model to a JSON schema), so that is the
+deciding sub-question for the integration ticket (#87): of **candle** (pure Rust,
+DIY constrained decoding), **llama.cpp via a Rust binding** (mature GBNF grammar,
+but the binding's sampler is currently broken), and **mistral.rs** (pure Rust,
+advertises constrained generation — untested), pick the one that delivers
+reliable schema-shaped JSON at least risk. **ollama** is the proven fallback
+(works today, structured output and all) at the cost of a background daemon.
 
-This was tested, not assumed — see [POC results](#poc-results).
+This was tested, not assumed — all three numbers below are from real runs on the
+same model and machine. (An earlier draft of this doc recommended llama.cpp over
+candle outright; the candle POC narrowed the gap — see [POC results](#poc-results).)
 
 ## Why structured output is the decisive criterion
 
@@ -38,18 +44,22 @@ constrained-decoding story is the first thing to weigh, not the last.
 | Dimension | llama.cpp (GGUF) | candle (HF) | ollama |
 |---|---|---|---|
 | Process model | **in-process** (Rust binding) or `llama-server` | **in-process**, pure Rust | external **daemon** |
-| Structured output | **native GBNF + schema→grammar** | **none built-in** (hand-roll logit masking) | native (uses llama.cpp GBNF) |
+| Structured output | **native GBNF + schema→grammar** | none built-in, but **raw logit access → DIY-feasible** | native (uses llama.cpp GBNF) |
 | Quantization | **GGUF** (k-quants, IQ, …), broad | GGUF + safetensors, narrower | GGUF |
 | Accel: Metal / CUDA / CPU | **all, mature** | Metal/CUDA/CPU, younger | all (via llama.cpp) |
-| Packaging / footprint | C++ build (cmake) in the dep tree; one binary | **pure Rust, no C toolchain**; one binary | separate install + daemon |
+| Packaging / footprint | C++ build (cmake) in the dep tree; one binary | **pure Rust, no cmake** (~1 min build); one binary | separate install + daemon |
 | Model management | you fetch the GGUF | you fetch weights | **`ollama pull`**, easy |
 | Cross-platform | macOS/Linux/Windows | macOS/Linux/Windows | macOS/Linux/Windows |
 | Author moving parts | **none** (in-process) | **none** | a daemon to install & keep running |
 
-The honest trade: candle's appeal is a pure-Rust build (no C++/cmake in the
-tree). But it loses on the one feature Quill needs most. ollama is the easiest to
-get working and manages models for the author, but it's a background daemon to
-install, run, and version — a moving part the in-process route avoids.
+The honest trade: candle is the cleanest build (pure Rust, ~1 min, no cmake) and
+ran competitively (below). Its gap is no *built-in* structured output — but
+because candle exposes the raw logits each decode step, grammar/JSON-schema
+constraint is implementable on top (mask the logits before sampling), so the gap
+is work-on-us, not a wall. llama.cpp ships that work but its mature engine is C++
+(and the current Rust binding's sampler is broken — below). ollama is the easiest
+to get working and manages models for the author, but it's a background daemon to
+install, run, and version — the moving part the in-process route avoids.
 
 ## POC results
 
@@ -87,46 +97,78 @@ produced **valid, correct, schema-shaped JSON on the first try**:
 - Build cost is real: compiling llama.cpp via cmake (one-time, a few minutes) and
   a deep build-dep tree (bindgen, cc, cmake, clang-sys).
 
-### candle
+### in-process (candle 0.9, pure Rust, Metal)
 
-Not run. candle can load and run a quantized Qwen on Metal, but it has **no
-native constrained decoding**, so the structured-output path — the spike's
-decisive criterion — would have to be hand-built (per-step logit masking against
-a grammar) or replaced with parse-and-retry. That is exactly the work llama.cpp
-already does and proved above, so a candle POC wouldn't change the recommendation.
+- **Generation on Metal works**: load 606 ms · **88.6 tok/s** · produced the same
+  JSON (`{"protagonist":"Mara Vance"}`) from a prompt. Faster generation than the
+  llama.cpp binding in these naive loops; slower model load (candle's GGUF
+  dequant/setup).
+- **Build is the cleanest of the three**: ~58 s, pure Rust, no cmake/C++ — just
+  `candle-core`, `candle-transformers`, `tokenizers` (needs the model's
+  `tokenizer.json` alongside the GGUF, since candle doesn't read the tokenizer
+  embedded in the GGUF the way llama.cpp does).
+- **No built-in structured output.** The POC sampled with `Sampling::ArgMax`, so
+  JSON here is prompt-driven, not guaranteed. But the loop has the full logits
+  tensor in hand before each `sample()` — so a grammar/JSON-schema mask applied to
+  those logits would give constrained decoding in pure Rust. That's real work (a
+  JSON state machine, or an existing Rust GBNF crate), but it's tractable, not a
+  wall.
 
 ## Recommendation & rationale
 
-1. **Engine: llama.cpp / GGUF.** It's the only option with mature, native
-   structured output (GBNF + schema→grammar), proven here on the target model and
-   Metal, with the broadest quantization and acceleration support. This rules out
-   candle as the primary engine.
-2. **Integration: in-process Rust binding, no daemon — target.** Best author
-   experience (single binary, nothing to install or keep running, Metal
-   automatic). **Contingent on getting grammar-constrained decoding working:** the
-   spike found `llama-cpp-2` 0.1.150's grammar sampler asserts, so the integration
-   ticket must validate GBNF end-to-end before committing — by pinning/patching a
-   working binding version, or evaluating **mistral.rs** (pure-Rust, advertises
-   constrained/structured generation), as part of that ticket.
-3. **Fallback: ollama.** If a reliable in-process grammar path can't be landed in
-   time, ship the local backend against ollama first (proven, easy model
-   management) and treat the daemon as a temporary cost. The `quill-ai` trait
-   makes the engine swappable later without touching the features.
+1. **Go in-process, no daemon.** All three in-process candidates generated fine on
+   Metal at ~80–90 tok/s; a single binary with nothing to install or keep running
+   is the right author experience and worth preferring over ollama's daemon.
+2. **GGUF + Metal, regardless of engine.** GGUF is the common quant format across
+   every option, Metal worked out of the box everywhere, and Q4_K_M of a small
+   Qwen is ~1 GB and fast on an M5. This is settled.
+3. **Structured output is the one unsolved in-process piece — let #87 decide it
+   empirically.** None of the in-process options gives turnkey schema-shaped JSON
+   today:
+   - **llama.cpp via `llama-cpp-2`** — mature GBNF + schema→grammar engine, but the
+     binding's grammar sampler asserts in 0.1.150 (needs a fixed/pinned/patched
+     version, or a different binding).
+   - **candle** — cleanest pure-Rust build and competitive speed, but constrained
+     decoding is DIY (mask the logits it already exposes, via a JSON state machine
+     or a Rust GBNF crate).
+   - **mistral.rs** — pure Rust, advertises constrained/structured generation;
+     untested here, worth a focused try.
+   #87 should prototype structured output through each and pick the lowest-risk
+   path to reliable schema-shaped JSON.
+4. **Ship against ollama first if needed.** It's the only option proven *today* for
+   structured output end-to-end (schema-constrained JSON, first try). If the
+   in-process structured path needs time, ship the local backend on ollama and
+   treat the daemon as a temporary cost — the `quill-ai` trait makes the engine
+   swappable later without touching the features.
 
-Net: prefer **llama.cpp over candle** decisively (structured output); prefer
-**in-process over a daemon** where the binding allows it.
+Net: **in-process over a daemon**; **GGUF/Metal settled**; **engine (candle vs
+llama.cpp-binding vs mistral.rs) decided by whichever lands reliable structured
+output first** — closer than it looked before the candle POC, which built cleanest
+and ran competitively and whose only gap is tractable.
+
+### Is llama.cpp preferable to candle?
+
+For structured output *today*, yes — llama.cpp's grammar engine works (proven via
+ollama), candle's doesn't exist yet. But for an *in-process Rust* backend the gap
+is small: candle builds cleaner (pure Rust, no cmake), ran faster than the
+llama.cpp binding here, and exposes the logits needed to add constrained decoding
+ourselves — while the llama.cpp Rust binding's grammar path is itself currently
+broken. So neither is turnkey in-process; candle is a genuine contender, not ruled
+out. The deciding factor is which reaches reliable schema-shaped JSON with least
+work and maintenance, which #87 settles by prototyping both (plus mistral.rs).
 
 ## Impact on the implementation tickets
 
-- **#87 (backend behind the `quill-ai` trait + switching)** — target the
-  llama.cpp engine in-process; its first job is to make grammar-constrained JSON
-  work end-to-end (resolve the `llama-cpp-2` grammar regression or adopt
-  mistral.rs), with ollama as the fallback transport. Map the trait's
-  `json_schema` to a GBNF grammar via schema→grammar.
-- **#86 (install & preparation)** — acquire a **GGUF** quant (engine-agnostic
-  across llama.cpp and ollama), not safetensors; if shipping the ollama fallback,
-  wrap it in a local `Modelfile` rather than depending on the registry (which was
-  flaky here).
+- **#87 (backend behind the `quill-ai` trait + switching)** — go in-process; its
+  first and gating job is reliable structured output. Prototype the trait's
+  `json_schema` → schema-shaped JSON through each contender (candle + a logit mask;
+  `llama-cpp-2` with the grammar regression resolved; mistral.rs constrained
+  generation) and pick the lowest-risk one, with ollama as the fallback transport.
+- **#86 (install & preparation)** — acquire a **GGUF** quant (works for every
+  option), not safetensors. Note candle additionally needs the model's
+  `tokenizer.json` fetched alongside the GGUF; if shipping the ollama fallback,
+  wrap the GGUF in a local `Modelfile` rather than depending on the registry
+  (which was flaky here).
 - **#85 (hardware-aware model selection)** — choose a Qwen **GGUF quant** to fit
   detected RAM/VRAM (e.g. Q4_K_M as the default sweet spot; smaller IQ quants on
   tight machines). The 1.5B Q4_K_M used here is ~1 GB and ran at ~80–97 tok/s on
