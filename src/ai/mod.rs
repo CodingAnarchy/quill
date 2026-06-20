@@ -13,6 +13,8 @@ pub mod character;
 pub mod constrain;
 pub mod continuity;
 pub mod cost;
+#[cfg(feature = "local")]
+pub mod local;
 pub mod naming;
 pub mod scaffold;
 pub mod setting;

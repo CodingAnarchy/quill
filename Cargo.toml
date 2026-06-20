@@ -20,6 +20,22 @@ time = { version = "0.3.49", features = ["local-offset", "macros", "parsing", "f
 ureq = { version = "3.3.0", features = ["json"] }
 similar = "3.1.1"
 
+# Local-model backend (#124): candle + tokenizers, off by default so the heavy
+# inference deps (and their build) stay out of a normal Quill build. Build/run
+# with `--features local`.
+candle-core = { version = "0.9", optional = true }
+candle-transformers = { version = "0.9", optional = true }
+tokenizers = { version = "0.20", optional = true }
+
+[features]
+local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers"]
+
+# On macOS, give candle the Metal backend (GPU). Cargo unions these features into
+# the optional deps above, so `--features local` is CPU elsewhere and Metal here.
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.9", optional = true, features = ["metal"] }
+candle-transformers = { version = "0.9", optional = true, features = ["metal"] }
+
 [profile.release]
 lto = true
 codegen-units = 1

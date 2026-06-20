@@ -173,3 +173,35 @@ work and maintenance, which #87 settles by prototyping both (plus mistral.rs).
   detected RAM/VRAM (e.g. Q4_K_M as the default sweet spot; smaller IQ quants on
   tight machines). The 1.5B Q4_K_M used here is ~1 GB and ran at ~80–97 tok/s on
   an M5; size the default tier from that.
+
+## Implementation status
+
+The decision above is now realized (#124):
+
+- **`src/ai/constrain.rs`** — the constrained-decoding core. `prefix_status` and
+  `Constraint` enforce a JSON Schema at the character level (objects + required
+  keys, arrays, strings, integer/number, boolean, null, string enums, nesting).
+  Pure, no model needed, fully unit-tested.
+- **`src/ai/local.rs`** (behind the `local` cargo feature) — `LocalBackend`:
+  loads a Qwen **GGUF** + its `tokenizer.json` with candle (Metal on macOS, CPU
+  elsewhere) and implements the `quill-ai` `Backend` trait. Its decode loop ranks
+  the logits, and when a request carries a `json_schema` it offers candidates to
+  the constraint in logit order — so the reply is guaranteed schema-valid. Without
+  a schema it decodes greedily.
+
+The heavy candle deps stay out of default builds; build/run the local backend
+with `--features local`. End-to-end check (needs a model on disk):
+
+```sh
+QUILL_LOCAL_GGUF=…/qwen.gguf QUILL_LOCAL_TOKENIZER=…/tokenizer.json \
+  cargo test --release --features local local_backend -- --ignored --nocapture
+```
+
+Verified on the spike machine: the local backend produced a valid, schema-shaped
+character object (`{name, role∈enum, traits[]}`) from a passage — constrained
+decoding making invalid JSON unrepresentable, no daemon, pure-Rust + Metal.
+
+**Remaining (#87):** wire `LocalBackend` behind settings / backend-switching
+(choose Claude vs local; offline mode → local only), and reset the model's KV
+cache between requests (the single-request path is validated; multi-request reuse
+is #87's concern).
