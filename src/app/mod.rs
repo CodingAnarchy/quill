@@ -380,6 +380,8 @@ impl App {
                 stats,
                 sentence_lengths,
                 style: analysis::style_flags(&text),
+                dialogue: analysis::dialogue_split(&text),
+                paragraph_lengths: analysis::paragraph_lengths(&text),
             });
         }
         let longest = longest.into_vec();

@@ -14,8 +14,8 @@ disk), so typing stays instant on a large manuscript (the perf guards in
 
 This document specifies each metric and its formula. The slices so far are
 readability (#67), sentence-length statistics (#68), chapter-length / pacing
-(#69), and frequency-based style flags (#70); later tickets in the epic (#66) add
-paragraph statistics, dialogue balance, and vocabulary.
+(#69), frequency-based style flags (#70), and dialogue balance & paragraph
+metrics (#71); a later ticket in the epic (#66) adds vocabulary richness.
 
 ## Shared text primitives
 
@@ -184,6 +184,27 @@ The fences are median-relative on purpose: a single very long or very short
 chapter would drag a mean- or quartile-based threshold toward itself and hide the
 very outlier it should catch, whereas the median barely moves. Below four
 chapters there is no meaningful "rest" to compare against, so nothing is flagged.
+
+## Dialogue & paragraphs
+
+Dialogue-heavy and narration-heavy chapters read at very different speeds, so the
+balance per chapter is a pacing signal: an all-dialogue stretch can feel rushed, a
+dialogue-free one can sag into exposition. Paragraph length is the related rhythm
+signal — a wall of 200-word paragraphs reads slower than short, broken-up ones.
+
+Per chapter and overall:
+
+- **Dialogue%** — the share of words inside quotation marks. Detection is a
+  heuristic: words between double quotes — straight (`"`) or curly (`“ ”`) — count
+  as dialogue, the rest as narration. **Single quotes are ignored** because
+  they're ambiguous with apostrophes (`don't`, `O'Brien`), and an unbalanced
+  quote runs to the end of the chapter. It measures *how much* is dialogue, not
+  whether the dialogue is good.
+- **Para~ / Median / Longest** — paragraph length in words: the mean, the median,
+  and the longest paragraph. A paragraph is a run of non-blank lines; heading
+  lines are already excluded (see *Prose words*), so a chapter title is never a
+  paragraph. A median well below the mean with a large longest means a few dense
+  blocks are dragging the rhythm.
 
 ## Style flags (frequency)
 
