@@ -10,6 +10,7 @@
 
 pub mod bible;
 pub mod character;
+pub mod constrain;
 pub mod continuity;
 pub mod cost;
 pub mod naming;
