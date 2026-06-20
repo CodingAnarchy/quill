@@ -632,12 +632,19 @@ const MATTR_WINDOW: usize = 100;
 
 /// Lexical variety as a moving-average type–token ratio (MATTR) in `0.0..=1.0`:
 /// the average fraction of distinct words across every [`MATTR_WINDOW`]-word
-/// window. Unlike a plain type–token ratio it doesn't fall just because a chapter
-/// is longer, so chapters are comparable. Short chapters (fewer than a window)
-/// fall back to the plain ratio over the whole text.
-pub fn lexical_variety(text: &str) -> f64 {
-    let tokens: Vec<String> = text.unicode_words().map(str::to_lowercase).collect();
-    mattr(&tokens, MATTR_WINDOW)
+/// window. Unlike a plain type–token ratio it doesn't fall just because a span is
+/// longer, so chapters are comparable. Spans shorter than a window fall back to
+/// the plain ratio. Takes pre-tokenized, lowercased words (via [`tally_tokens`]),
+/// so the caller tokenizes once and measures both a chapter (a slice) and the
+/// whole manuscript (the pool) with the same definition.
+pub fn lexical_variety_tokens(tokens: &[String]) -> f64 {
+    mattr(tokens, MATTR_WINDOW)
+}
+
+/// Append a span's lowercased word tokens to `out`. The basis for both the
+/// per-chapter and the pooled whole-manuscript lexical-variety figures.
+pub fn tally_tokens(text: &str, out: &mut Vec<String>) {
+    out.extend(text.unicode_words().map(str::to_lowercase));
 }
 
 fn mattr(tokens: &[String], window: usize) -> f64 {
@@ -691,7 +698,7 @@ pub struct ChapterAnalysis {
     pub style: StyleFlags,
     pub dialogue: Dialogue,
     pub paragraph_lengths: Vec<usize>,
-    /// Lexical variety (MATTR, 0.0..=1.0) — see [`lexical_variety`].
+    /// Lexical variety (MATTR, 0.0..=1.0) — see [`lexical_variety_tokens`].
     pub lexical_variety: f64,
 }
 
@@ -751,6 +758,9 @@ pub struct Report<'a> {
     pub top_words: &'a [(String, usize)],
     /// Repeated multi-word phrases across the manuscript, highest first.
     pub top_phrases: &'a [(String, usize)],
+    /// Whole-manuscript lexical variety (MATTR over the pooled tokens, not a mean
+    /// of the chapters', so it matches the per-chapter measure's definition).
+    pub overall_variety: f64,
 }
 
 /// The analysis report's rows: a readability table, a sentence-length section
@@ -770,7 +780,7 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     out.push(Line::raw(""));
     out.extend(style_section(report.chapters, report.top_phrases));
     out.push(Line::raw(""));
-    out.extend(vocabulary_section(report.chapters, report.top_words));
+    out.extend(vocabulary_section(report.chapters, report.top_words, report.overall_variety));
     out
 }
 
@@ -930,22 +940,23 @@ fn style_section(chapters: &[ChapterAnalysis], top_phrases: &[(String, usize)]) 
 
 /// The vocabulary section: lexical variety (MATTR ×100, so higher = more varied)
 /// per chapter and overall, plus the manuscript's most-used content words. The
-/// overall variety is the word-weighted mean of the chapters' (MATTR is already
-/// length-normalized, so the per-chapter values are comparable).
-fn vocabulary_section(chapters: &[ChapterAnalysis], top_words: &[(String, usize)]) -> Vec<Line<'static>> {
+/// overall variety is measured over the pooled manuscript tokens (see
+/// [`Report::overall_variety`]), the same definition as the per-chapter rows.
+fn vocabulary_section(
+    chapters: &[ChapterAnalysis],
+    top_words: &[(String, usize)],
+    overall_variety: f64,
+) -> Vec<Line<'static>> {
     let mut out = vec![
         dim("Vocabulary"),
         dim(format!("{:<26}{:>9}{:>8}", "Chapter", "Variety", "Words")),
     ];
-    let mut weighted = 0.0;
     let mut words = 0usize;
     for c in chapters {
-        weighted += c.lexical_variety * c.stats.words as f64;
         words += c.stats.words;
         out.push(Line::raw(vocab_text(&c.title, c.lexical_variety, c.stats.words)));
     }
-    let overall = if words == 0 { 0.0 } else { weighted / words as f64 };
-    out.push(bold(vocab_text("Whole manuscript", overall, words)));
+    out.push(bold(vocab_text("Whole manuscript", overall_variety, words)));
     out.extend(count_list("Most-used words", top_words));
     out
 }
@@ -1260,12 +1271,19 @@ mod tests {
         assert_eq!(summarize_lengths(&[]), (0.0, 0.0, 0));
     }
 
+    /// Lexical variety of a raw string (tokenize-then-measure), for tests.
+    fn variety(text: &str) -> f64 {
+        let mut tokens = Vec::new();
+        tally_tokens(text, &mut tokens);
+        lexical_variety_tokens(&tokens)
+    }
+
     #[test]
     fn lexical_variety_falls_back_to_plain_ttr_for_short_text() {
         // 5 tokens, 4 distinct ("the" twice) → 0.8; under the window, so plain TTR.
-        assert!((lexical_variety("the cat the dog runs") - 0.8).abs() < 1e-9);
-        assert_eq!(lexical_variety(""), 0.0);
-        assert_eq!(lexical_variety("word word word"), 1.0 / 3.0);
+        assert!((variety("the cat the dog runs") - 0.8).abs() < 1e-9);
+        assert_eq!(variety(""), 0.0);
+        assert_eq!(variety("word word word"), 1.0 / 3.0);
     }
 
     #[test]
@@ -1294,7 +1312,7 @@ mod tests {
             style: style_flags(prose_text),
             dialogue: dialogue_split(prose_text),
             paragraph_lengths: paragraph_lengths(prose_text),
-            lexical_variety: lexical_variety(prose_text),
+            lexical_variety: variety(prose_text),
         }
     }
 
@@ -1317,6 +1335,7 @@ mod tests {
             run_on_threshold: 40,
             top_words: &[("locket".to_string(), 9)],
             top_phrases: &[("the dog ran".to_string(), 4)],
+            overall_variety: 0.7,
         };
         let rows = lines(&report);
         let text: String = rows
@@ -1358,6 +1377,7 @@ mod tests {
             run_on_threshold: 40,
             top_words: &[],
             top_phrases: &[],
+            overall_variety: 0.0,
         };
         let text: String = lines(&report)
             .iter()
