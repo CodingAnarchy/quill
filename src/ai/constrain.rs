@@ -319,6 +319,11 @@ fn consume_object<'s>(schema: &Value, s: &'s str) -> Outcome<'s> {
             return Outcome::Partial;
         }
         if let Some(r) = rest.strip_prefix(',') {
+            // No additional properties: once every property is used, a comma can't
+            // be satisfied (no key would follow), so only `}` is valid.
+            if seen.len() == props.len() {
+                return Outcome::Invalid;
+            }
             rest = r;
             first = false;
             continue;
@@ -497,6 +502,20 @@ mod tests {
         assert_eq!(status(&o, "{\"a\": \"x\", \"a"), Prefix::Invalid);
         // "b" is a real remaining key.
         assert_eq!(status(&o, "{\"a\": \"x\", \"b"), Prefix::Partial);
+    }
+
+    #[test]
+    fn object_forbids_a_comma_once_all_properties_are_used() {
+        let o = json!({
+            "type": "object",
+            "properties": {"a": {"type": "string"}},
+            "required": ["a"]
+        });
+        // All properties present → only `}` may follow, not another `,` (no
+        // additional properties), so the value can actually terminate.
+        assert_eq!(status(&o, "{\"a\": \"x\""), Prefix::Partial);
+        assert_eq!(status(&o, "{\"a\": \"x\"}"), Prefix::Complete);
+        assert_eq!(status(&o, "{\"a\": \"x\","), Prefix::Invalid);
     }
 
     #[test]

@@ -26,9 +26,12 @@ similar = "3.1.1"
 candle-core = { version = "0.9", optional = true }
 candle-transformers = { version = "0.9", optional = true }
 tokenizers = { version = "0.20", optional = true }
+# Hardware detection + direct model download for hardware-aware selection (#85).
+sysinfo = { version = "0.33", optional = true }
+hf-hub = { version = "0.4", optional = true }
 
 [features]
-local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers"]
+local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
 
 # On macOS, give candle the Metal backend (GPU). Cargo unions these features into
 # the optional deps above, so `--features local` is CPU elsewhere and Metal here.

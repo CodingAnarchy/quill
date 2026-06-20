@@ -205,3 +205,25 @@ decoding making invalid JSON unrepresentable, no daemon, pure-Rust + Metal.
 (choose Claude vs local; offline mode → local only), and reset the model's KV
 cache between requests (the single-request path is validated; multi-request reuse
 is #87's concern).
+
+### Hardware-aware selection & direct acquisition (#85)
+
+- **`src/ai/model_select.rs`** (always compiled, pure, unit-tested) — a
+  data-driven table of quantized Qwen2.5 options and `recommend(ram_gb, accel)`,
+  which picks the largest variant that fits with headroom (capping size on
+  CPU-only machines) and explains the choice, or declines on too-small hardware.
+- **`LocalBackend::recommended()`** (feature `local`) — probes RAM + accelerator
+  (`sysinfo` + a candle device check), picks a model, and **downloads it directly
+  via `hf-hub`** (the GGUF + its `tokenizer.json`, cached outside the project,
+  resumable), then loads it. This is the "install/prepare" flow; the standalone
+  install ticket (#86) was closed as obsolete since candle is in-process and
+  hf-hub handles acquisition.
+
+Verified end-to-end: `recommended()`-style auto-download of a small Qwen on an M5
+fetched the GGUF + tokenizer via hf-hub and produced a complete, schema-valid
+object under constrained decoding. (The live test forces the smallest model to
+keep the download modest.)
+
+> Found during #85's live testing and fixed in `constrain.rs`: an object must
+> forbid a `,` once all its properties are used (no additional properties), so
+> the value can terminate instead of the model emitting endless whitespace.
