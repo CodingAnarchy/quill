@@ -19,7 +19,7 @@ use crate::ai::setting::{self, Setting};
 use crate::analysis;
 use crate::buffer::{self, Buffer};
 use crate::date;
-use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
+use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
@@ -343,6 +343,21 @@ impl App {
         (0..self.chapter_count())
             .map(|i| self.chapter_word_count(i))
             .sum()
+    }
+
+    /// Words in body chapters only — what the progress report measures against the
+    /// goal and projects from (#182), excluding front/back matter.
+    pub fn body_word_count(&self) -> usize {
+        (0..self.chapter_count())
+            .filter(|&i| self.project.chapter_band(i) == Band::Body)
+            .map(|i| self.chapter_word_count(i))
+            .sum()
+    }
+
+    /// Words in front/back-matter sections — shown in the report but not counted
+    /// toward the goal (#182).
+    pub fn section_word_count(&self) -> usize {
+        self.project_word_count() - self.body_word_count()
     }
 
 

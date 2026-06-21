@@ -123,6 +123,14 @@ offset.
 Let `W`, `C` = current words / chapters; `Wt`, `Ct`, `wpp` = goal words /
 chapters / words-per-page; pages use `floor(words / wpp)`.
 
+**Book sections (#182):** `W` and `C` count **body chapters only** — front- and
+back-matter sections (a `role:` in a chapter's front matter, e.g. `prologue`,
+`appendix`, `glossary`; see [book sections](../README.md#keys)) are excluded from
+the goal, the projection, and the rate, so the target tracks the novel rather
+than being inflated by a long introduction or appendix. Their combined word count
+is shown on its own line (`(+N words in front/back matter, not counted)`) so
+nothing is hidden. An all-body project is unaffected (the line is omitted).
+
 | Report line | Formula |
 | --- | --- |
 | `words ( % )` | `W / Wt`, percent = `W / Wt * 100` |
