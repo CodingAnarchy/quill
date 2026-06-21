@@ -15,6 +15,7 @@ use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::mode::{AiAction, Command, Palette, PaletteItem};
+use crate::text::count_matches;
 
 /// The outcome of staging one generated file (#153) — a bible profile or a
 /// submission artifact. Distinguishes a successful write from a hand-edit
@@ -494,16 +495,16 @@ impl App {
     /// Count a character's name/alias mentions across the manuscript and record
     /// the last chapter it appears in — local "screen time" / "last seen", free.
     pub(crate) fn enrich_mentions(&self, c: &mut Character) {
-        let needles: Vec<String> = std::iter::once(&c.name)
+        let needles: Vec<&str> = std::iter::once(&c.name)
             .chain(&c.aliases)
-            .map(|n| n.to_lowercase())
+            .map(String::as_str)
             .filter(|n| !n.is_empty())
             .collect();
         let mut total = 0;
         let mut last = None;
         for i in 0..self.chapter_count() {
-            let text = self.chapter_text(i).to_lowercase();
-            let count: usize = needles.iter().map(|n| text.matches(n.as_str()).count()).sum();
+            let text = self.chapter_text(i);
+            let count: usize = needles.iter().map(|n| count_matches(&text, n)).sum();
             if count > 0 {
                 total += count;
                 last = self.project.chapter_title(i).map(str::to_string);
