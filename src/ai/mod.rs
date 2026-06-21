@@ -13,6 +13,7 @@ pub mod character;
 pub mod constrain;
 pub mod continuity;
 pub mod cost;
+pub mod incremental;
 #[cfg(feature = "local")]
 pub mod local;
 pub mod model_select;
@@ -161,6 +162,10 @@ pub struct Settings {
     /// Confirm before any Claude pass whose estimated cost exceeds this many
     /// dollars. Cheaper passes (and the free local backend) run without a prompt.
     pub cost_threshold: f64,
+    /// Rebuild a bible from the whole manuscript (instead of an incremental
+    /// revise) once this many chapters have changed since its last pass (#90).
+    /// 0 disables incremental updates — every pass is a full rebuild.
+    pub refresh_after_changes: usize,
 }
 
 impl Default for Settings {
@@ -172,6 +177,7 @@ impl Default for Settings {
             model: default_model(),
             api_key: None,
             cost_threshold: 0.20,
+            refresh_after_changes: 5,
         }
     }
 }
