@@ -903,6 +903,20 @@ fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
 }
 
 #[test]
+fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
+    let (mut app, dir) = two_chapter_app("cont-unreadable");
+    fs::remove_file(dir.join("two.md")).unwrap(); // a chapter file vanishes
+    app.on_key(ctrl('l')); // try to enter the continuous view
+    assert!(app.manuscript.is_none(), "stays in the single-chapter view");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Couldn't open continuous view"),
+        "the failure is surfaced: {:?}",
+        app.message
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn undo_is_guarded_in_the_continuous_view() {
     let (mut app, dir) = two_chapter_app("undo-continuous");
     app.on_key(ctrl('l')); // enter the continuous-manuscript view

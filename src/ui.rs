@@ -1213,7 +1213,7 @@ mod tests {
         let project = Project::open(&dir).unwrap();
         let buffer = Buffer::from_path(project.active_path()).unwrap();
         let mut app = App::new(buffer, project);
-        app.manuscript = Some(Manuscript::open(&app.project));
+        app.manuscript = Some(Manuscript::open(&app.project).unwrap());
 
         let screen = render(&app, 60, 12);
         // Both chapters' prose appears in one continuous flow...
