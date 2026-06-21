@@ -39,7 +39,7 @@ mod task;
 mod vcs_actions;
 
 use panes::Split;
-pub(crate) use panes::SplitDir;
+pub(crate) use panes::{SplitDir, SplitView};
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 
@@ -87,6 +87,9 @@ pub struct App {
     /// each frame so visual-row cursor navigation (#143) wraps lines the same way
     /// the screen does. A `Cell` because the renderer borrows `App` immutably.
     pub wrap_width: std::cell::Cell<u16>,
+    /// Height of a docked surface pane (#164), set by the renderer so its scroll
+    /// bound matches what's drawn.
+    pub(crate) surface_height: std::cell::Cell<u16>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.
@@ -144,6 +147,7 @@ impl App {
             overlay: None,
             viewport_height: 0,
             wrap_width: std::cell::Cell::new(72),
+            surface_height: std::cell::Cell::new(0),
             added: 0,
             removed: 0,
             moved_to_unused: 0,
@@ -358,12 +362,28 @@ impl App {
             self.window_command(key.code);
             return;
         }
+        let ctrl_w = matches!(key.code, KeyCode::Char('w')) && key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // A docked surface pane (#164) with scroll focus takes scroll keys; Ctrl-w
+        // still starts a window command (e.g. to switch focus back or close it).
+        if self.surface_pane_focused() {
+            if ctrl_w {
+                self.window_pending = true;
+            } else {
+                self.on_key_surface(key);
+            }
+            return;
+        }
 
         // A full-screen overlay (progress report, analysis report, AI answer) is
         // read-only and scrollable: navigation keys scroll it, any other key
-        // closes it.
+        // closes it — except Ctrl-w, which docks it into a split (#164).
         if self.overlay.is_some() {
-            self.on_key_overlay(key);
+            if ctrl_w {
+                self.window_pending = true;
+            } else {
+                self.on_key_overlay(key);
+            }
             return;
         }
 

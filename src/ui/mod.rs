@@ -12,6 +12,7 @@ use ratatui::{
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, Search, SearchStage};
+use crate::app::SplitView;
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -79,27 +80,41 @@ pub fn draw(frame: &mut Frame, app: &App) {
     StatusBar(app).render(frame, chunks[1]);
 }
 
-/// Draw the editor region: one pane, or two when the window is split (#163).
+/// Draw the editor region: one pane, or two when the window is split — a second
+/// editor (#163) or a docked report/analysis/AI surface (#164).
 fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
-    let Some((dir, focused_first, other)) = app.split_render() else {
+    let Some(view) = app.split_view() else {
         Editor(app).render(frame, area);
         return;
     };
-    let direction = match dir {
-        crate::app::SplitDir::SideBySide => Direction::Horizontal,
-        crate::app::SplitDir::Stacked => Direction::Vertical,
+    let halve = |dir: crate::app::SplitDir| {
+        let direction = match dir {
+            crate::app::SplitDir::SideBySide => Direction::Horizontal,
+            crate::app::SplitDir::Stacked => Direction::Vertical,
+        };
+        Layout::default()
+            .direction(direction)
+            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+            .split(area)
     };
-    let halves = Layout::default()
-        .direction(direction)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-        .split(area);
-    let (focused_area, other_area) = if focused_first {
-        (halves[0], halves[1])
-    } else {
-        (halves[1], halves[0])
-    };
-    editor::render_focused_pane(frame, focused_area, app);
-    editor::render_reference_pane(frame, other_area, app, other);
+    match view {
+        SplitView::Editors { dir, focused_first, other } => {
+            let halves = halve(dir);
+            let (focused_area, other_area) =
+                if focused_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
+            editor::render_focused_pane(frame, focused_area, app);
+            editor::render_reference_pane(frame, other_area, app, other);
+        }
+        SplitView::Surface { dir, editor_first, overlay } => {
+            let halves = halve(dir);
+            let (editor_area, surface_area) =
+                if editor_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
+            editor::render_focused_pane(frame, editor_area, app);
+            // Feed the surface's scroll bound the height it's actually drawn in.
+            app.surface_height.set(surface_area.height);
+            draw_overlay(frame, surface_area, &app.project.manifest.title, overlay);
+        }
+    }
 }
 
 /// Render the open full-screen overlay in a bordered box, scrolled and clamped to

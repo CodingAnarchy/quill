@@ -83,7 +83,7 @@ byte-for-byte.
 | Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter)    |
-| Ctrl-W then …  | window split: `s`/`v` split, `w` switch pane, `c` close |
+| Ctrl-W then …  | window split: `s`/`v` split, `w` switch pane, `c` close (with a report/AI answer open, `s`/`v` docks it beside the editor) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete

@@ -39,7 +39,8 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         _ => (&[], None),
     };
     let inserts = header_inserts(app, column.width);
-    let editing = matches!(app.mode, Mode::Insert | Mode::EditMeta(_));
+    // No cursor while a docked surface pane has scroll focus (#164).
+    let editing = matches!(app.mode, Mode::Insert | Mode::EditMeta(_)) && !app.surface_pane_focused();
     render_body(frame, column, buffer, &inserts, &conceal, search_matches, current_match, editing);
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
