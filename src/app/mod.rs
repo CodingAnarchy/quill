@@ -1135,8 +1135,8 @@ impl App {
                 self.edit_chapter_meta(at, |fm| fm.set_pov(text));
             }
             MetaField::Goal { at } => {
-                // A blank or non-positive value clears the goal.
-                let goal = text.trim().parse::<usize>().ok().unwrap_or(0);
+                // A blank, non-positive, or unparseable value clears the goal.
+                let goal = text.trim().parse::<usize>().ok().filter(|&n| n > 0);
                 self.edit_chapter_meta(at, |fm| fm.set_goal(goal));
             }
             MetaField::ChapterEpigraph { at } => {

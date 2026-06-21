@@ -299,12 +299,11 @@ impl FrontMatter {
         self.get("goal").and_then(|v| v.trim().parse().ok()).filter(|&n| n > 0)
     }
 
-    /// Set the chapter's word-count goal; `0` clears it.
-    pub fn set_goal(&mut self, goal: usize) {
-        if goal == 0 {
-            self.remove("goal");
-        } else {
-            self.set("goal", &goal.to_string());
+    /// Set the chapter's word-count goal; `None` clears it.
+    pub fn set_goal(&mut self, goal: Option<usize>) {
+        match goal {
+            Some(n) => self.set("goal", &n.to_string()),
+            None => self.remove("goal"),
         }
     }
 
