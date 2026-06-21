@@ -12,7 +12,7 @@ use ratatui::{
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, RefFiles, Search, SearchStage};
-use crate::app::SplitView;
+use crate::app::{SplitDir, SplitView};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -80,33 +80,53 @@ pub fn draw(frame: &mut Frame, app: &App) {
     StatusBar(app).render(frame, chunks[1]);
 }
 
+/// A split pane narrower (or, stacked, shorter) than this is too cramped to use,
+/// so the layout collapses to the focused pane (#166).
+const MIN_PANE_WIDTH: u16 = 30;
+const MIN_PANE_HEIGHT: u16 = 6;
+
 /// Draw the editor region: one pane, or two when the window is split — a second
-/// editor (#163) or a docked report/analysis/AI surface (#164).
+/// editor (#163) or a docked report/analysis/AI surface (#164), at the split
+/// ratio set by `Ctrl-w </>` (#166).
 fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
     let Some(view) = app.split_view() else {
         Editor(app).render(frame, area);
         return;
     };
-    let halve = |dir: crate::app::SplitDir| {
-        let direction = match dir {
-            crate::app::SplitDir::SideBySide => Direction::Horizontal,
-            crate::app::SplitDir::Stacked => Direction::Vertical,
-        };
-        Layout::default()
-            .direction(direction)
-            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-            .split(area)
+    let (dir, first_ratio) = match &view {
+        SplitView::Editors { dir, first_ratio, .. } => (*dir, *first_ratio),
+        SplitView::Surface { dir, first_ratio, .. } => (*dir, *first_ratio),
     };
+
+    // Below the threshold a split would render both panes too thin to use — draw
+    // only the focused pane (#166). The split state survives, so widening the
+    // terminal restores it; this mirrors how the outline pane yields when narrow.
+    if too_cramped_to_split(dir, area) {
+        if let (true, SplitView::Surface { overlay, .. }) = (app.surface_pane_focused(), &view) {
+            app.surface_height.set(area.height);
+            draw_overlay(frame, area, &app.project.manifest.title, overlay);
+        } else {
+            Editor(app).render(frame, area);
+        }
+        return;
+    }
+
+    let direction = match dir {
+        SplitDir::SideBySide => Direction::Horizontal,
+        SplitDir::Stacked => Direction::Vertical,
+    };
+    let halves = Layout::default()
+        .direction(direction)
+        .constraints([Constraint::Percentage(first_ratio), Constraint::Percentage(100 - first_ratio)])
+        .split(area);
     match view {
-        SplitView::Editors { dir, focused_first, other } => {
-            let halves = halve(dir);
+        SplitView::Editors { focused_first, other, .. } => {
             let (focused_area, other_area) =
                 if focused_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
             editor::render_focused_pane(frame, focused_area, app);
             editor::render_reference_pane(frame, other_area, app, other);
         }
-        SplitView::Surface { dir, editor_first, overlay } => {
-            let halves = halve(dir);
+        SplitView::Surface { editor_first, overlay, .. } => {
             let (editor_area, surface_area) =
                 if editor_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
             editor::render_focused_pane(frame, editor_area, app);
@@ -114,6 +134,14 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
             app.surface_height.set(surface_area.height);
             draw_overlay(frame, surface_area, &app.project.manifest.title, overlay);
         }
+    }
+}
+
+/// Whether a split along `dir` would leave panes too small to use in `area`.
+fn too_cramped_to_split(dir: SplitDir, area: Rect) -> bool {
+    match dir {
+        SplitDir::SideBySide => area.width < MIN_PANE_WIDTH * 2,
+        SplitDir::Stacked => area.height < MIN_PANE_HEIGHT * 2,
     }
 }
 
@@ -682,6 +710,17 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    #[test]
+    fn a_split_collapses_only_once_a_pane_would_be_too_small() {
+        let wide = Rect { x: 0, y: 0, width: 100, height: 30 };
+        let thin = Rect { x: 0, y: 0, width: 50, height: 30 };
+        let short = Rect { x: 0, y: 0, width: 100, height: 8 };
+        assert!(!too_cramped_to_split(SplitDir::SideBySide, wide));
+        assert!(too_cramped_to_split(SplitDir::SideBySide, thin), "two columns need room");
+        assert!(!too_cramped_to_split(SplitDir::Stacked, wide));
+        assert!(too_cramped_to_split(SplitDir::Stacked, short), "two rows need room");
     }
 
     #[test]

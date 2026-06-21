@@ -2,6 +2,7 @@ use super::*;
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::project::Project;
+use ratatui::{backend::TestBackend, Terminal};
 use std::fs;
 use std::path::PathBuf;
 
@@ -1171,6 +1172,65 @@ fn a_reference_pane_saves_independently() {
     let one = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(mara.contains("NOTE"), "the bible file saved its edit: {mara:?}");
     assert!(!one.contains("NOTE"), "the chapter is untouched: {one:?}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- Resize & narrow-terminal collapse (#166) ------------------------------
+
+fn split_ratio(app: &App) -> u16 {
+    app.split.as_ref().expect("split").first_ratio
+}
+
+/// Render the whole app to a plain-text screen of the given size.
+fn screen(app: &App, w: u16, h: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+    let mut out = String::new();
+    for y in 0..h {
+        for x in 0..w {
+            out.push_str(buf[(x, y)].symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
+#[test]
+fn resize_grows_and_shrinks_the_focused_pane_within_bounds() {
+    let (mut app, dir) = two_chapter_app("resize");
+    window_cmd(&mut app, 'v'); // side-by-side, even split (focused pane is first)
+    let even = split_ratio(&app);
+    window_cmd(&mut app, '>'); // grow the focused pane
+    assert!(split_ratio(&app) > even, "Ctrl-w > grows the focused pane");
+    window_cmd(&mut app, '<');
+    window_cmd(&mut app, '<');
+    assert!(split_ratio(&app) < even, "Ctrl-w < shrinks it past even");
+    // Shrinking can't starve the other pane below the minimum.
+    for _ in 0..20 {
+        window_cmd(&mut app, '<');
+    }
+    assert_eq!(split_ratio(&app), 20, "clamped at the minimum ratio");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_narrow_terminal_draws_only_the_focused_pane() {
+    let (mut app, dir) = two_chapter_app("narrow"); // one.md="first chapter"
+    window_cmd(&mut app, 'v'); // split (both panes on chapter One)
+    window_cmd(&mut app, 'w'); // focus the other pane
+    app.on_key(ctrl('n')); // move it to chapter Two ("second chapter")
+    window_cmd(&mut app, 'w'); // focus back: first pane = "first chapter"
+
+    let wide = screen(&app, 100, 20);
+    assert!(wide.contains("first chapter") && wide.contains("second chapter"), "both panes draw when wide:\n{wide}");
+
+    let narrow = screen(&app, 50, 20); // below 2 × MIN_PANE_WIDTH
+    assert!(narrow.contains("first chapter"), "the focused pane still draws:\n{narrow}");
+    assert!(!narrow.contains("second chapter"), "the other pane collapses away:\n{narrow}");
+
+    // The split survives the squeeze: widening restores it.
+    assert!(app.split_view().is_some(), "the split state is kept, just not drawn");
     fs::remove_dir_all(&dir).ok();
 }
 
