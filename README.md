@@ -59,7 +59,10 @@ keystrokes that stay out of the way.
   as italic/bold). *Scrivener* writes a `.scriv` project bundle — a "Manuscript"
   binder with front matter and chapters as documents, parts as folders, and each
   chapter's prose as RTF (emphasis carried through) — that opens in Scrivener.
-  Vellum builds on the same compile step (#7).
+  *Vellum* writes a `.docx` tuned for [Vellum](https://vellum.pub): chapter and
+  part titles are styled **Heading 1**, which is where Vellum splits chapters on
+  import (in Vellum: *File → Import Word File…* and pick the `.vellum.docx`), so
+  chapters arrive as separate, correctly-ordered elements with emphasis intact.
 
 ## Build & run
 
@@ -98,7 +101,7 @@ byte-for-byte.
 | Ctrl-O         | toggle the chapter pane         |
 | Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
-| Ctrl-E         | export menu: Markdown, Word (`.docx`), or Scrivener (`.scriv`) → `export/` |
+| Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), or Vellum (`.docx`) → `export/` |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |

@@ -25,18 +25,43 @@ const DOC_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 /// Document defaults: Times New Roman 12pt, double-spaced — the manuscript-format
 /// baseline that body paragraphs inherit and headings/epigraphs override.
 const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="480" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>"#;
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="480" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>"#;
 
-/// Compile a [`Document`] to the bytes of a `.docx` file.
-pub fn to_docx(doc: &Document) -> std::io::Result<Vec<u8>> {
+/// A `Normal` base plus the canonical built-in "heading 1" paragraph style.
+/// Vellum starts a new chapter at each Heading 1, so the [`Profile::Vellum`]
+/// writer tags chapter/part titles with it; the full canonical form (the
+/// `Heading1` id, the "heading 1" name, `basedOn`/`qFormat`/`outlineLvl`) is what
+/// makes word processors recognize it as *the* Heading 1 rather than a lookalike.
+const VELLUM_STYLES: &str = r#"<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:uiPriority w:val="9"/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>"#;
+
+/// Which export shape a `.docx` takes.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Profile {
+    /// Standard manuscript format (#191): a title page, each chapter on a fresh
+    /// page under a centered bold title, double-spaced Times New Roman body.
+    Manuscript,
+    /// Vellum import (#193): chapter and part titles as Heading 1 (Vellum splits
+    /// chapters on it), no manuscript title page — Vellum applies its own design.
+    Vellum,
+}
+
+/// Compile a [`Document`] to the bytes of a `.docx` file in the given [`Profile`].
+pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default();
+    // Vellum needs a Heading 1 style to recognize chapter breaks; the manuscript
+    // profile adds nothing to the base styles.
+    let extra = match profile {
+        Profile::Manuscript => "",
+        Profile::Vellum => VELLUM_STYLES,
+    };
+    let styles = format!("{STYLES}{extra}</w:styles>");
     let parts = [
         ("[Content_Types].xml", CONTENT_TYPES.to_string()),
         ("_rels/.rels", RELS.to_string()),
         ("word/_rels/document.xml.rels", DOC_RELS.to_string()),
-        ("word/styles.xml", STYLES.to_string()),
-        ("word/document.xml", document_xml(doc)),
+        ("word/styles.xml", styles),
+        ("word/document.xml", document_xml(doc, profile)),
     ];
     for (name, content) in parts {
         zip.start_file(name, opts).map_err(std::io::Error::other)?;
@@ -45,39 +70,37 @@ pub fn to_docx(doc: &Document) -> std::io::Result<Vec<u8>> {
     Ok(zip.finish().map_err(std::io::Error::other)?.into_inner())
 }
 
-/// The `word/document.xml` body: the title block, then each part/chapter.
-fn document_xml(doc: &Document) -> String {
+/// The `word/document.xml` body: the title block (manuscript only), then each
+/// part/chapter.
+fn document_xml(doc: &Document, profile: Profile) -> String {
     let mut body = String::new();
 
-    // Title page: pushed down the page, centered.
-    if let Some(series) = &doc.series {
-        body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(series, false, false, None)));
-    }
-    body.push_str(&para(
-        r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
-        run(&doc.title, true, false, Some(36)),
-    ));
-    if let Some(subtitle) = &doc.subtitle {
-        body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(subtitle, false, true, None)));
-    }
-    if let Some(author) = &doc.author {
-        body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
-    }
-    if let Some(epigraph) = &doc.epigraph {
-        body.push_str(&epigraph_paras(epigraph));
+    // Title page (manuscript only — Vellum sets title/author on import, and stray
+    // text before the first Heading 1 would import as junk front matter).
+    if profile == Profile::Manuscript {
+        if let Some(series) = &doc.series {
+            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(series, false, false, None)));
+        }
+        body.push_str(&para(
+            r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
+            run(&doc.title, true, false, Some(36)),
+        ));
+        if let Some(subtitle) = &doc.subtitle {
+            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(subtitle, false, true, None)));
+        }
+        if let Some(author) = &doc.author {
+            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
+        }
+        if let Some(epigraph) = &doc.epigraph {
+            body.push_str(&epigraph_paras(epigraph));
+        }
     }
 
     for block in doc.blocks() {
         match block {
-            Block::Part(name) => body.push_str(&para(
-                r#"<w:pageBreakBefore/><w:spacing w:before="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
-                run(name, true, false, Some(32)),
-            )),
+            Block::Part(name) => body.push_str(&heading(name, profile)),
             Block::Chapter(chapter) => {
-                body.push_str(&para(
-                    r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
-                    run(&chapter.title, true, false, Some(28)),
-                ));
+                body.push_str(&heading(&chapter.title, profile));
                 if let Some(epigraph) = &chapter.epigraph {
                     body.push_str(&epigraph_paras(epigraph));
                 }
@@ -101,6 +124,19 @@ fn document_xml(doc: &Document) -> String {
         body = body,
         sect = sect,
     )
+}
+
+/// A part or chapter title. The manuscript profile opens a fresh page under a
+/// centered bold line; the Vellum profile tags it Heading 1 so Vellum splits
+/// chapters there and applies its own styling.
+fn heading(title: &str, profile: Profile) -> String {
+    match profile {
+        Profile::Manuscript => para(
+            r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
+            run(title, true, false, Some(28)),
+        ),
+        Profile::Vellum => para(r#"<w:pStyle w:val="Heading1"/>"#, run(title, false, false, None)),
+    }
 }
 
 /// One body block → a paragraph, or `None` for an empty block. A heading line
@@ -203,16 +239,18 @@ mod tests {
 
     #[test]
     fn produces_a_zip_with_the_required_parts() {
-        let bytes = to_docx(&doc()).unwrap();
+        let bytes = to_docx(&doc(), Profile::Manuscript).unwrap();
         assert_eq!(&bytes[..2], b"PK", "a zip container");
         for name in ["[Content_Types].xml", "_rels/.rels", "word/styles.xml", "word/document.xml"] {
             assert!(!part(&bytes, name).is_empty(), "{name} present");
         }
+        // styles.xml is closed once, whichever profile.
+        assert_eq!(part(&bytes, "word/styles.xml").matches("</w:styles>").count(), 1);
     }
 
     #[test]
     fn document_carries_structure_and_emphasis() {
-        let xml = part(&to_docx(&doc()).unwrap(), "word/document.xml");
+        let xml = part(&to_docx(&doc(), Profile::Manuscript).unwrap(), "word/document.xml");
         assert!(xml.contains("by A. Writer"));
         assert!(xml.contains("Part One") && xml.contains("The Find"), "headings present");
         // Each chapter starts on a new page.
@@ -222,5 +260,27 @@ mod tests {
         assert!(!xml.contains('*'), "no literal asterisks: {xml}");
         // XML special characters in the title are escaped.
         assert!(xml.contains("Red &lt;State&gt; Earth"), "title escaped");
+    }
+
+    #[test]
+    fn vellum_profile_uses_heading1_and_no_title_page() {
+        let bytes = to_docx(&doc(), Profile::Vellum).unwrap();
+        let styles = part(&bytes, "word/styles.xml");
+        // The Heading 1 style Vellum splits chapters on is defined.
+        assert!(styles.contains(r#"w:styleId="Heading1""#), "Heading1 style: {styles}");
+        assert!(styles.contains(r#"w:val="heading 1""#), "built-in heading 1 name");
+        let xml = part(&bytes, "word/document.xml");
+        // Chapter and part titles are tagged Heading 1, in reading order.
+        assert!(xml.contains(r#"<w:pStyle w:val="Heading1"/>"#), "headings styled: {xml}");
+        let part_at = xml.find("Part One").unwrap();
+        let chapter_at = xml.find("The Find").unwrap();
+        assert!(part_at < chapter_at, "reading order");
+        // No manuscript title page (the author sets title/author in Vellum) and no
+        // page-break-driven layout (Vellum reflows).
+        assert!(!xml.contains("by A. Writer"), "no title page: {xml}");
+        assert!(!xml.contains("<w:pageBreakBefore/>"), "no page breaks");
+        // Emphasis still carries through as real runs.
+        assert!(xml.contains("<w:b/>") && xml.contains("<w:i/>"), "bold + italic runs");
+        assert!(!xml.contains('*'), "no literal asterisks");
     }
 }
