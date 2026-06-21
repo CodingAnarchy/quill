@@ -149,6 +149,13 @@ impl Manifest {
         Epigraph::from_parts(self.epigraph.clone(), self.epigraph_by.clone())
     }
 
+    /// How many leading chapters are front matter (#185) — the offset of the
+    /// contiguous body block after the band reorder. The single source for the
+    /// front-to-body mapping the parts logic relies on.
+    pub fn front_chapter_count(&self) -> usize {
+        self.chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count()
+    }
+
     /// The configured TODO marker, defaulting to `xxx`.
     pub fn todo_marker(&self) -> &str {
         self.todo_marker.as_deref().unwrap_or("xxx")
@@ -171,9 +178,9 @@ impl Manifest {
             return None; // sections aren't part of a part
         }
         // Body chapters are contiguous after the band reorder, so the body
-        // position is the offset past the front matter.
-        let front = self.chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count();
-        let n = chapter_index - front + 1; // 1-based position among body chapters
+        // position is the offset past the front matter (saturating: a Body chapter
+        // always sits at or after `front`, but don't panic if that ever drifts).
+        let n = chapter_index.saturating_sub(self.front_chapter_count()) + 1;
         self.parts.as_ref()?.iter().position(|p| p.chapters[0] <= n && n <= p.chapters[1])
     }
 }
@@ -421,9 +428,8 @@ impl Project {
     /// preserving the author's order within each band (a stable sort). Returns
     /// whether the order actually changed.
     ///
-    /// Note: the report's `parts` ranges are positional (1-based indices into this
-    /// list) and are not remapped here, so mixing sections with `parts` can shift
-    /// which chapters a part covers (tracked as a follow-up).
+    /// The body block lands contiguous after the front matter, which is what lets
+    /// the report's `parts` ranges map cleanly to body-chapter positions (#185).
     pub fn reorder_by_band(&mut self) -> bool {
         // A stable sort, so "changed" is exactly "wasn't already in band order" —
         // checked without cloning the file list.
