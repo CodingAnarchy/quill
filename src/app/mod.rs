@@ -24,7 +24,7 @@ use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
     BibleConflict, BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode,
-    Overlay, Palette, PaletteItem, Pending, PromptState,
+    Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles,
 };
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
@@ -392,6 +392,7 @@ impl App {
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
+            Mode::RefFiles(_) => self.on_key_reffiles(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -710,6 +711,14 @@ impl App {
                 self.activate_chapter(sel);
                 self.mode = Mode::Insert;
             }
+            // Open the selected chapter in a side pane (#165) — compare two
+            // chapters, or keep one as reference while editing another.
+            KeyCode::Char('o') => {
+                self.open_file_in_pane(self.project.chapter_path(sel));
+                self.mode = Mode::Insert;
+            }
+            // Switch to the reference-file browser (#165): bible entries and notes.
+            KeyCode::Char('f') => self.open_ref_files(),
             // Reorder the selected chapter.
             KeyCode::Char('K') => {
                 let s = self.move_chapter(sel, true);
@@ -782,6 +791,46 @@ impl App {
             }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
+        }
+    }
+
+    /// Enter the reference-file browser (#165): the project's bible entries and
+    /// notes. Stays in the chapter browser with a note when there are none.
+    fn open_ref_files(&mut self) {
+        let files = self.project.reference_files();
+        if files.is_empty() {
+            self.message = Some("No reference files yet — add notes or a bible under the project.".into());
+            return;
+        }
+        self.mode = Mode::RefFiles(Box::new(RefFiles { files, selected: 0 }));
+    }
+
+    /// Navigate the reference-file browser (#165): arrows move, Enter opens the
+    /// selected file in a side pane, `f`/Esc return to the chapter browser.
+    fn on_key_reffiles(&mut self, key: KeyEvent) {
+        let Mode::RefFiles(state) = &self.mode else {
+            return;
+        };
+        let sel = state.selected;
+        let last = state.files.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.set_ref_selected(sel.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => self.set_ref_selected((sel + 1).min(last)),
+            KeyCode::Enter => {
+                let path = state.files[sel].clone();
+                self.open_file_in_pane(path);
+                self.mode = Mode::Insert;
+            }
+            // Back to the chapter browser.
+            KeyCode::Char('f') | KeyCode::Esc => self.select(self.project.active_index()),
+            _ => {}
+        }
+    }
+
+    /// Move the reference-file browser's selection (a no-op outside that mode).
+    fn set_ref_selected(&mut self, selected: usize) {
+        if let Mode::RefFiles(state) = &mut self.mode {
+            state.selected = selected;
         }
     }
 

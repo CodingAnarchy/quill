@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
-use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, Search, SearchStage};
+use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, RefFiles, Search, SearchStage};
 use crate::app::SplitView;
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
@@ -327,6 +327,31 @@ fn chapter_line(
     Line::from(spans)
 }
 
+/// The reference-file browser's rows (#165): a header, then each file as its
+/// path relative to the project root (the bible structure stays legible), the
+/// selection reversed.
+fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Reference files".to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "enter open · f/esc back".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::raw(""),
+    ];
+    for (i, path) in state.files.iter().enumerate() {
+        let label = path.strip_prefix(&app.project.root).unwrap_or(path).to_string_lossy();
+        lines.push(Line::from(Span::styled(
+            format!("{}{label}", marker(i == state.selected)),
+            row_style(i == state.selected),
+        )));
+    }
+    lines
+}
+
 /// The active chapter's heading outline, indented by level, current section
 /// accented. `skip` omits one heading by index (used to drop a leading H1 that
 /// just repeats the chapter title) while leaving the remaining indices — and so
@@ -404,6 +429,13 @@ impl Pane for NavPane<'_> {
         let block = Block::default().borders(Borders::RIGHT);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+
+        // The reference-file browser (#165) replaces the chapter list with the
+        // bible entries and notes the author can open in a side pane.
+        if let Mode::RefFiles(state) = &app.mode {
+            frame.render_widget(Paragraph::new(ref_file_lines(app, state)), inner);
+            return;
+        }
 
         let mut lines: Vec<Line> = project_header(&app.project.manifest);
 

@@ -59,7 +59,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
 /// Render a non-focused reference pane (#163): the other pane's prose under a
 /// dimmed title bar naming its chapter — no cursor, no search highlight.
 pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, buffer: &Buffer) {
-    let title = app.chapter_title_for(buffer).unwrap_or("reference");
+    let title = app.pane_title_for(buffer);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!(" {title}"),

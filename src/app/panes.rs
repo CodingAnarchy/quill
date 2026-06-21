@@ -89,6 +89,33 @@ impl App {
         }
     }
 
+    /// Open a project file in a reference pane beside the editor (#165): a chapter
+    /// to compare, or a story-bible entry / note to write alongside. It's a normal
+    /// editor pane (read, edit, and save independently), reusing the #163 split
+    /// machinery — so it replaces any existing split (two panes max). Single-chapter
+    /// view only.
+    pub(super) fn open_file_in_pane(&mut self, path: PathBuf) {
+        if self.manuscript.is_some() {
+            self.message = Some("Leave the continuous view (Ctrl-l) before opening a pane.".into());
+            return;
+        }
+        if self.flush_active().is_err() {
+            return;
+        }
+        match Buffer::from_path(&path) {
+            Ok(other) => {
+                self.close_split_if_any(); // two panes max — replace any existing split
+                self.split = Some(Split {
+                    other: OtherPane::Editor(other),
+                    dir: SplitDir::SideBySide,
+                    focused_first: true,
+                });
+                self.message = Some("Opened in a pane — Ctrl-w w to focus it, Ctrl-w c to close.".into());
+            }
+            Err(e) => self.message = Some(format!("Open failed: {e}")),
+        }
+    }
+
     /// Dock the open full-screen overlay into a pane beside the editor (#164), so
     /// the manuscript stays visible and editable. Single-chapter view only.
     fn dock_overlay(&mut self, dir: SplitDir) {
@@ -202,9 +229,20 @@ impl App {
         self.project.index_of_file(file)
     }
 
-    /// The title of the chapter a pane's `buffer` is showing, for its title bar.
-    pub(crate) fn chapter_title_for(&self, buffer: &Buffer) -> Option<&str> {
-        self.project.chapter_title(self.chapter_index_of(buffer)?)
+    /// The title bar for a reference pane (#163/#165): the chapter title if the
+    /// pane shows a chapter, otherwise the file's stem (e.g. a bible entry's name),
+    /// falling back to "reference" for an unnamed buffer.
+    pub(crate) fn pane_title_for(&self, buffer: &Buffer) -> String {
+        if let Some(title) = self.chapter_index_of(buffer).and_then(|i| self.project.chapter_title(i)) {
+            return title.to_string();
+        }
+        buffer
+            .path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .and_then(|s| s.to_str())
+            .unwrap_or("reference")
+            .to_string()
     }
 
     /// Point the project's active chapter at the focused buffer's file, so the

@@ -296,6 +296,19 @@ impl Project {
         self.manifest.chapters.iter().position(|c| c.file == file)
     }
 
+    /// The project's reference files (#165): every Markdown file under the root —
+    /// the story bible (`bible/**`) and any loose notes — that isn't a chapter or
+    /// in `unused/`. These are the files an author can open in a side pane to read
+    /// or edit alongside the prose. Sorted by path for a stable list.
+    pub fn reference_files(&self) -> Vec<PathBuf> {
+        let chapters: Vec<PathBuf> =
+            (0..self.manifest.chapters.len()).map(|i| self.chapter_path(i)).collect();
+        let mut found = Vec::new();
+        collect_markdown(&self.root, &self.root.join("unused"), &chapters, &mut found);
+        found.sort();
+        found
+    }
+
     /// Make chapter `index` the active one.
     pub fn set_active(&mut self, index: usize) {
         if let Some(chapter) = self.manifest.chapters.get(index) {
@@ -544,6 +557,23 @@ impl Project {
                 chapters,
             },
             active,
+        }
+    }
+}
+
+/// Recursively gather `.md` files under `dir` into `out`, skipping the `unused/`
+/// subtree and any `chapters` (which the chapter browser already lists). Best
+/// effort: an unreadable directory is silently skipped.
+fn collect_markdown(dir: &Path, unused: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path != unused {
+                collect_markdown(&path, unused, chapters, out);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") && !chapters.contains(&path) {
+            out.push(path);
         }
     }
 }
