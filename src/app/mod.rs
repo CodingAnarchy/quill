@@ -3,9 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 use similar::{ChangeTag, TextDiff};
 
@@ -34,6 +32,9 @@ use crate::report::{self, Momentum, PartDelta};
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod assist;
 mod search;
+mod task;
+
+use task::{Poll, Task};
 
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
 
@@ -99,13 +100,12 @@ pub struct App {
     /// AI configuration (opt-in, off by default), loaded from the user's home
     /// config. Drives whether the "Ask the manuscript" command is reachable.
     pub ai: ai::Settings,
-    /// Receiver for an in-flight AI request running on a worker thread; `Some`
-    /// while a request is pending. Polled each loop tick by [`App::poll_ai`].
-    ai_rx: Option<Receiver<Outcome>>,
-    /// Receiver for an in-flight remote push/pull (#134) running on a worker
-    /// thread, so the network op never blocks the editor; `Some` while syncing.
-    /// Polled each loop tick by [`App::poll_vc`].
-    vc_rx: Option<Receiver<VcMsg>>,
+    /// In-flight AI request (#152), run on a worker thread so it never blocks the
+    /// editor. Polled each loop tick by [`App::poll_ai`].
+    ai_task: Task<Outcome>,
+    /// In-flight remote push/pull (#134/#152), run on a worker thread. Polled each
+    /// loop tick by [`App::poll_vc`].
+    vc_task: Task<VcMsg>,
     /// The loaded local backend, cached after first use (loading a model is slow)
     /// and shared with the worker thread. Empty until the first local request;
     /// stays empty when the Claude backend is used. Type-erased so it needs no
@@ -144,8 +144,8 @@ impl App {
             part_removed: Vec::new(),
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
-            ai_rx: None,
-            vc_rx: None,
+            ai_task: Task::idle(),
+            vc_task: Task::idle(),
             local_backend: Arc::new(Mutex::new(None)),
             pending_findings: Vec::new(),
             triage: Vec::new(),
@@ -438,7 +438,7 @@ impl App {
     /// op runs off the UI thread so the editor stays responsive; the result lands
     /// via [`App::poll_vc`].
     fn start_push(&mut self) {
-        if !self.guard_remote() || self.vc_rx.is_some() {
+        if !self.guard_remote() || self.vc_task.is_busy() {
             return;
         }
         self.save_edit(); // flush edits so the status the author sees is accurate
@@ -453,7 +453,7 @@ impl App {
     /// when the working tree is dirty (a fast-forward checkout would overwrite
     /// uncommitted edits), so the author commits first.
     fn start_pull(&mut self) {
-        if !self.guard_remote() || self.vc_rx.is_some() {
+        if !self.guard_remote() || self.vc_task.is_busy() {
             return;
         }
         self.leave_continuous(); // the post-pull reload targets the single active chapter
@@ -474,11 +474,7 @@ impl App {
     /// for [`App::poll_vc`], and show `status` until the result lands. The single
     /// place push/pull cross to a background thread.
     fn start_vc(&mut self, status: &str, work: impl FnOnce() -> VcMsg + Send + 'static) {
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(work());
-        });
-        self.vc_rx = Some(rx);
+        self.vc_task.spawn(work);
         self.message = Some(status.into());
     }
 
@@ -498,21 +494,16 @@ impl App {
 
     /// Apply a finished push/pull result (non-blocking). Called once per loop tick.
     pub fn poll_vc(&mut self) {
-        let Some(rx) = &self.vc_rx else { return };
-        match rx.try_recv() {
-            Ok(msg) => {
-                self.vc_rx = None;
+        match self.vc_task.poll() {
+            Poll::Ready(msg) => {
                 if msg.reload {
                     let _ = self.reload_active_chapter(); // a pull can rewrite files on disk
                 }
                 self.refresh_vc_status();
                 self.message = Some(msg.text);
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.vc_rx = None;
-                self.message = Some("Remote operation failed.".into());
-            }
+            Poll::Pending => {}
+            Poll::Died => self.message = Some("Remote operation failed.".into()),
         }
     }
 
