@@ -1076,6 +1076,121 @@ fn docking_is_guarded_in_the_continuous_view() {
     fs::remove_dir_all(&dir).ok();
 }
 
+// --- Reference files in a pane (#165) --------------------------------------
+
+/// The title a reference pane shows for the non-focused buffer.
+fn other_pane_title(app: &App) -> String {
+    match app.split_view() {
+        Some(SplitView::Editors { other, .. }) => app.pane_title_for(other),
+        _ => panic!("expected two editor panes"),
+    }
+}
+
+/// Add a couple of bible files to a project on disk (created after open, which is
+/// fine — `reference_files` reads the filesystem live).
+fn write_bible(dir: &std::path::Path) {
+    let chars = dir.join("bible").join("characters");
+    fs::create_dir_all(&chars).unwrap();
+    fs::write(dir.join("bible").join("setting.md"), "# Setting\n\nthe city\n").unwrap();
+    fs::write(chars.join("mara.md"), "# Mara\n\na sailor\n").unwrap();
+}
+
+#[test]
+fn reference_files_list_the_bible_and_skip_chapters() {
+    let (app, dir) = two_chapter_app("ref-list");
+    write_bible(&dir);
+    let files = app.project.reference_files();
+    let names: Vec<String> = files
+        .iter()
+        .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(names.contains(&"bible/characters/mara.md".to_string()), "{names:?}");
+    assert!(names.contains(&"bible/setting.md".to_string()), "{names:?}");
+    assert!(!names.iter().any(|n| n.ends_with("one.md") || n.ends_with("two.md")), "chapters excluded: {names:?}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn f_in_the_browser_opens_the_reference_file_list() {
+    let (mut app, dir) = two_chapter_app("ref-browse");
+    write_bible(&dir);
+    app.on_key(ctrl('g')); // chapter browser
+    app.on_key(key(KeyCode::Char('f'))); // switch to reference files
+    let count = match &app.mode {
+        Mode::RefFiles(state) => state.files.len(),
+        _ => panic!("expected RefFiles mode"),
+    };
+    assert_eq!(count, 2, "both bible files listed");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn reference_browser_reports_when_there_are_no_files() {
+    let (mut app, dir) = two_chapter_app("ref-empty");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('f')));
+    assert!(matches!(app.mode, Mode::Nav { .. }), "stays in the chapter browser");
+    assert!(app.message.as_deref().unwrap_or("").contains("No reference files"));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn opening_a_reference_file_puts_it_in_a_pane() {
+    let (mut app, dir) = two_chapter_app("ref-open");
+    write_bible(&dir);
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('f')));
+    app.on_key(key(KeyCode::Enter)); // open the first file (bible/characters/mara.md, sorted)
+    assert!(app.split_view().is_some(), "a reference pane opened");
+    assert_eq!(other_pane_title(&app), "mara", "the pane is titled by the file");
+    assert!(matches!(app.mode, Mode::Insert), "focus returns to the editor");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn o_in_the_browser_opens_the_selected_chapter_in_a_pane() {
+    let (mut app, dir) = two_chapter_app("ref-chapter-pane"); // active = "One"
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select "Two"
+    app.on_key(key(KeyCode::Char('o')));
+    assert_eq!(other_pane_title(&app), "Two", "the other chapter opens in the pane");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_reference_pane_saves_independently() {
+    let (mut app, dir) = two_chapter_app("ref-save");
+    write_bible(&dir);
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('f')));
+    app.on_key(key(KeyCode::Enter)); // mara.md into the reference pane
+    window_cmd(&mut app, 'w'); // focus it (swap into the editor)
+    type_str(&mut app, "NOTE");
+    app.on_key(ctrl('s'));
+    let mara = fs::read_to_string(dir.join("bible").join("characters").join("mara.md")).unwrap();
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(mara.contains("NOTE"), "the bible file saved its edit: {mara:?}");
+    assert!(!one.contains("NOTE"), "the chapter is untouched: {one:?}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn editing_a_reference_pane_does_not_corrupt_the_chapter_word_cache() {
+    let (mut app, dir) = two_chapter_app("ref-cache"); // active = "One"
+    write_bible(&dir);
+    let one_words = app.project.chapter_words(0);
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('f')));
+    app.on_key(key(KeyCode::Enter)); // mara.md into the pane
+    window_cmd(&mut app, 'w'); // focus the bible file (a non-chapter buffer)
+    type_str(&mut app, "a longer note with several extra words here");
+    app.on_key(ctrl('s'));
+    // The bible file's word count must not have been written into chapter One's
+    // cached entry (which feeds the outline pane and the progress report).
+    assert_eq!(app.project.chapter_words(0), one_words, "chapter One's cached count is untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// Match count and current index while in search mode.
 fn search_state(app: &App) -> (usize, usize) {
     match &app.mode {

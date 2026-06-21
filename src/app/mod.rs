@@ -24,7 +24,7 @@ use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
     BibleConflict, BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode,
-    Overlay, Palette, PaletteItem, Pending, PromptState,
+    Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles,
 };
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
@@ -392,6 +392,7 @@ impl App {
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
+            Mode::RefFiles(_) => self.on_key_reffiles(key),
             Mode::Insert => self.on_key_insert(key),
         }
     }
@@ -410,7 +411,7 @@ impl App {
             }
         }
         // The chapter is now on disk; refresh its cached count.
-        self.project.set_active_words(self.buffer.word_count());
+        self.cache_focus_words();
         Ok(())
     }
 
@@ -518,7 +519,7 @@ impl App {
         }
         let changed = if redo { self.buffer.redo() } else { self.buffer.undo() };
         if changed {
-            self.project.set_active_words(self.buffer.word_count());
+            self.cache_focus_words();
             self.message = None;
         } else {
             self.message = Some(format!("Nothing to {}.", verb.to_lowercase()));
@@ -564,7 +565,7 @@ impl App {
         } else {
             match self.buffer.save() {
                 Ok(()) => {
-                    self.project.set_active_words(self.buffer.word_count());
+                    self.cache_focus_words();
                     self.refresh_split_sibling(); // a clean sibling on this chapter reflects the save (#163)
                     self.message = Some("Saved".into());
                 }
@@ -710,6 +711,14 @@ impl App {
                 self.activate_chapter(sel);
                 self.mode = Mode::Insert;
             }
+            // Open the selected chapter in a side pane (#165) — compare two
+            // chapters, or keep one as reference while editing another.
+            KeyCode::Char('o') => {
+                self.open_file_in_pane(self.project.chapter_path(sel));
+                self.mode = Mode::Insert;
+            }
+            // Switch to the reference-file browser (#165): bible entries and notes.
+            KeyCode::Char('f') => self.open_ref_files(),
             // Reorder the selected chapter.
             KeyCode::Char('K') => {
                 let s = self.move_chapter(sel, true);
@@ -781,6 +790,39 @@ impl App {
                 }
             }
             KeyCode::Esc => self.mode = Mode::Insert,
+            _ => {}
+        }
+    }
+
+    /// Enter the reference-file browser (#165): the project's bible entries and
+    /// notes. Stays in the chapter browser with a note when there are none.
+    fn open_ref_files(&mut self) {
+        let files = self.project.reference_files();
+        if files.is_empty() {
+            self.message = Some("No reference files yet — add notes or a bible under the project.".into());
+            return;
+        }
+        self.mode = Mode::RefFiles(Box::new(RefFiles { files, selected: 0 }));
+    }
+
+    /// Navigate the reference-file browser (#165): arrows move, Enter opens the
+    /// selected file in a side pane, `f`/Esc return to the chapter browser.
+    fn on_key_reffiles(&mut self, key: KeyEvent) {
+        let Mode::RefFiles(state) = &mut self.mode else {
+            return;
+        };
+        if let Some(s) = assist::list_move(state.selected, state.files.len(), key.code) {
+            state.selected = s;
+            return;
+        }
+        match key.code {
+            KeyCode::Enter => {
+                let path = state.files[state.selected].clone();
+                self.open_file_in_pane(path);
+                self.mode = Mode::Insert;
+            }
+            // Back to the chapter browser.
+            KeyCode::Char('f') | KeyCode::Esc => self.select(self.project.active_index()),
             _ => {}
         }
     }

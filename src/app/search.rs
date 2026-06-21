@@ -158,7 +158,7 @@ impl App {
     /// End the replace flow, report the count, and return to editing.
     fn finish_replace(&mut self) {
         let replaced = self.search().replaced;
-        self.project.set_active_words(self.buffer.word_count());
+        self.cache_focus_words();
         self.mode = Mode::Insert;
         self.message = Some(match replaced {
             0 => "No matches replaced.".into(),

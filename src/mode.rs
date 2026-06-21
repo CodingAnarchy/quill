@@ -73,6 +73,18 @@ pub enum Mode {
     /// the bottom, matches highlighted in the prose, navigated with n/N. Boxed
     /// (carries the query, replacement, and the match list).
     Search(Box<Search>),
+    /// Browsing the project's reference files — the story bible and loose notes
+    /// (#165). Reached with `f` from the chapter browser; Enter opens the selected
+    /// file in a side pane. Boxed (carries the file list).
+    RefFiles(Box<RefFiles>),
+}
+
+/// State for an open [`Mode::RefFiles`]: the reference files (bible + notes) and
+/// the selected row. The list is captured when the browser opens, so it's a
+/// stable target for the arrow keys.
+pub struct RefFiles {
+    pub(crate) files: Vec<std::path::PathBuf>,
+    pub(crate) selected: usize,
 }
 
 /// State for an open [`Mode::Palette`]: the available AI actions and the selected
