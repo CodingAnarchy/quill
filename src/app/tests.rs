@@ -1196,6 +1196,9 @@ fn resize_grows_and_shrinks_the_focused_pane_within_bounds() {
         window_cmd(&mut app, '<');
     }
     assert_eq!(split_ratio(&app), 20, "clamped at the minimum ratio");
+    // Ctrl-w = resets to an even balance (#173).
+    window_cmd(&mut app, '=');
+    assert_eq!(split_ratio(&app), even, "Ctrl-w = equalizes the split");
     fs::remove_dir_all(&dir).ok();
 }
 

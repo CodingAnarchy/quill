@@ -79,6 +79,8 @@ impl App {
             // split axis. `+`/`>` grow, `-`/`<` shrink — both spellings either way.
             KeyCode::Char('+' | '>') => self.resize_split(true),
             KeyCode::Char('-' | '<') => self.resize_split(false),
+            // Reset a resized split back to an even balance (#173), Vim's `Ctrl-w =`.
+            KeyCode::Char('=') => self.equalize_split(),
             _ => {} // unknown window command — cancel silently
         }
     }
@@ -250,6 +252,14 @@ impl App {
         let step = if grow == focused_is_first { RESIZE_STEP as i32 } else { -(RESIZE_STEP as i32) };
         let next = split.first_ratio as i32 + step;
         split.first_ratio = next.clamp(MIN_RATIO as i32, 100 - MIN_RATIO as i32) as u16;
+    }
+
+    /// Reset the split to an even balance (#173). A no-op when not split or already
+    /// even.
+    fn equalize_split(&mut self) {
+        if let Some(split) = self.split.as_mut() {
+            split.first_ratio = EVEN_SPLIT;
+        }
     }
 
     /// Whether a docked surface currently has scroll focus (#164) — keys go to it.
