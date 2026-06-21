@@ -669,14 +669,37 @@ fn triage_with_no_findings_shows_a_message() {
 
 // --- Incremental pass scoping (#90) ----------------------------------------
 
+/// Write a character bible file so the "up to date" path (bible present + state
+/// recorded) is reachable.
+fn write_character_bible(dir: &std::path::Path) {
+    let chars = dir.join("bible").join("characters");
+    fs::create_dir_all(&chars).unwrap();
+    fs::write(chars.join("mara.md"), "---\nname: Mara\n---\n\n<!-- generated:start -->\nprofile\n<!-- generated:end -->\n").unwrap();
+}
+
 #[test]
 fn an_up_to_date_bible_pass_makes_no_request() {
     let (mut app, dir) = two_chapter_app("incr-uptodate");
-    // Record a baseline matching the current manuscript → nothing changed.
+    // A bible exists and its recorded state matches the manuscript → nothing to do.
+    write_character_bible(&dir);
     ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
     app.analyze_characters();
     assert!(!app.ai_busy(), "an up-to-date bible spawns no request");
     assert!(app.message.as_deref().unwrap_or("").contains("current"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_hand_deleted_bible_rebuilds_even_when_state_says_current() {
+    let (app, dir) = two_chapter_app("incr-drift");
+    // The state claims the bible is built from the current manuscript, but no
+    // bible file exists on disk (deleted by hand) — rebuild rather than skip.
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    assert_eq!(
+        app.pass_context_len(crate::mode::AiAction::Characters),
+        app.manuscript_text().len(),
+        "a missing bible forces a full rebuild, not an up-to-date skip"
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -703,6 +726,7 @@ fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
     let (app, dir) = two_chapter_app("incr-cost");
     let action = crate::mode::AiAction::Characters;
     assert_eq!(app.pass_context_len(action), app.manuscript_text().len(), "first run estimates the full manuscript");
+    write_character_bible(&dir);
     ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
     assert_eq!(app.pass_context_len(action), 0, "an up-to-date bible costs nothing to confirm");
     fs::remove_dir_all(&dir).ok();

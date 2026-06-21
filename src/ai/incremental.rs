@@ -15,26 +15,23 @@
 //! The digest is content-addressed, so it needs no version control and is immune
 //! to commit timing — a chapter counts as changed exactly when its text differs.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::Request;
+use super::{bible, Request};
 
 /// A `chapter file → content digest` map: the manuscript state a pass was built
 /// from. `BTreeMap` so the serialized state file is stable (ordered).
 pub type Digests = BTreeMap<String, String>;
 
-/// Stable, non-cryptographic content hash of a chapter's text (mirrors the
-/// bible block digest; collisions only ever cost an extra re-analysis).
+/// Stable, non-cryptographic content hash of a chapter's text — the same persisted
+/// hash the bible uses, so the two can't drift (collisions only ever cost an
+/// extra re-analysis).
 pub fn digest(text: &str) -> String {
-    let mut h = DefaultHasher::new();
-    text.hash(&mut h);
-    format!("{:016x}", h.finish())
+    bible::digest(text)
 }
 
 /// How a pass should run, given what changed since it was last built.

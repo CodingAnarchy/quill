@@ -84,6 +84,51 @@ fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Ba
     Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
 }
 
+/// Where a persistent-bible tracker keeps its prior bible, for the incremental
+/// cache (#90).
+enum BibleSource {
+    /// A directory of files, e.g. `bible/characters/`.
+    Dir(&'static str),
+    /// A single file, e.g. `bible/setting.md`.
+    File(&'static str),
+}
+
+/// A persistent-bible tracker's incremental-scoping descriptor (#90): its state
+/// key, where its prior bible lives, and the status message for each scope.
+struct BibleTracker {
+    key: &'static str,
+    source: BibleSource,
+    full_msg: &'static str,
+    incr_msg: &'static str,
+}
+
+/// The bible tracker behind a costed AI action, or `None` for findings-only and
+/// interactive actions (which send the whole manuscript or nothing).
+fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
+    let make = |key, source, full_msg, incr_msg| BibleTracker { key, source, full_msg, incr_msg };
+    match action {
+        AiAction::Characters => Some(make(
+            "characters",
+            BibleSource::Dir("characters"),
+            "⟳ Analyzing characters…",
+            "⟳ Updating characters from changed chapters…",
+        )),
+        AiAction::Continuity => Some(make(
+            "timeline",
+            BibleSource::File("timeline.md"),
+            "⟳ Checking continuity…",
+            "⟳ Updating the timeline from changed chapters…",
+        )),
+        AiAction::Setting => Some(make(
+            "setting",
+            BibleSource::File("setting.md"),
+            "⟳ Building setting bible…",
+            "⟳ Updating the setting bible from changed chapters…",
+        )),
+        _ => None,
+    }
+}
+
 impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
@@ -201,12 +246,15 @@ impl App {
     }
     // --- AI: "Ask the manuscript" -----------------------------------------
 
-    /// The whole manuscript as plain text for an AI request: each chapter under
-    /// its title heading, the active chapter live from its buffer and the rest
-    /// from disk (the `count_todo` pattern).
-    pub(crate) fn manuscript_text(&self) -> String {
+    /// Assemble the chapters for which `keep(i)` holds, each under its `# Title`
+    /// heading (active chapter live from its buffer, the rest from disk) — the one
+    /// serialization shared by the whole-manuscript and changed-chapter contexts.
+    fn render_chapters(&self, keep: impl Fn(usize) -> bool) -> String {
         let mut out = String::new();
         for i in 0..self.chapter_count() {
+            if !keep(i) {
+                continue;
+            }
             if let Some(title) = self.project.chapter_title(i) {
                 out.push_str("# ");
                 out.push_str(title);
@@ -216,6 +264,11 @@ impl App {
             out.push_str("\n\n");
         }
         out
+    }
+
+    /// The whole manuscript as plain text for an AI request.
+    pub(crate) fn manuscript_text(&self) -> String {
+        self.render_chapters(|_| true)
     }
 
     /// Start an "Ask the manuscript" request on a worker thread. The manuscript
@@ -237,46 +290,28 @@ impl App {
     /// when the bible already exists, else a full pass (#90). Profiles are written
     /// / conflicts queued by [`App::poll_ai`].
     pub(crate) fn analyze_characters(&mut self) {
-        let prior = self.read_bible_dir("characters");
-        self.run_bible_tracker(
-            "characters",
-            "⟳ Analyzing characters…",
-            "⟳ Updating characters from changed chapters…",
-            prior,
-            character::build_request,
-            character::build_incremental_request,
-            |r| Outcome::Characters(r.and_then(|resp| character::parse(&resp.text))),
-        );
+        let t = bible_tracker(AiAction::Characters).expect("characters is a bible tracker");
+        self.run_bible_tracker(t, character::build_request, character::build_incremental_request, |r| {
+            Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
+        });
     }
 
     /// Start a timeline & continuity pass (incremental when possible, #90); the
     /// timeline + findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_continuity(&mut self) {
-        let prior = self.read_bible_file("timeline.md");
-        self.run_bible_tracker(
-            "timeline",
-            "⟳ Checking continuity…",
-            "⟳ Updating the timeline from changed chapters…",
-            prior,
-            continuity::build_request,
-            continuity::build_incremental_request,
-            |r| Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text))),
-        );
+        let t = bible_tracker(AiAction::Continuity).expect("continuity is a bible tracker");
+        self.run_bible_tracker(t, continuity::build_request, continuity::build_incremental_request, |r| {
+            Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
+        });
     }
 
     /// Start a setting & worldbuilding pass (incremental when possible, #90); the
     /// setting bible + rule findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_setting(&mut self) {
-        let prior = self.read_bible_file("setting.md");
-        self.run_bible_tracker(
-            "setting",
-            "⟳ Building setting bible…",
-            "⟳ Updating the setting bible from changed chapters…",
-            prior,
-            setting::build_request,
-            setting::build_incremental_request,
-            |r| Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text))),
-        );
+        let t = bible_tracker(AiAction::Setting).expect("setting is a bible tracker");
+        self.run_bible_tracker(t, setting::build_request, setting::build_incremental_request, |r| {
+            Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
+        });
     }
 
     /// Start a scaffolding pass; the beat outline + gap findings are applied by
@@ -337,13 +372,23 @@ impl App {
         message: &str,
         run: impl FnOnce(&dyn Backend, String, String) -> Outcome + Send + 'static,
     ) {
+        let model = self.ai.model.clone();
+        let manuscript = self.manuscript_text();
+        self.spawn_outcome(message, move |backend| run(backend, manuscript, model));
+    }
+
+    /// The shared worker-spawn lifecycle for an AI request: bail if one's already
+    /// in flight, resolve the backend (gating readiness on the UI thread; the
+    /// heavy build happens off-thread), then run `produce` to an `Outcome`.
+    fn spawn_outcome(
+        &mut self,
+        message: &str,
+        produce: impl FnOnce(&dyn Backend) -> Outcome + Send + 'static,
+    ) {
         if self.ai_task.is_busy() {
             self.message = Some("An AI request is already in flight…".into());
             return;
         }
-        // Resolve which backend to use (and gate on readiness) on the UI thread;
-        // actually *building* it — which for the local model means loading (and
-        // maybe downloading) — happens on the worker thread so the UI never blocks.
         let spec = match self.backend_spec() {
             Ok(spec) => spec,
             Err(e) => {
@@ -351,49 +396,57 @@ impl App {
                 return;
             }
         };
-        let model = self.ai.model.clone();
-        let manuscript = self.manuscript_text();
-
         self.ai_task.spawn(move || match spec.build() {
-            Ok(backend) => run(backend.as_ref(), manuscript, model),
+            Ok(backend) => produce(backend.as_ref()),
             Err(e) => Outcome::Error(e),
         });
         self.message = Some(message.to_string());
     }
 
-    /// Run a persistent-bible tracker with incremental scoping (#90): decide from
-    /// the revision delta whether to revise the bible from only the changed
-    /// chapters, rebuild it from the whole manuscript, or skip (already current),
-    /// then spawn the right request. `full`/`incr` build the request for each case.
-    #[allow(clippy::too_many_arguments)] // a cohesive per-tracker spec reads clearer flat than boxed in a struct
+    /// Read a tracker's prior bible and decide its scope from the revision delta
+    /// (#90) — shared by the cost estimate and the run so they always agree. A
+    /// missing/empty bible can't be revised and isn't truly "up to date" (e.g. it
+    /// was hand-deleted while the state file lingered), so it rebuilds in full.
+    fn plan_bible_pass(&self, t: &BibleTracker) -> (ai::incremental::Scope, String, ai::incremental::Digests) {
+        let prior = match t.source {
+            BibleSource::Dir(dir) => bible::raw_dir(&self.project.root, dir),
+            BibleSource::File(file) => bible::raw_file(&self.project.root, file),
+        };
+        let current = self.chapter_digests();
+        let scope = if prior.trim().is_empty() {
+            ai::incremental::Scope::Full
+        } else {
+            let state = ai::incremental::State::load(&self.project.root);
+            ai::incremental::decide(state.built_from(t.key), &current, self.ai.refresh_after_changes)
+        };
+        (scope, prior, current)
+    }
+
+    /// Run a persistent-bible tracker with incremental scoping (#90): revise the
+    /// bible from only the changed chapters, rebuild it from the whole manuscript,
+    /// or skip (already current). `full`/`incr` build the request for each case.
     fn run_bible_tracker(
         &mut self,
-        tracker: &str,
-        full_msg: &str,
-        incr_msg: &str,
-        prior_bible: String,
+        t: BibleTracker,
         full: impl FnOnce(String, &str) -> ai::Request,
         incr: impl FnOnce(&str, &str, &str) -> ai::Request,
         finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
     ) {
-        let current = self.chapter_digests();
-        let state = ai::incremental::State::load(&self.project.root);
-        let scope =
-            ai::incremental::decide(state.built_from(tracker), &current, self.ai.refresh_after_changes);
+        let (scope, prior, current) = self.plan_bible_pass(&t);
         let model = self.ai.model.clone();
         let (req, message) = match scope {
             ai::incremental::Scope::UpToDate => {
                 self.message =
-                    Some(format!("{tracker}: bible is current — no chapters changed since the last pass."));
+                    Some(format!("{}: bible is current — no chapters changed since the last pass.", t.key));
                 return;
             }
-            ai::incremental::Scope::Full => (full(self.manuscript_text(), &model), full_msg),
+            ai::incremental::Scope::Full => (full(self.manuscript_text(), &model), t.full_msg),
             ai::incremental::Scope::Incremental(changed) => {
-                (incr(&prior_bible, &self.chapters_text(&changed), &model), incr_msg)
+                (incr(&prior, &self.chapters_text(&changed), &model), t.incr_msg)
             }
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
-        self.pending_pass = Some((tracker.to_string(), current));
+        self.pending_pass = Some((t.key.to_string(), current));
         self.spawn_request(message, req, finish);
     }
 
@@ -406,22 +459,7 @@ impl App {
         req: ai::Request,
         finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
     ) {
-        if self.ai_task.is_busy() {
-            self.message = Some("An AI request is already in flight…".into());
-            return;
-        }
-        let spec = match self.backend_spec() {
-            Ok(spec) => spec,
-            Err(e) => {
-                self.message = Some(e.to_string());
-                return;
-            }
-        };
-        self.ai_task.spawn(move || match spec.build() {
-            Ok(backend) => finish(backend.complete(&req)),
-            Err(e) => Outcome::Error(e),
-        });
-        self.message = Some(message.to_string());
+        self.spawn_outcome(message, move |backend| finish(backend.complete(&req)));
     }
 
     /// The chapter `file → content-digest` map for the manuscript as it is now —
@@ -439,44 +477,7 @@ impl App {
     /// The text of the chapters whose files are in `files`, each under its title
     /// heading — the changed-chapter context for an incremental pass (#90).
     pub(crate) fn chapters_text(&self, files: &[String]) -> String {
-        let mut out = String::new();
-        for i in 0..self.chapter_count() {
-            if !files.iter().any(|f| f == self.project.chapter_file(i)) {
-                continue;
-            }
-            if let Some(title) = self.project.chapter_title(i) {
-                out.push_str(&format!("# {title}\n\n"));
-            }
-            out.push_str(self.chapter_text(i).trim_end());
-            out.push_str("\n\n");
-        }
-        out
-    }
-
-    /// An existing single-file bible (`bible/<rel>`) as the cache for an
-    /// incremental revise — empty when absent.
-    fn read_bible_file(&self, rel: &str) -> String {
-        std::fs::read_to_string(self.project.root.join("bible").join(rel)).unwrap_or_default()
-    }
-
-    /// The existing bible files under `bible/<dir>/` (e.g. the per-character
-    /// profiles), concatenated as the cache for an incremental revise.
-    fn read_bible_dir(&self, dir: &str) -> String {
-        let mut out = String::new();
-        let Ok(entries) = std::fs::read_dir(self.project.root.join("bible").join(dir)) else {
-            return out;
-        };
-        let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
-        files.sort();
-        for path in files {
-            if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    out.push_str(&text);
-                    out.push_str("\n\n");
-                }
-            }
-        }
-        out
+        self.render_chapters(|i| files.iter().any(|f| f == self.project.chapter_file(i)))
     }
 
     /// Record what the just-applied bible pass was built from (#90), so the next
@@ -495,23 +496,14 @@ impl App {
     /// bible + changed chapters for an incremental tracker pass, and zero when its
     /// bible is already current (so an up-to-date pass never prompts a confirm).
     pub(crate) fn pass_context_len(&self, action: AiAction) -> usize {
-        match action {
-            AiAction::Characters => self.bible_context_len("characters", self.read_bible_dir("characters")),
-            AiAction::Continuity => self.bible_context_len("timeline", self.read_bible_file("timeline.md")),
-            AiAction::Setting => self.bible_context_len("setting", self.read_bible_file("setting.md")),
-            _ => self.manuscript_text().len(),
-        }
-    }
-
-    fn bible_context_len(&self, tracker: &str, prior_bible: String) -> usize {
-        let current = self.chapter_digests();
-        let state = ai::incremental::State::load(&self.project.root);
-        match ai::incremental::decide(state.built_from(tracker), &current, self.ai.refresh_after_changes) {
+        let Some(t) = bible_tracker(action) else {
+            return self.manuscript_text().len();
+        };
+        let (scope, prior, _) = self.plan_bible_pass(&t);
+        match scope {
             ai::incremental::Scope::UpToDate => 0,
             ai::incremental::Scope::Full => self.manuscript_text().len(),
-            ai::incremental::Scope::Incremental(changed) => {
-                prior_bible.len() + self.chapters_text(&changed).len()
-            }
+            ai::incremental::Scope::Incremental(changed) => prior.len() + self.chapters_text(&changed).len(),
         }
     }
 

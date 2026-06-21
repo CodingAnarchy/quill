@@ -112,9 +112,15 @@ timeline) scope themselves to what changed:
 
 The findings-only passes (naming, style, scaffold) have no persistent cache to
 revise, so they always run a full pass. The scoping logic lives in
-`src/ai/incremental.rs`. Half-cost full rebuilds via the **Batch API**, and an
-explicit "rebuild now" command, are a follow-up (the full-rebuild path still uses
-the normal request).
+`src/ai/incremental.rs`. The state file is a derivable cache (gitignored): if it's
+absent — a fresh clone, or hand-deleted — the next pass simply rebuilds in full,
+which is also the way to **force a full rebuild on demand** today.
+
+An incremental revise updates and adds bible entries but does not delete a
+profile file whose character vanishes only within the incremental window — a full
+rebuild (cross the threshold, or delete `bible/.state.toml`) reconciles that.
+Half-cost full rebuilds via the **Batch API**, and an explicit "rebuild now"
+command, are a follow-up (the full-rebuild path still uses the normal request).
 
 ## Integration shape
 
