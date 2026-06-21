@@ -211,7 +211,7 @@ impl Buffer {
 
     /// Number of grapheme clusters on a line (how far the cursor can travel).
     fn line_graphemes(&self, idx: usize) -> usize {
-        self.line(idx).graphemes(true).count()
+        byte_to_col(&self.line(idx), usize::MAX)
     }
 
     /// The [`Cursor`] (line, grapheme-column) for an absolute byte offset — the
@@ -221,10 +221,8 @@ impl Buffer {
         let line = self.rope.byte_to_line(byte);
         let line_start_byte = self.rope.line_to_byte(line);
         let line_text = self.line(line);
-        // Graphemes from the line's start up to the offset within the line.
         let within = (byte - line_start_byte).min(line_text.len());
-        let col = line_text[..within].graphemes(true).count();
-        Cursor { line, col }
+        Cursor { line, col: byte_to_col(&line_text, within) }
     }
 
     /// Replace the byte range `[start, end)` with `text`, then put the cursor just
@@ -244,14 +242,9 @@ impl Buffer {
     fn cursor_char_idx(&self) -> usize {
         let line_start = self.rope.line_to_char(self.cursor.line.min(self.rope.len_lines().saturating_sub(1)));
         let line = self.line(self.cursor.line);
-        let byte: usize = line
-            .grapheme_indices(true)
-            .nth(self.cursor.col)
-            .map(|(b, _)| b)
-            .unwrap_or(line.len());
+        let byte = col_to_byte(&line, self.cursor.col);
         // Translate the byte offset within the line to a char offset.
-        let char_in_line = line[..byte].chars().count();
-        line_start + char_in_line
+        line_start + line[..byte].chars().count()
     }
 
     // --- Undo / redo (#145) ------------------------------------------------
@@ -462,11 +455,18 @@ impl Buffer {
         self.move_vertical(1, width);
     }
 
-    fn move_vertical(&mut self, dir: i32, width: usize) {
+    /// The cursor's current visual layout on its own line: the line text, its
+    /// wrap row starts, the visual row the cursor is on, and its display column.
+    fn cursor_visual_row(&self, width: usize) -> (String, Vec<usize>, usize, usize) {
         let line_text = self.line(self.cursor.line);
         let starts = crate::wrap::row_starts(&line_text, width);
         let cur_byte = col_to_byte(&line_text, self.cursor.col);
         let (row, x) = crate::wrap::visual_pos(&line_text, &starts, cur_byte);
+        (line_text, starts, row, x)
+    }
+
+    fn move_vertical(&mut self, dir: i32, width: usize) {
+        let (line_text, starts, row, x) = self.cursor_visual_row(width);
         let goal = *self.goal_x.get_or_insert(x);
 
         if dir < 0 {
@@ -498,10 +498,7 @@ impl Buffer {
 
     /// Move to the start of the current visual row (#143).
     pub fn move_home(&mut self, width: usize) {
-        let line_text = self.line(self.cursor.line);
-        let starts = crate::wrap::row_starts(&line_text, width);
-        let cur_byte = col_to_byte(&line_text, self.cursor.col);
-        let (row, _) = crate::wrap::visual_pos(&line_text, &starts, cur_byte);
+        let (line_text, starts, row, _) = self.cursor_visual_row(width);
         self.cursor.col = byte_to_col(&line_text, starts[row]);
         self.goal_x = None;
     }
@@ -510,10 +507,7 @@ impl Buffer {
     /// the cursor sits just before the trailing space, so it reads as the row's
     /// end rather than the next row's start.
     pub fn move_end(&mut self, width: usize) {
-        let line_text = self.line(self.cursor.line);
-        let starts = crate::wrap::row_starts(&line_text, width);
-        let cur_byte = col_to_byte(&line_text, self.cursor.col);
-        let (row, _) = crate::wrap::visual_pos(&line_text, &starts, cur_byte);
+        let (line_text, starts, row, _) = self.cursor_visual_row(width);
         let mut end = starts.get(row + 1).copied().unwrap_or(line_text.len());
         if row + 1 < starts.len() {
             if let Some((b, " ")) = line_text[..end].grapheme_indices(true).next_back() {

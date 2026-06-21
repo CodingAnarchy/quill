@@ -6,6 +6,12 @@
 //! Everything works in byte offsets within a single line's text (no trailing
 //! newline) and display cells (`unicode-width`), so callers map to/from grapheme
 //! columns at the edges.
+//!
+//! Wrapping is computed over the *source* line, before emphasis markers are
+//! concealed for display. Concealment only ever removes a cell or two (and only
+//! on the cursor's own span), so a row can render slightly narrower than the
+//! column but never wider — and keeping the layout independent of the cursor's
+//! position means navigation and rendering always agree on the break points.
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;

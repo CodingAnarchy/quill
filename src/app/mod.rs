@@ -924,6 +924,18 @@ impl App {
         }
     }
 
+    /// The editor's current wrap column (#143), in cells.
+    fn wrap_w(&self) -> usize {
+        self.wrap_width.get() as usize
+    }
+
+    /// Apply a wrap-aware cursor movement (up/down/home/end) at the current wrap
+    /// width, paging the continuous view if the cursor crossed a chapter.
+    fn edit_move_wrapped(&mut self, mv: impl FnOnce(&mut Buffer, usize)) {
+        let w = self.wrap_w();
+        self.edit_move(move |b| mv(b, w));
+    }
+
     /// Apply a cursor movement to the active edit buffer, then page the window
     /// if the continuous view's cursor crossed into another chapter.
     fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
@@ -1432,22 +1444,10 @@ impl App {
 
             (false, KeyCode::Left) => self.edit_move(Buffer::move_left),
             (false, KeyCode::Right) => self.edit_move(Buffer::move_right),
-            (false, KeyCode::Up) => {
-                let w = self.wrap_width.get() as usize;
-                self.edit_move(move |b| b.move_up(w));
-            }
-            (false, KeyCode::Down) => {
-                let w = self.wrap_width.get() as usize;
-                self.edit_move(move |b| b.move_down(w));
-            }
-            (false, KeyCode::Home) => {
-                let w = self.wrap_width.get() as usize;
-                self.edit_move(move |b| b.move_home(w));
-            }
-            (false, KeyCode::End) => {
-                let w = self.wrap_width.get() as usize;
-                self.edit_move(move |b| b.move_end(w));
-            }
+            (false, KeyCode::Up) => self.edit_move_wrapped(Buffer::move_up),
+            (false, KeyCode::Down) => self.edit_move_wrapped(Buffer::move_down),
+            (false, KeyCode::Home) => self.edit_move_wrapped(Buffer::move_home),
+            (false, KeyCode::End) => self.edit_move_wrapped(Buffer::move_end),
 
             _ => {}
         }
@@ -1500,19 +1500,19 @@ impl App {
             KeyCode::Left => self.edit_buffer_mut().move_left(),
             KeyCode::Right => self.edit_buffer_mut().move_right(),
             KeyCode::Up => {
-                let w = self.wrap_width.get() as usize;
+                let w = self.wrap_w();
                 self.edit_buffer_mut().move_up(w);
             }
             KeyCode::Down => {
-                let w = self.wrap_width.get() as usize;
+                let w = self.wrap_w();
                 self.edit_buffer_mut().move_down(w);
             }
             KeyCode::Home => {
-                let w = self.wrap_width.get() as usize;
+                let w = self.wrap_w();
                 self.edit_buffer_mut().move_home(w);
             }
             KeyCode::End => {
-                let w = self.wrap_width.get() as usize;
+                let w = self.wrap_w();
                 self.edit_buffer_mut().move_end(w);
             }
             _ => return false,
