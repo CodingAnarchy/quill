@@ -4,164 +4,185 @@
 //! in the shared types and the `Pane` trait.
 
 use super::*;
+use crate::buffer::Buffer;
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
 type ByteRange = (usize, usize);
 
 impl Pane for Editor<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
-        let app = self.0;
-        // Center a column of `focus_width` cells; fall back to full width if narrow.
-        let width = app.focus_width.min(area.width.saturating_sub(2));
-        let left_pad = area.width.saturating_sub(width) / 2;
-        let column = Rect {
-            x: area.x + left_pad,
-            y: area.y + 1,
-            width,
-            height: area.height.saturating_sub(1),
-        };
+        render_focused_pane(frame, area, self.0);
+    }
+}
 
-        let buffer = app.edit_buffer();
-        let height = column.height as usize;
-        let wrap = width as usize;
-        // Feed navigation the same wrap column the screen uses (#143), so visual
-        // up/down move by the rows the author actually sees.
-        app.wrap_width.set(width);
+/// Render the focused editor pane (`App::buffer`) into `area`: full rendering with
+/// headers, search highlighting, and the terminal cursor (#163: shared by the
+/// single-pane view and the focused half of a split).
+pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
+    // Center a column of `focus_width` cells; fall back to full width if narrow.
+    let width = app.focus_width.min(area.width.saturating_sub(2));
+    let left_pad = area.width.saturating_sub(width) / 2;
+    let column = Rect {
+        x: area.x + left_pad,
+        y: area.y + 1,
+        width,
+        height: area.height.saturating_sub(1),
+    };
 
-        // Emphasis markers are hidden, except on the span the cursor sits in (so
-        // it stays editable). Concealment shifts screen columns, so the cursor X
-        // below must be measured over the *visible* text, not the source.
-        let cursor_byte = buffer.cursor_byte();
-        let conceal = buffer.syntax().conceal_ranges(Some(cursor_byte));
+    let buffer = app.edit_buffer();
+    // Feed navigation the same wrap column the screen uses (#143), so visual
+    // up/down move by the rows the author actually sees.
+    app.wrap_width.set(width);
 
-        // Find/replace highlighting (#144): every match gets a dim background, the
-        // current one a bright background. Empty when not searching.
-        let (search_matches, current_match): (&[ByteRange], Option<ByteRange>) = match &app.mode {
-            Mode::Search(s) => (&s.matches, s.current_match()),
-            _ => (&[], None),
-        };
+    // Emphasis markers are hidden, except on the span the cursor sits in.
+    let conceal = buffer.syntax().conceal_ranges(Some(buffer.cursor_byte()));
+    // Find/replace highlighting (#144): every match gets a dim background, the
+    // current one a bright background. Empty when not searching.
+    let (search_matches, current_match): (&[ByteRange], Option<ByteRange>) = match &app.mode {
+        Mode::Search(s) => (&s.matches, s.current_match()),
+        _ => (&[], None),
+    };
+    let inserts = header_inserts(app, column.width);
+    let editing = matches!(app.mode, Mode::Insert | Mode::EditMeta(_));
+    render_body(frame, column, buffer, &inserts, &conceal, search_matches, current_match, editing);
 
-        // Display-only header blocks drawn above each chapter's body: a chapter
-        // divider (continuous view), the book epigraph (above chapter 0), and the
-        // chapter's own epigraph. Keyed by the buffer line they precede.
-        let inserts = header_inserts(app, column.width);
-        let header_rows = |line: usize| inserts.iter().find(|(at, _)| *at == line).map_or(0, |(_, b)| b.len());
-        let body_rows = |line: usize| crate::wrap::row_starts(&buffer.line(line), wrap).len();
+    // Editing a metadata field: a banner on the otherwise-blank top row.
+    if let Mode::EditMeta(meta) = &app.mode {
+        let banner = format!(" editing {} — Ctrl-S save · Esc cancel", meta.label);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                banner,
+                Style::default().fg(Color::Black).bg(Color::Cyan),
+            ))),
+            Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+        );
+    }
+}
 
-        let total = buffer.line_count();
-        let cursor_line = buffer.cursor.line;
+/// Render a non-focused reference pane (#163): the other pane's prose under a
+/// dimmed title bar naming its chapter — no cursor, no search highlight.
+pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, buffer: &Buffer) {
+    let title = app.chapter_title_for(buffer).unwrap_or("reference");
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!(" {title}"),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        ))),
+        Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+    );
+    let body = Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height.saturating_sub(1) };
+    let width = app.focus_width.min(body.width.saturating_sub(2));
+    let left_pad = body.width.saturating_sub(width) / 2;
+    let column = Rect { x: body.x + left_pad, y: body.y, width, height: body.height };
+    let conceal = buffer.syntax().conceal_ranges(Some(buffer.cursor_byte()));
+    render_body(frame, column, buffer, &[], &conceal, &[], None, false);
+}
 
-        // Where the cursor sits among its own line's visual rows.
-        let cline = buffer.line(cursor_line);
-        let cline_start = buffer.line_start_byte(cursor_line);
-        let cstarts = crate::wrap::row_starts(&cline, wrap);
-        let (cursor_subrow, _) = crate::wrap::visual_pos(&cline, &cstarts, cursor_byte - cline_start);
+/// Render `buffer`'s soft-wrapped, styled prose into `column`, following the
+/// cursor by visual row. Places the terminal cursor when `place_cursor`. The
+/// shared core of both pane renderers (#163).
+#[allow(clippy::too_many_arguments)]
+fn render_body(
+    frame: &mut Frame,
+    column: Rect,
+    buffer: &Buffer,
+    inserts: &[(usize, Vec<Line<'static>>)],
+    conceal: &[(usize, usize)],
+    matches: &[ByteRange],
+    current: Option<ByteRange>,
+    place_cursor: bool,
+) {
+    let height = column.height as usize;
+    let wrap = column.width as usize;
+    let header_rows = |line: usize| inserts.iter().find(|(at, _)| *at == line).map_or(0, |(_, b)| b.len());
+    let body_rows = |line: usize| crate::wrap::row_starts(&buffer.line(line), wrap).len();
 
-        // Follow the cursor by *visual* row, keeping it roughly centered — but
-        // clamped so we never scroll past the top or leave blank space at the
-        // bottom. All three walks are bounded by the viewport, never the document.
-        let target_above = height / 2;
-        // Rows available above the cursor (capped at the viewport).
-        let mut above_avail = header_rows(cursor_line) + cursor_subrow;
-        let mut l = cursor_line;
-        while l > 0 && above_avail < height {
-            l -= 1;
-            above_avail += header_rows(l) + body_rows(l);
-        }
-        // Rows available below the cursor (capped at the viewport).
-        let mut below_avail = body_rows(cursor_line) - 1 - cursor_subrow;
-        let mut l = cursor_line;
-        while l + 1 < total && below_avail < height {
-            l += 1;
-            below_avail += header_rows(l) + body_rows(l);
-        }
-        // Place the cursor at `keep_above` rows from the top: centered, but pulled
-        // up when there's little below (fill the bottom) and clamped to what
-        // actually exists above (don't scroll past the start).
-        let keep_above = target_above
-            .max((height.saturating_sub(1)).saturating_sub(below_avail))
-            .min(above_avail);
+    let total = buffer.line_count();
+    let cursor_line = buffer.cursor.line;
+    let cursor_byte = buffer.cursor_byte();
 
-        // Walk back exactly `keep_above` rows to find the first line to render and
-        // how many of its rows to skip.
-        let mut acc = header_rows(cursor_line) + cursor_subrow;
-        let mut top = cursor_line;
-        while acc < keep_above && top > 0 {
-            top -= 1;
-            acc += header_rows(top) + body_rows(top);
-        }
-        let mut to_skip = acc.saturating_sub(keep_above);
+    // Where the cursor sits among its own line's visual rows.
+    let cline = buffer.line(cursor_line);
+    let cline_start = buffer.line_start_byte(cursor_line);
+    let cstarts = crate::wrap::row_starts(&cline, wrap);
+    let (cursor_subrow, _) = crate::wrap::visual_pos(&cline, &cstarts, cursor_byte - cline_start);
 
-        // Emit visual rows from `top`, skipping `to_skip`, until the viewport fills.
-        let mut lines: Vec<Line> = Vec::with_capacity(height);
-        let mut cursor_row = None;
-        let mut ll = top;
-        'fill: while lines.len() < height && ll < total {
-            if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == ll) {
-                for line in block {
-                    if to_skip > 0 {
-                        to_skip -= 1;
-                    } else if lines.len() < height {
-                        lines.push(line.clone());
-                    } else {
-                        break 'fill;
-                    }
-                }
-            }
-            let body = styled_line(
-                buffer.syntax(),
-                buffer.line_start_byte(ll),
-                &buffer.line(ll),
-                &conceal,
-                search_matches,
-                current_match,
-                wrap,
-            );
-            for (sub, line) in body.into_iter().enumerate() {
+    // Follow the cursor by *visual* row, centered but clamped so we never scroll
+    // past the top or leave blank space at the bottom. Bounded by the viewport.
+    let target_above = height / 2;
+    let mut above_avail = header_rows(cursor_line) + cursor_subrow;
+    let mut l = cursor_line;
+    while l > 0 && above_avail < height {
+        l -= 1;
+        above_avail += header_rows(l) + body_rows(l);
+    }
+    let mut below_avail = body_rows(cursor_line) - 1 - cursor_subrow;
+    let mut l = cursor_line;
+    while l + 1 < total && below_avail < height {
+        l += 1;
+        below_avail += header_rows(l) + body_rows(l);
+    }
+    let keep_above = target_above
+        .max((height.saturating_sub(1)).saturating_sub(below_avail))
+        .min(above_avail);
+
+    let mut acc = header_rows(cursor_line) + cursor_subrow;
+    let mut top = cursor_line;
+    while acc < keep_above && top > 0 {
+        top -= 1;
+        acc += header_rows(top) + body_rows(top);
+    }
+    let mut to_skip = acc.saturating_sub(keep_above);
+
+    let mut lines: Vec<Line> = Vec::with_capacity(height);
+    let mut cursor_row = None;
+    let mut ll = top;
+    'fill: while lines.len() < height && ll < total {
+        if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == ll) {
+            for line in block {
                 if to_skip > 0 {
                     to_skip -= 1;
-                    continue;
-                }
-                if lines.len() >= height {
+                } else if lines.len() < height {
+                    lines.push(line.clone());
+                } else {
                     break 'fill;
                 }
-                if ll == cursor_line && sub == cursor_subrow {
-                    cursor_row = Some(lines.len() as u16);
-                }
-                lines.push(line);
             }
-            ll += 1;
         }
-
-        let paragraph = Paragraph::new(lines).block(Block::default());
-        frame.render_widget(paragraph, column);
-
-        // Editing a metadata field: a banner on the otherwise-blank top row.
-        if let Mode::EditMeta(meta) = &app.mode {
-            let banner = format!(" editing {} — Ctrl-S save · Esc cancel", meta.label);
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    banner,
-                    Style::default().fg(Color::Black).bg(Color::Cyan),
-                ))),
-                Rect { x: area.x, y: area.y, width: area.width, height: 1 },
-            );
+        let body = styled_line(
+            buffer.syntax(),
+            buffer.line_start_byte(ll),
+            &buffer.line(ll),
+            conceal,
+            matches,
+            current,
+            wrap,
+        );
+        for (sub, line) in body.into_iter().enumerate() {
+            if to_skip > 0 {
+                to_skip -= 1;
+                continue;
+            }
+            if lines.len() >= height {
+                break 'fill;
+            }
+            if ll == cursor_line && sub == cursor_subrow {
+                cursor_row = Some(lines.len() as u16);
+            }
+            lines.push(line);
         }
+        ll += 1;
+    }
 
-        // Place the terminal cursor (only while editing text). The cursor's own
-        // span is revealed, so it never lands on a concealed character.
-        let editing = matches!(app.mode, Mode::Insert | Mode::EditMeta(_));
-        if let (true, Some(row)) = (editing, cursor_row) {
+    frame.render_widget(Paragraph::new(lines).block(Block::default()), column);
+
+    // Place the terminal cursor (focused, editing panes only). Its span is
+    // revealed, so it never lands on a concealed character.
+    if place_cursor {
+        if let Some(row) = cursor_row {
             let screen_y = column.y + row;
-            // X within the cursor's *visual* row: measure from the row's start byte,
-            // not the logical line's, so wrapped rows place the cursor correctly.
             let row_start = cstarts[cursor_subrow];
-            let col_width = visible_width_before(
-                &cline[row_start..],
-                cline_start + row_start,
-                cursor_byte,
-                &conceal,
-            );
+            let col_width = visible_width_before(&cline[row_start..], cline_start + row_start, cursor_byte, conceal);
             let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
             frame.set_cursor_position((screen_x, screen_y));
         }

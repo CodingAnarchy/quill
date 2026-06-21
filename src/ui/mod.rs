@@ -62,20 +62,44 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .split(area);
 
     // The outline pane takes a left strip when toggled on (Ctrl-O); the editor
-    // centers within whatever space remains, so the page stays balanced.
-    if app.outline_visible {
+    // region centers within whatever space remains, so the page stays balanced.
+    let editor_area = if app.outline_visible {
         let outline_w = 28.min(chunks[0].width / 3);
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(outline_w), Constraint::Min(1)])
             .split(chunks[0]);
         NavPane(app).render(frame, cols[0]);
-        Editor(app).render(frame, cols[1]);
+        cols[1]
     } else {
-        Editor(app).render(frame, chunks[0]);
-    }
+        chunks[0]
+    };
 
+    draw_editor_region(frame, editor_area, app);
     StatusBar(app).render(frame, chunks[1]);
+}
+
+/// Draw the editor region: one pane, or two when the window is split (#163).
+fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
+    let Some((dir, focused_first, other)) = app.split_render() else {
+        Editor(app).render(frame, area);
+        return;
+    };
+    let direction = match dir {
+        crate::app::SplitDir::SideBySide => Direction::Horizontal,
+        crate::app::SplitDir::Stacked => Direction::Vertical,
+    };
+    let halves = Layout::default()
+        .direction(direction)
+        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+        .split(area);
+    let (focused_area, other_area) = if focused_first {
+        (halves[0], halves[1])
+    } else {
+        (halves[1], halves[0])
+    };
+    editor::render_focused_pane(frame, focused_area, app);
+    editor::render_reference_pane(frame, other_area, app, other);
 }
 
 /// Render the open full-screen overlay in a bordered box, scrolled and clamped to
