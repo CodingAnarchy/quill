@@ -18,6 +18,29 @@ impl App {
         }
     }
 
+    /// Set (or clear) the selected file's section role (#179). A blank value
+    /// clears it back to a body chapter; an unrecognized name is reported rather
+    /// than applied (so a typo doesn't silently leave the role unchanged).
+    pub(crate) fn set_chapter_role(&mut self, index: usize, text: &str) {
+        let trimmed = text.trim();
+        let role = if trimmed.is_empty() {
+            None
+        } else if let Some(r) = Role::from_key(trimmed) {
+            Some(r)
+        } else {
+            self.message =
+                Some(format!("Unknown section role '{trimmed}' — e.g. prologue, epilogue, appendix"));
+            return;
+        };
+        if self.edit_chapter_meta(index, |fm| fm.set_role(role)) {
+            let title = self.project.chapter_title(index).unwrap_or("Chapter");
+            self.message = Some(match role {
+                Some(r) => format!("{title}: {}", r.label()),
+                None => format!("{title}: body chapter"),
+            });
+        }
+    }
+
     /// Apply a front-matter edit to chapter `index`. The active chapter is edited
     /// through its live buffer (persisted on the next save, like prose); any other
     /// chapter is edited on disk immediately. Either way the pane cache is updated.
@@ -73,6 +96,7 @@ impl App {
                 let goal = text.trim().parse::<usize>().ok().filter(|&n| n > 0);
                 self.edit_chapter_meta(at, |fm| fm.set_goal(goal));
             }
+            MetaField::Role { at } => self.set_chapter_role(at, text),
             MetaField::ChapterEpigraph { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_epigraph_text(text));
             }

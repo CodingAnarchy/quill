@@ -291,6 +291,8 @@ pub(crate) enum MetaField {
     Pov { at: usize },
     /// The chapter's word-count goal (#146).
     Goal { at: usize },
+    /// The file's section role (#179): front/back-matter type, or blank for body.
+    Role { at: usize },
     ChapterEpigraph { at: usize },
     ChapterEpigraphBy { at: usize },
     BookTitle,

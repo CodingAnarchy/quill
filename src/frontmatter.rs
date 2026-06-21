@@ -125,6 +125,74 @@ impl Status {
     }
 }
 
+/// A project file's **section role** (#179): a front- or back-matter section type
+/// for the non-chapter parts of a book. A body chapter has no role (`None`), so
+/// existing projects — which have no `role:` key — read as plain chapters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    // Front matter (sorts before the body).
+    Foreword,
+    Preface,
+    Introduction,
+    Prologue,
+    // Back matter (sorts after the body).
+    Epilogue,
+    Afterword,
+    Acknowledgments,
+    Appendix,
+    Glossary,
+}
+
+impl Role {
+    /// The `role:` value as written in front matter.
+    pub fn key(self) -> &'static str {
+        match self {
+            Role::Foreword => "foreword",
+            Role::Preface => "preface",
+            Role::Introduction => "introduction",
+            Role::Prologue => "prologue",
+            Role::Epilogue => "epilogue",
+            Role::Afterword => "afterword",
+            Role::Acknowledgments => "acknowledgments",
+            Role::Appendix => "appendix",
+            Role::Glossary => "glossary",
+        }
+    }
+
+    /// Parse a front-matter `role:` value (case-insensitive). Accepts the British
+    /// "acknowledgements" spelling too. `None` for an unknown value (read as a
+    /// plain body chapter).
+    pub fn from_key(s: &str) -> Option<Role> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "foreword" => Some(Role::Foreword),
+            "preface" => Some(Role::Preface),
+            "introduction" => Some(Role::Introduction),
+            "prologue" => Some(Role::Prologue),
+            "epilogue" => Some(Role::Epilogue),
+            "afterword" => Some(Role::Afterword),
+            "acknowledgments" | "acknowledgements" => Some(Role::Acknowledgments),
+            "appendix" => Some(Role::Appendix),
+            "glossary" => Some(Role::Glossary),
+            _ => None,
+        }
+    }
+
+    /// Capitalized label for the chapter pane and messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            Role::Foreword => "Foreword",
+            Role::Preface => "Preface",
+            Role::Introduction => "Introduction",
+            Role::Prologue => "Prologue",
+            Role::Epilogue => "Epilogue",
+            Role::Afterword => "Afterword",
+            Role::Acknowledgments => "Acknowledgments",
+            Role::Appendix => "Appendix",
+            Role::Glossary => "Glossary",
+        }
+    }
+}
+
 /// A chapter's front matter, held as the verbatim block between the `---`
 /// fences. Reads and writes are **surgical**: a write replaces (or appends) only
 /// the one key's entry, so unknown keys and an author's hand formatting are left
@@ -307,6 +375,19 @@ impl FrontMatter {
         }
     }
 
+    /// The file's section role (#179), if set; `None` is a plain body chapter.
+    pub fn role(&self) -> Option<Role> {
+        self.get("role").as_deref().and_then(Role::from_key)
+    }
+
+    /// Set the section role; `None` clears it back to a body chapter.
+    pub fn set_role(&mut self, role: Option<Role>) {
+        match role {
+            Some(r) => self.set("role", r.key()),
+            None => self.remove("role"),
+        }
+    }
+
     /// The chapter epigraph, if a quotation is set. The attribution is optional.
     pub fn epigraph(&self) -> Option<Epigraph> {
         Epigraph::from_parts(self.get("epigraph"), self.get("epigraph_by"))
@@ -472,6 +553,31 @@ mod tests {
         assert!(!fm.as_str().contains("summary"));
         // Other keys survive the removal.
         assert_eq!(fm.status(), Some(Status::Draft));
+    }
+
+    #[test]
+    fn role_round_trips_and_clears() {
+        let mut fm = FrontMatter::from_raw("status: draft\n");
+        assert_eq!(fm.role(), None); // absent → body chapter
+        fm.set_role(Some(Role::Prologue));
+        assert!(fm.as_str().contains("role: prologue\n"));
+        assert_eq!(fm.role(), Some(Role::Prologue));
+        assert_eq!(fm.status(), Some(Status::Draft)); // sibling untouched
+        // Clearing drops the key (back to a body chapter).
+        fm.set_role(None);
+        assert_eq!(fm.role(), None);
+        assert!(!fm.as_str().contains("role"));
+    }
+
+    #[test]
+    fn role_keys_parse_case_insensitively_with_the_british_alias() {
+        assert_eq!(Role::from_key("Prologue"), Some(Role::Prologue));
+        assert_eq!(Role::from_key("  EPILOGUE "), Some(Role::Epilogue));
+        assert_eq!(Role::from_key("acknowledgements"), Some(Role::Acknowledgments));
+        assert_eq!(Role::from_key("acknowledgments"), Some(Role::Acknowledgments));
+        assert_eq!(Role::from_key("chapter"), None); // unknown → body
+        assert_eq!(Role::Appendix.key(), "appendix");
+        assert_eq!(Role::Appendix.label(), "Appendix");
     }
 
     #[test]

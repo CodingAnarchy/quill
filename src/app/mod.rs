@@ -19,7 +19,7 @@ use crate::ai::setting::{self, Setting};
 use crate::analysis;
 use crate::buffer::{self, Buffer};
 use crate::date;
-use crate::frontmatter::{Epigraph, FrontMatter, Status};
+use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
@@ -761,6 +761,16 @@ impl App {
             KeyCode::Char('l') => {
                 let prefill = self.project.chapter_goal(sel).map(|g| g.to_string()).unwrap_or_default();
                 self.open_prompt(Pending::SetMeta(MetaField::Goal { at: sel }), "Word goal: ", &prefill, Some(sel));
+            }
+            // Set the file's section role (#179); blank clears it to a body chapter.
+            KeyCode::Char('S') => {
+                let prefill = self.project.chapter_role(sel).map(|r| r.key().to_string()).unwrap_or_default();
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Role { at: sel }),
+                    "Section role (prologue/epilogue/appendix/…; blank = body): ",
+                    &prefill,
+                    Some(sel),
+                );
             }
             // Project-level book / series metadata.
             KeyCode::Char('t') => {

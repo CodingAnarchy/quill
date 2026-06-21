@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::buffer::count_words;
-use crate::frontmatter::{self, Epigraph, FrontMatter, Status};
+use crate::frontmatter::{self, Epigraph, FrontMatter, Role, Status};
 
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
@@ -52,6 +52,10 @@ pub struct ChapterEntry {
     /// chapter file is the source of truth.
     #[serde(skip)]
     pub goal: Option<usize>,
+    /// Cached section role (#179): front- or back-matter type, or `None` for a
+    /// plain body chapter. Transient — read from front matter at open.
+    #[serde(skip)]
+    pub role: Option<Role>,
 }
 
 /// The author's writing goals (see [`docs/progress-reports.md`]). Pages are
@@ -263,6 +267,7 @@ impl Project {
             summary: None,
             pov: None,
             goal: None,
+            role: None,
         };
         let path = self.root.join(&entry.file);
         if !path.exists() {
@@ -388,6 +393,11 @@ impl Project {
         self.manifest.chapters.get(index).and_then(|c| c.goal)
     }
 
+    /// The file's section role (#179), if set; `None` is a plain body chapter.
+    pub fn chapter_role(&self, index: usize) -> Option<Role> {
+        self.manifest.chapters.get(index).and_then(|c| c.role)
+    }
+
     /// Copy a chapter's managed metadata into its cache from a [`FrontMatter`]
     /// (used after the active chapter's front matter is edited in its buffer).
     pub fn cache_chapter_meta(&mut self, index: usize, front: Option<&FrontMatter>) {
@@ -396,6 +406,7 @@ impl Project {
             chapter.summary = front.and_then(|f| f.summary());
             chapter.pov = front.and_then(|f| f.pov());
             chapter.goal = front.and_then(|f| f.goal());
+            chapter.role = front.and_then(|f| f.role());
         }
     }
 
@@ -466,6 +477,7 @@ impl Project {
                 summary: None,
                 pov: None,
                 goal: None,
+                role: None,
             },
         );
         self.save_manifest()
@@ -531,6 +543,7 @@ impl Project {
                 summary: None,
                 pov: None,
                 goal: None,
+                role: None,
             })
             .collect();
         let active = chapters[0].file.clone();
