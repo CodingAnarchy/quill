@@ -300,14 +300,21 @@ impl App {
             return Vec::new();
         };
         let label = self.project.manifest.part_label();
-        let chapters = self.chapter_count();
+        // Part ranges are 1-based positions among the body chapters (#185); the
+        // body block is contiguous after the band reorder, starting past the
+        // front matter — so a body position maps to `front + position`.
+        let front = (0..self.chapter_count())
+            .filter(|&i| self.project.chapter_band(i) == Band::Front)
+            .count();
+        let body = self.project.body_chapter_count();
         parts
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let name = p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1));
-                let range = p.chapters[0].saturating_sub(1)..p.chapters[1].min(chapters);
-                (name, range)
+                let start = p.chapters[0].saturating_sub(1).min(body);
+                let end = p.chapters[1].min(body).max(start);
+                (name, (front + start)..(front + end))
             })
             .collect()
     }

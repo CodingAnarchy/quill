@@ -502,6 +502,49 @@ fn an_all_body_pane_keeps_the_flat_unnumbered_list() {
 }
 
 #[test]
+fn parts_map_to_body_chapters_not_sections() {
+    // A project with a prologue + 4 body chapters + an appendix, listed out of
+    // band order, and two parts over the body chapters (#185).
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-parts-sect-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[parts]]\nname = \"Act I\"\nchapters = [1, 2]\n\n\
+         [[parts]]\nname = \"Act II\"\nchapters = [3, 4]\n\n\
+         [[chapters]]\ntitle = \"B1\"\nfile = \"b1.md\"\n\n\
+         [[chapters]]\ntitle = \"B2\"\nfile = \"b2.md\"\n\n\
+         [[chapters]]\ntitle = \"Pro\"\nfile = \"pro.md\"\n\n\
+         [[chapters]]\ntitle = \"B3\"\nfile = \"b3.md\"\n\n\
+         [[chapters]]\ntitle = \"B4\"\nfile = \"b4.md\"\n\n\
+         [[chapters]]\ntitle = \"App\"\nfile = \"ap.md\"\n",
+    )
+    .unwrap();
+    for f in ["b1.md", "b2.md", "b3.md", "b4.md"] {
+        fs::write(dir.join(f), "body words here\n").unwrap();
+    }
+    fs::write(dir.join("pro.md"), "---\nrole: prologue\n---\nbefore\n").unwrap();
+    fs::write(dir.join("ap.md"), "---\nrole: appendix\n---\nnotes\n").unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let app = App::new(buffer, project);
+
+    // Load order: [pro, b1, b2, b3, b4, ap]. The parts cover body chapters only.
+    let ranges = app.part_ranges();
+    assert_eq!(ranges[0].1, 1..3, "Act I = the first two body chapters, not the prologue");
+    assert_eq!(ranges[1].1, 3..5, "Act II = the next two body chapters, not the appendix");
+    // And part membership: sections belong to no part.
+    assert_eq!(app.project.manifest.part_of(0), None, "prologue is in no part");
+    assert_eq!(app.project.manifest.part_of(1), Some(0), "first body chapter is in Act I");
+    assert_eq!(app.project.manifest.part_of(4), Some(1), "fourth body chapter is in Act II");
+    assert_eq!(app.project.manifest.part_of(5), None, "appendix is in no part");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn reordering_is_clamped_within_a_band() {
     let dir = sectioned_project("clamp"); // loads as [prologue p, body b, appendix a]
     let project = Project::open(&dir).unwrap();

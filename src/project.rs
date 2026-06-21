@@ -164,13 +164,17 @@ impl Manifest {
     }
 
     /// The index of the part containing chapter `chapter_index` (0-based), or
-    /// `None` if no part's inclusive 1-based range covers it.
+    /// `None` if it's not in any part. Part ranges are 1-based positions among the
+    /// **body chapters** (#185) — front/back-matter sections belong to no part.
     pub fn part_of(&self, chapter_index: usize) -> Option<usize> {
-        let n = chapter_index + 1; // ranges are 1-based
-        self.parts
-            .as_ref()?
-            .iter()
-            .position(|p| p.chapters[0] <= n && n <= p.chapters[1])
+        if Band::of(self.chapters.get(chapter_index)?.role) != Band::Body {
+            return None; // sections aren't part of a part
+        }
+        // Body chapters are contiguous after the band reorder, so the body
+        // position is the offset past the front matter.
+        let front = self.chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count();
+        let n = chapter_index - front + 1; // 1-based position among body chapters
+        self.parts.as_ref()?.iter().position(|p| p.chapters[0] <= n && n <= p.chapters[1])
     }
 }
 
@@ -796,11 +800,15 @@ mod tests {
     fn parts_round_trip_and_map_chapters_to_ranges() {
         let dir = temp_dir("parts");
         let _ = fs::remove_dir_all(&dir);
-        let mut project = Project::create(&dir).unwrap();
+        let mut project = Project::create(&dir).unwrap(); // 1 starter chapter
         assert!(project.manifest.parts.is_none());
         assert_eq!(project.manifest.part_label(), "part"); // default
         assert_eq!(project.manifest.part_of(0), None); // no parts → no mapping
 
+        // Four body chapters for the two parts to cover.
+        project.add_chapter(1, "Two").unwrap();
+        project.add_chapter(2, "Three").unwrap();
+        project.add_chapter(3, "Four").unwrap();
         project.manifest.part_label = Some("act".into());
         project.manifest.parts = Some(vec![
             Part { name: Some("The Gathering".into()), chapters: [1, 2], goal: Some(20_000) },
