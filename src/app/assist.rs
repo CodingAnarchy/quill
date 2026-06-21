@@ -317,7 +317,7 @@ impl App {
         message: &str,
         run: impl FnOnce(&dyn Backend, String, String) -> Outcome + Send + 'static,
     ) {
-        if self.ai_rx.is_some() {
+        if self.ai_task.is_busy() {
             self.message = Some("An AI request is already in flight…".into());
             return;
         }
@@ -334,15 +334,10 @@ impl App {
         let model = self.ai.model.clone();
         let manuscript = self.manuscript_text();
 
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let outcome = match spec.build() {
-                Ok(backend) => run(backend.as_ref(), manuscript, model),
-                Err(e) => Outcome::Error(e),
-            };
-            let _ = tx.send(outcome);
+        self.ai_task.spawn(move || match spec.build() {
+            Ok(backend) => run(backend.as_ref(), manuscript, model),
+            Err(e) => Outcome::Error(e),
         });
-        self.ai_rx = Some(rx);
         self.message = Some(message.to_string());
     }
 
@@ -376,10 +371,8 @@ impl App {
     /// feature and clear the pending state. Called once per loop iteration so the
     /// result lands within the poll window.
     pub fn poll_ai(&mut self) {
-        let Some(rx) = &self.ai_rx else { return };
-        match rx.try_recv() {
-            Ok(outcome) => {
-                self.ai_rx = None;
+        match self.ai_task.poll() {
+            Poll::Ready(outcome) => {
                 self.message = None;
                 self.overlay = None; // a fresh result supersedes any open overlay
                 match outcome {
@@ -394,11 +387,8 @@ impl App {
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
             }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.ai_rx = None;
-                self.message = Some("AI: request failed".into());
-            }
+            Poll::Pending => {}
+            Poll::Died => self.message = Some("AI: request failed".into()),
         }
     }
 
@@ -748,7 +738,7 @@ impl App {
 
     /// Whether an AI request is currently in flight (for the status indicator).
     pub fn ai_busy(&self) -> bool {
-        self.ai_rx.is_some()
+        self.ai_task.is_busy()
     }
 
     // --- Story-bible conflict review --------------------------------------

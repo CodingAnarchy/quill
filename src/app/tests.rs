@@ -742,7 +742,7 @@ fn ask_with_ai_off_explains_how_to_enable() {
     let (mut app, dir) = two_chapter_app("ai-off");
     app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
     app.ask_ai("who is the protagonist?");
-    assert!(app.ai_rx.is_none(), "nothing should be sent when AI is off");
+    assert!(!app.ai_task.is_busy(), "nothing should be sent when AI is off");
     assert!(app.overlay.is_none());
     assert!(app.message.as_deref().unwrap_or("").contains("off"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
@@ -759,7 +759,7 @@ fn offline_mode_selects_the_local_backend() {
     app.ask_ai("anything?");
     // This build has no `local` feature, so it can't run — nothing is sent and the
     // message explains how to enable it (rather than silently using Claude).
-    assert!(app.ai_rx.is_none());
+    assert!(!app.ai_task.is_busy());
     assert!(app.message.as_deref().unwrap_or("").contains("local"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
@@ -1615,7 +1615,7 @@ fn declining_an_expensive_pass_cancels_it() {
     app.start_ai_action(crate::mode::AiAction::Continuity);
     app.on_key(key(KeyCode::Char('n')));
     assert!(matches!(app.mode, Mode::Insert), "declining returns to editing");
-    assert!(app.ai_rx.is_none(), "nothing was sent");
+    assert!(!app.ai_task.is_busy(), "nothing was sent");
     fs::remove_dir_all(&dir).ok();
 }
 
