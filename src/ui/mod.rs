@@ -521,14 +521,16 @@ impl Pane for NavPane<'_> {
         let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
             .map(|i| app.chapter_word_count(i))
             .collect();
+        // Resolve each chapter's band once, like the counts above.
+        let bands: Vec<Band> = (0..counts.len()).map(|i| app.project.chapter_band(i)).collect();
 
         // Group by band (#181) only when the project actually has sections, so an
         // all-body project keeps the flat, un-numbered "CHAPTERS" list it had.
-        let grouped = (0..counts.len()).any(|i| app.project.chapter_band(i) != Band::Body);
+        let grouped = bands.iter().any(|&b| b != Band::Body);
         let mut shown_band: Option<Band> = None;
         let mut body_n = 0usize;
         for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
-            let band = app.project.chapter_band(i);
+            let band = bands[i];
             if shown_band != Some(band) {
                 if shown_band.is_some() {
                     lines.push(Line::raw("")); // a gap between bands
@@ -537,13 +539,12 @@ impl Pane for NavPane<'_> {
                 lines.push(Line::raw(""));
                 shown_band = Some(band);
             }
-            // Body chapters carry a number once the list is grouped; sections show
-            // their role instead.
-            let number = (band == Band::Body).then(|| {
+            // Body chapters carry a 1-based number once the list is grouped;
+            // sections show their role instead.
+            let number = (grouped && band == Band::Body).then(|| {
                 body_n += 1;
                 body_n
             });
-            let number = grouped.then_some(number).flatten();
 
             let is_active = i == active;
             let is_selected = nav_selected == Some(i);
@@ -560,9 +561,11 @@ impl Pane for NavPane<'_> {
         // Rolled-up totals: the body word count, kept clear of any front/back
         // matter so the manuscript total isn't muddied (#181).
         let total: usize = counts.iter().sum();
-        let body_total: usize = (0..counts.len())
-            .filter(|&i| app.project.chapter_band(i) == Band::Body)
-            .map(|i| counts[i])
+        let body_total: usize = bands
+            .iter()
+            .zip(&counts)
+            .filter(|(&b, _)| b == Band::Body)
+            .map(|(_, &c)| c)
             .sum();
         let total_line = if total != body_total {
             format!("{body_total} words · {} in sections", total - body_total)
