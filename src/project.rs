@@ -324,7 +324,7 @@ impl Project {
         let chapters: Vec<PathBuf> =
             (0..self.manifest.chapters.len()).map(|i| self.chapter_path(i)).collect();
         let mut found = Vec::new();
-        collect_markdown(&self.root, &self.root.join("unused"), &chapters, &mut found);
+        collect_markdown(&self.root, &chapters, &mut found);
         found.sort();
         found
     }
@@ -614,13 +614,16 @@ impl Project {
 /// Recursively gather `.md` files under `dir` into `out`, skipping the `unused/`
 /// subtree and any `chapters` (which the chapter browser already lists). Best
 /// effort: an unreadable directory is silently skipped.
-fn collect_markdown(dir: &Path, unused: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
+fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            if path != unused {
-                collect_markdown(&path, unused, chapters, out);
+            // Generated/scratch trees aren't reference material: `unused/` (deleted
+            // chapters) and `export/` (compiled output, #190).
+            let name = path.file_name().and_then(|n| n.to_str());
+            if !matches!(name, Some("unused") | Some("export")) {
+                collect_markdown(&path, chapters, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") && !chapters.contains(&path) {
             out.push(path);
