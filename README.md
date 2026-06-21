@@ -47,6 +47,14 @@ keystrokes that stay out of the way.
   body (the book's at the start of the manuscript). The quotation is edited in
   the main editor (Ctrl-S to save, Esc to cancel) and stored readably — a YAML
   `|` block in the chapter file, a TOML `"""` block in `book.toml`.
+- **Book sections** — mark a file as front matter (foreword/preface/introduction/
+  prologue) or back matter (epilogue/afterword/acknowledgments/appendix/glossary)
+  with **S** in the chapter browser; sections sort around the body, are grouped in
+  the pane, and are kept out of the body word-count goal.
+- **Export** — **Ctrl-E** compiles the whole manuscript to a single Markdown file
+  under `export/` (chapters in reading order, parts and titles as headings,
+  epigraphs set apart), ready to hand off or convert. Word/Scrivener/Vellum
+  writers build on this (#7).
 
 ## Build & run
 
@@ -85,6 +93,7 @@ byte-for-byte.
 | Ctrl-O         | toggle the chapter pane         |
 | Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
+| Ctrl-E         | export: compile to one Markdown file (`export/`) |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |

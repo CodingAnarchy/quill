@@ -31,6 +31,7 @@ use crate::report::{self, Momentum, PartDelta};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod assist;
+mod exporting;
 mod search;
 mod meta;
 mod panes;
@@ -1012,6 +1013,8 @@ impl App {
                 Ok(_) => self.open_ai_palette(),
                 Err(e) => self.message = Some(e.to_string()),
             },
+            // Compile the manuscript to a single export file (#190). Ctrl-e.
+            (true, KeyCode::Char('e')) => self.export_markdown(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),

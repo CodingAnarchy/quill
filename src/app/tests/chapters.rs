@@ -502,6 +502,33 @@ fn an_all_body_pane_keeps_the_flat_unnumbered_list() {
 }
 
 #[test]
+fn export_compiles_the_manuscript_to_a_single_markdown_file() {
+    let dir = sectioned_project("export"); // loads as [prologue Pro, body Body, appendix App]
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+
+    app.export_markdown();
+    assert!(app.message.as_deref().unwrap_or("").contains("Exported to export/"), "{:?}", app.message);
+
+    let out = fs::read_to_string(dir.join("export").join("book.md")).unwrap();
+    assert!(out.starts_with("# Book\n"), "book title heading:\n{out}");
+    // Chapters compiled in reading order (front → body → back), front matter gone.
+    let pro = out.find("## Pro").unwrap();
+    let body = out.find("## Body").unwrap();
+    let appendix = out.find("## App").unwrap();
+    assert!(pro < body && body < appendix, "reading order preserved:\n{out}");
+    assert!(out.contains("before") && !out.contains("role: prologue"), "prose without front matter:\n{out}");
+
+    // The compiled output isn't itself a reference file (#165).
+    assert!(
+        !app.project.reference_files().iter().any(|p| p.to_string_lossy().contains("export")),
+        "export/ is excluded from the reference-file browser"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn parts_map_to_body_chapters_not_sections() {
     // A project with a prologue + 4 body chapters + an appendix, listed out of
     // band order, and two parts over the body chapters (#185).

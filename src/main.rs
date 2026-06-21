@@ -8,6 +8,7 @@ mod analysis;
 mod app;
 mod buffer;
 mod date;
+mod export;
 mod frontmatter;
 mod history;
 mod manuscript;
