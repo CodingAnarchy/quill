@@ -363,21 +363,16 @@ fn chapter_line(
         Some(g) => format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
         None => words.to_string(),
     };
+    // The selection highlight reverses every span on the row.
+    let sel = |s: Style| if is_selected { s.add_modifier(Modifier::REVERSED) } else { s };
     let mut spans = vec![Span::styled(format!("{marker}{title}  {count}"), style)];
     // A front/back-matter section shows its role (#179) as a dim italic tag.
     if let Some(role) = role {
-        let mut tag = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
-        if is_selected {
-            tag = tag.add_modifier(Modifier::REVERSED);
-        }
-        spans.push(Span::styled(format!(" · {}", role.label()), tag));
+        let tag = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+        spans.push(Span::styled(format!(" · {}", role.label()), sel(tag)));
     }
     if let Some(status) = status {
-        let mut badge = status_style(status);
-        if is_selected {
-            badge = badge.add_modifier(Modifier::REVERSED);
-        }
-        spans.push(Span::styled(format!(" {}", status.badge()), badge));
+        spans.push(Span::styled(format!(" {}", status.badge()), sel(status_style(status))));
     }
     Line::from(spans)
 }
