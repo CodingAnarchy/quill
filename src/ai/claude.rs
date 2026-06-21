@@ -70,7 +70,11 @@ impl Backend for ClaudeBackend {
             }
             thread::sleep(BATCH_POLL);
         }
-        Err(AiError::Api("batch still processing after the time limit — try again".into()))
+        // Don't invite a blind retry: the submitted batch keeps running (and
+        // billing) server-side, so re-running would pay for a second one.
+        Err(AiError::Api(
+            "batch still processing after the time limit — it should finish on its own shortly (re-running starts a new, separately-billed batch)".into(),
+        ))
     }
 }
 

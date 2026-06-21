@@ -699,7 +699,7 @@ fn forcing_a_rebuild_overrides_an_up_to_date_bible() {
     assert_eq!(
         app.pass_context_len(action, true),
         app.manuscript_text().len(),
-        "Ctrl-w R (force) rebuilds from the whole manuscript anyway"
+        "the palette's R (force) rebuilds from the whole manuscript anyway"
     );
     fs::remove_dir_all(&dir).ok();
 }

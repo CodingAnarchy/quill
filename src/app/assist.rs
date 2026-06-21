@@ -437,7 +437,7 @@ impl App {
         finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
     ) {
         let (scope, prior, current) = self.plan_bible_pass(&t);
-        // `Ctrl-w R` forces a full rebuild regardless of the delta (#176).
+        // The AI palette's `R` forces a full rebuild regardless of the delta (#176).
         let scope = if force { ai::incremental::Scope::Full } else { scope };
         // Full rebuilds run through the Batch API (half price, higher latency) on
         // the Claude backend; the local backend has no batch path.
