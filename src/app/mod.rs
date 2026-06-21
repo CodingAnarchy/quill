@@ -33,10 +33,13 @@ use crate::report::{self, Momentum, PartDelta};
 mod assist;
 mod search;
 mod meta;
+mod panes;
 mod reports;
 mod task;
 mod vcs_actions;
 
+use panes::Split;
+pub(crate) use panes::SplitDir;
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 
@@ -52,6 +55,11 @@ pub struct App {
     /// rendering go through this windowed multi-chapter buffer instead of the
     /// single-chapter `buffer` above (which is then the saved, idle chapter).
     pub manuscript: Option<Manuscript>,
+    /// The second editor pane (#163), when the window is split. The focused pane
+    /// is always `buffer`; this holds the other one.
+    split: Option<Split>,
+    /// True between a `Ctrl-w` window prefix and the command key that follows it.
+    window_pending: bool,
     pub mode: Mode,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
@@ -125,6 +133,8 @@ impl App {
             buffer,
             project,
             manuscript: None,
+            split: None,
+            window_pending: false,
             mode: Mode::Insert,
             should_quit: false,
             focus_width: 72,
@@ -341,6 +351,14 @@ impl App {
         // A fresh keystroke clears any stale status message.
         self.message = None;
 
+        // The key after a `Ctrl-w` window prefix (#163) is a window command, not
+        // editing input.
+        if self.window_pending {
+            self.window_pending = false;
+            self.window_command(key.code);
+            return;
+        }
+
         // A full-screen overlay (progress report, analysis report, AI answer) is
         // read-only and scrollable: navigation keys scroll it, any other key
         // closes it.
@@ -423,6 +441,7 @@ impl App {
         if self.flush_active().is_err() {
             return;
         }
+        self.close_split_if_any(); // the continuous view and a split can't share the editor (#163)
         match Manuscript::open(&self.project) {
             Ok(m) => {
                 self.manuscript = Some(m);
@@ -530,6 +549,7 @@ impl App {
             match self.buffer.save() {
                 Ok(()) => {
                     self.project.set_active_words(self.buffer.word_count());
+                    self.refresh_split_sibling(); // a clean sibling on this chapter reflects the save (#163)
                     self.message = Some("Saved".into());
                 }
                 Err(e) => self.message = Some(format!("Save failed: {e}")),
@@ -912,6 +932,9 @@ impl App {
             (true, KeyCode::Char('y')) => self.history_step(true),
             // Find (#144). Ctrl-f opens the query; from there `r` starts a replace.
             (true, KeyCode::Char('f')) => self.open_find(),
+            // Window/split prefix (#163): the next key is a window command
+            // (s/v split, w/h/j/k/l focus, c/q close). Vim's Ctrl-w.
+            (true, KeyCode::Char('w')) => self.window_pending = true,
 
             (false, KeyCode::Char(c)) => self.edit_insert_char(c),
             (false, KeyCode::Enter) => self.edit_insert_char('\n'),

@@ -955,6 +955,83 @@ fn undo_is_guarded_in_the_continuous_view() {
     fs::remove_dir_all(&dir).ok();
 }
 
+// --- Window splits (#163) --------------------------------------------------
+
+/// Send a Vim window command: the `Ctrl-w` prefix then `c`.
+fn window_cmd(app: &mut App, c: char) {
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char(c)));
+}
+
+#[test]
+fn ctrl_w_v_splits_and_ctrl_w_c_closes() {
+    let (mut app, dir) = two_chapter_app("split-open-close");
+    assert!(app.split_render().is_none());
+    window_cmd(&mut app, 'v'); // vertical split
+    assert!(app.split_render().is_some(), "Ctrl-w v splits");
+    window_cmd(&mut app, 'c'); // close
+    assert!(app.split_render().is_none(), "Ctrl-w c closes the split");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn split_panes_edit_different_chapters_independently() {
+    let (mut app, dir) = two_chapter_app("split-edit"); // active = "One"
+    window_cmd(&mut app, 'v');
+    // Focus the other pane and move it to chapter Two; edit + save there.
+    window_cmd(&mut app, 'w');
+    app.on_key(ctrl('n')); // other pane → "Two"
+    type_str(&mut app, "TWO-EDIT");
+    app.on_key(ctrl('s'));
+    // Back to the first pane (still "One"); edit + save there.
+    window_cmd(&mut app, 'w');
+    type_str(&mut app, "ONE-EDIT");
+    app.on_key(ctrl('s'));
+
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(one.contains("ONE-EDIT") && two.contains("TWO-EDIT"), "one:{one:?} two:{two:?}");
+    assert!(!one.contains("TWO-EDIT"), "panes didn't cross-corrupt: {one:?}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn editing_the_same_chapter_in_both_panes_stays_consistent() {
+    let (mut app, dir) = two_chapter_app("split-same"); // both panes start on "One"
+    window_cmd(&mut app, 'v');
+    type_str(&mut app, "AAA"); // edit the focused pane
+    window_cmd(&mut app, 'w'); // switch: flush, then reload the sibling on the same chapter
+    assert!(app.buffer.text().contains("AAA"), "the other pane reflects the saved edit: {:?}", app.buffer.text());
+    type_str(&mut app, "BBB");
+    window_cmd(&mut app, 'w'); // switch back
+    let text = app.buffer.text();
+    assert!(text.contains("AAA") && text.contains("BBB"), "edits accumulate, no clobber: {text:?}");
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(one.contains("AAA") && one.contains("BBB"), "{one}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn split_is_guarded_in_the_continuous_view() {
+    let (mut app, dir) = two_chapter_app("split-in-cont");
+    app.on_key(ctrl('l'));
+    assert!(app.manuscript.is_some());
+    window_cmd(&mut app, 'v');
+    assert!(app.split_render().is_none(), "can't split the continuous view");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn entering_continuous_closes_a_split() {
+    let (mut app, dir) = two_chapter_app("cont-closes-split");
+    window_cmd(&mut app, 'v');
+    assert!(app.split_render().is_some());
+    app.on_key(ctrl('l')); // continuous view takes the editor region
+    assert!(app.split_render().is_none());
+    assert!(app.manuscript.is_some());
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// Match count and current index while in search mode.
 fn search_state(app: &App) -> (usize, usize) {
     match &app.mode {
