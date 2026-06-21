@@ -966,11 +966,11 @@ fn window_cmd(app: &mut App, c: char) {
 #[test]
 fn ctrl_w_v_splits_and_ctrl_w_c_closes() {
     let (mut app, dir) = two_chapter_app("split-open-close");
-    assert!(app.split_render().is_none());
+    assert!(app.split_view().is_none());
     window_cmd(&mut app, 'v'); // vertical split
-    assert!(app.split_render().is_some(), "Ctrl-w v splits");
+    assert!(app.split_view().is_some(), "Ctrl-w v splits");
     window_cmd(&mut app, 'c'); // close
-    assert!(app.split_render().is_none(), "Ctrl-w c closes the split");
+    assert!(app.split_view().is_none(), "Ctrl-w c closes the split");
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -1017,7 +1017,7 @@ fn split_is_guarded_in_the_continuous_view() {
     app.on_key(ctrl('l'));
     assert!(app.manuscript.is_some());
     window_cmd(&mut app, 'v');
-    assert!(app.split_render().is_none(), "can't split the continuous view");
+    assert!(app.split_view().is_none(), "can't split the continuous view");
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -1025,10 +1025,54 @@ fn split_is_guarded_in_the_continuous_view() {
 fn entering_continuous_closes_a_split() {
     let (mut app, dir) = two_chapter_app("cont-closes-split");
     window_cmd(&mut app, 'v');
-    assert!(app.split_render().is_some());
+    assert!(app.split_view().is_some());
     app.on_key(ctrl('l')); // continuous view takes the editor region
-    assert!(app.split_render().is_none());
+    assert!(app.split_view().is_none());
     assert!(app.manuscript.is_some());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ctrl_w_docks_an_open_report_beside_the_editor() {
+    let (mut app, dir) = two_chapter_app("dock-report");
+    app.on_key(ctrl('r')); // open the progress report full-screen
+    assert!(app.overlay.is_some());
+    window_cmd(&mut app, 'v'); // dock it into a split (#164)
+    assert!(app.overlay.is_none(), "the full-screen overlay moved into the pane");
+    assert!(matches!(app.split_view(), Some(SplitView::Surface { .. })), "now a surface split");
+    // The editor stays editable in the other pane.
+    type_str(&mut app, "EDIT");
+    assert!(app.buffer.text().contains("EDIT"));
+    // Closing the pane returns to the single editor.
+    window_cmd(&mut app, 'c');
+    assert!(app.split_view().is_none());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn focusing_a_docked_surface_scrolls_it() {
+    let (mut app, dir) = two_chapter_app("dock-scroll");
+    app.on_key(ctrl('t')); // analysis report — tall enough to scroll
+    window_cmd(&mut app, 'v'); // dock
+    app.surface_height.set(5); // the renderer sets this; supply it for the test
+    window_cmd(&mut app, 'w'); // focus the surface for scrolling
+    assert!(app.surface_pane_focused());
+    app.on_key(key(KeyCode::Char('j'))); // scroll down one row
+    let scrolled = matches!(app.split_view(), Some(SplitView::Surface { overlay, .. }) if overlay.scroll == 1);
+    assert!(scrolled, "j scrolls the docked surface");
+    app.on_key(key(KeyCode::Esc)); // Esc returns focus to the editor
+    assert!(!app.surface_pane_focused());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn docking_is_guarded_in_the_continuous_view() {
+    let (mut app, dir) = two_chapter_app("dock-cont");
+    app.on_key(ctrl('l')); // continuous view
+    app.on_key(ctrl('r')); // report opens full-screen
+    window_cmd(&mut app, 'v'); // try to dock
+    assert!(app.split_view().is_none(), "no docking in the continuous view");
+    assert!(app.overlay.is_some(), "the overlay stays full-screen");
     fs::remove_dir_all(&dir).ok();
 }
 

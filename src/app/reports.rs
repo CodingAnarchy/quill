@@ -46,24 +46,15 @@ impl App {
     /// Handle a key while a full-screen overlay is open: scroll on the navigation
     /// keys, close on anything else (so it stays "press a key to dismiss").
     pub(crate) fn on_key_overlay(&mut self, key: KeyEvent) {
-        let max = self.overlay_max_scroll() as i32;
-        let page = self.viewport_height.saturating_sub(3).max(1) as i32; // keep a line of context
-        let cur = self.overlay_scroll() as i32;
+        let max = self.overlay_max_scroll();
+        let page = self.viewport_height.saturating_sub(3).max(1); // keep a line of context
+        let cur = self.overlay_scroll();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        // `Some(row)` scrolls to `row`; `None` dismisses the overlay.
-        let target = match (ctrl, key.code) {
-            (false, KeyCode::Down | KeyCode::Char('j')) => Some((cur + 1).clamp(0, max)),
-            (false, KeyCode::Up | KeyCode::Char('k')) => Some((cur - 1).clamp(0, max)),
-            (false, KeyCode::PageDown | KeyCode::Char(' ')) | (true, KeyCode::Char('d')) => Some((cur + page).clamp(0, max)),
-            (false, KeyCode::PageUp | KeyCode::Char('b')) | (true, KeyCode::Char('u')) => Some((cur - page).clamp(0, max)),
-            (false, KeyCode::Home | KeyCode::Char('g')) => Some(0),
-            (false, KeyCode::End | KeyCode::Char('G')) => Some(max),
-            _ => None,
-        };
-        match target {
+        // `Some(row)` scrolls to `row`; a non-scroll key dismisses the overlay.
+        match super::scroll_target(key.code, ctrl, cur, max, page) {
             Some(row) => {
                 if let Some(overlay) = self.overlay.as_mut() {
-                    overlay.scroll = row as u16;
+                    overlay.scroll = row;
                 }
             }
             None => self.overlay = None,

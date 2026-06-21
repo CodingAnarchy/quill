@@ -39,7 +39,7 @@ mod task;
 mod vcs_actions;
 
 use panes::Split;
-pub(crate) use panes::SplitDir;
+pub(crate) use panes::{SplitDir, SplitView};
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 
@@ -87,6 +87,9 @@ pub struct App {
     /// each frame so visual-row cursor navigation (#143) wraps lines the same way
     /// the screen does. A `Cell` because the renderer borrows `App` immutably.
     pub wrap_width: std::cell::Cell<u16>,
+    /// Height of a docked surface pane (#164), set by the renderer so its scroll
+    /// bound matches what's drawn.
+    pub(crate) surface_height: std::cell::Cell<u16>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.
@@ -144,6 +147,7 @@ impl App {
             overlay: None,
             viewport_height: 0,
             wrap_width: std::cell::Cell::new(72),
+            surface_height: std::cell::Cell::new(0),
             added: 0,
             removed: 0,
             moved_to_unused: 0,
@@ -358,12 +362,24 @@ impl App {
             self.window_command(key.code);
             return;
         }
-
-        // A full-screen overlay (progress report, analysis report, AI answer) is
-        // read-only and scrollable: navigation keys scroll it, any other key
-        // closes it.
-        if self.overlay.is_some() {
-            self.on_key_overlay(key);
+        // A read-only surface takes scroll keys: a docked surface pane with scroll
+        // focus (#164), or a full-screen overlay (progress/analysis report, AI
+        // answer). Either way Ctrl-w still starts a window command — switching
+        // focus, closing, or (for an overlay) docking it into a split (#164).
+        let surface_key: Option<fn(&mut App, KeyEvent)> = if self.surface_pane_focused() {
+            Some(App::on_key_surface)
+        } else if self.overlay.is_some() {
+            Some(App::on_key_overlay)
+        } else {
+            None
+        };
+        if let Some(handle) = surface_key {
+            let ctrl_w = matches!(key.code, KeyCode::Char('w')) && key.modifiers.contains(KeyModifiers::CONTROL);
+            if ctrl_w {
+                self.window_pending = true;
+            } else {
+                handle(self, key);
+            }
             return;
         }
 
@@ -957,6 +973,23 @@ impl App {
     }
 
 
+}
+
+/// The new scroll offset for a scroll key over a `cur` position within
+/// `[0, max]`, paging by `page` lines — or `None` if `code` isn't a scroll key.
+/// Shared by the full-screen overlay and the docked surface pane (#164).
+fn scroll_target(code: KeyCode, ctrl: bool, cur: u16, max: u16, page: u16) -> Option<u16> {
+    let (cur, max, page) = (cur as i32, max as i32, page as i32);
+    let target = match (ctrl, code) {
+        (false, KeyCode::Down | KeyCode::Char('j')) => cur + 1,
+        (false, KeyCode::Up | KeyCode::Char('k')) => cur - 1,
+        (false, KeyCode::PageDown | KeyCode::Char(' ')) | (true, KeyCode::Char('d')) => cur + page,
+        (false, KeyCode::PageUp | KeyCode::Char('b')) | (true, KeyCode::Char('u')) => cur - page,
+        (false, KeyCode::Home | KeyCode::Char('g')) => 0,
+        (false, KeyCode::End | KeyCode::Char('G')) => max,
+        _ => return None,
+    };
+    Some(target.clamp(0, max) as u16)
 }
 
 /// Where an overlay (prompt or metadata editor) returns when it closes without
