@@ -166,6 +166,7 @@ impl App {
                 match command {
                     Some(Command::Ai(a)) => self.start_ai_action(a, force),
                     Some(Command::Git(g)) => self.start_git_action(g),
+                    Some(Command::Export(f)) => self.run_export(f),
                     None => {}
                 }
             }

@@ -1013,8 +1013,8 @@ impl App {
                 Ok(_) => self.open_ai_palette(),
                 Err(e) => self.message = Some(e.to_string()),
             },
-            // Compile the manuscript to a single export file (#190). Ctrl-e.
-            (true, KeyCode::Char('e')) => self.export_markdown(),
+            // Open the export menu (#7) — Markdown / Word. Ctrl-e.
+            (true, KeyCode::Char('e')) => self.open_export_palette(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             (true, KeyCode::Char('l')) => self.toggle_continuous(),

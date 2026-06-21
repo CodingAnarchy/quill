@@ -7,6 +7,8 @@
 
 use crate::frontmatter::Epigraph;
 
+pub mod docx;
+
 /// A project compiled for export: the book's metadata and its ordered contents.
 pub struct Document {
     pub title: String,

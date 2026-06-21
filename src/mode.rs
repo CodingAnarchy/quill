@@ -103,12 +103,22 @@ pub struct PaletteItem {
     pub(crate) command: Command,
 }
 
-/// A command reachable from a palette — the AI menu (Ctrl-A) and the
-/// version-control menu (Ctrl-V) share one palette mechanism.
+/// A command reachable from a palette — the AI menu (Ctrl-A), the version-control
+/// menu (Ctrl-V), and the export menu (Ctrl-E) share one palette mechanism.
 #[derive(Clone, Copy)]
 pub(crate) enum Command {
     Ai(AiAction),
     Git(GitAction),
+    Export(ExportFormat),
+}
+
+/// A manuscript export target (#7), chosen from the export palette.
+#[derive(Clone, Copy)]
+pub(crate) enum ExportFormat {
+    /// A single compiled Markdown document (#190).
+    Markdown,
+    /// Word `.docx` in standard manuscript format (#191).
+    Docx,
 }
 
 /// The AI actions reachable from the AI palette.

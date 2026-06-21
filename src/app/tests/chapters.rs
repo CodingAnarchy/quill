@@ -508,7 +508,7 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
 
-    app.export_markdown();
+    app.run_export(crate::mode::ExportFormat::Markdown);
     assert!(app.message.as_deref().unwrap_or("").contains("Exported to export/"), "{:?}", app.message);
 
     let out = fs::read_to_string(dir.join("export").join("book.md")).unwrap();
@@ -529,10 +529,32 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
 }
 
 #[test]
+fn ctrl_e_opens_the_export_menu() {
+    let (mut app, dir) = two_chapter_app("export-menu");
+    app.on_key(ctrl('e'));
+    let Mode::Palette(p) = &app.mode else { panic!("expected the export palette") };
+    assert_eq!(p.title, "Export");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn export_writes_a_docx_file() {
+    let dir = sectioned_project("export-docx");
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.run_export(crate::mode::ExportFormat::Docx);
+    assert!(app.message.as_deref().unwrap_or("").contains("Exported to export/"), "{:?}", app.message);
+    let bytes = fs::read(dir.join("export").join("book.docx")).unwrap();
+    assert_eq!(&bytes[..2], b"PK", "a .docx is a zip container");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn export_is_guarded_in_the_continuous_view() {
     let (mut app, dir) = two_chapter_app("export-cont");
     app.on_key(ctrl('l')); // enter the continuous view
-    app.export_markdown();
+    app.run_export(crate::mode::ExportFormat::Markdown);
     assert!(app.message.as_deref().unwrap_or("").contains("Leave the continuous view"), "{:?}", app.message);
     assert!(!dir.join("export").exists(), "no file written from the continuous view");
     fs::remove_dir_all(&dir).ok();

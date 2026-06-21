@@ -19,6 +19,9 @@ serde_json = "1.0.150"
 time = { version = "0.3.49", features = ["local-offset", "macros", "parsing", "formatting"] }
 ureq = { version = "3.3.0", features = ["json"] }
 similar = "3.1.1"
+# Manuscript export (#7): the .docx/OOXML container is a zip; the XML is
+# hand-written. Already present transitively, so this adds no new download.
+zip = { version = "7.2", default-features = false, features = ["deflate"] }
 # Version control (#54). https + ssh enable remote push/pull (#134); the local
 # operations need neither. vendored-openssl builds OpenSSL from source so the
 # HTTPS transport doesn't depend on a system OpenSSL install.
