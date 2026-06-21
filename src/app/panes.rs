@@ -147,16 +147,13 @@ impl App {
         };
         let max = crate::ui::max_scroll(overlay.lines.len(), height);
         let page = height.saturating_sub(3).max(1);
-        let cur = overlay.scroll;
-        match key.code {
-            KeyCode::Esc => *focused = false,
-            KeyCode::Down | KeyCode::Char('j') => overlay.scroll = (cur + 1).min(max),
-            KeyCode::Up | KeyCode::Char('k') => overlay.scroll = cur.saturating_sub(1),
-            KeyCode::PageDown | KeyCode::Char(' ') => overlay.scroll = (cur + page).min(max),
-            KeyCode::PageUp | KeyCode::Char('b') => overlay.scroll = cur.saturating_sub(page),
-            KeyCode::Home | KeyCode::Char('g') => overlay.scroll = 0,
-            KeyCode::End | KeyCode::Char('G') => overlay.scroll = max,
-            _ => {} // ignore — don't close the pane
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // Scroll keys move the surface; Esc hands focus back; anything else is
+        // ignored (unlike the full-screen overlay, a docked pane doesn't close).
+        match scroll_target(key.code, ctrl, overlay.scroll, max, page) {
+            Some(row) => overlay.scroll = row,
+            None if key.code == KeyCode::Esc => *focused = false,
+            None => {}
         }
     }
 
