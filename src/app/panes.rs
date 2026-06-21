@@ -42,10 +42,23 @@ pub(crate) struct Split {
     pub(crate) first_ratio: u16,
 }
 
-/// What the renderer needs to lay out a split (#163/#164/#166).
-pub(crate) enum SplitView<'a> {
-    Editors { dir: SplitDir, focused_first: bool, first_ratio: u16, other: &'a Buffer },
-    Surface { dir: SplitDir, editor_first: bool, first_ratio: u16, overlay: &'a Overlay },
+/// What the renderer needs to lay out a split (#163/#164/#166): the shared
+/// geometry, plus what the other pane holds.
+pub(crate) struct SplitView<'a> {
+    pub(crate) dir: SplitDir,
+    /// Percentage of the split axis given to the first (top/left) pane.
+    pub(crate) first_ratio: u16,
+    /// Whether the focused editor (`App::buffer`) is the first (top/left) pane.
+    pub(crate) focused_first: bool,
+    pub(crate) content: SplitContent<'a>,
+}
+
+/// What the non-focused pane shows the renderer (mirrors [`OtherPane`]).
+pub(crate) enum SplitContent<'a> {
+    /// A second editor pane (#163/#165).
+    Editor(&'a Buffer),
+    /// A docked read-only surface — report / analysis / AI answer (#164).
+    Surface(&'a Overlay),
 }
 
 /// The starting (even) split, and the bounds resize keeps the first pane within
@@ -226,18 +239,17 @@ impl App {
     /// docked surface taking scroll focus is the *second* pane.
     fn resize_split(&mut self, grow: bool) {
         let Some(split) = self.split.as_mut() else { return };
+        // A scroll-focused surface is the *second* pane; otherwise the focused
+        // editor is the first pane when `focused_first`.
         let focused_is_first = match &split.other {
             OtherPane::Surface { focused: true, .. } => !split.focused_first,
             _ => split.focused_first,
         };
-        // Grow the focused pane → enlarge whichever side it's on.
-        let enlarge_first = grow == focused_is_first;
-        let next = if enlarge_first {
-            split.first_ratio + RESIZE_STEP
-        } else {
-            split.first_ratio.saturating_sub(RESIZE_STEP)
-        };
-        split.first_ratio = next.clamp(MIN_RATIO, 100 - MIN_RATIO);
+        // Grow the focused pane → enlarge whichever side it's on (XNOR). The
+        // `.clamp` bounds both ends, so plain signed arithmetic is safe.
+        let step = if grow == focused_is_first { RESIZE_STEP as i32 } else { -(RESIZE_STEP as i32) };
+        let next = split.first_ratio as i32 + step;
+        split.first_ratio = next.clamp(MIN_RATIO as i32, 100 - MIN_RATIO as i32) as u16;
     }
 
     /// Whether a docked surface currently has scroll focus (#164) — keys go to it.
@@ -248,20 +260,11 @@ impl App {
     /// What the renderer needs to lay out the split (#163/#164). `None` when not split.
     pub(crate) fn split_view(&self) -> Option<SplitView<'_>> {
         let s = self.split.as_ref()?;
-        Some(match &s.other {
-            OtherPane::Editor(other) => SplitView::Editors {
-                dir: s.dir,
-                focused_first: s.focused_first,
-                first_ratio: s.first_ratio,
-                other,
-            },
-            OtherPane::Surface { overlay, .. } => SplitView::Surface {
-                dir: s.dir,
-                editor_first: s.focused_first,
-                first_ratio: s.first_ratio,
-                overlay,
-            },
-        })
+        let content = match &s.other {
+            OtherPane::Editor(other) => SplitContent::Editor(other),
+            OtherPane::Surface { overlay, .. } => SplitContent::Surface(overlay),
+        };
+        Some(SplitView { dir: s.dir, first_ratio: s.first_ratio, focused_first: s.focused_first, content })
     }
 
     /// Refresh the cached word count for the *focused* buffer's own chapter

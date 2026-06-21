@@ -12,7 +12,7 @@ use ratatui::{
 use crate::app::App;
 use crate::frontmatter::{Epigraph, FrontMatter, Status};
 use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, RefFiles, Search, SearchStage};
-use crate::app::{SplitDir, SplitView};
+use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -80,6 +80,24 @@ pub fn draw(frame: &mut Frame, app: &App) {
     StatusBar(app).render(frame, chunks[1]);
 }
 
+/// Render the whole app to a plain-text screen of the given size — a shared
+/// test helper for both the `ui` and `app` test suites.
+#[cfg(test)]
+pub(crate) fn render_to_string(app: &App, w: u16, h: u16) -> String {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| draw(f, app)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+    let mut out = String::new();
+    for y in 0..h {
+        for x in 0..w {
+            out.push_str(buf[(x, y)].symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// A split pane narrower (or, stacked, shorter) than this is too cramped to use,
 /// so the layout collapses to the focused pane (#166).
 const MIN_PANE_WIDTH: u16 = 30;
@@ -93,46 +111,43 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
         Editor(app).render(frame, area);
         return;
     };
-    let (dir, first_ratio) = match &view {
-        SplitView::Editors { dir, first_ratio, .. } => (*dir, *first_ratio),
-        SplitView::Surface { dir, first_ratio, .. } => (*dir, *first_ratio),
-    };
 
     // Below the threshold a split would render both panes too thin to use — draw
     // only the focused pane (#166). The split state survives, so widening the
     // terminal restores it; this mirrors how the outline pane yields when narrow.
-    if too_cramped_to_split(dir, area) {
-        if let (true, SplitView::Surface { overlay, .. }) = (app.surface_pane_focused(), &view) {
-            app.surface_height.set(area.height);
-            draw_overlay(frame, area, &app.project.manifest.title, overlay);
-        } else {
-            Editor(app).render(frame, area);
+    if too_cramped_to_split(view.dir, area) {
+        match (&view.content, app.surface_pane_focused()) {
+            // The only full-area surface case: a docked report with scroll focus.
+            (SplitContent::Surface(overlay), true) => {
+                app.surface_height.set(area.height);
+                draw_overlay(frame, area, &app.project.manifest.title, overlay);
+            }
+            // Otherwise the focused pane is always the editor (`App::buffer`).
+            _ => Editor(app).render(frame, area),
         }
         return;
     }
 
-    let direction = match dir {
+    let direction = match view.dir {
         SplitDir::SideBySide => Direction::Horizontal,
         SplitDir::Stacked => Direction::Vertical,
     };
     let halves = Layout::default()
         .direction(direction)
-        .constraints([Constraint::Percentage(first_ratio), Constraint::Percentage(100 - first_ratio)])
+        .constraints([Constraint::Percentage(view.first_ratio), Constraint::Percentage(100 - view.first_ratio)])
         .split(area);
-    match view {
-        SplitView::Editors { focused_first, other, .. } => {
-            let (focused_area, other_area) =
-                if focused_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
-            editor::render_focused_pane(frame, focused_area, app);
-            editor::render_reference_pane(frame, other_area, app, other);
-        }
-        SplitView::Surface { editor_first, overlay, .. } => {
-            let (editor_area, surface_area) =
-                if editor_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
-            editor::render_focused_pane(frame, editor_area, app);
+    let (focused_area, other_area) =
+        if view.focused_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
+
+    // The focused editor (`App::buffer`) always draws in `focused_area`; the other
+    // pane shows a second editor or a docked surface.
+    editor::render_focused_pane(frame, focused_area, app);
+    match view.content {
+        SplitContent::Editor(other) => editor::render_reference_pane(frame, other_area, app, other),
+        SplitContent::Surface(overlay) => {
             // Feed the surface's scroll bound the height it's actually drawn in.
-            app.surface_height.set(surface_area.height);
-            draw_overlay(frame, surface_area, &app.project.manifest.title, overlay);
+            app.surface_height.set(other_area.height);
+            draw_overlay(frame, other_area, &app.project.manifest.title, overlay);
         }
     }
 }
@@ -640,6 +655,7 @@ impl Pane for StatusBar<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::render_to_string as render;
     use crate::buffer::{Buffer, Cursor};
     use crate::project::Project;
     use ratatui::{backend::TestBackend, Terminal};
@@ -695,21 +711,6 @@ mod tests {
 
         println!("render {words}w + 150-chapter outline = {dt:?}");
         assert!(dt.as_millis() < 16, "render took {dt:?}");
-    }
-
-    /// Render the app to a TestBackend and return the screen as plain text.
-    fn render(app: &App, w: u16, h: u16) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let mut out = String::new();
-        for y in 0..h {
-            for x in 0..w {
-                out.push_str(buf[(x, y)].symbol());
-            }
-            out.push('\n');
-        }
-        out
     }
 
     #[test]

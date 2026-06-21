@@ -2,7 +2,7 @@ use super::*;
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::project::Project;
-use ratatui::{backend::TestBackend, Terminal};
+use crate::ui::render_to_string as screen;
 use std::fs;
 use std::path::PathBuf;
 
@@ -1040,7 +1040,7 @@ fn ctrl_w_docks_an_open_report_beside_the_editor() {
     assert!(app.overlay.is_some());
     window_cmd(&mut app, 'v'); // dock it into a split (#164)
     assert!(app.overlay.is_none(), "the full-screen overlay moved into the pane");
-    assert!(matches!(app.split_view(), Some(SplitView::Surface { .. })), "now a surface split");
+    assert!(matches!(app.split_view(), Some(SplitView { content: SplitContent::Surface(_), .. })), "now a surface split");
     // The editor stays editable in the other pane.
     type_str(&mut app, "EDIT");
     assert!(app.buffer.text().contains("EDIT"));
@@ -1059,7 +1059,7 @@ fn focusing_a_docked_surface_scrolls_it() {
     window_cmd(&mut app, 'w'); // focus the surface for scrolling
     assert!(app.surface_pane_focused());
     app.on_key(key(KeyCode::Char('j'))); // scroll down one row
-    let scrolled = matches!(app.split_view(), Some(SplitView::Surface { overlay, .. }) if overlay.scroll == 1);
+    let scrolled = matches!(app.split_view(), Some(SplitView { content: SplitContent::Surface(overlay), .. }) if overlay.scroll == 1);
     assert!(scrolled, "j scrolls the docked surface");
     app.on_key(key(KeyCode::Esc)); // Esc returns focus to the editor
     assert!(!app.surface_pane_focused());
@@ -1082,7 +1082,7 @@ fn docking_is_guarded_in_the_continuous_view() {
 /// The title a reference pane shows for the non-focused buffer.
 fn other_pane_title(app: &App) -> String {
     match app.split_view() {
-        Some(SplitView::Editors { other, .. }) => app.pane_title_for(other),
+        Some(SplitView { content: SplitContent::Editor(other), .. }) => app.pane_title_for(other),
         _ => panic!("expected two editor panes"),
     }
 }
@@ -1179,21 +1179,6 @@ fn a_reference_pane_saves_independently() {
 
 fn split_ratio(app: &App) -> u16 {
     app.split.as_ref().expect("split").first_ratio
-}
-
-/// Render the whole app to a plain-text screen of the given size.
-fn screen(app: &App, w: u16, h: u16) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
-    let buf = terminal.backend().buffer().clone();
-    let mut out = String::new();
-    for y in 0..h {
-        for x in 0..w {
-            out.push_str(buf[(x, y)].symbol());
-        }
-        out.push('\n');
-    }
-    out
 }
 
 #[test]

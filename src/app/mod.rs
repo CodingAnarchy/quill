@@ -39,7 +39,9 @@ mod task;
 mod vcs_actions;
 
 use panes::Split;
-pub(crate) use panes::{SplitDir, SplitView};
+pub(crate) use panes::{SplitContent, SplitDir};
+#[cfg(test)]
+pub(crate) use panes::SplitView; // the type name is only spelled in tests
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 
