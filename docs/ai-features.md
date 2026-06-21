@@ -113,14 +113,21 @@ timeline) scope themselves to what changed:
 The findings-only passes (naming, style, scaffold) have no persistent cache to
 revise, so they always run a full pass. The scoping logic lives in
 `src/ai/incremental.rs`. The state file is a derivable cache (gitignored): if it's
-absent — a fresh clone, or hand-deleted — the next pass simply rebuilds in full,
-which is also the way to **force a full rebuild on demand** today.
+absent — a fresh clone, or hand-deleted — the next pass rebuilds in full.
 
-An incremental revise updates and adds bible entries but does not delete a
-profile file whose character vanishes only within the incremental window — a full
-rebuild (cross the threshold, or delete `bible/.state.toml`) reconciles that.
-Half-cost full rebuilds via the **Batch API**, and an explicit "rebuild now"
-command, are a follow-up (the full-rebuild path still uses the normal request).
+**Force a full rebuild on demand** (#176): in the AI palette (Ctrl-A), press
+**R** instead of Enter to rebuild the selected bible from the whole manuscript
+regardless of the delta — the recovery path for the case an incremental revise
+can't cover (an incremental pass updates and adds bible entries but doesn't delete
+a profile file whose character vanishes only within the incremental window).
+
+**Batch API** (#176): every full rebuild — automatic past the threshold or forced
+with R — runs through the Claude [Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
+at half the per-token price. It trades latency for cost (the request runs on the
+worker thread and may take a few minutes), but the editor stays fully usable
+while it processes; the status line shows `(batch — may take a few minutes)`.
+Incremental passes stay on the normal request (they're small and want low
+latency), and the local backend has no batch path (it runs the request normally).
 
 ## Integration shape
 
@@ -222,10 +229,8 @@ author's prose is out of scope per the assistant-not-co-writer principle above.)
 
 ## Open questions
 
-- **Cost/visibility** — the pre-pass cost confirm (#82) and incremental scoping
-  (#90, see above) both ship. Still open: half-cost full rebuilds via the Batch
-  API and an explicit on-demand "rebuild now" command (the full-rebuild path
-  currently uses the normal request).
+- **Cost/visibility** — the pre-pass cost confirm (#82), incremental scoping
+  (#90), and the on-demand full rebuild + Batch API (#176) all ship; see above.
 - **Trust & provenance** — every AI-written bible entry needs a clear source
   ("generated from ch. 1–12, edited by you") so authors can trust or correct it.
 - **Local model backend** — define the `quill-ai` trait so a future on-device

@@ -157,11 +157,14 @@ impl App {
             return;
         }
         match key.code {
-            KeyCode::Enter => {
+            // Enter runs the selected action (auto-scoped for bibles); `R` forces a
+            // full-manuscript rebuild of a bible regardless of the delta (#176).
+            KeyCode::Enter | KeyCode::Char('R') => {
+                let force = matches!(key.code, KeyCode::Char('R'));
                 let command = p.items.get(p.selected).map(|it| it.command);
                 self.mode = Mode::Insert;
                 match command {
-                    Some(Command::Ai(a)) => self.start_ai_action(a),
+                    Some(Command::Ai(a)) => self.start_ai_action(a, force),
                     Some(Command::Git(g)) => self.start_git_action(g),
                     None => {}
                 }
@@ -174,23 +177,23 @@ impl App {
     /// Begin an AI action chosen from the palette: for a network pass, show a
     /// cost confirm first when the estimate exceeds the threshold; the local /
     /// interactive actions (Ask, Triage) run immediately.
-    pub(crate) fn start_ai_action(&mut self, action: AiAction) {
+    pub(crate) fn start_ai_action(&mut self, action: AiAction, force: bool) {
         // The local backend is free, so there's nothing to confirm — run directly.
         if self.ai.backend() == ai::BackendKind::Local {
-            self.run_ai_action(action);
+            self.run_ai_action(action, force);
             return;
         }
         let Some((model, max_tokens)) = self.cost_profile(action) else {
             // Interactive / local-only action — no whole-manuscript request to estimate.
-            self.run_ai_action(action);
+            self.run_ai_action(action, force);
             return;
         };
-        let est = cost::estimate(self.pass_context_len(action), max_tokens, model);
+        let est = cost::estimate(self.pass_context_len(action, force), max_tokens, model);
         if est.dollars > self.ai.cost_threshold {
             let label = format!("{} — run? (y/N)", cost::label(&est, model));
-            self.open_prompt(Pending::ConfirmAi(action), label, "", None);
+            self.open_prompt(Pending::ConfirmAi(action, force), label, "", None);
         } else {
-            self.run_ai_action(action);
+            self.run_ai_action(action, force);
         }
     }
 
@@ -208,12 +211,12 @@ impl App {
 
     /// Dispatch an AI action to its handler. Shared by the palette and the cost
     /// confirm.
-    pub(crate) fn run_ai_action(&mut self, action: AiAction) {
+    pub(crate) fn run_ai_action(&mut self, action: AiAction, force: bool) {
         match action {
             AiAction::Ask => self.open_prompt(Pending::AskAi, "Ask the manuscript: ", "", None),
-            AiAction::Characters => self.analyze_characters(),
-            AiAction::Continuity => self.analyze_continuity(),
-            AiAction::Setting => self.analyze_setting(),
+            AiAction::Characters => self.analyze_characters(force),
+            AiAction::Continuity => self.analyze_continuity(force),
+            AiAction::Setting => self.analyze_setting(force),
             AiAction::Scaffold => self.analyze_scaffold(),
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
@@ -289,27 +292,27 @@ impl App {
     /// Start a character-extraction pass — incremental from the changed chapters
     /// when the bible already exists, else a full pass (#90). Profiles are written
     /// / conflicts queued by [`App::poll_ai`].
-    pub(crate) fn analyze_characters(&mut self) {
+    pub(crate) fn analyze_characters(&mut self, force: bool) {
         let t = bible_tracker(AiAction::Characters).expect("characters is a bible tracker");
-        self.run_bible_tracker(t, character::build_request, character::build_incremental_request, |r| {
+        self.run_bible_tracker(t, force, character::build_request, character::build_incremental_request, |r| {
             Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
         });
     }
 
     /// Start a timeline & continuity pass (incremental when possible, #90); the
     /// timeline + findings are applied by [`App::poll_ai`].
-    pub(crate) fn analyze_continuity(&mut self) {
+    pub(crate) fn analyze_continuity(&mut self, force: bool) {
         let t = bible_tracker(AiAction::Continuity).expect("continuity is a bible tracker");
-        self.run_bible_tracker(t, continuity::build_request, continuity::build_incremental_request, |r| {
+        self.run_bible_tracker(t, force, continuity::build_request, continuity::build_incremental_request, |r| {
             Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
         });
     }
 
     /// Start a setting & worldbuilding pass (incremental when possible, #90); the
     /// setting bible + rule findings are applied by [`App::poll_ai`].
-    pub(crate) fn analyze_setting(&mut self) {
+    pub(crate) fn analyze_setting(&mut self, force: bool) {
         let t = bible_tracker(AiAction::Setting).expect("setting is a bible tracker");
-        self.run_bible_tracker(t, setting::build_request, setting::build_incremental_request, |r| {
+        self.run_bible_tracker(t, force, setting::build_request, setting::build_incremental_request, |r| {
             Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
         });
     }
@@ -428,26 +431,37 @@ impl App {
     fn run_bible_tracker(
         &mut self,
         t: BibleTracker,
+        force: bool,
         full: impl FnOnce(String, &str) -> ai::Request,
         incr: impl FnOnce(&str, &str, &str) -> ai::Request,
         finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
     ) {
         let (scope, prior, current) = self.plan_bible_pass(&t);
+        // `Ctrl-w R` forces a full rebuild regardless of the delta (#176).
+        let scope = if force { ai::incremental::Scope::Full } else { scope };
+        // Full rebuilds run through the Batch API (half price, higher latency) on
+        // the Claude backend; the local backend has no batch path.
+        let claude = self.ai.backend() == ai::BackendKind::Claude;
         let model = self.ai.model.clone();
-        let (req, message) = match scope {
+        let (req, base_msg, batch) = match scope {
             ai::incremental::Scope::UpToDate => {
                 self.message =
                     Some(format!("{}: bible is current — no chapters changed since the last pass.", t.key));
                 return;
             }
-            ai::incremental::Scope::Full => (full(self.manuscript_text(), &model), t.full_msg),
+            ai::incremental::Scope::Full => (full(self.manuscript_text(), &model), t.full_msg, claude),
             ai::incremental::Scope::Incremental(changed) => {
-                (incr(&prior, &self.chapters_text(&changed), &model), t.incr_msg)
+                (incr(&prior, &self.chapters_text(&changed), &model), t.incr_msg, false)
             }
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
         self.pending_pass = Some((t.key.to_string(), current));
-        self.spawn_request(message, req, finish);
+        let message = if batch {
+            format!("{base_msg} (batch — may take a few minutes)")
+        } else {
+            base_msg.to_string()
+        };
+        self.spawn_request(&message, req, batch, finish);
     }
 
     /// Run a pre-built request on a worker thread (#90), delivering `finish`'s
@@ -457,9 +471,13 @@ impl App {
         &mut self,
         message: &str,
         req: ai::Request,
+        batch: bool,
         finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
     ) {
-        self.spawn_outcome(message, move |backend| finish(backend.complete(&req)));
+        self.spawn_outcome(message, move |backend| {
+            let result = if batch { backend.complete_batched(&req) } else { backend.complete(&req) };
+            finish(result)
+        });
     }
 
     /// The chapter `file → content-digest` map for the manuscript as it is now —
@@ -495,10 +513,13 @@ impl App {
     /// cost estimate (#90). The whole manuscript for most passes, but only the
     /// bible + changed chapters for an incremental tracker pass, and zero when its
     /// bible is already current (so an up-to-date pass never prompts a confirm).
-    pub(crate) fn pass_context_len(&self, action: AiAction) -> usize {
+    pub(crate) fn pass_context_len(&self, action: AiAction, force: bool) -> usize {
         let Some(t) = bible_tracker(action) else {
             return self.manuscript_text().len();
         };
+        if force {
+            return self.manuscript_text().len(); // a forced rebuild sends the whole book
+        }
         let (scope, prior, _) = self.plan_bible_pass(&t);
         match scope {
             ai::incremental::Scope::UpToDate => 0,

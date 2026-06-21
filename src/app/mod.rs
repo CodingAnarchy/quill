@@ -856,10 +856,10 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
-            Pending::ConfirmAi(action) => match key.code {
+            Pending::ConfirmAi(action, force) => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
-                    self.run_ai_action(action);
+                    self.run_ai_action(action, force);
                 }
                 _ => self.mode = closed,
             },
