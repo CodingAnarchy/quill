@@ -11,6 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::App;
 use crate::mode::{Mode, Search, SearchStage};
+use crate::text::match_ranges;
 
 impl App {
     /// Open the find prompt (Ctrl-F). Drops to the single-chapter view so search
@@ -191,7 +192,7 @@ impl App {
     fn recompute_matches_from(&mut self, anchor: usize) {
         let text = self.buffer.text();
         let s = self.search_mut();
-        s.matches = find_match_ranges(&text, &s.query);
+        s.matches = match_ranges(&text, &s.query);
         s.current = s
             .matches
             .iter()
@@ -218,70 +219,5 @@ impl App {
             Mode::Search(s) => s,
             _ => unreachable!("search helper called outside Mode::Search"),
         }
-    }
-}
-
-/// Byte ranges of every case-insensitive, non-overlapping match of `query` in
-/// `text`, in document order. Empty when the query is empty. Case-insensitivity
-/// folds each character through its Unicode lowercase mapping, so "José" matches
-/// "josé" and "The" matches "the".
-pub(super) fn find_match_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
-    let needle: Vec<char> = query.chars().collect();
-    if needle.is_empty() {
-        return Vec::new();
-    }
-    let hay: Vec<(usize, char)> = text.char_indices().collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + needle.len() <= hay.len() {
-        if (0..needle.len()).all(|k| char_eq_ci(hay[i + k].1, needle[k])) {
-            let start = hay[i].0;
-            let last = &hay[i + needle.len() - 1];
-            out.push((start, last.0 + last.1.len_utf8()));
-            i += needle.len(); // non-overlapping
-        } else {
-            i += 1;
-        }
-    }
-    out
-}
-
-/// Case-insensitive single-character comparison via Unicode lowercase folding.
-fn char_eq_ci(a: char, b: char) -> bool {
-    a == b || a.to_lowercase().eq(b.to_lowercase())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::find_match_ranges;
-
-    #[test]
-    fn finds_case_insensitive_non_overlapping_matches() {
-        let text = "The cat sat on the mat. THE END.";
-        let m = find_match_ranges(text, "the");
-        assert_eq!(m.len(), 3, "The / the / THE all match");
-        // First match is the leading "The" at byte 0.
-        assert_eq!(m[0], (0, 3));
-        // Each range spans exactly the query length.
-        for (s, e) in m {
-            assert_eq!(e - s, 3);
-        }
-    }
-
-    #[test]
-    fn empty_query_matches_nothing() {
-        assert!(find_match_ranges("anything", "").is_empty());
-    }
-
-    #[test]
-    fn non_overlapping_for_repeated_runs() {
-        // "aa" in "aaaa" yields two matches, not three.
-        assert_eq!(find_match_ranges("aaaa", "aa"), vec![(0, 2), (2, 4)]);
-    }
-
-    #[test]
-    fn folds_accented_capitals() {
-        let text = "José and JOSÉ";
-        assert_eq!(find_match_ranges(text, "josé").len(), 2);
     }
 }

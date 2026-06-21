@@ -15,6 +15,7 @@ mod mode;
 mod project;
 mod report;
 mod syntax;
+mod text;
 mod ui;
 mod vcs;
 mod wrap;

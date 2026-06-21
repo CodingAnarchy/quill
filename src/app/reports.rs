@@ -4,6 +4,8 @@
 
 use super::*;
 
+use crate::text::count_matches;
+
 impl App {
     /// The progress report's rows, computed once when it's opened.
     pub(crate) fn report_lines(&self) -> Vec<Line<'static>> {
@@ -174,12 +176,9 @@ impl App {
 
     /// Count the configured TODO marker across the manuscript (case-insensitive).
     pub(crate) fn count_todo(&self) -> usize {
-        let needle = self.project.manifest.todo_marker().to_lowercase();
-        if needle.is_empty() {
-            return 0;
-        }
+        let marker = self.project.manifest.todo_marker();
         (0..self.chapter_count())
-            .map(|i| self.chapter_text(i).to_lowercase().matches(&needle).count())
+            .map(|i| count_matches(&self.chapter_text(i), marker))
             .sum()
     }
 
