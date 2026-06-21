@@ -49,11 +49,13 @@ pub enum Profile {
 pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default();
-    // Vellum needs a Heading 1 style to recognize chapter breaks.
-    let styles = match profile {
-        Profile::Manuscript => format!("{STYLES}</w:styles>"),
-        Profile::Vellum => format!("{STYLES}{VELLUM_STYLES}</w:styles>"),
+    // Vellum needs a Heading 1 style to recognize chapter breaks; the manuscript
+    // profile adds nothing to the base styles.
+    let extra = match profile {
+        Profile::Manuscript => "",
+        Profile::Vellum => VELLUM_STYLES,
     };
+    let styles = format!("{STYLES}{extra}</w:styles>");
     let parts = [
         ("[Content_Types].xml", CONTENT_TYPES.to_string()),
         ("_rels/.rels", RELS.to_string()),

@@ -39,15 +39,9 @@ impl App {
                 let markdown = export::to_markdown(&doc);
                 self.write_export("md", markdown.as_bytes());
             }
-            ExportFormat::Docx => match export::docx::to_docx(&doc, export::docx::Profile::Manuscript) {
-                Ok(bytes) => self.write_export("docx", &bytes),
-                Err(e) => self.message = Some(format!("Export failed: {e}")),
-            },
-            ExportFormat::Vellum => match export::docx::to_docx(&doc, export::docx::Profile::Vellum) {
-                // A distinct name so it sits alongside the manuscript .docx.
-                Ok(bytes) => self.write_export("vellum.docx", &bytes),
-                Err(e) => self.message = Some(format!("Export failed: {e}")),
-            },
+            ExportFormat::Docx => self.write_docx(&doc, export::docx::Profile::Manuscript, "docx"),
+            // A distinct name so the Vellum .docx sits alongside the manuscript one.
+            ExportFormat::Vellum => self.write_docx(&doc, export::docx::Profile::Vellum, "vellum.docx"),
             ExportFormat::Scriv => {
                 // A `.scriv` is a bundle directory, not a single file.
                 let path = self.export_path("scriv");
@@ -55,6 +49,14 @@ impl App {
                     .and_then(|()| export::scriv::write_scriv(&doc, &path));
                 self.report_export(&path, result);
             }
+        }
+    }
+
+    /// Compile to a `.docx` in `profile` and write it to `export/<slug>.<ext>`.
+    fn write_docx(&mut self, doc: &Document, profile: export::docx::Profile, ext: &str) {
+        match export::docx::to_docx(doc, profile) {
+            Ok(bytes) => self.write_export(ext, &bytes),
+            Err(e) => self.message = Some(format!("Export failed: {e}")),
         }
     }
 
