@@ -10,7 +10,7 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use super::{Block, Document};
+use super::{inline_runs, xml_escape, Block, Document};
 use crate::frontmatter::Epigraph;
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -163,49 +163,6 @@ fn run(text: &str, bold: bool, italic: bool, size: Option<u32>) -> String {
     format!("<w:r>{rpr}<w:t xml:space=\"preserve\">{}</w:t></w:r>", xml_escape(text))
 }
 
-/// Split a line into runs by `*` (italic) and `**` (bold) markers — Quill's
-/// emphasis convention. Other text (including `_`) is taken literally.
-pub(super) fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
-    let mut runs = Vec::new();
-    let mut cur = String::new();
-    let (mut bold, mut italic) = (false, false);
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '*' {
-            if chars.get(i + 1) == Some(&'*') {
-                push_run(&mut runs, &mut cur, bold, italic);
-                bold = !bold;
-                i += 2;
-                continue;
-            }
-            push_run(&mut runs, &mut cur, bold, italic);
-            italic = !italic;
-            i += 1;
-            continue;
-        }
-        cur.push(chars[i]);
-        i += 1;
-    }
-    push_run(&mut runs, &mut cur, bold, italic);
-    // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
-    // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
-    if bold || italic {
-        return vec![(text.to_string(), false, false)];
-    }
-    runs
-}
-
-fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
-    if !cur.is_empty() {
-        runs.push((std::mem::take(cur), bold, italic));
-    }
-}
-
-pub(super) fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,19 +222,5 @@ mod tests {
         assert!(!xml.contains('*'), "no literal asterisks: {xml}");
         // XML special characters in the title are escaped.
         assert!(xml.contains("Red &lt;State&gt; Earth"), "title escaped");
-    }
-
-    #[test]
-    fn parses_nested_and_plain_emphasis() {
-        assert_eq!(inline_runs("plain"), vec![("plain".into(), false, false)]);
-        assert_eq!(
-            inline_runs("a *b* c"),
-            vec![("a ".into(), false, false), ("b".into(), false, true), (" c".into(), false, false)]
-        );
-        assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
-        // Underscores are literal (not emphasis), so snake_case survives.
-        assert_eq!(inline_runs("snake_case"), vec![("snake_case".into(), false, false)]);
-        // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
-        assert_eq!(inline_runs("5 * 3 = 15"), vec![("5 * 3 = 15".into(), false, false)]);
     }
 }

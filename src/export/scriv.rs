@@ -12,8 +12,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use super::docx::{inline_runs, xml_escape};
-use super::{Chapter, Document, Part};
+use super::{inline_runs, xml_escape, Chapter, Document, Part};
 
 /// Write `doc` as a Scrivener `.scriv` bundle at `bundle` (the `<name>.scriv`
 /// directory). Any existing bundle there is replaced so the export always
@@ -72,24 +71,21 @@ pub fn write_scriv(doc: &Document, bundle: &Path) -> std::io::Result<()> {
 /// A named part becomes a binder folder wrapping its chapters; an unnamed part
 /// (ungrouped body chapters) contributes its chapters directly, with no folder.
 fn part_items(part: &Part, data: &Path, n: &mut usize) -> std::io::Result<String> {
-    let Some(name) = &part.name else {
-        let mut out = String::new();
-        for chapter in &part.chapters {
-            out.push_str(&text_item(chapter, data, n)?);
-        }
-        return Ok(out);
-    };
-    let mut out = format!(
-        "<BinderItem UUID=\"{}\" Type=\"Folder\"><Title>{}</Title><Children>",
-        uuid(&format!("folder:{n}")),
-        xml_escape(name),
-    );
-    *n += 1;
+    let mut chapters = String::new();
     for chapter in &part.chapters {
-        out.push_str(&text_item(chapter, data, n)?);
+        chapters.push_str(&text_item(chapter, data, n)?);
     }
-    out.push_str("</Children></BinderItem>");
-    Ok(out)
+    // An unnamed part (ungrouped body chapters) contributes its chapters directly,
+    // with no folder; a named part wraps them in a binder folder.
+    let Some(name) = &part.name else {
+        return Ok(chapters);
+    };
+    let uuid = uuid(&format!("folder:{n}"));
+    *n += 1;
+    Ok(format!(
+        "<BinderItem UUID=\"{uuid}\" Type=\"Folder\"><Title>{}</Title><Children>{chapters}</Children></BinderItem>",
+        xml_escape(name),
+    ))
 }
 
 /// Write one chapter's `content.rtf` and return its `<BinderItem>` (a Text
@@ -146,11 +142,19 @@ fn rtf_paragraph(runs: &[(String, bool, bool)]) -> String {
     let mut out = String::from("\\pard\\sa180 ");
     for (text, bold, italic) in runs {
         let escaped = rtf_escape(text);
-        match (bold, italic) {
-            (true, true) => out.push_str(&format!("{{\\b\\i {escaped}}}")),
-            (true, false) => out.push_str(&format!("{{\\b {escaped}}}")),
-            (false, true) => out.push_str(&format!("{{\\i {escaped}}}")),
-            (false, false) => out.push_str(&escaped),
+        let tags = match (bold, italic) {
+            (true, true) => "\\b\\i ",
+            (true, false) => "\\b ",
+            (false, true) => "\\i ",
+            (false, false) => "",
+        };
+        if tags.is_empty() {
+            out.push_str(&escaped);
+        } else {
+            out.push('{');
+            out.push_str(tags);
+            out.push_str(&escaped);
+            out.push('}');
         }
     }
     out.push_str("\\par\n");

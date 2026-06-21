@@ -91,7 +91,9 @@ impl App {
         let mut body_parts: Vec<Part> = Vec::new();
         // Group consecutive body chapters by the part they're in, in reading order
         // — body chapters in no defined part form an unnamed (heading-less) group.
-        let mut group: Option<Option<usize>> = None;
+        // A fresh group opens whenever the part changes (`prev` starts unset so the
+        // first body chapter always opens one).
+        let mut prev: Option<Option<usize>> = None;
         for i in 0..self.chapter_count() {
             let chapter = self.export_chapter(i);
             match self.project.chapter_band(i) {
@@ -99,8 +101,8 @@ impl App {
                 Band::Back => back.push(chapter),
                 Band::Body => {
                     let part = parts.iter().position(|(_, range)| range.contains(&i));
-                    if group != Some(part) {
-                        group = Some(part);
+                    if prev != Some(part) {
+                        prev = Some(part);
                         body_parts.push(Part {
                             name: part.map(|p| parts[p].0.clone()),
                             chapters: Vec::new(),

@@ -127,6 +127,52 @@ pub(crate) fn strip_repeated_title(body: &str, title: &str) -> String {
     }
 }
 
+/// Split a line into runs by `*` (italic) and `**` (bold) markers — Quill's
+/// emphasis convention. Other text (including `_`) is taken literally. Shared by
+/// the Word and Scrivener writers, which carry emphasis through to their own
+/// run markup.
+fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
+    let mut runs = Vec::new();
+    let mut cur = String::new();
+    let (mut bold, mut italic) = (false, false);
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '*' {
+            if chars.get(i + 1) == Some(&'*') {
+                push_run(&mut runs, &mut cur, bold, italic);
+                bold = !bold;
+                i += 2;
+                continue;
+            }
+            push_run(&mut runs, &mut cur, bold, italic);
+            italic = !italic;
+            i += 1;
+            continue;
+        }
+        cur.push(chars[i]);
+        i += 1;
+    }
+    push_run(&mut runs, &mut cur, bold, italic);
+    // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
+    // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
+    if bold || italic {
+        return vec![(text.to_string(), false, false)];
+    }
+    runs
+}
+
+fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
+    if !cur.is_empty() {
+        runs.push((std::mem::take(cur), bold, italic));
+    }
+}
+
+/// Escape `& < >` for embedding text in XML (the `.docx` and `.scrivx` markup).
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 /// An epigraph as a Markdown block quote — each line prefixed `> `, the
 /// attribution on its own dimmed line — set apart from the surrounding prose.
 fn epigraph_block(epigraph: &Epigraph) -> String {
@@ -203,6 +249,25 @@ mod tests {
         );
         // No leading heading → untouched.
         assert_eq!(strip_repeated_title("Just prose.\n", "Title"), "Just prose.\n");
+    }
+
+    #[test]
+    fn parses_nested_and_plain_emphasis() {
+        assert_eq!(inline_runs("plain"), vec![("plain".into(), false, false)]);
+        assert_eq!(
+            inline_runs("a *b* c"),
+            vec![("a ".into(), false, false), ("b".into(), false, true), (" c".into(), false, false)]
+        );
+        assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
+        // Underscores are literal (not emphasis), so snake_case survives.
+        assert_eq!(inline_runs("snake_case"), vec![("snake_case".into(), false, false)]);
+        // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
+        assert_eq!(inline_runs("5 * 3 = 15"), vec![("5 * 3 = 15".into(), false, false)]);
+    }
+
+    #[test]
+    fn xml_escape_escapes_the_markup_chars() {
+        assert_eq!(xml_escape("a & b < c > d"), "a &amp; b &lt; c &gt; d");
     }
 
     #[test]
