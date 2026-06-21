@@ -149,6 +149,13 @@ impl Manifest {
         Epigraph::from_parts(self.epigraph.clone(), self.epigraph_by.clone())
     }
 
+    /// How many leading chapters are front matter (#185) — the offset of the
+    /// contiguous body block after the band reorder. The single source for the
+    /// front-to-body mapping the parts logic relies on.
+    pub fn front_chapter_count(&self) -> usize {
+        self.chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count()
+    }
+
     /// The configured TODO marker, defaulting to `xxx`.
     pub fn todo_marker(&self) -> &str {
         self.todo_marker.as_deref().unwrap_or("xxx")
@@ -164,13 +171,17 @@ impl Manifest {
     }
 
     /// The index of the part containing chapter `chapter_index` (0-based), or
-    /// `None` if no part's inclusive 1-based range covers it.
+    /// `None` if it's not in any part. Part ranges are 1-based positions among the
+    /// **body chapters** (#185) — front/back-matter sections belong to no part.
     pub fn part_of(&self, chapter_index: usize) -> Option<usize> {
-        let n = chapter_index + 1; // ranges are 1-based
-        self.parts
-            .as_ref()?
-            .iter()
-            .position(|p| p.chapters[0] <= n && n <= p.chapters[1])
+        if Band::of(self.chapters.get(chapter_index)?.role) != Band::Body {
+            return None; // sections aren't part of a part
+        }
+        // Body chapters are contiguous after the band reorder, so the body
+        // position is the offset past the front matter (saturating: a Body chapter
+        // always sits at or after `front`, but don't panic if that ever drifts).
+        let n = chapter_index.saturating_sub(self.front_chapter_count()) + 1;
+        self.parts.as_ref()?.iter().position(|p| p.chapters[0] <= n && n <= p.chapters[1])
     }
 }
 
@@ -417,9 +428,8 @@ impl Project {
     /// preserving the author's order within each band (a stable sort). Returns
     /// whether the order actually changed.
     ///
-    /// Note: the report's `parts` ranges are positional (1-based indices into this
-    /// list) and are not remapped here, so mixing sections with `parts` can shift
-    /// which chapters a part covers (tracked as a follow-up).
+    /// The body block lands contiguous after the front matter, which is what lets
+    /// the report's `parts` ranges map cleanly to body-chapter positions (#185).
     pub fn reorder_by_band(&mut self) -> bool {
         // A stable sort, so "changed" is exactly "wasn't already in band order" —
         // checked without cloning the file list.
@@ -796,11 +806,15 @@ mod tests {
     fn parts_round_trip_and_map_chapters_to_ranges() {
         let dir = temp_dir("parts");
         let _ = fs::remove_dir_all(&dir);
-        let mut project = Project::create(&dir).unwrap();
+        let mut project = Project::create(&dir).unwrap(); // 1 starter chapter
         assert!(project.manifest.parts.is_none());
         assert_eq!(project.manifest.part_label(), "part"); // default
         assert_eq!(project.manifest.part_of(0), None); // no parts → no mapping
 
+        // Four body chapters for the two parts to cover.
+        project.add_chapter(1, "Two").unwrap();
+        project.add_chapter(2, "Three").unwrap();
+        project.add_chapter(3, "Four").unwrap();
         project.manifest.part_label = Some("act".into());
         project.manifest.parts = Some(vec![
             Part { name: Some("The Gathering".into()), chapters: [1, 2], goal: Some(20_000) },
