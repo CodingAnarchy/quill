@@ -154,7 +154,6 @@ read/write a human-readable **story bible** kept in the project.
 
 ### Editing & workflow
 
-- Word-wrap soft-wrapped paragraphs to the focus column
 - Per-session and daily word-count goals (per chapter / part / book / project)
 
 ### Vim-style keybindings & modes

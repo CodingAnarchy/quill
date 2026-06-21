@@ -419,13 +419,10 @@ impl Pane for Editor<'_> {
 
         let buffer = app.edit_buffer();
         let height = column.height as usize;
-
-        // Vertically follow the cursor: keep it roughly centered in the viewport.
-        let total = buffer.line_count();
-        let cursor_line = buffer.cursor.line;
-        let top = cursor_line
-            .saturating_sub(height / 2)
-            .min(total.saturating_sub(height));
+        let wrap = width as usize;
+        // Feed navigation the same wrap column the screen uses (#143), so visual
+        // up/down move by the rows the author actually sees.
+        app.wrap_width.set(width);
 
         // Emphasis markers are hidden, except on the span the cursor sits in (so
         // it stays editable). Concealment shifts screen columns, so the cursor X
@@ -442,37 +439,94 @@ impl Pane for Editor<'_> {
 
         // Display-only header blocks drawn above each chapter's body: a chapter
         // divider (continuous view), the book epigraph (above chapter 0), and the
-        // chapter's own epigraph. Keyed by the buffer line they precede; injected
-        // into the rendered rows, so the cursor's row is tracked as we go.
+        // chapter's own epigraph. Keyed by the buffer line they precede.
         let inserts = header_inserts(app, column.width);
+        let header_rows = |line: usize| inserts.iter().find(|(at, _)| *at == line).map_or(0, |(_, b)| b.len());
+        let body_rows = |line: usize| crate::wrap::row_starts(&buffer.line(line), wrap).len();
 
+        let total = buffer.line_count();
+        let cursor_line = buffer.cursor.line;
+
+        // Where the cursor sits among its own line's visual rows.
+        let cline = buffer.line(cursor_line);
+        let cline_start = buffer.line_start_byte(cursor_line);
+        let cstarts = crate::wrap::row_starts(&cline, wrap);
+        let (cursor_subrow, _) = crate::wrap::visual_pos(&cline, &cstarts, cursor_byte - cline_start);
+
+        // Follow the cursor by *visual* row, keeping it roughly centered — but
+        // clamped so we never scroll past the top or leave blank space at the
+        // bottom. All three walks are bounded by the viewport, never the document.
+        let target_above = height / 2;
+        // Rows available above the cursor (capped at the viewport).
+        let mut above_avail = header_rows(cursor_line) + cursor_subrow;
+        let mut l = cursor_line;
+        while l > 0 && above_avail < height {
+            l -= 1;
+            above_avail += header_rows(l) + body_rows(l);
+        }
+        // Rows available below the cursor (capped at the viewport).
+        let mut below_avail = body_rows(cursor_line) - 1 - cursor_subrow;
+        let mut l = cursor_line;
+        while l + 1 < total && below_avail < height {
+            l += 1;
+            below_avail += header_rows(l) + body_rows(l);
+        }
+        // Place the cursor at `keep_above` rows from the top: centered, but pulled
+        // up when there's little below (fill the bottom) and clamped to what
+        // actually exists above (don't scroll past the start).
+        let keep_above = target_above
+            .max((height.saturating_sub(1)).saturating_sub(below_avail))
+            .min(above_avail);
+
+        // Walk back exactly `keep_above` rows to find the first line to render and
+        // how many of its rows to skip.
+        let mut acc = header_rows(cursor_line) + cursor_subrow;
+        let mut top = cursor_line;
+        while acc < keep_above && top > 0 {
+            top -= 1;
+            acc += header_rows(top) + body_rows(top);
+        }
+        let mut to_skip = acc.saturating_sub(keep_above);
+
+        // Emit visual rows from `top`, skipping `to_skip`, until the viewport fills.
         let mut lines: Vec<Line> = Vec::with_capacity(height);
         let mut cursor_row = None;
-        let mut i = top;
-        while lines.len() < height && i < total {
-            if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == i) {
+        let mut ll = top;
+        'fill: while lines.len() < height && ll < total {
+            if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == ll) {
                 for line in block {
-                    if lines.len() >= height {
-                        break;
+                    if to_skip > 0 {
+                        to_skip -= 1;
+                    } else if lines.len() < height {
+                        lines.push(line.clone());
+                    } else {
+                        break 'fill;
                     }
-                    lines.push(line.clone());
-                }
-                if lines.len() >= height {
-                    break;
                 }
             }
-            if i == cursor_line {
-                cursor_row = Some(lines.len() as u16);
-            }
-            lines.push(styled_line(
+            let body = styled_line(
                 buffer.syntax(),
-                buffer.line_start_byte(i),
-                &buffer.line(i),
+                buffer.line_start_byte(ll),
+                &buffer.line(ll),
                 &conceal,
                 search_matches,
                 current_match,
-            ));
-            i += 1;
+                wrap,
+            );
+            for (sub, line) in body.into_iter().enumerate() {
+                if to_skip > 0 {
+                    to_skip -= 1;
+                    continue;
+                }
+                if lines.len() >= height {
+                    break 'fill;
+                }
+                if ll == cursor_line && sub == cursor_subrow {
+                    cursor_row = Some(lines.len() as u16);
+                }
+                lines.push(line);
+            }
+            ll += 1;
         }
 
         let paragraph = Paragraph::new(lines).block(Block::default());
@@ -495,9 +549,12 @@ impl Pane for Editor<'_> {
         let editing = matches!(app.mode, Mode::Insert | Mode::EditMeta(_));
         if let (true, Some(row)) = (editing, cursor_row) {
             let screen_y = column.y + row;
+            // X within the cursor's *visual* row: measure from the row's start byte,
+            // not the logical line's, so wrapped rows place the cursor correctly.
+            let row_start = cstarts[cursor_subrow];
             let col_width = visible_width_before(
-                &buffer.line(cursor_line),
-                buffer.line_start_byte(cursor_line),
+                &cline[row_start..],
+                cline_start + row_start,
                 cursor_byte,
                 &conceal,
             );
@@ -584,11 +641,10 @@ fn divider_line(title: &str, width: u16) -> Line<'static> {
     ))
 }
 
-/// Build a styled line: split `text` (one line, no newline) into runs of equal
-/// style from the overlapping highlights, dropping any characters whose bytes
-/// fall in a `conceal` range (hidden emphasis markers). `line_start` is the
-/// line's absolute byte offset, since highlights and conceal ranges use document
-/// offsets.
+/// Soft-wrap a logical line into its visual rows (#143) and style each. `text` is
+/// one line (no newline); `line_start` its absolute byte offset (highlights,
+/// conceal, and match ranges use document offsets). Returns one [`Line`] per
+/// wrapped row.
 fn styled_line(
     syntax: &Syntax,
     line_start: usize,
@@ -596,17 +652,46 @@ fn styled_line(
     conceal: &[(usize, usize)],
     matches: &[ByteRange],
     current: Option<ByteRange>,
-) -> Line<'static> {
+    width: usize,
+) -> Vec<Line<'static>> {
     if text.is_empty() {
+        return vec![Line::raw("")];
+    }
+    let starts = crate::wrap::row_starts(text, width);
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, &rs)| {
+            let re = starts.get(i + 1).copied().unwrap_or(text.len());
+            styled_row(syntax, line_start, text, rs, re, conceal, matches, current)
+        })
+        .collect()
+}
+
+/// Style one visual row — the byte sub-range `[rs, re)` of `text` — into runs of
+/// equal style, dropping concealed (hidden-marker) characters.
+#[allow(clippy::too_many_arguments)]
+fn styled_row(
+    syntax: &Syntax,
+    line_start: usize,
+    text: &str,
+    rs: usize,
+    re: usize,
+    conceal: &[(usize, usize)],
+    matches: &[ByteRange],
+    current: Option<ByteRange>,
+) -> Line<'static> {
+    let seg = &text[rs..re];
+    if seg.is_empty() {
         return Line::raw("");
     }
-
-    let line_end = line_start + text.len();
-    let hls: Vec<Highlight> = syntax.highlights_in(line_start, line_end).copied().collect();
-    let concealed_here = conceal.iter().any(|&(s, e)| s < line_end && e > line_start);
-    let match_here = matches.iter().any(|&(s, e)| s < line_end && e > line_start);
+    let seg_start = line_start + rs;
+    let seg_end = line_start + re;
+    let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
+    let concealed_here = conceal.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let match_here = matches.iter().any(|&(s, e)| s < seg_end && e > seg_start);
     if hls.is_empty() && !concealed_here && !match_here {
-        return Line::raw(text.to_string());
+        return Line::raw(seg.to_string());
     }
 
     // Build runs character by character, since concealed chars are dropped and
@@ -614,8 +699,8 @@ fn styled_line(
     let mut spans: Vec<Span> = Vec::new();
     let mut run = String::new();
     let mut run_style = Style::default();
-    for (local_byte, ch) in text.char_indices() {
-        let abs = line_start + local_byte;
+    for (local_byte, ch) in seg.char_indices() {
+        let abs = seg_start + local_byte;
         if is_concealed(abs, conceal) {
             continue;
         }
@@ -894,6 +979,23 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    #[test]
+    fn long_paragraph_soft_wraps_within_the_focus_column() {
+        // One long logical line (a single paragraph, no internal newlines).
+        let long = "word ".repeat(60);
+        let app = app_with(&format!("{long}\n"));
+        let screen = render(&app, 100, 20);
+
+        // It appears on several rows (wrapped), not truncated to one... ("word word"
+        // matches body rows, not the status bar's "60 words" count).
+        let content_rows: Vec<&str> = screen.lines().filter(|l| l.contains("word word")).collect();
+        assert!(content_rows.len() > 1, "the long line wrapped:\n{screen}");
+        // ...and no rendered row is wider than the centered focus column (+ pad).
+        for row in content_rows {
+            assert!(row.trim_end().chars().count() <= 90, "row stays within the column: {row:?}");
+        }
     }
 
     #[test]

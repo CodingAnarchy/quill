@@ -17,6 +17,7 @@ mod report;
 mod syntax;
 mod ui;
 mod vcs;
+mod wrap;
 
 use std::io::{self, Stdout};
 use std::path::PathBuf;
