@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
+use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, RefFiles, Search, SearchStage};
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
@@ -346,6 +346,7 @@ fn status_style(status: Status) -> Style {
 #[allow(clippy::too_many_arguments)] // a chapter row's fields read clearer flat than boxed
 fn chapter_line(
     title: &str,
+    number: Option<usize>,
     words: usize,
     goal: Option<usize>,
     status: Option<Status>,
@@ -358,6 +359,11 @@ fn chapter_line(
         style = style.add_modifier(Modifier::REVERSED);
     }
     let marker = if is_active { "▸ " } else { "  " };
+    // A grouped body chapter (#181) shows its 1-based number; sections don't.
+    let label = match number {
+        Some(n) => format!("{marker}{n}. {title}"),
+        None => format!("{marker}{title}"),
+    };
     // With a goal (#146), show progress (a ✓ once reached); otherwise just the count.
     let count = match goal {
         Some(g) => format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
@@ -365,7 +371,7 @@ fn chapter_line(
     };
     // The selection highlight reverses every span on the row.
     let sel = |s: Style| if is_selected { s.add_modifier(Modifier::REVERSED) } else { s };
-    let mut spans = vec![Span::styled(format!("{marker}{title}  {count}"), style)];
+    let mut spans = vec![Span::styled(format!("{label}  {count}"), style)];
     // A front/back-matter section shows its role (#179) as a dim italic tag.
     if let Some(role) = role {
         let tag = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
@@ -463,14 +469,22 @@ fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
         )));
     }
     lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "CHAPTERS",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::raw(""));
     lines
+}
+
+/// A band header for the chapter pane (#181): "CHAPTERS" for the body — so an
+/// all-body project reads exactly as before — and "FRONT MATTER" / "BACK MATTER"
+/// for the section bands.
+fn band_header(band: Band) -> Line<'static> {
+    let label = match band {
+        Band::Front => "FRONT MATTER",
+        Band::Body => "CHAPTERS",
+        Band::Back => "BACK MATTER",
+    };
+    Line::from(Span::styled(
+        label.to_string(),
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+    ))
 }
 
 impl Pane for NavPane<'_> {
@@ -507,26 +521,59 @@ impl Pane for NavPane<'_> {
         let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
             .map(|i| app.chapter_word_count(i))
             .collect();
+        // Resolve each chapter's band once, like the counts above.
+        let bands: Vec<Band> = (0..counts.len()).map(|i| app.project.chapter_band(i)).collect();
 
+        // Group by band (#181) only when the project actually has sections, so an
+        // all-body project keeps the flat, un-numbered "CHAPTERS" list it had.
+        let grouped = bands.iter().any(|&b| b != Band::Body);
+        let mut shown_band: Option<Band> = None;
+        let mut body_n = 0usize;
         for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
+            let band = bands[i];
+            if shown_band != Some(band) {
+                if shown_band.is_some() {
+                    lines.push(Line::raw("")); // a gap between bands
+                }
+                lines.push(band_header(band));
+                lines.push(Line::raw(""));
+                shown_band = Some(band);
+            }
+            // Body chapters carry a 1-based number once the list is grouped;
+            // sections show their role instead.
+            let number = (grouped && band == Band::Body).then(|| {
+                body_n += 1;
+                body_n
+            });
+
             let is_active = i == active;
             let is_selected = nav_selected == Some(i);
             let status = app.project.chapter_status(i);
             let goal = app.project.chapter_goal(i);
             let role = app.project.chapter_role(i);
-            lines.push(chapter_line(&chapter.title, counts[i], goal, status, role, is_active, is_selected));
+            lines.push(chapter_line(&chapter.title, number, counts[i], goal, status, role, is_active, is_selected));
             if is_active {
                 let skip = redundant_title_heading(headings, &chapter.title);
                 lines.extend(heading_outline_lines(headings, current_heading, skip));
             }
         }
 
-        // Rolled-up project total.
+        // Rolled-up totals: the body word count, kept clear of any front/back
+        // matter so the manuscript total isn't muddied (#181).
+        let total: usize = counts.iter().sum();
+        let body_total: usize = bands
+            .iter()
+            .zip(&counts)
+            .filter(|(&b, _)| b == Band::Body)
+            .map(|(_, &c)| c)
+            .sum();
+        let total_line = if total != body_total {
+            format!("{body_total} words · {} in sections", total - body_total)
+        } else {
+            format!("{total} words")
+        };
         lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            format!("{} words", counts.iter().sum::<usize>()),
-            Style::default().fg(Color::DarkGray),
-        )));
+        lines.push(Line::from(Span::styled(total_line, Style::default().fg(Color::DarkGray))));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }
