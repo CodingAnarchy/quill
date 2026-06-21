@@ -1069,6 +1069,25 @@ fn character_pass_writes_bible_files_and_summarizes() {
     fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn failed_bible_write_is_reported_not_counted_as_success() {
+    let (mut app, dir) = two_chapter_app("char-write-fail");
+    // Make `bible` a regular file so the `bible/characters` dir can't be created
+    // — every profile write then fails.
+    fs::write(dir.join("bible"), "x").unwrap();
+
+    app.apply_characters(Ok(vec![Character { name: "Mara".into(), ..Default::default() }]));
+
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Couldn't write"),
+        "a failed write is surfaced: {:?}",
+        app.message
+    );
+    assert!(app.overlay.is_none(), "no success summary when the write failed");
+    assert!(!matches!(app.mode, Mode::BibleReview(_)), "a write failure isn't a conflict");
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// Set up a project with a clean, then hand-edited, Mara profile; a second pass
 /// with new content must not overwrite it.
 fn conflict_app(name: &str) -> (App, PathBuf, PathBuf) {

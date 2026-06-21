@@ -16,6 +16,29 @@ use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::mode::{AiAction, Command, Palette, PaletteItem};
 
+/// The outcome of staging one generated file (#153) — a bible profile or a
+/// submission artifact. Distinguishes a successful write from a hand-edit
+/// conflict (queue for review) and from an I/O failure (surface to the author),
+/// so a failed write is never miscounted as success.
+enum Staged {
+    /// Written to disk.
+    Wrote,
+    /// The generated block was hand-edited since the last pass; queued for review.
+    Conflict(BibleConflict),
+    /// The write (or its parent-directory creation) failed; carries an
+    /// author-facing description.
+    Failed(String),
+}
+
+/// A one-line status message for one or more failed writes (#153).
+fn write_failure_message(failures: &[String]) -> String {
+    match failures.split_first() {
+        Some((first, [])) => format!("Couldn't write {first}"),
+        Some((first, rest)) => format!("Couldn't write {} files — first: {first}", rest.len() + 1),
+        None => String::new(),
+    }
+}
+
 /// Shown when the local backend is selected but wasn't compiled in. One source
 /// so the fast-fail (UI thread) and the `build_local` stub can't drift.
 const LOCAL_UNAVAILABLE: &str =
@@ -421,16 +444,20 @@ impl App {
         let mut written = 0;
         let mut drift = 0;
         let mut conflicts = Vec::new();
+        let mut failures = Vec::new();
         for c in &chars {
             drift += c.drift.len();
             let path = dir.join(format!("{}.md", bible::slug(&c.name)));
             match self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)) {
-                Ok(()) => written += 1,
-                Err(conflict) => conflicts.push(conflict),
+                Staged::Wrote => written += 1,
+                Staged::Conflict(conflict) => conflicts.push(conflict),
+                Staged::Failed(msg) => failures.push(msg),
             }
         }
 
-        if conflicts.is_empty() {
+        if !failures.is_empty() {
+            self.message = Some(write_failure_message(&failures));
+        } else if conflicts.is_empty() {
             self.show_ai(character_summary_lines(chars.len(), written, drift));
         } else {
             let pending = conflicts.len();
@@ -439,30 +466,39 @@ impl App {
         }
     }
 
-    /// Write a story-bible file, or return a conflict if its generated block was
-    /// hand-edited since the last pass. `render` receives the author's preserved
-    /// Notes block and returns the full file content. `Ok(true)` when written.
-    /// Shared by the character and continuity passes.
-    fn stage_bible(
-        &self,
-        path: PathBuf,
-        name: &str,
-        render: impl Fn(&str) -> String,
-    ) -> Result<(), BibleConflict> {
+    /// Stage a generated file: write it, or report a hand-edit conflict, or
+    /// report an I/O failure (#153). `render` receives the author's preserved
+    /// Notes block and returns the full file content. Shared by the character,
+    /// continuity/setting/scaffold, and submission passes.
+    fn stage_bible(&self, path: PathBuf, name: &str, render: impl Fn(&str) -> String) -> Staged {
         let existing = std::fs::read_to_string(&path).ok();
         let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
         let proposed = render(&notes);
         if let Some(current) = &existing {
             if bible::is_hand_edited(current) {
                 let diff = unified_diff(current, &proposed);
-                return Err(BibleConflict { path, name: name.to_string(), proposed, diff });
+                return Staged::Conflict(BibleConflict { path, name: name.to_string(), proposed, diff });
             }
         }
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        match self.write_file(&path, &proposed) {
+            Ok(()) => Staged::Wrote,
+            Err(msg) => Staged::Failed(msg),
         }
-        let _ = std::fs::write(&path, &proposed);
-        Ok(())
+    }
+
+    /// Write `content` to `path`, creating parent directories. On failure returns
+    /// an author-facing message (the project-relative path plus the OS error), so
+    /// the caller can surface it instead of silently dropping the write (#153).
+    fn write_file(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", self.display_path(path)))?;
+        }
+        std::fs::write(path, content).map_err(|e| format!("{}: {e}", self.display_path(path)))
+    }
+
+    /// A project-relative label for `path`, for author-facing messages.
+    fn display_path(&self, path: &std::path::Path) -> String {
+        path.strip_prefix(&self.project.root).unwrap_or(path).display().to_string()
     }
 
     /// Count a character's name/alias mentions across the manuscript and record
@@ -623,16 +659,20 @@ impl App {
         let today = date::iso(date::today());
         let mut written = Vec::new();
         let mut conflicts = Vec::new();
+        let mut failures = Vec::new();
         for (kind, file, text) in sub.artifacts() {
             let path = self.project.root.join("submission").join(file);
             let title = format!("title: {kind}\n");
             match self.stage_bible(path, kind, |notes| bible::render(&title, text, notes, &today)) {
-                Ok(()) => written.push(format!("submission/{file}")),
-                Err(c) => conflicts.push(c),
+                Staged::Wrote => written.push(format!("submission/{file}")),
+                Staged::Conflict(c) => conflicts.push(c),
+                Staged::Failed(msg) => failures.push(msg),
             }
         }
 
-        if conflicts.is_empty() {
+        if !failures.is_empty() {
+            self.message = Some(write_failure_message(&failures));
+        } else if conflicts.is_empty() {
             let mut lines = vec![Line::raw("Submission material written:"), Line::raw("")];
             lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
             lines.push(Line::raw(""));
@@ -671,13 +711,22 @@ impl App {
         self.accumulate_triage(&findings);
         self.pending_findings = findings;
         match self.stage_bible(path, name, render) {
-            Ok(()) => self.open_findings(),
-            Err(conflict) => {
+            Staged::Wrote => self.open_findings(),
+            Staged::Conflict(conflict) => {
                 self.mode = Mode::BibleReview(Box::new(BibleReview {
                     conflicts: vec![conflict],
                     editing: None,
                 }));
                 self.message = Some(format!("{name} edited — review, then findings"));
+            }
+            Staged::Failed(msg) => {
+                // The analysis still holds, so show the findings — but report the
+                // failed write instead of claiming it was saved to the bible.
+                self.message = Some(write_failure_message(&[msg]));
+                let items = std::mem::take(&mut self.pending_findings);
+                if !items.is_empty() {
+                    self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
+                }
             }
         }
     }
@@ -728,12 +777,20 @@ impl App {
         // Diff view: choose how to resolve the front conflict.
         match key.code {
             KeyCode::Char('o') => {
-                if let Mode::BibleReview(r) = &self.mode {
-                    if let Some(front) = r.conflicts.first() {
-                        let _ = std::fs::write(&front.path, &front.proposed);
-                    }
+                let failed = if let Mode::BibleReview(r) = &self.mode {
+                    r.conflicts
+                        .first()
+                        .and_then(|front| self.write_file(&front.path, &front.proposed).err())
+                } else {
+                    None
+                };
+                // A failed overwrite keeps the conflict (so the author can retry)
+                // and reports the error rather than silently advancing.
+                if let Some(msg) = failed {
+                    self.message = Some(write_failure_message(&[msg]));
+                } else {
+                    self.advance_bible_review();
                 }
-                self.advance_bible_review();
             }
             KeyCode::Char('k') => self.advance_bible_review(),
             KeyCode::Char('e') => {
@@ -752,12 +809,22 @@ impl App {
         }
     }
 
-    /// Persist the edited proposed version, then advance to the next conflict.
+    /// Persist the edited proposed version, then advance to the next conflict. A
+    /// failed write keeps the conflict and reports the error (#153).
     fn save_bible_edit(&mut self) {
+        let failed = if let Mode::BibleReview(r) = &self.mode {
+            r.conflicts
+                .first()
+                .zip(r.editing.as_ref())
+                .and_then(|(front, buf)| self.write_file(&front.path, &buf.text()).err())
+        } else {
+            None
+        };
+        if let Some(msg) = failed {
+            self.message = Some(write_failure_message(&[msg]));
+            return; // leave the editor open on the unsaved conflict
+        }
         if let Mode::BibleReview(r) = &mut self.mode {
-            if let (Some(buf), Some(front)) = (&r.editing, r.conflicts.first()) {
-                let _ = std::fs::write(&front.path, buf.text());
-            }
             r.editing = None;
         }
         self.advance_bible_review();
