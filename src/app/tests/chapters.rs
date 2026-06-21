@@ -787,6 +787,40 @@ fn word_counts_roll_up_and_update_live() {
 }
 
 #[test]
+fn the_report_counts_body_words_not_section_words() {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-rep-sect-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[goals]\nwords = 100\nchapters = 5\n\n\
+         [[chapters]]\ntitle = \"Body\"\nfile = \"b.md\"\n\n\
+         [[chapters]]\ntitle = \"Appendix\"\nfile = \"a.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("b.md"), "one two three four five\n").unwrap(); // 5 body words
+    fs::write(dir.join("a.md"), "---\nrole: appendix\n---\nalpha beta gamma\n").unwrap(); // 3 section words
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let app = App::new(buffer, project);
+
+    assert_eq!(app.body_word_count(), 5);
+    assert_eq!(app.section_word_count(), 3);
+
+    let report: String = app
+        .report_lines()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(report.contains("5 / 100  words"), "the goal measures body words only:\n{report}");
+    assert!(report.contains("(+3 words in front/back matter, not counted)"), "{report}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn word_count_cache_tracks_add_and_delete() {
     let (mut app, dir) = two_chapter_app("counts-structure");
     app.on_key(ctrl('g'));

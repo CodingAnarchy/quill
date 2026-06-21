@@ -16,7 +16,8 @@ impl App {
         };
         report::lines(
             &self.project.manifest,
-            self.project_word_count(),
+            self.body_word_count(),    // the goal & projection track the novel (#182)
+            self.section_word_count(), // front/back matter, shown but not counted
             self.project.body_chapter_count(), // front/back matter aren't chapters (#180)
             self.count_todo(),
             &momentum,
