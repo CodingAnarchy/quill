@@ -529,6 +529,16 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
 }
 
 #[test]
+fn export_is_guarded_in_the_continuous_view() {
+    let (mut app, dir) = two_chapter_app("export-cont");
+    app.on_key(ctrl('l')); // enter the continuous view
+    app.export_markdown();
+    assert!(app.message.as_deref().unwrap_or("").contains("Leave the continuous view"), "{:?}", app.message);
+    assert!(!dir.join("export").exists(), "no file written from the continuous view");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn parts_map_to_body_chapters_not_sections() {
     // A project with a prologue + 4 body chapters + an appendix, listed out of
     // band order, and two parts over the body chapters (#185).

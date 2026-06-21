@@ -38,6 +38,13 @@ impl App {
     /// Compile the manuscript to a single Markdown file under `export/` (#190),
     /// overwriting any previous one so it always reflects the current project.
     pub(crate) fn export_markdown(&mut self) {
+        // The continuous view's edits live in the windowed buffer, not the
+        // per-chapter ones export reads — compile from the single-chapter view so
+        // nothing is exported stale (same constraint as undo / structure edits).
+        if self.manuscript.is_some() {
+            self.message = Some("Leave the continuous view (Ctrl-l) before exporting.".into());
+            return;
+        }
         let markdown = export::to_markdown(&self.export_document());
         let path = self
             .project
