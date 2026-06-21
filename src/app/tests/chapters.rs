@@ -391,6 +391,45 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
 }
 
 #[test]
+fn setting_a_section_role_persists_clears_and_survives_reopen() {
+    use crate::frontmatter::Role;
+    let (mut app, dir) = two_chapter_app("role-set");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1 (not active)
+    app.on_key(key(KeyCode::Char('S'))); // section-role prompt
+    typed(&mut app, "prologue");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.chapter_role(1), Some(Role::Prologue));
+    assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("role: prologue"));
+    // Read back from front matter on reopen.
+    assert_eq!(Project::open(&dir).unwrap().chapter_role(1), Some(Role::Prologue));
+
+    // Blank input clears it back to a body chapter.
+    app.on_key(key(KeyCode::Char('S')));
+    for _ in 0..8 {
+        app.on_key(key(KeyCode::Backspace)); // clear the prefilled "prologue"
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.project.chapter_role(1), None);
+    assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("role:"));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_unknown_section_role_is_rejected_without_changing_it() {
+    let (mut app, dir) = two_chapter_app("role-bad");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('S')));
+    typed(&mut app, "chapterish");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.message.as_deref().unwrap_or("").contains("Unknown section role"), "{:?}", app.message);
+    assert_eq!(app.project.chapter_role(1), None, "an unknown role leaves it a body chapter");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn metadata_survives_reopening_the_project() {
     let (mut app, dir) = two_chapter_app("meta-reopen");
     app.on_key(ctrl('g'));

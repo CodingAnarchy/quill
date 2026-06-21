@@ -93,10 +93,16 @@ byte-for-byte.
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
 (draft → revised → final), **m** edit the one-line summary, **v** set the POV
-character, **l** set a word-count goal, **g** epigraph (quotation, then
-attribution). Book/series metadata
+character, **l** set a word-count goal, **S** set a section role (blank = body),
+**g** epigraph (quotation, then attribution). Book/series metadata
 (shown in the pane header): **t** book title, **b** subtitle, **w** author,
 **e** series, **G** book epigraph.
+
+A file can be marked as a non-chapter **section** (#53) with **S**: front matter
+(`foreword`, `preface`, `introduction`, `prologue`) or back matter (`epilogue`,
+`afterword`, `acknowledgments`, `appendix`, `glossary`); blank clears it back to a
+body chapter. The role shows as a dim tag in the pane. (Role-aware ordering,
+numbering, and report handling build on this in later work.)
 
 To write with your notes open, the browser opens files in a side pane: **o**
 opens the selected chapter beside the editor (compare two chapters), and **f**

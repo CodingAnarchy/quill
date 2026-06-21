@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::frontmatter::{Epigraph, FrontMatter, Status};
+use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, RefFiles, Search, SearchStage};
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
@@ -343,11 +343,13 @@ fn status_style(status: Status) -> Style {
 
 /// One chapter row: a marker for the active chapter, its word count, and a
 /// colored status badge — reversed while it's the Nav-mode selection.
+#[allow(clippy::too_many_arguments)] // a chapter row's fields read clearer flat than boxed
 fn chapter_line(
     title: &str,
     words: usize,
     goal: Option<usize>,
     status: Option<Status>,
+    role: Option<Role>,
     is_active: bool,
     is_selected: bool,
 ) -> Line<'static> {
@@ -362,6 +364,14 @@ fn chapter_line(
         None => words.to_string(),
     };
     let mut spans = vec![Span::styled(format!("{marker}{title}  {count}"), style)];
+    // A front/back-matter section shows its role (#179) as a dim italic tag.
+    if let Some(role) = role {
+        let mut tag = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+        if is_selected {
+            tag = tag.add_modifier(Modifier::REVERSED);
+        }
+        spans.push(Span::styled(format!(" · {}", role.label()), tag));
+    }
     if let Some(status) = status {
         let mut badge = status_style(status);
         if is_selected {
@@ -508,7 +518,8 @@ impl Pane for NavPane<'_> {
             let is_selected = nav_selected == Some(i);
             let status = app.project.chapter_status(i);
             let goal = app.project.chapter_goal(i);
-            lines.push(chapter_line(&chapter.title, counts[i], goal, status, is_active, is_selected));
+            let role = app.project.chapter_role(i);
+            lines.push(chapter_line(&chapter.title, counts[i], goal, status, role, is_active, is_selected));
             if is_active {
                 let skip = redundant_title_heading(headings, &chapter.title);
                 lines.extend(heading_outline_lines(headings, current_heading, skip));
