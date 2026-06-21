@@ -188,6 +188,11 @@ fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
         i += 1;
     }
     push_run(&mut runs, &mut cur, bold, italic);
+    // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
+    // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
+    if bold || italic {
+        return vec![(text.to_string(), false, false)];
+    }
     runs
 }
 
@@ -270,5 +275,7 @@ mod tests {
         assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
         // Underscores are literal (not emphasis), so snake_case survives.
         assert_eq!(inline_runs("snake_case"), vec![("snake_case".into(), false, false)]);
+        // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
+        assert_eq!(inline_runs("5 * 3 = 15"), vec![("5 * 3 = 15".into(), false, false)]);
     }
 }
