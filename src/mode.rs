@@ -276,6 +276,8 @@ pub(crate) enum Pending {
 pub(crate) enum MetaField {
     Summary { at: usize },
     Pov { at: usize },
+    /// The chapter's word-count goal (#146).
+    Goal { at: usize },
     ChapterEpigraph { at: usize },
     ChapterEpigraphBy { at: usize },
     BookTitle,

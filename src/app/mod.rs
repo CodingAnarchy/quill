@@ -730,6 +730,7 @@ impl App {
     /// current word total, and today's added / removed within it.
     fn part_deltas(&self) -> Vec<PartDelta> {
         let words = self.part_word_counts();
+        let goals = self.project.manifest.parts.as_ref();
         self.part_ranges()
             .into_iter()
             .enumerate()
@@ -737,6 +738,7 @@ impl App {
             .map(|(i, (name, _))| PartDelta {
                 name,
                 words: words[i],
+                goal: goals.and_then(|p| p.get(i)).and_then(|p| p.goal),
                 added: self.part_added[i],
                 removed: self.part_removed[i],
             })
@@ -1132,6 +1134,11 @@ impl App {
             MetaField::Pov { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_pov(text));
             }
+            MetaField::Goal { at } => {
+                // A blank or non-positive value clears the goal.
+                let goal = text.trim().parse::<usize>().ok().unwrap_or(0);
+                self.edit_chapter_meta(at, |fm| fm.set_goal(goal));
+            }
             MetaField::ChapterEpigraph { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_epigraph_text(text));
             }
@@ -1239,6 +1246,11 @@ impl App {
             KeyCode::Char('g') => {
                 let text = self.chapter_epigraph(sel).map(|e| e.text).unwrap_or_default();
                 self.edit_meta(MetaField::ChapterEpigraph { at: sel }, "chapter epigraph", text, Some(sel));
+            }
+            // Set the chapter's word-count goal (#146); blank clears it.
+            KeyCode::Char('l') => {
+                let prefill = self.project.chapter_goal(sel).map(|g| g.to_string()).unwrap_or_default();
+                self.open_prompt(Pending::SetMeta(MetaField::Goal { at: sel }), "Word goal: ", &prefill, Some(sel));
             }
             // Project-level book / series metadata.
             KeyCode::Char('t') => {

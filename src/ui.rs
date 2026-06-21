@@ -263,6 +263,7 @@ fn status_style(status: Status) -> Style {
 fn chapter_line(
     title: &str,
     words: usize,
+    goal: Option<usize>,
     status: Option<Status>,
     is_active: bool,
     is_selected: bool,
@@ -272,7 +273,12 @@ fn chapter_line(
         style = style.add_modifier(Modifier::REVERSED);
     }
     let marker = if is_active { "▸ " } else { "  " };
-    let mut spans = vec![Span::styled(format!("{marker}{title}  {words}"), style)];
+    // With a goal (#146), show progress (a ✓ once reached); otherwise just the count.
+    let count = match goal {
+        Some(g) => format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
+        None => words.to_string(),
+    };
+    let mut spans = vec![Span::styled(format!("{marker}{title}  {count}"), style)];
     if let Some(status) = status {
         let mut badge = status_style(status);
         if is_selected {
@@ -386,7 +392,8 @@ impl Pane for NavPane<'_> {
             let is_active = i == active;
             let is_selected = nav_selected == Some(i);
             let status = app.project.chapter_status(i);
-            lines.push(chapter_line(&chapter.title, counts[i], status, is_active, is_selected));
+            let goal = app.project.chapter_goal(i);
+            lines.push(chapter_line(&chapter.title, counts[i], goal, status, is_active, is_selected));
             if is_active {
                 let skip = redundant_title_heading(headings, &chapter.title);
                 lines.extend(heading_outline_lines(headings, current_heading, skip));
@@ -1097,6 +1104,21 @@ mod tests {
         assert!(screen.contains("Three"), "screen:\n{screen}");
         // The active chapter (index 0) carries the active marker.
         assert!(screen.contains("▸ One"), "screen:\n{screen}");
+    }
+
+    #[test]
+    fn outline_shows_chapter_goal_progress() {
+        let mut app = app_with_chapters(&["One", "Two"], "alpha beta gamma\n"); // 3 words, active
+        app.outline_visible = true;
+
+        app.project.manifest.chapters[0].goal = Some(10);
+        let screen = render(&app, 90, 12);
+        assert!(screen.contains("3 / 10"), "progress toward the goal:\n{screen}");
+
+        // A reached goal is marked.
+        app.project.manifest.chapters[0].goal = Some(2);
+        let screen = render(&app, 90, 12);
+        assert!(screen.contains("3 / 2 ✓"), "reached goal marked:\n{screen}");
     }
 
     #[test]
