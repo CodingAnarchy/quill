@@ -17,6 +17,7 @@ impl App {
             item("Manuscript (Markdown)", "One compiled .md file — hand off or convert", ExportFormat::Markdown),
             item("Word (.docx)", "Standard manuscript format", ExportFormat::Docx),
             item("Scrivener (.scriv)", "A project bundle — binder, parts, chapters", ExportFormat::Scriv),
+            item("Vellum (.docx)", "Word tuned for Vellum — chapters split on Heading 1", ExportFormat::Vellum),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "Export", items, selected: 0 }));
     }
@@ -38,8 +39,13 @@ impl App {
                 let markdown = export::to_markdown(&doc);
                 self.write_export("md", markdown.as_bytes());
             }
-            ExportFormat::Docx => match export::docx::to_docx(&doc) {
+            ExportFormat::Docx => match export::docx::to_docx(&doc, export::docx::Profile::Manuscript) {
                 Ok(bytes) => self.write_export("docx", &bytes),
+                Err(e) => self.message = Some(format!("Export failed: {e}")),
+            },
+            ExportFormat::Vellum => match export::docx::to_docx(&doc, export::docx::Profile::Vellum) {
+                // A distinct name so it sits alongside the manuscript .docx.
+                Ok(bytes) => self.write_export("vellum.docx", &bytes),
                 Err(e) => self.message = Some(format!("Export failed: {e}")),
             },
             ExportFormat::Scriv => {

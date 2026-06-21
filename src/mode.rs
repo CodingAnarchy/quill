@@ -121,6 +121,8 @@ pub(crate) enum ExportFormat {
     Docx,
     /// A Scrivener `.scriv` project bundle (#192).
     Scriv,
+    /// A Word `.docx` tuned for Vellum import — chapter titles as Heading 1 (#193).
+    Vellum,
 }
 
 /// The AI actions reachable from the AI palette.
