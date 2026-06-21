@@ -47,6 +47,11 @@ pub struct ChapterEntry {
     pub summary: Option<String>,
     #[serde(skip)]
     pub pov: Option<String>,
+    /// Cached chapter word-count goal (#146), read from front matter at open and
+    /// kept current as the author edits it. Transient like the fields above — the
+    /// chapter file is the source of truth.
+    #[serde(skip)]
+    pub goal: Option<usize>,
 }
 
 /// The author's writing goals (see [`docs/progress-reports.md`]). Pages are
@@ -77,6 +82,10 @@ pub struct Part {
     pub name: Option<String>,
     /// Inclusive 1-based chapter range `[start, end]`.
     pub chapters: [usize; 2],
+    /// Optional word-count goal for the part (#146), set in `book.toml`. When
+    /// present, the progress report shows the part's words against it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<usize>,
 }
 
 /// The on-disk manifest (`book.toml`), deserialized.
@@ -253,6 +262,7 @@ impl Project {
             status: None,
             summary: None,
             pov: None,
+            goal: None,
         };
         let path = self.root.join(&entry.file);
         if !path.exists() {
@@ -359,6 +369,11 @@ impl Project {
             .and_then(|c| c.pov.as_deref())
     }
 
+    /// The chapter's word-count goal (#146), if set.
+    pub fn chapter_goal(&self, index: usize) -> Option<usize> {
+        self.manifest.chapters.get(index).and_then(|c| c.goal)
+    }
+
     /// Copy a chapter's managed metadata into its cache from a [`FrontMatter`]
     /// (used after the active chapter's front matter is edited in its buffer).
     pub fn cache_chapter_meta(&mut self, index: usize, front: Option<&FrontMatter>) {
@@ -366,6 +381,7 @@ impl Project {
             chapter.status = front.and_then(|f| f.status());
             chapter.summary = front.and_then(|f| f.summary());
             chapter.pov = front.and_then(|f| f.pov());
+            chapter.goal = front.and_then(|f| f.goal());
         }
     }
 
@@ -440,6 +456,7 @@ impl Project {
                 status: None,
                 summary: None,
                 pov: None,
+                goal: None,
             },
         );
         self.save_manifest()
@@ -504,6 +521,7 @@ impl Project {
                 status: None,
                 summary: None,
                 pov: None,
+                goal: None,
             })
             .collect();
         let active = chapters[0].file.clone();
@@ -714,8 +732,8 @@ mod tests {
 
         project.manifest.part_label = Some("act".into());
         project.manifest.parts = Some(vec![
-            Part { name: Some("The Gathering".into()), chapters: [1, 2] },
-            Part { name: None, chapters: [3, 4] },
+            Part { name: Some("The Gathering".into()), chapters: [1, 2], goal: Some(20_000) },
+            Part { name: None, chapters: [3, 4], goal: None },
         ]);
         project.save_manifest().unwrap();
 
@@ -736,6 +754,8 @@ mod tests {
         let parts = reopened.manifest.parts.as_ref().unwrap();
         assert_eq!(parts[0].name.as_deref(), Some("The Gathering"));
         assert_eq!(parts[0].chapters, [1, 2]);
+        assert_eq!(parts[0].goal, Some(20_000), "part goal round-trips (#146)");
+        assert_eq!(parts[1].goal, None);
         // Chapter index 0 (chapter 1) is in part 0; index 2 (chapter 3) in part 1.
         assert_eq!(reopened.manifest.part_of(0), Some(0));
         assert_eq!(reopened.manifest.part_of(2), Some(1));

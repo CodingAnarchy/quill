@@ -24,10 +24,11 @@ pub struct Momentum {
 }
 
 /// One part's line in the "part deltas" block: its display name, current word
-/// total, and today's added / removed within it.
+/// total, an optional word-count goal (#146), and today's added / removed.
 pub struct PartDelta {
     pub name: String,
     pub words: usize,
+    pub goal: Option<usize>,
     pub added: usize,
     pub removed: usize,
 }
@@ -169,8 +170,14 @@ fn part_lines(parts: &[PartDelta], label: &str) -> Vec<Line<'static>> {
 
     let mut out = vec![Line::raw(format!("{} deltas:", label.to_lowercase()))];
     for p in parts {
+        // When a part has a goal (#146), show its words against it; otherwise
+        // just the count.
+        let target = match p.goal {
+            Some(g) => format!(" / {} ( {} )", thousands(g as i64), percent(p.words, g)),
+            None => String::new(),
+        };
         let mut spans = vec![Span::raw(format!(
-            "  {name:<name_w$}  {words:>words_w$} words   ",
+            "  {name:<name_w$}  {words:>words_w$} words{target}   ",
             name = p.name,
             words = thousands(p.words as i64),
         ))];
@@ -337,8 +344,8 @@ mod tests {
         let mut m = manifest();
         m.part_label = Some("Act".into()); // header should lowercase to "act deltas:"
         let parts = vec![
-            PartDelta { name: "The Gathering".into(), words: 12_450, added: 1_486, removed: 159 },
-            PartDelta { name: "Part 2".into(), words: 8_200, added: 12, removed: 16 },
+            PartDelta { name: "The Gathering".into(), words: 12_450, goal: Some(15_000), added: 1_486, removed: 159 },
+            PartDelta { name: "Part 2".into(), words: 8_200, goal: None, added: 12, removed: 16 },
         ];
         let rows = lines(&m, 163_204, 56, 12, &momentum(), &parts, today);
         let report = text(&rows);
@@ -346,6 +353,9 @@ mod tests {
         assert!(report.contains("act deltas:"), "{report}");
         assert!(report.contains("The Gathering"), "{report}");
         assert!(report.contains("12,450 words"), "{report}");
+        // The part with a goal shows its progress; the one without doesn't (#146).
+        assert!(report.contains("12,450 words / 15,000 ( 83.00 % )"), "{report}");
+        assert!(report.contains("8,200 words   "), "no-goal part shows just the count: {report}");
 
         // The first part is a net gain (green +1,327), the second a loss (red -4).
         let gain = rows.iter().find(|l| text(std::slice::from_ref(l)).contains("The Gathering")).unwrap();

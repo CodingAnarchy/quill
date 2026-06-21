@@ -411,6 +411,31 @@ fn editing_a_non_active_chapters_summary_writes_immediately() {
 }
 
 #[test]
+fn setting_a_chapter_word_goal_persists_and_clears() {
+    let (mut app, dir) = two_chapter_app("goal-set");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1 (not active)
+    app.on_key(key(KeyCode::Char('l'))); // word-goal prompt
+    typed(&mut app, "2500");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.chapter_goal(1), Some(2500));
+    assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("goal: 2500"));
+    // Survives a reopen (read back from front matter).
+    assert_eq!(Project::open(&dir).unwrap().chapter_goal(1), Some(2500));
+
+    // Clearing the field (blank input) removes the goal.
+    app.on_key(key(KeyCode::Char('l')));
+    for _ in 0..6 {
+        app.on_key(key(KeyCode::Backspace)); // clear the prefilled "2500"
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.project.chapter_goal(1), None, "blank clears the goal");
+    assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("goal:"));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn metadata_survives_reopening_the_project() {
     let (mut app, dir) = two_chapter_app("meta-reopen");
     app.on_key(ctrl('g'));

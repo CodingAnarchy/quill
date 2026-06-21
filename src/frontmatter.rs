@@ -293,6 +293,20 @@ impl FrontMatter {
         self.put_text("pov", pov);
     }
 
+    /// The chapter's word-count goal, if set (#146). A non-positive or
+    /// unparseable value reads as "no goal".
+    pub fn goal(&self) -> Option<usize> {
+        self.get("goal").and_then(|v| v.trim().parse().ok()).filter(|&n| n > 0)
+    }
+
+    /// Set the chapter's word-count goal; `None` clears it.
+    pub fn set_goal(&mut self, goal: Option<usize>) {
+        match goal {
+            Some(n) => self.set("goal", &n.to_string()),
+            None => self.remove("goal"),
+        }
+    }
+
     /// The chapter epigraph, if a quotation is set. The attribution is optional.
     pub fn epigraph(&self) -> Option<Epigraph> {
         Epigraph::from_parts(self.get("epigraph"), self.get("epigraph_by"))

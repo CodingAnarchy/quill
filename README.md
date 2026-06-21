@@ -88,7 +88,8 @@ byte-for-byte.
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
 (draft → revised → final), **m** edit the one-line summary, **v** set the POV
-character, **g** epigraph (quotation, then attribution). Book/series metadata
+character, **l** set a word-count goal, **g** epigraph (quotation, then
+attribution). Book/series metadata
 (shown in the pane header): **t** book title, **b** subtitle, **w** author,
 **e** series, **G** book epigraph.
 
@@ -154,7 +155,8 @@ read/write a human-readable **story bible** kept in the project.
 
 ### Editing & workflow
 
-- Per-session and daily word-count goals (per chapter / part / book / project)
+- Per-session / daily word-count target (today's goal, beyond the per-chapter /
+  part / book goals that already ship)
 
 ### Vim-style keybindings & modes
 
