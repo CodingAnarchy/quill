@@ -4,6 +4,7 @@
 //! a rope (`ropey`) gives us cheap inserts/deletes at any offset without copying
 //! the whole document around.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,6 +66,11 @@ pub struct Buffer {
     /// and subsequent edits fold into the same undo entry until the group is
     /// sealed on idle ([`Buffer::seal_undo_group`]).
     group_open: bool,
+    /// Cached word count (#151), so the status bar / outline don't re-segment the
+    /// whole document every frame. Invalidated (`None`) on edit and recomputed
+    /// lazily on the next read; `Cell` so the cheap [`word_count`] reader stays
+    /// `&self`.
+    word_count_cache: Cell<Option<usize>>,
 }
 
 impl Buffer {
@@ -84,6 +90,7 @@ impl Buffer {
             undo_stack: VecDeque::new(),
             redo_stack: VecDeque::new(),
             group_open: false,
+            word_count_cache: Cell::new(None),
         }
     }
 
@@ -104,6 +111,7 @@ impl Buffer {
             undo_stack: VecDeque::new(),
             redo_stack: VecDeque::new(),
             group_open: false,
+            word_count_cache: Cell::new(None),
         }
     }
 
@@ -134,6 +142,7 @@ impl Buffer {
             undo_stack: VecDeque::new(),
             redo_stack: VecDeque::new(),
             group_open: false,
+            word_count_cache: Cell::new(None),
         })
     }
 
@@ -309,6 +318,7 @@ impl Buffer {
         self.group_open = false; // the next edit opens a fresh group
         self.dirty = true;
         self.clamp_cursor();
+        self.word_count_cache.set(None); // the whole document changed (#151)
         self.syntax = Syntax::new(&self.rope.to_string());
         self.syntax_dirty = false;
     }
@@ -326,6 +336,7 @@ impl Buffer {
     /// the reparse can be incremental. Does not touch the cursor.
     fn edit_insert(&mut self, char_idx: usize, text: &str) {
         self.checkpoint();
+        self.word_count_cache.set(None); // the text changed; recount on next read
         let start_byte = self.rope.char_to_byte(char_idx);
         let start_position = point_at_byte(&self.rope, start_byte);
 
@@ -348,6 +359,7 @@ impl Buffer {
     /// Does not touch the cursor.
     fn edit_remove(&mut self, start: usize, end: usize) {
         self.checkpoint();
+        self.word_count_cache.set(None); // the text changed; recount on next read
         let start_byte = self.rope.char_to_byte(start);
         let old_end_byte = self.rope.char_to_byte(end);
         let start_position = point_at_byte(&self.rope, start_byte);
@@ -522,9 +534,15 @@ impl Buffer {
 
     /// Total word count across the document.
     pub fn word_count(&self) -> usize {
+        if let Some(n) = self.word_count_cache.get() {
+            return n;
+        }
         // Count over the whole text, not per rope chunk: a word straddling a
-        // chunk boundary would otherwise be counted twice.
-        count_words(&self.rope.to_string())
+        // chunk boundary would otherwise be counted twice. Cached until the next
+        // edit (#151) so the status bar / outline don't re-segment every frame.
+        let n = count_words(&self.rope.to_string());
+        self.word_count_cache.set(Some(n));
+        n
     }
 
     #[allow(dead_code)] // part of the buffer's public API; used by upcoming stats UI
@@ -741,6 +759,30 @@ mod tests {
         assert_eq!(buf.word_count(), 5000);
 
         fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn word_count_cache_updates_on_edit_and_undo() {
+        let mut buf = Buffer::from_text("one two");
+        assert_eq!(buf.word_count(), 2);
+
+        // Append a third word; the cached count reflects the edit (#151).
+        buf.cursor = Cursor { line: 0, col: 7 };
+        for c in " three".chars() {
+            buf.insert_char(c);
+        }
+        assert_eq!(buf.word_count(), 3);
+
+        // Delete it back; the count follows.
+        buf.seal_undo_group();
+        for _ in 0..6 {
+            buf.backspace();
+        }
+        assert_eq!(buf.word_count(), 2);
+
+        // Undo restores both the text and the count.
+        buf.undo();
+        assert_eq!(buf.word_count(), 3);
     }
 
     // The syntax highlights must stay correct through incremental edits — this
