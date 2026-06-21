@@ -24,6 +24,10 @@ keystrokes that stay out of the way.
 - **Two editing views** — chapter-at-a-time (default) or a continuous
   manuscript (Ctrl-L) that flows across chapter boundaries and writes edits back
   to the right files, while never holding more than ~3 chapters in memory.
+- **Split panes** — keep a reference beside the prose with Vim-style windows
+  (Ctrl-W): split the editor, open another chapter / a story-bible entry / a
+  docked report in a second pane, switch focus, resize, and close. Panes collapse
+  gracefully on a narrow terminal. Full details in [`docs/windows.md`](docs/windows.md).
 - **Rolled-up word counts** — live per-chapter counts and a project total in the
   chapter pane.
 - **Chapter metadata** — set each chapter's status (draft / revised / final),
@@ -83,7 +87,7 @@ byte-for-byte.
 | Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
-| Ctrl-W then …  | window split: `s`/`v` split, `w` switch pane, `c` close (with a report/AI answer open, `s`/`v` docks it beside the editor) |
+| Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
