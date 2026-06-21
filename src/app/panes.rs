@@ -25,9 +25,9 @@ pub(crate) struct Split {
     /// The non-focused pane's editor.
     pub(crate) other: Buffer,
     pub(crate) dir: SplitDir,
-    /// Whether `other` is the top/left pane (the focused `App::buffer` is then the
-    /// bottom/right one). Flips on every focus swap so positions stay put.
-    pub(crate) other_first: bool,
+    /// Whether the focused pane (`App::buffer`) is the top/left one. Flips on every
+    /// focus swap so the two panes keep their on-screen positions.
+    pub(crate) focused_first: bool,
 }
 
 impl App {
@@ -60,38 +60,50 @@ impl App {
         }
         match Buffer::from_path(self.project.active_path()) {
             Ok(other) => {
-                self.split = Some(Split { other, dir, other_first: false });
+                self.split = Some(Split { other, dir, focused_first: true });
                 self.message = Some("Split — Ctrl-w w to switch, Ctrl-w c to close.".into());
             }
             Err(e) => self.message = Some(format!("Split failed: {e}")),
         }
     }
 
-    /// Move focus to the other pane: swap which buffer is `App::buffer`, then
-    /// re-point the active chapter at it so save / nav follow focus.
+    /// Move focus to the other pane. Flush the pane we're leaving first, then swap
+    /// which buffer is `App::buffer`; if the now-focused pane shows the same chapter
+    /// we just left, reload it from disk so it reflects those edits rather than a
+    /// stale copy (#163 — keeps two panes on one chapter consistent, no clobber).
     fn focus_other_pane(&mut self) {
-        let Some(split) = &mut self.split else { return };
+        if self.split.is_none() {
+            return;
+        }
+        let _ = self.flush_active(); // save the leaving pane (no-op if clean)
+        let split = self.split.as_mut().unwrap();
         std::mem::swap(&mut self.buffer, &mut split.other);
-        split.other_first = !split.other_first;
+        split.focused_first = !split.focused_first;
+        if self.buffer.path == split.other.path {
+            if let Some(path) = self.buffer.path.clone() {
+                if let Ok(reloaded) = Buffer::from_path(path) {
+                    self.buffer = reloaded;
+                }
+            }
+        }
         self.sync_active_to_focus();
     }
 
-    /// Close the split, keeping the focused pane. The other pane is flushed first
-    /// so its edits aren't lost.
+    /// Close the split, keeping the focused pane (the other pane is flushed first
+    /// so its edits aren't lost).
     fn close_split(&mut self) {
-        let Some(mut split) = self.split.take() else { return };
-        if split.other.dirty {
-            let _ = split.other.save(); // best effort; the focused pane is unaffected
+        if self.split.is_some() {
+            self.close_split_if_any();
+            self.message = Some("Closed the split.".into());
         }
-        self.message = Some("Closed the split.".into());
     }
 
-    /// Drop the split (flushing the other pane) without a status message — for
-    /// callers that take over the editor region, like the continuous view.
+    /// Drop the split, flushing the other pane. Quiet (no message) — for callers
+    /// that take over the editor region, like the continuous view.
     pub(super) fn close_split_if_any(&mut self) {
         if let Some(mut split) = self.split.take() {
             if split.other.dirty {
-                let _ = split.other.save();
+                let _ = split.other.save(); // best effort; the focused pane is unaffected
             }
         }
     }
@@ -102,24 +114,25 @@ impl App {
     /// buffer. `None` when not split.
     pub(crate) fn split_render(&self) -> Option<(SplitDir, bool, &Buffer)> {
         let s = self.split.as_ref()?;
-        Some((s.dir, !s.other_first, &s.other))
+        Some((s.dir, s.focused_first, &s.other))
+    }
+
+    /// The manifest index of the chapter a pane's `buffer` is showing.
+    fn chapter_index_of(&self, buffer: &Buffer) -> Option<usize> {
+        let file = buffer.path.as_ref()?.file_name()?.to_str()?;
+        self.project.index_of_file(file)
     }
 
     /// The title of the chapter a pane's `buffer` is showing, for its title bar.
     pub(crate) fn chapter_title_for(&self, buffer: &Buffer) -> Option<&str> {
-        let file = buffer.path.as_ref()?.file_name()?.to_str()?;
-        let i = self.project.manifest.chapters.iter().position(|c| c.file == file)?;
-        self.project.chapter_title(i)
+        self.project.chapter_title(self.chapter_index_of(buffer)?)
     }
 
     /// Point the project's active chapter at the focused buffer's file, so the
     /// active-chapter machinery (save, Ctrl-n/p, the outline marker) follows focus.
     fn sync_active_to_focus(&mut self) {
-        let file = self.buffer.path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str());
-        if let Some(file) = file {
-            if let Some(i) = self.project.manifest.chapters.iter().position(|c| c.file == file) {
-                self.project.set_active(i);
-            }
+        if let Some(i) = self.chapter_index_of(&self.buffer) {
+            self.project.set_active(i);
         }
     }
 

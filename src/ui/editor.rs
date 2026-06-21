@@ -19,20 +19,16 @@ impl Pane for Editor<'_> {
 /// headers, search highlighting, and the terminal cursor (#163: shared by the
 /// single-pane view and the focused half of a split).
 pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
-    // Center a column of `focus_width` cells; fall back to full width if narrow.
-    let width = app.focus_width.min(area.width.saturating_sub(2));
-    let left_pad = area.width.saturating_sub(width) / 2;
-    let column = Rect {
-        x: area.x + left_pad,
-        y: area.y + 1,
-        width,
-        height: area.height.saturating_sub(1),
-    };
+    // The prose column, with a blank top row (the EditMeta banner draws there).
+    let column = centered_column(
+        Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height.saturating_sub(1) },
+        app.focus_width,
+    );
 
     let buffer = app.edit_buffer();
     // Feed navigation the same wrap column the screen uses (#143), so visual
     // up/down move by the rows the author actually sees.
-    app.wrap_width.set(width);
+    app.wrap_width.set(column.width);
 
     // Emphasis markers are hidden, except on the span the cursor sits in.
     let conceal = buffer.syntax().conceal_ranges(Some(buffer.cursor_byte()));
@@ -71,10 +67,9 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         Rect { x: area.x, y: area.y, width: area.width, height: 1 },
     );
     let body = Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height.saturating_sub(1) };
-    let width = app.focus_width.min(body.width.saturating_sub(2));
-    let left_pad = body.width.saturating_sub(width) / 2;
-    let column = Rect { x: body.x + left_pad, y: body.y, width, height: body.height };
-    let conceal = buffer.syntax().conceal_ranges(Some(buffer.cursor_byte()));
+    let column = centered_column(body, app.focus_width);
+    // No cursor in a reference pane, so conceal every emphasis marker uniformly.
+    let conceal = buffer.syntax().conceal_ranges(None);
     render_body(frame, column, buffer, &[], &conceal, &[], None, false);
 }
 
@@ -360,6 +355,14 @@ fn style_at(hls: &[Highlight], byte: usize) -> Style {
 
 fn is_concealed(byte: usize, conceal: &[(usize, usize)]) -> bool {
     conceal.iter().any(|&(s, e)| byte >= s && byte < e)
+}
+
+/// A `focus_width`-wide prose column centered horizontally in `area` (full width
+/// when the area is narrow). Shared by both pane renderers (#163).
+fn centered_column(area: Rect, focus_width: u16) -> Rect {
+    let width = focus_width.min(area.width.saturating_sub(2));
+    let left_pad = area.width.saturating_sub(width) / 2;
+    Rect { x: area.x + left_pad, y: area.y, width, height: area.height }
 }
 
 /// Layer search highlighting onto a character's base style: the current match

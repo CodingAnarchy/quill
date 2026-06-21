@@ -288,11 +288,12 @@ impl Project {
     /// correct after any structural edit. Falls back to 0 if the active file is
     /// momentarily absent (e.g. just after deleting it, before a new one is set).
     pub fn active_index(&self) -> usize {
-        self.manifest
-            .chapters
-            .iter()
-            .position(|c| c.file == self.active)
-            .unwrap_or(0)
+        self.index_of_file(&self.active).unwrap_or(0)
+    }
+
+    /// The index of the chapter whose file is `file`, if any.
+    pub fn index_of_file(&self, file: &str) -> Option<usize> {
+        self.manifest.chapters.iter().position(|c| c.file == file)
     }
 
     /// Make chapter `index` the active one.

@@ -996,6 +996,22 @@ fn split_panes_edit_different_chapters_independently() {
 }
 
 #[test]
+fn editing_the_same_chapter_in_both_panes_stays_consistent() {
+    let (mut app, dir) = two_chapter_app("split-same"); // both panes start on "One"
+    window_cmd(&mut app, 'v');
+    type_str(&mut app, "AAA"); // edit the focused pane
+    window_cmd(&mut app, 'w'); // switch: flush, then reload the sibling on the same chapter
+    assert!(app.buffer.text().contains("AAA"), "the other pane reflects the saved edit: {:?}", app.buffer.text());
+    type_str(&mut app, "BBB");
+    window_cmd(&mut app, 'w'); // switch back
+    let text = app.buffer.text();
+    assert!(text.contains("AAA") && text.contains("BBB"), "edits accumulate, no clobber: {text:?}");
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(one.contains("AAA") && one.contains("BBB"), "{one}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn split_is_guarded_in_the_continuous_view() {
     let (mut app, dir) = two_chapter_app("split-in-cont");
     app.on_key(ctrl('l'));
