@@ -472,6 +472,36 @@ fn front_and_back_matter_sort_around_the_body_on_load() {
 }
 
 #[test]
+fn the_pane_groups_sections_under_band_headers() {
+    let dir = sectioned_project("pane-group"); // [prologue Pro, body Body, appendix App]
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.on_key(ctrl('g')); // show the nav pane in browse mode
+    let screen = crate::ui::render_to_string(&app, 80, 20);
+
+    let f = screen.find("FRONT MATTER").expect("front-matter header");
+    let c = screen.find("CHAPTERS").expect("body header");
+    let b = screen.find("BACK MATTER").expect("back-matter header");
+    assert!(f < c && c < b, "bands shown in reading order:\n{screen}");
+    assert!(screen.contains("1. Body"), "the body chapter is numbered:\n{screen}");
+    // The total separates body words from section words (#181).
+    assert!(screen.contains("in sections"), "section words kept clear of the body total:\n{screen}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_all_body_pane_keeps_the_flat_unnumbered_list() {
+    let (mut app, dir) = two_chapter_app("pane-flat"); // "One", "Two", no roles
+    app.on_key(ctrl('g'));
+    let screen = crate::ui::render_to_string(&app, 80, 16);
+    assert!(screen.contains("CHAPTERS"), "still has the body header:\n{screen}");
+    assert!(!screen.contains("FRONT MATTER") && !screen.contains("BACK MATTER"), "no section headers:\n{screen}");
+    assert!(!screen.contains("1. One"), "no numbers without sections:\n{screen}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn reordering_is_clamped_within_a_band() {
     let dir = sectioned_project("clamp"); // loads as [prologue p, body b, appendix a]
     let project = Project::open(&dir).unwrap();
