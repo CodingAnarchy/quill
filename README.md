@@ -101,8 +101,10 @@ character, **l** set a word-count goal, **S** set a section role (blank = body),
 A file can be marked as a non-chapter **section** (#53) with **S**: front matter
 (`foreword`, `preface`, `introduction`, `prologue`) or back matter (`epilogue`,
 `afterword`, `acknowledgments`, `appendix`, `glossary`); blank clears it back to a
-body chapter. The role shows as a dim tag in the pane. (Role-aware ordering,
-numbering, and report handling build on this in later work.)
+body chapter. The role shows as a dim tag in the pane. Front matter sorts before
+the body and back matter after it, reordering (J / K) stays within a band, and
+the progress report counts only body chapters toward the chapter goal. (Pane
+grouping and separate front/back word counts build on this in later work.)
 
 To write with your notes open, the browser opens files in a side pane: **o**
 opens the selected chapter beside the editor (compare two chapters), and **f**

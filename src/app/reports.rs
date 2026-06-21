@@ -17,7 +17,7 @@ impl App {
         report::lines(
             &self.project.manifest,
             self.project_word_count(),
-            self.chapter_count(),
+            self.project.body_chapter_count(), // front/back matter aren't chapters (#180)
             self.count_todo(),
             &momentum,
             &self.part_deltas(),

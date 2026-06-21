@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::buffer::count_words;
-use crate::frontmatter::{self, Epigraph, FrontMatter, Role, Status};
+use crate::frontmatter::{self, Band, Epigraph, FrontMatter, Role, Status};
 
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
@@ -211,12 +211,16 @@ impl Project {
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
         } else {
-            project.active = project.manifest.chapters[0].file.clone();
-            // Populate per-chapter caches (word count + front-matter metadata)
-            // from disk: one transient read each, never N live buffers.
+            // Populate per-chapter caches (word count + front-matter metadata,
+            // including the section role) from disk: one transient read each,
+            // never N live buffers.
             for i in 0..project.manifest.chapters.len() {
                 project.read_chapter_cache(i);
             }
+            // Order front matter → body → back matter in memory, whatever order
+            // the manifest listed them in (#180).
+            project.reorder_by_band();
+            project.active = project.manifest.chapters[0].file.clone();
         }
         Ok(project)
     }
@@ -396,6 +400,26 @@ impl Project {
     /// The file's section role (#179), if set; `None` is a plain body chapter.
     pub fn chapter_role(&self, index: usize) -> Option<Role> {
         self.manifest.chapters.get(index).and_then(|c| c.role)
+    }
+
+    /// The ordering band a file sits in (#180): front matter, body, or back matter.
+    pub fn chapter_band(&self, index: usize) -> Band {
+        Band::of(self.chapter_role(index))
+    }
+
+    /// How many files are body chapters — the count that feeds chapter numbering
+    /// and the progress report's goal, excluding front/back matter (#180).
+    pub fn body_chapter_count(&self) -> usize {
+        self.manifest.chapters.iter().filter(|c| Band::of(c.role) == Band::Body).count()
+    }
+
+    /// Sort chapters into reading order — front matter, body, back matter (#180) —
+    /// preserving the author's order within each band (a stable sort). Returns
+    /// whether the order actually changed.
+    pub fn reorder_by_band(&mut self) -> bool {
+        let before: Vec<String> = self.manifest.chapters.iter().map(|c| c.file.clone()).collect();
+        self.manifest.chapters.sort_by_key(|c| Band::of(c.role));
+        self.manifest.chapters.iter().zip(&before).any(|(c, f)| c.file != *f)
     }
 
     /// Copy a chapter's managed metadata into its cache from a [`FrontMatter`]

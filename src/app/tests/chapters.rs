@@ -393,25 +393,31 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
 #[test]
 fn setting_a_section_role_persists_clears_and_survives_reopen() {
     use crate::frontmatter::Role;
-    let (mut app, dir) = two_chapter_app("role-set");
+    let (mut app, dir) = two_chapter_app("role-set"); // "One" (active), "Two"
     app.on_key(ctrl('g'));
-    app.on_key(key(KeyCode::Down)); // select chapter 1 (not active)
+    app.on_key(key(KeyCode::Down)); // select chapter "Two"
     app.on_key(key(KeyCode::Char('S'))); // section-role prompt
     typed(&mut app, "prologue");
     app.on_key(key(KeyCode::Enter));
 
-    assert_eq!(app.project.chapter_role(1), Some(Role::Prologue));
+    // "Two" became a prologue → it re-sorts ahead of the body (#180), and the
+    // browser selection follows it to index 0.
+    assert_eq!(app.project.index_of_file("two.md"), Some(0), "front matter sorts first");
+    assert_eq!(app.project.chapter_role(0), Some(Role::Prologue));
+    assert_eq!(nav_sel(&app), 0, "the selection follows the moved chapter");
     assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("role: prologue"));
-    // Read back from front matter on reopen.
-    assert_eq!(Project::open(&dir).unwrap().chapter_role(1), Some(Role::Prologue));
+    // Read back from front matter on reopen (and re-sorted the same way).
+    let reopened = Project::open(&dir).unwrap();
+    assert_eq!(reopened.index_of_file("two.md"), Some(0));
+    assert_eq!(reopened.chapter_role(0), Some(Role::Prologue));
 
-    // Blank input clears it back to a body chapter.
+    // Blank input clears it back to a body chapter (the selection is on it now).
     app.on_key(key(KeyCode::Char('S')));
     for _ in 0..8 {
         app.on_key(key(KeyCode::Backspace)); // clear the prefilled "prologue"
     }
     app.on_key(key(KeyCode::Enter));
-    assert_eq!(app.project.chapter_role(1), None);
+    assert_eq!(app.project.chapter_role(app.project.index_of_file("two.md").unwrap()), None);
     assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("role:"));
     fs::remove_dir_all(&dir).ok();
 }
@@ -426,6 +432,62 @@ fn an_unknown_section_role_is_rejected_without_changing_it() {
     app.on_key(key(KeyCode::Enter));
     assert!(app.message.as_deref().unwrap_or("").contains("Unknown section role"), "{:?}", app.message);
     assert_eq!(app.project.chapter_role(1), None, "an unknown role leaves it a body chapter");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// A project on disk with three files listed body / prologue / appendix in the
+/// manifest (deliberately out of band order) — front-matter and back-matter
+/// front matter set. Returns its dir.
+fn sectioned_project(name: &str) -> PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-sect-{}-{}", std::process::id(), name));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"Body\"\nfile = \"b.md\"\n\n\
+         [[chapters]]\ntitle = \"Pro\"\nfile = \"p.md\"\n\n\
+         [[chapters]]\ntitle = \"App\"\nfile = \"a.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("b.md"), "the body\n").unwrap();
+    fs::write(dir.join("p.md"), "---\nrole: prologue\n---\nbefore\n").unwrap();
+    fs::write(dir.join("a.md"), "---\nrole: appendix\n---\nnotes\n").unwrap();
+    dir
+}
+
+#[test]
+fn front_and_back_matter_sort_around_the_body_on_load() {
+    use crate::frontmatter::Role;
+    let dir = sectioned_project("order");
+    let p = Project::open(&dir).unwrap();
+    // Reading order: prologue (front), body, appendix (back) — not manifest order.
+    assert_eq!(p.index_of_file("p.md"), Some(0));
+    assert_eq!(p.index_of_file("b.md"), Some(1));
+    assert_eq!(p.index_of_file("a.md"), Some(2));
+    assert_eq!(p.chapter_role(0), Some(Role::Prologue));
+    assert_eq!(p.body_chapter_count(), 1, "only the body file counts as a chapter");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn reordering_is_clamped_within_a_band() {
+    let dir = sectioned_project("clamp"); // loads as [prologue p, body b, appendix a]
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.on_key(ctrl('g')); // selection on index 0 (the prologue, the active file)
+
+    // The prologue can't move down into the body.
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(app.project.index_of_file("p.md"), Some(0), "front matter stays ahead of the body");
+    assert!(app.message.as_deref().unwrap_or("").contains("stays within"));
+
+    // The body can't move up into front matter.
+    app.on_key(key(KeyCode::Down)); // select the body (index 1)
+    app.on_key(key(KeyCode::Char('K')));
+    assert_eq!(app.project.index_of_file("b.md"), Some(1), "the body stays out of front matter");
     fs::remove_dir_all(&dir).ok();
 }
 

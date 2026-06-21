@@ -18,10 +18,12 @@ impl App {
         }
     }
 
-    /// Set (or clear) the selected file's section role (#179). A blank value
-    /// clears it back to a body chapter; an unrecognized name is reported rather
-    /// than applied (so a typo doesn't silently leave the role unchanged).
-    pub(crate) fn set_chapter_role(&mut self, index: usize, text: &str) {
+    /// Set (or clear) the selected file's section role (#179), then re-sort it
+    /// into its band (#180). A blank value clears it back to a body chapter; an
+    /// unrecognized name is reported rather than applied (so a typo doesn't
+    /// silently leave the role unchanged). Returns the file's index after the
+    /// re-sort, so the browser selection can follow it.
+    pub(crate) fn set_chapter_role(&mut self, index: usize, text: &str) -> Option<usize> {
         let trimmed = text.trim();
         let role = if trimmed.is_empty() {
             None
@@ -30,15 +32,26 @@ impl App {
         } else {
             self.message =
                 Some(format!("Unknown section role '{trimmed}' — e.g. prologue, epilogue, appendix"));
-            return;
+            return None;
         };
-        if self.edit_chapter_meta(index, |fm| fm.set_role(role)) {
-            let title = self.project.chapter_title(index).unwrap_or("Chapter");
-            self.message = Some(match role {
-                Some(r) => format!("{title}: {}", r.label()),
-                None => format!("{title}: body chapter"),
-            });
+        let file = self.project.chapter_file(index).to_string();
+        if !self.edit_chapter_meta(index, |fm| fm.set_role(role)) {
+            return None;
         }
+        // The new role may move the file into another band — re-sort and persist
+        // the order (#180).
+        if self.project.reorder_by_band() {
+            if let Err(e) = self.project.save_manifest() {
+                self.message = Some(format!("Save failed: {e}"));
+            }
+        }
+        let moved = self.project.index_of_file(&file);
+        let title = moved.and_then(|i| self.project.chapter_title(i)).unwrap_or("Chapter");
+        self.message = Some(match role {
+            Some(r) => format!("{title}: {}", r.label()),
+            None => format!("{title}: body chapter"),
+        });
+        moved
     }
 
     /// Apply a front-matter edit to chapter `index`. The active chapter is edited
@@ -80,11 +93,13 @@ impl App {
 
     /// Write a metadata field's text — chapter fields go through the chapter's
     /// front matter, book fields through the manifest. The single place that maps
-    /// a [`MetaField`] to where it's stored.
-    pub(crate) fn apply_meta(&mut self, field: MetaField, text: &str) {
+    /// a [`MetaField`] to where it's stored. Returns a new browser selection index
+    /// when the edit re-sorted the chapter list (a role change, #180), else `None`.
+    pub(crate) fn apply_meta(&mut self, field: MetaField, text: &str) -> Option<usize> {
         // Optional fields clear to `None` on empty input; only one arm uses this.
         let optional = (!text.is_empty()).then(|| text.to_string());
         match field {
+            MetaField::Role { at } => return self.set_chapter_role(at, text),
             MetaField::Summary { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_summary(text));
             }
@@ -96,7 +111,6 @@ impl App {
                 let goal = text.trim().parse::<usize>().ok().filter(|&n| n > 0);
                 self.edit_chapter_meta(at, |fm| fm.set_goal(goal));
             }
-            MetaField::Role { at } => self.set_chapter_role(at, text),
             MetaField::ChapterEpigraph { at } => {
                 self.edit_chapter_meta(at, |fm| fm.set_epigraph_text(text));
             }
@@ -115,6 +129,7 @@ impl App {
             MetaField::BookEpigraph => self.set_book_meta(|m| m.epigraph = optional),
             MetaField::BookEpigraphBy => self.set_book_meta(|m| m.epigraph_by = optional),
         }
+        None // only a role change re-sorts the list
     }
 
     /// The current epigraph of chapter `index`: from the live buffer if it's the
