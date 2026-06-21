@@ -61,10 +61,12 @@ Focusing a docked report instead hands it the scroll keys (`j`/`k`, `PageUp` /
 | ----------------------- | --------------------------------------------------- |
 | `Ctrl-w >` or `Ctrl-w +`| Grow the focused pane along the split axis.          |
 | `Ctrl-w <` or `Ctrl-w -`| Shrink the focused pane.                             |
+| `Ctrl-w =`              | Reset the split to an even balance.                  |
 
 Resizing moves the boundary in steps. It stops before either pane gets too thin
 to use, so you can lean on the key without collapsing a pane to a sliver. The
-ratio you set is remembered if the terminal is resized.
+ratio you set is remembered if the terminal is resized. When you're done with a
+temporary emphasis, `Ctrl-w =` snaps the two panes back to even.
 
 ## Closing
 
