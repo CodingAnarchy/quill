@@ -82,7 +82,7 @@ byte-for-byte.
 | Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
-| Ctrl-G         | browse chapters (↑/↓, Enter)    |
+| Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window split: `s`/`v` split, `w` switch pane, `c` close (with a report/AI answer open, `s`/`v` docks it beside the editor) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
@@ -93,6 +93,13 @@ character, **l** set a word-count goal, **g** epigraph (quotation, then
 attribution). Book/series metadata
 (shown in the pane header): **t** book title, **b** subtitle, **w** author,
 **e** series, **G** book epigraph.
+
+To write with your notes open, the browser opens files in a side pane: **o**
+opens the selected chapter beside the editor (compare two chapters), and **f**
+switches to the reference-file browser — the project's story bible (`bible/`) and
+loose notes — where **Enter** opens the chosen file in a side pane. A reference
+pane is a normal editor: **Ctrl-W w** focuses it to scroll or edit, **Ctrl-S**
+saves it to its own file, **Ctrl-W c** closes it.
 
 In find (Ctrl-F): type to search the current chapter (case-insensitive,
 matches highlighted), **n / N** jump to the next / previous match, **r** start

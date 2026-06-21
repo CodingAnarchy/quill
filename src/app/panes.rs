@@ -10,6 +10,8 @@
 
 use super::*;
 
+use std::path::Path;
+
 /// How the two panes are arranged.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SplitDir {
@@ -73,28 +75,22 @@ impl App {
             self.message = Some("Already split — Ctrl-w c to close a pane.".into());
             return;
         }
-        if self.manuscript.is_some() {
-            self.message = Some("Leave the continuous view (Ctrl-l) before splitting.".into());
-            return;
-        }
-        if self.flush_active().is_err() {
-            return;
-        }
-        match Buffer::from_path(self.project.active_path()) {
-            Ok(other) => {
-                self.split = Some(Split { other: OtherPane::Editor(other), dir, focused_first: true });
-                self.message = Some("Split — Ctrl-w w to switch, Ctrl-w c to close.".into());
-            }
-            Err(e) => self.message = Some(format!("Split failed: {e}")),
-        }
+        let path = self.project.active_path();
+        self.place_editor_pane(&path, dir, "Split — Ctrl-w w to switch, Ctrl-w c to close.");
     }
 
     /// Open a project file in a reference pane beside the editor (#165): a chapter
     /// to compare, or a story-bible entry / note to write alongside. It's a normal
     /// editor pane (read, edit, and save independently), reusing the #163 split
-    /// machinery — so it replaces any existing split (two panes max). Single-chapter
-    /// view only.
+    /// machinery. Single-chapter view only.
     pub(super) fn open_file_in_pane(&mut self, path: PathBuf) {
+        self.place_editor_pane(&path, SplitDir::SideBySide, "Opened in a pane — Ctrl-w w to focus it, Ctrl-w c to close.");
+    }
+
+    /// Load `path` into the other pane as an editor, the shared tail of opening a
+    /// split (#163) and a reference pane (#165): leave the continuous view, flush
+    /// the focused pane, then replace any existing split (two panes max).
+    fn place_editor_pane(&mut self, path: &Path, dir: SplitDir, ok_msg: &str) {
         if self.manuscript.is_some() {
             self.message = Some("Leave the continuous view (Ctrl-l) before opening a pane.".into());
             return;
@@ -102,15 +98,11 @@ impl App {
         if self.flush_active().is_err() {
             return;
         }
-        match Buffer::from_path(&path) {
+        match Buffer::from_path(path) {
             Ok(other) => {
                 self.close_split_if_any(); // two panes max — replace any existing split
-                self.split = Some(Split {
-                    other: OtherPane::Editor(other),
-                    dir: SplitDir::SideBySide,
-                    focused_first: true,
-                });
-                self.message = Some("Opened in a pane — Ctrl-w w to focus it, Ctrl-w c to close.".into());
+                self.split = Some(Split { other: OtherPane::Editor(other), dir, focused_first: true });
+                self.message = Some(ok_msg.into());
             }
             Err(e) => self.message = Some(format!("Open failed: {e}")),
         }
@@ -221,6 +213,18 @@ impl App {
                 SplitView::Surface { dir: s.dir, editor_first: s.focused_first, overlay }
             }
         })
+    }
+
+    /// Refresh the cached word count for the *focused* buffer's own chapter
+    /// (#165). A reference pane on a bible file or note has no manifest entry, so
+    /// caching the active chapter's count from it would corrupt the cache — this
+    /// is a no-op unless the focused buffer is itself a chapter. For the ordinary
+    /// single-chapter case the focused buffer is the active chapter, so the
+    /// cached count is refreshed exactly as before.
+    pub(super) fn cache_focus_words(&mut self) {
+        if let Some(i) = self.chapter_index_of(&self.buffer) {
+            self.project.set_chapter_words(i, self.buffer.word_count());
+        }
     }
 
     /// The manifest index of the chapter a pane's `buffer` is showing.

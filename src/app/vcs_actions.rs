@@ -203,7 +203,7 @@ impl App {
         let path = self.project.active_path();
         let buffer = Buffer::from_path(&path).map_err(|e| e.to_string())?;
         self.buffer = buffer;
-        self.project.set_active_words(self.buffer.word_count());
+        self.cache_focus_words();
         Ok(())
     }
 

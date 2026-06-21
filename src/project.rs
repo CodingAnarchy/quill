@@ -419,11 +419,6 @@ impl Project {
         Ok(())
     }
 
-    /// Refresh the active chapter's cached word count (called after editing it).
-    pub fn set_active_words(&mut self, words: usize) {
-        self.set_chapter_words(self.active_index(), words);
-    }
-
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
         self.chapter_path(self.active_index())

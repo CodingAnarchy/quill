@@ -1174,6 +1174,23 @@ fn a_reference_pane_saves_independently() {
     fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn editing_a_reference_pane_does_not_corrupt_the_chapter_word_cache() {
+    let (mut app, dir) = two_chapter_app("ref-cache"); // active = "One"
+    write_bible(&dir);
+    let one_words = app.project.chapter_words(0);
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('f')));
+    app.on_key(key(KeyCode::Enter)); // mara.md into the pane
+    window_cmd(&mut app, 'w'); // focus the bible file (a non-chapter buffer)
+    type_str(&mut app, "a longer note with several extra words here");
+    app.on_key(ctrl('s'));
+    // The bible file's word count must not have been written into chapter One's
+    // cached entry (which feeds the outline pane and the progress report).
+    assert_eq!(app.project.chapter_words(0), one_words, "chapter One's cached count is untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// Match count and current index while in search mode.
 fn search_state(app: &App) -> (usize, usize) {
     match &app.mode {

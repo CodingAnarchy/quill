@@ -921,7 +921,7 @@ impl App {
             if let Ok(buffer) = Buffer::from_path(&path) {
                 self.buffer = buffer;
             }
-            self.project.set_active_words(self.buffer.word_count());
+            self.cache_focus_words();
         }
         // Non-active chapters: the marker is on disk; the report's `xxx` count
         // reads bodies live, and leaving the word cache untouched keeps an
@@ -930,11 +930,10 @@ impl App {
     }
 }
 
-/// A unified line diff (current → proposed), each line signed `+`/`-`/` `.
-/// Computed once when a conflict is staged (not per frame).
 /// The new selection for a navigable list given a key, or `None` if the key
-/// isn't a movement key. Shared by the findings and palette overlays.
-fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<usize> {
+/// isn't a movement key. Shared by the palette, findings, and reference-file
+/// list handlers.
+pub(super) fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<usize> {
     match code {
         KeyCode::Up | KeyCode::Char('k') => Some(selected.saturating_sub(1)),
         KeyCode::Down | KeyCode::Char('j') => Some((selected + 1).min(len.saturating_sub(1))),

@@ -560,10 +560,9 @@ impl Pane for StatusBar<'_> {
             // under the cursor (with a marker); otherwise the single active chapter.
             let (name, dirtied) = match &app.manuscript {
                 Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
-                None => (
-                    app.project.active_title().unwrap_or("[untitled]").to_string(),
-                    buffer.dirty,
-                ),
+                // The focused buffer's own title — usually the active chapter, but
+                // a reference pane swapped into focus (#165) shows its file name.
+                None => (app.pane_title_for(buffer), buffer.dirty),
             };
             let dirty = if dirtied { " ●" } else { "" };
             // Persistent AI indicator (independent of the transient message, which

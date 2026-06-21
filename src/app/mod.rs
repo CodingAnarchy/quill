@@ -411,7 +411,7 @@ impl App {
             }
         }
         // The chapter is now on disk; refresh its cached count.
-        self.project.set_active_words(self.buffer.word_count());
+        self.cache_focus_words();
         Ok(())
     }
 
@@ -519,7 +519,7 @@ impl App {
         }
         let changed = if redo { self.buffer.redo() } else { self.buffer.undo() };
         if changed {
-            self.project.set_active_words(self.buffer.word_count());
+            self.cache_focus_words();
             self.message = None;
         } else {
             self.message = Some(format!("Nothing to {}.", verb.to_lowercase()));
@@ -565,7 +565,7 @@ impl App {
         } else {
             match self.buffer.save() {
                 Ok(()) => {
-                    self.project.set_active_words(self.buffer.word_count());
+                    self.cache_focus_words();
                     self.refresh_split_sibling(); // a clean sibling on this chapter reflects the save (#163)
                     self.message = Some("Saved".into());
                 }
@@ -808,29 +808,22 @@ impl App {
     /// Navigate the reference-file browser (#165): arrows move, Enter opens the
     /// selected file in a side pane, `f`/Esc return to the chapter browser.
     fn on_key_reffiles(&mut self, key: KeyEvent) {
-        let Mode::RefFiles(state) = &self.mode else {
+        let Mode::RefFiles(state) = &mut self.mode else {
             return;
         };
-        let sel = state.selected;
-        let last = state.files.len().saturating_sub(1);
+        if let Some(s) = assist::list_move(state.selected, state.files.len(), key.code) {
+            state.selected = s;
+            return;
+        }
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.set_ref_selected(sel.saturating_sub(1)),
-            KeyCode::Down | KeyCode::Char('j') => self.set_ref_selected((sel + 1).min(last)),
             KeyCode::Enter => {
-                let path = state.files[sel].clone();
+                let path = state.files[state.selected].clone();
                 self.open_file_in_pane(path);
                 self.mode = Mode::Insert;
             }
             // Back to the chapter browser.
             KeyCode::Char('f') | KeyCode::Esc => self.select(self.project.active_index()),
             _ => {}
-        }
-    }
-
-    /// Move the reference-file browser's selection (a no-op outside that mode).
-    fn set_ref_selected(&mut self, selected: usize) {
-        if let Mode::RefFiles(state) = &mut self.mode {
-            state.selected = selected;
         }
     }
 
