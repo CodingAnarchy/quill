@@ -622,6 +622,12 @@ impl App {
             (sel + 1 < self.chapter_count()).then_some(sel + 1)
         };
         let Some(j) = target else { return sel };
+        // Reordering stays within a band — a section can't be shuffled out of
+        // front/back matter into the body or vice versa (#180).
+        if self.project.chapter_band(sel) != self.project.chapter_band(j) {
+            self.message = Some("Reordering stays within front matter / body / back matter.".into());
+            return sel;
+        }
         match self.project.swap_chapters(sel, j) {
             Ok(()) => j,
             Err(e) => {
@@ -913,9 +919,10 @@ impl App {
                                 // attribution, book fields). The multi-line
                                 // epigraph quotations are edited in the editor
                                 // (Mode::EditMeta), which chains here for the
-                                // attribution.
-                                self.apply_meta(field, text);
-                                self.select(fallback);
+                                // attribution. A role change re-sorts the list, so
+                                // follow the chapter to its new index (#180).
+                                let moved = self.apply_meta(field, text);
+                                self.select(moved.unwrap_or(fallback));
                             }
                             Pending::AskAi => {
                                 // Back to editing immediately; the answer arrives

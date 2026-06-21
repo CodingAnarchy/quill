@@ -143,7 +143,39 @@ pub enum Role {
     Glossary,
 }
 
+/// The three ordering bands of a manuscript (#180): front matter sorts before
+/// the body, which sorts before back matter. Declared in that order so the
+/// derived `Ord` sorts chapters into reading order.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Band {
+    Front,
+    Body,
+    Back,
+}
+
+impl Band {
+    /// The band a file belongs to: a role's band, or `Body` when it has no role.
+    pub fn of(role: Option<Role>) -> Band {
+        match role {
+            Some(r) => r.band(),
+            None => Band::Body,
+        }
+    }
+}
+
 impl Role {
+    /// Which ordering band this section sits in (#180).
+    pub fn band(self) -> Band {
+        match self {
+            Role::Foreword | Role::Preface | Role::Introduction | Role::Prologue => Band::Front,
+            Role::Epilogue
+            | Role::Afterword
+            | Role::Acknowledgments
+            | Role::Appendix
+            | Role::Glossary => Band::Back,
+        }
+    }
+
     /// The `role:` value as written in front matter.
     pub fn key(self) -> &'static str {
         match self {
