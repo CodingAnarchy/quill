@@ -119,6 +119,8 @@ pub(crate) enum ExportFormat {
     Markdown,
     /// Word `.docx` in standard manuscript format (#191).
     Docx,
+    /// A Scrivener `.scriv` project bundle (#192).
+    Scriv,
 }
 
 /// The AI actions reachable from the AI palette.

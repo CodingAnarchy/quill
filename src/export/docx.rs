@@ -10,7 +10,7 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use super::{Document, Item};
+use super::{Block, Document};
 use crate::frontmatter::Epigraph;
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -67,22 +67,22 @@ fn document_xml(doc: &Document) -> String {
         body.push_str(&epigraph_paras(epigraph));
     }
 
-    for item in &doc.items {
-        match item {
-            Item::Part(name) => body.push_str(&para(
+    for block in doc.blocks() {
+        match block {
+            Block::Part(name) => body.push_str(&para(
                 r#"<w:pageBreakBefore/><w:spacing w:before="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
                 run(name, true, false, Some(32)),
             )),
-            Item::Chapter { title, epigraph, body: prose } => {
+            Block::Chapter(chapter) => {
                 body.push_str(&para(
                     r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
-                    run(title, true, false, Some(28)),
+                    run(&chapter.title, true, false, Some(28)),
                 ));
-                if let Some(epigraph) = epigraph {
+                if let Some(epigraph) = &chapter.epigraph {
                     body.push_str(&epigraph_paras(epigraph));
                 }
-                for block in prose.split("\n\n") {
-                    if let Some(p) = prose_paragraph(block) {
+                for prose_block in chapter.body.split("\n\n") {
+                    if let Some(p) = prose_paragraph(prose_block) {
                         body.push_str(&p);
                     }
                 }
@@ -165,7 +165,7 @@ fn run(text: &str, bold: bool, italic: bool, size: Option<u32>) -> String {
 
 /// Split a line into runs by `*` (italic) and `**` (bold) markers — Quill's
 /// emphasis convention. Other text (including `_`) is taken literally.
-fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
+pub(super) fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
     let mut runs = Vec::new();
     let mut cur = String::new();
     let (mut bold, mut italic) = (false, false);
@@ -202,7 +202,7 @@ fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, 
     }
 }
 
-fn xml_escape(s: &str) -> String {
+pub(super) fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
@@ -222,14 +222,16 @@ mod tests {
             author: Some("A. Writer".into()),
             series: None,
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
-            items: vec![
-                Item::Part("Part One".into()),
-                Item::Chapter {
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: Some("Part One".into()),
+                chapters: vec![crate::export::Chapter {
                     title: "The Find".into(),
                     epigraph: None,
                     body: "The locket *gleamed* and felt **heavy**.\n\n## A scene\n\nMore.".into(),
-                },
-            ],
+                }],
+            }],
+            back: vec![],
         }
     }
 
