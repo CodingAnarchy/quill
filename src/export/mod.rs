@@ -8,8 +8,12 @@
 use crate::frontmatter::Epigraph;
 
 pub mod docx;
+pub mod scriv;
 
-/// A project compiled for export: the book's metadata and its ordered contents.
+/// A project compiled for export: the book's metadata and its contents as a tree
+/// — front matter, the body (grouped into parts), and back matter — so a binder
+/// format (Scrivener, #192) can nest it and a linear format (Markdown/Word) can
+/// flatten it via [`Document::blocks`].
 pub struct Document {
     pub title: String,
     pub subtitle: Option<String>,
@@ -17,21 +21,53 @@ pub struct Document {
     pub series: Option<String>,
     /// The book epigraph, rendered at the start.
     pub epigraph: Option<Epigraph>,
-    /// Parts and chapters in reading order (front matter → body → back matter).
-    pub items: Vec<Item>,
+    /// Front-matter sections (foreword, prologue, …), in order.
+    pub front: Vec<Chapter>,
+    /// The body, grouped into parts. A book with no defined parts has a single
+    /// unnamed part holding all body chapters.
+    pub parts: Vec<Part>,
+    /// Back-matter sections (epilogue, appendix, …), in order.
+    pub back: Vec<Chapter>,
 }
 
-/// One element of the compiled book.
-pub enum Item {
-    /// A part heading, emitted before the chapters it groups.
-    Part(String),
-    /// A chapter or front/back-matter section: its title, optional epigraph, and
-    /// prose body (front matter already stripped).
-    Chapter {
-        title: String,
-        epigraph: Option<Epigraph>,
-        body: String,
-    },
+/// A named (or unnamed) grouping of body chapters.
+pub struct Part {
+    /// The part's title, or `None` for the catch-all group of ungrouped body
+    /// chapters (rendered without a part heading / folder).
+    pub name: Option<String>,
+    pub chapters: Vec<Chapter>,
+}
+
+/// A chapter or front/back-matter section: its title, optional epigraph, and prose
+/// body (front matter already stripped).
+pub struct Chapter {
+    pub title: String,
+    pub epigraph: Option<Epigraph>,
+    pub body: String,
+}
+
+/// The book flattened to a linear sequence — part headings interleaved with
+/// chapters — for the Markdown and Word writers.
+pub enum Block<'a> {
+    Part(&'a str),
+    Chapter(&'a Chapter),
+}
+
+impl Document {
+    /// Front matter, then each part (a heading when named) and its chapters, then
+    /// back matter — in reading order.
+    pub fn blocks(&self) -> Vec<Block<'_>> {
+        let mut out = Vec::new();
+        out.extend(self.front.iter().map(Block::Chapter));
+        for part in &self.parts {
+            if let Some(name) = &part.name {
+                out.push(Block::Part(name));
+            }
+            out.extend(part.chapters.iter().map(Block::Chapter));
+        }
+        out.extend(self.back.iter().map(Block::Chapter));
+        out
+    }
 }
 
 /// Render a [`Document`] as a single Markdown document (#190): a title block,
@@ -54,15 +90,15 @@ pub fn to_markdown(doc: &Document) -> String {
         out.push_str(&epigraph_block(epigraph));
     }
 
-    for item in &doc.items {
-        match item {
-            Item::Part(name) => out.push_str(&format!("## {name}\n\n")),
-            Item::Chapter { title, epigraph, body } => {
-                out.push_str(&format!("## {title}\n\n"));
-                if let Some(epigraph) = epigraph {
+    for block in doc.blocks() {
+        match block {
+            Block::Part(name) => out.push_str(&format!("## {name}\n\n")),
+            Block::Chapter(chapter) => {
+                out.push_str(&format!("## {}\n\n", chapter.title));
+                if let Some(epigraph) = &chapter.epigraph {
                     out.push_str(&epigraph_block(epigraph));
                 }
-                let body = body.trim();
+                let body = chapter.body.trim();
                 if !body.is_empty() {
                     out.push_str(body);
                     out.push_str("\n\n");
@@ -91,6 +127,52 @@ pub(crate) fn strip_repeated_title(body: &str, title: &str) -> String {
     }
 }
 
+/// Split a line into runs by `*` (italic) and `**` (bold) markers — Quill's
+/// emphasis convention. Other text (including `_`) is taken literally. Shared by
+/// the Word and Scrivener writers, which carry emphasis through to their own
+/// run markup.
+fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
+    let mut runs = Vec::new();
+    let mut cur = String::new();
+    let (mut bold, mut italic) = (false, false);
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '*' {
+            if chars.get(i + 1) == Some(&'*') {
+                push_run(&mut runs, &mut cur, bold, italic);
+                bold = !bold;
+                i += 2;
+                continue;
+            }
+            push_run(&mut runs, &mut cur, bold, italic);
+            italic = !italic;
+            i += 1;
+            continue;
+        }
+        cur.push(chars[i]);
+        i += 1;
+    }
+    push_run(&mut runs, &mut cur, bold, italic);
+    // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
+    // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
+    if bold || italic {
+        return vec![(text.to_string(), false, false)];
+    }
+    runs
+}
+
+fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
+    if !cur.is_empty() {
+        runs.push((std::mem::take(cur), bold, italic));
+    }
+}
+
+/// Escape `& < >` for embedding text in XML (the `.docx` and `.scrivx` markup).
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 /// An epigraph as a Markdown block quote — each line prefixed `> `, the
 /// attribution on its own dimmed line — set apart from the surrounding prose.
 fn epigraph_block(epigraph: &Epigraph) -> String {
@@ -117,6 +199,10 @@ mod tests {
         Epigraph { text: text.to_string(), attribution: by.map(str::to_string) }
     }
 
+    fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
+        Chapter { title: title.to_string(), epigraph, body: body.to_string() }
+    }
+
     fn doc() -> Document {
         Document {
             title: "Red State Earth".into(),
@@ -124,19 +210,12 @@ mod tests {
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
-            items: vec![
-                Item::Chapter {
-                    title: "Prologue".into(),
-                    epigraph: None,
-                    body: "Before it all.".into(),
-                },
-                Item::Part("Part One".into()),
-                Item::Chapter {
-                    title: "The Find".into(),
-                    epigraph: Some(epigraph("A line.", None)),
-                    body: "The locket *gleamed*.".into(),
-                },
-            ],
+            front: vec![chapter("Prologue", None, "Before it all.")],
+            parts: vec![Part {
+                name: Some("Part One".into()),
+                chapters: vec![chapter("The Find", Some(epigraph("A line.", None)), "The locket *gleamed*.")],
+            }],
+            back: vec![],
         }
     }
 
@@ -173,6 +252,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_nested_and_plain_emphasis() {
+        assert_eq!(inline_runs("plain"), vec![("plain".into(), false, false)]);
+        assert_eq!(
+            inline_runs("a *b* c"),
+            vec![("a ".into(), false, false), ("b".into(), false, true), (" c".into(), false, false)]
+        );
+        assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
+        // Underscores are literal (not emphasis), so snake_case survives.
+        assert_eq!(inline_runs("snake_case"), vec![("snake_case".into(), false, false)]);
+        // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
+        assert_eq!(inline_runs("5 * 3 = 15"), vec![("5 * 3 = 15".into(), false, false)]);
+    }
+
+    #[test]
+    fn xml_escape_escapes_the_markup_chars() {
+        assert_eq!(xml_escape("a & b < c > d"), "a &amp; b &lt; c &gt; d");
+    }
+
+    #[test]
     fn a_multiline_epigraph_quotes_every_line() {
         let d = Document {
             title: "T".into(),
@@ -180,7 +278,9 @@ mod tests {
             author: None,
             series: None,
             epigraph: Some(epigraph("Roses are red\n\nViolets are blue", None)),
-            items: vec![],
+            front: vec![],
+            parts: vec![],
+            back: vec![],
         };
         let md = to_markdown(&d);
         assert!(md.contains("> Roses are red\n>\n> Violets are blue\n"), "{md}");

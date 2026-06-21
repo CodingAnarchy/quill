@@ -10,7 +10,7 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use super::{Document, Item};
+use super::{inline_runs, xml_escape, Block, Document};
 use crate::frontmatter::Epigraph;
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -67,22 +67,22 @@ fn document_xml(doc: &Document) -> String {
         body.push_str(&epigraph_paras(epigraph));
     }
 
-    for item in &doc.items {
-        match item {
-            Item::Part(name) => body.push_str(&para(
+    for block in doc.blocks() {
+        match block {
+            Block::Part(name) => body.push_str(&para(
                 r#"<w:pageBreakBefore/><w:spacing w:before="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
                 run(name, true, false, Some(32)),
             )),
-            Item::Chapter { title, epigraph, body: prose } => {
+            Block::Chapter(chapter) => {
                 body.push_str(&para(
                     r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
-                    run(title, true, false, Some(28)),
+                    run(&chapter.title, true, false, Some(28)),
                 ));
-                if let Some(epigraph) = epigraph {
+                if let Some(epigraph) = &chapter.epigraph {
                     body.push_str(&epigraph_paras(epigraph));
                 }
-                for block in prose.split("\n\n") {
-                    if let Some(p) = prose_paragraph(block) {
+                for prose_block in chapter.body.split("\n\n") {
+                    if let Some(p) = prose_paragraph(prose_block) {
                         body.push_str(&p);
                     }
                 }
@@ -163,49 +163,6 @@ fn run(text: &str, bold: bool, italic: bool, size: Option<u32>) -> String {
     format!("<w:r>{rpr}<w:t xml:space=\"preserve\">{}</w:t></w:r>", xml_escape(text))
 }
 
-/// Split a line into runs by `*` (italic) and `**` (bold) markers — Quill's
-/// emphasis convention. Other text (including `_`) is taken literally.
-fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
-    let mut runs = Vec::new();
-    let mut cur = String::new();
-    let (mut bold, mut italic) = (false, false);
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '*' {
-            if chars.get(i + 1) == Some(&'*') {
-                push_run(&mut runs, &mut cur, bold, italic);
-                bold = !bold;
-                i += 2;
-                continue;
-            }
-            push_run(&mut runs, &mut cur, bold, italic);
-            italic = !italic;
-            i += 1;
-            continue;
-        }
-        cur.push(chars[i]);
-        i += 1;
-    }
-    push_run(&mut runs, &mut cur, bold, italic);
-    // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
-    // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
-    if bold || italic {
-        return vec![(text.to_string(), false, false)];
-    }
-    runs
-}
-
-fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
-    if !cur.is_empty() {
-        runs.push((std::mem::take(cur), bold, italic));
-    }
-}
-
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,14 +179,16 @@ mod tests {
             author: Some("A. Writer".into()),
             series: None,
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
-            items: vec![
-                Item::Part("Part One".into()),
-                Item::Chapter {
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: Some("Part One".into()),
+                chapters: vec![crate::export::Chapter {
                     title: "The Find".into(),
                     epigraph: None,
                     body: "The locket *gleamed* and felt **heavy**.\n\n## A scene\n\nMore.".into(),
-                },
-            ],
+                }],
+            }],
+            back: vec![],
         }
     }
 
@@ -263,19 +222,5 @@ mod tests {
         assert!(!xml.contains('*'), "no literal asterisks: {xml}");
         // XML special characters in the title are escaped.
         assert!(xml.contains("Red &lt;State&gt; Earth"), "title escaped");
-    }
-
-    #[test]
-    fn parses_nested_and_plain_emphasis() {
-        assert_eq!(inline_runs("plain"), vec![("plain".into(), false, false)]);
-        assert_eq!(
-            inline_runs("a *b* c"),
-            vec![("a ".into(), false, false), ("b".into(), false, true), (" c".into(), false, false)]
-        );
-        assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
-        // Underscores are literal (not emphasis), so snake_case survives.
-        assert_eq!(inline_runs("snake_case"), vec![("snake_case".into(), false, false)]);
-        // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
-        assert_eq!(inline_runs("5 * 3 = 15"), vec![("5 * 3 = 15".into(), false, false)]);
     }
 }
