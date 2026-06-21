@@ -17,6 +17,7 @@ const GITIGNORE: &str = "\
 # Quill editor state — not part of the manuscript
 /.quill/
 /unused/
+/bible/.state.toml
 
 # OS / editor cruft
 .DS_Store
@@ -385,6 +386,7 @@ mod tests {
         assert!(is_repo(&dir), "a .git directory should exist");
         let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
         assert!(ignore.contains("/.quill/") && ignore.contains("/unused/"));
+        assert!(ignore.contains("/bible/.state.toml"), "the AI scoping cache is ignored (#90)");
         fs::remove_dir_all(&dir).ok();
     }
 

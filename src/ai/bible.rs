@@ -79,11 +79,39 @@ pub fn yaml(value: &str) -> String {
     }
 }
 
-/// Stable change-detection hash of a generated block (not cryptographic).
-fn digest(generated: &str) -> String {
+/// Stable change-detection hash of a block of text (not cryptographic). The one
+/// source of the persisted-hash format, shared by the generated-block digest and
+/// the incremental-scoping chapter digests (#90).
+pub(crate) fn digest(generated: &str) -> String {
     let mut h = DefaultHasher::new();
     generated.hash(&mut h);
     format!("{:016x}", h.finish())
+}
+
+/// An existing single-file bible (`bible/<rel>`) as raw text — the cache for an
+/// incremental revise (#90), empty when absent.
+pub(crate) fn raw_file(root: &Path, rel: &str) -> String {
+    std::fs::read_to_string(root.join("bible").join(rel)).unwrap_or_default()
+}
+
+/// The existing `.md` bible files under `bible/<dir>/` (e.g. the per-character
+/// profiles), concatenated as the cache for an incremental revise (#90).
+pub(crate) fn raw_dir(root: &Path, dir: &str) -> String {
+    let mut out = String::new();
+    let Ok(entries) = std::fs::read_dir(root.join("bible").join(dir)) else {
+        return out;
+    };
+    let mut files: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    files.sort();
+    for path in files {
+        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push_str(&text);
+                out.push_str("\n\n");
+            }
+        }
+    }
+    out
 }
 
 /// The text strictly between `start` and `end` markers, if both are present.

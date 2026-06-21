@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// One character's profile. The serde fields the model fills define the JSON
 /// schema; `mentions`/`last_chapter` are enriched locally after extraction.
@@ -147,6 +147,23 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
     }
 }
 
+const REVISE_SYSTEM: &str = "You are a story-bible assistant maintaining an \
+existing character bible. You are given the current bible (built from the whole \
+manuscript) and only the chapters that have changed since. Revise the bible: \
+update characters the changed chapters affect (traits, voice, relationships, \
+goals, and the per-chapter arc beats for those chapters), add characters newly \
+introduced, and drop ones the changes remove. Preserve everything the changed \
+chapters don't touch — arc beats and relationships established in unchanged \
+chapters — exactly as the existing bible records them. Re-evaluate `drift` across \
+the whole bible. Do not invent details. Reference chapters by title. Return the \
+complete revised set of characters.";
+
+/// Build an incremental revision request (#90): revise the existing character
+/// bible from only the changed chapters.
+pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, model: &str) -> Request {
+    incremental::revise_request(REVISE_SYSTEM, schema(), MAX_OUTPUT_TOKENS, prior_bible, changed_chapters, model)
+}
+
 /// Parse a structured reply (`{ "characters": [...] }`) into profiles.
 pub fn parse(text: &str) -> Result<Vec<Character>, AiError> {
     #[derive(Deserialize)]
@@ -263,6 +280,15 @@ mod tests {
     #[test]
     fn parse_rejects_bad_json() {
         assert!(matches!(parse("not json"), Err(AiError::Api(_))));
+    }
+
+    #[test]
+    fn incremental_request_carries_the_bible_and_only_changed_chapters() {
+        let req = build_incremental_request("EXISTING BIBLE", "# Two\n\nchanged prose", "claude-opus-4-8");
+        assert!(req.cached_context.contains("EXISTING BIBLE"), "feeds the prior bible as cache");
+        assert!(req.cached_context.contains("changed prose"), "feeds the changed chapter");
+        assert!(req.system.as_deref().unwrap().contains("existing"), "asks to revise, not regenerate");
+        assert!(req.json_schema.is_some(), "still constrained to the schema");
     }
 
     #[test]

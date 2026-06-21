@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a continuity pass: the ordered events and the contradictions.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -103,6 +103,21 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
 }
 
 /// Parse a structured continuity reply.
+const REVISE_SYSTEM: &str = "You are a continuity editor maintaining an existing \
+timeline. You are given the current timeline (built from the whole manuscript) \
+and only the chapters that have changed since. Revise it: update or re-rank the \
+events the changed chapters affect, add events the changes introduce, and remove \
+events the changes delete — keeping the `story_order` consistent across the whole \
+timeline, including events from unchanged chapters. Then re-check the whole \
+manuscript for genuine continuity contradictions. Be faithful to the text. \
+Reference chapters by title. Return the complete revised timeline and findings.";
+
+/// Build an incremental revision request (#90): revise the existing timeline from
+/// only the changed chapters.
+pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, model: &str) -> Request {
+    incremental::revise_request(REVISE_SYSTEM, schema(), MAX_OUTPUT_TOKENS, prior_bible, changed_chapters, model)
+}
+
 pub fn parse(text: &str) -> Result<Continuity, AiError> {
     serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad continuity JSON: {e}")))
 }

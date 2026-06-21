@@ -127,6 +127,10 @@ pub struct App {
     /// All findings accumulated this session (continuity / setting / style /
     /// naming / gaps), de-duplicated — the "revision triage" list.
     triage: Vec<Finding>,
+    /// The bible pass in flight and the chapter digests it was built from (#90),
+    /// recorded to the incremental-scoping state file once the pass applies
+    /// cleanly. `(tracker, digests)`; `None` when no bible pass is pending.
+    pending_pass: Option<(String, ai::incremental::Digests)>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -162,6 +166,7 @@ impl App {
             local_backend: Arc::new(Mutex::new(None)),
             pending_findings: Vec::new(),
             triage: Vec::new(),
+            pending_pass: None,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.

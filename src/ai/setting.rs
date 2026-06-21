@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a setting pass: the categorized bible, the gazetteer, and the
 /// rule-consistency findings.
@@ -118,6 +118,22 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
         max_tokens: MAX_OUTPUT_TOKENS,
         json_schema: Some(schema()),
     }
+}
+
+const REVISE_SYSTEM: &str = "You are a worldbuilding editor maintaining an \
+existing setting bible. You are given the current bible (built from the whole \
+manuscript) and only the chapters that have changed since. Revise it: update the \
+categories, entries, and gazetteer the changed chapters affect, add anything \
+newly established, and drop what the changes contradict. Preserve everything the \
+changed chapters don't touch exactly as the existing bible records it. Re-flag \
+rule violations across the whole world. Be faithful to the text; report only \
+genuine violations. Reference chapters by title. Return the complete revised \
+setting bible, gazetteer, and findings.";
+
+/// Build an incremental revision request (#90): revise the existing setting bible
+/// from only the changed chapters.
+pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, model: &str) -> Request {
+    incremental::revise_request(REVISE_SYSTEM, schema(), MAX_OUTPUT_TOKENS, prior_bible, changed_chapters, model)
 }
 
 /// Parse a structured setting reply.

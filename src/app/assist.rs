@@ -84,6 +84,51 @@ fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Ba
     Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
 }
 
+/// Where a persistent-bible tracker keeps its prior bible, for the incremental
+/// cache (#90).
+enum BibleSource {
+    /// A directory of files, e.g. `bible/characters/`.
+    Dir(&'static str),
+    /// A single file, e.g. `bible/setting.md`.
+    File(&'static str),
+}
+
+/// A persistent-bible tracker's incremental-scoping descriptor (#90): its state
+/// key, where its prior bible lives, and the status message for each scope.
+struct BibleTracker {
+    key: &'static str,
+    source: BibleSource,
+    full_msg: &'static str,
+    incr_msg: &'static str,
+}
+
+/// The bible tracker behind a costed AI action, or `None` for findings-only and
+/// interactive actions (which send the whole manuscript or nothing).
+fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
+    let make = |key, source, full_msg, incr_msg| BibleTracker { key, source, full_msg, incr_msg };
+    match action {
+        AiAction::Characters => Some(make(
+            "characters",
+            BibleSource::Dir("characters"),
+            "⟳ Analyzing characters…",
+            "⟳ Updating characters from changed chapters…",
+        )),
+        AiAction::Continuity => Some(make(
+            "timeline",
+            BibleSource::File("timeline.md"),
+            "⟳ Checking continuity…",
+            "⟳ Updating the timeline from changed chapters…",
+        )),
+        AiAction::Setting => Some(make(
+            "setting",
+            BibleSource::File("setting.md"),
+            "⟳ Building setting bible…",
+            "⟳ Updating the setting bible from changed chapters…",
+        )),
+        _ => None,
+    }
+}
+
 impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
@@ -140,7 +185,7 @@ impl App {
             self.run_ai_action(action);
             return;
         };
-        let est = cost::estimate(self.manuscript_text().len(), max_tokens, model);
+        let est = cost::estimate(self.pass_context_len(action), max_tokens, model);
         if est.dollars > self.ai.cost_threshold {
             let label = format!("{} — run? (y/N)", cost::label(&est, model));
             self.open_prompt(Pending::ConfirmAi(action), label, "", None);
@@ -201,12 +246,15 @@ impl App {
     }
     // --- AI: "Ask the manuscript" -----------------------------------------
 
-    /// The whole manuscript as plain text for an AI request: each chapter under
-    /// its title heading, the active chapter live from its buffer and the rest
-    /// from disk (the `count_todo` pattern).
-    pub(crate) fn manuscript_text(&self) -> String {
+    /// Assemble the chapters for which `keep(i)` holds, each under its `# Title`
+    /// heading (active chapter live from its buffer, the rest from disk) — the one
+    /// serialization shared by the whole-manuscript and changed-chapter contexts.
+    fn render_chapters(&self, keep: impl Fn(usize) -> bool) -> String {
         let mut out = String::new();
         for i in 0..self.chapter_count() {
+            if !keep(i) {
+                continue;
+            }
             if let Some(title) = self.project.chapter_title(i) {
                 out.push_str("# ");
                 out.push_str(title);
@@ -216,6 +264,11 @@ impl App {
             out.push_str("\n\n");
         }
         out
+    }
+
+    /// The whole manuscript as plain text for an AI request.
+    pub(crate) fn manuscript_text(&self) -> String {
+        self.render_chapters(|_| true)
     }
 
     /// Start an "Ask the manuscript" request on a worker thread. The manuscript
@@ -233,30 +286,31 @@ impl App {
         });
     }
 
-    /// Start a character-extraction pass; profiles are written / conflicts queued
-    /// by [`App::poll_ai`].
+    /// Start a character-extraction pass — incremental from the changed chapters
+    /// when the bible already exists, else a full pass (#90). Profiles are written
+    /// / conflicts queued by [`App::poll_ai`].
     pub(crate) fn analyze_characters(&mut self) {
-        self.spawn_ai("⟳ Analyzing characters…", |backend, manuscript, model| {
-            let req = character::build_request(manuscript, &model);
-            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
+        let t = bible_tracker(AiAction::Characters).expect("characters is a bible tracker");
+        self.run_bible_tracker(t, character::build_request, character::build_incremental_request, |r| {
+            Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
         });
     }
 
-    /// Start a timeline & continuity pass; the timeline + findings are applied by
-    /// [`App::poll_ai`].
+    /// Start a timeline & continuity pass (incremental when possible, #90); the
+    /// timeline + findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_continuity(&mut self) {
-        self.spawn_ai("⟳ Checking continuity…", |backend, manuscript, model| {
-            let req = continuity::build_request(manuscript, &model);
-            Outcome::Continuity(backend.complete(&req).and_then(|r| continuity::parse(&r.text)))
+        let t = bible_tracker(AiAction::Continuity).expect("continuity is a bible tracker");
+        self.run_bible_tracker(t, continuity::build_request, continuity::build_incremental_request, |r| {
+            Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
         });
     }
 
-    /// Start a setting & worldbuilding pass; the setting bible + rule findings are
-    /// applied by [`App::poll_ai`].
+    /// Start a setting & worldbuilding pass (incremental when possible, #90); the
+    /// setting bible + rule findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_setting(&mut self) {
-        self.spawn_ai("⟳ Building setting bible…", |backend, manuscript, model| {
-            let req = setting::build_request(manuscript, &model);
-            Outcome::Setting(backend.complete(&req).and_then(|r| setting::parse(&r.text)))
+        let t = bible_tracker(AiAction::Setting).expect("setting is a bible tracker");
+        self.run_bible_tracker(t, setting::build_request, setting::build_incremental_request, |r| {
+            Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
         });
     }
 
@@ -318,13 +372,23 @@ impl App {
         message: &str,
         run: impl FnOnce(&dyn Backend, String, String) -> Outcome + Send + 'static,
     ) {
+        let model = self.ai.model.clone();
+        let manuscript = self.manuscript_text();
+        self.spawn_outcome(message, move |backend| run(backend, manuscript, model));
+    }
+
+    /// The shared worker-spawn lifecycle for an AI request: bail if one's already
+    /// in flight, resolve the backend (gating readiness on the UI thread; the
+    /// heavy build happens off-thread), then run `produce` to an `Outcome`.
+    fn spawn_outcome(
+        &mut self,
+        message: &str,
+        produce: impl FnOnce(&dyn Backend) -> Outcome + Send + 'static,
+    ) {
         if self.ai_task.is_busy() {
             self.message = Some("An AI request is already in flight…".into());
             return;
         }
-        // Resolve which backend to use (and gate on readiness) on the UI thread;
-        // actually *building* it — which for the local model means loading (and
-        // maybe downloading) — happens on the worker thread so the UI never blocks.
         let spec = match self.backend_spec() {
             Ok(spec) => spec,
             Err(e) => {
@@ -332,14 +396,115 @@ impl App {
                 return;
             }
         };
-        let model = self.ai.model.clone();
-        let manuscript = self.manuscript_text();
-
         self.ai_task.spawn(move || match spec.build() {
-            Ok(backend) => run(backend.as_ref(), manuscript, model),
+            Ok(backend) => produce(backend.as_ref()),
             Err(e) => Outcome::Error(e),
         });
         self.message = Some(message.to_string());
+    }
+
+    /// Read a tracker's prior bible and decide its scope from the revision delta
+    /// (#90) — shared by the cost estimate and the run so they always agree. A
+    /// missing/empty bible can't be revised and isn't truly "up to date" (e.g. it
+    /// was hand-deleted while the state file lingered), so it rebuilds in full.
+    fn plan_bible_pass(&self, t: &BibleTracker) -> (ai::incremental::Scope, String, ai::incremental::Digests) {
+        let prior = match t.source {
+            BibleSource::Dir(dir) => bible::raw_dir(&self.project.root, dir),
+            BibleSource::File(file) => bible::raw_file(&self.project.root, file),
+        };
+        let current = self.chapter_digests();
+        let scope = if prior.trim().is_empty() {
+            ai::incremental::Scope::Full
+        } else {
+            let state = ai::incremental::State::load(&self.project.root);
+            ai::incremental::decide(state.built_from(t.key), &current, self.ai.refresh_after_changes)
+        };
+        (scope, prior, current)
+    }
+
+    /// Run a persistent-bible tracker with incremental scoping (#90): revise the
+    /// bible from only the changed chapters, rebuild it from the whole manuscript,
+    /// or skip (already current). `full`/`incr` build the request for each case.
+    fn run_bible_tracker(
+        &mut self,
+        t: BibleTracker,
+        full: impl FnOnce(String, &str) -> ai::Request,
+        incr: impl FnOnce(&str, &str, &str) -> ai::Request,
+        finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
+    ) {
+        let (scope, prior, current) = self.plan_bible_pass(&t);
+        let model = self.ai.model.clone();
+        let (req, message) = match scope {
+            ai::incremental::Scope::UpToDate => {
+                self.message =
+                    Some(format!("{}: bible is current — no chapters changed since the last pass.", t.key));
+                return;
+            }
+            ai::incremental::Scope::Full => (full(self.manuscript_text(), &model), t.full_msg),
+            ai::incremental::Scope::Incremental(changed) => {
+                (incr(&prior, &self.chapters_text(&changed), &model), t.incr_msg)
+            }
+        };
+        // Snapshot the manuscript state now; recorded once the pass applies cleanly.
+        self.pending_pass = Some((t.key.to_string(), current));
+        self.spawn_request(message, req, finish);
+    }
+
+    /// Run a pre-built request on a worker thread (#90), delivering `finish`'s
+    /// `Outcome` via `ai_rx`. Like [`App::spawn_ai`], but the request is assembled
+    /// by the caller (so it can be a full or an incremental pass).
+    fn spawn_request(
+        &mut self,
+        message: &str,
+        req: ai::Request,
+        finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
+    ) {
+        self.spawn_outcome(message, move |backend| finish(backend.complete(&req)));
+    }
+
+    /// The chapter `file → content-digest` map for the manuscript as it is now —
+    /// the revision-delta baseline for incremental scoping (#90).
+    pub(crate) fn chapter_digests(&self) -> ai::incremental::Digests {
+        (0..self.chapter_count())
+            .filter_map(|i| {
+                let file = self.project.chapter_file(i);
+                (!file.is_empty())
+                    .then(|| (file.to_string(), ai::incremental::digest(&self.chapter_text(i))))
+            })
+            .collect()
+    }
+
+    /// The text of the chapters whose files are in `files`, each under its title
+    /// heading — the changed-chapter context for an incremental pass (#90).
+    pub(crate) fn chapters_text(&self, files: &[String]) -> String {
+        self.render_chapters(|i| files.iter().any(|f| f == self.project.chapter_file(i)))
+    }
+
+    /// Record what the just-applied bible pass was built from (#90), so the next
+    /// run only re-analyzes what changed. Best effort — a state-write failure
+    /// doesn't undo the pass that already succeeded. A no-op for non-bible passes
+    /// (which leave `pending_pass` unset).
+    fn record_pass_state(&mut self) {
+        if let Some((tracker, digests)) = self.pending_pass.take() {
+            let today = date::iso(date::today());
+            let _ = ai::incremental::State::record(&self.project.root, &tracker, &today, digests);
+        }
+    }
+
+    /// The byte length of the context a costed pass will actually send — for the
+    /// cost estimate (#90). The whole manuscript for most passes, but only the
+    /// bible + changed chapters for an incremental tracker pass, and zero when its
+    /// bible is already current (so an up-to-date pass never prompts a confirm).
+    pub(crate) fn pass_context_len(&self, action: AiAction) -> usize {
+        let Some(t) = bible_tracker(action) else {
+            return self.manuscript_text().len();
+        };
+        let (scope, prior, _) = self.plan_bible_pass(&t);
+        match scope {
+            ai::incremental::Scope::UpToDate => 0,
+            ai::incremental::Scope::Full => self.manuscript_text().len(),
+            ai::incremental::Scope::Incremental(changed) => prior.len() + self.chapters_text(&changed).len(),
+        }
     }
 
     /// Choose the backend for a request from settings (after the readiness gate).
@@ -387,6 +552,9 @@ impl App {
                     Outcome::Submission(r) => self.apply_submission(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
+                // The in-flight pass is done; a clean bible apply already recorded
+                // its state (#90), so drop any snapshot a failed/conflicted one left.
+                self.pending_pass = None;
             }
             Poll::Pending => {}
             Poll::Died => self.message = Some("AI: request failed".into()),
@@ -449,6 +617,7 @@ impl App {
         if !failures.is_empty() {
             self.message = Some(write_failure_message(&failures));
         } else if conflicts.is_empty() {
+            self.record_pass_state(); // the bible now reflects this manuscript state (#90)
             self.show_ai(character_summary_lines(chars.len(), written, drift));
         } else {
             let pending = conflicts.len();
@@ -702,7 +871,10 @@ impl App {
         self.accumulate_triage(&findings);
         self.pending_findings = findings;
         match self.stage_bible(path, name, render) {
-            Staged::Wrote => self.open_findings(),
+            Staged::Wrote => {
+                self.record_pass_state(); // the bible now reflects this manuscript state (#90)
+                self.open_findings();
+            }
             Staged::Conflict(conflict) => {
                 self.mode = Mode::BibleReview(Box::new(BibleReview {
                     conflicts: vec![conflict],

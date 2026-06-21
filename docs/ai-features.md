@@ -28,6 +28,7 @@ backend = "claude"             # "claude" (API) or "local" (on-device Qwen via c
 offline = false                # true forces the local backend (nothing leaves the machine)
 model = "claude-opus-4-8"      # Claude model; the local backend picks its own
 cost_threshold = 0.20          # confirm before a Claude pass estimated above this (USD)
+refresh_after_changes = 5      # rebuild a bible fully once this many chapters change (else revise incrementally)
 # api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins); Claude only
 ```
 
@@ -88,6 +89,38 @@ author-owned `<!-- notes:start/end -->` block that survives regeneration; a
 `digest:` detects hand-edits so a pass shows a diff instead of overwriting. The
 findings overlay lets the author jump to a finding's chapter, mark it as an `xxx`
 TODO, or dismiss it. The shared bible machinery lives in `src/ai/bible.rs`.
+
+### Incremental scoping (#90)
+
+Authors edit a chapter at a time, so re-sending the whole novel on every pass is
+almost all wasted work. The persistent-bible passes (character, setting,
+timeline) scope themselves to what changed:
+
+- Each pass records a `chapter file → content digest` map of the manuscript it
+  was built from, in `bible/.state.toml` (one entry per tracker). The digest is
+  content-addressed, so a chapter counts as changed exactly when its text
+  differs — no version control or commit timing involved.
+- The next run hashes the current chapters and diffs against that record:
+  - **nothing changed** → the bible is already current, so no request is sent
+    (and the cost confirm never fires);
+  - **a few chapters changed** → an *incremental* pass feeds the existing bible
+    plus only the changed chapters and asks the model to revise it;
+  - **many changed** (≥ `refresh_after_changes`), a chapter was removed, or
+    there's no prior record → a full whole-manuscript rebuild.
+- The cost estimate reflects what will actually be sent, so an incremental update
+  is correctly cheap rather than warning at whole-novel size.
+
+The findings-only passes (naming, style, scaffold) have no persistent cache to
+revise, so they always run a full pass. The scoping logic lives in
+`src/ai/incremental.rs`. The state file is a derivable cache (gitignored): if it's
+absent — a fresh clone, or hand-deleted — the next pass simply rebuilds in full,
+which is also the way to **force a full rebuild on demand** today.
+
+An incremental revise updates and adds bible entries but does not delete a
+profile file whose character vanishes only within the incremental window — a full
+rebuild (cross the threshold, or delete `bible/.state.toml`) reconciles that.
+Half-cost full rebuilds via the **Batch API**, and an explicit "rebuild now"
+command, are a follow-up (the full-rebuild path still uses the normal request).
 
 ## Integration shape
 
@@ -189,10 +222,10 @@ author's prose is out of scope per the assistant-not-co-writer principle above.)
 
 ## Open questions
 
-- **Cost/visibility** — the pre-pass cost confirm ships (#82). Still open:
-  intelligent/incremental scoping — update a tracker from the revision delta
-  since its last run, using the existing bible as a cache, and only re-send the
-  whole book after N revisions (#90).
+- **Cost/visibility** — the pre-pass cost confirm (#82) and incremental scoping
+  (#90, see above) both ship. Still open: half-cost full rebuilds via the Batch
+  API and an explicit on-demand "rebuild now" command (the full-rebuild path
+  currently uses the normal request).
 - **Trust & provenance** — every AI-written bible entry needs a clear source
   ("generated from ch. 1–12, edited by you") so authors can trust or correct it.
 - **Local model backend** — define the `quill-ai` trait so a future on-device

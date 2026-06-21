@@ -666,3 +666,81 @@ fn triage_with_no_findings_shows_a_message() {
     assert!(app.message.as_deref().unwrap_or("").contains("No findings"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- Incremental pass scoping (#90) ----------------------------------------
+
+/// Write a character bible file so the "up to date" path (bible present + state
+/// recorded) is reachable.
+fn write_character_bible(dir: &std::path::Path) {
+    let chars = dir.join("bible").join("characters");
+    fs::create_dir_all(&chars).unwrap();
+    fs::write(chars.join("mara.md"), "---\nname: Mara\n---\n\n<!-- generated:start -->\nprofile\n<!-- generated:end -->\n").unwrap();
+}
+
+#[test]
+fn an_up_to_date_bible_pass_makes_no_request() {
+    let (mut app, dir) = two_chapter_app("incr-uptodate");
+    // A bible exists and its recorded state matches the manuscript → nothing to do.
+    write_character_bible(&dir);
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    app.analyze_characters();
+    assert!(!app.ai_busy(), "an up-to-date bible spawns no request");
+    assert!(app.message.as_deref().unwrap_or("").contains("current"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_hand_deleted_bible_rebuilds_even_when_state_says_current() {
+    let (app, dir) = two_chapter_app("incr-drift");
+    // The state claims the bible is built from the current manuscript, but no
+    // bible file exists on disk (deleted by hand) — rebuild rather than skip.
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    assert_eq!(
+        app.pass_context_len(crate::mode::AiAction::Characters),
+        app.manuscript_text().len(),
+        "a missing bible forces a full rebuild, not an up-to-date skip"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
+    let (mut app, dir) = two_chapter_app("incr-scope");
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    // Edit chapter Two and save; only it is now part of the delta.
+    app.on_key(ctrl('n')); // active → Two
+    type_str(&mut app, "NEWWORD");
+    app.on_key(ctrl('s'));
+
+    let state = ai::incremental::State::load(&dir);
+    let scope = ai::incremental::decide(state.built_from("characters"), &app.chapter_digests(), 5);
+    assert_eq!(scope, ai::incremental::Scope::Incremental(vec!["two.md".into()]));
+    // The incremental context is only the changed chapter, not the whole book.
+    let changed = app.chapters_text(&["two.md".to_string()]);
+    assert!(changed.contains("NEWWORD") && !changed.contains("first chapter"), "{changed}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
+    let (app, dir) = two_chapter_app("incr-cost");
+    let action = crate::mode::AiAction::Characters;
+    assert_eq!(app.pass_context_len(action), app.manuscript_text().len(), "first run estimates the full manuscript");
+    write_character_bible(&dir);
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    assert_eq!(app.pass_context_len(action), 0, "an up-to-date bible costs nothing to confirm");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_clean_bible_pass_records_what_it_built_from() {
+    let (mut app, dir) = two_chapter_app("incr-record");
+    let built = app.chapter_digests();
+    // Stand in for what analyze_characters sets just before spawning the request.
+    app.pending_pass = Some(("characters".to_string(), built.clone()));
+    app.apply_characters(Ok(vec![Character { name: "Mara".into(), ..Default::default() }]));
+    let state = ai::incremental::State::load(&dir);
+    assert_eq!(state.built_from("characters"), Some(&built), "the pass recorded its manuscript state");
+    assert!(app.pending_pass.is_none(), "the snapshot was consumed");
+    fs::remove_dir_all(&dir).ok();
+}
