@@ -407,8 +407,8 @@ impl Project {
         Band::of(self.chapter_role(index))
     }
 
-    /// How many files are body chapters — the count that feeds chapter numbering
-    /// and the progress report's goal, excluding front/back matter (#180).
+    /// How many files are body chapters — the count the progress report measures
+    /// against the chapter goal, excluding front/back matter (#180).
     pub fn body_chapter_count(&self) -> usize {
         self.manifest.chapters.iter().filter(|c| Band::of(c.role) == Band::Body).count()
     }
@@ -416,10 +416,18 @@ impl Project {
     /// Sort chapters into reading order — front matter, body, back matter (#180) —
     /// preserving the author's order within each band (a stable sort). Returns
     /// whether the order actually changed.
+    ///
+    /// Note: the report's `parts` ranges are positional (1-based indices into this
+    /// list) and are not remapped here, so mixing sections with `parts` can shift
+    /// which chapters a part covers (tracked as a follow-up).
     pub fn reorder_by_band(&mut self) -> bool {
-        let before: Vec<String> = self.manifest.chapters.iter().map(|c| c.file.clone()).collect();
+        // A stable sort, so "changed" is exactly "wasn't already in band order" —
+        // checked without cloning the file list.
+        if self.manifest.chapters.is_sorted_by_key(|c| Band::of(c.role)) {
+            return false;
+        }
         self.manifest.chapters.sort_by_key(|c| Band::of(c.role));
-        self.manifest.chapters.iter().zip(&before).any(|(c, f)| c.file != *f)
+        true
     }
 
     /// Copy a chapter's managed metadata into its cache from a [`FrontMatter`]
