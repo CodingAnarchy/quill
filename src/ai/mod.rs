@@ -45,6 +45,14 @@ use serde::Deserialize;
 /// cached in an `Arc` and shared with the worker thread.
 pub trait Backend: Send + Sync {
     fn complete(&self, req: &Request) -> Result<Response, AiError>;
+
+    /// Run a request through the provider's batch path (#176) — half price, higher
+    /// latency — for the occasional full-manuscript rebuild. The default just runs
+    /// it normally, so a backend with no batch support (the local model) and the
+    /// non-batch path both keep working.
+    fn complete_batched(&self, req: &Request) -> Result<Response, AiError> {
+        self.complete(req)
+    }
 }
 
 /// One completion request. `cached_context` is the large, slowly-changing prefix

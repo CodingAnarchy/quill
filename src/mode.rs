@@ -271,7 +271,8 @@ pub(crate) enum Pending {
     /// Text input: a message for a version-control commit (#131).
     Commit,
     /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.
-    ConfirmAi(AiAction),
+    /// The bool is whether to force a full rebuild (#176).
+    ConfirmAi(AiAction, bool),
     /// y/N: restore the current chapter to its last committed version (#135).
     ConfirmRestore,
     /// Text input: the remote URL to back the project up to (#134).

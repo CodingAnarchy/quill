@@ -257,7 +257,9 @@ fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
         ])
     });
     let title = format!(" {} ", palette.title);
-    let help = format!("{} — ↑↓ move · enter run · esc close", palette.title);
+    // The `R` force-rebuild gesture only applies to the AI bible passes (#176).
+    let rebuild = if palette.title == "AI" { " · R rebuild bible (full)" } else { "" };
+    let help = format!("{} — ↑↓ move · enter run{rebuild} · esc close", palette.title);
     draw_list_overlay(frame, area, &title, &help, rows);
 }
 

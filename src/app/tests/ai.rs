@@ -588,10 +588,10 @@ fn findings_len(app: &App) -> usize {
 fn an_expensive_pass_asks_for_confirmation_first() {
     let (mut app, dir) = two_chapter_app("cost-confirm");
     app.ai.cost_threshold = 0.0; // any non-empty manuscript exceeds it
-    app.start_ai_action(crate::mode::AiAction::Continuity);
+    app.start_ai_action(crate::mode::AiAction::Continuity, false);
     match &app.mode {
         Mode::Prompt(s) => {
-            assert!(matches!(s.pending, Pending::ConfirmAi(_)), "cost confirm opens");
+            assert!(matches!(s.pending, Pending::ConfirmAi(_, _)), "cost confirm opens");
             assert!(s.label.contains("run?"), "{}", s.label);
         }
         _ => panic!("expected the cost confirm prompt"),
@@ -603,7 +603,7 @@ fn an_expensive_pass_asks_for_confirmation_first() {
 fn a_cheap_pass_runs_without_confirmation() {
     let (mut app, dir) = two_chapter_app("cost-cheap");
     app.ai.cost_threshold = 1_000.0; // nothing this small could exceed it
-    app.start_ai_action(crate::mode::AiAction::Style);
+    app.start_ai_action(crate::mode::AiAction::Style, false);
     // It dispatched straight through (no key configured → a status message),
     // never stopping at a confirm prompt.
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm for a cheap pass");
@@ -614,7 +614,7 @@ fn a_cheap_pass_runs_without_confirmation() {
 fn confirming_an_expensive_pass_dispatches_it() {
     let (mut app, dir) = two_chapter_app("cost-yes");
     app.ai.cost_threshold = 0.0;
-    app.start_ai_action(crate::mode::AiAction::Continuity);
+    app.start_ai_action(crate::mode::AiAction::Continuity, false);
     assert!(matches!(app.mode, Mode::Prompt(_)));
     app.on_key(key(KeyCode::Char('y'))); // confirm → dispatch (no key → message)
     assert!(!matches!(app.mode, Mode::Prompt(_)), "confirm closes the prompt");
@@ -625,7 +625,7 @@ fn confirming_an_expensive_pass_dispatches_it() {
 fn declining_an_expensive_pass_cancels_it() {
     let (mut app, dir) = two_chapter_app("cost-no");
     app.ai.cost_threshold = 0.0;
-    app.start_ai_action(crate::mode::AiAction::Continuity);
+    app.start_ai_action(crate::mode::AiAction::Continuity, false);
     app.on_key(key(KeyCode::Char('n')));
     assert!(matches!(app.mode, Mode::Insert), "declining returns to editing");
     assert!(!app.ai_task.is_busy(), "nothing was sent");
@@ -683,9 +683,24 @@ fn an_up_to_date_bible_pass_makes_no_request() {
     // A bible exists and its recorded state matches the manuscript → nothing to do.
     write_character_bible(&dir);
     ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
-    app.analyze_characters();
+    app.analyze_characters(false);
     assert!(!app.ai_busy(), "an up-to-date bible spawns no request");
     assert!(app.message.as_deref().unwrap_or("").contains("current"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn forcing_a_rebuild_overrides_an_up_to_date_bible() {
+    let (app, dir) = two_chapter_app("incr-force");
+    write_character_bible(&dir);
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    let action = crate::mode::AiAction::Characters;
+    assert_eq!(app.pass_context_len(action, false), 0, "up to date by default");
+    assert_eq!(
+        app.pass_context_len(action, true),
+        app.manuscript_text().len(),
+        "the palette's R (force) rebuilds from the whole manuscript anyway"
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -696,7 +711,7 @@ fn a_hand_deleted_bible_rebuilds_even_when_state_says_current() {
     // bible file exists on disk (deleted by hand) — rebuild rather than skip.
     ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
     assert_eq!(
-        app.pass_context_len(crate::mode::AiAction::Characters),
+        app.pass_context_len(crate::mode::AiAction::Characters, false),
         app.manuscript_text().len(),
         "a missing bible forces a full rebuild, not an up-to-date skip"
     );
@@ -725,10 +740,10 @@ fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
 fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
     let (app, dir) = two_chapter_app("incr-cost");
     let action = crate::mode::AiAction::Characters;
-    assert_eq!(app.pass_context_len(action), app.manuscript_text().len(), "first run estimates the full manuscript");
+    assert_eq!(app.pass_context_len(action, false), app.manuscript_text().len(), "first run estimates the full manuscript");
     write_character_bible(&dir);
     ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
-    assert_eq!(app.pass_context_len(action), 0, "an up-to-date bible costs nothing to confirm");
+    assert_eq!(app.pass_context_len(action, false), 0, "an up-to-date bible costs nothing to confirm");
     fs::remove_dir_all(&dir).ok();
 }
 
