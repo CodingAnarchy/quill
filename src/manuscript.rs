@@ -61,16 +61,17 @@ pub struct SegmentHeader {
 
 impl Manuscript {
     /// Open the continuous view, windowed around the project's active chapter,
-    /// cursor at that chapter's start.
-    pub fn open(project: &Project) -> Self {
+    /// cursor at that chapter's start. Fails if a chapter in the window can't be
+    /// read (#154), rather than presenting it as empty.
+    pub fn open(project: &Project) -> std::io::Result<Self> {
         let active = project.active_index();
         let (lo, hi) = window_bounds(active, chapter_count(project));
         let mut m = Manuscript {
             segments: Vec::new(),
             buffer: Buffer::from_text(""),
         };
-        m.rebuild(project, lo, hi, active, 0, 0);
-        m
+        m.rebuild(project, lo, hi, active, 0, 0)?;
+        Ok(m)
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -202,12 +203,15 @@ impl Manuscript {
         let local = line - self.segment_start_line(seg);
         let col = self.buffer.cursor.col;
         self.save(project)?;
-        self.rebuild(project, lo, hi, current, local, col);
-        Ok(())
+        self.rebuild(project, lo, hi, current, local, col)
     }
 
     /// Load chapters `[lo, hi)` into a fresh buffer, rebuild the segment table,
     /// and restore the cursor to `keep_chapter` at `keep_local`/`keep_col`.
+    ///
+    /// All chapters are read up front; if any read fails (#154) the error is
+    /// returned and `self` is left untouched, so an unreadable chapter is never
+    /// loaded as empty text the author could then save over its real content.
     fn rebuild(
         &mut self,
         project: &Project,
@@ -216,11 +220,14 @@ impl Manuscript {
         keep_chapter: usize,
         keep_local: usize,
         keep_col: usize,
-    ) {
+    ) -> std::io::Result<()> {
         let mut text = String::new();
         let mut segments = Vec::new();
         for index in lo..hi {
-            let raw = fs::read_to_string(project.chapter_path(index)).unwrap_or_default();
+            // Propagate any read failure before mutating self — every manifest
+            // chapter has a file (created on add), so a failure here means the
+            // file is gone or unreadable, not a legitimately empty chapter.
+            let raw = fs::read_to_string(project.chapter_path(index))?;
             // Front matter stays out of the flowing text; keep it to re-attach on save.
             let (front, body) = frontmatter::split(&raw);
             // Give every chapter at least one line so it's always editable; an
@@ -253,6 +260,7 @@ impl Manuscript {
         let line = self.segment_start_line(seg);
         self.buffer.cursor.line = (line + keep_local).min(self.buffer.line_count() - 1);
         self.buffer.cursor.col = keep_col;
+        Ok(())
     }
 
     // --- Line ↔ segment mapping --------------------------------------------
@@ -338,7 +346,7 @@ mod tests {
     #[test]
     fn open_loads_a_window_and_line_sums_match() {
         let (project, dir) = project_with("open", &["a1\na2\n", "b1\n", "c1\n", "d1\n"]);
-        let m = Manuscript::open(&project); // active is chapter 0
+        let m = Manuscript::open(&project).unwrap(); // active is chapter 0
 
         // Only WINDOW chapters loaded, never the whole novel.
         assert_eq!(m.segments.len(), WINDOW);
@@ -359,7 +367,7 @@ mod tests {
                 "Beta prose.\n",
             ],
         );
-        let mut m = Manuscript::open(&project);
+        let mut m = Manuscript::open(&project).unwrap();
 
         // The concatenated buffer holds only prose — no YAML in the flow.
         let flow = m.buffer.line_range_text(0, m.buffer.line_count());
@@ -382,7 +390,7 @@ mod tests {
     #[test]
     fn maps_global_line_to_the_right_chapter() {
         let (project, dir) = project_with("map", &["a1\na2\n", "b1\n", "c1\n"]);
-        let m = Manuscript::open(&project);
+        let m = Manuscript::open(&project).unwrap();
         // Segments: a = lines [0,2), b = [2,3), c = [3,4).
         assert_eq!(m.segments[m.owner_of_line(0)].index, 0);
         assert_eq!(m.segments[m.owner_of_line(1)].index, 0);
@@ -397,7 +405,7 @@ mod tests {
     #[test]
     fn edit_marks_only_the_owning_chapter_and_saves_just_that_file() {
         let (mut project, dir) = project_with("edit", &["alpha\n", "beta\n", "gamma\n"]);
-        let mut m = Manuscript::open(&project);
+        let mut m = Manuscript::open(&project).unwrap();
 
         // Put the cursor in chapter 1 ("beta", global line 1) and type.
         m.buffer.cursor = Cursor { line: 1, col: 4 };
@@ -421,7 +429,7 @@ mod tests {
     #[test]
     fn backspace_at_a_chapter_start_is_a_fixed_seam() {
         let (mut project, dir) = project_with("seam", &["alpha\n", "beta\n"]);
-        let mut m = Manuscript::open(&project);
+        let mut m = Manuscript::open(&project).unwrap();
 
         // Cursor at the first position of chapter 1 ("beta", line 1, col 0).
         m.buffer.cursor = Cursor { line: 1, col: 0 };
@@ -437,10 +445,37 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_chapter_fails_rather_than_loading_empty() {
+        let (project, dir) = project_with("unreadable", &["alpha\n", "beta\n"]);
+        // The file vanishes out from under the view (removed / permission lost).
+        fs::remove_file(dir.join("ch1.md")).unwrap();
+        // Opening the window must surface the failure, not load ch1 as empty text
+        // that a later save could write back over the (now-missing) file (#154).
+        assert!(Manuscript::open(&project).is_err());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reslide_keeps_the_window_intact_when_a_paged_in_chapter_is_unreadable() {
+        let (mut project, dir) = project_with("reslide-fail", &["a\n", "b\n", "c\n", "d\n", "e\n"]);
+        let mut m = Manuscript::open(&project).unwrap(); // window [0,3)
+
+        // Make chapter 3 (paged in when we slide forward) unreadable, then move
+        // the cursor into chapter 2 and reslide.
+        fs::remove_file(dir.join("ch3.md")).unwrap();
+        m.buffer.cursor = Cursor { line: 2, col: 0 };
+        assert!(m.reslide(&mut project).is_err(), "the failed read is surfaced");
+        // The window is unchanged — the old chapters are still loaded, not blanked.
+        assert_eq!((m.window_lo(), m.window_hi()), (0, 3));
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "a\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn scrolling_pages_chapters_in_and_out_and_saves_dropped_edits() {
         let (mut project, dir) =
             project_with("slide", &["a\n", "b\n", "c\n", "d\n", "e\n"]);
-        let mut m = Manuscript::open(&project); // window [0,3)
+        let mut m = Manuscript::open(&project).unwrap(); // window [0,3)
         assert_eq!((m.window_lo(), m.window_hi()), (0, 3));
 
         // Edit chapter 0, then step the cursor into chapter 2 (the last loaded)

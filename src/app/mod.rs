@@ -864,8 +864,15 @@ impl App {
         if self.flush_active().is_err() {
             return;
         }
-        self.manuscript = Some(Manuscript::open(&self.project));
-        self.message = Some("Continuous view".into());
+        match Manuscript::open(&self.project) {
+            Ok(m) => {
+                self.manuscript = Some(m);
+                self.message = Some("Continuous view".into());
+            }
+            // A chapter in the window couldn't be read (#154) — stay in the
+            // single-chapter view rather than show it blank.
+            Err(e) => self.message = Some(format!("Couldn't open continuous view: {e}")),
+        }
     }
 
     /// Leave the continuous view: save its chapters, then reopen the single
@@ -941,8 +948,11 @@ impl App {
     fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
         mv(self.edit_buffer_mut());
         if let Some(mut m) = self.manuscript.take() {
+            // reslide flushes pending edits then pages the window; either the save
+            // or a chapter read (#154) can fail. The window is left intact on a
+            // failed read, so the view simply doesn't page.
             if let Err(e) = m.reslide(&mut self.project) {
-                self.message = Some(format!("Save failed: {e}"));
+                self.message = Some(format!("Continuous view: {e}"));
             }
             self.manuscript = Some(m);
         }
