@@ -17,8 +17,8 @@ fn vim_app(name: &str) -> (App, PathBuf) {
 fn normal_mode_keys_do_not_insert_text() {
     let (mut app, dir) = vim_app("vim-normal-no-insert");
     let original = app.buffer.text();
-    // `x` (delete, a later child) is unhandled here — it must not type a letter.
-    app.on_key(key(KeyCode::Char('x')));
+    // An unmapped letter is a no-op, never typed input.
+    app.on_key(key(KeyCode::Char('z')));
     assert_eq!(app.buffer.text(), original, "letters are commands, not input");
     assert!(matches!(app.mode, Mode::Normal));
     fs::remove_dir_all(&dir).ok();
@@ -155,6 +155,90 @@ fn f_finds_a_char_and_semicolon_repeats() {
     assert_eq!(app.buffer.cursor.col, 10, "; repeats the find");
     app.on_key(key(KeyCode::Char(',')));
     assert_eq!(app.buffer.cursor.col, 4, ", repeats the find backwards");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn dw_deletes_a_word_and_stays_in_normal() {
+    let (mut app, dir) = vim_app("vim-dw");
+    type_str(&mut app, "dw"); // delete "first " (word + trailing space)
+    assert_eq!(app.buffer.text(), "chapter\n", "{}", app.buffer.text());
+    assert!(matches!(app.mode, Mode::Normal), "d stays in Normal");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn cw_changes_to_word_end_and_enters_insert() {
+    let (mut app, dir) = vim_app("vim-cw");
+    // cw acts like ce: changes "first" (not the trailing space), then Insert.
+    type_str(&mut app, "cw");
+    assert!(matches!(app.mode, Mode::Insert), "c enters Insert");
+    type_str(&mut app, "last");
+    assert_eq!(app.buffer.text(), "last chapter\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn dd_deletes_the_line_with_a_count() {
+    let (mut app, dir) = vim_app("vim-dd");
+    // Build three lines, return to Normal at the top.
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond\nthird");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg"); // to line 0
+    type_str(&mut app, "2dd"); // delete the first two lines
+    assert_eq!(app.buffer.text(), "third\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn x_deletes_the_char_under_the_cursor() {
+    let (mut app, dir) = vim_app("vim-x");
+    type_str(&mut app, "x");
+    assert_eq!(app.buffer.text(), "irst chapter\n", "{}", app.buffer.text());
+    type_str(&mut app, "2x");
+    assert_eq!(app.buffer.text(), "st chapter\n", "2x deletes two: {}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ci_quote_changes_inside_quotes() {
+    let (mut app, dir) = vim_app("vim-ciq");
+    // Replace the chapter with a quoted line.
+    type_str(&mut app, "cc");
+    type_str(&mut app, "say \"hi\" now");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "0"); // line start
+    type_str(&mut app, "ci\""); // change inside the quotes
+    assert!(matches!(app.mode, Mode::Insert));
+    type_str(&mut app, "bye");
+    assert_eq!(app.buffer.text(), "say \"bye\" now\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn capital_d_deletes_to_end_of_line_and_u_undoes() {
+    let (mut app, dir) = vim_app("vim-D");
+    type_str(&mut app, "fc"); // jump to the 'c' of "chapter"
+    type_str(&mut app, "D"); // delete to end of line
+    assert_eq!(app.buffer.text(), "first \n", "{}", app.buffer.text());
+    app.on_idle(); // seal the edit into an undo group
+    type_str(&mut app, "u"); // undo
+    assert_eq!(app.buffer.text(), "first chapter\n", "u restores the line");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_operator_composes_with_the_arrow_keys() {
+    let (mut app, dir) = vim_app("vim-d-arrow");
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond\nthird");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg"); // to line 0
+    // d<Down> deletes this line and the next, like dj.
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(app.buffer.text(), "third\n", "{}", app.buffer.text());
     fs::remove_dir_all(&dir).ok();
 }
 
