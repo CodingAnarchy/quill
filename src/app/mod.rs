@@ -1436,11 +1436,7 @@ impl App {
             let last = last.min(buf.line_count().saturating_sub(1));
             let start = buf.line_start_byte(first);
             // The register always holds the full lines (with their newlines).
-            let end = if last + 1 < buf.line_count() {
-                buf.line_start_byte(last + 1)
-            } else {
-                buf.len_bytes()
-            };
+            let end = buf.next_line_byte(last);
             let text = buf.byte_slice(start, end);
             match op {
                 Op::Delete => buf.replace_byte_range(start, end, ""),
@@ -1493,15 +1489,7 @@ impl App {
         let buf = self.edit_buffer_mut();
         if yank.linewise {
             let line = buf.cursor.line;
-            let at = if after {
-                if line + 1 < buf.line_count() {
-                    buf.line_start_byte(line + 1)
-                } else {
-                    buf.len_bytes()
-                }
-            } else {
-                buf.line_start_byte(line)
-            };
+            let at = if after { buf.next_line_byte(line) } else { buf.line_start_byte(line) };
             buf.replace_byte_range(at, at, &body);
             buf.move_to_line(if after { line + 1 } else { line });
         } else {
