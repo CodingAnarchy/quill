@@ -256,6 +256,7 @@ impl Action {
         Action::Ai(AiAction::Style),
         Action::Ai(AiAction::Voice),
         Action::Ai(AiAction::Submission),
+        Action::Ai(AiAction::Marketing),
         Action::Ai(AiAction::Triage),
     ];
 
@@ -279,6 +280,7 @@ impl Action {
             Action::Ai(AiAction::Style) => "ai:style",
             Action::Ai(AiAction::Voice) => "ai:voice",
             Action::Ai(AiAction::Submission) => "ai:submission",
+            Action::Ai(AiAction::Marketing) => "ai:marketing",
             Action::Ai(AiAction::Triage) => "triage",
         }
     }
@@ -302,6 +304,7 @@ impl Action {
             Action::Ai(AiAction::Style) => "AI · Prose & style",
             Action::Ai(AiAction::Voice) => "AI · Character voice",
             Action::Ai(AiAction::Submission) => "AI · Submission material",
+            Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
             Action::Ai(AiAction::Triage) => "Revision triage",
         }
     }
@@ -351,6 +354,8 @@ pub(crate) enum AiAction {
     /// Character voice consistency — dialogue & POV/narration (#183).
     Voice,
     Submission,
+    /// Marketing copy — blurb variants & taglines, off-manuscript (#236).
+    Marketing,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
 }
