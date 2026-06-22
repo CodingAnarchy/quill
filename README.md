@@ -147,9 +147,17 @@ Normal-mode editing:
   `"a`–`"z` are named registers (`"ayy`, `"ap`).
 - **Undo / redo** — `u` undoes; `Ctrl-y` redoes (sharing Quill's undo history).
 
+Visual mode:
+
+- **`v`** starts a characterwise selection, **`V`** a linewise one; motions
+  extend it (it's highlighted as you go), `o` swaps the active end, `Esc`
+  cancels.
+- **`d`** / **`c`** / **`y`** act on the selection (delete / change / yank), and
+  **`p`** replaces it with the register.
+
 Vim editing commands run in the single-chapter view; in the continuous view
-(Ctrl-L) they're held back, like undo. Visual mode, search, and an Ex command
-line are arriving incrementally (see the roadmap).
+(Ctrl-L) they're held back, like undo. Search and an Ex command line are
+arriving incrementally (see the roadmap).
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status

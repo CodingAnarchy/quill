@@ -36,13 +36,15 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // current one a bright background. Empty when not searching.
     let (search_matches, current_match): (&[ByteRange], Option<ByteRange>) = match &app.mode {
         Mode::Search(s) => (&s.matches, s.current_match()),
+        // Vim Visual mode (#205): the live selection draws as the highlight.
+        Mode::Visual { anchor, linewise } => (&[], Some(app.selection_bytes(*anchor, *linewise))),
         _ => (&[], None),
     };
     let inserts = header_inserts(app, column.width);
-    // No cursor while a docked surface pane has scroll focus (#164). Vim Normal
-    // mode still shows the cursor — that's where the next command acts.
-    let editing =
-        matches!(app.mode, Mode::Insert | Mode::Normal | Mode::EditMeta(_)) && !app.surface_pane_focused();
+    // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
+    // Visual mode still shows the cursor — that's the selection's active end.
+    let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))
+        && !app.surface_pane_focused();
     render_body(frame, column, buffer, &inserts, &conceal, search_matches, current_match, editing);
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
@@ -313,7 +315,10 @@ fn styled_row(
     let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
     let concealed_here = conceal.iter().any(|&(s, e)| s < seg_end && e > seg_start);
     let match_here = matches.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    if hls.is_empty() && !concealed_here && !match_here {
+    // `current` (the search current match, or the Visual selection #205) can be
+    // set without any entry in `matches`, so check it too before skipping styling.
+    let current_here = current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
+    if hls.is_empty() && !concealed_here && !match_here && !current_here {
         return Line::raw(seg.to_string());
     }
 
