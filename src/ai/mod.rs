@@ -136,6 +136,17 @@ impl Outcome {
     }
 }
 
+/// Render a list of items as numbered Markdown sections (`## {label} N`), each
+/// trimmed, with a blank line around it — the shared shape for off-manuscript copy
+/// artifacts (marketing variants #236, social posts #237). Empty input → empty.
+pub(crate) fn numbered_sections(label: &str, items: &[String]) -> String {
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, it)| format!("## {label} {}\n\n{}\n\n", i + 1, it.trim()))
+        .collect()
+}
+
 /// Token usage reported by the backend (zeros when unknown).
 #[derive(Default)]
 pub struct Usage {

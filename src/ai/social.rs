@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{numbered_sections, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// A round of social posts, grouped by platform.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -32,15 +32,8 @@ impl Social {
             ("Instagram posts", "instagram.md", &self.instagram),
         ]
         .into_iter()
-        .map(|(title, file, posts)| {
-            let body: String = posts
-                .iter()
-                .enumerate()
-                .map(|(i, p)| format!("## Post {}\n\n{}\n\n", i + 1, p.trim()))
-                .collect();
-            (title, file, body)
-        })
-        .filter(|(_, _, body)| !body.trim().is_empty())
+        .filter(|(_, _, posts)| !posts.is_empty())
+        .map(|(title, file, posts)| (title, file, numbered_sections("Post", posts)))
         .collect()
     }
 }
