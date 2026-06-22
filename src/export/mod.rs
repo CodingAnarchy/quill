@@ -98,6 +98,10 @@ pub fn to_markdown(doc: &Document) -> String {
                 if let Some(epigraph) = &chapter.epigraph {
                     out.push_str(&epigraph_block(epigraph));
                 }
+                // The body is already Markdown, so it's emitted verbatim — no
+                // block classification needed (a scene-break rule like `---` is
+                // already a Markdown thematic break; #199 only translates it for
+                // the Word/Scrivener writers, which can't carry raw Markdown).
                 let body = chapter.body.trim();
                 if !body.is_empty() {
                     out.push_str(body);
