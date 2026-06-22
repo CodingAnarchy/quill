@@ -208,6 +208,8 @@ pub(crate) enum Command {
     /// only because the AI and export palettes still emit them directly — folding
     /// those palettes onto the registry is follow-up work (#226).
     Run(Action),
+    /// Run the author workflow at this index in `App::workflows` (#226).
+    RunWorkflow(usize),
 }
 
 /// A single invokable Quill action — the unified registry (#225). The run-action
@@ -219,7 +221,7 @@ pub(crate) enum Command {
 /// of actions depending on repo/remote state, and several entries are interactive
 /// prompts or spawn async work — neither fits the flat, fire-and-forget registry
 /// yet. It can join once the registry models context-dependent availability.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Action {
     /// Save the active chapter / continuous window (Ctrl-S).
     Save,
@@ -298,10 +300,24 @@ impl Action {
             Action::Ai(AiAction::Triage) => "Revision triage",
         }
     }
+
+    /// Look up an action by its stable [`name`](Action::name) — the resolver a
+    /// workflow (#226) uses to turn a config step token into an action.
+    pub(crate) fn from_name(name: &str) -> Option<Action> {
+        Action::ALL.iter().copied().find(|a| a.name() == name)
+    }
+
+    /// Whether this action completes synchronously, so a workflow (#226) can run
+    /// it and move straight to the next step. The network AI passes are async
+    /// (workflow support is #227) and "Ask" waits for typed input; `triage` is
+    /// local aggregation, so it counts as synchronous.
+    pub(crate) fn is_sync(self) -> bool {
+        !matches!(self, Action::Ai(a) if !matches!(a, AiAction::Triage))
+    }
 }
 
 /// A manuscript export target (#7), chosen from the export palette.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum ExportFormat {
     /// A single compiled Markdown document (#190).
     Markdown,
@@ -314,7 +330,7 @@ pub(crate) enum ExportFormat {
 }
 
 /// The AI actions reachable from the AI palette.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum AiAction {
     Ask,
     Characters,

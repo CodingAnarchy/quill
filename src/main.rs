@@ -20,6 +20,7 @@ mod syntax;
 mod text;
 mod ui;
 mod vcs;
+mod workflow;
 mod wrap;
 
 use std::io::{self, Stdout};

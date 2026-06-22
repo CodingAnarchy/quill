@@ -166,10 +166,11 @@ impl App {
     }
 
     /// Why `action` can't run right now, or `None` if it can — the one
-    /// availability check the menu annotates with and [`run_action`](App::run_action)
-    /// guards on. The per-action runtime guards (AI cost confirm, etc.) still live
-    /// at the dispatch layer; this only covers the up-front "can't start" cases.
-    fn action_status(&self, action: Action) -> Option<String> {
+    /// availability check the menu annotates with, [`run_action`](App::run_action)
+    /// guards on, and the workflow runner (#226) treats as a step failure. The
+    /// per-action runtime guards (AI cost confirm, etc.) still live at the dispatch
+    /// layer; this only covers the up-front "can't start" cases.
+    pub(crate) fn action_status(&self, action: Action) -> Option<String> {
         match action {
             // Triage is local aggregation — it works with the AI backend off.
             Action::Ai(AiAction::Triage) => None,
@@ -191,6 +192,13 @@ impl App {
             self.message = Some(format!("{}: {reason}", action.label()));
             return;
         }
+        self.dispatch_action(action, force);
+    }
+
+    /// Run an action's effect, its availability already checked by
+    /// [`action_status`](App::action_status). Shared by the run-action menu and the
+    /// workflow runner (#226).
+    pub(crate) fn dispatch_action(&mut self, action: Action, force: bool) {
         match action {
             Action::Save => self.save_edit(),
             Action::Export(f) => self.run_export(f),
@@ -220,6 +228,7 @@ impl App {
                     Some(Command::Git(g)) => self.start_git_action(g),
                     Some(Command::Export(f)) => self.run_export(f),
                     Some(Command::Run(a)) => self.run_action(a, force),
+                    Some(Command::RunWorkflow(i)) => self.run_workflow(i),
                     None => {}
                 }
             }
