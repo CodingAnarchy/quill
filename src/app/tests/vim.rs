@@ -104,6 +104,61 @@ fn returning_from_the_browser_lands_in_normal_when_vim_is_on() {
 }
 
 #[test]
+fn word_motion_and_count_move_the_cursor() {
+    // Active chapter is "first chapter\n".
+    let (mut app, dir) = vim_app("vim-word");
+    app.on_key(key(KeyCode::Char('w'))); // to "chapter"
+    assert_eq!(app.buffer.cursor.col, 6, "w jumps to the next word");
+    app.on_key(key(KeyCode::Char('0'))); // back to line start
+    assert_eq!(app.buffer.cursor.col, 0, "0 goes to the line start");
+    app.on_key(key(KeyCode::Char('$'))); // to line end
+    assert_eq!(app.buffer.cursor.col, app.buffer.line_len(), "$ goes to the line end");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_count_prefix_repeats_a_motion() {
+    let (mut app, dir) = vim_app("vim-count");
+    // "3l" moves right three graphemes.
+    type_str(&mut app, "3l");
+    assert_eq!(app.buffer.cursor.col, 3, "3l moves three to the right");
+    // The count is consumed — a lone "l" now moves one.
+    app.on_key(key(KeyCode::Char('l')));
+    assert_eq!(app.buffer.cursor.col, 4, "count resets after the motion");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn gg_and_capital_g_jump_between_lines() {
+    let (mut app, dir) = vim_app("vim-gg");
+    // Give the chapter a few lines via Insert, then return to Normal.
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond\nthird");
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.buffer.cursor.line, 2, "cursor on the last line after typing");
+    type_str(&mut app, "gg");
+    assert_eq!(app.buffer.cursor.line, 0, "gg jumps to the first line");
+    app.on_key(key(KeyCode::Char('G')));
+    assert_eq!(app.buffer.cursor.line, 2, "G jumps to the last line");
+    type_str(&mut app, "2G");
+    assert_eq!(app.buffer.cursor.line, 1, "a count before G jumps to that line");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn f_finds_a_char_and_semicolon_repeats() {
+    let (mut app, dir) = vim_app("vim-find");
+    // "first chapter": 't' at col 4 (first) and col 10 (chapter).
+    type_str(&mut app, "ft");
+    assert_eq!(app.buffer.cursor.col, 4, "ft jumps to the first 't'");
+    app.on_key(key(KeyCode::Char(';')));
+    assert_eq!(app.buffer.cursor.col, 10, "; repeats the find");
+    app.on_key(key(KeyCode::Char(',')));
+    assert_eq!(app.buffer.cursor.col, 4, ", repeats the find backwards");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;

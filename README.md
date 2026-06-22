@@ -120,10 +120,22 @@ vim = true
 
 With it on, the editor rests in **Normal** mode (shown in the status bar): keys
 are commands, not text. `i`/`a` (and `I`/`A`/`o`/`O`) enter **Insert** mode to
-type, and `Esc` returns to Normal. In Normal mode `h`/`j`/`k`/`l` (and the
-arrows) move the cursor. All the `Ctrl-` shortcuts above keep working in both
-modes. Richer motions, operators, Visual mode, search, and an Ex command line
-are arriving incrementally (see the roadmap).
+type, and `Esc` returns to Normal. All the `Ctrl-` shortcuts above keep working
+in both modes.
+
+Normal-mode motions:
+
+- **Characters / lines** — `h` `j` `k` `l` (and the arrows); `0` line start,
+  `^` first non-blank, `$` line end.
+- **Words** — `w` / `b` next / previous word start, `e` word end.
+- **Document** — `gg` first line, `G` last line, `{count}G` (or `{count}gg`) a
+  specific line.
+- **Find on the line** — `f{char}` / `t{char}` jump to / just before the next
+  occurrence, `F` / `T` backward, and `;` / `,` repeat it forward / back.
+- **Counts** — a number repeats a motion: `5j`, `3w`, `2fx`.
+
+Operators, registers, Visual mode, search, and an Ex command line are arriving
+incrementally (see the roadmap).
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use ratatui::text::Line;
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, FindKind};
 
 /// A full-screen, read-only overlay drawn above any mode: the progress report,
 /// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
@@ -81,6 +81,38 @@ pub enum Mode {
     /// (#165). Reached with `f` from the chapter browser; Enter opens the selected
     /// file in a side pane. Boxed (carries the file list).
     RefFiles(Box<RefFiles>),
+}
+
+/// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
+/// command awaiting its next key, and the last find for `;` / `,`. Lives on
+/// `App` (not inside [`Mode::Normal`]) so `last_find` survives a trip through
+/// Insert mode, the way Vim's does.
+#[derive(Default)]
+pub struct VimState {
+    /// Digits typed as a count prefix (`5` in `5j`); `None` when none is pending.
+    pub(crate) count: Option<usize>,
+    /// A multi-key command awaiting another key (`g…`, or an `f`/`t` target).
+    pub(crate) pending: VimPending,
+    /// The last `f`/`t`/`F`/`T` motion, replayed by `;` / `,`.
+    pub(crate) last_find: Option<Find>,
+}
+
+/// A Vim Normal-mode command waiting on its next keystroke.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VimPending {
+    #[default]
+    None,
+    /// `g` seen — awaiting the second `g` (for `gg`).
+    G,
+    /// `f`/`t`/`F`/`T` seen — awaiting the target character.
+    Find(FindKind),
+}
+
+/// A recorded find-char motion, so `;` / `,` can replay it.
+#[derive(Clone, Copy)]
+pub(crate) struct Find {
+    pub(crate) kind: FindKind,
+    pub(crate) target: char,
 }
 
 /// State for an open [`Mode::RefFiles`]: the reference files (bible + notes) and
