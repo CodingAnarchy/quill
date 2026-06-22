@@ -407,6 +407,8 @@ pub(crate) enum Pending {
     ConfirmRestore,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
+    /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).
+    ExCommand,
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.

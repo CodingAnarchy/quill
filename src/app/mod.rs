@@ -764,6 +764,42 @@ impl App {
         self.mode = Mode::Nav { selected };
     }
 
+    /// Open the Vim Ex command line (#207): `:` then a command (`w`/`q`/`wq`/…).
+    fn open_ex_command(&mut self) {
+        self.vim_state.op = None;
+        self.open_prompt(Pending::ExCommand, ":", "", None);
+    }
+
+    /// Quit, or — when there are unsaved changes — open the confirm prompt first.
+    /// Shared by Ctrl-Q and `:q`.
+    fn request_quit(&mut self) {
+        if self.edit_dirty() {
+            self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
+        } else {
+            self.should_quit = true;
+        }
+    }
+
+    /// Run a typed Ex command (#207). The supported set is the file commands a
+    /// Vim user reaches for first; anything else is reported, like Vim's E492.
+    fn run_ex_command(&mut self, cmd: &str) {
+        match cmd {
+            "" => {} // bare `:` — nothing to do
+            "w" => self.save_edit(),
+            // `:q` prompts on unsaved changes, exactly as Ctrl-Q does.
+            "q" => self.request_quit(),
+            // Write then quit; don't quit if the write failed (buffer still dirty).
+            "wq" | "x" => {
+                self.save_edit();
+                if !self.edit_dirty() {
+                    self.should_quit = true;
+                }
+            }
+            "q!" => self.should_quit = true,
+            other => self.message = Some(format!("Not an editor command: {other}")),
+        }
+    }
+
     /// The prompt state, while in [`Mode::Prompt`]. Only call from a prompt key
     /// handler, which has already matched the variant.
     fn prompt_mut(&mut self) -> &mut PromptState {
@@ -955,7 +991,8 @@ impl App {
             | Pending::SetMeta(_)
             | Pending::AskAi
             | Pending::Commit
-            | Pending::SetRemote => {
+            | Pending::SetRemote
+            | Pending::ExCommand => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1005,6 +1042,10 @@ impl App {
                                 self.mode = closed;
                                 self.set_remote(text);
                             }
+                            Pending::ExCommand => {
+                                self.mode = closed; // back to the editor, then run it
+                                self.run_ex_command(text);
+                            }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
                         }
@@ -1023,13 +1064,7 @@ impl App {
     fn on_key_ctrl(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char('s') => self.save_edit(),
-            KeyCode::Char('q') => {
-                if self.edit_dirty() {
-                    self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
-                } else {
-                    self.should_quit = true;
-                }
-            }
+            KeyCode::Char('q') => self.request_quit(),
             KeyCode::Char('=') | KeyCode::Char('+') => {
                 self.focus_width = (self.focus_width + 4).min(160);
             }
@@ -1280,6 +1315,9 @@ impl App {
             'n' => self.vim_repeat(count, |s| s.vim_search_repeat(false)),
             'N' => self.vim_repeat(count, |s| s.vim_search_repeat(true)),
             '*' => self.vim_search_word(),
+
+            // Ex command line (#207): `:w`, `:q`, `:wq`, …
+            ':' => self.open_ex_command(),
 
             // Anything else cancels a dangling operator.
             _ => self.vim_state.op = None,

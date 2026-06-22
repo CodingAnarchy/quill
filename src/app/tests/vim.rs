@@ -421,6 +421,86 @@ fn star_searches_the_word_under_the_cursor() {
     fs::remove_dir_all(&dir).ok();
 }
 
+/// Make the active chapter dirty (an unsaved edit), back in Normal mode.
+fn dirty_it(app: &mut App) {
+    app.on_key(key(KeyCode::Char('i')));
+    type_str(app, "z");
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.buffer.dirty, "buffer is now dirty");
+}
+
+#[test]
+fn ex_write_saves_the_buffer() {
+    let (mut app, dir) = vim_app("vim-ex-w");
+    dirty_it(&mut app);
+    type_str(&mut app, ":w");
+    app.on_key(key(KeyCode::Enter));
+    assert!(!app.buffer.dirty, "':w' saved the buffer");
+    assert!(matches!(app.mode, Mode::Normal), "back to Normal after :w");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ex_quit_is_clean_or_prompts_when_dirty() {
+    let (mut app, dir) = vim_app("vim-ex-q");
+    // Clean buffer: ':q' quits straight away.
+    type_str(&mut app, ":q");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.should_quit, "':q' quits a clean buffer");
+
+    // Dirty buffer: ':q' prompts instead of quitting.
+    let (mut app, dir2) = vim_app("vim-ex-q-dirty");
+    dirty_it(&mut app);
+    type_str(&mut app, ":q");
+    app.on_key(key(KeyCode::Enter));
+    assert!(!app.should_quit, "':q' on unsaved changes doesn't quit yet");
+    assert!(matches!(app.mode, Mode::Prompt(_)), "it opens the quit confirm");
+    fs::remove_dir_all(&dir).ok();
+    fs::remove_dir_all(&dir2).ok();
+}
+
+#[test]
+fn ex_force_quit_discards_changes() {
+    let (mut app, dir) = vim_app("vim-ex-q-bang");
+    dirty_it(&mut app);
+    type_str(&mut app, ":q!");
+    app.on_key(key(KeyCode::Enter));
+    assert!(app.should_quit, "':q!' quits despite unsaved changes");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ex_write_quit_saves_then_quits() {
+    let (mut app, dir) = vim_app("vim-ex-wq");
+    dirty_it(&mut app);
+    type_str(&mut app, ":wq");
+    app.on_key(key(KeyCode::Enter));
+    assert!(!app.buffer.dirty, "':wq' saved");
+    assert!(app.should_quit, "':wq' quit");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ex_unknown_command_reports_and_does_nothing() {
+    let (mut app, dir) = vim_app("vim-ex-unknown");
+    type_str(&mut app, ":frobnicate");
+    app.on_key(key(KeyCode::Enter));
+    assert!(!app.should_quit);
+    assert!(app.message.as_deref().unwrap_or("").contains("Not an editor command"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ex_command_can_be_cancelled() {
+    let (mut app, dir) = vim_app("vim-ex-esc");
+    app.on_key(key(KeyCode::Char(':')));
+    assert!(matches!(app.mode, Mode::Prompt(_)), "':' opens the command line");
+    app.on_key(key(KeyCode::Esc));
+    assert!(matches!(app.mode, Mode::Normal), "Esc cancels back to Normal");
+    assert!(!app.should_quit);
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn entering_continuous_view_leaves_visual() {
     let (mut app, dir) = vim_app("vim-v-continuous");
