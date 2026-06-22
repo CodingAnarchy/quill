@@ -60,24 +60,68 @@ impl App {
     /// each annotated with what it runs (or why it can't). With none defined,
     /// explain how to add one rather than opening an empty menu.
     pub(crate) fn open_workflow_palette(&mut self) {
-        if self.workflows.is_empty() {
-            self.message =
-                Some("No workflows defined — add a [workflows] section to config.toml".into());
+        // The menu always offers to build a new workflow from a description (#232),
+        // so it's useful even before any workflow is defined.
+        let mut items = vec![PaletteItem {
+            label: "✎ New workflow from a description…".into(),
+            desc: "describe a routine in words; the AI drafts it".into(),
+            command: Command::NewWorkflowFromPrompt,
+        }];
+        items.extend(self.workflows.iter().enumerate().map(|(i, wf)| {
+            let desc = match workflow::resolve(&self.workflows, &wf.name) {
+                Ok(actions) => format!("{} steps: {}", actions.len(), wf.steps.join(" → ")),
+                Err(e) => format!("⚠ {e}"),
+            };
+            PaletteItem { label: wf.name.clone(), desc, command: Command::RunWorkflow(i) }
+        }));
+        self.mode = Mode::Palette(Box::new(Palette { title: "Workflows", items, selected: 0 }));
+    }
+
+    /// The vocabulary an AI workflow draft (#232) may choose steps from: every
+    /// registry action that's valid as a workflow step (so not the interactive
+    /// "ask"), each with its label, plus the existing workflow names.
+    pub(crate) fn workflow_vocab(&self) -> Vec<(String, String)> {
+        let mut vocab: Vec<(String, String)> = Action::ALL
+            .iter()
+            .filter(|a| !matches!(a, Action::Ai(AiAction::Ask)))
+            .map(|a| (a.name().to_string(), a.label().to_string()))
+            .collect();
+        for w in &self.workflows {
+            vocab.push((w.name.clone(), format!("run the '{}' workflow", w.name)));
+        }
+        vocab
+    }
+
+    /// Save the AI-proposed workflow (#232) under `name` after the author confirms
+    /// it: writes the `[workflows]` entry to config.toml and adds it live. Refuses
+    /// an empty name or one that already exists (re-prompting rather than clobber).
+    pub(crate) fn save_generated_workflow(&mut self, name: &str) {
+        let name = name.trim().to_string();
+        let Some(steps) = self.pending_workflow.take() else {
+            return;
+        };
+        if name.is_empty() {
+            self.message = Some("Workflow name can't be empty — cancelled".into());
             return;
         }
-        let items = self
-            .workflows
-            .iter()
-            .enumerate()
-            .map(|(i, wf)| {
-                let desc = match workflow::resolve(&self.workflows, &wf.name) {
-                    Ok(actions) => format!("{} steps: {}", actions.len(), wf.steps.join(" → ")),
-                    Err(e) => format!("⚠ {e}"),
-                };
-                PaletteItem { label: wf.name.clone(), desc, command: Command::RunWorkflow(i) }
-            })
-            .collect();
-        self.mode = Mode::Palette(Box::new(Palette { title: "Run workflow", items, selected: 0 }));
+        if self.workflows.iter().any(|w| w.name == name) {
+            self.pending_workflow = Some(steps);
+            self.open_prompt(
+                Pending::NameNewWorkflow,
+                format!("'{name}' already exists — save as: "),
+                &name,
+                None,
+            );
+            return;
+        }
+        match crate::config::add_workflow(&name, &steps) {
+            Ok(path) => {
+                self.workflows.push(workflow::Workflow { name: name.clone(), steps });
+                self.workflows.sort_by(|a, b| a.name.cmp(&b.name));
+                self.message = Some(format!("Saved workflow '{name}' to {}", path.display()));
+            }
+            Err(e) => self.message = Some(format!("Couldn't save workflow: {e}")),
+        }
     }
 
     /// Start the workflow at `index`: resolve its steps (reporting an unknown

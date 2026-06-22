@@ -210,6 +210,8 @@ pub(crate) enum Command {
     Run(Action),
     /// Run the author workflow at this index in `App::workflows` (#226).
     RunWorkflow(usize),
+    /// Start building a workflow from a plain-language description (#232).
+    NewWorkflowFromPrompt,
 }
 
 /// A single invokable Quill action — the unified registry (#225). The run-action
@@ -524,6 +526,11 @@ pub(crate) enum Pending {
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).
     ExCommand,
+    /// Text input: a plain-language description of a workflow to generate (#232).
+    DescribeWorkflow,
+    /// Text input: confirm or edit the name for the workflow the AI proposed
+    /// (#232); the steps wait in `App::pending_workflow`. Enter saves, Esc cancels.
+    NameNewWorkflow,
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.

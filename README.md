@@ -113,6 +113,13 @@ keystrokes that stay out of the way.
   fires while a workflow is already running is ignored, and a trigger naming an
   unknown workflow (or a bad key) is reported at startup, not silently kept.
 
+  Don't want to learn the tokens? Pick **✎ New workflow from a description…** in
+  the Ctrl-X menu and describe the routine in plain words ("save, refresh the
+  character bible, flag continuity, then export to Word"). The AI (when enabled)
+  drafts an ordered workflow from the available actions, tells you about anything
+  it couldn't map, and shows the proposal for you to name and confirm — nothing is
+  written to `config.toml` until you do, and the rest of your config is left as-is.
+
 ## Build & run
 
 ```sh

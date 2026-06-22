@@ -22,6 +22,7 @@ pub mod scaffold;
 pub mod setting;
 pub mod style;
 pub mod submission;
+pub mod workflow_gen;
 mod claude;
 
 pub use character::Character;
@@ -95,6 +96,8 @@ pub enum Outcome {
     Style(Result<style::Style, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
+    /// A workflow generated from a plain-language description (#232).
+    Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -115,6 +118,7 @@ impl Outcome {
             Outcome::Naming(r) => r.as_ref().err(),
             Outcome::Style(r) => r.as_ref().err(),
             Outcome::Submission(r) => r.as_ref().err(),
+            Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
     }

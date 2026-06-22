@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::ai;
+use crate::ai::workflow_gen::GeneratedWorkflow;
 use crate::mode::{Action, AiAction};
 use crate::workflow::{Triggers, Workflow};
 
@@ -15,6 +16,20 @@ fn wf(name: &str, steps: &[&str]) -> Workflow {
 
 fn ai_off(app: &mut App) {
     app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
+}
+
+fn ai_on(app: &mut App) {
+    app.ai = ai::Settings::default();
+    app.ai.enabled = true;
+    app.ai.api_key = Some("k".into()); // ready (Claude), but no network is touched here
+}
+
+fn generated(name: &str, steps: &[&str], unmapped: &[&str]) -> GeneratedWorkflow {
+    GeneratedWorkflow {
+        name: name.into(),
+        steps: steps.iter().map(|s| (*s).to_string()).collect(),
+        unmapped: unmapped.iter().map(|s| (*s).to_string()).collect(),
+    }
 }
 
 #[test]
@@ -83,10 +98,11 @@ fn the_menu_lists_the_defined_workflows() {
     app.open_workflow_palette();
     match &app.mode {
         Mode::Palette(p) => {
-            assert_eq!(p.title, "Run workflow");
-            assert_eq!(p.items.len(), 2);
+            assert_eq!(p.title, "Workflows");
+            // The two workflows plus the "new from description" entry (#232).
+            assert_eq!(p.items.len(), 3);
         }
-        _ => panic!("expected the run-workflow menu"),
+        _ => panic!("expected the workflows menu"),
     }
     fs::remove_dir_all(&dir).ok();
 }
@@ -97,23 +113,27 @@ fn the_menu_annotates_an_invalid_workflow() {
     app.workflows = vec![wf("bad", &["nope"])];
     app.open_workflow_palette();
     match &app.mode {
-        Mode::Palette(p) => assert!(p.items[0].desc.contains('⚠'), "{}", p.items[0].desc),
-        _ => panic!("expected the run-workflow menu"),
+        // items[0] is the "new from description" entry (#232); the workflow follows.
+        Mode::Palette(p) => assert!(p.items[1].desc.contains('⚠'), "{}", p.items[1].desc),
+        _ => panic!("expected the workflows menu"),
     }
     fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
-fn empty_config_explains_how_to_add_a_workflow() {
+fn the_menu_offers_to_build_one_when_none_are_defined() {
     let (mut app, dir) = two_chapter_app("wf-empty");
     app.workflows = Vec::new();
     app.open_workflow_palette();
-    assert!(!matches!(app.mode, Mode::Palette(_)), "no empty menu opens");
-    assert!(
-        app.message.as_deref().unwrap_or("").contains("No workflows"),
-        "{:?}",
-        app.message
-    );
+    match &app.mode {
+        // Even with no workflows, the menu opens with the "new from description"
+        // entry (#232) — the first-run path to creating one.
+        Mode::Palette(p) => {
+            assert_eq!(p.items.len(), 1);
+            assert!(matches!(p.items[0].command, Command::NewWorkflowFromPrompt));
+        }
+        _ => panic!("expected the workflows menu to open"),
+    }
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -303,5 +323,87 @@ fn a_bound_key_does_not_fire_mid_operator() {
         "the bound key is a motion while an operator is pending: {:?}",
         app.message
     );
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #232: build a workflow from a description -------------------------------
+
+#[test]
+fn the_menu_entry_to_describe_a_workflow_needs_ai_on() {
+    let (mut app, dir) = two_chapter_app("wf-describe-off");
+    ai_off(&mut app);
+    app.start_describe_workflow();
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no prompt opens when AI is off");
+    assert!(app.message.is_some(), "explains AI is off: {:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn describing_a_workflow_opens_the_description_prompt() {
+    let (mut app, dir) = two_chapter_app("wf-describe-on");
+    ai_on(&mut app);
+    app.start_describe_workflow();
+    assert!(matches!(app.mode, Mode::Prompt(_)), "the description prompt opens");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_proposed_workflow_opens_the_name_confirm_prompt() {
+    let (mut app, dir) = two_chapter_app("wf-propose");
+    app.apply_generated_workflow(Ok(generated("revise", &["save", "ai:continuity"], &[])));
+    assert_eq!(app.pending_workflow.as_deref(), Some(["save".to_string(), "ai:continuity".to_string()].as_slice()));
+    match &app.mode {
+        Mode::Prompt(p) => {
+            assert!(p.label.contains("save → ai:continuity"), "steps shown: {}", p.label);
+            assert_eq!(p.input, "revise", "name prefilled for confirm/rename");
+        }
+        _ => panic!("expected the name-confirm prompt"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_unmappable_request_is_reported_not_saved() {
+    let (mut app, dir) = two_chapter_app("wf-unmappable");
+    app.apply_generated_workflow(Ok(generated("nope", &[], &["email my agent", "print the book"])));
+    assert!(app.pending_workflow.is_none(), "nothing to save");
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no save prompt");
+    let msg = app.message.as_deref().unwrap_or("");
+    assert!(msg.contains("Couldn't map") && msg.contains("email my agent"), "{msg}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_partially_mapped_proposal_notes_what_was_dropped() {
+    let (mut app, dir) = two_chapter_app("wf-partial");
+    app.apply_generated_workflow(Ok(generated("x", &["save"], &["email my agent"])));
+    match &app.mode {
+        Mode::Prompt(p) => assert!(p.label.contains("couldn't map") && p.label.contains("email my agent"), "{}", p.label),
+        _ => panic!("expected the name-confirm prompt"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn saving_with_a_colliding_name_reprompts_without_clobbering() {
+    let (mut app, dir) = two_chapter_app("wf-collide");
+    app.workflows = vec![wf("revise", &["report:progress"])];
+    app.pending_workflow = Some(vec!["save".to_string()]);
+    app.save_generated_workflow("revise"); // name already taken
+    assert!(app.pending_workflow.is_some(), "proposal kept for a retry");
+    assert!(matches!(app.mode, Mode::Prompt(_)), "re-prompts for a new name");
+    assert!(app.message.is_none() || !app.message.as_deref().unwrap().contains("Saved"));
+    // The existing workflow is untouched.
+    assert_eq!(app.workflows.len(), 1);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn saving_with_an_empty_name_cancels() {
+    let (mut app, dir) = two_chapter_app("wf-empty-name");
+    app.pending_workflow = Some(vec!["save".to_string()]);
+    app.save_generated_workflow("   ");
+    assert!(app.pending_workflow.is_none(), "proposal dropped");
+    assert!(app.message.as_deref().unwrap_or("").contains("can't be empty"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
