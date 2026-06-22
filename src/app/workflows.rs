@@ -85,6 +85,16 @@ impl App {
     /// steps run inline; the run suspends on each async AI step and resumes from
     /// [`poll_ai`](App::poll_ai) when its result lands.
     pub(crate) fn run_workflow(&mut self, index: usize) {
+        let Some(name) = self.workflows.get(index).map(|w| w.name.clone()) else {
+            return;
+        };
+        self.run_workflow_named(&name);
+    }
+
+    /// Start the named workflow — the core entry the menu (by index), the on-save
+    /// trigger, and the key triggers (#228) all route through. Refuses to start a
+    /// second run, or one while a manual AI request is in flight (no overlap).
+    pub(crate) fn run_workflow_named(&mut self, name: &str) {
         if self.workflow_run.is_some() {
             self.message = Some("A workflow is already running".into());
             return;
@@ -93,18 +103,27 @@ impl App {
             self.message = Some("An AI request is already in flight…".into());
             return;
         }
-        let Some(name) = self.workflows.get(index).map(|w| w.name.clone()) else {
-            return;
-        };
-        let actions = match workflow::resolve(&self.workflows, &name) {
+        let actions = match workflow::resolve(&self.workflows, name) {
             Ok(a) => a,
             Err(e) => {
                 self.message = Some(format!("Workflow '{name}': {e}"));
                 return;
             }
         };
-        self.workflow_run = Some(WorkflowRun::new(name, actions));
+        self.workflow_run = Some(WorkflowRun::new(name.to_string(), actions));
         self.advance_workflow();
+    }
+
+    /// Run the on-save workflow trigger (#228), if one is configured. A no-op when
+    /// a workflow is already running — so a workflow's own `save` step can't
+    /// re-trigger the on-save workflow (no re-entrancy).
+    pub(crate) fn trigger_on_save(&mut self) {
+        if self.workflow_run.is_some() {
+            return;
+        }
+        if let Some(name) = self.triggers.on_save.clone() {
+            self.run_workflow_named(&name);
+        }
     }
 
     /// Drive the run forward from its current step: run synchronous steps inline

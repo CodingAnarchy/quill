@@ -1,9 +1,9 @@
-//! Author workflows (#226): named, ordered sequences of registry actions defined
-//! in `config.toml`, run as a single step from the run-workflow menu. This module
-//! owns the `[workflows]` config shape and the pure resolution of a workflow's
-//! steps — flattening any nested workflow references, rejecting unknown or
-//! not-yet-supported steps, and refusing cycles. The App layer (`app::workflows`)
-//! executes the resolved action list.
+//! Author workflows (#226, #228): named, ordered sequences of registry actions
+//! defined in `config.toml`, run as a single step. This module owns the
+//! `[workflows]` / `[triggers]` config shape and the pure resolution of a
+//! workflow's steps — flattening any nested workflow references, rejecting unknown
+//! or interactive steps, and refusing cycles. The App layer (`app::workflows`)
+//! executes the resolved action list and wires the triggers.
 
 use std::collections::HashMap;
 
@@ -21,26 +21,89 @@ pub struct Workflow {
     pub steps: Vec<String>,
 }
 
-/// Load the `[workflows]` section from the home config file, sorted by name for a
-/// stable menu order. Best-effort: a missing, unreadable, or invalid file yields
-/// no workflows (the feature is simply absent), like the other config sections.
-pub fn load() -> Vec<Workflow> {
+/// How a workflow fires beyond the run-workflow menu (#228): automatically after
+/// a save, and/or from a bound Vim Normal-mode key. Validated against the defined
+/// workflows at load — entries naming an unknown workflow (or a bad key) are
+/// dropped and reported, never silently kept.
+#[derive(Default)]
+pub struct Triggers {
+    /// The workflow run after each manual save, if any.
+    pub on_save: Option<String>,
+    /// Vim Normal-mode key → workflow name.
+    pub keys: HashMap<char, String>,
+}
+
+/// The result of loading the workflow config: the workflows, the validated
+/// triggers, and any config errors to surface to the author (#208-style).
+pub struct Loaded {
+    pub workflows: Vec<Workflow>,
+    pub triggers: Triggers,
+    pub errors: Vec<String>,
+}
+
+/// Load and validate the `[workflows]` and `[triggers]` sections from the home
+/// config file. Workflows are sorted by name for a stable menu order; triggers
+/// are checked against them. Best-effort: a missing, unreadable, or invalid file
+/// yields nothing (the feature is simply absent), like the other config sections.
+pub fn load() -> Loaded {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct TriggersRaw {
+        on_save: Option<String>,
+        keys: HashMap<String, String>,
+    }
     #[derive(Deserialize, Default)]
     #[serde(default)]
     struct File {
         workflows: HashMap<String, Vec<String>>,
+        triggers: TriggersRaw,
     }
-    let map = config_path()
+    let file = config_path()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| toml::from_str::<File>(&t).ok())
-        .map(|f| f.workflows)
         .unwrap_or_default();
-    let mut list: Vec<Workflow> = map
+
+    let mut workflows: Vec<Workflow> = file
+        .workflows
         .into_iter()
         .map(|(name, steps)| Workflow { name, steps })
         .collect();
-    list.sort_by(|a, b| a.name.cmp(&b.name));
-    list
+    workflows.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let (triggers, errors) = validate_triggers(&workflows, file.triggers.on_save, file.triggers.keys);
+    Loaded { workflows, triggers, errors }
+}
+
+/// Drop trigger entries that name an unknown workflow or aren't a single key,
+/// returning the kept triggers plus a reason for each dropped one. Separate from
+/// parsing so the rule is testable without a config file on disk.
+fn validate_triggers(
+    workflows: &[Workflow],
+    on_save: Option<String>,
+    keys: HashMap<String, String>,
+) -> (Triggers, Vec<String>) {
+    let known = |name: &str| workflows.iter().any(|w| w.name == name);
+    let mut errors = Vec::new();
+    let mut triggers = Triggers::default();
+
+    if let Some(name) = on_save {
+        if known(&name) {
+            triggers.on_save = Some(name);
+        } else {
+            errors.push(format!("on_save names unknown workflow '{name}'"));
+        }
+    }
+    for (key, name) in keys {
+        let mut chars = key.chars();
+        match (chars.next(), chars.next()) {
+            (Some(k), None) if known(&name) => {
+                triggers.keys.insert(k, name);
+            }
+            (Some(_), None) => errors.push(format!("key '{key}' names unknown workflow '{name}'")),
+            _ => errors.push(format!("trigger key '{key}' must be a single key")),
+        }
+    }
+    (triggers, errors)
 }
 
 /// Resolve a workflow to the flat, ordered list of actions it runs, expanding any
@@ -96,6 +159,44 @@ mod tests {
 
     fn wf(name: &str, steps: &[&str]) -> Workflow {
         Workflow { name: name.into(), steps: steps.iter().map(|s| (*s).to_string()).collect() }
+    }
+
+    fn keymap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect()
+    }
+
+    #[test]
+    fn valid_triggers_are_kept() {
+        let wfs = vec![wf("save-all", &["save"])];
+        let (t, errs) =
+            validate_triggers(&wfs, Some("save-all".into()), keymap(&[("R", "save-all")]));
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(t.on_save.as_deref(), Some("save-all"));
+        assert_eq!(t.keys.get(&'R').map(String::as_str), Some("save-all"));
+    }
+
+    #[test]
+    fn on_save_naming_an_unknown_workflow_is_dropped_and_reported() {
+        let wfs = vec![wf("save-all", &["save"])];
+        let (t, errs) = validate_triggers(&wfs, Some("nope".into()), HashMap::new());
+        assert!(t.on_save.is_none(), "the bad on_save is dropped");
+        assert!(errs.iter().any(|e| e.contains("nope")), "{errs:?}");
+    }
+
+    #[test]
+    fn a_multi_key_trigger_is_rejected() {
+        let wfs = vec![wf("save-all", &["save"])];
+        let (t, errs) = validate_triggers(&wfs, None, keymap(&[("gg", "save-all")]));
+        assert!(t.keys.is_empty());
+        assert!(errs.iter().any(|e| e.contains("single key")), "{errs:?}");
+    }
+
+    #[test]
+    fn a_key_naming_an_unknown_workflow_is_rejected() {
+        let wfs = vec![wf("save-all", &["save"])];
+        let (t, errs) = validate_triggers(&wfs, None, keymap(&[("R", "ghost")]));
+        assert!(t.keys.is_empty());
+        assert!(errs.iter().any(|e| e.contains("ghost")), "{errs:?}");
     }
 
     #[test]
