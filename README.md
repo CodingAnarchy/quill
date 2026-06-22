@@ -313,7 +313,8 @@ focused passes before Quill is a daily driver.
 
 - **Performance** — stay instant on real manuscripts: typing, scrolling,
   navigation, and save remain snappy from a short story up to a multi-book
-  series, backed by a benchmark suite with documented targets.
+  series, backed by a benchmark suite with documented targets (run with
+  `cargo perf`; corpus and budgets in [`docs/performance.md`](docs/performance.md)).
 - **Stability** — never lose an author's words: atomic saves, autosave and
   crash recovery, panic-free error handling, and a fuzzed, property-tested data
   path.
