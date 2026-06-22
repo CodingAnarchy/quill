@@ -34,11 +34,12 @@ pub use submission::Submission;
 // `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
 use std::fmt;
-use std::path::PathBuf;
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use serde::Deserialize;
+
+use crate::config::config_path;
 
 /// A provider that turns a [`Request`] into a [`Response`] — the Claude HTTP
 /// client or the local candle model. `Send + Sync` so a loaded backend can be
@@ -249,14 +250,6 @@ impl Settings {
             )),
         }
     }
-}
-
-/// `$XDG_CONFIG_HOME/quill/config.toml`, else `$HOME/.config/quill/config.toml`.
-fn config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("quill").join("config.toml"))
 }
 
 /// System prompt for grounded manuscript Q&A.

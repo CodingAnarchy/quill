@@ -46,6 +46,10 @@ impl Overlay {
 pub enum Mode {
     /// Normal prose entry. Typed characters go straight into the buffer.
     Insert,
+    /// Vim Normal mode (#27, opt-in): keys are commands, not text — the cursor
+    /// moves and `i`/`a`/`o` enter [`Mode::Insert`]. Only reachable when Vim mode
+    /// is enabled in the config.
+    Normal,
     /// A transient prompt at the bottom: a y/N confirmation or a line of text
     /// input.
     Prompt(PromptState),

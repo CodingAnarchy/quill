@@ -11,6 +11,7 @@ mod chapters;
 mod editing;
 mod panes;
 mod vcs;
+mod vim;
 
 fn ctrl(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)

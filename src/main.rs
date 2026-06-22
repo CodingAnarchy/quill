@@ -7,6 +7,7 @@ mod ai;
 mod analysis;
 mod app;
 mod buffer;
+mod config;
 mod date;
 mod export;
 mod frontmatter;

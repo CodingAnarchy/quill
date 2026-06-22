@@ -691,14 +691,30 @@ impl Pane for StatusBar<'_> {
             (format!(" {name}{dirty}{vc_tag}{ai_tag}"), right)
         };
 
+        // Vim mode (#27): a chip at the far left naming the editing mode. Only
+        // while actually in the editor (not browsing or editing a metadata field).
+        let mode_chip = (app.vim && matches!(app.mode, Mode::Insert | Mode::Normal)).then(|| {
+            let (label, bg) = if matches!(app.mode, Mode::Insert) {
+                ("INSERT", Color::Green)
+            } else {
+                ("NORMAL", Color::Blue)
+            };
+            Span::styled(
+                format!(" {label} "),
+                Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD),
+            )
+        });
+        let chip_w = mode_chip.as_ref().map_or(0, |s| s.content.chars().count());
+
         let pad = (area.width as usize)
-            .saturating_sub(left.len() + right.len())
+            .saturating_sub(chip_w + left.len() + right.len())
             .max(1);
-        let line = Line::from(vec![
-            Span::styled(left, Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" ".repeat(pad)),
-            Span::styled(right, Style::default().fg(Color::DarkGray)),
-        ]);
+        let mut spans = Vec::new();
+        spans.extend(mode_chip);
+        spans.push(Span::styled(left, Style::default().add_modifier(Modifier::BOLD)));
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.push(Span::styled(right, Style::default().fg(Color::DarkGray)));
+        let line = Line::from(spans);
 
         frame.render_widget(
             Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 36))),
@@ -794,6 +810,21 @@ mod tests {
         for row in content_rows {
             assert!(row.trim_end().chars().count() <= 90, "row stays within the column: {row:?}");
         }
+    }
+
+    #[test]
+    fn vim_mode_is_shown_in_the_status_bar() {
+        let mut app = app_with("first chapter\n");
+        // Off: no mode chip.
+        assert!(!render(&app, 80, 8).contains("NORMAL"), "no chip when Vim is off");
+        // On, resting in Normal.
+        app.vim = true;
+        app.mode = Mode::Normal;
+        assert!(render(&app, 80, 8).contains("NORMAL"), "Normal shown");
+        // Entering Insert updates the indicator.
+        app.mode = Mode::Insert;
+        let screen = render(&app, 80, 8);
+        assert!(screen.contains("INSERT") && !screen.contains("NORMAL"), "Insert shown:\n{screen}");
     }
 
     #[test]

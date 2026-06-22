@@ -107,6 +107,24 @@ byte-for-byte.
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
+### Vim mode (opt-in)
+
+Authors with Vim muscle memory can turn on modal editing. It's off by default —
+with it off, editing is exactly as described above. Enable it in
+`~/.config/quill/config.toml`:
+
+```toml
+[editor]
+vim = true
+```
+
+With it on, the editor rests in **Normal** mode (shown in the status bar): keys
+are commands, not text. `i`/`a` (and `I`/`A`/`o`/`O`) enter **Insert** mode to
+type, and `Esc` returns to Normal. In Normal mode `h`/`j`/`k`/`l` (and the
+arrows) move the cursor. All the `Ctrl-` shortcuts above keep working in both
+modes. Richer motions, operators, Visual mode, search, and an Ex command line
+are arriving incrementally (see the roadmap).
+
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
 (draft → revised → final), **m** edit the one-line summary, **v** set the POV
