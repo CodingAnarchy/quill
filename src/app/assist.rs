@@ -1047,41 +1047,13 @@ impl App {
     /// Apply a submission pass: write the synopsis / blurb / query to
     /// `submission/` (conflict-reviewed like any generated file) and summarize.
     pub(crate) fn apply_submission(&mut self, result: Result<Submission, ai::AiError>) {
-        self.overlay = None;
-        let sub = match result {
-            Ok(s) => s,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
+        match result {
+            Ok(sub) => {
+                let artifacts =
+                    sub.artifacts().into_iter().map(|(k, f, t)| (k, f, t.to_string())).collect();
+                self.write_off_manuscript("Submission material", "submission", artifacts);
             }
-        };
-        let today = date::iso(date::today());
-        let mut written = Vec::new();
-        let mut conflicts = Vec::new();
-        let mut failures = Vec::new();
-        for (kind, file, text) in sub.artifacts() {
-            let path = self.project.root.join("submission").join(file);
-            let title = format!("title: {kind}\n");
-            match self.stage_bible(path, kind, |notes| bible::render(&title, text, notes, &today)) {
-                Staged::Wrote => written.push(format!("submission/{file}")),
-                Staged::Conflict(c) => conflicts.push(c),
-                Staged::Failed(msg) => failures.push(msg),
-            }
-        }
-
-        if !failures.is_empty() {
-            self.message = Some(write_failure_message(&failures));
-        } else if conflicts.is_empty() {
-            let mut lines = vec![Line::raw("Submission material written:"), Line::raw("")];
-            lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
-            lines.push(Line::raw(""));
-            lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));
-            self.show_ai(lines);
-        } else {
-            let pending = conflicts.len();
-            let n = written.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
-            self.message = Some(format!("Wrote {n} · {pending} need review"));
+            Err(e) => self.message = Some(format!("AI: {e}")),
         }
     }
 
@@ -1089,23 +1061,33 @@ impl App {
     /// to `marketing/`, conflict-reviewed and off-manuscript like the submission
     /// material.
     pub(crate) fn apply_marketing(&mut self, result: Result<Marketing, ai::AiError>) {
+        match result {
+            Ok(copy) => self.write_off_manuscript("Marketing copy", "marketing", copy.artifacts()),
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
+    }
+
+    /// Write a set of off-manuscript artifacts (#236) — `(title, filename, body)`
+    /// — under `<subdir>/`, conflict-reviewed via [`stage_bible`](App::stage_bible)
+    /// and summarized. The one writer shared by the submission and marketing passes
+    /// (and future off-manuscript copy): they differ only in `label`, `subdir`, and
+    /// what their `artifacts()` renders.
+    fn write_off_manuscript(
+        &mut self,
+        label: &str,
+        subdir: &str,
+        artifacts: Vec<(&'static str, &'static str, String)>,
+    ) {
         self.overlay = None;
-        let copy = match result {
-            Ok(m) => m,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
-        };
         let today = date::iso(date::today());
         let mut written = Vec::new();
         let mut conflicts = Vec::new();
         let mut failures = Vec::new();
-        for (kind, file, text) in copy.artifacts() {
-            let path = self.project.root.join("marketing").join(file);
+        for (kind, file, text) in artifacts {
+            let path = self.project.root.join(subdir).join(file);
             let title = format!("title: {kind}\n");
             match self.stage_bible(path, kind, |notes| bible::render(&title, &text, notes, &today)) {
-                Staged::Wrote => written.push(format!("marketing/{file}")),
+                Staged::Wrote => written.push(format!("{subdir}/{file}")),
                 Staged::Conflict(c) => conflicts.push(c),
                 Staged::Failed(msg) => failures.push(msg),
             }
@@ -1114,9 +1096,9 @@ impl App {
         if !failures.is_empty() {
             self.message = Some(write_failure_message(&failures));
         } else if written.is_empty() && conflicts.is_empty() {
-            self.message = Some("Marketing copy: nothing generated".into());
+            self.message = Some(format!("{label}: nothing generated"));
         } else if conflicts.is_empty() {
-            let mut lines = vec![Line::raw("Marketing copy written:"), Line::raw("")];
+            let mut lines = vec![Line::raw(format!("{label} written:")), Line::raw("")];
             lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
             lines.push(Line::raw(""));
             lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));

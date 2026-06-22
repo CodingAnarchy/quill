@@ -24,14 +24,13 @@ impl Marketing {
     /// the blurb variants as numbered sections, the taglines as a bullet list.
     /// Skips an artifact with no content so an empty round writes no empty file.
     pub fn artifacts(&self) -> Vec<(&'static str, &'static str, String)> {
-        let mut blurbs = String::new();
-        for (i, b) in self.blurbs.iter().enumerate() {
-            blurbs.push_str(&format!("## Variant {}\n\n{}\n\n", i + 1, b.trim()));
-        }
-        let mut taglines = String::new();
-        for t in &self.taglines {
-            taglines.push_str(&format!("- {}\n", t.trim()));
-        }
+        let blurbs: String = self
+            .blurbs
+            .iter()
+            .enumerate()
+            .map(|(i, b)| format!("## Variant {}\n\n{}\n\n", i + 1, b.trim()))
+            .collect();
+        let taglines: String = self.taglines.iter().map(|t| format!("- {}\n", t.trim())).collect();
         [("Back-cover blurbs", "blurbs.md", blurbs), ("Taglines", "taglines.md", taglines)]
             .into_iter()
             .filter(|(_, _, body)| !body.trim().is_empty())
@@ -61,7 +60,9 @@ pub fn schema() -> Value {
     })
 }
 
-/// Build the marketing-copy request: the manuscript as cached context, schema attached.
+/// Build the marketing-copy request: the manuscript as cached context, schema
+/// attached. Manuscript-only for now; the bible (names/stakes) could sharpen the
+/// copy later, but blurbs/taglines come mostly from the prose and tone (#104).
 pub fn build_request(manuscript: String, model: &str) -> Request {
     Request {
         system: Some(SYSTEM.to_string()),
