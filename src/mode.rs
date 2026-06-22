@@ -258,6 +258,7 @@ impl Action {
         Action::Ai(AiAction::Submission),
         Action::Ai(AiAction::Marketing),
         Action::Ai(AiAction::Social),
+        Action::Ai(AiAction::Portrait),
         Action::Ai(AiAction::Triage),
     ];
 
@@ -283,6 +284,7 @@ impl Action {
             Action::Ai(AiAction::Submission) => "ai:submission",
             Action::Ai(AiAction::Marketing) => "ai:marketing",
             Action::Ai(AiAction::Social) => "ai:social",
+            Action::Ai(AiAction::Portrait) => "ai:portrait",
             Action::Ai(AiAction::Triage) => "triage",
         }
     }
@@ -308,6 +310,7 @@ impl Action {
             Action::Ai(AiAction::Submission) => "AI · Submission material",
             Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
             Action::Ai(AiAction::Social) => "AI · Social posts",
+            Action::Ai(AiAction::Portrait) => "AI · Character portraits",
             Action::Ai(AiAction::Triage) => "Revision triage",
         }
     }
@@ -361,6 +364,8 @@ pub(crate) enum AiAction {
     Marketing,
     /// Social posts — per-platform promo copy, off-manuscript (#237).
     Social,
+    /// Character portrait images from the character bible (#238).
+    Portrait,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
 }
@@ -535,6 +540,9 @@ pub(crate) enum Pending {
     /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.
     /// The bool is whether to force a full rebuild (#176).
     ConfirmAi(AiAction, bool),
+    /// y/N: generate character portraits (#238) — each image is billed, so the
+    /// action confirms before spending.
+    ConfirmPortraits,
     /// y/N: restore the current chapter to its last committed version (#135).
     ConfirmRestore,
     /// Text input: the remote URL to back the project up to (#134).

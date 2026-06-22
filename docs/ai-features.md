@@ -30,7 +30,16 @@ model = "claude-opus-4-8"      # Claude model; the local backend picks its own
 cost_threshold = 0.20          # confirm before a Claude pass estimated above this (USD)
 refresh_after_changes = 5      # rebuild a bible fully once this many chapters change (else revise incrementally)
 # api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins); Claude only
+
+[image]                          # image generation (#238) — its own opt-in & key
+enabled = true                   # off by default
+model = "fal-ai/flux/schnell"    # a fal.ai model id
+# api_key = "..."                # or set FAL_KEY (env wins)
 ```
+
+Image generation (#238) is a separate opt-in with its own `[image]` section and
+key (`FAL_KEY` or `api_key`), since it uses a different provider (fal.ai) and is
+billed per image. It's independent of the text `[ai]` settings.
 
 The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
 never from the project directory. **Backends:** the default `claude` backend sends
@@ -87,6 +96,13 @@ The palette actions:
 - **Social posts** (#237) — ready-to-post promo copy shaped to each platform's
   conventions (X / Facebook / Instagram), written to `marketing/social/` (one file
   per platform). Off-manuscript and conflict-reviewed; edit and regenerate freely.
+- **Character portraits** (#238) — portrait images of the bible characters, built
+  from their profiles and generated via a remote image backend (fal.ai), saved to
+  `marketing/images/characters/`. Off-manuscript files the author owns and
+  regenerates. Its own `[image]` opt-in + key (separate from the text `[ai]`
+  settings); confirms before generating since each image is billed. Needs the
+  character pass to have run first. The image backend sits behind a trait so a
+  local option can be added later (#240).
 - **Revision triage** (#82) — every finding surfaced this session (continuity,
   setting, style, naming, structural gaps), aggregated into one de-duplicated
   list in the findings overlay. Local only — no request. Marking a finding as an

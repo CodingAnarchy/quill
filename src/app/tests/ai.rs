@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 12, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 13, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -694,6 +694,71 @@ fn social_skips_a_platform_with_no_posts() {
     assert!(dir.join("marketing/social/x.md").exists());
     assert!(!dir.join("marketing/social/facebook.md").exists(), "no empty facebook file");
     assert!(!dir.join("marketing/social/instagram.md").exists());
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #238: character portraits ----------------------------------------------
+
+fn image_on(app: &mut App) {
+    app.image = ai::image::ImageSettings { enabled: true, api_key: Some("k".into()), ..Default::default() };
+}
+
+fn write_character(dir: &std::path::Path, slug: &str, name: &str) {
+    let chars = dir.join("bible").join("characters");
+    fs::create_dir_all(&chars).unwrap();
+    fs::write(chars.join(format!("{slug}.md")), format!("---\nname: {name}\n---\n\n## Physical\n- green eyes\n")).unwrap();
+}
+
+#[test]
+fn portrait_pass_needs_image_generation_enabled() {
+    let (mut app, dir) = two_chapter_app("portrait-off");
+    app.image = ai::image::ImageSettings::default(); // off
+    write_character(&dir, "mara", "Mara");
+    app.start_portrait();
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm when image gen is off");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Image generation is off"),
+        "{:?}",
+        app.message
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn portrait_pass_needs_the_character_bible() {
+    let (mut app, dir) = two_chapter_app("portrait-no-bible");
+    image_on(&mut app);
+    app.start_portrait(); // no bible/characters yet
+    assert!(!matches!(app.mode, Mode::Prompt(_)));
+    assert!(app.message.as_deref().unwrap_or("").contains("character pass first"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn portrait_pass_confirms_before_spending() {
+    let (mut app, dir) = two_chapter_app("portrait-confirm");
+    image_on(&mut app);
+    write_character(&dir, "mara", "Mara");
+    write_character(&dir, "tomas", "Tomas");
+    app.start_portrait();
+    match &app.mode {
+        Mode::Prompt(p) => {
+            assert!(p.label.contains("2 character portraits"), "counts the cast: {}", p.label);
+            assert!(p.label.contains("fal.ai") && p.label.contains("billed"), "{}", p.label);
+        }
+        _ => panic!("expected the cost confirm before generating"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn portrait_results_summarize_saved_and_failed() {
+    let (mut app, dir) = two_chapter_app("portrait-apply");
+    app.apply_portraits(Ok(ai::image::ImageReport {
+        saved: vec!["marketing/images/characters/mara.png".into()],
+        failed: vec!["Tomas: network error".into()],
+    }));
+    assert!(app.overlay.is_some(), "summary overlay opens");
     fs::remove_dir_all(&dir).ok();
 }
 

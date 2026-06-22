@@ -13,6 +13,8 @@ pub mod character;
 pub mod constrain;
 pub mod continuity;
 pub mod cost;
+pub mod fal;
+pub mod image;
 pub mod incremental;
 pub mod marketing;
 #[cfg(feature = "local")]
@@ -105,6 +107,8 @@ pub enum Outcome {
     Social(Result<social::Social, AiError>),
     /// Character voice analysis — dialogue/narration consistency (#183).
     Voice(Result<voice::Voice, AiError>),
+    /// Generated images saved to disk — character portraits (#238).
+    Image(Result<image::ImageReport, AiError>),
     /// A workflow generated from a plain-language description (#232).
     Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
@@ -130,6 +134,7 @@ impl Outcome {
             Outcome::Marketing(r) => r.as_ref().err(),
             Outcome::Social(r) => r.as_ref().err(),
             Outcome::Voice(r) => r.as_ref().err(),
+            Outcome::Image(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
