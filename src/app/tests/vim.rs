@@ -243,6 +243,74 @@ fn an_operator_composes_with_the_arrow_keys() {
 }
 
 #[test]
+fn yy_then_p_duplicates_a_line() {
+    let (mut app, dir) = vim_app("vim-yy-p");
+    type_str(&mut app, "yy"); // yank "first chapter"
+    type_str(&mut app, "p"); // put it on a new line below
+    assert_eq!(app.buffer.text(), "first chapter\nfirst chapter\n", "{}", app.buffer.text());
+    assert!(matches!(app.mode, Mode::Normal), "put stays in Normal");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn dd_then_p_moves_a_line() {
+    let (mut app, dir) = vim_app("vim-dd-p");
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg"); // line 0 ("first chapter")
+    type_str(&mut app, "dd"); // delete it (now in unnamed register)
+    type_str(&mut app, "p"); // put below the current line ("second")
+    assert_eq!(app.buffer.text(), "second\nfirst chapter\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn yw_then_capital_p_puts_inline_before_the_cursor() {
+    let (mut app, dir) = vim_app("vim-yw-P");
+    type_str(&mut app, "yw"); // yank "first " (charwise)
+    type_str(&mut app, "P"); // put before the cursor, inline
+    assert_eq!(app.buffer.text(), "first first chapter\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn named_registers_hold_separate_text() {
+    let (mut app, dir) = vim_app("vim-named-reg");
+    // Two lines; yank each into its own register.
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg");
+    type_str(&mut app, "\"ayy"); // line 0 → register a
+    type_str(&mut app, "j");
+    type_str(&mut app, "\"byy"); // line 1 → register b
+    // Put register a below the current (last) line.
+    type_str(&mut app, "\"ap");
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter\nsecond\nfirst chapter\n",
+        "register a held line 0: {}",
+        app.buffer.text()
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn count_repeats_a_put() {
+    let (mut app, dir) = vim_app("vim-3p");
+    type_str(&mut app, "yy");
+    type_str(&mut app, "3p");
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter\nfirst chapter\nfirst chapter\nfirst chapter\n",
+        "{}",
+        app.buffer.text()
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;

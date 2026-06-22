@@ -2,6 +2,7 @@
 //! handlers read or write are `pub(crate)`; `label`/`input` are `pub` because
 //! the status bar and the edit banner render them.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use ratatui::text::Line;
@@ -96,12 +97,24 @@ pub struct VimState {
     pub(crate) pending: VimPending,
     /// The last `f`/`t`/`F`/`T` motion, replayed by `;` / `,`.
     pub(crate) last_find: Option<Find>,
-    /// A pending operator (`d`/`c`) and its count, awaiting a motion or text
-    /// object (`dw`, `ci"`, …).
+    /// A pending operator (`d`/`c`/`y`) and its count, awaiting a motion or text
+    /// object (`dw`, `ci"`, `yi(`, …).
     pub(crate) op: Option<(Op, usize)>,
-    /// The unnamed register — text from the last delete / change, and whether it
-    /// was linewise. Named registers arrive with #204.
-    pub(crate) register: Option<Yank>,
+    /// The yank/delete registers (#204): the unnamed register plus the named
+    /// `"a`–`"z`.
+    pub(crate) registers: Registers,
+    /// The register `"x` chose for the next yank / delete / put; `None` is the
+    /// unnamed register.
+    pub(crate) selected_register: Option<char>,
+}
+
+/// The Vim register store (#204): the unnamed register, written by every yank /
+/// delete / change, and the named registers `"a`–`"z`. Numbered registers and
+/// the system clipboard are out of scope.
+#[derive(Default)]
+pub(crate) struct Registers {
+    pub(crate) unnamed: Option<Yank>,
+    pub(crate) named: HashMap<char, Yank>,
 }
 
 /// A Vim Normal-mode command waiting on its next keystroke.
@@ -116,21 +129,25 @@ pub(crate) enum VimPending {
     /// `i` / `a` seen with an operator pending — awaiting the text-object id
     /// (`w`, `"`, `(`, …); `around` is the `a` form.
     Object { around: bool },
+    /// `"` seen — awaiting the register name (`a`–`z`).
+    Register,
 }
 
-/// A Vim operator (#203): delete leaves Normal mode, change enters Insert.
+/// A Vim operator (#203): delete leaves Normal mode, change enters Insert, yank
+/// (#204) copies and stays put.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Op {
     Delete,
     Change,
+    Yank,
 }
 
-/// Text captured by a delete / change / yank. Recorded now; the put command
-/// that reads it back arrives with #204.
-#[allow(dead_code)] // `text`/`linewise` are consumed by put (#204)
+/// Text captured by a delete / change / yank, for putting back with `p` / `P`.
+#[derive(Clone)]
 pub(crate) struct Yank {
     pub(crate) text: String,
-    /// Whole-line text (from `dd`/`cc`/linewise motions), put on its own lines.
+    /// Whole-line text (from `dd`/`cc`/`yy`/linewise motions), put on its own
+    /// lines rather than inline.
     pub(crate) linewise: bool,
 }
 

@@ -672,6 +672,17 @@ impl Buffer {
             .map_or(text.len(), |(b, _)| byte + b)
     }
 
+    /// The byte where the line after `line` begins — i.e. just past `line`'s
+    /// newline — or the buffer end if `line` is the last. The boundary linewise
+    /// deletes and puts work against.
+    pub fn next_line_byte(&self, line: usize) -> usize {
+        if line + 1 < self.line_count() {
+            self.line_start_byte(line + 1)
+        } else {
+            self.len_bytes()
+        }
+    }
+
     /// The text in byte range `[start, end)` — what an operator records to the
     /// register before deleting it.
     pub fn byte_slice(&self, start: usize, end: usize) -> String {

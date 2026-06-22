@@ -1151,6 +1151,13 @@ impl App {
                 self.apply_text_object(c, around);
                 return;
             }
+            VimPending::Register => {
+                self.vim_state.pending = VimPending::None;
+                if c.is_ascii_alphabetic() {
+                    self.vim_state.selected_register = Some(c.to_ascii_lowercase());
+                }
+                return;
+            }
             VimPending::None => {}
         }
 
@@ -1171,6 +1178,8 @@ impl App {
             'F' => Some(VimPending::Find(FindKind::FindBack)),
             't' => Some(VimPending::Find(FindKind::TillFwd)),
             'T' => Some(VimPending::Find(FindKind::TillBack)),
+            // `"x` selects the register for the next yank / delete / put.
+            '"' => Some(VimPending::Register),
             _ => None,
         };
         if let Some(p) = prefix {
@@ -1182,9 +1191,19 @@ impl App {
         let raw = self.vim_state.count.take();
         let count = raw.unwrap_or(1);
         match c {
-            // Operators: `d`/`c` await a motion or text object; a repeated
-            // operator (`dd`/`cc`) acts linewise on the current line(s).
-            'd' | 'c' => self.operator(if c == 'd' { Op::Delete } else { Op::Change }, count),
+            // Operators: `d`/`c`/`y` await a motion or text object; a repeated
+            // operator (`dd`/`cc`/`yy`) acts linewise on the current line(s).
+            'd' => self.operator(Op::Delete, count),
+            'c' => self.operator(Op::Change, count),
+            'y' => self.operator(Op::Yank, count),
+            // `Y` yanks the line (Vim's default), like `yy`.
+            'Y' => {
+                let cur = self.edit_buffer().cursor.line;
+                self.operate_linewise(Op::Yank, cur, cur + count.saturating_sub(1));
+            }
+            // Put the register after (`p`) / before (`P`) the cursor or line.
+            'p' => self.put(true, count),
+            'P' => self.put(false, count),
             // `i`/`a` are a text-object prefix while an operator is pending,
             // otherwise they enter Insert.
             'i' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: false },
@@ -1247,6 +1266,12 @@ impl App {
 
             // Anything else cancels a dangling operator.
             _ => self.vim_state.op = None,
+        }
+
+        // A `"x` register selection only lives until the operator/put that uses
+        // it. If this key completed a command (nothing left pending), drop it.
+        if self.vim_state.op.is_none() && self.vim_state.pending == VimPending::None {
+            self.vim_state.selected_register = None;
         }
     }
 
@@ -1371,17 +1396,27 @@ impl App {
     }
 
     /// Apply a charwise operator to byte range `[lo, hi)`: record the text in the
-    /// unnamed register, delete it, and for a change enter Insert mode.
+    /// register, then — for delete/change — remove it; yank leaves the text and
+    /// just moves the cursor to the start. Change ends in Insert mode.
     fn operate_charwise(&mut self, op: Op, lo: usize, hi: usize) {
         if self.guard_vim_edit() {
             return;
         }
         if lo < hi {
-            let buf = self.edit_buffer_mut();
-            let text = buf.byte_slice(lo, hi);
-            buf.replace_byte_range(lo, hi, "");
-            self.vim_state.register = Some(Yank { text, linewise: false });
-            self.cache_focus_words();
+            let text = {
+                let buf = self.edit_buffer_mut();
+                let text = buf.byte_slice(lo, hi);
+                if op == Op::Yank {
+                    buf.cursor = buf.cursor_at_byte(lo);
+                } else {
+                    buf.replace_byte_range(lo, hi, "");
+                }
+                text
+            };
+            self.store_register(Yank { text, linewise: false });
+            if op != Op::Yank {
+                self.cache_focus_words();
+            }
         }
         if op == Op::Change {
             self.mode = Mode::Insert;
@@ -1389,8 +1424,9 @@ impl App {
     }
 
     /// Apply a linewise operator to the inclusive line range `[first, last]`:
-    /// delete the whole lines (`dd`), or for a change clear them to one blank
-    /// line and enter Insert.
+    /// record the whole lines, then delete them (`dd`), clear them to one blank
+    /// line and enter Insert (`cc`), or — for yank — leave them and move to the
+    /// first.
     fn operate_linewise(&mut self, op: Op, first: usize, last: usize) {
         if self.guard_vim_edit() {
             return;
@@ -1399,34 +1435,74 @@ impl App {
             let buf = self.edit_buffer_mut();
             let last = last.min(buf.line_count().saturating_sub(1));
             let start = buf.line_start_byte(first);
+            // The register always holds the full lines (with their newlines).
+            let end = buf.next_line_byte(last);
+            let text = buf.byte_slice(start, end);
             match op {
-                Op::Delete => {
-                    let end = if last + 1 < buf.line_count() {
-                        buf.line_start_byte(last + 1)
-                    } else {
-                        buf.len_bytes()
-                    };
-                    let text = buf.byte_slice(start, end);
-                    buf.replace_byte_range(start, end, "");
-                    text
-                }
+                Op::Delete => buf.replace_byte_range(start, end, ""),
                 Op::Change => {
                     // Clear the lines' content but keep one line to type on.
                     let content_end = buf.line_start_byte(last) + buf.line(last).len();
-                    let mut text = buf.byte_slice(start, content_end);
-                    text.push('\n');
                     buf.replace_byte_range(start, content_end, "");
-                    text
                 }
+                Op::Yank => {}
             }
+            text
         };
-        self.vim_state.register = Some(Yank { text, linewise: true });
+        self.store_register(Yank { text, linewise: true });
         self.edit_move(move |b| b.move_to_line(first));
-        self.cache_focus_words();
+        if op != Op::Yank {
+            self.cache_focus_words();
+        }
         if op == Op::Change {
             self.edit_move(Buffer::move_line_start);
             self.mode = Mode::Insert;
         }
+    }
+
+    /// Record a yank into the unnamed register, and into the named register if
+    /// `"x` selected one.
+    fn store_register(&mut self, yank: Yank) {
+        if let Some(name) = self.vim_state.selected_register.take() {
+            self.vim_state.registers.named.insert(name, yank.clone());
+        }
+        self.vim_state.registers.unnamed = Some(yank);
+    }
+
+    /// The register `p` / `P` reads from: the `"x`-selected named register, else
+    /// the unnamed one.
+    fn active_register(&mut self) -> Option<Yank> {
+        match self.vim_state.selected_register.take() {
+            Some(name) => self.vim_state.registers.named.get(&name).cloned(),
+            None => self.vim_state.registers.unnamed.clone(),
+        }
+    }
+
+    /// `p` / `P`: put the active register `count` times — inline for a charwise
+    /// yank, on new lines for a linewise one.
+    fn put(&mut self, after: bool, count: usize) {
+        if self.guard_vim_edit() {
+            return;
+        }
+        let Some(yank) = self.active_register() else { return };
+        let body = yank.text.repeat(count);
+        let buf = self.edit_buffer_mut();
+        if yank.linewise {
+            let line = buf.cursor.line;
+            let at = if after { buf.next_line_byte(line) } else { buf.line_start_byte(line) };
+            buf.replace_byte_range(at, at, &body);
+            buf.move_to_line(if after { line + 1 } else { line });
+        } else {
+            let line_end = buf.line_start_byte(buf.cursor.line) + buf.line(buf.cursor.line).len();
+            let at = if after {
+                buf.grapheme_after(buf.cursor_byte()).min(line_end)
+            } else {
+                buf.cursor_byte()
+            };
+            buf.replace_byte_range(at, at, &body);
+            buf.move_left(); // land on the last grapheme put, as Vim does
+        }
+        self.cache_focus_words();
     }
 
     /// Vim editing commands need the per-chapter buffer; like undo (#145), they're
