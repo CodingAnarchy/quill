@@ -66,6 +66,14 @@ The palette actions:
 - **Prose & style** (#79) — *semantic* findings (POV / tense consistency, voice
   drift, context-aware repeated phrasing); analysis only, no rewrites. Frequency
   metrics (crutch words, etc.) are the local-analysis report's job (#70).
+- **Character voice** (#183) — checks the manuscript against the character
+  bible's **voice profiles** (the character pass now captures speech patterns,
+  vocabulary/register, verbal tics, and sentence rhythm per character, editable
+  like the rest of the bible). Flags dialogue that reads out of character for its
+  speaker and POV/narration whose voice has drifted or isn't distinct from another
+  POV — each finding naming the character and chapters. Analysis only, grounded in
+  the bible, never a rewrite; needs the character pass to have run first. Distinct
+  from prose & style: this is character-grounded with dialogue attribution.
 - **Submission material** (#81) — a synopsis, back-cover blurb, and query-letter
   draft written to `submission/`. The one AI feature that produces prose, and it
   is **off-manuscript** (submission/marketing artifacts, never in the novel), so
@@ -175,9 +183,11 @@ can edit any bible entry; edits are treated as ground truth on the next pass.
 
 ### 1. Character tracking (traits & arcs)
 
-- AI summarization builds a profile per character: physical traits, voice,
-  relationships, goals, and a **per-chapter arc** (state and change over the
-  book), attributed via the tree-sitter chapter/scene outline.
+- AI summarization builds a profile per character: physical traits, an actionable
+  **voice profile** (speech patterns, vocabulary/register, verbal tics, sentence
+  rhythm — see Character voice, #183), relationships, goals, and a **per-chapter
+  arc** (state and change over the book), attributed via the tree-sitter
+  chapter/scene outline.
 - Flags drift the author may not intend (a trait stated in ch. 3 contradicted in
   ch. 20) and surfaces "last seen" / "screen time" per character.
 - Incremental: editing one chapter re-summarizes that chapter and updates the

@@ -254,6 +254,7 @@ impl Action {
         Action::Ai(AiAction::Scaffold),
         Action::Ai(AiAction::Naming),
         Action::Ai(AiAction::Style),
+        Action::Ai(AiAction::Voice),
         Action::Ai(AiAction::Submission),
         Action::Ai(AiAction::Triage),
     ];
@@ -276,6 +277,7 @@ impl Action {
             Action::Ai(AiAction::Scaffold) => "ai:scaffold",
             Action::Ai(AiAction::Naming) => "ai:naming",
             Action::Ai(AiAction::Style) => "ai:style",
+            Action::Ai(AiAction::Voice) => "ai:voice",
             Action::Ai(AiAction::Submission) => "ai:submission",
             Action::Ai(AiAction::Triage) => "triage",
         }
@@ -298,6 +300,7 @@ impl Action {
             Action::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
             Action::Ai(AiAction::Naming) => "AI · Name & term consistency",
             Action::Ai(AiAction::Style) => "AI · Prose & style",
+            Action::Ai(AiAction::Voice) => "AI · Character voice",
             Action::Ai(AiAction::Submission) => "AI · Submission material",
             Action::Ai(AiAction::Triage) => "Revision triage",
         }
@@ -345,6 +348,8 @@ pub(crate) enum AiAction {
     Scaffold,
     Naming,
     Style,
+    /// Character voice consistency — dialogue & POV/narration (#183).
+    Voice,
     Submission,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
