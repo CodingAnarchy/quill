@@ -68,8 +68,25 @@ keystrokes that stay out of the way.
   save, each export, the progress and analysis reports, and the AI passes — and
   runs the one you pick through the same path its own shortcut uses. An action
   that can't run right now (an AI pass with AI off, an export from the continuous
-  view) stays listed with the reason. It's the single seam author workflows will
-  build on to chain actions by name.
+  view) stays listed with the reason. It's the single seam author workflows build
+  on to chain actions by name.
+
+- **Workflows** — chain the actions you run together into one named routine.
+  Define them in `config.toml` and run one with **Ctrl-X**:
+
+  ```toml
+  [workflows]
+  finish = ["save", "report:progress", "export:docx"]
+  check  = ["save", "report:analysis", "triage"]
+  ```
+
+  Each step is an action name (the tokens shown in the Ctrl-K menu, e.g. `save`,
+  `export:docx`, `report:progress`, `triage`) or the name of another workflow,
+  expanded in place. Steps run in order; the run stops at the first step that
+  can't run and tells you which and why (the earlier steps' effects stand). An
+  unknown step or a workflow that would loop back on itself is reported, not run.
+  For now steps are the synchronous actions (save, export, the reports, triage);
+  the AI passes become workflow steps in a later release.
 
 ## Build & run
 
@@ -110,6 +127,7 @@ byte-for-byte.
 | Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), or Vellum (`.docx`) → `export/` |
 | Ctrl-K         | run action: one menu for save, export, the reports, and the AI passes (unavailable ones say why) |
+| Ctrl-X         | run workflow: pick one of your defined action sequences and run it |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |

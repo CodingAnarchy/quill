@@ -39,6 +39,7 @@ mod panes;
 mod reports;
 mod task;
 mod vcs_actions;
+mod workflows;
 
 use panes::Split;
 pub(crate) use panes::{SplitContent, SplitDir};
@@ -144,6 +145,10 @@ pub struct App {
     /// recorded to the incremental-scoping state file once the pass applies
     /// cleanly. `(tracker, digests)`; `None` when no bible pass is pending.
     pending_pass: Option<(String, ai::incremental::Digests)>,
+    /// Author-defined workflows (#226) from the `[workflows]` config — named,
+    /// ordered sequences of registry actions run as one step. Loaded once at
+    /// startup, sorted by name for a stable run-workflow menu.
+    workflows: Vec<crate::workflow::Workflow>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -188,6 +193,7 @@ impl App {
             pending_findings: Vec::new(),
             triage: Vec::new(),
             pending_pass: None,
+            workflows: crate::workflow::load(),
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -1115,6 +1121,9 @@ impl App {
             // (save, export, reports, AI passes) in one searchable list. Ctrl-k
             // for "command", the one menu that reaches the others.
             KeyCode::Char('k') => self.open_action_palette(),
+            // Open the run-workflow menu (#226) — the author's named action
+            // sequences. Ctrl-x: "execute" a workflow.
+            KeyCode::Char('x') => self.open_workflow_palette(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             KeyCode::Char('l') => self.toggle_continuous(),

@@ -13,6 +13,7 @@ mod editing;
 mod panes;
 mod vcs;
 mod vim;
+mod workflows;
 
 fn ctrl(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
