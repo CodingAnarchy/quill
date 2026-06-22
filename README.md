@@ -141,11 +141,15 @@ Normal-mode editing:
   `dd`/`cc` act on whole lines, `D`/`C` to end of line, with counts (`2dd`).
   `c` leaves you in Insert.
 - **Delete a character** — `x` (with a count, `3x`).
+- **Yank & put** — `y` with a motion or text object (`yw`, `yi"`), `yy` (or `Y`)
+  for the line; `p` puts after the cursor / line, `P` before; counts apply
+  (`3p`). Yanks and deletes share a register, so `dd`…`p` moves a line, and
+  `"a`–`"z` are named registers (`"ayy`, `"ap`).
 - **Undo / redo** — `u` undoes; `Ctrl-y` redoes (sharing Quill's undo history).
 
 Vim editing commands run in the single-chapter view; in the continuous view
-(Ctrl-L) they're held back, like undo. Registers (yank/put), Visual mode,
-search, and an Ex command line are arriving incrementally (see the roadmap).
+(Ctrl-L) they're held back, like undo. Visual mode, search, and an Ex command
+line are arriving incrementally (see the roadmap).
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
