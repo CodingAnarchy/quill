@@ -523,6 +523,23 @@ fn voice_pass_needs_the_character_bible() {
 }
 
 #[test]
+fn voice_pass_needs_voice_profiles_not_just_a_character_file() {
+    let (mut app, dir) = two_chapter_app("voice-no-profiles");
+    app.ai = ai::Settings::default();
+    app.ai.enabled = true;
+    app.ai.api_key = Some("k".into());
+    // A character file with no `## Voice` section (e.g. a pre-#183 bible) doesn't
+    // satisfy the precondition — the pass can't ground on it.
+    let chars = dir.join("bible").join("characters");
+    fs::create_dir_all(&chars).unwrap();
+    fs::write(chars.join("mara.md"), "name: Mara\n\n## Physical\n- green eyes\n").unwrap();
+    app.analyze_voice();
+    assert!(!app.ai_task.is_busy());
+    assert!(app.message.as_deref().unwrap_or("").contains("character pass first"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn style_with_no_findings_summarizes() {
     let (mut app, dir) = two_chapter_app("style-clean");
     app.apply_style(Ok(ai::style::Style { findings: vec![] }));

@@ -503,7 +503,10 @@ impl App {
     /// grounding, so it asks for the character pass first when there isn't one.
     pub(crate) fn analyze_voice(&mut self) {
         let notes = bible::raw_dir(&self.project.root, "characters");
-        if notes.trim().is_empty() {
+        // The precondition is voice *profiles* to ground on, not merely a
+        // character bible — a pre-#183 bible (or one whose characters have no
+        // voice) has no `## Voice` section, so it can't ground this pass.
+        if !notes.contains("## Voice") {
             self.message = Some("Run the character pass first to capture voice profiles".into());
             return;
         }

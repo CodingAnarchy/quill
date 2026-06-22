@@ -249,24 +249,22 @@ fn generated_block(c: &Character) -> String {
         s.push_str(&format!("**Role:** {role}\n\n"));
     }
     bullets(&mut s, "Physical", &c.physical);
-    if let Some(voice) = &c.voice {
-        if !voice.is_empty() {
-            s.push_str("## Voice\n");
-            let labeled = |s: &mut String, label: &str, items: &[String]| {
-                if !items.is_empty() {
-                    s.push_str(&format!("- **{label}:** {}\n", items.join("; ")));
-                }
-            };
-            labeled(&mut s, "Speech patterns", &voice.patterns);
-            if let Some(register) = &voice.register {
-                s.push_str(&format!("- **Register:** {register}\n"));
+    if let Some(voice) = c.voice.as_ref().filter(|v| !v.is_empty()) {
+        s.push_str("## Voice\n");
+        let labeled = |s: &mut String, label: &str, items: &[String]| {
+            if !items.is_empty() {
+                s.push_str(&format!("- **{label}:** {}\n", items.join("; ")));
             }
-            labeled(&mut s, "Verbal tics", &voice.tics);
-            if let Some(rhythm) = &voice.rhythm {
-                s.push_str(&format!("- **Rhythm:** {rhythm}\n"));
-            }
-            s.push('\n');
+        };
+        labeled(&mut s, "Speech patterns", &voice.patterns);
+        if let Some(register) = &voice.register {
+            s.push_str(&format!("- **Register:** {register}\n"));
         }
+        labeled(&mut s, "Verbal tics", &voice.tics);
+        if let Some(rhythm) = &voice.rhythm {
+            s.push_str(&format!("- **Rhythm:** {rhythm}\n"));
+        }
+        s.push('\n');
     }
     bullets(&mut s, "Personality", &c.personality);
     if !c.relationships.is_empty() {
