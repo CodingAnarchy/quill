@@ -72,6 +72,10 @@ pub struct App {
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
+    /// Vim key remaps (#208): a pressed key → the default key whose action it
+    /// should run, built from the `[editor.keys]` config. Empty (no remaps) by
+    /// default, so the built-in bindings apply unchanged.
+    vim_keys: HashMap<char, char>,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
@@ -147,7 +151,9 @@ pub struct App {
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
         let under_vc = crate::vcs::is_repo(&project.root);
-        let vim = crate::config::EditorConfig::load().vim;
+        let editor = crate::config::EditorConfig::load();
+        let vim = editor.vim;
+        let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let mut app = Self {
             buffer,
             project,
@@ -159,6 +165,7 @@ impl App {
             mode: if vim { Mode::Normal } else { Mode::Insert },
             vim,
             vim_state: VimState::default(),
+            vim_keys,
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
@@ -189,6 +196,10 @@ impl App {
         app.part_removed = vec![0; parts];
         app.seed_baselines();
         app.refresh_vc_status();
+        // Surface bad key remaps (#208) rather than dropping them silently.
+        if vim && !key_errors.is_empty() {
+            app.message = Some(format!("Vim keymap ignored: {}", key_errors.join("; ")));
+        }
         app
     }
 
@@ -1203,6 +1214,10 @@ impl App {
             VimPending::None => {}
         }
 
+        // Past the pending second-keys (find targets, register names, object
+        // ids), a command key goes through the user's remaps (#208).
+        let c = self.remap_key(c);
+
         // A digit (other than a leading `0`, which is the line-start motion)
         // accumulates the count prefix.
         if c.is_ascii_digit() && !(c == '0' && self.vim_state.count.is_none()) {
@@ -1589,10 +1604,19 @@ impl App {
             self.on_key_normal(key);
             return;
         }
-        match key.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
+        // Non-character keys (Esc, arrows) handled directly; command chars go
+        // through the user's remaps (#208) first.
+        let c = match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                return;
+            }
+            KeyCode::Char(c) => self.remap_key(c),
+            _ => return self.on_key_normal(key), // arrows / Home / End extend the selection
+        };
+        match c {
             // `v` / `V` switch the selection kind, or leave Visual if already it.
-            KeyCode::Char(c @ ('v' | 'V')) => {
+            'v' | 'V' => {
                 let want_line = c == 'V';
                 self.mode = if linewise == want_line {
                     Mode::Normal
@@ -1601,24 +1625,21 @@ impl App {
                 };
             }
             // `o` swaps the fixed and active ends of the selection.
-            KeyCode::Char('o') => {
+            'o' => {
                 let cur = self.edit_buffer().cursor_byte();
                 let buf = self.edit_buffer_mut();
                 buf.cursor = buf.cursor_at_byte(anchor);
                 self.mode = Mode::Visual { anchor: cur, linewise };
             }
             // Operators act on the selection, then leave Visual (Insert for `c`).
-            KeyCode::Char('d') | KeyCode::Char('x') => self.visual_operate(Op::Delete, anchor, linewise),
-            KeyCode::Char('c') | KeyCode::Char('s') => self.visual_operate(Op::Change, anchor, linewise),
-            KeyCode::Char('y') => self.visual_operate(Op::Yank, anchor, linewise),
+            'd' | 'x' => self.visual_operate(Op::Delete, anchor, linewise),
+            'c' | 's' => self.visual_operate(Op::Change, anchor, linewise),
+            'y' => self.visual_operate(Op::Yank, anchor, linewise),
             // `p` replaces the selection with the register.
-            KeyCode::Char('p') => self.visual_put(anchor, linewise),
+            'p' => self.visual_put(anchor, linewise),
             // Motions (and counts / multi-key prefixes) extend the selection by
-            // reusing the Normal-mode dispatch.
-            KeyCode::Char(c) if is_motion_key(c) => self.on_key_normal(key),
-            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => {
-                self.on_key_normal(key)
-            }
+            // reusing the Normal-mode dispatch (which remaps again to the same key).
+            _ if is_motion_key(c) => self.on_key_normal(key),
             _ => {} // ignore anything else, so nothing slips into Insert / edits
         }
     }
@@ -1704,6 +1725,13 @@ impl App {
         self.vim_state.count.take().unwrap_or(1)
     }
 
+    /// Translate a pressed key through the user's remaps (#208): a remapped key
+    /// runs the default key's action; an unmapped key is itself. Applied to
+    /// command keys only — not to find targets, register names, or object ids.
+    fn remap_key(&self, c: char) -> char {
+        self.vim_keys.get(&c).copied().unwrap_or(c)
+    }
+
     /// Run `motion` `n` times — how a count repeats a simple motion.
     fn vim_repeat(&mut self, n: usize, mut motion: impl FnMut(&mut App)) {
         for _ in 0..n {
@@ -1739,6 +1767,77 @@ impl App {
     }
 
 
+}
+
+/// The remappable Vim commands (#208): each named action and its default key.
+/// `[editor.keys]` binds an action name to a different key; the action set is the
+/// single-key Normal/Visual commands (`gg` and the `"` register prefix, being
+/// multi-key, aren't remappable). Documented in the README.
+const VIM_ACTIONS: &[(&str, char)] = &[
+    ("left", 'h'),
+    ("down", 'j'),
+    ("up", 'k'),
+    ("right", 'l'),
+    ("word_forward", 'w'),
+    ("word_backward", 'b'),
+    ("word_end", 'e'),
+    ("line_start", '0'),
+    ("first_non_blank", '^'),
+    ("line_end", '$'),
+    ("last_line", 'G'),
+    ("find_forward", 'f'),
+    ("find_backward", 'F'),
+    ("till_forward", 't'),
+    ("till_backward", 'T'),
+    ("repeat_find", ';'),
+    ("repeat_find_reverse", ','),
+    ("delete", 'd'),
+    ("change", 'c'),
+    ("yank", 'y'),
+    ("delete_char", 'x'),
+    ("delete_to_line_end", 'D'),
+    ("change_to_line_end", 'C'),
+    ("put_after", 'p'),
+    ("put_before", 'P'),
+    ("undo", 'u'),
+    ("insert", 'i'),
+    ("append", 'a'),
+    ("insert_line_start", 'I'),
+    ("append_line_end", 'A'),
+    ("open_below", 'o'),
+    ("open_above", 'O'),
+    ("visual", 'v'),
+    ("visual_line", 'V'),
+    ("search_forward", '/'),
+    ("search_backward", '?'),
+    ("search_next", 'n'),
+    ("search_prev", 'N'),
+    ("search_word", '*'),
+    ("ex_command", ':'),
+];
+
+/// Build the pressed-key → default-key remap from the `[editor.keys]` config
+/// (#208). Each entry is `action = key`; the result maps that key to the
+/// action's default key, so the existing dispatch runs unchanged. Returns any
+/// bad entries (unknown action, or a value that isn't a single key) for
+/// reporting — they're skipped, leaving the default binding in place.
+fn build_keymap(keys: &HashMap<String, String>) -> (HashMap<char, char>, Vec<String>) {
+    let mut map = HashMap::new();
+    let mut errors = Vec::new();
+    for (action, key) in keys {
+        let Some(&(_, default)) = VIM_ACTIONS.iter().find(|(name, _)| name == action) else {
+            errors.push(format!("unknown action '{action}'"));
+            continue;
+        };
+        let mut chars = key.chars();
+        match (chars.next(), chars.next()) {
+            (Some(k), None) => {
+                map.insert(k, default);
+            }
+            _ => errors.push(format!("'{action}' must be a single key, got '{key}'")),
+        }
+    }
+    (map, errors)
 }
 
 /// Whether `c` is a Normal-mode motion key — a count digit, a motion, or a

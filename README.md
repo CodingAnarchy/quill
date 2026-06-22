@@ -170,8 +170,31 @@ Command line:
   save then quit, **`:q!`** quits discarding changes.
 
 Vim editing commands run in the single-chapter view; in the continuous view
-(Ctrl-L) they're held back, like undo. Configurable keybindings are arriving
-incrementally (see the roadmap).
+(Ctrl-L) they're held back, like undo.
+
+#### Remapping keys
+
+Bind a key to an action under `[editor.keys]` (`action = "key"`). Unmapped keys
+keep their defaults; an invalid entry (unknown action, or a value that isn't a
+single key) is reported at startup and ignored, leaving the default in place.
+
+```toml
+[editor.keys]
+# Colemak-style home-row motions (the defaults still work too):
+left = "n"
+down = "e"
+up = "i"
+right = "o"
+```
+
+The action names: `left` `down` `up` `right`; `word_forward` `word_backward`
+`word_end`; `line_start` `first_non_blank` `line_end` `last_line`; `find_forward`
+`find_backward` `till_forward` `till_backward` `repeat_find`
+`repeat_find_reverse`; `delete` `change` `yank`; `delete_char`
+`delete_to_line_end` `change_to_line_end`; `put_after` `put_before` `undo`;
+`insert` `append` `insert_line_start` `append_line_end` `open_below` `open_above`;
+`visual` `visual_line`; `search_forward` `search_backward` `search_next`
+`search_prev` `search_word`; `ex_command`.
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
