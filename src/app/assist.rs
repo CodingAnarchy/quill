@@ -14,6 +14,7 @@ use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
+use crate::ai::voice;
 use crate::ai::workflow_gen::{self, GeneratedWorkflow};
 use crate::mode::{Action, AiAction, Command, Palette, PaletteItem};
 use crate::text::count_matches;
@@ -150,6 +151,7 @@ impl App {
             ai("Scaffold / outline", "Beat outline + structural gaps", AiAction::Scaffold),
             ai("Name & term consistency", "Spelling variants (cheap pass)", AiAction::Naming),
             ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
+            ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
@@ -302,6 +304,7 @@ impl App {
             AiAction::Scaffold => self.analyze_scaffold(),
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
+            AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
             AiAction::Triage => self.open_triage(),
         }
@@ -491,6 +494,22 @@ impl App {
         self.spawn_ai("⟳ Reviewing prose & style…", |backend, manuscript, model| {
             let req = style::build_request(manuscript, &model);
             Outcome::Style(backend.complete(&req).and_then(|r| style::parse(&r.text)))
+        });
+    }
+
+    /// Start a character-voice pass (#183): check the manuscript against the
+    /// character bible's voice profiles, surfacing dialogue / narration
+    /// consistency findings via [`App::poll_ai`]. Needs the character bible for
+    /// grounding, so it asks for the character pass first when there isn't one.
+    pub(crate) fn analyze_voice(&mut self) {
+        let notes = bible::raw_dir(&self.project.root, "characters");
+        if notes.trim().is_empty() {
+            self.message = Some("Run the character pass first to capture voice profiles".into());
+            return;
+        }
+        self.spawn_ai("⟳ Checking character voice…", move |backend, manuscript, model| {
+            let req = voice::build_request(manuscript, &notes, &model);
+            Outcome::Voice(backend.complete(&req).and_then(|r| voice::parse(&r.text)))
         });
     }
 
@@ -722,6 +741,7 @@ impl App {
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),
                     Outcome::Submission(r) => self.apply_submission(r),
+                    Outcome::Voice(r) => self.apply_voice(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
@@ -977,6 +997,31 @@ impl App {
             .iter()
             .map(|f| Finding {
                 summary: format!("{}: {}", f.kind, f.detail),
+                chapters: f.chapters.clone(),
+            })
+            .collect();
+        self.show_findings(findings);
+    }
+
+    /// Apply a character-voice pass (#183): surface the observations as findings,
+    /// naming the character each concerns. Pure analysis — nothing is written.
+    pub(crate) fn apply_voice(&mut self, result: Result<voice::Voice, ai::AiError>) {
+        let voice = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let findings = voice
+            .findings
+            .iter()
+            .map(|f| Finding {
+                summary: if f.character.is_empty() {
+                    format!("{}: {}", f.kind, f.detail)
+                } else {
+                    format!("{} ({}): {}", f.kind, f.character, f.detail)
+                },
                 chapters: f.chapters.clone(),
             })
             .collect();

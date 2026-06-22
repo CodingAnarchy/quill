@@ -21,7 +21,7 @@ pub struct Character {
     #[serde(default)]
     pub physical: Vec<String>,
     #[serde(default)]
-    pub voice: Option<String>,
+    pub voice: Option<VoiceProfile>,
     #[serde(default)]
     pub personality: Vec<String>,
     #[serde(default)]
@@ -38,6 +38,32 @@ pub struct Character {
     /// Locally computed: the last chapter the character is mentioned in.
     #[serde(default)]
     pub last_chapter: Option<String>,
+}
+
+/// An actionable voice profile (#183): the speech fingerprint the voice-analysis
+/// pass checks dialogue and narration against, richer than a one-line summary.
+/// Every field is optional so a thin character still parses.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct VoiceProfile {
+    /// How they build sentences — habits of phrasing, syntax, directness.
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    /// Vocabulary and register (formal/colloquial, jargon, era, profanity).
+    #[serde(default)]
+    pub register: Option<String>,
+    /// Verbal tics or catchphrases that recur in their speech.
+    #[serde(default)]
+    pub tics: Vec<String>,
+    /// Typical sentence rhythm and length (clipped, run-on, measured).
+    #[serde(default)]
+    pub rhythm: Option<String>,
+}
+
+impl VoiceProfile {
+    /// Whether the profile carries anything worth rendering.
+    fn is_empty(&self) -> bool {
+        self.patterns.is_empty() && self.register.is_none() && self.tics.is_empty() && self.rhythm.is_none()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -62,11 +88,13 @@ pub struct Drift {
 const SYSTEM: &str = "You are a story-bible assistant. Read the novel manuscript \
 and extract a profile for every named character with a meaningful presence. Be \
 faithful to the text — do not invent details. For each character capture physical \
-traits, voice, personality, relationships, goals, and a per-chapter arc (the \
-chapter title and the character's state or change there). In `drift`, record only \
-genuine contradictions across the manuscript (e.g. eye color stated differently \
-in two chapters), each with the chapters involved. Reference chapters by their \
-title.";
+traits; an actionable voice profile (speech patterns, vocabulary and register, \
+verbal tics or catchphrases, and typical sentence rhythm/length — the speech \
+fingerprint, not a one-line label); personality, relationships, goals, and a \
+per-chapter arc (the chapter title and the character's state or change there). In \
+`drift`, record only genuine contradictions across the manuscript (e.g. eye color \
+stated differently in two chapters), each with the chapters involved. Reference \
+chapters by their title.";
 
 /// The JSON Schema for a character-extraction reply (matches the model-provided
 /// fields of [`Character`], wrapped in a `characters` array).
@@ -84,7 +112,16 @@ pub fn schema() -> Value {
                         "aliases": string_array,
                         "role": { "type": "string" },
                         "physical": string_array,
-                        "voice": { "type": "string" },
+                        "voice": {
+                            "type": "object",
+                            "properties": {
+                                "patterns": string_array,
+                                "register": { "type": "string" },
+                                "tics": string_array,
+                                "rhythm": { "type": "string" }
+                            },
+                            "additionalProperties": false
+                        },
                         "personality": string_array,
                         "relationships": {
                             "type": "array",
@@ -213,7 +250,23 @@ fn generated_block(c: &Character) -> String {
     }
     bullets(&mut s, "Physical", &c.physical);
     if let Some(voice) = &c.voice {
-        s.push_str(&format!("## Voice\n{voice}\n\n"));
+        if !voice.is_empty() {
+            s.push_str("## Voice\n");
+            let labeled = |s: &mut String, label: &str, items: &[String]| {
+                if !items.is_empty() {
+                    s.push_str(&format!("- **{label}:** {}\n", items.join("; ")));
+                }
+            };
+            labeled(&mut s, "Speech patterns", &voice.patterns);
+            if let Some(register) = &voice.register {
+                s.push_str(&format!("- **Register:** {register}\n"));
+            }
+            labeled(&mut s, "Verbal tics", &voice.tics);
+            if let Some(rhythm) = &voice.rhythm {
+                s.push_str(&format!("- **Rhythm:** {rhythm}\n"));
+            }
+            s.push('\n');
+        }
     }
     bullets(&mut s, "Personality", &c.personality);
     if !c.relationships.is_empty() {
@@ -256,7 +309,12 @@ mod tests {
             aliases: vec!["Mara".into()],
             role: Some("protagonist".into()),
             physical: vec!["green eyes".into()],
-            voice: Some("wry, clipped".into()),
+            voice: Some(VoiceProfile {
+                patterns: vec!["answers a question with a question".into()],
+                register: Some("dry, understated".into()),
+                tics: vec!["\"suppose\"".into()],
+                rhythm: Some("clipped".into()),
+            }),
             personality: vec!["guarded".into()],
             relationships: vec![Relationship { name: "Tomas".into(), relation: "estranged brother".into() }],
             goals: vec!["find the locket's owner".into()],
@@ -298,6 +356,10 @@ mod tests {
         assert!(file.contains("name: Mara Vance"));
         assert!(file.contains("aliases: [Mara]"));
         assert!(file.contains("mentions: 42"));
+        assert!(file.contains("## Voice"));
+        assert!(file.contains("**Speech patterns:** answers a question with a question"));
+        assert!(file.contains("**Register:** dry, understated"));
+        assert!(file.contains("**Rhythm:** clipped"));
         assert!(file.contains("## Arc"));
         assert!(file.contains("## Drift flags"));
         assert!(file.contains("based on my aunt"));

@@ -22,6 +22,7 @@ pub mod scaffold;
 pub mod setting;
 pub mod style;
 pub mod submission;
+pub mod voice;
 pub mod workflow_gen;
 mod claude;
 
@@ -96,6 +97,8 @@ pub enum Outcome {
     Style(Result<style::Style, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
+    /// Character voice analysis — dialogue/narration consistency (#183).
+    Voice(Result<voice::Voice, AiError>),
     /// A workflow generated from a plain-language description (#232).
     Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
@@ -118,6 +121,7 @@ impl Outcome {
             Outcome::Naming(r) => r.as_ref().err(),
             Outcome::Style(r) => r.as_ref().err(),
             Outcome::Submission(r) => r.as_ref().err(),
+            Outcome::Voice(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }

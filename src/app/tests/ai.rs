@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 9, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 10, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -478,6 +478,47 @@ fn style_findings_open_the_overlay() {
         }],
     }));
     assert!(matches!(app.mode, Mode::Findings(_)));
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #183: character voice analysis -----------------------------------------
+
+#[test]
+fn voice_findings_open_the_overlay_and_name_the_character() {
+    let (mut app, dir) = two_chapter_app("voice");
+    app.apply_voice(Ok(ai::voice::Voice {
+        findings: vec![ai::voice::VoiceFinding {
+            kind: "dialogue".into(),
+            character: "Mara".into(),
+            detail: "too formal for her clipped register".into(),
+            chapters: vec!["Two".into()],
+        }],
+    }));
+    match &app.mode {
+        Mode::Findings(f) => {
+            assert!(f.items[0].summary.contains("Mara"), "names the character: {}", f.items[0].summary);
+            assert!(f.items[0].summary.contains("dialogue"));
+        }
+        _ => panic!("expected the findings overlay"),
+    }
+    // Voice findings feed revision triage like the other passes.
+    assert_eq!(app.triage.len(), 1);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn voice_pass_needs_the_character_bible() {
+    let (mut app, dir) = two_chapter_app("voice-no-bible");
+    app.ai = ai::Settings::default();
+    app.ai.enabled = true;
+    app.ai.api_key = Some("k".into());
+    app.analyze_voice(); // no bible/characters yet
+    assert!(!app.ai_task.is_busy(), "nothing sent without voice profiles to ground on");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("character pass first"),
+        "{:?}",
+        app.message
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
