@@ -53,25 +53,6 @@ fn save_image(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-/// The text after a `---`-fenced front-matter block (#238) — the bible body used
-/// as a portrait description. Returns the whole text when there's no front matter.
-fn strip_front_matter(text: &str) -> &str {
-    text.strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---\n"))
-        .map(|(_, body)| body)
-        .unwrap_or(text)
-}
-
-/// A scalar field from a `---`-fenced front-matter block (e.g. `name: Mara`).
-fn front_matter_field(text: &str, key: &str) -> Option<String> {
-    let fm = text.strip_prefix("---\n")?.split_once("\n---\n")?.0;
-    let prefix = format!("{key}:");
-    fm.lines()
-        .find_map(|l| l.trim().strip_prefix(&prefix))
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
 /// A one-line status message for one or more failed writes (#153).
 fn write_failure_message(failures: &[String]) -> String {
     match failures.split_first() {
@@ -597,10 +578,8 @@ impl App {
             self.message = Some("Run the character pass first to build the character bible".into());
             return;
         }
-        if self.ai_task.is_busy() {
-            self.message = Some("An AI request is already in flight…".into());
-            return;
-        }
+        // The busy guard lives at the spawn site (`generate_portraits`); the task
+        // can't become busy between opening this confirm and the y/N answer.
         let plural = if n == 1 { "" } else { "s" };
         let label = format!(
             "Generate {n} character portrait{plural} via fal.ai ({}) — each image is billed. Run? (y/N)",
@@ -628,6 +607,9 @@ impl App {
         }
         let model = self.image.model.clone();
         let dir = self.project.root.join("marketing").join("images").join("characters");
+        // The remote backend is trivial to construct, so we build it here and move
+        // it into the worker. The local image model (#240) is heavy and will need
+        // the build-on-worker + cached-slot pattern the text `BackendSpec` uses.
         let backend: Box<dyn ImageBackend> = Box::new(FalBackend::new(key));
         self.ai_task.spawn(move || {
             let mut report = ImageReport::default();
@@ -664,8 +646,10 @@ impl App {
                 continue;
             };
             let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("character").to_string();
-            let name = front_matter_field(&text, "name").unwrap_or_else(|| slug.clone());
-            let description = strip_front_matter(&text);
+            let name = bible::front_field(&text, "name")
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| slug.clone());
+            let description = crate::frontmatter::split(&text).1;
             out.push((slug, name.clone(), image::portrait_prompt(&name, description)));
         }
         out

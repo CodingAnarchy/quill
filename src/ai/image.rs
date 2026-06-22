@@ -80,7 +80,7 @@ impl ImageSettings {
 
     /// The configured API key, if any (non-empty).
     pub fn resolved_key(&self) -> Option<&str> {
-        self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty())
+        super::resolved_key(&self.api_key)
     }
 
     /// Whether image generation is usable as configured, or why not — the gate for

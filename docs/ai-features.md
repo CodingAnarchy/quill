@@ -39,7 +39,10 @@ model = "fal-ai/flux/schnell"    # a fal.ai model id
 
 Image generation (#238) is a separate opt-in with its own `[image]` section and
 key (`FAL_KEY` or `api_key`), since it uses a different provider (fal.ai) and is
-billed per image. It's independent of the text `[ai]` settings.
+billed per image. Its opt-in and key are separate from the text `[ai]` settings;
+the portrait action is gated on image readiness and reachable from the run-action
+menu (Ctrl-K) even with text AI off (the AI palette itself opens only when text AI
+is on).
 
 The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
 never from the project directory. **Backends:** the default `claude` backend sends

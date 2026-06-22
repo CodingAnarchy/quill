@@ -141,6 +141,17 @@ impl Outcome {
     }
 }
 
+/// Whether an HTTP status is 2xx — shared by the HTTP backends.
+pub(crate) fn is_ok(status: u16) -> bool {
+    (200..300).contains(&status)
+}
+
+/// A configured key from an optional config string: trimmed, `None` when blank.
+/// Shared by the text [`Settings`] and image [`image::ImageSettings`].
+pub(crate) fn resolved_key(key: &Option<String>) -> Option<&str> {
+    key.as_deref().map(str::trim).filter(|k| !k.is_empty())
+}
+
 /// Render a list of items as numbered Markdown sections (`## {label} N`), each
 /// trimmed, with a blank line around it — the shared shape for off-manuscript copy
 /// artifacts (marketing variants #236, social posts #237). Empty input → empty.
@@ -270,7 +281,7 @@ impl Settings {
 
     /// The configured API key, if any (non-empty).
     pub fn resolved_key(&self) -> Option<&str> {
-        self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty())
+        resolved_key(&self.api_key)
     }
 
     /// The backend that will actually run, accounting for the privacy switch:

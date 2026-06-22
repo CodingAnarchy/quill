@@ -6,7 +6,7 @@
 use serde_json::{json, Value};
 
 use super::image::{ImageBackend, ImageRequest};
-use super::AiError;
+use super::{is_ok, AiError};
 
 /// fal.ai's synchronous run endpoint: `POST {BASE}/{model}` with the inputs,
 /// returns the result (including the image URLs) directly.
@@ -72,11 +72,6 @@ impl FalBackend {
             .read_to_vec()
             .map_err(|e| AiError::Network(e.to_string()))
     }
-}
-
-/// Whether an HTTP status is 2xx.
-fn is_ok(status: u16) -> bool {
-    (200..300).contains(&status)
 }
 
 /// The run URL for a model id.
