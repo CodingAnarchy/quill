@@ -23,12 +23,31 @@ pub struct ImageReport {
     pub failed: Vec<String>,
 }
 
-/// A provider that turns a prompt into image bytes. Implemented now by the remote
+/// A generated image: the encoded bytes plus the file extension matching their
+/// format, so it's saved as `.jpg`/`.png`/… to match the actual content rather
+/// than a guessed extension.
+pub struct GeneratedImage {
+    pub bytes: Vec<u8>,
+    pub ext: String,
+}
+
+/// A provider that turns a prompt into an image. Implemented now by the remote
 /// [`FalBackend`](super::fal::FalBackend); a local implementation lands in #240.
 /// `Send + Sync` so it can run on the worker thread like the text backend.
 pub trait ImageBackend: Send + Sync {
-    /// Generate an image, returning the encoded bytes (e.g. PNG/JPEG).
-    fn generate(&self, req: &ImageRequest) -> Result<Vec<u8>, AiError>;
+    /// Generate an image, returning its bytes and the matching file extension.
+    fn generate(&self, req: &ImageRequest) -> Result<GeneratedImage, AiError>;
+}
+
+/// The file extension for an image MIME type (e.g. `image/jpeg` → `jpg`),
+/// defaulting to `png` for anything unrecognized.
+pub fn extension_for(content_type: &str) -> &'static str {
+    match content_type.rsplit('/').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "jpeg" | "jpg" => "jpg",
+        "webp" => "webp",
+        "gif" => "gif",
+        _ => "png",
+    }
 }
 
 /// The fal.ai FLUX model used when none is configured — fast and inexpensive.
@@ -150,5 +169,13 @@ mod tests {
     fn portrait_prompt_tolerates_an_empty_description() {
         let p = portrait_prompt("Mara", "  ");
         assert!(p.contains("Mara") && p.contains("portrait"));
+    }
+
+    #[test]
+    fn extension_maps_mime_types() {
+        assert_eq!(extension_for("image/jpeg"), "jpg");
+        assert_eq!(extension_for("image/png"), "png");
+        assert_eq!(extension_for("image/webp"), "webp");
+        assert_eq!(extension_for("application/octet-stream"), "png"); // fallback
     }
 }

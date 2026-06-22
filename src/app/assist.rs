@@ -615,10 +615,13 @@ impl App {
             let mut report = ImageReport::default();
             for (slug, name, prompt) in targets {
                 match backend.generate(&ImageRequest { prompt, model: model.clone() }) {
-                    Ok(bytes) => match save_image(&dir.join(format!("{slug}.png")), &bytes) {
-                        Ok(()) => report.saved.push(format!("marketing/images/characters/{slug}.png")),
-                        Err(e) => report.failed.push(format!("{name}: {e}")),
-                    },
+                    Ok(img) => {
+                        let file = format!("{slug}.{}", img.ext);
+                        match save_image(&dir.join(&file), &img.bytes) {
+                            Ok(()) => report.saved.push(format!("marketing/images/characters/{file}")),
+                            Err(e) => report.failed.push(format!("{name}: {e}")),
+                        }
+                    }
                     Err(e) => report.failed.push(format!("{name}: {e}")),
                 }
             }
