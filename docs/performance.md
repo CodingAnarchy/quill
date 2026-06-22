@@ -46,6 +46,7 @@ Corpora are generated deterministically in-test, so the suite needs no fixtures.
 | `reparse_is_fast_at_window_size` | `buffer.rs` | ~3-chapter window (~4.5k words) | < 16 ms (best of 5) | A full incremental reparse on the continuous-view window stays under one frame. Best-of-5 because a single sample catches one-off noise (scheduling, CPU ramp); noise only ever *adds* time. |
 | `render_stays_within_a_frame` | `ui/mod.rs` | ~82k-word chapter + 150-chapter outline pane | < 16 ms / frame | A full `draw()` stays under one frame. The status bar's word count is O(document); the pane reads cached per-chapter metadata, never files. Catches rendering that re-reads files or does per-chapter work proportional to the novel. |
 | `open_is_fast_for_a_large_novel` | `project.rs` | 150 chapters on disk | < 250 ms | Opening reads and parses each chapter once (word count + front matter) and caches it; catches a regression to per-chapter re-reads or O(n²) work at open. (Typically a few ms.) |
+| `open_is_fast_for_a_series_sized_project` | `project.rs` | 1500 chapters on disk | < 500 ms | Open scales linearly with the project (the per-chapter cache read is the only proportional work, and it's bounded); a multi-book series still opens near-instantly. (Typically ~25–35 ms.) |
 | `navigation_is_fast_in_a_series_sized_project` | `app/tests/chapters.rs` | 600 chapters on disk | < 10 ms / switch | Switching chapters reads/parses one chapter file — never work proportional to the project. (Typically ~0.5 ms.) |
 
 Budgets are deliberately generous headroom over the typical measured time: they
@@ -63,3 +64,10 @@ typical so it keeps defending the win.
 - **Work stays incremental** — editing one chapter doesn't reprocess the whole
   project (parse, word counts, AI caches). The navigation guard, and the
   word-count work in #220, enforce this.
+- **Memory is bounded to the editing window** — the project holds one small
+  `ChapterEntry` per chapter (title, file, cached count, front-matter metadata),
+  never a chapter's body text, and the editor holds one live `Buffer` (the active
+  chapter) — at most ~3 in the continuous view. So a series-sized project's
+  footprint grows with the *number* of chapters (small metadata), not with the
+  manuscript's word count. Opening or editing one chapter reads/parses only that
+  chapter's file, never the others'.
