@@ -1127,7 +1127,8 @@ impl App {
             VimPending::G => {
                 self.vim_state.pending = VimPending::None;
                 if c == 'g' {
-                    self.jump_to_counted_line(0); // gg → first line (or {count}gg)
+                    let raw = self.vim_state.count.take();
+                    self.goto_line_or(raw, |b| b.move_to_line(0)); // gg → first line (or {count}gg)
                 } else {
                     self.vim_state.count = None; // an unknown `g_` aborts
                 }
@@ -1153,13 +1154,17 @@ impl App {
         }
 
         // Commands that await another key keep the count pending.
-        match c {
-            'g' => return self.vim_state.pending = VimPending::G,
-            'f' => return self.vim_state.pending = VimPending::Find(FindKind::FindFwd),
-            'F' => return self.vim_state.pending = VimPending::Find(FindKind::FindBack),
-            't' => return self.vim_state.pending = VimPending::Find(FindKind::TillFwd),
-            'T' => return self.vim_state.pending = VimPending::Find(FindKind::TillBack),
-            _ => {}
+        let prefix = match c {
+            'g' => Some(VimPending::G),
+            'f' => Some(VimPending::Find(FindKind::FindFwd)),
+            'F' => Some(VimPending::Find(FindKind::FindBack)),
+            't' => Some(VimPending::Find(FindKind::TillFwd)),
+            'T' => Some(VimPending::Find(FindKind::TillBack)),
+            _ => None,
+        };
+        if let Some(p) = prefix {
+            self.vim_state.pending = p;
+            return;
         }
 
         // Terminal commands consume the count.
@@ -1205,10 +1210,7 @@ impl App {
             '$' => self.edit_move(Buffer::move_line_end),
 
             // Document motion: `G` to the counted line, else the last line.
-            'G' => match raw {
-                Some(n) => self.edit_move(move |b| b.move_to_line(n.saturating_sub(1))),
-                None => self.edit_move(Buffer::move_to_last_line),
-            },
+            'G' => self.goto_line_or(raw, Buffer::move_to_last_line),
 
             // Repeat the last find: `;` same direction, `,` reversed.
             ';' => self.repeat_find(count, false),
@@ -1246,11 +1248,14 @@ impl App {
         }
     }
 
-    /// Jump to a 0-based line, or to `{count}`-th line when a count is pending
-    /// (`gg` vs `5gg`). Consumes the count.
-    fn jump_to_counted_line(&mut self, default_line: usize) {
-        let line = self.vim_state.count.take().map_or(default_line, |n| n.saturating_sub(1));
-        self.edit_move(move |b| b.move_to_line(line));
+    /// Jump to the `{count}`-th (1-based) line, or run `fallback` when no count
+    /// was given — the shared core of `gg` (fallback: first line) and `G`
+    /// (fallback: last line). `raw` is the already-taken pending count.
+    fn goto_line_or(&mut self, raw: Option<usize>, fallback: impl FnOnce(&mut Buffer)) {
+        match raw {
+            Some(n) => self.edit_move(move |b| b.move_to_line(n.saturating_sub(1))),
+            None => self.edit_move(fallback),
+        }
     }
 
     /// Replay the last `f`/`t`/`F`/`T`, in its own direction (`reverse == false`)
