@@ -589,6 +589,8 @@ fn search_status(s: &Search) -> String {
         format!("  {}/{}", s.current + 1, s.matches.len())
     };
     match s.stage {
+        // Vim search (#206) shows its `/` / `?` prompt; the Ctrl-F find labels itself.
+        SearchStage::Query if s.from_vim => format!(" {}{}{count}", if s.backward { '?' } else { '/' }, s.query),
         SearchStage::Query => format!(" Find: {}{count}", s.query),
         SearchStage::Navigate => {
             format!(" Find: {}{count}  · n next · N prev · r replace · Esc done", s.query)

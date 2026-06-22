@@ -365,6 +365,63 @@ fn esc_cancels_visual_and_o_swaps_ends() {
 }
 
 #[test]
+fn slash_search_jumps_and_n_repeats() {
+    let (mut app, dir) = vim_app("vim-search");
+    // "first chapter": search for "r" → jumps to the first 'r' (col 3).
+    type_str(&mut app, "/r");
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.mode, Mode::Normal), "Enter finalizes back to Normal");
+    assert_eq!(app.buffer.cursor.col, 2, "jumped to the first match");
+    app.on_key(key(KeyCode::Char('n'))); // next 'r' (in "chapter", col 12)
+    assert_eq!(app.buffer.cursor.col, 12, "n repeats forward");
+    app.on_key(key(KeyCode::Char('N'))); // back to the first
+    assert_eq!(app.buffer.cursor.col, 2, "N reverses");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn search_wraps_with_a_notice() {
+    let (mut app, dir) = vim_app("vim-search-wrap");
+    type_str(&mut app, "/r");
+    app.on_key(key(KeyCode::Enter)); // col 3
+    app.on_key(key(KeyCode::Char('n'))); // col 12 (last 'r')
+    app.on_key(key(KeyCode::Char('n'))); // wraps to col 2
+    assert_eq!(app.buffer.cursor.col, 2, "wrapped to the first match");
+    assert!(app.message.as_deref().unwrap_or("").contains("BOTTOM"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn question_searches_backward_and_esc_restores_the_cursor() {
+    let (mut app, dir) = vim_app("vim-search-back");
+    type_str(&mut app, "$"); // to end of line
+    let start = app.buffer.cursor.col;
+    // `?t` searches backward → nearest 't' before the cursor (col 10 in "chapter").
+    type_str(&mut app, "?t");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.buffer.cursor.col, 10, "? jumped backward");
+    // A fresh search, abandoned with Esc, restores the origin.
+    type_str(&mut app, "/f");
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.buffer.cursor.col, 10, "Esc restores the pre-search cursor");
+    let _ = start;
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn star_searches_the_word_under_the_cursor() {
+    let (mut app, dir) = vim_app("vim-star");
+    // Make the word repeat so * has somewhere to jump.
+    type_str(&mut app, "A"); // append at end → Insert
+    type_str(&mut app, " first");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg0"); // back to the start ("first chapter first")
+    type_str(&mut app, "*"); // search "first" → next occurrence
+    assert_eq!(app.buffer.cursor.col, 14, "* jumped to the next 'first': {}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn entering_continuous_view_leaves_visual() {
     let (mut app, dir) = vim_app("vim-v-continuous");
     app.on_key(key(KeyCode::Char('v')));

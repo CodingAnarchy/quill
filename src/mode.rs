@@ -110,6 +110,16 @@ pub struct VimState {
     /// The register `"x` chose for the next yank / delete / put; `None` is the
     /// unnamed register.
     pub(crate) selected_register: Option<char>,
+    /// The last `/` / `?` / `*` search, replayed by `n` / `N` (#206).
+    pub(crate) last_search: Option<VimSearch>,
+}
+
+/// A recorded Vim search, so `n` / `N` can repeat it (#206).
+#[derive(Clone)]
+pub(crate) struct VimSearch {
+    pub(crate) query: String,
+    /// The search direction; `n` repeats it, `N` inverts it.
+    pub(crate) backward: bool,
 }
 
 /// The Vim register store (#204): the unnamed register, written by every yank /
@@ -329,6 +339,13 @@ pub struct Search {
     pub(crate) origin_byte: usize,
     /// How many replacements have been made, reported when the flow ends.
     pub(crate) replaced: usize,
+    /// Vim `?` search — match nearest *before* the origin, and `n`/`N` invert
+    /// (#206). `false` for forward (`/`) and the Ctrl-F find.
+    pub(crate) backward: bool,
+    /// Opened by Vim's `/` or `?` (#206): Enter finalizes back to Normal and
+    /// records the search for `n`/`N`, rather than entering the find/replace
+    /// navigation. Esc restores the cursor to the origin.
+    pub(crate) from_vim: bool,
 }
 
 impl Search {
