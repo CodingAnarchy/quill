@@ -720,6 +720,21 @@ fn idle_tallies_words_added_then_removed() {
 }
 
 #[test]
+fn an_edited_chapter_is_tallied_even_after_navigating_away() {
+    // Edit ch0, then switch to ch1 before an idle tick. The tally must still book
+    // ch0's delta — it tracks which chapters changed (#220), not just the active
+    // one. (The single-chapter analogue of a continuous-view chapter paging out.)
+    let (mut app, dir) = two_chapter_app("tally-away"); // ch0 "first chapter" (2 words)
+    typed(&mut app, "new words "); // ch0 → +2, no idle yet
+    app.on_key(ctrl('n')); // switch to ch1 (flushes ch0, recording its new count)
+    assert_eq!(app.project.active_index(), 1);
+    app.on_idle();
+    assert_eq!(app.added, 2, "ch0's edit was booked though it's no longer active");
+    assert_eq!(app.removed, 0);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn deleting_a_chapter_books_moved_to_unused_not_removed() {
     let (mut app, dir) = two_chapter_app("moved"); // ch1 "second chapter" (2 words)
     app.on_key(ctrl('g'));
@@ -1002,5 +1017,49 @@ fn navigation_is_fast_in_a_series_sized_project() {
 
     println!("chapter switch in a {n}-chapter project = {per:?}");
     assert!(per.as_millis() < 10, "chapter switch took {per:?}");
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Performance guard (`cargo perf`). The daily word tally runs on every idle
+/// tick; its cost must not grow with the project — it touches only the chapters
+/// that changed (the live active one, plus any whose cache moved), not all of
+/// them (#220). See `docs/performance.md`.
+#[test]
+#[ignore]
+fn tally_is_independent_of_project_size() {
+    use std::time::Instant;
+
+    let n = 2000;
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-perf-tally-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let mut manifest = String::from("title = \"Series\"\n\n");
+    for i in 0..n {
+        let file = format!("ch{i}.md");
+        manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+        fs::write(dir.join(&file), "Some prose in this chapter.\n").unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    // Edit a chapter near the end — the worst case for any active-chapter lookup.
+    app.activate_chapter(n - 1);
+
+    app.on_idle(); // warm
+    let iters = 200;
+    let t = Instant::now();
+    for _ in 0..iters {
+        app.buffer.insert_char('x'); // an edit, so the active chapter is re-checked
+        app.tally_words();
+    }
+    let per = t.elapsed() / iters;
+
+    // A full per-chapter walk (the old behavior) would be ~50–100µs at this size;
+    // touching only the changed chapter keeps it an order of magnitude cheaper.
+    println!("tally over a {n}-chapter project = {per:?}");
+    assert!(per.as_micros() < 30, "tally took {per:?}");
     fs::remove_dir_all(&dir).ok();
 }

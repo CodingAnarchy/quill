@@ -48,6 +48,7 @@ Corpora are generated deterministically in-test, so the suite needs no fixtures.
 | `open_is_fast_for_a_large_novel` | `project.rs` | 150 chapters on disk | < 250 ms | Opening reads and parses each chapter once (word count + front matter) and caches it; catches a regression to per-chapter re-reads or O(n²) work at open. (Typically a few ms.) |
 | `open_is_fast_for_a_series_sized_project` | `project.rs` | 1500 chapters on disk | < 500 ms | Open scales linearly with the project (the per-chapter cache read is the only proportional work, and it's bounded); a multi-book series still opens near-instantly. (Typically ~25–35 ms.) |
 | `navigation_is_fast_in_a_series_sized_project` | `app/tests/chapters.rs` | 600 chapters on disk | < 10 ms / switch | Switching chapters reads/parses one chapter file — never work proportional to the project. (Typically ~0.5 ms.) |
+| `tally_is_independent_of_project_size` | `app/tests/chapters.rs` | 2000 chapters on disk | < 30 µs / idle tick | The daily word tally touches only the chapters that changed (the live active one, plus any whose cache moved), not all of them. A regression to the per-chapter walk would be ~50–100 µs here. (Typically ~6 µs.) |
 
 Budgets are deliberately generous headroom over the typical measured time: they
 catch *regressions* (a gross slowdown), not micro-fluctuations. When an

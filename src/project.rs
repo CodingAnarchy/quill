@@ -15,6 +15,7 @@
 //! chapter list (a standalone novel is one book) — and will grow act/book/series
 //! grouping as those tickets land.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -196,6 +197,12 @@ pub struct Project {
     /// chapter is still the same file, so [`active_index`](Self::active_index)
     /// re-derives the position with no per-op bookkeeping.
     active: String,
+    /// Files whose cached word count changed since the daily tally last drained
+    /// this (#220). [`set_chapter_words`](Self::set_chapter_words) is the only
+    /// place counts change, so recording here lets the tally touch just the
+    /// chapters that moved — not the whole project — every idle tick. Keyed by
+    /// file so it survives reordering.
+    words_changed: HashSet<String>,
 }
 
 impl Project {
@@ -218,6 +225,7 @@ impl Project {
             root,
             manifest,
             active: String::new(),
+            words_changed: HashSet::new(),
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -265,6 +273,7 @@ impl Project {
                 chapters: Vec::new(),
             },
             active: String::new(),
+            words_changed: HashSet::new(),
         };
         project.add_default_chapter()?;
         Ok(project)
@@ -311,6 +320,11 @@ impl Project {
         self.index_of_file(&self.active).unwrap_or(0)
     }
 
+    /// The active chapter's file (its identity), independent of its index.
+    pub fn active_file(&self) -> &str {
+        &self.active
+    }
+
     /// The index of the chapter whose file is `file`, if any.
     pub fn index_of_file(&self, file: &str) -> Option<usize> {
         self.manifest.chapters.iter().position(|c| c.file == file)
@@ -345,8 +359,25 @@ impl Project {
     /// The continuous view uses this to update each chapter it saves.
     pub fn set_chapter_words(&mut self, index: usize, words: usize) {
         if let Some(chapter) = self.manifest.chapters.get_mut(index) {
-            chapter.words = words;
+            if chapter.words != words {
+                chapter.words = words;
+                // Record the change so the daily tally re-checks just this chapter
+                // (#220) rather than the whole project.
+                self.words_changed.insert(chapter.file.clone());
+            }
         }
+    }
+
+    /// Take the files whose cached word count changed since the last call — what
+    /// the daily tally needs to re-check (#220).
+    pub fn take_words_changed(&mut self) -> HashSet<String> {
+        std::mem::take(&mut self.words_changed)
+    }
+
+    /// Discard any pending word-count changes — used when the daily tally
+    /// re-baselines everything (a structural edit), so nothing stale carries over.
+    pub fn clear_words_changed(&mut self) {
+        self.words_changed.clear();
     }
 
     /// Read chapter `index` from disk once and refresh its cached word count and
@@ -607,6 +638,7 @@ impl Project {
                 chapters,
             },
             active,
+            words_changed: HashSet::new(),
         }
     }
 }
