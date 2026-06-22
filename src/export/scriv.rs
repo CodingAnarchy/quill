@@ -12,7 +12,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use super::{inline_runs, xml_escape, Chapter, Document, Part};
+use super::{classify_block, inline_runs, xml_escape, Chapter, Document, Part, Prose, SCENE_BREAK};
 
 /// Write `doc` as a Scrivener `.scriv` bundle at `bundle` (the `<name>.scriv`
 /// directory). Any existing bundle there is replaced so the export always
@@ -120,17 +120,13 @@ fn to_rtf(chapter: &Chapter) -> String {
         }
     }
     for block in chapter.body.split("\n\n") {
-        let text = block.trim();
-        if text.is_empty() {
-            continue;
+        match classify_block(block) {
+            None => {}
+            // A centered scene divider, the conventional Scrivener separator.
+            Some(Prose::SceneBreak) => body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n")),
+            Some(Prose::Heading(heading)) => body.push_str(&rtf_paragraph(&[(heading, true, false)])),
+            Some(Prose::Paragraph(text)) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
         }
-        if let Some(heading) = text.strip_prefix('#') {
-            let heading = heading.trim_start_matches('#').trim();
-            body.push_str(&rtf_paragraph(&[(heading.to_string(), true, false)]));
-            continue;
-        }
-        let joined = text.split('\n').map(str::trim).collect::<Vec<_>>().join(" ");
-        body.push_str(&rtf_paragraph(&inline_runs(&joined)));
     }
     format!(
         "{{\\rtf1\\ansi\\ansicpg1252\\deff0{{\\fonttbl{{\\f0\\froman Times New Roman;}}}}\n\\f0\\fs24\n{body}}}"
@@ -272,6 +268,18 @@ mod tests {
         assert!(find_rtf.contains("5 * 3 stays literal"), "stray * verbatim:\n{find_rtf}");
 
         std::fs::remove_dir_all(dir.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_scene_break_becomes_a_centered_divider_in_rtf() {
+        let rtf = to_rtf(&chapter("One", None, "Scene one.\n\n---\n\nScene two."));
+        assert!(!rtf.contains("---"), "no literal rule: {rtf}");
+        // A centered `#` divider between the scenes.
+        assert!(rtf.contains("\\pard\\qc\\sa180 #\\par"), "centered divider: {rtf}");
+        let one = rtf.find("Scene one.").unwrap();
+        let hash = rtf.find("\\qc\\sa180 #").unwrap();
+        let two = rtf.find("Scene two.").unwrap();
+        assert!(one < hash && hash < two, "divider between scenes: {rtf}");
     }
 
     #[test]

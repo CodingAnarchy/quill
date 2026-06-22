@@ -173,6 +173,54 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
+/// The scene-break glyph the writers emit for a thematic break: a centered `#`,
+/// the standard manuscript / Scrivener scene divider, which Vellum also
+/// recognizes as a scene break on import (#199).
+const SCENE_BREAK: &str = "#";
+
+/// One block of a chapter body (the body split on blank lines), classified so
+/// each format writer renders it in its own markup. Shared by the Word and
+/// Scrivener writers so scene breaks, headings, and prose are recognized
+/// identically.
+enum Prose {
+    /// A scene break — a thematic-break line (`---`, `* * *`, …).
+    SceneBreak,
+    /// A heading line (`#`…), markers stripped.
+    Heading(String),
+    /// A normal paragraph, soft-wrapped lines joined into one.
+    Paragraph(String),
+}
+
+/// Classify one body block (already split on blank lines), or `None` when it's
+/// empty.
+fn classify_block(block: &str) -> Option<Prose> {
+    let text = block.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if is_thematic_break(text) {
+        return Some(Prose::SceneBreak);
+    }
+    if let Some(heading) = text.strip_prefix('#') {
+        return Some(Prose::Heading(heading.trim_start_matches('#').trim().to_string()));
+    }
+    // Soft-wrapped lines join into one paragraph.
+    let joined = text.split('\n').map(str::trim).collect::<Vec<_>>().join(" ");
+    Some(Prose::Paragraph(joined))
+}
+
+/// A CommonMark thematic break: a single line of three or more matching `-`,
+/// `_`, or `*`, with optional spaces between and nothing else — Quill's
+/// scene-break marker. A line with any other character (an em-dash, "5 * 3") is
+/// not one, so prose isn't mistaken for a break.
+fn is_thematic_break(block: &str) -> bool {
+    if block.contains('\n') {
+        return false;
+    }
+    let marks: Vec<char> = block.chars().filter(|c| !c.is_whitespace()).collect();
+    marks.len() >= 3 && matches!(marks[0], '-' | '_' | '*') && marks.iter().all(|&c| c == marks[0])
+}
+
 /// An epigraph as a Markdown block quote — each line prefixed `> `, the
 /// attribution on its own dimmed line — set apart from the surrounding prose.
 fn epigraph_block(epigraph: &Epigraph) -> String {
@@ -268,6 +316,40 @@ mod tests {
     #[test]
     fn xml_escape_escapes_the_markup_chars() {
         assert_eq!(xml_escape("a & b < c > d"), "a &amp; b &lt; c &gt; d");
+    }
+
+    #[test]
+    fn recognizes_thematic_breaks_but_not_prose() {
+        // The scene-break forms an author might type.
+        for br in ["---", "***", "___", "* * *", "- - -", "----"] {
+            assert!(is_thematic_break(br), "{br:?} is a scene break");
+            assert!(matches!(classify_block(br), Some(Prose::SceneBreak)), "{br:?}");
+        }
+        // Prose that merely contains the same characters is not a break.
+        for prose in ["a — dash", "5 * 3 = 15", "--", "well - maybe", "* one bullet"] {
+            assert!(!is_thematic_break(prose), "{prose:?} is prose, not a break");
+        }
+        // Headings and paragraphs still classify as before.
+        assert!(matches!(classify_block("## A scene"), Some(Prose::Heading(h)) if h == "A scene"));
+        assert!(classify_block("  ").is_none());
+    }
+
+    #[test]
+    fn markdown_keeps_a_scene_break_as_a_thematic_break() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("One", None, "Scene one.\n\n---\n\nScene two.")],
+            }],
+            back: vec![],
+        };
+        assert!(to_markdown(&d).contains("Scene one.\n\n---\n\nScene two."), "{}", to_markdown(&d));
     }
 
     #[test]
