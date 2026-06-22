@@ -5,7 +5,7 @@
 
 use serde_json::{json, Value};
 
-use super::image::{ImageBackend, ImageRequest};
+use super::image::{self, GeneratedImage, ImageBackend, ImageRequest};
 use super::{is_ok, AiError};
 
 /// fal.ai's synchronous run endpoint: `POST {BASE}/{model}` with the inputs,
@@ -28,13 +28,14 @@ impl FalBackend {
 }
 
 impl ImageBackend for FalBackend {
-    fn generate(&self, req: &ImageRequest) -> Result<Vec<u8>, AiError> {
+    fn generate(&self, req: &ImageRequest) -> Result<GeneratedImage, AiError> {
         let (status, value) = self.post(&run_url(&req.model), &body(req))?;
         if !is_ok(status) {
             return Err(api_error(status, &value));
         }
-        let url = image_url(&value)?;
-        self.download(&url)
+        let (url, content_type) = first_image(&value)?;
+        let bytes = self.download(&url)?;
+        Ok(GeneratedImage { bytes, ext: image::extension_for(&content_type).to_string() })
     }
 }
 
@@ -84,13 +85,20 @@ fn body(req: &ImageRequest) -> Value {
     json!({ "prompt": req.prompt })
 }
 
-/// The first image URL from a fal result (`{ "images": [ { "url": ... } ] }`).
-fn image_url(value: &Value) -> Result<String, AiError> {
-    value
-        .pointer("/images/0/url")
+/// The first image's URL and content type from a fal result
+/// (`{ "images": [ { "url": ..., "content_type": ... } ] }`). The content type is
+/// optional (defaults to PNG); the URL is required.
+fn first_image(value: &Value) -> Result<(String, String), AiError> {
+    let image = value
+        .pointer("/images/0")
+        .ok_or_else(|| AiError::Api("fal response had no image".into()))?;
+    let url = image
+        .get("url")
         .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| AiError::Api("fal response had no image url".into()))
+        .ok_or_else(|| AiError::Api("fal image had no url".into()))?;
+    let content_type =
+        image.get("content_type").and_then(Value::as_str).unwrap_or("image/png");
+    Ok((url.to_string(), content_type.to_string()))
 }
 
 /// An `AiError::Api` from a fal error body (it reports a `detail` message).
@@ -119,14 +127,20 @@ mod tests {
     }
 
     #[test]
-    fn image_url_reads_the_first_image() {
-        let v = json!({ "images": [ { "url": "https://cdn.fal/img.png" } ] });
-        assert_eq!(image_url(&v).unwrap(), "https://cdn.fal/img.png");
+    fn first_image_reads_url_and_content_type() {
+        let v = json!({ "images": [ { "url": "https://cdn.fal/img.jpg", "content_type": "image/jpeg" } ] });
+        assert_eq!(first_image(&v).unwrap(), ("https://cdn.fal/img.jpg".into(), "image/jpeg".into()));
     }
 
     #[test]
-    fn image_url_errors_when_absent() {
-        assert!(matches!(image_url(&json!({ "images": [] })), Err(AiError::Api(_))));
+    fn first_image_defaults_the_content_type() {
+        let v = json!({ "images": [ { "url": "https://cdn.fal/img" } ] });
+        assert_eq!(first_image(&v).unwrap().1, "image/png");
+    }
+
+    #[test]
+    fn first_image_errors_when_absent() {
+        assert!(matches!(first_image(&json!({ "images": [] })), Err(AiError::Api(_))));
     }
 
     #[test]
