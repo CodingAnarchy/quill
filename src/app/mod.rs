@@ -152,6 +152,9 @@ pub struct App {
     /// Workflow triggers (#228) from the `[triggers]` config — on-save and bound
     /// Vim Normal-mode keys, validated against `workflows` at startup.
     triggers: crate::workflow::Triggers,
+    /// The steps of an AI-proposed workflow (#232) awaiting the author's
+    /// name-confirm prompt; taken when they save it, cleared when they cancel.
+    pending_workflow: Option<Vec<String>>,
     /// The workflow currently executing (#227), if any: its resolved steps and
     /// where it is. `Some` while a run is in progress — including while it's
     /// suspended waiting on an async AI step. Drives the step state machine.
@@ -204,6 +207,7 @@ impl App {
             pending_pass: None,
             workflows: loaded.workflows,
             triggers: loaded.triggers,
+            pending_workflow: None,
             workflow_run: None,
             message: None,
         };
@@ -1064,7 +1068,9 @@ impl App {
             | Pending::AskAi
             | Pending::Commit
             | Pending::SetRemote
-            | Pending::ExCommand => {
+            | Pending::ExCommand
+            | Pending::DescribeWorkflow
+            | Pending::NameNewWorkflow => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1118,11 +1124,25 @@ impl App {
                                 self.mode = closed; // back to the editor, then run it
                                 self.run_ex_command(text);
                             }
+                            Pending::DescribeWorkflow => {
+                                // Back to editing; the proposal arrives asynchronously.
+                                self.mode = closed;
+                                self.generate_workflow(text);
+                            }
+                            Pending::NameNewWorkflow => {
+                                self.mode = closed;
+                                self.save_generated_workflow(text);
+                            }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
                         }
                     }
-                    KeyCode::Esc => self.mode = closed,
+                    KeyCode::Esc => {
+                        // Cancelling the name prompt discards the AI workflow
+                        // proposal (#232); harmless no-op for the other prompts.
+                        self.pending_workflow = None;
+                        self.mode = closed;
+                    }
                     _ => {}
                 }
             }

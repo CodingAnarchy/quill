@@ -76,6 +76,13 @@ The palette actions:
   list in the findings overlay. Local only — no request. Marking a finding as an
   `xxx` TODO is the durable outcome (it lands in the chapter and feeds the
   report's TODO count); dismissals are in-session.
+- **Build a workflow from a description** (#232) — from the Ctrl-X workflows
+  menu, describe a routine in plain words; the model maps it onto the available
+  action tokens (constrained to that closed set, so it can't invent a step) and
+  reports anything it couldn't map. The proposal is shown to name and confirm
+  before the `[workflows]` entry is written to `config.toml` (preserving the rest
+  of the file). Configures tooling, not prose — within the assistant boundary. No
+  manuscript is sent, so the request is cheap.
 
 **Cost confirm** (#82): before any whole-manuscript pass, Quill estimates the
 token/dollar cost from the manuscript size and the effective model. When the

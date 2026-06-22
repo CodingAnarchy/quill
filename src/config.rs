@@ -5,6 +5,7 @@
 //! and the `[editor]` section.
 
 use std::collections::HashMap;
+use std::io;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -15,6 +16,60 @@ pub fn config_path() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("quill").join("config.toml"))
+}
+
+/// Add a `[workflows]` entry to the home config file (#232), creating the file /
+/// directory if needed. Inserts only the one line, preserving everything else in
+/// the file (other sections, comments, formatting) — so it's safe to write a
+/// config the author hand-maintains. Returns the path written.
+pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<PathBuf> {
+    let path = config_path().ok_or_else(|| io::Error::other("no config directory"))?;
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let updated = insert_workflow(&existing, name, steps);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, updated)?;
+    Ok(path)
+}
+
+/// Splice a workflow entry into a config file's text: under an existing
+/// `[workflows]` header if there is one, else in a new `[workflows]` section
+/// appended at the end. Everything already in the file is left untouched.
+fn insert_workflow(existing: &str, name: &str, steps: &[String]) -> String {
+    let entry = workflow_entry(name, steps);
+
+    if let Some(header) = existing.lines().position(|l| l.trim() == "[workflows]") {
+        let mut lines: Vec<String> = existing.lines().map(String::from).collect();
+        lines.insert(header + 1, entry);
+        let mut out = lines.join("\n");
+        if existing.ends_with('\n') {
+            out.push('\n');
+        }
+        out
+    } else {
+        let mut out = existing.to_string();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str("[workflows]\n");
+        out.push_str(&entry);
+        out.push('\n');
+        out
+    }
+}
+
+/// Render one `name = ["step", …]` entry, delegating key quoting and string
+/// escaping to the `toml` serializer (a one-key table serializes to exactly this
+/// line) so they always match the format the loader parses.
+fn workflow_entry(name: &str, steps: &[String]) -> String {
+    let array = steps.iter().cloned().map(toml::Value::String).collect();
+    let mut table = toml::Table::new();
+    table.insert(name.to_string(), toml::Value::Array(array));
+    toml::to_string(&table).unwrap_or_default().trim_end().to_string()
 }
 
 /// Editor behavior from the `[editor]` section. The default keeps Quill's
@@ -45,5 +100,44 @@ impl EditorConfig {
             .and_then(|t| toml::from_str::<File>(&t).ok())
             .map(|f| f.editor)
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn steps(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| (*x).to_string()).collect()
+    }
+
+    #[test]
+    fn inserts_under_an_existing_workflows_section() {
+        let existing = "[editor]\nvim = true\n\n[workflows]\nfinish = [\"save\"]\n";
+        let out = insert_workflow(existing, "revise", &steps(&["save", "ai:continuity"]));
+        // The new entry is under the header, and the existing content is intact.
+        assert!(out.contains("[workflows]\nrevise = [\"save\", \"ai:continuity\"]\n"));
+        assert!(out.contains("finish = [\"save\"]"));
+        assert!(out.contains("[editor]\nvim = true"));
+    }
+
+    #[test]
+    fn appends_a_new_section_when_none_exists() {
+        let existing = "[editor]\nvim = true\n";
+        let out = insert_workflow(existing, "revise", &steps(&["save"]));
+        assert!(out.contains("[editor]\nvim = true"), "existing kept: {out}");
+        assert!(out.ends_with("[workflows]\nrevise = [\"save\"]\n"), "appended: {out}");
+    }
+
+    #[test]
+    fn writes_a_fresh_file_when_empty() {
+        let out = insert_workflow("", "x", &steps(&["save"]));
+        assert_eq!(out, "[workflows]\nx = [\"save\"]\n");
+    }
+
+    #[test]
+    fn a_name_needing_quotes_is_quoted() {
+        let out = insert_workflow("", "my pass", &steps(&["save"]));
+        assert!(out.contains("\"my pass\" = [\"save\"]"), "{out}");
     }
 }
