@@ -1005,9 +1005,10 @@ impl App {
     }
 
     /// The editor's `Ctrl-` shortcuts, shared by Insert and Vim Normal mode so
-    /// they keep working in both. Returns whether the key was a (handled)
-    /// shortcut, so each mode handler can fall through to its own keys.
-    fn on_key_ctrl(&mut self, code: KeyCode) -> bool {
+    /// they keep working in both. A `Ctrl-` combo never produces text in either
+    /// mode, so handling is fire-and-forget — an unrecognized one is simply
+    /// ignored.
+    fn on_key_ctrl(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char('s') => self.save_edit(),
             KeyCode::Char('q') => {
@@ -1072,9 +1073,8 @@ impl App {
             // (s/v split, w/h/j/k/l focus, c/q close). Vim's Ctrl-w.
             KeyCode::Char('w') => self.window_pending = true,
 
-            _ => return false,
+            _ => {}
         }
-        true
     }
 
     fn on_key_insert(&mut self, key: KeyEvent) {
