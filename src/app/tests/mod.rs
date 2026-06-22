@@ -54,5 +54,10 @@ fn two_chapter_app(name: &str) -> (App, PathBuf) {
     // tests opt back in explicitly via `vim_app`.
     app.vim = false;
     app.mode = Mode::Insert;
+    // Likewise drop any workflows / triggers from the real config, so a developer
+    // with an on-save trigger doesn't perturb the save-based tests (#228). The
+    // workflow tests set these explicitly.
+    app.workflows = Vec::new();
+    app.triggers = Default::default();
     (app, dir)
 }

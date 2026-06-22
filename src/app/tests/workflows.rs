@@ -7,7 +7,7 @@
 use super::*;
 use crate::ai;
 use crate::mode::{Action, AiAction};
-use crate::workflow::Workflow;
+use crate::workflow::{Triggers, Workflow};
 
 fn wf(name: &str, steps: &[&str]) -> Workflow {
     Workflow { name: name.into(), steps: steps.iter().map(|s| (*s).to_string()).collect() }
@@ -229,6 +229,78 @@ fn run_workflow_is_refused_while_one_is_already_running() {
     assert!(
         app.message.as_deref().unwrap_or("").contains("already running"),
         "{:?}",
+        app.message
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #228: triggers ---------------------------------------------------------
+
+#[test]
+fn saving_runs_the_on_save_workflow() {
+    let (mut app, dir) = two_chapter_app("wf-on-save");
+    app.workflows = vec![wf("autosave", &["report:progress"])];
+    app.triggers = Triggers { on_save: Some("autosave".into()), keys: Default::default() };
+    app.on_key(ctrl('s'));
+    assert!(app.overlay.is_some(), "the on-save workflow's report step ran");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Ran workflow 'autosave'"),
+        "{:?}",
+        app.message
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_workflows_own_save_step_does_not_re_trigger_on_save() {
+    let (mut app, dir) = two_chapter_app("wf-on-save-reentrant");
+    // The on-save workflow itself contains a save step; it must run once, not recurse.
+    app.workflows = vec![wf("autosave", &["save", "report:progress"])];
+    app.triggers = Triggers { on_save: Some("autosave".into()), keys: Default::default() };
+    app.on_key(key(KeyCode::Char('X'))); // edit so the save has work
+    app.on_key(ctrl('s'));
+    // Completed (no recursion) and ran both steps exactly once.
+    assert!(app.workflow_run.is_none());
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Ran workflow 'autosave' — 2 steps"),
+        "{:?}",
+        app.message
+    );
+    assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_bound_vim_key_runs_the_workflow() {
+    let (mut app, dir) = two_chapter_app("wf-key");
+    app.vim = true;
+    app.mode = Mode::Normal;
+    app.workflows = vec![wf("quick", &["report:progress"])];
+    app.triggers = Triggers {
+        on_save: None,
+        keys: [('Q', "quick".to_string())].into_iter().collect(),
+    };
+    app.on_key(key(KeyCode::Char('Q')));
+    assert!(app.overlay.is_some(), "the bound key ran the workflow");
+    assert!(app.message.as_deref().unwrap_or("").contains("Ran workflow 'quick'"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_bound_key_does_not_fire_mid_operator() {
+    let (mut app, dir) = two_chapter_app("wf-key-operator");
+    app.vim = true;
+    app.mode = Mode::Normal;
+    app.workflows = vec![wf("quick", &["report:progress"])];
+    app.triggers = Triggers {
+        on_save: None,
+        keys: [('w', "quick".to_string())].into_iter().collect(),
+    };
+    app.on_key(key(KeyCode::Char('d'))); // start an operator (dw)
+    app.on_key(key(KeyCode::Char('w'))); // 'w' is a motion here, not the trigger
+    assert!(
+        !app.message.as_deref().unwrap_or("").contains("Ran workflow"),
+        "the bound key is a motion while an operator is pending: {:?}",
         app.message
     );
     fs::remove_dir_all(&dir).ok();

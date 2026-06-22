@@ -95,6 +95,24 @@ keystrokes that stay out of the way.
   threshold asks to confirm first (declining cancels the run). The interactive
   "ask the manuscript" action needs a typed question, so it can't be a step.
 
+  Beyond running one by hand (Ctrl-X), a workflow can fire from a **trigger**:
+
+  ```toml
+  [triggers]
+  on_save = "autosave"      # run this workflow after every save
+
+  [triggers.keys]           # Vim Normal-mode key → workflow
+  Q = "revise"
+  ```
+
+  `on_save` runs a workflow after each explicit save (Ctrl-S, or `:w` in Vim
+  mode); the save isn't blocked (async steps continue in the background), and a
+  workflow's own `save` step won't re-trigger it. `[triggers.keys]` binds a Vim
+  Normal-mode key to a workflow (Vim mode, #27); a bound key overrides its
+  built-in Normal command and any remap of that key, your choice. A trigger that
+  fires while a workflow is already running is ignored, and a trigger naming an
+  unknown workflow (or a bad key) is reported at startup, not silently kept.
+
 ## Build & run
 
 ```sh

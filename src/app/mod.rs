@@ -149,6 +149,9 @@ pub struct App {
     /// ordered sequences of registry actions run as one step. Loaded once at
     /// startup, sorted by name for a stable run-workflow menu.
     workflows: Vec<crate::workflow::Workflow>,
+    /// Workflow triggers (#228) from the `[triggers]` config — on-save and bound
+    /// Vim Normal-mode keys, validated against `workflows` at startup.
+    triggers: crate::workflow::Triggers,
     /// The workflow currently executing (#227), if any: its resolved steps and
     /// where it is. `Some` while a run is in progress — including while it's
     /// suspended waiting on an async AI step. Drives the step state machine.
@@ -163,6 +166,8 @@ impl App {
         let editor = crate::config::EditorConfig::load();
         let vim = editor.vim;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
+        let loaded = crate::workflow::load();
+        let trigger_errors = loaded.errors;
         let mut app = Self {
             buffer,
             project,
@@ -197,7 +202,8 @@ impl App {
             pending_findings: Vec::new(),
             triage: Vec::new(),
             pending_pass: None,
-            workflows: crate::workflow::load(),
+            workflows: loaded.workflows,
+            triggers: loaded.triggers,
             workflow_run: None,
             message: None,
         };
@@ -207,9 +213,17 @@ impl App {
         app.part_removed = vec![0; parts];
         app.seed_baselines();
         app.refresh_vc_status();
-        // Surface bad key remaps (#208) rather than dropping them silently.
+        // Surface dropped config — bad key remaps (#208) and bad workflow triggers
+        // (#228) — rather than ignoring them silently.
+        let mut warnings = Vec::new();
         if vim && !key_errors.is_empty() {
-            app.message = Some(format!("Vim keymap ignored: {}", key_errors.join("; ")));
+            warnings.push(format!("Vim keymap ignored: {}", key_errors.join("; ")));
+        }
+        if !trigger_errors.is_empty() {
+            warnings.push(format!("Workflow triggers ignored: {}", trigger_errors.join("; ")));
+        }
+        if !warnings.is_empty() {
+            app.message = Some(warnings.join(" · "));
         }
         app
     }
@@ -687,6 +701,11 @@ impl App {
         }
         // Checkpoint today's momentum to the history log.
         self.persist_snapshot();
+        // Run the on-save workflow trigger (#228). This is the explicit-save
+        // command (Ctrl-S / `:w`); implicit flushes (chapter switch, leaving the
+        // continuous view) save the buffer directly and intentionally don't fire
+        // it. A no-op when this save is itself a workflow's own step — no recursion.
+        self.trigger_on_save();
     }
 
     fn next_chapter(&mut self) {
@@ -1257,6 +1276,17 @@ impl App {
                 return;
             }
             VimPending::None => {}
+        }
+
+        // A key bound to a workflow (#228) runs it — a standalone Normal command,
+        // so only when nothing (operator, count) is pending. Checked before the
+        // remap and built-ins, so a bound key overrides its default meaning, the
+        // author's choice (like the #208 remaps).
+        if self.vim_state.op.is_none() && self.vim_state.count.is_none() {
+            if let Some(name) = self.triggers.keys.get(&c).cloned() {
+                self.run_workflow_named(&name);
+                return;
+            }
         }
 
         // Past the pending second-keys (find targets, register names, object
