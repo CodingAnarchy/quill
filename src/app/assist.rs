@@ -17,6 +17,13 @@ use crate::ai::submission::{self, Submission};
 use crate::mode::{Action, AiAction, Command, Palette, PaletteItem};
 use crate::text::count_matches;
 
+/// The cost decision for starting a network AI action (#82): either run it now,
+/// or confirm first (the estimate exceeds the threshold) with the confirm label.
+pub(crate) enum AiStart {
+    Run,
+    Confirm(String),
+}
+
 /// The outcome of staging one generated file (#153) — a bible profile or a
 /// submission artifact. Distinguishes a successful write from a hand-edit
 /// conflict (queue for review) and from an I/O failure (surface to the author),
@@ -241,22 +248,32 @@ impl App {
     /// cost confirm first when the estimate exceeds the threshold; the local /
     /// interactive actions (Ask, Triage) run immediately.
     pub(crate) fn start_ai_action(&mut self, action: AiAction, force: bool) {
+        match self.ai_action_start(action, force) {
+            AiStart::Run => self.run_ai_action(action, force),
+            AiStart::Confirm(label) => {
+                self.open_prompt(Pending::ConfirmAi(action, force), label, "", None)
+            }
+        }
+    }
+
+    /// The cost decision for a network AI action (#82): run it now, or confirm
+    /// first because the estimate exceeds the threshold. Shared by the AI palette
+    /// ([`start_ai_action`]) and the workflow runner (#227) so a workflow's AI
+    /// step follows the same cost policy.
+    pub(crate) fn ai_action_start(&self, action: AiAction, force: bool) -> AiStart {
         // The local backend is free, so there's nothing to confirm — run directly.
         if self.ai.backend() == ai::BackendKind::Local {
-            self.run_ai_action(action, force);
-            return;
+            return AiStart::Run;
         }
         let Some((model, max_tokens)) = self.cost_profile(action) else {
             // Interactive / local-only action — no whole-manuscript request to estimate.
-            self.run_ai_action(action, force);
-            return;
+            return AiStart::Run;
         };
         let est = cost::estimate(self.pass_context_len(action, force), max_tokens, model);
         if est.dollars > self.ai.cost_threshold {
-            let label = format!("{} — run? (y/N)", cost::label(&est, model));
-            self.open_prompt(Pending::ConfirmAi(action, force), label, "", None);
+            AiStart::Confirm(format!("{} — run? (y/N)", cost::label(&est, model)))
         } else {
-            self.run_ai_action(action, force);
+            AiStart::Run
         }
     }
 
@@ -621,10 +638,13 @@ impl App {
     /// feature and clear the pending state. Called once per loop iteration so the
     /// result lands within the poll window.
     pub fn poll_ai(&mut self) {
+        // A stuck AI step shouldn't wedge a running workflow (#227).
+        self.tick_workflow_timeout();
         match self.ai_task.poll() {
             Poll::Ready(outcome) => {
                 self.message = None;
                 self.overlay = None; // a fresh result supersedes any open overlay
+                let step_error = outcome.error().map(|e| e.to_string());
                 match outcome {
                     Outcome::Answer(r) => self.apply_qa_result(r),
                     Outcome::Characters(r) => self.apply_characters(r),
@@ -639,9 +659,14 @@ impl App {
                 // The in-flight pass is done; a clean bible apply already recorded
                 // its state (#90), so drop any snapshot a failed/conflicted one left.
                 self.pending_pass = None;
+                // If this AI request was a workflow step, advance the workflow.
+                self.advance_after_ai(step_error);
             }
             Poll::Pending => {}
-            Poll::Died => self.message = Some("AI: request failed".into()),
+            Poll::Died => {
+                self.message = Some("AI: request failed".into());
+                self.advance_after_ai(Some("request failed".into()));
+            }
         }
     }
 

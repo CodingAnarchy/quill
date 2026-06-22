@@ -100,6 +100,26 @@ pub enum Outcome {
     Error(AiError),
 }
 
+impl Outcome {
+    /// The error this outcome carries, if it represents a failure — a per-feature
+    /// request/parse error or a backend-build [`Outcome::Error`]. Lets the
+    /// workflow runner (#227) treat a failed AI step as a step error that stops
+    /// the run, without inspecting each variant at the call site.
+    pub(crate) fn error(&self) -> Option<&AiError> {
+        match self {
+            Outcome::Answer(r) => r.as_ref().err(),
+            Outcome::Characters(r) => r.as_ref().err(),
+            Outcome::Continuity(r) => r.as_ref().err(),
+            Outcome::Setting(r) => r.as_ref().err(),
+            Outcome::Scaffold(r) => r.as_ref().err(),
+            Outcome::Naming(r) => r.as_ref().err(),
+            Outcome::Style(r) => r.as_ref().err(),
+            Outcome::Submission(r) => r.as_ref().err(),
+            Outcome::Error(e) => Some(e),
+        }
+    }
+}
+
 /// Token usage reported by the backend (zeros when unknown).
 #[derive(Default)]
 pub struct Usage {

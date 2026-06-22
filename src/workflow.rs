@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::config::config_path;
-use crate::mode::Action;
+use crate::mode::{Action, AiAction};
 
 /// One workflow as written in config: a name and its ordered step tokens. Each
 /// token is either a registry action name (e.g. `export:docx`) or the name of
@@ -45,9 +45,10 @@ pub fn load() -> Vec<Workflow> {
 
 /// Resolve a workflow to the flat, ordered list of actions it runs, expanding any
 /// nested workflow steps. Returns an author-facing reason if a step names neither
-/// an action nor a workflow, names an action a workflow can't run yet (the async
-/// AI passes — #227), or forms a cycle (a workflow invoking itself, directly or
-/// transitively).
+/// an action nor a workflow, names the interactive "ask" action (which needs a
+/// typed question), or forms a cycle (a workflow invoking itself, directly or
+/// transitively). The async AI passes are allowed — the runner runs them
+/// off-thread (#227).
 pub fn resolve(workflows: &[Workflow], name: &str) -> Result<Vec<Action>, String> {
     let Some(wf) = workflows.iter().find(|w| w.name == name) else {
         return Err(format!("unknown workflow '{name}'"));
@@ -74,8 +75,11 @@ fn expand<'a>(
         if let Some(sub) = workflows.iter().find(|w| w.name == *step) {
             expand(workflows, sub, stack, out)?;
         } else if let Some(action) = Action::from_name(step) {
-            if !action.is_sync() {
-                return Err(format!("step '{step}' isn't supported in a workflow yet (#227)"));
+            // "Ask the manuscript" needs a typed question, so it can't run
+            // unattended in a workflow; every other registry action can (the
+            // async AI passes run off-thread — #227).
+            if matches!(action, Action::Ai(AiAction::Ask)) {
+                return Err(format!("step '{step}' needs a typed question — not usable in a workflow"));
             }
             out.push(action);
         } else {
@@ -110,10 +114,17 @@ mod tests {
     }
 
     #[test]
-    fn an_async_ai_step_is_rejected_until_227() {
+    fn an_async_ai_step_resolves() {
         let wfs = vec![wf("deep", &["save", "ai:characters"])];
-        let err = resolve(&wfs, "deep").unwrap_err();
-        assert!(err.contains("ai:characters") && err.contains("#227"), "{err}");
+        let names: Vec<_> = resolve(&wfs, "deep").unwrap().iter().map(|a| a.name()).collect();
+        assert_eq!(names, ["save", "ai:characters"]);
+    }
+
+    #[test]
+    fn the_interactive_ask_step_is_rejected() {
+        let wfs = vec![wf("q", &["ai:ask"])];
+        let err = resolve(&wfs, "q").unwrap_err();
+        assert!(err.contains("ai:ask") && err.contains("question"), "{err}");
     }
 
     #[test]

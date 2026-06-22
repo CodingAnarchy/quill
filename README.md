@@ -77,16 +77,23 @@ keystrokes that stay out of the way.
   ```toml
   [workflows]
   finish = ["save", "report:progress", "export:docx"]
-  check  = ["save", "report:analysis", "triage"]
+  revise = ["save", "ai:continuity", "ai:style", "triage"]
   ```
 
   Each step is an action name (the tokens shown in the Ctrl-K menu, e.g. `save`,
-  `export:docx`, `report:progress`, `triage`) or the name of another workflow,
-  expanded in place. Steps run in order; the run stops at the first step that
-  can't run and tells you which and why (the earlier steps' effects stand). An
-  unknown step or a workflow that would loop back on itself is reported, not run.
-  For now steps are the synchronous actions (save, export, the reports, triage);
-  the AI passes become workflow steps in a later release.
+  `export:docx`, `report:progress`, `triage`, `ai:continuity`) or the name of
+  another workflow, expanded in place. Steps run in order; the run stops at the
+  first step that can't run and tells you which and why (the earlier steps'
+  effects stand). An unknown step or a workflow that would loop back on itself is
+  reported, not run.
+
+  AI passes can be steps too. They run off the editor thread, one at a time, so a
+  workflow can refresh a bible and flag continuity without freezing the editor;
+  the status bar shows the current step and **Esc** cancels the run (cleanly,
+  after the step in flight). AI steps respect your `[ai]` settings: with AI off
+  they're skipped and noted rather than failing the run, and a step over the cost
+  threshold asks to confirm first (declining cancels the run). The interactive
+  "ask the manuscript" action needs a typed question, so it can't be a step.
 
 ## Build & run
 

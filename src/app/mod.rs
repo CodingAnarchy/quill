@@ -149,6 +149,10 @@ pub struct App {
     /// ordered sequences of registry actions run as one step. Loaded once at
     /// startup, sorted by name for a stable run-workflow menu.
     workflows: Vec<crate::workflow::Workflow>,
+    /// The workflow currently executing (#227), if any: its resolved steps and
+    /// where it is. `Some` while a run is in progress — including while it's
+    /// suspended waiting on an async AI step. Drives the step state machine.
+    workflow_run: Option<workflows::WorkflowRun>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -194,6 +198,7 @@ impl App {
             triage: Vec::new(),
             pending_pass: None,
             workflows: crate::workflow::load(),
+            workflow_run: None,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -422,6 +427,17 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         // A fresh keystroke clears any stale status message.
         self.message = None;
+
+        // While a workflow is running (suspended on an async step), Esc cancels it
+        // — cleanly, after the current step finishes (#227). Only in an editing
+        // mode: a prompt/palette owns Esc itself (a cost-confirm cancels there).
+        if self.workflow_run.is_some()
+            && key.code == KeyCode::Esc
+            && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+        {
+            self.cancel_workflow();
+            return;
+        }
 
         // The key after a `Ctrl-w` window prefix (#163) is a window command, not
         // editing input.
@@ -1001,9 +1017,19 @@ impl App {
             Pending::ConfirmAi(action, force) => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
-                    self.run_ai_action(action, force);
+                    // Mid-workflow, the confirm gates that step: run it as the
+                    // workflow's async step so the run advances on completion.
+                    if self.workflow_run.is_some() {
+                        self.start_async_step(action);
+                    } else {
+                        self.run_ai_action(action, force);
+                    }
                 }
-                _ => self.mode = closed,
+                _ => {
+                    self.mode = closed;
+                    // Declining a workflow step's cost confirm cancels the run.
+                    self.decline_workflow();
+                }
             },
             Pending::ConfirmRestore => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
