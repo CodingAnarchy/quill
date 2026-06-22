@@ -263,9 +263,7 @@ impl App {
         // reslide). Re-checking just those keeps the tally O(edit), not O(project)
         // (#220). Keyed by file so a reorder between ticks can't misattribute.
         let mut files = self.project.take_words_changed();
-        files.push(self.project.active_file().to_string());
-        files.sort();
-        files.dedup();
+        files.insert(self.project.active_file().to_string()); // always re-check the live active chapter
         for file in files {
             let Some(i) = self.project.index_of_file(&file) else {
                 continue; // chapter gone (e.g. deleted) since it was recorded

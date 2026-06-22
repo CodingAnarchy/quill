@@ -15,6 +15,7 @@
 //! chapter list (a standalone novel is one book) — and will grow act/book/series
 //! grouping as those tickets land.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -201,7 +202,7 @@ pub struct Project {
     /// place counts change, so recording here lets the tally touch just the
     /// chapters that moved — not the whole project — every idle tick. Keyed by
     /// file so it survives reordering.
-    words_changed: Vec<String>,
+    words_changed: HashSet<String>,
 }
 
 impl Project {
@@ -224,7 +225,7 @@ impl Project {
             root,
             manifest,
             active: String::new(),
-            words_changed: Vec::new(),
+            words_changed: HashSet::new(),
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -272,7 +273,7 @@ impl Project {
                 chapters: Vec::new(),
             },
             active: String::new(),
-            words_changed: Vec::new(),
+            words_changed: HashSet::new(),
         };
         project.add_default_chapter()?;
         Ok(project)
@@ -362,14 +363,14 @@ impl Project {
                 chapter.words = words;
                 // Record the change so the daily tally re-checks just this chapter
                 // (#220) rather than the whole project.
-                self.words_changed.push(chapter.file.clone());
+                self.words_changed.insert(chapter.file.clone());
             }
         }
     }
 
     /// Take the files whose cached word count changed since the last call — what
     /// the daily tally needs to re-check (#220).
-    pub fn take_words_changed(&mut self) -> Vec<String> {
+    pub fn take_words_changed(&mut self) -> HashSet<String> {
         std::mem::take(&mut self.words_changed)
     }
 
@@ -637,7 +638,7 @@ impl Project {
                 chapters,
             },
             active,
-            words_changed: Vec::new(),
+            words_changed: HashSet::new(),
         }
     }
 }
