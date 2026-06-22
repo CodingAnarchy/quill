@@ -13,9 +13,9 @@ fn git_menu(app: &mut App, index: usize) {
     app.on_key(key(KeyCode::Enter));
 }
 
-fn palette_labels(app: &App) -> Vec<&'static str> {
+fn palette_labels(app: &App) -> Vec<&str> {
     match &app.mode {
-        Mode::Palette(p) => p.items.iter().map(|it| it.label).collect(),
+        Mode::Palette(p) => p.items.iter().map(|it| it.label.as_str()).collect(),
         _ => panic!("expected a palette to be open"),
     }
 }

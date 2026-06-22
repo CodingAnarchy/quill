@@ -64,6 +64,13 @@ keystrokes that stay out of the way.
   import (in Vellum: *File → Import Word File…* and pick the `.vellum.docx`), so
   chapters arrive as separate, correctly-ordered elements with emphasis intact.
 
+- **Run action** — **Ctrl-K** opens one menu listing every invokable action —
+  save, each export, the progress and analysis reports, and the AI passes — and
+  runs the one you pick through the same path its own shortcut uses. An action
+  that can't run right now (an AI pass with AI off, an export from the continuous
+  view) stays listed with the reason. It's the single seam author workflows will
+  build on to chain actions by name.
+
 ## Build & run
 
 ```sh
@@ -102,6 +109,7 @@ byte-for-byte.
 | Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
 | Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), or Vellum (`.docx`) → `export/` |
+| Ctrl-K         | run action: one menu for save, export, the reports, and the AI passes (unavailable ones say why) |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |

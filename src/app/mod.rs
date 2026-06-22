@@ -1099,14 +1099,10 @@ impl App {
             // changes / restore, in one menu. Ctrl-v: "version control".
             KeyCode::Char('v') => self.open_git_palette(),
             // Open the progress report (scroll to read; any other key closes).
-            KeyCode::Char('r') => {
-                self.overlay = Some(Overlay::report("progress", self.report_lines()));
-            }
+            KeyCode::Char('r') => self.open_progress_report(),
             // Open the local analysis report — editing metrics. Ctrl-t: "text"
             // analysis. Scrollable (it can run past one screen); any other key closes.
-            KeyCode::Char('t') => {
-                self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
-            }
+            KeyCode::Char('t') => self.open_analysis_report(),
             // Open the AI command palette (opt-in). When AI isn't ready, explain
             // how to enable it rather than listing dead actions.
             KeyCode::Char('a') => match self.ai.check_ready() {
@@ -1115,6 +1111,10 @@ impl App {
             },
             // Open the export menu (#7) — Markdown / Word. Ctrl-e.
             KeyCode::Char('e') => self.open_export_palette(),
+            // Open the unified run-action menu (#225) — every invokable action
+            // (save, export, reports, AI passes) in one searchable list. Ctrl-k
+            // for "command", the one menu that reaches the others.
+            KeyCode::Char('k') => self.open_action_palette(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             KeyCode::Char('l') => self.toggle_continuous(),

@@ -14,7 +14,7 @@ use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
-use crate::mode::{AiAction, Command, Palette, PaletteItem};
+use crate::mode::{Action, AiAction, Command, Palette, PaletteItem};
 use crate::text::count_matches;
 
 /// The outcome of staging one generated file (#153) — a bible profile or a
@@ -133,7 +133,7 @@ impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
-        let ai = |label, desc, a| PaletteItem { label, desc, command: Command::Ai(a) };
+        let ai = |label: &str, desc: &str, a| PaletteItem { label: label.into(), desc: desc.into(), command: Command::Ai(a) };
         let items = vec![
             ai("Ask the manuscript", "Answer a question grounded in the draft", AiAction::Ask),
             ai("Character bible", "Profiles, arcs, and drift flags", AiAction::Characters),
@@ -146,6 +146,58 @@ impl App {
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
+    }
+
+    /// Open the unified run-action menu (#225): every registry [`Action`], run by
+    /// name through the same dispatch its dedicated shortcut uses. Unavailable
+    /// actions stay listed, annotated with why they can't run right now.
+    pub(crate) fn open_action_palette(&mut self) {
+        let items = Action::ALL
+            .iter()
+            .map(|&a| {
+                let desc = match self.action_status(a) {
+                    Some(reason) => format!("{} · unavailable: {reason}", a.name()),
+                    None => a.name().to_string(),
+                };
+                PaletteItem { label: a.label().into(), desc, command: Command::Run(a) }
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette { title: "Run action", items, selected: 0 }));
+    }
+
+    /// Why `action` can't run right now, or `None` if it can — the one
+    /// availability check the menu annotates with and [`run_action`](App::run_action)
+    /// guards on. The per-action runtime guards (AI cost confirm, etc.) still live
+    /// at the dispatch layer; this only covers the up-front "can't start" cases.
+    fn action_status(&self, action: Action) -> Option<String> {
+        match action {
+            // Triage is local aggregation — it works with the AI backend off.
+            Action::Ai(AiAction::Triage) => None,
+            Action::Ai(_) => self.ai.check_ready().err().map(|e| e.to_string()),
+            // Export compiles per-chapter files; the continuous view holds an
+            // unsaved window, so leave it first.
+            Action::Export(_) if self.manuscript.is_some() => {
+                Some("leave the continuous view (Ctrl-l) first".into())
+            }
+            _ => None,
+        }
+    }
+
+    /// Run a registry [`Action`] (#225) through the existing code path for its
+    /// kind, after checking [`action_status`](App::action_status). `force` rebuilds
+    /// a bible from the full manuscript for the AI passes that support it.
+    pub(crate) fn run_action(&mut self, action: Action, force: bool) {
+        if let Some(reason) = self.action_status(action) {
+            self.message = Some(format!("{}: {reason}", action.label()));
+            return;
+        }
+        match action {
+            Action::Save => self.save_edit(),
+            Action::Export(f) => self.run_export(f),
+            Action::ProgressReport => self.open_progress_report(),
+            Action::AnalysisReport => self.open_analysis_report(),
+            Action::Ai(a) => self.start_ai_action(a, force),
+        }
     }
 
     pub(crate) fn on_key_palette(&mut self, key: KeyEvent) {
@@ -167,6 +219,7 @@ impl App {
                     Some(Command::Ai(a)) => self.start_ai_action(a, force),
                     Some(Command::Git(g)) => self.start_git_action(g),
                     Some(Command::Export(f)) => self.run_export(f),
+                    Some(Command::Run(a)) => self.run_action(a, force),
                     None => {}
                 }
             }

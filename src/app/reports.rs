@@ -7,6 +7,16 @@ use super::*;
 use crate::text::count_matches;
 
 impl App {
+    /// Open the progress report overlay (Ctrl-R, and the run-action menu #225).
+    pub(crate) fn open_progress_report(&mut self) {
+        self.overlay = Some(Overlay::report("progress", self.report_lines()));
+    }
+
+    /// Open the local analysis report overlay (Ctrl-T, and the run-action menu).
+    pub(crate) fn open_analysis_report(&mut self) {
+        self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
+    }
+
     /// The progress report's rows, computed once when it's opened.
     pub(crate) fn report_lines(&self) -> Vec<Line<'static>> {
         let momentum = Momentum {
