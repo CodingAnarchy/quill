@@ -163,9 +163,15 @@ Search:
 - **`n`** repeats in the search direction, **`N`** the opposite (wrapping at the
   document ends with a notice); **`*`** searches for the word under the cursor.
 
+Command line:
+
+- **`:`** opens a command line on the bottom row (Enter runs, Esc cancels):
+  **`:w`** saves, **`:q`** quits (prompting on unsaved changes), **`:wq`** / **`:x`**
+  save then quit, **`:q!`** quits discarding changes.
+
 Vim editing commands run in the single-chapter view; in the continuous view
-(Ctrl-L) they're held back, like undo. An Ex command line (`:w`, `:q`) and
-configurable keybindings are arriving incrementally (see the roadmap).
+(Ctrl-L) they're held back, like undo. Configurable keybindings are arriving
+incrementally (see the roadmap).
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
