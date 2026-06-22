@@ -349,6 +349,22 @@ pub struct Search {
 }
 
 impl Search {
+    /// A fresh search at the query stage, anchored at `origin_byte`. `backward` /
+    /// `from_vim` distinguish the Vim `/`/`?` search (#206) from the Ctrl-F find.
+    pub(crate) fn new(origin_byte: usize, backward: bool, from_vim: bool) -> Self {
+        Self {
+            stage: SearchStage::Query,
+            query: String::new(),
+            replacement: String::new(),
+            matches: Vec::new(),
+            current: 0,
+            origin_byte,
+            replaced: 0,
+            backward,
+            from_vim,
+        }
+    }
+
     /// The current match range, if any.
     pub(crate) fn current_match(&self) -> Option<(usize, usize)> {
         self.matches.get(self.current).copied()

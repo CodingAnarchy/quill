@@ -20,17 +20,7 @@ impl App {
     pub(super) fn open_find(&mut self) {
         self.leave_continuous();
         let origin_byte = self.buffer.cursor_byte();
-        self.mode = Mode::Search(Box::new(Search {
-            stage: SearchStage::Query,
-            query: String::new(),
-            replacement: String::new(),
-            matches: Vec::new(),
-            current: 0,
-            origin_byte,
-            replaced: 0,
-            backward: false,
-            from_vim: false,
-        }));
+        self.mode = Mode::Search(Box::new(Search::new(origin_byte, false, false)));
     }
 
     /// Open a Vim search (#206): `/` forward, `?` backward. Reuses the find query
@@ -40,17 +30,7 @@ impl App {
         self.leave_continuous();
         self.vim_state.op = None; // a search isn't an operator target here
         let origin_byte = self.buffer.cursor_byte();
-        self.mode = Mode::Search(Box::new(Search {
-            stage: SearchStage::Query,
-            query: String::new(),
-            replacement: String::new(),
-            matches: Vec::new(),
-            current: 0,
-            origin_byte,
-            replaced: 0,
-            backward,
-            from_vim: true,
-        }));
+        self.mode = Mode::Search(Box::new(Search::new(origin_byte, backward, true)));
     }
 
     /// `n` / `N` in Normal mode (#206): jump to the next match of the last search.
