@@ -1099,14 +1099,10 @@ impl App {
             // changes / restore, in one menu. Ctrl-v: "version control".
             KeyCode::Char('v') => self.open_git_palette(),
             // Open the progress report (scroll to read; any other key closes).
-            KeyCode::Char('r') => {
-                self.overlay = Some(Overlay::report("progress", self.report_lines()));
-            }
+            KeyCode::Char('r') => self.open_progress_report(),
             // Open the local analysis report — editing metrics. Ctrl-t: "text"
             // analysis. Scrollable (it can run past one screen); any other key closes.
-            KeyCode::Char('t') => {
-                self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
-            }
+            KeyCode::Char('t') => self.open_analysis_report(),
             // Open the AI command palette (opt-in). When AI isn't ready, explain
             // how to enable it rather than listing dead actions.
             KeyCode::Char('a') => match self.ai.check_ready() {

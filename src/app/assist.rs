@@ -194,12 +194,8 @@ impl App {
         match action {
             Action::Save => self.save_edit(),
             Action::Export(f) => self.run_export(f),
-            Action::ProgressReport => {
-                self.overlay = Some(Overlay::report("progress", self.report_lines()))
-            }
-            Action::AnalysisReport => {
-                self.overlay = Some(Overlay::report("analysis", self.analysis_lines()))
-            }
+            Action::ProgressReport => self.open_progress_report(),
+            Action::AnalysisReport => self.open_analysis_report(),
             Action::Ai(a) => self.start_ai_action(a, force),
         }
     }

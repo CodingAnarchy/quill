@@ -203,7 +203,10 @@ pub(crate) enum Command {
     Ai(AiAction),
     Git(GitAction),
     Export(ExportFormat),
-    /// Run a registry [`Action`] from the unified run-action menu (#225).
+    /// Run a registry [`Action`] from the unified run-action menu (#225). This is
+    /// the going-forward path; `Ai`/`Export` above remain as their own variants
+    /// only because the AI and export palettes still emit them directly — folding
+    /// those palettes onto the registry is follow-up work (#226).
     Run(Action),
 }
 
@@ -211,6 +214,11 @@ pub(crate) enum Command {
 /// command lists these and runs one by name, and author workflows (#89) will
 /// enumerate and invoke them by [`name`](Action::name). Each wraps the dispatch
 /// the existing shortcuts already use (save, export, the reports, the AI passes).
+///
+/// Git is intentionally absent: the version-control palette shows a different set
+/// of actions depending on repo/remote state, and several entries are interactive
+/// prompts or spawn async work — neither fits the flat, fire-and-forget registry
+/// yet. It can join once the registry models context-dependent availability.
 #[derive(Clone, Copy)]
 pub(crate) enum Action {
     /// Save the active chapter / continuous window (Ctrl-S).
