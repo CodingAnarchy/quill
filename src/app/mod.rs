@@ -124,6 +124,9 @@ pub struct App {
     /// AI configuration (opt-in, off by default), loaded from the user's home
     /// config. Drives whether the "Ask the manuscript" command is reachable.
     pub ai: ai::Settings,
+    /// Image-generation configuration (#238): the `[image]` section, opt-in and
+    /// key-gated separately from the text `[ai]` settings.
+    pub image: ai::image::ImageSettings,
     /// In-flight AI request (#152), run on a worker thread so it never blocks the
     /// editor. Polled each loop tick by [`App::poll_ai`].
     ai_task: Task<Outcome>,
@@ -199,6 +202,7 @@ impl App {
             part_removed: Vec::new(),
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
+            image: ai::image::ImageSettings::load(),
             ai_task: Task::idle(),
             vc_task: Task::idle(),
             local_backend: Arc::new(Mutex::new(None)),
@@ -1058,6 +1062,13 @@ impl App {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
                     self.restore_chapter();
+                }
+                _ => self.mode = closed,
+            },
+            Pending::ConfirmPortraits => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.generate_portraits();
                 }
                 _ => self.mode = closed,
             },

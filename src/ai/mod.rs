@@ -13,6 +13,8 @@ pub mod character;
 pub mod constrain;
 pub mod continuity;
 pub mod cost;
+pub mod fal;
+pub mod image;
 pub mod incremental;
 pub mod marketing;
 #[cfg(feature = "local")]
@@ -105,6 +107,8 @@ pub enum Outcome {
     Social(Result<social::Social, AiError>),
     /// Character voice analysis — dialogue/narration consistency (#183).
     Voice(Result<voice::Voice, AiError>),
+    /// Generated images saved to disk — character portraits (#238).
+    Image(Result<image::ImageReport, AiError>),
     /// A workflow generated from a plain-language description (#232).
     Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
@@ -130,10 +134,22 @@ impl Outcome {
             Outcome::Marketing(r) => r.as_ref().err(),
             Outcome::Social(r) => r.as_ref().err(),
             Outcome::Voice(r) => r.as_ref().err(),
+            Outcome::Image(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
     }
+}
+
+/// Whether an HTTP status is 2xx — shared by the HTTP backends.
+pub(crate) fn is_ok(status: u16) -> bool {
+    (200..300).contains(&status)
+}
+
+/// A configured key from an optional config string: trimmed, `None` when blank.
+/// Shared by the text [`Settings`] and image [`image::ImageSettings`].
+pub(crate) fn resolved_key(key: &Option<String>) -> Option<&str> {
+    key.as_deref().map(str::trim).filter(|k| !k.is_empty())
 }
 
 /// Render a list of items as numbered Markdown sections (`## {label} N`), each
@@ -265,7 +281,7 @@ impl Settings {
 
     /// The configured API key, if any (non-empty).
     pub fn resolved_key(&self) -> Option<&str> {
-        self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty())
+        resolved_key(&self.api_key)
     }
 
     /// The backend that will actually run, accounting for the privacy switch:

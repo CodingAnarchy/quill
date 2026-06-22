@@ -138,11 +138,18 @@ fn expand<'a>(
         if let Some(sub) = workflows.iter().find(|w| w.name == *step) {
             expand(workflows, sub, stack, out)?;
         } else if let Some(action) = Action::from_name(step) {
-            // "Ask the manuscript" needs a typed question, so it can't run
-            // unattended in a workflow; every other registry action can (the
-            // async AI passes run off-thread — #227).
-            if matches!(action, Action::Ai(AiAction::Ask)) {
-                return Err(format!("step '{step}' needs a typed question — not usable in a workflow"));
+            // Interactive actions can't run unattended in a workflow: "ask" needs a
+            // typed question, and the portrait pass (#238) confirms before it spends
+            // on image generation. Every other registry action can (the async AI
+            // passes run off-thread — #227).
+            match action {
+                Action::Ai(AiAction::Ask) => {
+                    return Err(format!("step '{step}' needs a typed question — not usable in a workflow"))
+                }
+                Action::Ai(AiAction::Portrait) => {
+                    return Err(format!("step '{step}' is interactive — not usable in a workflow"))
+                }
+                _ => {}
             }
             out.push(action);
         } else {
@@ -226,6 +233,13 @@ mod tests {
         let wfs = vec![wf("q", &["ai:ask"])];
         let err = resolve(&wfs, "q").unwrap_err();
         assert!(err.contains("ai:ask") && err.contains("question"), "{err}");
+    }
+
+    #[test]
+    fn the_interactive_portrait_step_is_rejected() {
+        let wfs = vec![wf("art", &["ai:portrait"])];
+        let err = resolve(&wfs, "art").unwrap_err();
+        assert!(err.contains("ai:portrait") && err.contains("interactive"), "{err}");
     }
 
     #[test]

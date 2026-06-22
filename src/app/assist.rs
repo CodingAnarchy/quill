@@ -10,6 +10,8 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 use crate::ai::cost;
+use crate::ai::fal::FalBackend;
+use crate::ai::image::{self, ImageBackend, ImageReport, ImageRequest};
 use crate::ai::marketing::{self, Marketing};
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
@@ -40,6 +42,15 @@ enum Staged {
     /// The write (or its parent-directory creation) failed; carries an
     /// author-facing description.
     Failed(String),
+}
+
+/// Write image bytes to `path`, creating parent directories (#238). Runs on the
+/// worker thread, so it returns a plain message rather than using `App`.
+fn save_image(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
 /// A one-line status message for one or more failed writes (#153).
@@ -157,6 +168,7 @@ impl App {
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
             ai("Social posts", "X / Facebook / Instagram copy (off-manuscript)", AiAction::Social),
+            ai("Character portraits", "Portrait images from the character bible (fal.ai)", AiAction::Portrait),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
@@ -188,6 +200,8 @@ impl App {
         match action {
             // Triage is local aggregation — it works with the AI backend off.
             Action::Ai(AiAction::Triage) => None,
+            // Image generation has its own opt-in / key, separate from the text AI.
+            Action::Ai(AiAction::Portrait) => self.image.check_ready().err().map(|e| e.to_string()),
             Action::Ai(_) => self.ai.check_ready().err().map(|e| e.to_string()),
             // Export compiles per-chapter files; the continuous view holds an
             // unsaved window, so leave it first.
@@ -291,7 +305,9 @@ impl App {
     /// interactive actions (Ask, Triage), which issue no costed pass.
     fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
         match action {
-            AiAction::Ask | AiAction::Triage => None,
+            // No text-token estimate: Ask/Triage are interactive/local, and the
+            // portrait pass is image generation with its own confirm (#238).
+            AiAction::Ask | AiAction::Triage | AiAction::Portrait => None,
             AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
             _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
@@ -312,6 +328,7 @@ impl App {
             AiAction::Submission => self.analyze_submission(),
             AiAction::Marketing => self.analyze_marketing(),
             AiAction::Social => self.analyze_social(),
+            AiAction::Portrait => self.start_portrait(),
             AiAction::Triage => self.open_triage(),
         }
     }
@@ -549,6 +566,125 @@ impl App {
         });
     }
 
+    /// Begin a character-portrait pass (#238): gate on image readiness and the
+    /// character bible, then confirm before spending (each image is billed).
+    pub(crate) fn start_portrait(&mut self) {
+        if let Err(e) = self.image.check_ready() {
+            self.message = Some(e.to_string());
+            return;
+        }
+        let n = self.character_portrait_targets().len();
+        if n == 0 {
+            self.message = Some("Run the character pass first to build the character bible".into());
+            return;
+        }
+        // The busy guard lives at the spawn site (`generate_portraits`); the task
+        // can't become busy between opening this confirm and the y/N answer.
+        let plural = if n == 1 { "" } else { "s" };
+        let label = format!(
+            "Generate {n} character portrait{plural} via fal.ai ({}) — each image is billed. Run? (y/N)",
+            self.image.model,
+        );
+        self.open_prompt(Pending::ConfirmPortraits, label, "", None);
+    }
+
+    /// Generate the character portraits off the UI thread (#238): one image per
+    /// bible character, saved under `marketing/images/characters/`. Confirmed by
+    /// [`start_portrait`](App::start_portrait) first. The result is applied by
+    /// [`poll_ai`](App::poll_ai).
+    pub(crate) fn generate_portraits(&mut self) {
+        if self.ai_task.is_busy() {
+            self.message = Some("An AI request is already in flight…".into());
+            return;
+        }
+        let Some(key) = self.image.resolved_key().map(str::to_string) else {
+            self.message = Some("No image API key configured".into());
+            return;
+        };
+        let targets = self.character_portrait_targets();
+        if targets.is_empty() {
+            return;
+        }
+        let model = self.image.model.clone();
+        let dir = self.project.root.join("marketing").join("images").join("characters");
+        // The remote backend is trivial to construct, so we build it here and move
+        // it into the worker. The local image model (#240) is heavy and will need
+        // the build-on-worker + cached-slot pattern the text `BackendSpec` uses.
+        let backend: Box<dyn ImageBackend> = Box::new(FalBackend::new(key));
+        self.ai_task.spawn(move || {
+            let mut report = ImageReport::default();
+            for (slug, name, prompt) in targets {
+                match backend.generate(&ImageRequest { prompt, model: model.clone() }) {
+                    Ok(bytes) => match save_image(&dir.join(format!("{slug}.png")), &bytes) {
+                        Ok(()) => report.saved.push(format!("marketing/images/characters/{slug}.png")),
+                        Err(e) => report.failed.push(format!("{name}: {e}")),
+                    },
+                    Err(e) => report.failed.push(format!("{name}: {e}")),
+                }
+            }
+            Outcome::Image(Ok(report))
+        });
+        self.message = Some("⟳ Generating portraits…".into());
+    }
+
+    /// The portrait targets — `(slug, name, prompt)` per character in the bible,
+    /// the prompt built from that character's profile. Empty when no bible exists.
+    fn character_portrait_targets(&self) -> Vec<(String, String, String)> {
+        let dir = self.project.root.join("bible").join("characters");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut files: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
+            .collect();
+        files.sort();
+        let mut out = Vec::new();
+        for path in files {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("character").to_string();
+            let name = bible::front_field(&text, "name")
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| slug.clone());
+            let description = crate::frontmatter::split(&text).1;
+            out.push((slug, name.clone(), image::portrait_prompt(&name, description)));
+        }
+        out
+    }
+
+    /// Apply a portrait pass (#238): summarize the saved images and any failures.
+    pub(crate) fn apply_portraits(&mut self, result: Result<ImageReport, ai::AiError>) {
+        self.overlay = None;
+        let report = match result {
+            Ok(r) => r,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        if report.saved.is_empty() && report.failed.is_empty() {
+            self.message = Some("No portraits generated".into());
+            return;
+        }
+        let mut lines = Vec::new();
+        if !report.saved.is_empty() {
+            lines.push(Line::raw("Portraits generated:"));
+            lines.push(Line::raw(""));
+            lines.extend(report.saved.iter().map(|s| Line::raw(format!("  {s}"))));
+            lines.push(Line::raw(""));
+            lines.push(Line::raw("Off-manuscript image files — yours to use and regenerate."));
+        }
+        if !report.failed.is_empty() {
+            lines.push(Line::raw(""));
+            lines.push(Line::raw(format!("{} failed:", report.failed.len())));
+            lines.extend(report.failed.iter().map(|f| Line::raw(format!("  {f}"))));
+        }
+        self.show_ai(lines);
+    }
+
     /// The known entity list for naming checks: the setting gazetteer plus the
     /// character names from the story bible. Empty when no bible has been built.
     pub(crate) fn known_entities(&self) -> Vec<String> {
@@ -771,6 +907,7 @@ impl App {
                     Outcome::Marketing(r) => self.apply_marketing(r),
                     Outcome::Social(r) => self.apply_social(r),
                     Outcome::Voice(r) => self.apply_voice(r),
+                    Outcome::Image(r) => self.apply_portraits(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }

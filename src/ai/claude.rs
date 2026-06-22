@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{AiError, Backend, Request, Response, Usage};
+use super::{is_ok, AiError, Backend, Request, Response, Usage};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const BATCH_URL: &str = "https://api.anthropic.com/v1/messages/batches";
@@ -126,11 +126,6 @@ impl ClaudeBackend {
             .read_to_string()
             .map_err(|e| AiError::Api(e.to_string()))
     }
-}
-
-/// Whether an HTTP status is 2xx.
-fn is_ok(status: u16) -> bool {
-    (200..300).contains(&status)
 }
 
 /// An `AiError::Api` from an error response body (Anthropic returns a JSON
