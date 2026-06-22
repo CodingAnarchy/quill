@@ -49,30 +49,30 @@ pub fn load() -> Vec<Workflow> {
 /// AI passes — #227), or forms a cycle (a workflow invoking itself, directly or
 /// transitively).
 pub fn resolve(workflows: &[Workflow], name: &str) -> Result<Vec<Action>, String> {
+    let Some(wf) = workflows.iter().find(|w| w.name == name) else {
+        return Err(format!("unknown workflow '{name}'"));
+    };
     let mut out = Vec::new();
     let mut stack: Vec<&str> = Vec::new();
-    expand(workflows, name, &mut stack, &mut out)?;
+    expand(workflows, wf, &mut stack, &mut out)?;
     Ok(out)
 }
 
 fn expand<'a>(
     workflows: &'a [Workflow],
-    name: &'a str,
+    wf: &'a Workflow,
     stack: &mut Vec<&'a str>,
     out: &mut Vec<Action>,
 ) -> Result<(), String> {
-    if stack.contains(&name) {
-        return Err(format!("workflow '{name}' can't run itself (cycle)"));
+    if stack.contains(&wf.name.as_str()) {
+        return Err(format!("workflow '{}' can't run itself (cycle)", wf.name));
     }
-    let Some(wf) = workflows.iter().find(|w| w.name == name) else {
-        return Err(format!("unknown workflow '{name}'"));
-    };
-    stack.push(name);
+    stack.push(&wf.name);
     for step in &wf.steps {
         // A step naming another workflow expands it (under the cycle guard);
         // otherwise it must be a registry action this kind of workflow can run.
-        if workflows.iter().any(|w| w.name == *step) {
-            expand(workflows, step, stack, out)?;
+        if let Some(sub) = workflows.iter().find(|w| w.name == *step) {
+            expand(workflows, sub, stack, out)?;
         } else if let Some(action) = Action::from_name(step) {
             if !action.is_sync() {
                 return Err(format!("step '{step}' isn't supported in a workflow yet (#227)"));

@@ -36,6 +36,11 @@ impl App {
     /// unknown step, an unsupported async step, or a cycle), then run each in
     /// order, stopping at the first step whose action can't run — the steps before
     /// it have already taken effect.
+    ///
+    /// "Can't run" here is the up-front availability check ([`action_status`]); a
+    /// step that starts but then fails at runtime (e.g. an export I/O error)
+    /// surfaces its own message but doesn't halt the run. Threading real step
+    /// results through the runner comes with the async-step work (#227).
     pub(crate) fn run_workflow(&mut self, index: usize) {
         let Some(name) = self.workflows.get(index).map(|w| w.name.clone()) else {
             return;

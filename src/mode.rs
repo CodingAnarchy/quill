@@ -312,7 +312,11 @@ impl Action {
     /// (workflow support is #227) and "Ask" waits for typed input; `triage` is
     /// local aggregation, so it counts as synchronous.
     pub(crate) fn is_sync(self) -> bool {
-        !matches!(self, Action::Ai(a) if !matches!(a, AiAction::Triage))
+        match self {
+            Action::Ai(AiAction::Triage) => true,
+            Action::Ai(_) => false,
+            _ => true,
+        }
     }
 }
 
