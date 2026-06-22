@@ -114,9 +114,10 @@ impl App {
         self.advance_workflow();
     }
 
-    /// Run the on-save workflow trigger (#228), if one is configured. A no-op when
-    /// a workflow is already running — so a workflow's own `save` step can't
-    /// re-trigger the on-save workflow (no re-entrancy).
+    /// Run the on-save workflow trigger (#228), if one is configured, after an
+    /// explicit save. A no-op when a workflow is already running — so a workflow's
+    /// own `save` step can't re-trigger the on-save workflow (no re-entrancy), and
+    /// without the "already running" message that path would otherwise show.
     pub(crate) fn trigger_on_save(&mut self) {
         if self.workflow_run.is_some() {
             return;

@@ -701,8 +701,10 @@ impl App {
         }
         // Checkpoint today's momentum to the history log.
         self.persist_snapshot();
-        // Run the on-save workflow trigger (#228), unless this save is itself a
-        // workflow's own step (guarded inside) — no re-entrancy.
+        // Run the on-save workflow trigger (#228). This is the explicit-save
+        // command (Ctrl-S / `:w`); implicit flushes (chapter switch, leaving the
+        // continuous view) save the buffer directly and intentionally don't fire
+        // it. A no-op when this save is itself a workflow's own step — no recursion.
         self.trigger_on_save();
     }
 
