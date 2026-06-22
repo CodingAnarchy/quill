@@ -10,7 +10,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::App;
-use crate::mode::{Mode, Search, SearchStage};
+use crate::buffer::TextObject;
+use crate::mode::{Mode, Search, SearchStage, VimSearch};
 use crate::text::match_ranges;
 
 impl App {
@@ -19,15 +20,76 @@ impl App {
     pub(super) fn open_find(&mut self) {
         self.leave_continuous();
         let origin_byte = self.buffer.cursor_byte();
-        self.mode = Mode::Search(Box::new(Search {
-            stage: SearchStage::Query,
-            query: String::new(),
-            replacement: String::new(),
-            matches: Vec::new(),
-            current: 0,
-            origin_byte,
-            replaced: 0,
-        }));
+        self.mode = Mode::Search(Box::new(Search::new(origin_byte, false, false)));
+    }
+
+    /// Open a Vim search (#206): `/` forward, `?` backward. Reuses the find query
+    /// line and live highlight; Enter finalizes back to Normal and records the
+    /// search for `n` / `N`. Scoped to the single chapter, like the find (#144).
+    pub(super) fn open_vim_search(&mut self, backward: bool) {
+        self.leave_continuous();
+        self.vim_state.op = None; // a search isn't an operator target here
+        let origin_byte = self.buffer.cursor_byte();
+        self.mode = Mode::Search(Box::new(Search::new(origin_byte, backward, true)));
+    }
+
+    /// `n` / `N` in Normal mode (#206): jump to the next match of the last search.
+    /// `reverse` inverts the recorded direction (so `N` goes the other way).
+    pub(super) fn vim_search_repeat(&mut self, reverse: bool) {
+        self.vim_state.op = None;
+        let Some(search) = self.vim_state.last_search.clone() else {
+            self.message = Some("No previous search.".into());
+            return;
+        };
+        self.vim_search_jump(&search.query, search.backward ^ reverse);
+    }
+
+    /// `*` in Normal mode (#206): search forward for the word under the cursor.
+    pub(super) fn vim_search_word(&mut self) {
+        self.vim_state.op = None;
+        let buffer = self.edit_buffer();
+        let Some((lo, hi)) = buffer.text_object(TextObject::Word, false) else {
+            self.message = Some("No word under the cursor.".into());
+            return;
+        };
+        let word = buffer.byte_slice(lo, hi);
+        if word.trim().is_empty() {
+            self.message = Some("No word under the cursor.".into());
+            return;
+        }
+        self.vim_state.last_search = Some(VimSearch { query: word.clone(), backward: false });
+        self.vim_search_jump(&word, false);
+    }
+
+    /// Jump the cursor to the next/previous match of `query` from its current
+    /// position, wrapping around the document ends with a notice (Vim's behavior).
+    fn vim_search_jump(&mut self, query: &str, backward: bool) {
+        let text = self.edit_buffer().text();
+        let matches = match_ranges(&text, query);
+        if matches.is_empty() {
+            self.message = Some(format!("Pattern not found: {query}"));
+            return;
+        }
+        let cur = self.edit_buffer().cursor_byte();
+        let (target, wrapped) = if backward {
+            match matches.iter().rev().find(|&&(start, _)| start < cur) {
+                Some(&(start, _)) => (start, false),
+                None => (matches.last().unwrap().0, true),
+            }
+        } else {
+            match matches.iter().find(|&&(start, _)| start > cur) {
+                Some(&(start, _)) => (start, false),
+                None => (matches[0].0, true),
+            }
+        };
+        let buffer = self.edit_buffer_mut();
+        buffer.cursor = buffer.cursor_at_byte(target);
+        if wrapped {
+            self.message = Some(
+                if backward { "search hit TOP, continuing at BOTTOM" } else { "search hit BOTTOM, continuing at TOP" }
+                    .into(),
+            );
+        }
     }
 
     /// Key handling while in [`Mode::Search`].
@@ -81,14 +143,18 @@ impl App {
         }
     }
 
-    /// Enter on the query: a non-empty query moves to navigation; an empty one
-    /// just closes. (Replace is reached from navigation with `r`.)
+    /// Enter on the query. An empty query just closes. A Vim search (#206)
+    /// records itself for `n`/`N` and returns to Normal with the cursor on the
+    /// match; the Ctrl-F find moves to navigation (where `r` promotes to replace).
     fn search_query_done(&mut self) {
-        let s = self.search_mut();
+        let s = self.search();
         if s.query.is_empty() {
             self.close_search();
+        } else if s.from_vim {
+            self.vim_state.last_search = Some(VimSearch { query: s.query.clone(), backward: s.backward });
+            self.mode = self.editing_mode(); // cursor already on the current match
         } else {
-            s.stage = SearchStage::Navigate;
+            self.search_mut().stage = SearchStage::Navigate;
         }
     }
 
@@ -168,6 +234,12 @@ impl App {
     }
 
     fn close_search(&mut self) {
+        // Abandoning a Vim search restores the cursor to where it started, like
+        // Vim's incremental search (#206).
+        if self.search().from_vim {
+            let origin = self.search().origin_byte;
+            self.buffer.cursor = self.buffer.cursor_at_byte(origin);
+        }
         self.mode = self.editing_mode();
     }
 
@@ -178,10 +250,21 @@ impl App {
     /// first match in the document is used so the user always sees one.
     fn requery(&mut self) {
         let origin = self.search().origin_byte;
+        let backward = self.search().backward;
         self.recompute_matches_from(origin);
         let s = self.search_mut();
-        if s.current >= s.matches.len() && !s.matches.is_empty() {
-            s.current = 0;
+        if !s.matches.is_empty() {
+            if backward {
+                // A `?` search lands on the nearest match *before* the origin,
+                // wrapping to the last if none precede it.
+                s.current = s
+                    .matches
+                    .iter()
+                    .rposition(|&(start, _)| start < origin)
+                    .unwrap_or(s.matches.len() - 1);
+            } else if s.current >= s.matches.len() {
+                s.current = 0;
+            }
         }
         self.jump_to_current();
     }

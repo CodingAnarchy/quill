@@ -155,9 +155,17 @@ Visual mode:
 - **`d`** / **`c`** / **`y`** act on the selection (delete / change / yank), and
   **`p`** replaces it with the register.
 
+Search:
+
+- **`/`** searches forward, **`?`** backward — type the query on the bottom line
+  (matches highlight as you type), Enter jumps to the match, Esc cancels and
+  returns the cursor.
+- **`n`** repeats in the search direction, **`N`** the opposite (wrapping at the
+  document ends with a notice); **`*`** searches for the word under the cursor.
+
 Vim editing commands run in the single-chapter view; in the continuous view
-(Ctrl-L) they're held back, like undo. Search and an Ex command line are
-arriving incrementally (see the roadmap).
+(Ctrl-L) they're held back, like undo. An Ex command line (`:w`, `:q`) and
+configurable keybindings are arriving incrementally (see the roadmap).
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status

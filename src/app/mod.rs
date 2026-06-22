@@ -1273,6 +1273,14 @@ impl App {
             ';' => self.repeat_find(count, false),
             ',' => self.repeat_find(count, true),
 
+            // Search (#206): `/` forward, `?` backward, `n`/`N` repeat / reverse,
+            // `*` the word under the cursor.
+            '/' => self.open_vim_search(false),
+            '?' => self.open_vim_search(true),
+            'n' => self.vim_repeat(count, |s| s.vim_search_repeat(false)),
+            'N' => self.vim_repeat(count, |s| s.vim_search_repeat(true)),
+            '*' => self.vim_search_word(),
+
             // Anything else cancels a dangling operator.
             _ => self.vim_state.op = None,
         }
