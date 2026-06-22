@@ -19,6 +19,50 @@ use crate::syntax::Syntax;
 mod history;
 use history::Snapshot;
 
+/// Direction and stop rule for the `f`/`t`/`F`/`T` find-char motions (#202):
+/// land *on* the target (`Find`) or just *before* it (`Till`), forward or back.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FindKind {
+    FindFwd,
+    FindBack,
+    TillFwd,
+    TillBack,
+}
+
+impl FindKind {
+    /// The opposite direction — for `,`, which repeats a find the other way.
+    pub fn reversed(self) -> Self {
+        match self {
+            Self::FindFwd => Self::FindBack,
+            Self::FindBack => Self::FindFwd,
+            Self::TillFwd => Self::TillBack,
+            Self::TillBack => Self::TillFwd,
+        }
+    }
+}
+
+/// Vim's character classes for word motions: a word is a run of word-characters
+/// or a run of punctuation, separated by whitespace.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharClass {
+    Word,
+    Punct,
+    Space,
+}
+
+impl CharClass {
+    fn of(grapheme: &str) -> Self {
+        let c = grapheme.chars().next().unwrap_or(' ');
+        if c.is_whitespace() {
+            Self::Space
+        } else if c.is_alphanumeric() || c == '_' {
+            Self::Word
+        } else {
+            Self::Punct
+        }
+    }
+}
+
 /// A cursor position expressed in (line, grapheme-column).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cursor {
@@ -469,6 +513,133 @@ impl Buffer {
         self.goal_x = None;
     }
 
+    // --- Vim motions (#202) ------------------------------------------------
+
+    /// Move to the first non-blank grapheme of the current logical line — Vim's
+    /// `^`. Falls back to the line start for an all-blank line.
+    pub fn move_first_non_blank(&mut self) {
+        let line = self.line(self.cursor.line);
+        let blank = line.graphemes(true).take_while(|g| g.chars().all(char::is_whitespace)).count();
+        self.cursor.col = blank.min(self.line_graphemes(self.cursor.line));
+        self.goal_x = None;
+    }
+
+    /// Jump to logical line `line` (0-based, clamped), at its first non-blank —
+    /// Vim's `gg` / `{count}G`.
+    pub fn move_to_line(&mut self, line: usize) {
+        self.cursor.line = line.min(self.line_count().saturating_sub(1));
+        self.move_first_non_blank();
+    }
+
+    /// Jump to the last line with content — Vim's `G`. A buffer ending in a
+    /// newline has an empty trailing line; this targets the line before it, the
+    /// way Vim treats a trailing newline.
+    pub fn move_to_last_line(&mut self) {
+        let n = self.line_count();
+        let last = if n > 1 && self.line(n - 1).is_empty() { n - 2 } else { n - 1 };
+        self.move_to_line(last);
+    }
+
+    /// Move to the start of the next word — Vim's `w`. A word is a run of
+    /// word-characters or a run of punctuation; whitespace separates them. Spans
+    /// line boundaries like Vim.
+    pub fn move_word_forward(&mut self) {
+        let items = self.classes();
+        let mut i = self.grapheme_index(&items);
+        let Some(&(_, start)) = items.get(i) else { return };
+        if start != CharClass::Space {
+            while items.get(i).is_some_and(|&(_, c)| c == start) {
+                i += 1;
+            }
+        }
+        while items.get(i).is_some_and(|&(_, c)| c == CharClass::Space) {
+            i += 1;
+        }
+        let target = items.get(i).map_or_else(|| self.rope.len_bytes(), |&(b, _)| b);
+        self.cursor = self.cursor_at_byte(target);
+        self.goal_x = None;
+    }
+
+    /// Move to the start of the current/previous word — Vim's `b`.
+    pub fn move_word_backward(&mut self) {
+        let items = self.classes();
+        let cur = self.grapheme_index(&items);
+        if cur == 0 {
+            return;
+        }
+        let mut i = cur - 1;
+        while i > 0 && items[i].1 == CharClass::Space {
+            i -= 1;
+        }
+        if items[i].1 == CharClass::Space {
+            self.cursor = self.cursor_at_byte(items[0].0);
+            self.goal_x = None;
+            return;
+        }
+        let class = items[i].1;
+        while i > 0 && items[i - 1].1 == class {
+            i -= 1;
+        }
+        self.cursor = self.cursor_at_byte(items[i].0);
+        self.goal_x = None;
+    }
+
+    /// Move to the end of the next word — Vim's `e`.
+    pub fn move_word_end(&mut self) {
+        let items = self.classes();
+        let mut i = self.grapheme_index(&items) + 1;
+        while items.get(i).is_some_and(|&(_, c)| c == CharClass::Space) {
+            i += 1;
+        }
+        let Some(&(_, class)) = items.get(i) else { return };
+        while items.get(i + 1).is_some_and(|&(_, c)| c == class) {
+            i += 1;
+        }
+        self.cursor = self.cursor_at_byte(items[i].0);
+        self.goal_x = None;
+    }
+
+    /// Find the `count`-th occurrence of `target` on the current line and move to
+    /// it (or just shy of it, for `t`/`T`) — Vim's `f`/`t`/`F`/`T`. No move when
+    /// there is no such occurrence.
+    pub fn find_char(&mut self, target: char, kind: FindKind, count: usize) {
+        let line = self.line(self.cursor.line);
+        let hits: Vec<usize> = line
+            .graphemes(true)
+            .enumerate()
+            .filter(|(_, g)| g.starts_with(target))
+            .map(|(i, _)| i)
+            .collect();
+        let cur = self.cursor.col;
+        let nth = count.saturating_sub(1);
+        let found = match kind {
+            FindKind::FindFwd | FindKind::TillFwd => hits.iter().filter(|&&c| c > cur).nth(nth).copied(),
+            FindKind::FindBack | FindKind::TillBack => hits.iter().rev().filter(|&&c| c < cur).nth(nth).copied(),
+        };
+        if let Some(col) = found {
+            self.cursor.col = match kind {
+                FindKind::TillFwd => col - 1,
+                FindKind::TillBack => col + 1,
+                _ => col,
+            };
+            self.goal_x = None;
+        }
+    }
+
+    /// The whole buffer as `(byte offset, character class)` per grapheme — the
+    /// scan the word motions walk.
+    fn classes(&self) -> Vec<(usize, CharClass)> {
+        let text = self.rope.to_string();
+        text.grapheme_indices(true).map(|(b, g)| (b, CharClass::of(g))).collect()
+    }
+
+    /// Index into [`classes`](Self::classes) of the grapheme at the cursor (the
+    /// length when the cursor is at the very end).
+    fn grapheme_index(&self, items: &[(usize, CharClass)]) -> usize {
+        let byte = self.cursor_byte();
+        items.iter().position(|&(b, _)| b >= byte).unwrap_or(items.len())
+    }
+
     // --- Stats -------------------------------------------------------------
 
     /// Total word count across the document.
@@ -576,6 +747,82 @@ mod tests {
 
     fn read(path: &Path) -> String {
         fs::read_to_string(path).unwrap()
+    }
+
+    // --- Vim motions (#202) ------------------------------------------------
+
+    #[test]
+    fn word_motions_step_by_word_and_punctuation() {
+        let mut b = Buffer::from_text("the quick, brown fox");
+        assert_eq!(b.cursor.col, 0);
+        b.move_word_forward(); // -> "quick"
+        assert_eq!(b.cursor.col, 4);
+        b.move_word_forward(); // -> ","  (punctuation is its own word)
+        assert_eq!(b.cursor.col, 9);
+        b.move_word_forward(); // -> "brown"
+        assert_eq!(b.cursor.col, 11);
+        b.move_word_end(); // end of "brown"
+        assert_eq!(b.cursor.col, 15);
+        b.move_word_backward(); // back to start of "brown"
+        assert_eq!(b.cursor.col, 11);
+    }
+
+    #[test]
+    fn word_forward_crosses_line_boundaries() {
+        let mut b = Buffer::from_text("end\nnext line");
+        b.cursor = Cursor { line: 0, col: 1 };
+        b.move_word_forward(); // from inside "end" to "next" on the following line
+        assert_eq!((b.cursor.line, b.cursor.col), (1, 0));
+    }
+
+    #[test]
+    fn line_and_document_motions() {
+        let mut b = Buffer::from_text("  indented\nmiddle\nlast line\n");
+        b.cursor = Cursor { line: 0, col: 6 };
+        b.move_line_start();
+        assert_eq!(b.cursor.col, 0);
+        b.move_first_non_blank();
+        assert_eq!(b.cursor.col, 2, "^ skips leading blanks");
+        b.move_line_end();
+        assert_eq!(b.cursor.col, b.line_len());
+
+        b.move_to_line(1);
+        assert_eq!(b.cursor.line, 1);
+        // G targets the last line with content, not the empty trailing line.
+        b.move_to_last_line();
+        assert_eq!(b.cursor.line, 2, "G skips the trailing newline's empty line");
+    }
+
+    #[test]
+    fn find_char_lands_on_or_before_the_target() {
+        // cols:                 0    5    10
+        let mut b = Buffer::from_text("alpha-beta-gamma");
+        b.find_char('-', FindKind::FindFwd, 1);
+        assert_eq!(b.cursor.col, 5, "f lands on the first '-'");
+        b.find_char('-', FindKind::FindFwd, 1);
+        assert_eq!(b.cursor.col, 10, "f again lands on the next '-'");
+        b.find_char('a', FindKind::FindBack, 1);
+        assert_eq!(b.cursor.col, 9, "F lands on the previous 'a'");
+        b.find_char('m', FindKind::TillFwd, 1);
+        assert_eq!(b.cursor.col, 12, "t lands just before the next 'm'");
+
+        // Count selects the nth occurrence; a miss leaves the cursor put.
+        b.cursor = Cursor { line: 0, col: 0 };
+        b.find_char('-', FindKind::FindFwd, 2);
+        assert_eq!(b.cursor.col, 10, "2f- reaches the second '-'");
+        b.find_char('z', FindKind::FindFwd, 1);
+        assert_eq!(b.cursor.col, 10, "a missing target doesn't move");
+    }
+
+    #[test]
+    fn motions_do_not_panic_at_boundaries() {
+        let mut b = Buffer::from_text("word");
+        b.move_word_backward(); // already at start
+        assert_eq!(b.cursor.col, 0);
+        b.cursor = Cursor { line: 0, col: 4 };
+        b.move_word_forward(); // already at end
+        b.move_word_end();
+        assert_eq!(b.cursor.line, 0);
     }
 
     #[test]

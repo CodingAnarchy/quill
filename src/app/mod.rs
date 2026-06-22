@@ -17,14 +17,14 @@ use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::setting::{self, Setting};
 use crate::analysis;
-use crate::buffer::{self, Buffer};
+use crate::buffer::{self, Buffer, FindKind};
 use crate::date;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleConflict, BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode,
-    Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles,
+    BibleConflict, BibleReview, Command, Find, Finding, Findings, GitAction, MetaEdit, MetaField,
+    Mode, Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles, VimPending, VimState,
 };
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
@@ -68,6 +68,9 @@ pub struct App {
     /// the editor's resting state is [`Mode::Normal`] and the status bar shows the
     /// mode; when off, editing is exactly as it has always been.
     pub vim: bool,
+    /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
+    /// and last find. Only meaningful while `vim` is on.
+    vim_state: VimState,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
@@ -154,6 +157,7 @@ impl App {
             // the modeless Insert.
             mode: if vim { Mode::Normal } else { Mode::Insert },
             vim,
+            vim_state: VimState::default(),
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
@@ -1114,11 +1118,58 @@ impl App {
             self.on_key_ctrl(key.code);
             return;
         }
-        match key.code {
-            // Enter Insert mode.
-            KeyCode::Char('i') => self.mode = Mode::Insert,
+        let KeyCode::Char(c) = key.code else {
+            return self.on_key_normal_special(key.code);
+        };
+
+        // Resolve a multi-key command first: this char is its second key.
+        match self.vim_state.pending {
+            VimPending::G => {
+                self.vim_state.pending = VimPending::None;
+                if c == 'g' {
+                    self.jump_to_counted_line(0); // gg → first line (or {count}gg)
+                } else {
+                    self.vim_state.count = None; // an unknown `g_` aborts
+                }
+                return;
+            }
+            VimPending::Find(kind) => {
+                self.vim_state.pending = VimPending::None;
+                let count = self.take_count();
+                self.vim_state.last_find = Some(Find { kind, target: c });
+                self.edit_move(move |b| b.find_char(c, kind, count));
+                return;
+            }
+            VimPending::None => {}
+        }
+
+        // A digit (other than a leading `0`, which is the line-start motion)
+        // accumulates the count prefix.
+        if c.is_ascii_digit() && !(c == '0' && self.vim_state.count.is_none()) {
+            let d = c.to_digit(10).unwrap_or(0) as usize;
+            let count = self.vim_state.count.unwrap_or(0).saturating_mul(10).saturating_add(d);
+            self.vim_state.count = Some(count);
+            return;
+        }
+
+        // Commands that await another key keep the count pending.
+        match c {
+            'g' => return self.vim_state.pending = VimPending::G,
+            'f' => return self.vim_state.pending = VimPending::Find(FindKind::FindFwd),
+            'F' => return self.vim_state.pending = VimPending::Find(FindKind::FindBack),
+            't' => return self.vim_state.pending = VimPending::Find(FindKind::TillFwd),
+            'T' => return self.vim_state.pending = VimPending::Find(FindKind::TillBack),
+            _ => {}
+        }
+
+        // Terminal commands consume the count.
+        let raw = self.vim_state.count.take();
+        let count = raw.unwrap_or(1);
+        match c {
+            // Enter Insert mode (count-repeat of inserts is a later child).
+            'i' => self.mode = Mode::Insert,
             // Append: after the cursor's grapheme, but never past the line end.
-            KeyCode::Char('a') => {
+            'a' => {
                 self.edit_move(|b| {
                     if b.cursor.col < b.line_len() {
                         b.move_right();
@@ -1126,27 +1177,88 @@ impl App {
                 });
                 self.mode = Mode::Insert;
             }
-            KeyCode::Char('I') => {
-                self.edit_move(Buffer::move_line_start);
+            'I' => {
+                self.edit_move(Buffer::move_first_non_blank);
                 self.mode = Mode::Insert;
             }
-            KeyCode::Char('A') => {
+            'A' => {
                 self.edit_move(Buffer::move_line_end);
                 self.mode = Mode::Insert;
             }
-            KeyCode::Char('o') => self.open_line(false),
-            KeyCode::Char('O') => self.open_line(true),
+            'o' => self.open_line(false),
+            'O' => self.open_line(true),
 
-            // Motion: hjkl and the arrow keys.
-            KeyCode::Char('h') | KeyCode::Left => self.edit_move(Buffer::move_left),
-            KeyCode::Char('l') | KeyCode::Right => self.edit_move(Buffer::move_right),
-            KeyCode::Char('k') | KeyCode::Up => self.edit_move_wrapped(Buffer::move_up),
-            KeyCode::Char('j') | KeyCode::Down => self.edit_move_wrapped(Buffer::move_down),
-            KeyCode::Home => self.edit_move_wrapped(Buffer::move_home),
-            KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
+            // Character motions.
+            'h' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_left)),
+            'l' | ' ' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_right)),
+            'k' => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_up)),
+            'j' => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_down)),
+
+            // Word motions.
+            'w' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_word_forward)),
+            'b' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_word_backward)),
+            'e' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_word_end)),
+
+            // Line motions.
+            '0' => self.edit_move(Buffer::move_line_start),
+            '^' => self.edit_move(Buffer::move_first_non_blank),
+            '$' => self.edit_move(Buffer::move_line_end),
+
+            // Document motion: `G` to the counted line, else the last line.
+            'G' => match raw {
+                Some(n) => self.edit_move(move |b| b.move_to_line(n.saturating_sub(1))),
+                None => self.edit_move(Buffer::move_to_last_line),
+            },
+
+            // Repeat the last find: `;` same direction, `,` reversed.
+            ';' => self.repeat_find(count, false),
+            ',' => self.repeat_find(count, true),
 
             _ => {}
         }
+    }
+
+    /// Normal-mode handling for non-character keys: the arrow keys move (count-
+    /// aware), Home/End go to the row edges, and Esc clears any pending command.
+    fn on_key_normal_special(&mut self, code: KeyCode) {
+        let count = self.take_count();
+        match code {
+            KeyCode::Left => self.vim_repeat(count, |s| s.edit_move(Buffer::move_left)),
+            KeyCode::Right => self.vim_repeat(count, |s| s.edit_move(Buffer::move_right)),
+            KeyCode::Up => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_up)),
+            KeyCode::Down => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_down)),
+            KeyCode::Home => self.edit_move_wrapped(Buffer::move_home),
+            KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
+            _ => {} // Esc and the rest: the count is already cleared above.
+        }
+        self.vim_state.pending = VimPending::None;
+    }
+
+    /// Take the pending count, defaulting to 1, and clear it.
+    fn take_count(&mut self) -> usize {
+        self.vim_state.count.take().unwrap_or(1)
+    }
+
+    /// Run `motion` `n` times — how a count repeats a simple motion.
+    fn vim_repeat(&mut self, n: usize, mut motion: impl FnMut(&mut App)) {
+        for _ in 0..n {
+            motion(self);
+        }
+    }
+
+    /// Jump to a 0-based line, or to `{count}`-th line when a count is pending
+    /// (`gg` vs `5gg`). Consumes the count.
+    fn jump_to_counted_line(&mut self, default_line: usize) {
+        let line = self.vim_state.count.take().map_or(default_line, |n| n.saturating_sub(1));
+        self.edit_move(move |b| b.move_to_line(line));
+    }
+
+    /// Replay the last `f`/`t`/`F`/`T`, in its own direction (`reverse == false`)
+    /// or the opposite — Vim's `;` and `,`.
+    fn repeat_find(&mut self, count: usize, reverse: bool) {
+        let Some(find) = self.vim_state.last_find else { return };
+        let kind = if reverse { find.kind.reversed() } else { find.kind };
+        self.edit_move(move |b| b.find_char(find.target, kind, count));
     }
 
     /// Vim `o` / `O`: open a blank line below (`above == false`) or above the
