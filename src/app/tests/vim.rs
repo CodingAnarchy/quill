@@ -513,6 +513,61 @@ fn entering_continuous_view_leaves_visual() {
 }
 
 #[test]
+fn a_remapped_key_runs_the_action_and_defaults_still_work() {
+    let (mut app, dir) = vim_app("vim-remap");
+    app.vim_keys.insert('s', 'l'); // make 's' do what 'l' (right) does
+    app.on_key(key(KeyCode::Char('s')));
+    assert_eq!(app.buffer.cursor.col, 1, "remapped 's' moved right");
+    app.on_key(key(KeyCode::Char('l'))); // the default key is unchanged
+    assert_eq!(app.buffer.cursor.col, 2, "unmapped 'l' keeps its default");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_remapped_operator_composes_with_motions() {
+    let (mut app, dir) = vim_app("vim-remap-op");
+    app.vim_keys.insert('x', 'd'); // 'x' now starts the delete operator
+    type_str(&mut app, "xw"); // x→d, then w: delete the word
+    assert_eq!(app.buffer.text(), "chapter\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn keymap_builds_valid_entries_and_reports_bad_ones() {
+    use std::collections::HashMap;
+    let cfg = HashMap::from([
+        ("down".to_string(), "n".to_string()),   // valid: 'n' → 'j'
+        ("frobnicate".to_string(), "z".to_string()), // unknown action
+        ("left".to_string(), "hh".to_string()),  // not a single key
+    ]);
+    let (map, errors) = super::super::build_keymap(&cfg);
+    assert_eq!(map.get(&'n'), Some(&'j'), "down maps the 'n' key to 'j'");
+    assert_eq!(map.len(), 1, "only the valid entry is kept");
+    assert_eq!(errors.len(), 2, "the unknown action and multi-char value are reported: {errors:?}");
+}
+
+#[test]
+fn keymap_reports_a_key_bound_twice() {
+    use std::collections::HashMap;
+    let cfg = HashMap::from([
+        ("down".to_string(), "j".to_string()),
+        ("delete".to_string(), "j".to_string()), // both want the 'j' key
+    ]);
+    let (_, errors) = super::super::build_keymap(&cfg);
+    assert_eq!(errors.len(), 1, "the collision is reported: {errors:?}");
+    assert!(errors[0].contains("more than one"), "{:?}", errors);
+}
+
+#[test]
+fn a_remapped_motion_extends_a_visual_selection() {
+    let (mut app, dir) = vim_app("vim-remap-visual");
+    app.vim_keys.insert('s', 'l'); // 's' moves right
+    type_str(&mut app, "vssd"); // visual, extend right twice via 's', delete
+    assert_eq!(app.buffer.text(), "st chapter\n", "remapped motion drove the selection: {}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;

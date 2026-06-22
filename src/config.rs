@@ -4,6 +4,7 @@
 //! its own section (`[ai]`, `[editor]`, …); this module owns the file location
 //! and the `[editor]` section.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -24,6 +25,10 @@ pub struct EditorConfig {
     /// Opt-in Vim-style modal editing (#27). Off by default — with it off the
     /// editor behaves exactly as it always has.
     pub vim: bool,
+    /// Vim key remaps (#208) from the `[editor.keys]` table: action name → the
+    /// key that should trigger it (e.g. `down = "n"`). Validated when the editor
+    /// builds its keymap; unknown actions are reported, not silently dropped.
+    pub keys: HashMap<String, String>,
 }
 
 impl EditorConfig {
