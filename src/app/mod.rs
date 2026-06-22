@@ -436,6 +436,7 @@ impl App {
             Mode::RefFiles(_) => self.on_key_reffiles(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
+            Mode::Visual { .. } => self.on_key_visual(key),
         }
     }
 
@@ -1204,6 +1205,9 @@ impl App {
             // Put the register after (`p`) / before (`P`) the cursor or line.
             'p' => self.put(true, count),
             'P' => self.put(false, count),
+            // Enter Visual mode (#205): `v` characterwise, `V` linewise.
+            'v' => self.mode = Mode::Visual { anchor: self.edit_buffer().cursor_byte(), linewise: false },
+            'V' => self.mode = Mode::Visual { anchor: self.edit_buffer().cursor_byte(), linewise: true },
             // `i`/`a` are a text-object prefix while an operator is pending,
             // otherwise they enter Insert.
             'i' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: false },
@@ -1517,6 +1521,110 @@ impl App {
         }
     }
 
+    /// Vim Visual mode (#205): motions extend the selection; `d`/`c`/`y` act on
+    /// it and leave Visual. Motion handling is reused from Normal mode (which just
+    /// moves the cursor here, since no operator is pending).
+    fn on_key_visual(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.on_key_ctrl(key.code);
+            return;
+        }
+        let Mode::Visual { anchor, linewise } = self.mode else {
+            return;
+        };
+        // Mid multi-key motion (an `f`/`g` second key, or a `"` register name):
+        // let the Normal handler resolve it, extending the selection.
+        if self.vim_state.pending != VimPending::None {
+            self.on_key_normal(key);
+            return;
+        }
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Normal,
+            // `v` / `V` switch the selection kind, or leave Visual if already it.
+            KeyCode::Char('v') => {
+                self.mode = if linewise { Mode::Visual { anchor, linewise: false } } else { Mode::Normal };
+            }
+            KeyCode::Char('V') => {
+                self.mode = if linewise { Mode::Normal } else { Mode::Visual { anchor, linewise: true } };
+            }
+            // `o` swaps the fixed and active ends of the selection.
+            KeyCode::Char('o') => {
+                let cur = self.edit_buffer().cursor_byte();
+                let buf = self.edit_buffer_mut();
+                buf.cursor = buf.cursor_at_byte(anchor);
+                self.mode = Mode::Visual { anchor: cur, linewise };
+            }
+            // Operators act on the selection, then leave Visual (Insert for `c`).
+            KeyCode::Char('d') | KeyCode::Char('x') => self.visual_operate(Op::Delete, anchor, linewise),
+            KeyCode::Char('c') | KeyCode::Char('s') => self.visual_operate(Op::Change, anchor, linewise),
+            KeyCode::Char('y') => self.visual_operate(Op::Yank, anchor, linewise),
+            // `p` replaces the selection with the register.
+            KeyCode::Char('p') => self.visual_put(anchor, linewise),
+            // Motions (and counts / multi-key prefixes) extend the selection by
+            // reusing the Normal-mode dispatch.
+            KeyCode::Char(c) if is_motion_key(c) => self.on_key_normal(key),
+            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => {
+                self.on_key_normal(key)
+            }
+            _ => {} // ignore anything else, so nothing slips into Insert / edits
+        }
+    }
+
+    /// The inclusive line range of the current Visual selection.
+    fn selection_lines(&self, anchor: usize) -> (usize, usize) {
+        let buf = self.edit_buffer();
+        let a = buf.cursor_at_byte(anchor).line;
+        let b = buf.cursor.line;
+        (a.min(b), a.max(b))
+    }
+
+    /// The byte range the current Visual selection covers — whole lines when
+    /// linewise, else the chars between the ends (inclusive of the later one).
+    /// Shared by the operators, put, and the highlight.
+    pub(crate) fn selection_bytes(&self, anchor: usize, linewise: bool) -> (usize, usize) {
+        let buf = self.edit_buffer();
+        if linewise {
+            let (first, last) = self.selection_lines(anchor);
+            (buf.line_start_byte(first), buf.next_line_byte(last))
+        } else {
+            let cur = buf.cursor_byte();
+            (anchor.min(cur), buf.grapheme_after(anchor.max(cur)))
+        }
+    }
+
+    /// Apply an operator to the Visual selection, then leave Visual.
+    fn visual_operate(&mut self, op: Op, anchor: usize, linewise: bool) {
+        self.vim_state.count = None;
+        if linewise {
+            let (first, last) = self.selection_lines(anchor);
+            self.operate_linewise(op, first, last);
+        } else {
+            let (lo, hi) = self.selection_bytes(anchor, false);
+            self.operate_charwise(op, lo, hi);
+        }
+        // `c` left us in Insert; delete/yank return to Normal.
+        if op != Op::Change {
+            self.mode = Mode::Normal;
+        }
+    }
+
+    /// `p` in Visual: replace the selection with the register, then leave Visual.
+    fn visual_put(&mut self, anchor: usize, linewise: bool) {
+        if self.guard_vim_edit() {
+            return;
+        }
+        let Some(yank) = self.active_register() else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let (lo, hi) = self.selection_bytes(anchor, linewise);
+        let buf = self.edit_buffer_mut();
+        buf.replace_byte_range(lo, hi, &yank.text);
+        buf.cursor = buf.cursor_at_byte(lo);
+        self.cache_focus_words();
+        self.mode = Mode::Normal;
+    }
+
     /// Normal-mode handling for non-character keys: the arrow keys move (count-
     /// aware), Home/End go to the row edges, and Esc clears any pending command.
     fn on_key_normal_special(&mut self, code: KeyCode) {
@@ -1578,6 +1686,18 @@ impl App {
     }
 
 
+}
+
+/// Whether `c` is a Normal-mode motion key — a count digit, a motion, or a
+/// multi-key motion prefix (`g`/`f`/`"`). These are the keys Visual mode forwards
+/// to the Normal handler to extend the selection.
+fn is_motion_key(c: char) -> bool {
+    c.is_ascii_digit()
+        || matches!(
+            c,
+            'h' | 'j' | 'k' | 'l' | ' ' | 'w' | 'b' | 'e' | '0' | '^' | '$' | 'g' | 'G' | 'f' | 'F'
+                | 't' | 'T' | ';' | ',' | '"'
+        )
 }
 
 /// The new scroll offset for a scroll key over a `cur` position within

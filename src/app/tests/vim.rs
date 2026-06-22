@@ -311,6 +311,60 @@ fn count_repeats_a_put() {
 }
 
 #[test]
+fn visual_char_selection_deletes_the_range() {
+    let (mut app, dir) = vim_app("vim-v-d");
+    // v selects from col 0; ll extends to col 2; d deletes "fir" (inclusive).
+    type_str(&mut app, "vlld");
+    assert_eq!(app.buffer.text(), "st chapter\n", "{}", app.buffer.text());
+    assert!(matches!(app.mode, Mode::Normal), "delete leaves Visual for Normal");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn visual_line_selection_deletes_whole_lines() {
+    let (mut app, dir) = vim_app("vim-vline-d");
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg"); // line 0
+    type_str(&mut app, "Vd"); // linewise select + delete the line
+    assert_eq!(app.buffer.text(), "second\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn visual_change_enters_insert() {
+    let (mut app, dir) = vim_app("vim-v-c");
+    type_str(&mut app, "vllc");
+    assert!(matches!(app.mode, Mode::Insert), "change enters Insert");
+    type_str(&mut app, "X");
+    assert_eq!(app.buffer.text(), "Xst chapter\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn visual_yank_then_put() {
+    let (mut app, dir) = vim_app("vim-v-y");
+    type_str(&mut app, "vlly"); // yank "fir"; cursor returns to the start
+    type_str(&mut app, "P"); // put it before the cursor, inline
+    assert_eq!(app.buffer.text(), "firfirst chapter\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn esc_cancels_visual_and_o_swaps_ends() {
+    let (mut app, dir) = vim_app("vim-v-esc");
+    app.on_key(key(KeyCode::Char('v')));
+    assert!(matches!(app.mode, Mode::Visual { .. }), "v enters Visual");
+    app.on_key(key(KeyCode::Esc));
+    assert!(matches!(app.mode, Mode::Normal), "Esc cancels Visual");
+    // `o` swaps the ends without changing which text is selected.
+    type_str(&mut app, "vllod");
+    assert_eq!(app.buffer.text(), "st chapter\n", "swap leaves the same selection: {}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;

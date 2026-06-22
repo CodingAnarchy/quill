@@ -693,17 +693,19 @@ impl Pane for StatusBar<'_> {
 
         // Vim mode (#27): a chip at the far left naming the editing mode. Only
         // while actually in the editor (not browsing or editing a metadata field).
-        let mode_chip = (app.vim && matches!(app.mode, Mode::Insert | Mode::Normal)).then(|| {
-            let (label, bg) = if matches!(app.mode, Mode::Insert) {
-                ("INSERT", Color::Green)
-            } else {
-                ("NORMAL", Color::Blue)
+        let mode_chip = app.vim.then(|| {
+            let (label, bg) = match app.mode {
+                Mode::Insert => ("INSERT", Color::Green),
+                Mode::Visual { linewise: false, .. } => ("VISUAL", Color::Magenta),
+                Mode::Visual { linewise: true, .. } => ("VISUAL LINE", Color::Magenta),
+                Mode::Normal => ("NORMAL", Color::Blue),
+                _ => return None, // not in the editor (browsing, prompt, …)
             };
-            Span::styled(
+            Some(Span::styled(
                 format!(" {label} "),
                 Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD),
-            )
-        });
+            ))
+        }).flatten();
         let chip_w = mode_chip.as_ref().map_or(0, |s| s.content.chars().count());
 
         let pad = (area.width as usize)
@@ -825,6 +827,25 @@ mod tests {
         app.mode = Mode::Insert;
         let screen = render(&app, 80, 8);
         assert!(screen.contains("INSERT") && !screen.contains("NORMAL"), "Insert shown:\n{screen}");
+        // Visual modes show their own labels.
+        app.mode = Mode::Visual { anchor: 0, linewise: false };
+        assert!(render(&app, 80, 8).contains("VISUAL"), "Visual shown");
+        app.mode = Mode::Visual { anchor: 0, linewise: true };
+        assert!(render(&app, 80, 8).contains("VISUAL LINE"), "Visual Line shown");
+    }
+
+    #[test]
+    fn visual_selection_draws_a_highlight() {
+        let mut app = app_with("hello world\n");
+        app.vim = true;
+        // Select the first few graphemes (anchor at 0, cursor at col 2).
+        app.mode = Mode::Visual { anchor: 0, linewise: false };
+        app.buffer.cursor = Cursor { line: 0, col: 2 };
+        let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buf = terminal.backend().buffer();
+        let highlighted = (0..40).any(|x| (0..6).any(|y| buf[(x, y)].style().bg == Some(Color::Yellow)));
+        assert!(highlighted, "the selection carries a highlight background");
     }
 
     #[test]

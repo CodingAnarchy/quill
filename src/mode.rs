@@ -51,6 +51,10 @@ pub enum Mode {
     /// moves and `i`/`a`/`o` enter [`Mode::Insert`]. Only reachable when Vim mode
     /// is enabled in the config.
     Normal,
+    /// Vim Visual mode (#205): a live selection from `anchor` (a byte offset, the
+    /// fixed end) to the cursor (the active end). Motions extend it; `d`/`c`/`y`
+    /// act on it. `linewise` is the `V` selection (whole lines) vs. `v` (chars).
+    Visual { anchor: usize, linewise: bool },
     /// A transient prompt at the bottom: a y/N confirmation or a line of text
     /// input.
     Prompt(PromptState),
