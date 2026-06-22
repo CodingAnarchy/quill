@@ -363,10 +363,12 @@ impl App {
             self.message = Some(format!("Proposed workflow is invalid: {e}"));
             return;
         }
-        let mut label = format!("Save workflow [{}] as: ", gen.steps.join(" → "));
-        if !gen.unmapped.is_empty() {
-            label = format!("(couldn't map: {}) {label}", gen.unmapped.join(", "));
-        }
+        let note = if gen.unmapped.is_empty() {
+            String::new()
+        } else {
+            format!("(couldn't map: {}) ", gen.unmapped.join(", "))
+        };
+        let label = format!("{note}Save workflow [{}] as: ", gen.steps.join(" → "));
         self.pending_workflow = Some(gen.steps);
         self.open_prompt(Pending::NameNewWorkflow, label, &gen.name, None);
     }

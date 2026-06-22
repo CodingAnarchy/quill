@@ -37,8 +37,7 @@ pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<PathBuf> {
 /// `[workflows]` header if there is one, else in a new `[workflows]` section
 /// appended at the end. Everything already in the file is left untouched.
 fn insert_workflow(existing: &str, name: &str, steps: &[String]) -> String {
-    let values: Vec<String> = steps.iter().map(|s| toml_string(s)).collect();
-    let entry = format!("{} = [{}]", toml_key(name), values.join(", "));
+    let entry = workflow_entry(name, steps);
 
     if let Some(header) = existing.lines().position(|l| l.trim() == "[workflows]") {
         let mut lines: Vec<String> = existing.lines().map(String::from).collect();
@@ -63,19 +62,14 @@ fn insert_workflow(existing: &str, name: &str, steps: &[String]) -> String {
     }
 }
 
-/// A TOML bare key when it's a simple identifier, else a quoted key.
-fn toml_key(name: &str) -> String {
-    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        name.to_string()
-    } else {
-        toml_string(name)
-    }
-}
-
-/// A double-quoted TOML basic string, escaping the two characters that matter for
-/// the tokens/names we write (quote and backslash).
-fn toml_string(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+/// Render one `name = ["step", …]` entry, delegating key quoting and string
+/// escaping to the `toml` serializer (a one-key table serializes to exactly this
+/// line) so they always match the format the loader parses.
+fn workflow_entry(name: &str, steps: &[String]) -> String {
+    let array = steps.iter().cloned().map(toml::Value::String).collect();
+    let mut table = toml::Table::new();
+    table.insert(name.to_string(), toml::Value::Array(array));
+    toml::to_string(&table).unwrap_or_default().trim_end().to_string()
 }
 
 /// Editor behavior from the `[editor]` section. The default keeps Quill's
