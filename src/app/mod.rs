@@ -1289,12 +1289,18 @@ impl App {
         }
     }
 
+    /// Take a pending operator together with the effective count — the operator's
+    /// own count times the motion's count (`2d3w` → 6). `None` when no operator is
+    /// pending, so the motion just moves the cursor.
+    fn take_op(&mut self, count: usize) -> Option<(Op, usize)> {
+        self.vim_state.op.take().map(|(op, opc)| (op, count.saturating_mul(opc)))
+    }
+
     /// A charwise motion: move the cursor, or — when an operator is pending —
     /// delete/change the span from the cursor to where the motion lands.
     /// `inclusive` covers the landing grapheme (Vim's `e`, `$`, `f`, `t`).
     fn charwise(&mut self, count: usize, inclusive: bool, step: impl Fn(&mut Buffer)) {
-        if let Some((op, opc)) = self.vim_state.op.take() {
-            let n = count.saturating_mul(opc);
+        if let Some((op, n)) = self.take_op(count) {
             let (lo, hi) = {
                 let buf = self.edit_buffer_mut();
                 let start = buf.cursor_byte();
@@ -1320,8 +1326,7 @@ impl App {
     /// A linewise vertical motion (`j`/`k`): move by visual rows, or — with an
     /// operator pending — delete/change whole lines.
     fn vertical(&mut self, count: usize, down: bool) {
-        if let Some((op, opc)) = self.vim_state.op.take() {
-            let n = count.saturating_mul(opc);
+        if let Some((op, n)) = self.take_op(count) {
             let cur = self.edit_buffer().cursor.line;
             let other = if down { cur + n } else { cur.saturating_sub(n) };
             self.operate_linewise(op, cur.min(other), cur.max(other));
@@ -1334,7 +1339,7 @@ impl App {
     /// Jump to `target` (0-based line): move the cursor, or — with an operator
     /// pending (`dG`, `dgg`) — act linewise over the lines between.
     fn goto_line(&mut self, target: usize) {
-        if let Some((op, _)) = self.vim_state.op.take() {
+        if let Some((op, _)) = self.take_op(1) {
             let cur = self.edit_buffer().cursor.line;
             self.operate_linewise(op, cur.min(target), cur.max(target));
         } else {
@@ -1440,16 +1445,19 @@ impl App {
     /// aware), Home/End go to the row edges, and Esc clears any pending command.
     fn on_key_normal_special(&mut self, code: KeyCode) {
         let count = self.take_count();
+        // The arrow keys mirror hjkl, so they compose with a pending operator too
+        // (`d<Down>` works like `dj`).
         match code {
-            KeyCode::Left => self.vim_repeat(count, |s| s.edit_move(Buffer::move_left)),
-            KeyCode::Right => self.vim_repeat(count, |s| s.edit_move(Buffer::move_right)),
-            KeyCode::Up => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_up)),
-            KeyCode::Down => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_down)),
+            KeyCode::Left => self.charwise(count, false, Buffer::move_left),
+            KeyCode::Right => self.charwise(count, false, Buffer::move_right),
+            KeyCode::Up => self.vertical(count, false),
+            KeyCode::Down => self.vertical(count, true),
             KeyCode::Home => self.edit_move_wrapped(Buffer::move_home),
             KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
             _ => {} // Esc and the rest: the count is already cleared above.
         }
-        // Esc (or any non-motion key) also cancels a pending operator / command.
+        // Esc / Home / End (and the rest) also cancel a pending operator/command;
+        // the motion arrows already consumed any operator via charwise/vertical.
         self.vim_state.pending = VimPending::None;
         self.vim_state.op = None;
     }

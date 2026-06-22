@@ -229,6 +229,20 @@ fn capital_d_deletes_to_end_of_line_and_u_undoes() {
 }
 
 #[test]
+fn an_operator_composes_with_the_arrow_keys() {
+    let (mut app, dir) = vim_app("vim-d-arrow");
+    app.on_key(key(KeyCode::Char('A')));
+    type_str(&mut app, "\nsecond\nthird");
+    app.on_key(key(KeyCode::Esc));
+    type_str(&mut app, "gg"); // to line 0
+    // d<Down> deletes this line and the next, like dj.
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(app.buffer.text(), "third\n", "{}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;
