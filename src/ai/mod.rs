@@ -21,6 +21,7 @@ pub mod model_select;
 pub mod naming;
 pub mod scaffold;
 pub mod setting;
+pub mod social;
 pub mod style;
 pub mod submission;
 pub mod voice;
@@ -100,6 +101,8 @@ pub enum Outcome {
     Submission(Result<Submission, AiError>),
     /// Marketing copy — blurb variants & taglines (#236).
     Marketing(Result<marketing::Marketing, AiError>),
+    /// Social posts — per-platform promo copy (#237).
+    Social(Result<social::Social, AiError>),
     /// Character voice analysis — dialogue/narration consistency (#183).
     Voice(Result<voice::Voice, AiError>),
     /// A workflow generated from a plain-language description (#232).
@@ -125,6 +128,7 @@ impl Outcome {
             Outcome::Style(r) => r.as_ref().err(),
             Outcome::Submission(r) => r.as_ref().err(),
             Outcome::Marketing(r) => r.as_ref().err(),
+            Outcome::Social(r) => r.as_ref().err(),
             Outcome::Voice(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),

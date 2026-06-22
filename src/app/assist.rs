@@ -13,6 +13,7 @@ use crate::ai::cost;
 use crate::ai::marketing::{self, Marketing};
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
+use crate::ai::social::{self, Social};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::ai::voice;
@@ -155,6 +156,7 @@ impl App {
             ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
+            ai("Social posts", "X / Facebook / Instagram copy (off-manuscript)", AiAction::Social),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
@@ -309,6 +311,7 @@ impl App {
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
             AiAction::Marketing => self.analyze_marketing(),
+            AiAction::Social => self.analyze_social(),
             AiAction::Triage => self.open_triage(),
         }
     }
@@ -537,6 +540,15 @@ impl App {
         });
     }
 
+    /// Generate social posts (#237) — per-platform promo copy; written to
+    /// `marketing/social/` by [`App::poll_ai`].
+    pub(crate) fn analyze_social(&mut self) {
+        self.spawn_ai("⟳ Drafting social posts…", |backend, manuscript, model| {
+            let req = social::build_request(manuscript, &model);
+            Outcome::Social(backend.complete(&req).and_then(|r| social::parse(&r.text)))
+        });
+    }
+
     /// The known entity list for naming checks: the setting gazetteer plus the
     /// character names from the story bible. Empty when no bible has been built.
     pub(crate) fn known_entities(&self) -> Vec<String> {
@@ -757,6 +769,7 @@ impl App {
                     Outcome::Style(r) => self.apply_style(r),
                     Outcome::Submission(r) => self.apply_submission(r),
                     Outcome::Marketing(r) => self.apply_marketing(r),
+                    Outcome::Social(r) => self.apply_social(r),
                     Outcome::Voice(r) => self.apply_voice(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
@@ -1063,6 +1076,15 @@ impl App {
     pub(crate) fn apply_marketing(&mut self, result: Result<Marketing, ai::AiError>) {
         match result {
             Ok(copy) => self.write_off_manuscript("Marketing copy", "marketing", copy.artifacts()),
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
+    }
+
+    /// Apply a social-posts pass (#237): write the per-platform posts under
+    /// `marketing/social/`, conflict-reviewed and off-manuscript.
+    pub(crate) fn apply_social(&mut self, result: Result<Social, ai::AiError>) {
+        match result {
+            Ok(posts) => self.write_off_manuscript("Social posts", "marketing/social", posts.artifacts()),
             Err(e) => self.message = Some(format!("AI: {e}")),
         }
     }

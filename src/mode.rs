@@ -257,6 +257,7 @@ impl Action {
         Action::Ai(AiAction::Voice),
         Action::Ai(AiAction::Submission),
         Action::Ai(AiAction::Marketing),
+        Action::Ai(AiAction::Social),
         Action::Ai(AiAction::Triage),
     ];
 
@@ -281,6 +282,7 @@ impl Action {
             Action::Ai(AiAction::Voice) => "ai:voice",
             Action::Ai(AiAction::Submission) => "ai:submission",
             Action::Ai(AiAction::Marketing) => "ai:marketing",
+            Action::Ai(AiAction::Social) => "ai:social",
             Action::Ai(AiAction::Triage) => "triage",
         }
     }
@@ -305,6 +307,7 @@ impl Action {
             Action::Ai(AiAction::Voice) => "AI · Character voice",
             Action::Ai(AiAction::Submission) => "AI · Submission material",
             Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
+            Action::Ai(AiAction::Social) => "AI · Social posts",
             Action::Ai(AiAction::Triage) => "Revision triage",
         }
     }
@@ -356,6 +359,8 @@ pub(crate) enum AiAction {
     Submission,
     /// Marketing copy — blurb variants & taglines, off-manuscript (#236).
     Marketing,
+    /// Social posts — per-platform promo copy, off-manuscript (#237).
+    Social,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
 }

@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 11, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 12, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -661,6 +661,39 @@ fn marketing_with_no_taglines_writes_only_blurbs() {
     }));
     assert!(dir.join("marketing/blurbs.md").exists());
     assert!(!dir.join("marketing/taglines.md").exists(), "no empty taglines file");
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #237: social posts -----------------------------------------------------
+
+#[test]
+fn social_writes_a_file_per_platform_off_manuscript() {
+    let (mut app, dir) = two_chapter_app("social");
+    let before = fs::read_to_string(dir.join("one.md")).unwrap();
+    app.apply_social(Ok(ai::social::Social {
+        x: vec!["A locket. A reckoning. #fantasy".into()],
+        facebook: vec!["She came home to bury a secret, and dug up something worse.".into()],
+        instagram: vec!["Some doors stay shut for a reason.\n\n#booklover #fantasy".into()],
+    }));
+    assert!(fs::read_to_string(dir.join("marketing/social/x.md")).unwrap().contains("reckoning"));
+    assert!(fs::read_to_string(dir.join("marketing/social/facebook.md")).unwrap().contains("bury a secret"));
+    assert!(fs::read_to_string(dir.join("marketing/social/instagram.md")).unwrap().contains("#booklover"));
+    assert!(app.overlay.is_some(), "summary overlay");
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn social_skips_a_platform_with_no_posts() {
+    let (mut app, dir) = two_chapter_app("social-partial");
+    app.apply_social(Ok(ai::social::Social {
+        x: vec!["just one platform".into()],
+        facebook: vec![],
+        instagram: vec![],
+    }));
+    assert!(dir.join("marketing/social/x.md").exists());
+    assert!(!dir.join("marketing/social/facebook.md").exists(), "no empty facebook file");
+    assert!(!dir.join("marketing/social/instagram.md").exists());
     fs::remove_dir_all(&dir).ok();
 }
 
