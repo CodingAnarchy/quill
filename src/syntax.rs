@@ -15,8 +15,9 @@
 //! kept available for the upcoming in-chapter outline (issue #11) to consume
 //! rather than re-parsing.
 
-use tree_sitter::{InputEdit, Node, Tree};
-use tree_sitter_md::{MarkdownParser, MarkdownTree};
+use ropey::Rope;
+use tree_sitter::{InputEdit, Node, Point, Tree};
+use tree_sitter_md::{MarkdownParseOptions, MarkdownParser, MarkdownTree};
 
 /// What a highlighted span represents. The renderer maps each to a `Style`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,7 +79,7 @@ impl Syntax {
         let tree = parser
             .parse(text.as_bytes(), None)
             .expect("markdown parse should not fail without a timeout/cancellation");
-        let (highlights, markers, headings) = collect(&tree, text);
+        let (highlights, markers, headings) = collect(&tree, |s, e| text[s..e].to_string());
         Self {
             parser,
             tree,
@@ -98,27 +99,40 @@ impl Syntax {
     }
 
     /// Re-parse incrementally against the recorded edits and refresh highlights.
-    /// `text` is the current document. Run off the keystroke path (on idle).
-    ///
-    /// Handing tree-sitter the full text and re-collecting all highlights is
-    /// simple and correct; the incremental re-parse and chapter-sized documents
-    /// keep it cheap. If whole-manuscript buffers ever make this matter, the
-    /// performance epic (#14) can parse only the visible region.
-    pub fn reparse(&mut self, text: &str) {
-        if let Some(tree) = self.parser.parse(text.as_bytes(), Some(&self.tree)) {
+    /// Run off the keystroke path (on idle). Reads the current document straight
+    /// from the `rope` — both the tree-sitter parse and the heading-text lookups
+    /// pull chunks/slices from it, so no full-document copy is allocated per
+    /// reparse (#218). The re-collect is over the bounded editing window.
+    pub fn reparse(&mut self, rope: &Rope) {
+        let len = rope.len_bytes();
+        // Feed tree-sitter rope chunks: it asks for the bytes starting at an
+        // offset and we hand back the rest of that chunk (empty past the end).
+        let mut read = |byte: usize, _: Point| -> &[u8] {
+            if byte >= len {
+                return &[];
+            }
+            let (chunk, chunk_start, _, _) = rope.chunk_at_byte(byte);
+            &chunk.as_bytes()[byte - chunk_start..]
+        };
+        if let Some(tree) =
+            self.parser
+                .parse_with_options(&mut read, Some(&self.tree), MarkdownParseOptions::default())
+        {
             self.tree = tree;
-            let (highlights, markers, headings) = collect(&self.tree, text);
+            let (highlights, markers, headings) =
+                collect(&self.tree, |s, e| rope.byte_slice(s..e).to_string());
             self.highlights = highlights;
             self.markers = markers;
             self.headings = headings;
         }
     }
 
-    /// Highlights overlapping `[start, end)` in document order.
+    /// Highlights overlapping `[start, end)` in document order. The list is
+    /// start-sorted, so a binary search skips every highlight starting at or
+    /// after `end` rather than scanning the whole list per rendered line (#218).
     pub fn highlights_in(&self, start: usize, end: usize) -> impl Iterator<Item = &Highlight> {
-        self.highlights
-            .iter()
-            .filter(move |h| h.start < end && h.end > start)
+        let upper = self.highlights.partition_point(|h| h.start < end);
+        self.highlights[..upper].iter().filter(move |h| h.end > start)
     }
 
     /// Emphasis-delimiter byte ranges to hide when rendering. A delimiter is
@@ -152,7 +166,10 @@ impl Syntax {
 /// flat, start-sorted list of highlight spans plus the emphasis delimiters to
 /// conceal. Inline trees carry absolute document offsets, so their node ranges
 /// line up with the block tree's.
-fn collect(tree: &MarkdownTree, text: &str) -> (Vec<Highlight>, Vec<Marker>, Vec<Heading>) {
+fn collect(
+    tree: &MarkdownTree,
+    read: impl Fn(usize, usize) -> String,
+) -> (Vec<Highlight>, Vec<Marker>, Vec<Heading>) {
     let mut out = Vec::new();
     let mut markers = Vec::new();
     let mut headings = Vec::new();
@@ -164,7 +181,7 @@ fn collect(tree: &MarkdownTree, text: &str) -> (Vec<Highlight>, Vec<Marker>, Vec
                 end: node.end_byte(),
                 kind: HighlightKind::Heading,
             });
-            headings.push(heading_info(&node, text));
+            headings.push(heading_info(&node, &read));
         }
     });
 
@@ -210,10 +227,12 @@ fn collect(tree: &MarkdownTree, text: &str) -> (Vec<Highlight>, Vec<Marker>, Vec
     (out, markers, headings)
 }
 
-/// Pull a heading's level and title out of its node. Works on the source text
-/// rather than walking marker children, which keeps atx and setext uniform.
-fn heading_info(node: &Node, text: &str) -> Heading {
-    let raw = &text[node.start_byte()..node.end_byte()];
+/// Pull a heading's level and title out of its node. Reads the heading's source
+/// text (via `read`) rather than walking marker children, which keeps atx and
+/// setext uniform.
+fn heading_info(node: &Node, read: &impl Fn(usize, usize) -> String) -> Heading {
+    let raw = read(node.start_byte(), node.end_byte());
+    let raw = raw.as_str();
     if node.kind() == "setext_heading" {
         // "Title\n===" (level 1) or "Title\n---" (level 2).
         let mut lines = raw.lines();

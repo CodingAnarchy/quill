@@ -359,8 +359,8 @@ impl Buffer {
     /// goes idle — so typing never blocks on a parse.
     pub fn refresh_syntax(&mut self) {
         if self.syntax_dirty {
-            let text = self.rope.to_string();
-            self.syntax.reparse(&text);
+            // Reparse straight from the rope — no full-document copy (#218).
+            self.syntax.reparse(&self.rope);
             self.syntax_dirty = false;
         }
     }
