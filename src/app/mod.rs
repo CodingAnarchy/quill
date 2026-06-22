@@ -1115,6 +1115,10 @@ impl App {
             },
             // Open the export menu (#7) — Markdown / Word. Ctrl-e.
             KeyCode::Char('e') => self.open_export_palette(),
+            // Open the unified run-action menu (#225) — every invokable action
+            // (save, export, reports, AI passes) in one searchable list. Ctrl-k
+            // for "command", the one menu that reaches the others.
+            KeyCode::Char('k') => self.open_action_palette(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             KeyCode::Char('l') => self.toggle_continuous(),

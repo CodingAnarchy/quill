@@ -12,7 +12,7 @@ use crate::mode::{Command, ExportFormat, Palette, PaletteItem};
 impl App {
     /// Open the export menu (#7): pick a format, then [`run_export`] writes it.
     pub(crate) fn open_export_palette(&mut self) {
-        let item = |label, desc, format| PaletteItem { label, desc, command: Command::Export(format) };
+        let item = |label: &str, desc: &str, format| PaletteItem { label: label.into(), desc: desc.into(), command: Command::Export(format) };
         let items = vec![
             item("Manuscript (Markdown)", "One compiled .md file — hand off or convert", ExportFormat::Markdown),
             item("Word (.docx)", "Standard manuscript format", ExportFormat::Docx),

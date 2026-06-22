@@ -191,8 +191,8 @@ pub struct Palette {
 
 /// One palette entry: a label, a one-line description, and the command it runs.
 pub struct PaletteItem {
-    pub(crate) label: &'static str,
-    pub(crate) desc: &'static str,
+    pub(crate) label: String,
+    pub(crate) desc: String,
     pub(crate) command: Command,
 }
 
@@ -203,6 +203,93 @@ pub(crate) enum Command {
     Ai(AiAction),
     Git(GitAction),
     Export(ExportFormat),
+    /// Run a registry [`Action`] from the unified run-action menu (#225).
+    Run(Action),
+}
+
+/// A single invokable Quill action — the unified registry (#225). The run-action
+/// command lists these and runs one by name, and author workflows (#89) will
+/// enumerate and invoke them by [`name`](Action::name). Each wraps the dispatch
+/// the existing shortcuts already use (save, export, the reports, the AI passes).
+#[derive(Clone, Copy)]
+pub(crate) enum Action {
+    /// Save the active chapter / continuous window (Ctrl-S).
+    Save,
+    /// Compile and write an export (Ctrl-E).
+    Export(ExportFormat),
+    /// Open the progress report (Ctrl-R).
+    ProgressReport,
+    /// Open the local analysis report (Ctrl-T).
+    AnalysisReport,
+    /// Run an AI pass / open an AI view (Ctrl-A).
+    Ai(AiAction),
+}
+
+impl Action {
+    /// Every action, in menu order — the registry.
+    pub(crate) const ALL: &'static [Action] = &[
+        Action::Save,
+        Action::Export(ExportFormat::Markdown),
+        Action::Export(ExportFormat::Docx),
+        Action::Export(ExportFormat::Scriv),
+        Action::Export(ExportFormat::Vellum),
+        Action::ProgressReport,
+        Action::AnalysisReport,
+        Action::Ai(AiAction::Ask),
+        Action::Ai(AiAction::Characters),
+        Action::Ai(AiAction::Continuity),
+        Action::Ai(AiAction::Setting),
+        Action::Ai(AiAction::Scaffold),
+        Action::Ai(AiAction::Naming),
+        Action::Ai(AiAction::Style),
+        Action::Ai(AiAction::Submission),
+        Action::Ai(AiAction::Triage),
+    ];
+
+    /// The stable name the run-action command matches and workflows (#89)
+    /// reference in config — never change these without a migration.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Action::Save => "save",
+            Action::Export(ExportFormat::Markdown) => "export:markdown",
+            Action::Export(ExportFormat::Docx) => "export:docx",
+            Action::Export(ExportFormat::Scriv) => "export:scriv",
+            Action::Export(ExportFormat::Vellum) => "export:vellum",
+            Action::ProgressReport => "report:progress",
+            Action::AnalysisReport => "report:analysis",
+            Action::Ai(AiAction::Ask) => "ai:ask",
+            Action::Ai(AiAction::Characters) => "ai:characters",
+            Action::Ai(AiAction::Continuity) => "ai:continuity",
+            Action::Ai(AiAction::Setting) => "ai:setting",
+            Action::Ai(AiAction::Scaffold) => "ai:scaffold",
+            Action::Ai(AiAction::Naming) => "ai:naming",
+            Action::Ai(AiAction::Style) => "ai:style",
+            Action::Ai(AiAction::Submission) => "ai:submission",
+            Action::Ai(AiAction::Triage) => "triage",
+        }
+    }
+
+    /// Human label for the run-action menu.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Action::Save => "Save",
+            Action::Export(ExportFormat::Markdown) => "Export → Markdown",
+            Action::Export(ExportFormat::Docx) => "Export → Word (.docx)",
+            Action::Export(ExportFormat::Scriv) => "Export → Scrivener",
+            Action::Export(ExportFormat::Vellum) => "Export → Vellum (.docx)",
+            Action::ProgressReport => "Progress report",
+            Action::AnalysisReport => "Analysis report",
+            Action::Ai(AiAction::Ask) => "AI · Ask the manuscript",
+            Action::Ai(AiAction::Characters) => "AI · Character bible",
+            Action::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
+            Action::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
+            Action::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
+            Action::Ai(AiAction::Naming) => "AI · Name & term consistency",
+            Action::Ai(AiAction::Style) => "AI · Prose & style",
+            Action::Ai(AiAction::Submission) => "AI · Submission material",
+            Action::Ai(AiAction::Triage) => "Revision triage",
+        }
+    }
 }
 
 /// A manuscript export target (#7), chosen from the export palette.

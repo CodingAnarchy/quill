@@ -6,6 +6,7 @@ use crate::project::Project;
 use std::fs;
 use std::path::PathBuf;
 
+mod actions;
 mod ai;
 mod chapters;
 mod editing;
