@@ -101,6 +101,9 @@ What they assert:
 - `navigation_is_fast_in_a_series_sized_project` (`app/tests/chapters.rs`) —
   switching chapters in a 600-chapter (series-sized) project reads/parses one
   chapter file, never work proportional to the project (~0.5ms/switch).
+- `tally_is_independent_of_project_size` (`app/tests/chapters.rs`) — the daily
+  word tally (every idle tick) touches only the chapters that changed, not all of
+  them; flat (~6µs) even at 2000 chapters.
 
 The corpus, every benchmark, its target, and the rationale are written up in
 [`docs/performance.md`](docs/performance.md) — the pre-release perf gate. Run

@@ -211,6 +211,8 @@ impl App {
         self.baselines = (0..self.chapter_count())
             .map(|i| (self.project.chapter_file(i).to_string(), self.chapter_word_count(i)))
             .collect();
+        // A full re-baseline supersedes any pending per-chapter changes (#220).
+        self.project.clear_words_changed();
     }
 
     /// The buffer the author is currently editing: the continuous-view buffer
@@ -256,10 +258,20 @@ impl App {
     /// Structural edits (chapter delete) drop their baseline so they aren't
     /// booked as prose.
     fn tally_words(&mut self) {
-        for i in 0..self.chapter_count() {
+        // Only a few chapters can have changed since the last idle tick: the live
+        // active chapter, plus any whose cached count moved (continuous-view saves,
+        // reslide). Re-checking just those keeps the tally O(edit), not O(project)
+        // (#220). Keyed by file so a reorder between ticks can't misattribute.
+        let mut files = self.project.take_words_changed();
+        files.push(self.project.active_file().to_string());
+        files.sort();
+        files.dedup();
+        for file in files {
+            let Some(i) = self.project.index_of_file(&file) else {
+                continue; // chapter gone (e.g. deleted) since it was recorded
+            };
             let words = self.chapter_word_count(i);
-            let file = self.project.chapter_file(i);
-            let last = self.baselines.get(file).copied().unwrap_or(0);
+            let last = self.baselines.get(&file).copied().unwrap_or(0);
             let delta = words as i64 - last as i64;
             if delta == 0 {
                 continue;
@@ -278,7 +290,7 @@ impl App {
                 self.part_added[p] += add;
                 self.part_removed[p] += rem;
             }
-            self.baselines.insert(file.to_string(), words);
+            self.baselines.insert(file, words);
         }
     }
 
