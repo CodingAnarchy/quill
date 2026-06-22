@@ -11,6 +11,7 @@ mod chapters;
 mod editing;
 mod panes;
 mod vcs;
+mod vim;
 
 fn ctrl(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
@@ -45,5 +46,11 @@ fn two_chapter_app(name: &str) -> (App, PathBuf) {
 
     let project = Project::open(&dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
-    (App::new(buffer, project), dir)
+    let mut app = App::new(buffer, project);
+    // App::new reads the developer's real config; pin the modeless default so the
+    // tests don't depend on whether the dev has Vim mode (#27) enabled. The Vim
+    // tests opt back in explicitly via `vim_app`.
+    app.vim = false;
+    app.mode = Mode::Insert;
+    (app, dir)
 }

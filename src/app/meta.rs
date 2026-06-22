@@ -254,6 +254,6 @@ impl App {
             Mode::EditMeta(m) => m.nav_return,
             _ => return,
         };
-        self.mode = closed_mode(nav_return);
+        self.mode = self.closed_mode(nav_return);
     }
 }

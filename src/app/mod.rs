@@ -64,6 +64,10 @@ pub struct App {
     /// True between a `Ctrl-w` window prefix and the command key that follows it.
     window_pending: bool,
     pub mode: Mode,
+    /// Opt-in Vim-style modal editing (#27), from the `[editor]` config. When on,
+    /// the editor's resting state is [`Mode::Normal`] and the status bar shows the
+    /// mode; when off, editing is exactly as it has always been.
+    pub vim: bool,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
@@ -139,13 +143,17 @@ pub struct App {
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
         let under_vc = crate::vcs::is_repo(&project.root);
+        let vim = crate::config::EditorConfig::load().vim;
         let mut app = Self {
             buffer,
             project,
             manuscript: None,
             split: None,
             window_pending: false,
-            mode: Mode::Insert,
+            // With Vim mode on, the editor rests in Normal; otherwise it's always
+            // the modeless Insert.
+            mode: if vim { Mode::Normal } else { Mode::Insert },
+            vim,
             should_quit: false,
             focus_width: 72,
             outline_visible: false,
@@ -422,6 +430,28 @@ impl App {
             Mode::Search(_) => self.on_key_search(key),
             Mode::RefFiles(_) => self.on_key_reffiles(key),
             Mode::Insert => self.on_key_insert(key),
+            Mode::Normal => self.on_key_normal(key),
+        }
+    }
+
+    /// The editor's resting mode: Vim Normal when Vim mode is on, else the
+    /// modeless Insert. Every "return to the editor" path routes through this so
+    /// it lands in the right mode for the user's configuration.
+    fn editing_mode(&self) -> Mode {
+        if self.vim {
+            Mode::Normal
+        } else {
+            Mode::Insert
+        }
+    }
+
+    /// Where an overlay (prompt or metadata editor) returns when it closes
+    /// without acting: back to the chapter browser at `selected`, or to the
+    /// editor's resting mode.
+    fn closed_mode(&self, nav_return: Option<usize>) -> Mode {
+        match nav_return {
+            Some(selected) => Mode::Nav { selected },
+            None => self.editing_mode(),
         }
     }
 
@@ -743,13 +773,13 @@ impl App {
             }
             KeyCode::Enter => {
                 self.activate_chapter(sel);
-                self.mode = Mode::Insert;
+                self.mode = self.editing_mode();
             }
             // Open the selected chapter in a side pane (#165) — compare two
             // chapters, or keep one as reference while editing another.
             KeyCode::Char('o') => {
                 self.open_file_in_pane(self.project.chapter_path(sel));
-                self.mode = Mode::Insert;
+                self.mode = self.editing_mode();
             }
             // Switch to the reference-file browser (#165): bible entries and notes.
             KeyCode::Char('f') => self.open_ref_files(),
@@ -863,7 +893,7 @@ impl App {
             KeyCode::Enter => {
                 let path = state.files[state.selected].clone();
                 self.open_file_in_pane(path);
-                self.mode = Mode::Insert;
+                self.mode = self.editing_mode();
             }
             // Back to the chapter browser.
             KeyCode::Char('f') | KeyCode::Esc => self.select(self.project.active_index()),
@@ -879,7 +909,7 @@ impl App {
         let nav_return = state.nav_return;
 
         // Where to go when the prompt closes without acting.
-        let closed = closed_mode(nav_return);
+        let closed = self.closed_mode(nav_return);
 
         match pending {
             Pending::Quit => match key.code {
@@ -974,57 +1004,59 @@ impl App {
         }
     }
 
-    fn on_key_insert(&mut self, key: KeyEvent) {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-
-        match (ctrl, key.code) {
-            (true, KeyCode::Char('s')) => self.save_edit(),
-            (true, KeyCode::Char('q')) => {
+    /// The editor's `Ctrl-` shortcuts, shared by Insert and Vim Normal mode so
+    /// they keep working in both. A `Ctrl-` combo never produces text in either
+    /// mode, so handling is fire-and-forget — an unrecognized one is simply
+    /// ignored.
+    fn on_key_ctrl(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Char('s') => self.save_edit(),
+            KeyCode::Char('q') => {
                 if self.edit_dirty() {
                     self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
                 } else {
                     self.should_quit = true;
                 }
             }
-            (true, KeyCode::Char('=') | KeyCode::Char('+')) => {
+            KeyCode::Char('=') | KeyCode::Char('+') => {
                 self.focus_width = (self.focus_width + 4).min(160);
             }
-            (true, KeyCode::Char('-')) => {
+            KeyCode::Char('-') => {
                 self.focus_width = self.focus_width.saturating_sub(4).max(32);
             }
-            (true, KeyCode::Char('o')) => {
+            KeyCode::Char('o') => {
                 self.outline_visible = !self.outline_visible;
             }
             // Open the version-control palette (#54) — init / commit / history /
             // changes / restore, in one menu. Ctrl-v: "version control".
-            (true, KeyCode::Char('v')) => self.open_git_palette(),
+            KeyCode::Char('v') => self.open_git_palette(),
             // Open the progress report (scroll to read; any other key closes).
-            (true, KeyCode::Char('r')) => {
+            KeyCode::Char('r') => {
                 self.overlay = Some(Overlay::report("progress", self.report_lines()));
             }
             // Open the local analysis report — editing metrics. Ctrl-t: "text"
             // analysis. Scrollable (it can run past one screen); any other key closes.
-            (true, KeyCode::Char('t')) => {
+            KeyCode::Char('t') => {
                 self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
             }
             // Open the AI command palette (opt-in). When AI isn't ready, explain
             // how to enable it rather than listing dead actions.
-            (true, KeyCode::Char('a')) => match self.ai.check_ready() {
+            KeyCode::Char('a') => match self.ai.check_ready() {
                 Ok(_) => self.open_ai_palette(),
                 Err(e) => self.message = Some(e.to_string()),
             },
             // Open the export menu (#7) — Markdown / Word. Ctrl-e.
-            (true, KeyCode::Char('e')) => self.open_export_palette(),
+            KeyCode::Char('e') => self.open_export_palette(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
-            (true, KeyCode::Char('l')) => self.toggle_continuous(),
+            KeyCode::Char('l') => self.toggle_continuous(),
             // Step to the next / previous chapter (single-chapter view only;
             // in continuous view you just scroll across boundaries).
-            (true, KeyCode::Char('n')) if self.manuscript.is_none() => self.next_chapter(),
-            (true, KeyCode::Char('p')) if self.manuscript.is_none() => self.prev_chapter(),
+            KeyCode::Char('n') if self.manuscript.is_none() => self.next_chapter(),
+            KeyCode::Char('p') if self.manuscript.is_none() => self.prev_chapter(),
             // Focus the chapter pane to browse. Chapter structure is edited in
             // the single-chapter view, so leave continuous first.
-            (true, KeyCode::Char('g')) => {
+            KeyCode::Char('g') => {
                 self.leave_continuous();
                 self.outline_visible = true;
                 self.mode = Mode::Nav {
@@ -1033,32 +1065,103 @@ impl App {
             }
 
             // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
-            (true, KeyCode::Char('z')) => self.history_step(false),
-            (true, KeyCode::Char('y')) => self.history_step(true),
+            KeyCode::Char('z') => self.history_step(false),
+            KeyCode::Char('y') => self.history_step(true),
             // Find (#144). Ctrl-f opens the query; from there `r` starts a replace.
-            (true, KeyCode::Char('f')) => self.open_find(),
+            KeyCode::Char('f') => self.open_find(),
             // Window/split prefix (#163): the next key is a window command
             // (s/v split, w/h/j/k/l focus, c/q close). Vim's Ctrl-w.
-            (true, KeyCode::Char('w')) => self.window_pending = true,
+            KeyCode::Char('w') => self.window_pending = true,
 
-            (false, KeyCode::Char(c)) => self.edit_insert_char(c),
-            (false, KeyCode::Enter) => self.edit_insert_char('\n'),
-            (false, KeyCode::Backspace) => self.edit_backspace(),
-            (false, KeyCode::Tab) => {
+            _ => {}
+        }
+    }
+
+    fn on_key_insert(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.on_key_ctrl(key.code);
+            return;
+        }
+        match key.code {
+            // In Vim mode, Esc leaves Insert for Normal; without it, Esc is inert.
+            KeyCode::Esc if self.vim => self.mode = Mode::Normal,
+
+            KeyCode::Char(c) => self.edit_insert_char(c),
+            KeyCode::Enter => self.edit_insert_char('\n'),
+            KeyCode::Backspace => self.edit_backspace(),
+            KeyCode::Tab => {
                 for _ in 0..4 {
                     self.edit_insert_char(' ');
                 }
             }
 
-            (false, KeyCode::Left) => self.edit_move(Buffer::move_left),
-            (false, KeyCode::Right) => self.edit_move(Buffer::move_right),
-            (false, KeyCode::Up) => self.edit_move_wrapped(Buffer::move_up),
-            (false, KeyCode::Down) => self.edit_move_wrapped(Buffer::move_down),
-            (false, KeyCode::Home) => self.edit_move_wrapped(Buffer::move_home),
-            (false, KeyCode::End) => self.edit_move_wrapped(Buffer::move_end),
+            KeyCode::Left => self.edit_move(Buffer::move_left),
+            KeyCode::Right => self.edit_move(Buffer::move_right),
+            KeyCode::Up => self.edit_move_wrapped(Buffer::move_up),
+            KeyCode::Down => self.edit_move_wrapped(Buffer::move_down),
+            KeyCode::Home => self.edit_move_wrapped(Buffer::move_home),
+            KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
 
             _ => {}
         }
+    }
+
+    /// Vim Normal mode (#27): keys are commands. This foundation covers entering
+    /// Insert (`i`/`a`/`I`/`A`/`o`/`O`) and basic cursor motion (`hjkl` + arrows);
+    /// richer motions, operators, and Visual mode are later children of #27.
+    fn on_key_normal(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.on_key_ctrl(key.code);
+            return;
+        }
+        match key.code {
+            // Enter Insert mode.
+            KeyCode::Char('i') => self.mode = Mode::Insert,
+            // Append: after the cursor's grapheme, but never past the line end.
+            KeyCode::Char('a') => {
+                self.edit_move(|b| {
+                    if b.cursor.col < b.line_len() {
+                        b.move_right();
+                    }
+                });
+                self.mode = Mode::Insert;
+            }
+            KeyCode::Char('I') => {
+                self.edit_move(Buffer::move_line_start);
+                self.mode = Mode::Insert;
+            }
+            KeyCode::Char('A') => {
+                self.edit_move(Buffer::move_line_end);
+                self.mode = Mode::Insert;
+            }
+            KeyCode::Char('o') => self.open_line(false),
+            KeyCode::Char('O') => self.open_line(true),
+
+            // Motion: hjkl and the arrow keys.
+            KeyCode::Char('h') | KeyCode::Left => self.edit_move(Buffer::move_left),
+            KeyCode::Char('l') | KeyCode::Right => self.edit_move(Buffer::move_right),
+            KeyCode::Char('k') | KeyCode::Up => self.edit_move_wrapped(Buffer::move_up),
+            KeyCode::Char('j') | KeyCode::Down => self.edit_move_wrapped(Buffer::move_down),
+            KeyCode::Home => self.edit_move_wrapped(Buffer::move_home),
+            KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
+
+            _ => {}
+        }
+    }
+
+    /// Vim `o` / `O`: open a blank line below (`above == false`) or above the
+    /// current logical line and enter Insert mode there. Anchors on logical line
+    /// boundaries so a soft-wrapped paragraph isn't split mid-way.
+    fn open_line(&mut self, above: bool) {
+        if above {
+            self.edit_move(Buffer::move_line_start);
+            self.edit_insert_char('\n');
+            self.edit_move_wrapped(Buffer::move_up); // onto the new blank line
+        } else {
+            self.edit_move(Buffer::move_line_end);
+            self.edit_insert_char('\n');
+        }
+        self.mode = Mode::Insert;
     }
 
 
@@ -1081,14 +1184,6 @@ fn scroll_target(code: KeyCode, ctrl: bool, cur: u16, max: u16, page: u16) -> Op
     Some(target.clamp(0, max) as u16)
 }
 
-/// Where an overlay (prompt or metadata editor) returns when it closes without
-/// acting: back to the chapter browser at `selected`, or to insert mode.
-fn closed_mode(nav_return: Option<usize>) -> Mode {
-    match nav_return {
-        Some(selected) => Mode::Nav { selected },
-        None => Mode::Insert,
-    }
-}
 
 
 #[cfg(test)]

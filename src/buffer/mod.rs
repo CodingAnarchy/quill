@@ -426,6 +426,27 @@ impl Buffer {
         }
     }
 
+    /// Grapheme length of the current logical line — how far the cursor can
+    /// travel on it.
+    pub fn line_len(&self) -> usize {
+        self.line_graphemes(self.cursor.line)
+    }
+
+    /// Move to the start of the current *logical* line (column 0) — the anchor
+    /// for opening a line above (#27).
+    pub fn move_line_start(&mut self) {
+        self.cursor.col = 0;
+        self.goal_x = None;
+    }
+
+    /// Move to the end of the current *logical* line, past its last grapheme —
+    /// the anchor for opening a line below (#27). Unlike [`move_end`](Self::move_end)
+    /// this spans the whole paragraph, not just the cursor's wrapped row.
+    pub fn move_line_end(&mut self) {
+        self.cursor.col = self.line_graphemes(self.cursor.line);
+        self.goal_x = None;
+    }
+
     /// Move to the start of the current visual row (#143).
     pub fn move_home(&mut self, width: usize) {
         let (line_text, starts, row, _) = self.cursor_visual_row(width);

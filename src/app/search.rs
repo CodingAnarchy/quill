@@ -159,7 +159,7 @@ impl App {
     fn finish_replace(&mut self) {
         let replaced = self.search().replaced;
         self.cache_focus_words();
-        self.mode = Mode::Insert;
+        self.mode = self.editing_mode();
         self.message = Some(match replaced {
             0 => "No matches replaced.".into(),
             1 => "Replaced 1 occurrence.".into(),
@@ -168,7 +168,7 @@ impl App {
     }
 
     fn close_search(&mut self) {
-        self.mode = Mode::Insert;
+        self.mode = self.editing_mode();
     }
 
     // --- Shared helpers ----------------------------------------------------

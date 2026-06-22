@@ -162,7 +162,7 @@ impl App {
             KeyCode::Enter | KeyCode::Char('R') => {
                 let force = matches!(key.code, KeyCode::Char('R'));
                 let command = p.items.get(p.selected).map(|it| it.command);
-                self.mode = Mode::Insert;
+                self.mode = self.editing_mode();
                 match command {
                     Some(Command::Ai(a)) => self.start_ai_action(a, force),
                     Some(Command::Git(g)) => self.start_git_action(g),
@@ -987,7 +987,7 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                self.mode = Mode::Insert;
+                self.mode = self.editing_mode();
                 self.message = Some("Review cancelled — kept your versions".into());
             }
             _ => {}
@@ -1028,7 +1028,7 @@ impl App {
         // Queue drained. A continuity pass leaves findings stashed — show them now;
         // a character pass leaves none, so this falls back to insert mode.
         if self.pending_findings.is_empty() {
-            self.mode = Mode::Insert;
+            self.mode = self.editing_mode();
             self.message = Some("Bible review complete".into());
         } else {
             self.open_findings();
@@ -1048,7 +1048,7 @@ impl App {
                 if f.selected < f.items.len() {
                     f.items.remove(f.selected);
                     if f.items.is_empty() {
-                        self.mode = Mode::Insert;
+                        self.mode = self.editing_mode();
                     } else {
                         f.selected = f.selected.min(f.items.len() - 1);
                     }
@@ -1056,7 +1056,7 @@ impl App {
             }
             KeyCode::Enter => {
                 let target = f.items.get(f.selected).and_then(|it| it.chapters.first()).cloned();
-                self.mode = Mode::Insert;
+                self.mode = self.editing_mode();
                 if let Some(title) = target {
                     if let Some(i) = (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title.as_str())) {
                         self.activate_chapter(i);
