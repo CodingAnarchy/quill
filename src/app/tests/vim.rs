@@ -547,6 +547,27 @@ fn keymap_builds_valid_entries_and_reports_bad_ones() {
 }
 
 #[test]
+fn keymap_reports_a_key_bound_twice() {
+    use std::collections::HashMap;
+    let cfg = HashMap::from([
+        ("down".to_string(), "j".to_string()),
+        ("delete".to_string(), "j".to_string()), // both want the 'j' key
+    ]);
+    let (_, errors) = super::super::build_keymap(&cfg);
+    assert_eq!(errors.len(), 1, "the collision is reported: {errors:?}");
+    assert!(errors[0].contains("more than one"), "{:?}", errors);
+}
+
+#[test]
+fn a_remapped_motion_extends_a_visual_selection() {
+    let (mut app, dir) = vim_app("vim-remap-visual");
+    app.vim_keys.insert('s', 'l'); // 's' moves right
+    type_str(&mut app, "vssd"); // visual, extend right twice via 's', delete
+    assert_eq!(app.buffer.text(), "st chapter\n", "remapped motion drove the selection: {}", app.buffer.text());
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;

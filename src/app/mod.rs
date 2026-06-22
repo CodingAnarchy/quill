@@ -1832,7 +1832,9 @@ fn build_keymap(keys: &HashMap<String, String>) -> (HashMap<char, char>, Vec<Str
         let mut chars = key.chars();
         match (chars.next(), chars.next()) {
             (Some(k), None) => {
-                map.insert(k, default);
+                if map.insert(k, default).is_some() {
+                    errors.push(format!("key '{k}' is bound by more than one action"));
+                }
             }
             _ => errors.push(format!("'{action}' must be a single key, got '{key}'")),
         }
