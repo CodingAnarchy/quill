@@ -13,8 +13,8 @@ rewriting, tightening, expanding, or larger-edit suggestions. It is limited to
 **structure** (outlines, beat sheets, scene notes), **tracking** (the story
 bible), **markers** (`xxx` TODOs), and **analysis** (flags and findings the
 author fixes themselves). The prose is the author's. Off-manuscript artifacts
-like a synopsis or query letter are the only prose the AI produces, and never
-inside the manuscript.
+like a synopsis, query letter, or marketing blurb are the only prose the AI
+produces, and never inside the manuscript.
 
 ## Configuration
 
@@ -75,10 +75,15 @@ The palette actions:
   the bible, never a rewrite; needs the character pass to have run first. Distinct
   from prose & style: this is character-grounded with dialogue attribution.
 - **Submission material** (#81) — a synopsis, back-cover blurb, and query-letter
-  draft written to `submission/`. The one AI feature that produces prose, and it
-  is **off-manuscript** (submission/marketing artifacts, never in the novel), so
-  it stays within the assistant-not-co-writer rule. Each is a conflict-reviewed
-  bible-format file the author edits freely.
+  draft written to `submission/`. Produces prose, but **off-manuscript**
+  (submission/marketing artifacts, never in the novel), so it stays within the
+  assistant-not-co-writer rule. Each is a conflict-reviewed bible-format file the
+  author edits freely.
+- **Marketing copy** (#236) — several back-cover blurb variants (different hooks,
+  spoiler-free) and one-line taglines for promoting the finished book, written to
+  `marketing/` (`blurbs.md`, `taglines.md`). Off-manuscript and conflict-reviewed
+  like the submission material; the author edits and regenerates freely. The first
+  of the indie-marketing features (epic #104).
 - **Revision triage** (#82) — every finding surfaced this session (continuity,
   setting, style, naming, structural gaps), aggregated into one de-duplicated
   list in the findings overlay. Local only — no request. Marking a finding as an

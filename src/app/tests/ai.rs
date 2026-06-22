@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 10, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 11, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -630,6 +630,37 @@ fn submission_never_touches_the_manuscript() {
         query: "Q".into(),
     }));
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #236: marketing copy ---------------------------------------------------
+
+#[test]
+fn marketing_writes_blurbs_and_taglines_off_manuscript() {
+    let (mut app, dir) = two_chapter_app("marketing");
+    let before = fs::read_to_string(dir.join("one.md")).unwrap();
+    app.apply_marketing(Ok(ai::marketing::Marketing {
+        blurbs: vec!["A locket. A reckoning.".into(), "She came home to bury a secret.".into()],
+        taglines: vec!["Some doors stay shut for a reason.".into()],
+    }));
+    let blurbs = fs::read_to_string(dir.join("marketing/blurbs.md")).unwrap();
+    assert!(blurbs.contains("## Variant 1") && blurbs.contains("## Variant 2"));
+    assert!(blurbs.contains("A reckoning"));
+    assert!(fs::read_to_string(dir.join("marketing/taglines.md")).unwrap().contains("- Some doors stay shut"));
+    assert!(app.overlay.is_some(), "summary overlay");
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn marketing_with_no_taglines_writes_only_blurbs() {
+    let (mut app, dir) = two_chapter_app("marketing-blurbs-only");
+    app.apply_marketing(Ok(ai::marketing::Marketing {
+        blurbs: vec!["Only a blurb.".into()],
+        taglines: vec![],
+    }));
+    assert!(dir.join("marketing/blurbs.md").exists());
+    assert!(!dir.join("marketing/taglines.md").exists(), "no empty taglines file");
     fs::remove_dir_all(&dir).ok();
 }
 

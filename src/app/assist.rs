@@ -10,6 +10,7 @@ use super::*;
 use std::sync::{Arc, Mutex};
 
 use crate::ai::cost;
+use crate::ai::marketing::{self, Marketing};
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
@@ -153,6 +154,7 @@ impl App {
             ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
             ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
+            ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
@@ -306,6 +308,7 @@ impl App {
             AiAction::Style => self.analyze_style(),
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
+            AiAction::Marketing => self.analyze_marketing(),
             AiAction::Triage => self.open_triage(),
         }
     }
@@ -522,6 +525,15 @@ impl App {
         self.spawn_ai("⟳ Drafting submission material…", |backend, manuscript, model| {
             let req = submission::build_request(manuscript, &model);
             Outcome::Submission(backend.complete(&req).and_then(|r| submission::parse(&r.text)))
+        });
+    }
+
+    /// Generate marketing copy (#236) — blurb variants & taglines; written to
+    /// `marketing/` by [`App::poll_ai`].
+    pub(crate) fn analyze_marketing(&mut self) {
+        self.spawn_ai("⟳ Drafting marketing copy…", |backend, manuscript, model| {
+            let req = marketing::build_request(manuscript, &model);
+            Outcome::Marketing(backend.complete(&req).and_then(|r| marketing::parse(&r.text)))
         });
     }
 
@@ -744,6 +756,7 @@ impl App {
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),
                     Outcome::Submission(r) => self.apply_submission(r),
+                    Outcome::Marketing(r) => self.apply_marketing(r),
                     Outcome::Voice(r) => self.apply_voice(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
@@ -1034,23 +1047,47 @@ impl App {
     /// Apply a submission pass: write the synopsis / blurb / query to
     /// `submission/` (conflict-reviewed like any generated file) and summarize.
     pub(crate) fn apply_submission(&mut self, result: Result<Submission, ai::AiError>) {
-        self.overlay = None;
-        let sub = match result {
-            Ok(s) => s,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
+        match result {
+            Ok(sub) => {
+                let artifacts =
+                    sub.artifacts().into_iter().map(|(k, f, t)| (k, f, t.to_string())).collect();
+                self.write_off_manuscript("Submission material", "submission", artifacts);
             }
-        };
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
+    }
+
+    /// Apply a marketing-copy pass (#236): write the blurb variants and taglines
+    /// to `marketing/`, conflict-reviewed and off-manuscript like the submission
+    /// material.
+    pub(crate) fn apply_marketing(&mut self, result: Result<Marketing, ai::AiError>) {
+        match result {
+            Ok(copy) => self.write_off_manuscript("Marketing copy", "marketing", copy.artifacts()),
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
+    }
+
+    /// Write a set of off-manuscript artifacts (#236) — `(title, filename, body)`
+    /// — under `<subdir>/`, conflict-reviewed via [`stage_bible`](App::stage_bible)
+    /// and summarized. The one writer shared by the submission and marketing passes
+    /// (and future off-manuscript copy): they differ only in `label`, `subdir`, and
+    /// what their `artifacts()` renders.
+    fn write_off_manuscript(
+        &mut self,
+        label: &str,
+        subdir: &str,
+        artifacts: Vec<(&'static str, &'static str, String)>,
+    ) {
+        self.overlay = None;
         let today = date::iso(date::today());
         let mut written = Vec::new();
         let mut conflicts = Vec::new();
         let mut failures = Vec::new();
-        for (kind, file, text) in sub.artifacts() {
-            let path = self.project.root.join("submission").join(file);
+        for (kind, file, text) in artifacts {
+            let path = self.project.root.join(subdir).join(file);
             let title = format!("title: {kind}\n");
-            match self.stage_bible(path, kind, |notes| bible::render(&title, text, notes, &today)) {
-                Staged::Wrote => written.push(format!("submission/{file}")),
+            match self.stage_bible(path, kind, |notes| bible::render(&title, &text, notes, &today)) {
+                Staged::Wrote => written.push(format!("{subdir}/{file}")),
                 Staged::Conflict(c) => conflicts.push(c),
                 Staged::Failed(msg) => failures.push(msg),
             }
@@ -1058,8 +1095,10 @@ impl App {
 
         if !failures.is_empty() {
             self.message = Some(write_failure_message(&failures));
+        } else if written.is_empty() && conflicts.is_empty() {
+            self.message = Some(format!("{label}: nothing generated"));
         } else if conflicts.is_empty() {
-            let mut lines = vec![Line::raw("Submission material written:"), Line::raw("")];
+            let mut lines = vec![Line::raw(format!("{label} written:")), Line::raw("")];
             lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
             lines.push(Line::raw(""));
             lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));

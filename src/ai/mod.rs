@@ -14,6 +14,7 @@ pub mod constrain;
 pub mod continuity;
 pub mod cost;
 pub mod incremental;
+pub mod marketing;
 #[cfg(feature = "local")]
 pub mod local;
 pub mod model_select;
@@ -97,6 +98,8 @@ pub enum Outcome {
     Style(Result<style::Style, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
+    /// Marketing copy — blurb variants & taglines (#236).
+    Marketing(Result<marketing::Marketing, AiError>),
     /// Character voice analysis — dialogue/narration consistency (#183).
     Voice(Result<voice::Voice, AiError>),
     /// A workflow generated from a plain-language description (#232).
@@ -121,6 +124,7 @@ impl Outcome {
             Outcome::Naming(r) => r.as_ref().err(),
             Outcome::Style(r) => r.as_ref().err(),
             Outcome::Submission(r) => r.as_ref().err(),
+            Outcome::Marketing(r) => r.as_ref().err(),
             Outcome::Voice(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
