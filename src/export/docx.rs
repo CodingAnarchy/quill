@@ -10,7 +10,7 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use super::{inline_runs, xml_escape, Block, Document};
+use super::{classify_block, inline_runs, xml_escape, Block, Document, Prose, SCENE_BREAK};
 use crate::frontmatter::Epigraph;
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -139,28 +139,28 @@ fn heading(title: &str, profile: Profile) -> String {
     }
 }
 
-/// One body block → a paragraph, or `None` for an empty block. A heading line
-/// (`#`…) becomes a centered bold line; otherwise a double-spaced, first-line-
-/// indented paragraph with `*`/`**` emphasis as italic/bold runs.
+/// One body block → a paragraph, or `None` for an empty block. A scene break
+/// becomes a centered divider; a heading line (`#`…) a centered bold line;
+/// otherwise a double-spaced, first-line-indented paragraph with `*`/`**`
+/// emphasis as italic/bold runs.
 fn prose_paragraph(block: &str) -> Option<String> {
-    let text = block.trim();
-    if text.is_empty() {
-        return None;
-    }
-    if let Some(heading) = text.strip_prefix('#') {
-        let heading = heading.trim_start_matches('#').trim();
-        return Some(para(
+    Some(match classify_block(block)? {
+        Prose::SceneBreak => para(
+            r#"<w:spacing w:before="120" w:after="120" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
+            run(SCENE_BREAK, false, false, None),
+        ),
+        Prose::Heading(heading) => para(
             r#"<w:spacing w:before="120" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
-            run(heading, true, false, None),
-        ));
-    }
-    // Soft-wrapped lines join into one paragraph.
-    let joined = text.split('\n').map(str::trim).collect::<Vec<_>>().join(" ");
-    let runs: String = inline_runs(&joined)
-        .into_iter()
-        .map(|(t, b, i)| run(&t, b, i, None))
-        .collect();
-    Some(para(r#"<w:ind w:firstLine="720"/>"#, runs))
+            run(&heading, true, false, None),
+        ),
+        Prose::Paragraph(text) => {
+            let runs: String = inline_runs(&text)
+                .into_iter()
+                .map(|(t, b, i)| run(&t, b, i, None))
+                .collect();
+            para(r#"<w:ind w:firstLine="720"/>"#, runs)
+        }
+    })
 }
 
 /// An epigraph as set-apart italic paragraphs (single-spaced, indented), the
@@ -260,6 +260,34 @@ mod tests {
         assert!(!xml.contains('*'), "no literal asterisks: {xml}");
         // XML special characters in the title are escaped.
         assert!(xml.contains("Red &lt;State&gt; Earth"), "title escaped");
+    }
+
+    #[test]
+    fn a_scene_break_becomes_a_centered_divider_not_literal_dashes() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: None,
+                chapters: vec![crate::export::Chapter {
+                    title: "One".into(),
+                    epigraph: None,
+                    body: "Scene one.\n\n---\n\nScene two.".into(),
+                }],
+            }],
+            back: vec![],
+        };
+        let xml = part(&to_docx(&d, Profile::Manuscript).unwrap(), "word/document.xml");
+        assert!(!xml.contains("---"), "no literal rule: {xml}");
+        // A centered `#` divider sits between the two scenes.
+        let one = xml.find("Scene one.").unwrap();
+        let hash = xml.find(r#"<w:t xml:space="preserve">#</w:t>"#).expect("# divider");
+        let two = xml.find("Scene two.").unwrap();
+        assert!(one < hash && hash < two, "divider between scenes: {xml}");
     }
 
     #[test]
