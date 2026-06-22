@@ -957,3 +957,50 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
     fs::remove_dir_all(&dir).ok();
 }
 
+
+/// Performance guard (`cargo perf`). Switching chapters in a series-sized
+/// project must stay instant: only a window is ever loaded, so a switch
+/// reads/parses one chapter file — never work proportional to the project. If a
+/// future change makes navigation re-read or re-scan other chapters, this catches
+/// it. See `docs/performance.md`.
+#[test]
+#[ignore]
+fn navigation_is_fast_in_a_series_sized_project() {
+    use std::time::Instant;
+
+    // Far past a single novel: a multi-book series' worth of chapter files.
+    let n = 600;
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-perf-nav-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let mut manifest = String::from("title = \"Series\"\n\n");
+    for i in 0..n {
+        let file = format!("ch{i}.md");
+        manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+        let mut body = String::from("# Chapter\n\n");
+        for _ in 0..40 {
+            body.push_str("The night was dark and the road was very long indeed.\n");
+        }
+        fs::write(dir.join(&file), body).unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+
+    // One untimed switch first: the first parse pays one-off allocation/CPU-ramp
+    // costs that aren't part of the steady-state per-switch cost we're guarding.
+    app.on_key(ctrl('n'));
+    let switches = 50;
+    let t = Instant::now();
+    for _ in 0..switches {
+        app.on_key(ctrl('n'));
+    }
+    let per = t.elapsed() / switches; // average over many switches smooths noise
+
+    println!("chapter switch in a {n}-chapter project = {per:?}");
+    assert!(per.as_millis() < 10, "chapter switch took {per:?}");
+    fs::remove_dir_all(&dir).ok();
+}

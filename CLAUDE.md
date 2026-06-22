@@ -95,6 +95,14 @@ What they assert:
 - `open_is_fast_for_a_large_novel` (`project.rs`) — opening reads and parses
   every chapter file once (word count + front matter); even a 150-chapter
   novel opens in a few ms.
+- `navigation_is_fast_in_a_series_sized_project` (`app/tests/chapters.rs`) —
+  switching chapters in a 600-chapter (series-sized) project reads/parses one
+  chapter file, never work proportional to the project (~0.5ms/switch).
+
+The corpus, every benchmark, its target, and the rationale are written up in
+[`docs/performance.md`](docs/performance.md) — the pre-release perf gate. Run
+`cargo perf` before a release and whenever you touch the parse, the edit path,
+rendering, or project load.
 
 If you make per-keystroke work depend on document size, the first guard will
 catch it. Keep parsing off the keystroke path (record on edit, reparse on idle
