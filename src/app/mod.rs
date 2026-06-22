@@ -770,6 +770,16 @@ impl App {
         self.open_prompt(Pending::ExCommand, ":", "", None);
     }
 
+    /// Quit, or — when there are unsaved changes — open the confirm prompt first.
+    /// Shared by Ctrl-Q and `:q`.
+    fn request_quit(&mut self) {
+        if self.edit_dirty() {
+            self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
+        } else {
+            self.should_quit = true;
+        }
+    }
+
     /// Run a typed Ex command (#207). The supported set is the file commands a
     /// Vim user reaches for first; anything else is reported, like Vim's E492.
     fn run_ex_command(&mut self, cmd: &str) {
@@ -777,13 +787,7 @@ impl App {
             "" => {} // bare `:` — nothing to do
             "w" => self.save_edit(),
             // `:q` prompts on unsaved changes, exactly as Ctrl-Q does.
-            "q" => {
-                if self.edit_dirty() {
-                    self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
-                } else {
-                    self.should_quit = true;
-                }
-            }
+            "q" => self.request_quit(),
             // Write then quit; don't quit if the write failed (buffer still dirty).
             "wq" | "x" => {
                 self.save_edit();
@@ -1060,13 +1064,7 @@ impl App {
     fn on_key_ctrl(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char('s') => self.save_edit(),
-            KeyCode::Char('q') => {
-                if self.edit_dirty() {
-                    self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
-                } else {
-                    self.should_quit = true;
-                }
-            }
+            KeyCode::Char('q') => self.request_quit(),
             KeyCode::Char('=') | KeyCode::Char('+') => {
                 self.focus_width = (self.focus_width + 4).min(160);
             }
