@@ -526,6 +526,12 @@ impl App {
         match Manuscript::open(&self.project) {
             Ok(m) => {
                 self.manuscript = Some(m);
+                // A Visual selection's anchor is a byte in the single-chapter
+                // buffer; it's meaningless against the manuscript window, so drop
+                // back to the resting mode (#205).
+                if matches!(self.mode, Mode::Visual { .. }) {
+                    self.mode = self.editing_mode();
+                }
                 self.message = Some("Continuous view".into());
             }
             // A chapter in the window couldn't be read (#154) — stay in the
@@ -1206,8 +1212,7 @@ impl App {
             'p' => self.put(true, count),
             'P' => self.put(false, count),
             // Enter Visual mode (#205): `v` characterwise, `V` linewise.
-            'v' => self.mode = Mode::Visual { anchor: self.edit_buffer().cursor_byte(), linewise: false },
-            'V' => self.mode = Mode::Visual { anchor: self.edit_buffer().cursor_byte(), linewise: true },
+            'v' | 'V' => self.mode = Mode::Visual { anchor: self.edit_buffer().cursor_byte(), linewise: c == 'V' },
             // `i`/`a` are a text-object prefix while an operator is pending,
             // otherwise they enter Insert.
             'i' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: false },
@@ -1541,11 +1546,13 @@ impl App {
         match key.code {
             KeyCode::Esc => self.mode = Mode::Normal,
             // `v` / `V` switch the selection kind, or leave Visual if already it.
-            KeyCode::Char('v') => {
-                self.mode = if linewise { Mode::Visual { anchor, linewise: false } } else { Mode::Normal };
-            }
-            KeyCode::Char('V') => {
-                self.mode = if linewise { Mode::Normal } else { Mode::Visual { anchor, linewise: true } };
+            KeyCode::Char(c @ ('v' | 'V')) => {
+                let want_line = c == 'V';
+                self.mode = if linewise == want_line {
+                    Mode::Normal
+                } else {
+                    Mode::Visual { anchor, linewise: want_line }
+                };
             }
             // `o` swaps the fixed and active ends of the selection.
             KeyCode::Char('o') => {
@@ -1690,7 +1697,10 @@ impl App {
 
 /// Whether `c` is a Normal-mode motion key — a count digit, a motion, or a
 /// multi-key motion prefix (`g`/`f`/`"`). These are the keys Visual mode forwards
-/// to the Normal handler to extend the selection.
+/// to the Normal handler to extend the selection. Keep in sync with the motion
+/// arms of [`App::on_key_normal`]; a new motion added there must be listed here
+/// to work in Visual mode too (forwarding fails safe — an omission just means the
+/// motion doesn't extend a selection, never a stray edit).
 fn is_motion_key(c: char) -> bool {
     c.is_ascii_digit()
         || matches!(

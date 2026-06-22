@@ -365,6 +365,17 @@ fn esc_cancels_visual_and_o_swaps_ends() {
 }
 
 #[test]
+fn entering_continuous_view_leaves_visual() {
+    let (mut app, dir) = vim_app("vim-v-continuous");
+    app.on_key(key(KeyCode::Char('v')));
+    assert!(matches!(app.mode, Mode::Visual { .. }));
+    app.on_key(ctrl('l')); // toggle the continuous view
+    assert!(app.manuscript.is_some(), "entered the continuous view");
+    assert!(matches!(app.mode, Mode::Normal), "Visual's stale anchor is dropped");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn modeless_default_is_unchanged_when_vim_is_off() {
     let (mut app, dir) = two_chapter_app("vim-off");
     app.vim = false;

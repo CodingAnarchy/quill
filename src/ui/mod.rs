@@ -693,19 +693,20 @@ impl Pane for StatusBar<'_> {
 
         // Vim mode (#27): a chip at the far left naming the editing mode. Only
         // while actually in the editor (not browsing or editing a metadata field).
-        let mode_chip = app.vim.then(|| {
-            let (label, bg) = match app.mode {
-                Mode::Insert => ("INSERT", Color::Green),
-                Mode::Visual { linewise: false, .. } => ("VISUAL", Color::Magenta),
-                Mode::Visual { linewise: true, .. } => ("VISUAL LINE", Color::Magenta),
-                Mode::Normal => ("NORMAL", Color::Blue),
-                _ => return None, // not in the editor (browsing, prompt, …)
-            };
-            Some(Span::styled(
+        let mode_chip = match app.mode {
+            _ if !app.vim => None, // Vim mode off: no chip
+            Mode::Insert => Some(("INSERT", Color::Green)),
+            Mode::Visual { linewise: false, .. } => Some(("VISUAL", Color::Magenta)),
+            Mode::Visual { linewise: true, .. } => Some(("VISUAL LINE", Color::Magenta)),
+            Mode::Normal => Some(("NORMAL", Color::Blue)),
+            _ => None, // not in the editor (browsing, prompt, …)
+        }
+        .map(|(label, bg)| {
+            Span::styled(
                 format!(" {label} "),
                 Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD),
-            ))
-        }).flatten();
+            )
+        });
         let chip_w = mode_chip.as_ref().map_or(0, |s| s.content.chars().count());
 
         let pad = (area.width as usize)
