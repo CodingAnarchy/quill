@@ -990,13 +990,15 @@ fn navigation_is_fast_in_a_series_sized_project() {
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
 
-    app.on_key(ctrl('n')); // warm
+    // One untimed switch first: the first parse pays one-off allocation/CPU-ramp
+    // costs that aren't part of the steady-state per-switch cost we're guarding.
+    app.on_key(ctrl('n'));
     let switches = 50;
     let t = Instant::now();
     for _ in 0..switches {
         app.on_key(ctrl('n'));
     }
-    let per = t.elapsed() / switches;
+    let per = t.elapsed() / switches; // average over many switches smooths noise
 
     println!("chapter switch in a {n}-chapter project = {per:?}");
     assert!(per.as_millis() < 10, "chapter switch took {per:?}");
