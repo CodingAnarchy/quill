@@ -134,8 +134,18 @@ Normal-mode motions:
   occurrence, `F` / `T` backward, and `;` / `,` repeat it forward / back.
 - **Counts** — a number repeats a motion: `5j`, `3w`, `2fx`.
 
-Operators, registers, Visual mode, search, and an Ex command line are arriving
-incrementally (see the roadmap).
+Normal-mode editing:
+
+- **Operators** — `d` (delete) and `c` (change) compose with any motion
+  (`dw`, `d$`, `c3w`, `dG`) and with text objects (`diw`/`daw`, `ci"`, `di(`);
+  `dd`/`cc` act on whole lines, `D`/`C` to end of line, with counts (`2dd`).
+  `c` leaves you in Insert.
+- **Delete a character** — `x` (with a count, `3x`).
+- **Undo / redo** — `u` undoes; `Ctrl-y` redoes (sharing Quill's undo history).
+
+Vim editing commands run in the single-chapter view; in the continuous view
+(Ctrl-L) they're held back, like undo. Registers (yank/put), Visual mode,
+search, and an Ex command line are arriving incrementally (see the roadmap).
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
 (moved to `unused/`), **J / K** move the selection down / up, **s** cycle status

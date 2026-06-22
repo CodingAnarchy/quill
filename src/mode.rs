@@ -91,10 +91,17 @@ pub enum Mode {
 pub struct VimState {
     /// Digits typed as a count prefix (`5` in `5j`); `None` when none is pending.
     pub(crate) count: Option<usize>,
-    /// A multi-key command awaiting another key (`g…`, or an `f`/`t` target).
+    /// A multi-key command awaiting another key (`g…`, an `f`/`t` target, or an
+    /// `i`/`a` text-object id while an operator is pending).
     pub(crate) pending: VimPending,
     /// The last `f`/`t`/`F`/`T` motion, replayed by `;` / `,`.
     pub(crate) last_find: Option<Find>,
+    /// A pending operator (`d`/`c`) and its count, awaiting a motion or text
+    /// object (`dw`, `ci"`, …).
+    pub(crate) op: Option<(Op, usize)>,
+    /// The unnamed register — text from the last delete / change, and whether it
+    /// was linewise. Named registers arrive with #204.
+    pub(crate) register: Option<Yank>,
 }
 
 /// A Vim Normal-mode command waiting on its next keystroke.
@@ -106,6 +113,25 @@ pub(crate) enum VimPending {
     G,
     /// `f`/`t`/`F`/`T` seen — awaiting the target character.
     Find(FindKind),
+    /// `i` / `a` seen with an operator pending — awaiting the text-object id
+    /// (`w`, `"`, `(`, …); `around` is the `a` form.
+    Object { around: bool },
+}
+
+/// A Vim operator (#203): delete leaves Normal mode, change enters Insert.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Op {
+    Delete,
+    Change,
+}
+
+/// Text captured by a delete / change / yank. Recorded now; the put command
+/// that reads it back arrives with #204.
+#[allow(dead_code)] // `text`/`linewise` are consumed by put (#204)
+pub(crate) struct Yank {
+    pub(crate) text: String,
+    /// Whole-line text (from `dd`/`cc`/linewise motions), put on its own lines.
+    pub(crate) linewise: bool,
 }
 
 /// A recorded find-char motion, so `;` / `,` can replay it.

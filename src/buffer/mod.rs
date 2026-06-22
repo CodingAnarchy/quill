@@ -41,6 +41,19 @@ impl FindKind {
     }
 }
 
+/// A Vim text object (#203) the operators `d`/`c` act on — `iw`/`aw`,
+/// `i"`/`a"`, `i(`/`a(`, etc. The `around` flag (inner vs. a-) is passed
+/// separately to [`Buffer::text_object`].
+#[derive(Clone, Copy)]
+pub enum TextObject {
+    /// `w`: the word (or whitespace run) under the cursor.
+    Word,
+    /// `"` / `'` / `` ` ``: text between a pair of that quote on the line.
+    Quote(char),
+    /// `(` `)` `[` `]` `{` `}` `<` `>`: the enclosing matched pair.
+    Pair(char, char),
+}
+
 /// Vim's character classes for word motions: a word is a run of word-characters
 /// or a run of punctuation, separated by whitespace.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -531,13 +544,15 @@ impl Buffer {
         self.move_first_non_blank();
     }
 
-    /// Jump to the last line with content — Vim's `G`. A buffer ending in a
-    /// newline has an empty trailing line; this targets the line before it, the
-    /// way Vim treats a trailing newline.
-    pub fn move_to_last_line(&mut self) {
+    /// The line index Vim's `G` targets — the last line with content (skipping a
+    /// trailing newline's empty line).
+    pub fn last_line_index(&self) -> usize {
         let n = self.line_count();
-        let last = if n > 1 && self.line(n - 1).is_empty() { n - 2 } else { n - 1 };
-        self.move_to_line(last);
+        if n > 1 && self.line(n - 1).is_empty() {
+            n - 2
+        } else {
+            n - 1
+        }
     }
 
     /// Move to the start of the next word — Vim's `w`. A word is a run of
@@ -638,6 +653,148 @@ impl Buffer {
     fn grapheme_index(&self, items: &[(usize, CharClass)]) -> usize {
         let byte = self.cursor_byte();
         items.iter().position(|&(b, _)| b >= byte).unwrap_or(items.len())
+    }
+
+    // --- Operator support (#203) -------------------------------------------
+
+    /// Total byte length of the document.
+    pub fn len_bytes(&self) -> usize {
+        self.rope.len_bytes()
+    }
+
+    /// The byte just past the grapheme starting at `byte` — so an inclusive
+    /// motion or `x` can cover the grapheme the cursor is on. Clamped to the end.
+    pub fn grapheme_after(&self, byte: usize) -> usize {
+        let text = self.rope.to_string();
+        text[byte.min(text.len())..]
+            .grapheme_indices(true)
+            .nth(1)
+            .map_or(text.len(), |(b, _)| byte + b)
+    }
+
+    /// The text in byte range `[start, end)` — what an operator records to the
+    /// register before deleting it.
+    pub fn byte_slice(&self, start: usize, end: usize) -> String {
+        let len = self.rope.len_bytes();
+        let (start, end) = (start.min(len), end.min(len));
+        if start >= end {
+            return String::new();
+        }
+        self.rope.byte_slice(start..end).to_string()
+    }
+
+    /// The byte range of a text object around the cursor (#203) — `inner` is the
+    /// content, the `around` form includes the delimiters / trailing whitespace.
+    /// `None` when there's no such object here.
+    pub fn text_object(&self, object: TextObject, around: bool) -> Option<(usize, usize)> {
+        match object {
+            TextObject::Word => self.word_object(around),
+            TextObject::Quote(q) => self.quote_object(q, around),
+            TextObject::Pair(open, close) => self.pair_object(open, close, around),
+        }
+    }
+
+    /// `iw` / `aw`: the run of same-class graphemes under the cursor; `aw` also
+    /// takes the trailing whitespace (or leading, when there's none trailing).
+    fn word_object(&self, around: bool) -> Option<(usize, usize)> {
+        let items = self.classes();
+        if items.is_empty() {
+            return None;
+        }
+        let cur = self.grapheme_index(&items).min(items.len() - 1);
+        let class = items[cur].1;
+        let mut start = cur;
+        while start > 0 && items[start - 1].1 == class {
+            start -= 1;
+        }
+        let mut end = cur; // last grapheme index of the run
+        while end + 1 < items.len() && items[end + 1].1 == class {
+            end += 1;
+        }
+        let mut start_b = items[start].0;
+        let mut end_b = items.get(end + 1).map_or_else(|| self.len_bytes(), |&(b, _)| b);
+        if around {
+            let mut e = end + 1;
+            if items.get(e).is_some_and(|&(_, c)| c == CharClass::Space) {
+                while items.get(e).is_some_and(|&(_, c)| c == CharClass::Space) {
+                    e += 1;
+                }
+                end_b = items.get(e).map_or_else(|| self.len_bytes(), |&(b, _)| b);
+            } else {
+                while start > 0 && items[start - 1].1 == CharClass::Space {
+                    start -= 1;
+                }
+                start_b = items[start].0;
+            }
+        }
+        Some((start_b, end_b))
+    }
+
+    /// `i"` / `a"` (and `'`, `` ` ``): the text between the pair of quotes on the
+    /// current line that the cursor is at or before.
+    fn quote_object(&self, quote: char, around: bool) -> Option<(usize, usize)> {
+        let line = self.line(self.cursor.line);
+        let base = self.line_start_byte(self.cursor.line);
+        let marks: Vec<usize> = line
+            .grapheme_indices(true)
+            .filter(|(_, g)| g.starts_with(quote))
+            .map(|(b, _)| b)
+            .collect();
+        let cur = col_to_byte(&line, self.cursor.col);
+        for pair in marks.chunks(2) {
+            let [open, close] = *pair else { break };
+            if cur <= close {
+                return Some(if around {
+                    (base + open, base + close + quote.len_utf8())
+                } else {
+                    (base + open + quote.len_utf8(), base + close)
+                });
+            }
+        }
+        None
+    }
+
+    /// `i(` / `a(` (and the other bracket pairs): the enclosing matched pair,
+    /// honoring nesting, searched across the whole buffer.
+    fn pair_object(&self, open: char, close: char, around: bool) -> Option<(usize, usize)> {
+        let text = self.rope.to_string();
+        let cur = self.cursor_byte().min(text.len());
+        // Walk back to the unmatched open bracket enclosing the cursor.
+        let mut depth = 0usize;
+        let mut open_b = None;
+        for (b, ch) in text[..=cur.min(text.len().saturating_sub(1))].char_indices().rev() {
+            if ch == close && b != cur {
+                depth += 1;
+            } else if ch == open {
+                if depth == 0 {
+                    open_b = Some(b);
+                    break;
+                }
+                depth -= 1;
+            }
+        }
+        let open_b = open_b?;
+        // Walk forward to its matching close.
+        depth = 0;
+        let mut close_b = None;
+        for (b, ch) in text[open_b + open.len_utf8()..].char_indices() {
+            let b = open_b + open.len_utf8() + b;
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                if depth == 0 {
+                    close_b = Some(b);
+                    break;
+                }
+                depth -= 1;
+            }
+        }
+        let close_b = close_b?;
+        Some(if around {
+            (open_b, close_b + close.len_utf8())
+        } else {
+            (open_b + open.len_utf8(), close_b)
+        })
     }
 
     // --- Stats -------------------------------------------------------------
@@ -789,7 +946,7 @@ mod tests {
         b.move_to_line(1);
         assert_eq!(b.cursor.line, 1);
         // G targets the last line with content, not the empty trailing line.
-        b.move_to_last_line();
+        b.move_to_line(b.last_line_index());
         assert_eq!(b.cursor.line, 2, "G skips the trailing newline's empty line");
     }
 
@@ -812,6 +969,27 @@ mod tests {
         assert_eq!(b.cursor.col, 10, "2f- reaches the second '-'");
         b.find_char('z', FindKind::FindFwd, 1);
         assert_eq!(b.cursor.col, 10, "a missing target doesn't move");
+    }
+
+    #[test]
+    fn text_objects_cover_words_quotes_and_pairs() {
+        // Word object: inner is the word, around takes the trailing space.
+        let mut b = Buffer::from_text("the quick fox");
+        b.cursor = Cursor { line: 0, col: 5 }; // inside "quick"
+        assert_eq!(b.text_object(TextObject::Word, false), Some((4, 9)));
+        assert_eq!(b.text_object(TextObject::Word, true), Some((4, 10)), "aw takes the trailing space");
+
+        // Quote object on the line.
+        let mut b = Buffer::from_text("say \"hello\" now");
+        b.cursor = Cursor { line: 0, col: 6 }; // inside the quotes
+        assert_eq!(b.text_object(TextObject::Quote('"'), false), Some((5, 10)), "i\" is the inside");
+        assert_eq!(b.text_object(TextObject::Quote('"'), true), Some((4, 11)), "a\" includes the quotes");
+
+        // Bracket pair with nesting.
+        let mut b = Buffer::from_text("f(a, g(b), c)");
+        b.cursor = Cursor { line: 0, col: 3 }; // inside the outer parens
+        assert_eq!(b.text_object(TextObject::Pair('(', ')'), false), Some((2, 12)), "i( spans to the matching close");
+        assert_eq!(b.text_object(TextObject::Pair('(', ')'), true), Some((1, 13)), "a( includes the parens");
     }
 
     #[test]

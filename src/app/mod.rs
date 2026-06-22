@@ -17,14 +17,15 @@ use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::setting::{self, Setting};
 use crate::analysis;
-use crate::buffer::{self, Buffer, FindKind};
+use crate::buffer::{self, Buffer, FindKind, TextObject};
 use crate::date;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
     BibleConflict, BibleReview, Command, Find, Finding, Findings, GitAction, MetaEdit, MetaField,
-    Mode, Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles, VimPending, VimState,
+    Mode, Op, Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles, VimPending, VimState,
+    Yank,
 };
 use crate::project::{Manifest, Project};
 use crate::report::{self, Momentum, PartDelta};
@@ -1069,6 +1070,8 @@ impl App {
             }
 
             // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
+            // (Vim's redo, Ctrl-r, is taken by the progress report; in Vim mode
+            // `u` undoes and Ctrl-y redoes.)
             KeyCode::Char('z') => self.history_step(false),
             KeyCode::Char('y') => self.history_step(true),
             // Find (#144). Ctrl-f opens the query; from there `r` starts a replace.
@@ -1127,10 +1130,11 @@ impl App {
             VimPending::G => {
                 self.vim_state.pending = VimPending::None;
                 if c == 'g' {
-                    let raw = self.vim_state.count.take();
-                    self.goto_line_or(raw, |b| b.move_to_line(0)); // gg → first line (or {count}gg)
+                    let target = self.vim_state.count.take().map_or(0, |n| n.saturating_sub(1));
+                    self.goto_line(target); // gg → first line (or {count}gg); operator-aware
                 } else {
                     self.vim_state.count = None; // an unknown `g_` aborts
+                    self.vim_state.op = None;
                 }
                 return;
             }
@@ -1138,7 +1142,13 @@ impl App {
                 self.vim_state.pending = VimPending::None;
                 let count = self.take_count();
                 self.vim_state.last_find = Some(Find { kind, target: c });
-                self.edit_move(move |b| b.find_char(c, kind, count));
+                // f/t are inclusive; charwise() moves or operates (dfx) as needed.
+                self.charwise(1, true, move |b| b.find_char(c, kind, count));
+                return;
+            }
+            VimPending::Object { around } => {
+                self.vim_state.pending = VimPending::None;
+                self.apply_text_object(c, around);
                 return;
             }
             VimPending::None => {}
@@ -1153,7 +1163,8 @@ impl App {
             return;
         }
 
-        // Commands that await another key keep the count pending.
+        // Commands that await another key keep the count (and any operator)
+        // pending.
         let prefix = match c {
             'g' => Some(VimPending::G),
             'f' => Some(VimPending::Find(FindKind::FindFwd)),
@@ -1171,7 +1182,13 @@ impl App {
         let raw = self.vim_state.count.take();
         let count = raw.unwrap_or(1);
         match c {
-            // Enter Insert mode (count-repeat of inserts is a later child).
+            // Operators: `d`/`c` await a motion or text object; a repeated
+            // operator (`dd`/`cc`) acts linewise on the current line(s).
+            'd' | 'c' => self.operator(if c == 'd' { Op::Delete } else { Op::Change }, count),
+            // `i`/`a` are a text-object prefix while an operator is pending,
+            // otherwise they enter Insert.
+            'i' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: false },
+            'a' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: true },
             'i' => self.mode = Mode::Insert,
             // Append: after the cursor's grapheme, but never past the line end.
             'a' => {
@@ -1193,30 +1210,229 @@ impl App {
             'o' => self.open_line(false),
             'O' => self.open_line(true),
 
-            // Character motions.
-            'h' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_left)),
-            'l' | ' ' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_right)),
-            'k' => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_up)),
-            'j' => self.vim_repeat(count, |s| s.edit_move_wrapped(Buffer::move_down)),
+            // Single-key edits.
+            'x' => self.delete_chars(count),
+            'D' => self.delete_to_line_end(Op::Delete),
+            'C' => self.delete_to_line_end(Op::Change),
+            'u' => self.history_step(false),
 
-            // Word motions.
-            'w' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_word_forward)),
-            'b' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_word_backward)),
-            'e' => self.vim_repeat(count, |s| s.edit_move(Buffer::move_word_end)),
+            // Character motions (charwise: move, or an operator range).
+            'h' => self.charwise(count, false, Buffer::move_left),
+            'l' | ' ' => self.charwise(count, false, Buffer::move_right),
+
+            // Word motions; `cw` acts like `ce` (to the word end), as in Vim.
+            'w' if matches!(self.vim_state.op, Some((Op::Change, _))) => {
+                self.charwise(count, true, Buffer::move_word_end);
+            }
+            'w' => self.charwise(count, false, Buffer::move_word_forward),
+            'b' => self.charwise(count, false, Buffer::move_word_backward),
+            'e' => self.charwise(count, true, Buffer::move_word_end),
 
             // Line motions.
-            '0' => self.edit_move(Buffer::move_line_start),
-            '^' => self.edit_move(Buffer::move_first_non_blank),
-            '$' => self.edit_move(Buffer::move_line_end),
+            '0' => self.charwise(1, false, Buffer::move_line_start),
+            '^' => self.charwise(1, false, Buffer::move_first_non_blank),
+            '$' => self.charwise(1, true, Buffer::move_line_end),
 
-            // Document motion: `G` to the counted line, else the last line.
-            'G' => self.goto_line_or(raw, Buffer::move_to_last_line),
+            // Linewise vertical motions (`j`/`k`) and document jump (`G`).
+            'j' => self.vertical(count, true),
+            'k' => self.vertical(count, false),
+            'G' => {
+                let target = raw.map_or_else(|| self.edit_buffer().last_line_index(), |n| n.saturating_sub(1));
+                self.goto_line(target);
+            }
 
             // Repeat the last find: `;` same direction, `,` reversed.
             ';' => self.repeat_find(count, false),
             ',' => self.repeat_find(count, true),
 
-            _ => {}
+            // Anything else cancels a dangling operator.
+            _ => self.vim_state.op = None,
+        }
+    }
+
+    /// `d` / `c`: begin an operator awaiting a motion, or — when the same
+    /// operator is already pending (`dd`/`cc`) — act linewise on the current
+    /// line(s). `count` is this keypress's count.
+    fn operator(&mut self, op: Op, count: usize) {
+        match self.vim_state.op.take() {
+            Some((pending, opc)) => {
+                if pending == op {
+                    let lines = opc.saturating_mul(count).max(1);
+                    let cur = self.edit_buffer().cursor.line;
+                    self.operate_linewise(op, cur, cur + lines - 1);
+                }
+                // A mismatched operator (`dc`) just cancels.
+            }
+            None => self.vim_state.op = Some((op, count)),
+        }
+    }
+
+    /// Resolve an `i`/`a` text object (`diw`, `ci"`, …) and apply the pending
+    /// operator to its range.
+    fn apply_text_object(&mut self, id: char, around: bool) {
+        let object = match id {
+            'w' => Some(TextObject::Word),
+            '"' | '\'' | '`' => Some(TextObject::Quote(id)),
+            '(' | ')' | 'b' => Some(TextObject::Pair('(', ')')),
+            '[' | ']' => Some(TextObject::Pair('[', ']')),
+            '{' | '}' | 'B' => Some(TextObject::Pair('{', '}')),
+            '<' | '>' => Some(TextObject::Pair('<', '>')),
+            _ => None,
+        };
+        match (object, self.vim_state.op.take()) {
+            (Some(object), Some((op, _))) => {
+                if let Some((lo, hi)) = self.edit_buffer().text_object(object, around) {
+                    self.operate_charwise(op, lo, hi);
+                }
+            }
+            _ => self.vim_state.op = None, // an unknown object cancels
+        }
+    }
+
+    /// A charwise motion: move the cursor, or — when an operator is pending —
+    /// delete/change the span from the cursor to where the motion lands.
+    /// `inclusive` covers the landing grapheme (Vim's `e`, `$`, `f`, `t`).
+    fn charwise(&mut self, count: usize, inclusive: bool, step: impl Fn(&mut Buffer)) {
+        if let Some((op, opc)) = self.vim_state.op.take() {
+            let n = count.saturating_mul(opc);
+            let (lo, hi) = {
+                let buf = self.edit_buffer_mut();
+                let start = buf.cursor_byte();
+                let saved = buf.cursor;
+                for _ in 0..n {
+                    step(buf);
+                }
+                let target = buf.cursor_byte();
+                buf.cursor = saved;
+                let hi = start.max(target);
+                (start.min(target), if inclusive { buf.grapheme_after(hi) } else { hi })
+            };
+            self.operate_charwise(op, lo, hi);
+        } else {
+            self.edit_move(move |b| {
+                for _ in 0..count {
+                    step(b);
+                }
+            });
+        }
+    }
+
+    /// A linewise vertical motion (`j`/`k`): move by visual rows, or — with an
+    /// operator pending — delete/change whole lines.
+    fn vertical(&mut self, count: usize, down: bool) {
+        if let Some((op, opc)) = self.vim_state.op.take() {
+            let n = count.saturating_mul(opc);
+            let cur = self.edit_buffer().cursor.line;
+            let other = if down { cur + n } else { cur.saturating_sub(n) };
+            self.operate_linewise(op, cur.min(other), cur.max(other));
+        } else {
+            let mv = if down { Buffer::move_down } else { Buffer::move_up };
+            self.vim_repeat(count, move |s| s.edit_move_wrapped(mv));
+        }
+    }
+
+    /// Jump to `target` (0-based line): move the cursor, or — with an operator
+    /// pending (`dG`, `dgg`) — act linewise over the lines between.
+    fn goto_line(&mut self, target: usize) {
+        if let Some((op, _)) = self.vim_state.op.take() {
+            let cur = self.edit_buffer().cursor.line;
+            self.operate_linewise(op, cur.min(target), cur.max(target));
+        } else {
+            self.edit_move(move |b| b.move_to_line(target));
+        }
+    }
+
+    /// `D` / `C`: delete (or change) from the cursor to the end of the line.
+    fn delete_to_line_end(&mut self, op: Op) {
+        let buf = self.edit_buffer();
+        let lo = buf.cursor_byte();
+        let hi = buf.line_start_byte(buf.cursor.line) + buf.line(buf.cursor.line).len();
+        self.operate_charwise(op, lo, hi);
+    }
+
+    /// `x`: delete `count` graphemes from under the cursor, never past the line.
+    fn delete_chars(&mut self, count: usize) {
+        let (lo, hi) = {
+            let buf = self.edit_buffer();
+            let lo = buf.cursor_byte();
+            let line_end = buf.line_start_byte(buf.cursor.line) + buf.line(buf.cursor.line).len();
+            let mut hi = lo;
+            for _ in 0..count {
+                hi = buf.grapheme_after(hi).min(line_end);
+            }
+            (lo, hi)
+        };
+        self.operate_charwise(Op::Delete, lo, hi);
+    }
+
+    /// Apply a charwise operator to byte range `[lo, hi)`: record the text in the
+    /// unnamed register, delete it, and for a change enter Insert mode.
+    fn operate_charwise(&mut self, op: Op, lo: usize, hi: usize) {
+        if self.guard_vim_edit() {
+            return;
+        }
+        if lo < hi {
+            let buf = self.edit_buffer_mut();
+            let text = buf.byte_slice(lo, hi);
+            buf.replace_byte_range(lo, hi, "");
+            self.vim_state.register = Some(Yank { text, linewise: false });
+            self.cache_focus_words();
+        }
+        if op == Op::Change {
+            self.mode = Mode::Insert;
+        }
+    }
+
+    /// Apply a linewise operator to the inclusive line range `[first, last]`:
+    /// delete the whole lines (`dd`), or for a change clear them to one blank
+    /// line and enter Insert.
+    fn operate_linewise(&mut self, op: Op, first: usize, last: usize) {
+        if self.guard_vim_edit() {
+            return;
+        }
+        let text = {
+            let buf = self.edit_buffer_mut();
+            let last = last.min(buf.line_count().saturating_sub(1));
+            let start = buf.line_start_byte(first);
+            match op {
+                Op::Delete => {
+                    let end = if last + 1 < buf.line_count() {
+                        buf.line_start_byte(last + 1)
+                    } else {
+                        buf.len_bytes()
+                    };
+                    let text = buf.byte_slice(start, end);
+                    buf.replace_byte_range(start, end, "");
+                    text
+                }
+                Op::Change => {
+                    // Clear the lines' content but keep one line to type on.
+                    let content_end = buf.line_start_byte(last) + buf.line(last).len();
+                    let mut text = buf.byte_slice(start, content_end);
+                    text.push('\n');
+                    buf.replace_byte_range(start, content_end, "");
+                    text
+                }
+            }
+        };
+        self.vim_state.register = Some(Yank { text, linewise: true });
+        self.edit_move(move |b| b.move_to_line(first));
+        self.cache_focus_words();
+        if op == Op::Change {
+            self.edit_move(Buffer::move_line_start);
+            self.mode = Mode::Insert;
+        }
+    }
+
+    /// Vim editing commands need the per-chapter buffer; like undo (#145), they're
+    /// guarded out of the continuous view, whose segment bookkeeping a raw range
+    /// edit would desync. Returns whether the command was blocked.
+    fn guard_vim_edit(&mut self) -> bool {
+        if self.manuscript.is_some() {
+            self.message = Some("Editing commands aren't available in the continuous view — Ctrl-l to return.".into());
+            true
+        } else {
+            false
         }
     }
 
@@ -1233,7 +1449,9 @@ impl App {
             KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
             _ => {} // Esc and the rest: the count is already cleared above.
         }
+        // Esc (or any non-motion key) also cancels a pending operator / command.
         self.vim_state.pending = VimPending::None;
+        self.vim_state.op = None;
     }
 
     /// Take the pending count, defaulting to 1, and clear it.
@@ -1248,22 +1466,16 @@ impl App {
         }
     }
 
-    /// Jump to the `{count}`-th (1-based) line, or run `fallback` when no count
-    /// was given — the shared core of `gg` (fallback: first line) and `G`
-    /// (fallback: last line). `raw` is the already-taken pending count.
-    fn goto_line_or(&mut self, raw: Option<usize>, fallback: impl FnOnce(&mut Buffer)) {
-        match raw {
-            Some(n) => self.edit_move(move |b| b.move_to_line(n.saturating_sub(1))),
-            None => self.edit_move(fallback),
-        }
-    }
-
     /// Replay the last `f`/`t`/`F`/`T`, in its own direction (`reverse == false`)
-    /// or the opposite — Vim's `;` and `,`.
+    /// or the opposite — Vim's `;` and `,`. Operator-aware, so `d;` works.
     fn repeat_find(&mut self, count: usize, reverse: bool) {
-        let Some(find) = self.vim_state.last_find else { return };
+        let Some(find) = self.vim_state.last_find else {
+            self.vim_state.op = None;
+            return;
+        };
         let kind = if reverse { find.kind.reversed() } else { find.kind };
-        self.edit_move(move |b| b.find_char(find.target, kind, count));
+        let target = find.target;
+        self.charwise(1, true, move |b| b.find_char(target, kind, count));
     }
 
     /// Vim `o` / `O`: open a blank line below (`above == false`) or above the
