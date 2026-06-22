@@ -84,6 +84,9 @@ The palette actions:
   `marketing/` (`blurbs.md`, `taglines.md`). Off-manuscript and conflict-reviewed
   like the submission material; the author edits and regenerates freely. The first
   of the indie-marketing features (epic #104).
+- **Social posts** (#237) — ready-to-post promo copy shaped to each platform's
+  conventions (X / Facebook / Instagram), written to `marketing/social/` (one file
+  per platform). Off-manuscript and conflict-reviewed; edit and regenerate freely.
 - **Revision triage** (#82) — every finding surfaced this session (continuity,
   setting, style, naming, structural gaps), aggregated into one de-duplicated
   list in the findings overlay. Local only — no request. Marking a finding as an

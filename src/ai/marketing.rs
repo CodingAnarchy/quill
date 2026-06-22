@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{numbered_sections, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// A round of marketing copy: several blurb variants and several taglines.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -24,12 +24,7 @@ impl Marketing {
     /// the blurb variants as numbered sections, the taglines as a bullet list.
     /// Skips an artifact with no content so an empty round writes no empty file.
     pub fn artifacts(&self) -> Vec<(&'static str, &'static str, String)> {
-        let blurbs: String = self
-            .blurbs
-            .iter()
-            .enumerate()
-            .map(|(i, b)| format!("## Variant {}\n\n{}\n\n", i + 1, b.trim()))
-            .collect();
+        let blurbs = numbered_sections("Variant", &self.blurbs);
         let taglines: String = self.taglines.iter().map(|t| format!("- {}\n", t.trim())).collect();
         [("Back-cover blurbs", "blurbs.md", blurbs), ("Taglines", "taglines.md", taglines)]
             .into_iter()
