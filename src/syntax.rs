@@ -232,7 +232,6 @@ fn collect(
 /// setext uniform.
 fn heading_info(node: &Node, read: &impl Fn(usize, usize) -> String) -> Heading {
     let raw = read(node.start_byte(), node.end_byte());
-    let raw = raw.as_str();
     if node.kind() == "setext_heading" {
         // "Title\n===" (level 1) or "Title\n---" (level 2).
         let mut lines = raw.lines();
