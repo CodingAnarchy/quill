@@ -584,6 +584,9 @@ pub(crate) enum Pending {
     ConfirmScene,
     /// y/N: restore the current chapter to its last committed version (#135).
     ConfirmRestore,
+    /// Crash recovery (#263): unsaved work from a previous session was found.
+    /// `y`/`r` restores it, `d` discards the sidecar, Esc keeps it for later.
+    ConfirmRecovery,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).

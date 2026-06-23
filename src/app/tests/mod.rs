@@ -11,6 +11,7 @@ mod ai;
 mod chapters;
 mod editing;
 mod panes;
+mod recovery;
 mod vcs;
 mod vim;
 mod workflows;
