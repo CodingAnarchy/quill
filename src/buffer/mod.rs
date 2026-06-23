@@ -917,6 +917,48 @@ mod tests {
         fs::read_to_string(path).unwrap()
     }
 
+    // --- Data-path resilience (#264) ---------------------------------------
+
+    #[test]
+    fn from_path_surfaces_a_read_error_rather_than_panicking() {
+        // A path that exists but is a directory: `read_to_string` fails with a
+        // non-NotFound error, which must surface as `Err`, not a panic and not a
+        // silently-empty buffer (which a later save would write over the dir).
+        // The name carries an extension so `with_default_extension` leaves it be
+        // and the resolved path really is the directory.
+        let dir = temp_path("from-path-is-a-dir.md");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let result = Buffer::from_path(&dir);
+        assert!(result.is_err(), "opening a directory as a file should error");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_failed_save_keeps_the_buffer_dirty_and_re_savable() {
+        // Point the buffer at an existing directory so the write fails; the
+        // unsaved content must remain (dirty stays true), so a later save to a
+        // good path still works.
+        let dir = temp_path("save-onto-a-dir");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut b = Buffer::from_text("precious unsaved words");
+        b.path = Some(dir.clone());
+        b.dirty = true;
+        assert!(b.save().is_err(), "writing onto a directory should error");
+        assert!(b.dirty, "a failed save must leave the buffer dirty");
+
+        // Re-savable to a real file, with the content intact.
+        let good = temp_path("save-onto-a-dir-good.md");
+        b.path = Some(good.clone());
+        b.save().expect("the buffer should still save to a valid path");
+        assert_eq!(read(&good), "precious unsaved words\n");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&good).ok();
+    }
+
     // --- Vim motions (#202) ------------------------------------------------
 
     #[test]
