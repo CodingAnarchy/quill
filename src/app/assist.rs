@@ -130,6 +130,51 @@ fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Ba
     Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
 }
 
+/// Shown when the local *image* backend is selected but wasn't compiled in (#240).
+const LOCAL_IMAGE_UNAVAILABLE: &str =
+    "local image backend isn't in this build — rebuild Quill with `--features local`, or set `backend = \"remote\"` under [image]";
+
+/// A resolved image-backend choice, built on the worker thread (#238/#240) so a
+/// heavy local model load can't block the UI — mirroring [`BackendSpec`].
+enum ImageBackendSpec {
+    /// The remote fal.ai backend, with its API key.
+    Remote(String),
+    /// The local Stable-Diffusion backend, sharing `App`'s cache slot so the
+    /// loaded model is reused across requests.
+    Local(Arc<Mutex<Option<Arc<dyn ImageBackend>>>>),
+}
+
+impl ImageBackendSpec {
+    /// Build (or fetch the cached) image backend. Runs on the worker thread.
+    fn build(self) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
+        match self {
+            ImageBackendSpec::Remote(key) => Ok(Arc::new(FalBackend::new(key))),
+            ImageBackendSpec::Local(slot) => build_local_image(slot),
+        }
+    }
+}
+
+/// Load the local image model once and cache it in the shared slot (#240).
+#[cfg(feature = "local")]
+fn build_local_image(
+    slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
+) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
+    let mut guard = slot.lock().map_err(|_| ai::AiError::Api("image model lock poisoned".into()))?;
+    if let Some(backend) = guard.as_ref() {
+        return Ok(backend.clone());
+    }
+    let backend: Arc<dyn ImageBackend> = Arc::new(ai::local_image::LocalImageBackend::load()?);
+    *guard = Some(backend.clone());
+    Ok(backend)
+}
+
+#[cfg(not(feature = "local"))]
+fn build_local_image(
+    _slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
+) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
+    Err(ai::AiError::NotConfigured(LOCAL_IMAGE_UNAVAILABLE.into()))
+}
+
 /// Where a persistent-bible tracker keeps its prior bible, for the incremental
 /// cache (#90).
 enum BibleSource {
@@ -225,9 +270,10 @@ impl App {
         match action {
             // Triage is local aggregation — it works with the AI backend off.
             Action::Ai(AiAction::Triage) => None,
-            // Image generation has its own opt-in / key, separate from the text AI.
+            // Image generation has its own opt-in / key, separate from the text AI
+            // (and its own "local not compiled" fail-fast).
             Action::Ai(AiAction::Portrait | AiAction::Scene) => {
-                self.image.check_ready().err().map(|e| e.to_string())
+                self.image_backend_spec().err().map(|e| e.to_string())
             }
             Action::Ai(_) => self.ai.check_ready().err().map(|e| e.to_string()),
             // Export compiles per-chapter files; the continuous view holds an
@@ -597,7 +643,7 @@ impl App {
     /// Begin a character-portrait pass (#238): gate on image readiness and the
     /// character bible, then confirm before spending (each image is billed).
     pub(crate) fn start_portrait(&mut self) {
-        if let Err(e) = self.image.check_ready() {
+        if let Err(e) = self.image_backend_spec() {
             self.message = Some(e.to_string());
             return;
         }
@@ -638,17 +684,22 @@ impl App {
             self.message = Some("An AI request is already in flight…".into());
             return;
         }
-        let Some(key) = self.image.resolved_key().map(str::to_string) else {
-            self.message = Some("No image API key configured".into());
-            return;
+        // Resolve the backend choice on the UI thread (gating + fail-fast for an
+        // uncompiled local model); the heavy local load happens on the worker.
+        let spec = match self.image_backend_spec() {
+            Ok(spec) => spec,
+            Err(e) => {
+                self.message = Some(e.to_string());
+                return;
+            }
         };
         let model = self.image.model.clone();
         let dir = self.project.root.join(subdir);
-        // The remote backend is trivial to construct, so we build it here and move
-        // it into the worker. The local image model (#240) is heavy and will need
-        // the build-on-worker + cached-slot pattern the text `BackendSpec` uses.
-        let backend: Box<dyn ImageBackend> = Box::new(FalBackend::new(key));
         self.ai_task.spawn(move || {
+            let backend = match spec.build() {
+                Ok(b) => b,
+                Err(e) => return Outcome::Image(Err(e)),
+            };
             let mut report = ImageReport::default();
             for (slug, label, prompt) in targets {
                 match backend.generate(&ImageRequest { prompt, model: model.clone() }) {
@@ -665,6 +716,28 @@ impl App {
             Outcome::Image(Ok(report))
         });
         self.message = Some(message.to_string());
+    }
+
+    /// Resolve the configured image backend (#238/#240) for building on the worker:
+    /// gate on readiness, supply the remote key, or fail fast when the local model
+    /// is selected but not compiled in.
+    fn image_backend_spec(&self) -> Result<ImageBackendSpec, ai::AiError> {
+        self.image.check_ready()?;
+        Ok(match self.image.backend() {
+            ai::image::ImageBackendKind::Remote => {
+                let key = self
+                    .image
+                    .resolved_key()
+                    .ok_or_else(|| ai::AiError::NotConfigured("no image API key".into()))?;
+                ImageBackendSpec::Remote(key.to_string())
+            }
+            ai::image::ImageBackendKind::Local => {
+                if cfg!(not(feature = "local")) {
+                    return Err(ai::AiError::NotConfigured(LOCAL_IMAGE_UNAVAILABLE.into()));
+                }
+                ImageBackendSpec::Local(self.image_backend.clone())
+            }
+        })
     }
 
     /// The portrait targets — `(slug, name, prompt)` per character in the bible,
@@ -698,7 +771,7 @@ impl App {
     /// Begin a scene-illustration pass (#239): gate on image readiness and the
     /// active chapter having text, then confirm before spending.
     pub(crate) fn start_scene(&mut self) {
-        if let Err(e) = self.image.check_ready() {
+        if let Err(e) = self.image_backend_spec() {
             self.message = Some(e.to_string());
             return;
         }

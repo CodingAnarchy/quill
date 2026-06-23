@@ -138,6 +138,9 @@ pub struct App {
     /// stays empty when the Claude backend is used. Type-erased so it needs no
     /// `local`-feature cfg here.
     local_backend: Arc<Mutex<Option<Arc<dyn Backend>>>>,
+    /// Cached local image model (#240), loaded once on first use and reused;
+    /// empty for the remote image backend. Type-erased like `local_backend`.
+    image_backend: Arc<Mutex<Option<Arc<dyn ai::image::ImageBackend>>>>,
     /// Continuity findings waiting to be shown — stashed while a timeline
     /// conflict is resolved first, then opened by [`App::open_findings`].
     pending_findings: Vec<Finding>,
@@ -206,6 +209,7 @@ impl App {
             ai_task: Task::idle(),
             vc_task: Task::idle(),
             local_backend: Arc::new(Mutex::new(None)),
+            image_backend: Arc::new(Mutex::new(None)),
             pending_findings: Vec::new(),
             triage: Vec::new(),
             pending_pass: None,

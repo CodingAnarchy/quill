@@ -10,6 +10,14 @@
 //! recommendation to the author is #87.
 #![allow(dead_code)]
 
+/// The best candle device this machine offers — Metal, then CUDA, then CPU. The
+/// two local backends (text #124 and image #240) share this probe.
+#[cfg(feature = "local")]
+pub fn best_device() -> candle_core::Device {
+    use candle_core::Device;
+    Device::new_metal(0).or_else(|_| Device::new_cuda(0)).unwrap_or(Device::Cpu)
+}
+
 /// Whether the machine has a GPU accelerator candle can use, or is CPU-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Accel {

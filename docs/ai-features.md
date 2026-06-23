@@ -33,8 +33,10 @@ refresh_after_changes = 5      # rebuild a bible fully once this many chapters c
 
 [image]                          # image generation (#238) — its own opt-in & key
 enabled = true                   # off by default
-model = "fal-ai/flux/schnell"    # a fal.ai model id
-# api_key = "..."                # or set FAL_KEY (env wins)
+backend = "remote"               # "remote" (fal.ai) or "local" (on-device SD, #240)
+offline = false                  # true forces the local backend
+model = "fal-ai/flux/schnell"    # a fal.ai model id (remote backend)
+# api_key = "..."                # or set FAL_KEY (env wins); remote backend only
 ```
 
 Image generation (#238) is a separate opt-in with its own `[image]` section and
@@ -43,6 +45,15 @@ billed per image. Its opt-in and key are separate from the text `[ai]` settings;
 the portrait action is gated on image readiness and reachable from the run-action
 menu (Ctrl-K) even with text AI off (the AI palette itself opens only when text AI
 is on).
+
+**Image backends** (#240): the default `remote` backend calls fal.ai (needs a key,
+billed per image). The `local` backend runs an on-device Stable-Diffusion model
+with candle — no key, no per-image cost, nothing leaves the machine — and
+`offline = true` forces it. Like the text local backend, it's a build-time opt-in:
+a standard build is remote-only, and selecting `local` without `--features local`
+tells you to rebuild. Both satisfy the same image-backend trait, so portraits and
+scenes work against either; the local model loads once on first use (off the UI
+thread) and downloads its weights via `hf-hub` (cached outside the project).
 
 The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
 never from the project directory. **Backends:** the default `claude` backend sends
