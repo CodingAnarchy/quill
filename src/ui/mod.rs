@@ -12,8 +12,8 @@ use ratatui::{
 use crate::app::App;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::mode::{
-    BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, ProjectBrowser, RefFiles, Search,
-    SearchStage,
+    BibleReview, DirBrowser, Findings, Mode, Overlay, OverlayKind, Palette, ProjectBrowser,
+    RefFiles, Search, SearchStage,
 };
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
@@ -61,6 +61,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::ProjectBrowser(browser) = &app.mode {
         draw_project_browser(frame, area, browser, &app.project.root);
+        return;
+    }
+    if let Mode::DirBrowser(browser) = &app.mode {
+        draw_dir_browser(frame, area, browser);
         return;
     }
 
@@ -282,7 +286,27 @@ fn draw_project_browser(frame: &mut Frame, area: Rect, browser: &ProjectBrowser,
             Span::styled(format!("  — {}", p.path.display()), Style::default().fg(Color::DarkGray)),
         ])
     });
-    draw_list_overlay(frame, area, " Projects ", "Projects — ↑↓ move · enter open · esc cancel", rows);
+    draw_list_overlay(frame, area, " Projects ", "Projects — ↑↓ move · enter open · b browse files · esc cancel", rows);
+}
+
+/// Render the filesystem navigator (#271): the current directory's subfolders,
+/// with `..` to go up and Quill projects marked as openable.
+fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrowser) {
+    let rows = browser.entries.iter().enumerate().map(|(i, e)| {
+        let tag = if e.is_project {
+            "  (project — enter opens)"
+        } else if e.is_parent {
+            "  (up)"
+        } else {
+            "/"
+        };
+        Line::from(Span::styled(
+            format!("{}{}{tag}", marker(i == browser.selected), e.label),
+            row_style(i == browser.selected),
+        ))
+    });
+    let title = format!(" {} ", browser.cwd.display());
+    draw_list_overlay(frame, area, &title, "Browse — ↑↓ move · enter open/into · ← up · esc cancel", rows);
 }
 
 /// Render the findings as a navigable triage list.

@@ -2,7 +2,7 @@
 //! editor-mode types live in [`crate::mode`].
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use similar::{ChangeTag, TextDiff};
@@ -23,9 +23,9 @@ use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleConflict, BibleReview, Command, Find, Finding, Findings, GitAction, MetaEdit, MetaField,
-    Mode, Op, Overlay, Palette, PaletteItem, Pending, ProjectBrowser, PromptState, RefFiles,
-    VimPending, VimState, Yank,
+    BibleConflict, BibleReview, Command, DirBrowser, DirEntry, Find, Finding, Findings, GitAction,
+    MetaEdit, MetaField, Mode, Op, Overlay, Palette, PaletteItem, Pending, ProjectBrowser,
+    PromptState, RefFiles, VimPending, VimState, Yank,
 };
 use crate::project::{Manifest, Project};
 use crate::recent;
@@ -525,6 +525,7 @@ impl App {
             Mode::Search(_) => self.on_key_search(key),
             Mode::RefFiles(_) => self.on_key_reffiles(key),
             Mode::ProjectBrowser(_) => self.on_key_project_browser(key),
+            Mode::DirBrowser(_) => self.on_key_dir_browser(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
             Mode::Visual { .. } => self.on_key_visual(key),
@@ -831,16 +832,14 @@ impl App {
     /// Open the project browser over the recently-opened projects (newest first).
     /// Empty until at least one project has been opened.
     fn open_project_browser(&mut self) {
+        // Always open, even with no recents — `b` (browse) must be reachable so a
+        // first-time author can still find a project on disk (#271).
         let projects = recent::list();
-        if projects.is_empty() {
-            self.message = Some("No recent projects yet — opened projects show up here.".into());
-            return;
-        }
         self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser { projects, selected: 0 }));
     }
 
     /// Navigate the project browser (#270): arrows move, Enter switches to the
-    /// selected project, Esc returns to editing.
+    /// selected project, `b` browses the filesystem (#271), Esc returns to editing.
     fn on_key_project_browser(&mut self, key: KeyEvent) {
         let Mode::ProjectBrowser(state) = &mut self.mode else {
             return;
@@ -851,8 +850,102 @@ impl App {
         }
         match key.code {
             KeyCode::Enter => {
-                let target = state.projects[state.selected].path.clone();
-                self.request_switch(target);
+                if let Some(p) = state.projects.get(state.selected) {
+                    let target = p.path.clone();
+                    self.request_switch(target);
+                }
+            }
+            KeyCode::Char('b') => self.open_dir_browser(),
+            KeyCode::Esc => self.mode = self.editing_mode(),
+            _ => {}
+        }
+    }
+
+    // --- Filesystem navigator (#271) --------------------------------------
+
+    /// Open the directory navigator to find a project that isn't in the recent
+    /// list. Starts beside the current project (its parent directory), where
+    /// sibling books most likely live.
+    fn open_dir_browser(&mut self) {
+        let start = self.browse_start_dir();
+        self.browse_into(start);
+    }
+
+    /// A sensible directory to start browsing from: the parent of the current
+    /// project (sibling projects), falling back to the working directory.
+    fn browse_start_dir(&self) -> PathBuf {
+        let root = self.project.root.canonicalize().unwrap_or_else(|_| self.project.root.clone());
+        root.parent()
+            .map(Path::to_path_buf)
+            .filter(|p| p.is_dir())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    /// Show `dir` in the directory navigator. An unreadable directory (e.g.
+    /// permission denied) surfaces a clear message and leaves the current view
+    /// in place, rather than failing silently or crashing (#264/#271).
+    fn browse_into(&mut self, dir: PathBuf) {
+        match Self::dir_entries(&dir) {
+            Ok(entries) => self.mode = Mode::DirBrowser(Box::new(DirBrowser { cwd: dir, entries, selected: 0 })),
+            Err(e) => self.message = Some(format!("Can't open {}: {e}", dir.display())),
+        }
+    }
+
+    /// The navigable rows for `dir`: a `..` parent entry (unless at the root),
+    /// then its subdirectories sorted by name (hidden ones skipped), each flagged
+    /// as a project if it holds a `book.toml`.
+    fn dir_entries(dir: &Path) -> std::io::Result<Vec<DirEntry>> {
+        let mut entries = Vec::new();
+        if let Some(parent) = dir.parent() {
+            entries.push(DirEntry {
+                label: "..".into(),
+                path: parent.to_path_buf(),
+                is_project: false,
+                is_parent: true,
+            });
+        }
+        let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir)?
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .map(|e| e.path())
+            .filter(|p| !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')))
+            .collect();
+        subdirs.sort();
+        for path in subdirs {
+            let label = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let is_project = Project::manifest_path(&path).exists();
+            entries.push(DirEntry { label, path, is_project, is_parent: false });
+        }
+        Ok(entries)
+    }
+
+    /// Navigate the directory browser (#271): arrows move; Enter opens a project
+    /// or descends into a folder (`..` goes up); Left/Backspace go up; Esc exits.
+    fn on_key_dir_browser(&mut self, key: KeyEvent) {
+        let Mode::DirBrowser(state) = &mut self.mode else {
+            return;
+        };
+        if let Some(s) = assist::list_move(state.selected, state.entries.len(), key.code) {
+            state.selected = s;
+            return;
+        }
+        match key.code {
+            KeyCode::Enter => {
+                let Some(entry) = state.entries.get(state.selected) else {
+                    return;
+                };
+                let path = entry.path.clone();
+                if entry.is_project {
+                    self.request_switch(path);
+                } else {
+                    self.browse_into(path); // `..` or a plain subdirectory
+                }
+            }
+            KeyCode::Left | KeyCode::Backspace => {
+                if let Some(parent) = state.cwd.parent().map(Path::to_path_buf) {
+                    self.browse_into(parent);
+                }
             }
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
