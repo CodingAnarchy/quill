@@ -267,6 +267,7 @@ impl Action {
         Action::Ai(AiAction::Naming),
         Action::Ai(AiAction::Style),
         Action::Ai(AiAction::Brainstorm),
+        Action::Ai(AiAction::DraftCharacters),
         Action::Ai(AiAction::Voice),
         Action::Ai(AiAction::Submission),
         Action::Ai(AiAction::Marketing),
@@ -295,6 +296,7 @@ impl Action {
             Action::Ai(AiAction::Naming) => "ai:naming",
             Action::Ai(AiAction::Style) => "ai:style",
             Action::Ai(AiAction::Brainstorm) => "ai:brainstorm",
+            Action::Ai(AiAction::DraftCharacters) => "ai:draft-characters",
             Action::Ai(AiAction::Voice) => "ai:voice",
             Action::Ai(AiAction::Submission) => "ai:submission",
             Action::Ai(AiAction::Marketing) => "ai:marketing",
@@ -323,6 +325,7 @@ impl Action {
             Action::Ai(AiAction::Naming) => "AI · Name & term consistency",
             Action::Ai(AiAction::Style) => "AI · Prose & style",
             Action::Ai(AiAction::Brainstorm) => "AI · Brainstorm ideas",
+            Action::Ai(AiAction::DraftCharacters) => "AI · Draft characters",
             Action::Ai(AiAction::Voice) => "AI · Character voice",
             Action::Ai(AiAction::Submission) => "AI · Submission material",
             Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
@@ -377,6 +380,8 @@ pub(crate) enum AiAction {
     Style,
     /// Brainstorm story ideas from a premise — generative, off-manuscript (#255).
     Brainstorm,
+    /// Draft a starter character cast from a concept — generative (#256).
+    DraftCharacters,
     /// Character voice consistency — dialogue & POV/narration (#183).
     Voice,
     Submission,
@@ -575,6 +580,8 @@ pub(crate) enum Pending {
     ExCommand,
     /// Text input: a premise / idea to brainstorm story ideas from (#255).
     Brainstorm,
+    /// Text input: a concept to draft a starter character cast from (#256).
+    DraftCharacters,
     /// Text input: a plain-language description of a workflow to generate (#232).
     DescribeWorkflow,
     /// Text input: confirm or edit the name for the workflow the AI proposed

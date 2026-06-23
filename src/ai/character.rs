@@ -184,6 +184,30 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
     }
 }
 
+const CONCEPT_SYSTEM: &str = "You are a story-bible assistant helping an author \
+start a novel from a concept, before any draft exists. From the concept or \
+premise, INVENT a small starter cast of distinct, plausible characters who could \
+populate this story. For each, draft a profile: name, physical traits, an \
+actionable voice profile (speech patterns, vocabulary/register, verbal tics, \
+sentence rhythm), personality, relationships, goals, and a short arc sketch — a \
+few beats labeled by story phase (e.g. \"Opening\", \"Midpoint\", \"Climax\") \
+since there are no chapters yet. These are first-draft suggestions the author will \
+reshape, not canon. Do NOT write prose or scenes. Leave `drift` empty — there's no \
+manuscript to contradict.";
+
+/// Build a generative request (#256): draft a starter cast from a concept /
+/// premise (no manuscript), into the same schema the extractive pass returns.
+pub fn build_concept_request(concept: &str, model: &str) -> Request {
+    Request {
+        system: Some(CONCEPT_SYSTEM.to_string()),
+        cached_context: format!("Concept / premise:\n{concept}"),
+        user: "Draft the starter character profiles as specified.".to_string(),
+        model: model.to_string(),
+        max_tokens: MAX_OUTPUT_TOKENS,
+        json_schema: Some(schema()),
+    }
+}
+
 const REVISE_SYSTEM: &str = "You are a story-bible assistant maintaining an \
 existing character bible. You are given the current bible (built from the whole \
 manuscript) and only the chapters that have changed since. Revise the bible: \
@@ -326,6 +350,14 @@ mod tests {
     #[test]
     fn parse_rejects_bad_json() {
         assert!(matches!(parse("not json"), Err(AiError::Api(_))));
+    }
+
+    #[test]
+    fn concept_request_carries_the_concept_not_a_manuscript() {
+        let req = build_concept_request("a heist on a generation ship", "claude-opus-4-8");
+        assert!(req.cached_context.contains("generation ship"));
+        assert!(req.system.as_deref().unwrap().contains("INVENT"), "asks to invent, not extract");
+        assert!(req.json_schema.is_some(), "same schema as the extractive pass");
     }
 
     #[test]
