@@ -1273,7 +1273,9 @@ impl App {
             }
         };
         if chars.is_empty() {
-            self.message = Some("No characters found.".into());
+            // Shared by the extractive pass (#74) and the generative draft (#256),
+            // so phrase it for both: nothing extracted / nothing drafted.
+            self.message = Some("No character profiles produced.".into());
             return;
         }
         for c in &mut chars {
