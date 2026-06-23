@@ -135,6 +135,27 @@ pub fn portrait_prompt(name: &str, description: &str) -> String {
     prompt
 }
 
+/// Build the image prompt for a key-scene illustration (#239) from the active
+/// chapter: the book + chapter titles, a scene excerpt, and the setting bible for
+/// visual consistency. Kept pure for testing.
+pub fn scene_prompt(book: &str, chapter: &str, excerpt: &str, setting: &str) -> String {
+    let mut prompt = format!("An illustration of a scene from the novel \"{book}\", in the chapter \"{chapter}\".");
+    let excerpt = excerpt.trim();
+    if !excerpt.is_empty() {
+        prompt.push_str(" Scene: ");
+        prompt.push_str(excerpt);
+    }
+    let setting = setting.trim();
+    if !setting.is_empty() {
+        prompt.push_str(" Setting, for visual consistency: ");
+        prompt.push_str(setting);
+    }
+    prompt.push_str(
+        " Cinematic, atmospheric, book-cover illustration style; no text or lettering in the image.",
+    );
+    prompt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +190,21 @@ mod tests {
     fn portrait_prompt_tolerates_an_empty_description() {
         let p = portrait_prompt("Mara", "  ");
         assert!(p.contains("Mara") && p.contains("portrait"));
+    }
+
+    #[test]
+    fn scene_prompt_includes_titles_excerpt_and_setting() {
+        let p = scene_prompt("Red State", "The Find", "Mara opens the locket", "a coastal town");
+        assert!(p.contains("Red State") && p.contains("The Find"));
+        assert!(p.contains("Mara opens the locket"));
+        assert!(p.contains("coastal town"));
+    }
+
+    #[test]
+    fn scene_prompt_omits_empty_sections() {
+        let p = scene_prompt("Book", "Ch", "  ", "");
+        assert!(p.contains("Book") && p.contains("illustration"));
+        assert!(!p.contains("Scene:") && !p.contains("Setting"));
     }
 
     #[test]

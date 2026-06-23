@@ -259,6 +259,7 @@ impl Action {
         Action::Ai(AiAction::Marketing),
         Action::Ai(AiAction::Social),
         Action::Ai(AiAction::Portrait),
+        Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
     ];
 
@@ -285,6 +286,7 @@ impl Action {
             Action::Ai(AiAction::Marketing) => "ai:marketing",
             Action::Ai(AiAction::Social) => "ai:social",
             Action::Ai(AiAction::Portrait) => "ai:portrait",
+            Action::Ai(AiAction::Scene) => "ai:scene",
             Action::Ai(AiAction::Triage) => "triage",
         }
     }
@@ -311,6 +313,7 @@ impl Action {
             Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
             Action::Ai(AiAction::Social) => "AI · Social posts",
             Action::Ai(AiAction::Portrait) => "AI · Character portraits",
+            Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
         }
     }
@@ -366,6 +369,8 @@ pub(crate) enum AiAction {
     Social,
     /// Character portrait images from the character bible (#238).
     Portrait,
+    /// A key-scene illustration of the active chapter (#239).
+    Scene,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
 }
@@ -543,6 +548,8 @@ pub(crate) enum Pending {
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,
+    /// y/N: generate a scene illustration of the active chapter (#239).
+    ConfirmScene,
     /// y/N: restore the current chapter to its last committed version (#135).
     ConfirmRestore,
     /// Text input: the remote URL to back the project up to (#134).
