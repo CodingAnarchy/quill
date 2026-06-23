@@ -30,6 +30,14 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let mut f = File::create(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
+        // Test-only seam (#265): simulate a crash *after* the temp is fully
+        // written but *before* the rename — the case that distinguishes an
+        // atomic save (target untouched) from a truncate-then-write (target
+        // already destroyed). Production builds compile this out entirely.
+        #[cfg(test)]
+        if fail_point::should_fail_before_rename() {
+            return Err(io::Error::other("injected pre-rename failure"));
+        }
         fs::rename(&tmp, path)
     })();
     if let Err(e) = staged {
@@ -64,6 +72,31 @@ fn temp_path(path: &Path) -> PathBuf {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "quill".into());
     parent(path).join(format!(".{name}.{}.tmp", std::process::id()))
+}
+
+/// Test-only fault injection for [`write`] (#265). One-shot and thread-local, so
+/// the data-path suite can simulate a crash mid-save without touching the
+/// filesystem's permissions, and parallel tests can't perturb each other.
+/// Compiled out of production builds.
+#[cfg(test)]
+pub(crate) mod fail_point {
+    use std::cell::Cell;
+
+    thread_local! {
+        static FAIL_BEFORE_RENAME: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Arm a one-shot failure that fires inside the next [`super::write`] on this
+    /// thread, after the temp file is written but before the rename.
+    pub(crate) fn arm_pre_rename_failure() {
+        FAIL_BEFORE_RENAME.with(|f| f.set(true));
+    }
+
+    /// Whether the current write should fail before its rename, consuming the
+    /// armed flag (so it fires exactly once).
+    pub(crate) fn should_fail_before_rename() -> bool {
+        FAIL_BEFORE_RENAME.with(|f| f.replace(false))
+    }
 }
 
 #[cfg(test)]

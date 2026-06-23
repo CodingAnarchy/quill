@@ -39,6 +39,11 @@ hf-hub = { version = "0.4", optional = true }
 # PNG encoding for the local image backend (#240) — only needed with `local`.
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 
+[dev-dependencies]
+# Property / round-trip and adversarial-input testing for the data path (#265).
+# Dev-only — never built into the shipped editor.
+proptest = "1"
+
 [features]
 local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub", "dep:image"]
 

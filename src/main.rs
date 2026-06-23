@@ -9,6 +9,8 @@ mod app;
 mod atomic;
 mod buffer;
 mod config;
+#[cfg(test)]
+mod datapath_tests;
 mod date;
 mod export;
 mod frontmatter;
