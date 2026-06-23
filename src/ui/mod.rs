@@ -11,7 +11,10 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
-use crate::mode::{BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, RefFiles, Search, SearchStage};
+use crate::mode::{
+    BibleReview, Findings, Mode, Overlay, OverlayKind, Palette, ProjectBrowser, RefFiles, Search,
+    SearchStage,
+};
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
@@ -54,6 +57,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::Palette(palette) = &app.mode {
         draw_palette(frame, area, palette);
+        return;
+    }
+    if let Mode::ProjectBrowser(browser) = &app.mode {
+        draw_project_browser(frame, area, browser, &app.project.root);
         return;
     }
 
@@ -261,6 +268,21 @@ fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
     let rebuild = if palette.title == "AI" { " · R rebuild bible (full)" } else { "" };
     let help = format!("{} — ↑↓ move · enter run{rebuild} · esc close", palette.title);
     draw_list_overlay(frame, area, &title, &help, rows);
+}
+
+/// Render the recently-opened projects as a navigable list (#270). The
+/// currently-open project is marked, and each row shows the title over its path.
+fn draw_project_browser(frame: &mut Frame, area: Rect, browser: &ProjectBrowser, current: &std::path::Path) {
+    let current = current.canonicalize();
+    let rows = browser.projects.iter().enumerate().map(|(i, p)| {
+        let here = current.as_ref().map(|c| c == &p.path).unwrap_or(false);
+        let tag = if here { "  (open)" } else { "" };
+        Line::from(vec![
+            Span::styled(format!("{}{}{tag}", marker(i == browser.selected), p.title), row_style(i == browser.selected)),
+            Span::styled(format!("  — {}", p.path.display()), Style::default().fg(Color::DarkGray)),
+        ])
+    });
+    draw_list_overlay(frame, area, " Projects ", "Projects — ↑↓ move · enter open · esc cancel", rows);
 }
 
 /// Render the findings as a navigable triage list.

@@ -160,6 +160,7 @@ byte-for-byte.
 | Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), or Vellum (`.docx`) → `export/` |
 | Ctrl-K         | run action: one menu for save, export, the reports, and the AI passes (unavailable ones say why) |
 | Ctrl-X         | run workflow: pick one of your defined action sequences and run it |
+| Ctrl-B         | browse projects: switch to a recently-opened project (saves the current first) |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
