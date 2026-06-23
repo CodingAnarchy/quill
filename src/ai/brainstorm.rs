@@ -67,19 +67,10 @@ pub fn parse(text: &str) -> Result<Brainstorm, AiError> {
 /// `notes`, via [`bible::render`]. `today` is the generation date.
 pub fn render(b: &Brainstorm, notes: &str, today: &str) -> String {
     let mut body = String::new();
-    let section = |body: &mut String, heading: &str, items: &[String]| {
-        if !items.is_empty() {
-            body.push_str(&format!("## {heading}\n"));
-            for item in items {
-                body.push_str(&format!("- {item}\n"));
-            }
-            body.push('\n');
-        }
-    };
-    section(&mut body, "Premises", &b.premises);
-    section(&mut body, "What if", &b.what_ifs);
-    section(&mut body, "Themes", &b.themes);
-    section(&mut body, "Central conflicts", &b.conflicts);
+    bible::bullet_section(&mut body, "Premises", &b.premises);
+    bible::bullet_section(&mut body, "What if", &b.what_ifs);
+    bible::bullet_section(&mut body, "Themes", &b.themes);
+    bible::bullet_section(&mut body, "Central conflicts", &b.conflicts);
     bible::render("title: Brainstorm\n", &body, notes, today)
 }
 

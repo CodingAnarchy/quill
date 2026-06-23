@@ -488,7 +488,7 @@ fn brainstorm_writes_an_off_manuscript_doc() {
 #[test]
 fn brainstorm_action_opens_a_premise_prompt() {
     let (mut app, dir) = two_chapter_app("brainstorm-prompt");
-    app.run_ai_action(ai_action_brainstorm(), false);
+    app.run_ai_action(crate::mode::AiAction::Brainstorm, false);
     assert!(matches!(app.mode, Mode::Prompt(_)), "asks for a premise");
     fs::remove_dir_all(&dir).ok();
 }
@@ -502,10 +502,6 @@ fn empty_premise_sends_nothing() {
     app.brainstorm("   ");
     assert!(!app.ai_task.is_busy(), "an empty premise sends no request");
     fs::remove_dir_all(&dir).ok();
-}
-
-fn ai_action_brainstorm() -> crate::mode::AiAction {
-    crate::mode::AiAction::Brainstorm
 }
 
 // --- AI: prose & style ------------------------------------------------------
