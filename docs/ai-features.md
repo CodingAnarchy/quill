@@ -117,10 +117,13 @@ The palette actions:
   the cost confirm reflects the count (each image is billed). Its own `[image]`
   opt-in + key (separate from the text `[ai]` settings). Needs the character pass
   to have run first.
-- **Scene illustration** (#239) — an illustration of the active chapter, built from
-  a scene excerpt plus the setting bible (for visual consistency), via the same
-  image backend, saved to `marketing/images/scenes/`. Off-manuscript; confirms
-  before generating (billed per image).
+- **Scene illustration** (#239, #247) — an illustration of the active chapter, via
+  the same image backend, saved to `marketing/images/scenes/`. When the text AI is
+  configured, a read-only pass first distills a **visual brief** of the chapter's
+  most pivotal, depictable moment (setting, subjects, composition, mood) and uses
+  that as the image prompt — off-manuscript, never the author's prose; otherwise it
+  falls back to a prose excerpt + the setting bible. Confirms before generating
+  (billed per image).
 - **Revision triage** (#82) — every finding surfaced this session (continuity,
   setting, style, naming, structural gaps), aggregated into one de-duplicated
   list in the findings overlay. Local only — no request. Marking a finding as an

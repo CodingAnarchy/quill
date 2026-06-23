@@ -24,6 +24,7 @@ pub mod local;
 pub mod model_select;
 pub mod naming;
 pub mod scaffold;
+pub mod scene_brief;
 pub mod setting;
 pub mod social;
 pub mod style;
