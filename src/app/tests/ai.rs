@@ -735,19 +735,66 @@ fn portrait_pass_needs_the_character_bible() {
 }
 
 #[test]
-fn portrait_pass_confirms_before_spending() {
-    let (mut app, dir) = two_chapter_app("portrait-confirm");
+fn portrait_pass_opens_a_character_picker() {
+    let (mut app, dir) = two_chapter_app("portrait-picker");
     image_on(&mut app);
     write_character(&dir, "mara", "Mara");
     write_character(&dir, "tomas", "Tomas");
     app.start_portrait();
     match &app.mode {
-        Mode::Prompt(p) => {
-            assert!(p.label.contains("2 character portraits"), "counts the cast: {}", p.label);
-            assert!(p.label.contains("fal.ai") && p.label.contains("billed"), "{}", p.label);
+        // "All characters (2)" plus one item per character (#244).
+        Mode::Palette(p) => {
+            assert_eq!(p.title, "Character portrait");
+            assert_eq!(p.items.len(), 3);
+            assert!(p.items[0].label.contains("All characters (2)"), "{}", p.items[0].label);
         }
-        _ => panic!("expected the cost confirm before generating"),
+        _ => panic!("expected the character picker"),
     }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn picking_all_confirms_the_whole_cast() {
+    let (mut app, dir) = two_chapter_app("portrait-all");
+    image_on(&mut app);
+    write_character(&dir, "mara", "Mara");
+    write_character(&dir, "tomas", "Tomas");
+    app.confirm_portraits(crate::mode::PortraitChoice::All);
+    match &app.mode {
+        Mode::Prompt(p) => assert!(p.label.contains("2 character portraits"), "{}", p.label),
+        _ => panic!("expected the cost confirm"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn picking_one_confirms_and_generates_only_that_character() {
+    let (mut app, dir) = two_chapter_app("portrait-one");
+    image_on(&mut app);
+    write_character(&dir, "mara", "Mara");
+    write_character(&dir, "tomas", "Tomas");
+    // Sorted by file: mara.md (0), tomas.md (1) → pick the second.
+    app.confirm_portraits(crate::mode::PortraitChoice::One(1));
+    match &app.mode {
+        Mode::Prompt(p) => assert!(p.label.contains("1 character portrait"), "{}", p.label),
+        _ => panic!("expected the cost confirm"),
+    }
+    // Only the one picked target is staged, so generation won't touch the others.
+    let pending = app.pending_portraits.as_ref().expect("a selection is staged");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, "tomas", "the picked slug");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn cancelling_the_portrait_confirm_discards_the_selection() {
+    let (mut app, dir) = two_chapter_app("portrait-cancel");
+    image_on(&mut app);
+    write_character(&dir, "mara", "Mara");
+    app.confirm_portraits(crate::mode::PortraitChoice::All);
+    assert!(app.pending_portraits.is_some());
+    app.on_key(key(KeyCode::Esc)); // decline the confirm
+    assert!(app.pending_portraits.is_none(), "the staged selection is dropped");
     fs::remove_dir_all(&dir).ok();
 }
 

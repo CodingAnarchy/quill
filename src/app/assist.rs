@@ -20,7 +20,7 @@ use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::ai::voice;
 use crate::ai::workflow_gen::{self, GeneratedWorkflow};
-use crate::mode::{Action, AiAction, Command, Palette, PaletteItem};
+use crate::mode::{Action, AiAction, Command, Palette, PaletteItem, PortraitChoice};
 use crate::text::count_matches;
 
 /// The cost decision for starting a network AI action (#82): either run it now,
@@ -331,6 +331,7 @@ impl App {
                     Some(Command::Run(a)) => self.run_action(a, force),
                     Some(Command::RunWorkflow(i)) => self.run_workflow(i),
                     Some(Command::NewWorkflowFromPrompt) => self.start_describe_workflow(),
+                    Some(Command::Portrait(c)) => self.confirm_portraits(c),
                     None => {}
                 }
             }
@@ -641,34 +642,61 @@ impl App {
     }
 
     /// Begin a character-portrait pass (#238): gate on image readiness and the
-    /// character bible, then confirm before spending (each image is billed).
+    /// character bible, then open the picker so the author chooses which
+    /// character(s) to generate (#244).
     pub(crate) fn start_portrait(&mut self) {
         if let Err(e) = self.image_backend_spec() {
             self.message = Some(e.to_string());
             return;
         }
-        let n = self.character_portrait_targets().len();
-        if n == 0 {
+        let targets = self.character_portrait_targets();
+        if targets.is_empty() {
             self.message = Some("Run the character pass first to build the character bible".into());
             return;
         }
-        // The busy guard lives at the spawn site (`generate_portraits`); the task
-        // can't become busy between opening this confirm and the y/N answer.
+        // Lead with "all", then one item per character. The choice carries the
+        // index; the targets are recomputed (stable order) when it's confirmed.
+        let mut items = vec![PaletteItem {
+            label: format!("All characters ({})", targets.len()),
+            desc: "a portrait for every character".into(),
+            command: Command::Portrait(PortraitChoice::All),
+        }];
+        items.extend(targets.iter().enumerate().map(|(i, (_, name, _))| PaletteItem {
+            label: name.clone(),
+            desc: "a portrait for this character".into(),
+            command: Command::Portrait(PortraitChoice::One(i)),
+        }));
+        self.mode = Mode::Palette(Box::new(Palette { title: "Character portrait", items, selected: 0 }));
+    }
+
+    /// Confirm the picked portrait selection (#244) before spending: stash the
+    /// chosen targets and open the cost confirm, whose count reflects the choice.
+    pub(crate) fn confirm_portraits(&mut self, choice: PortraitChoice) {
+        let targets = self.character_portrait_targets();
+        let selected = match choice {
+            PortraitChoice::All => targets,
+            PortraitChoice::One(i) => targets.into_iter().nth(i).map(|t| vec![t]).unwrap_or_default(),
+        };
+        if selected.is_empty() {
+            return;
+        }
+        let n = selected.len();
         let plural = if n == 1 { "" } else { "s" };
         let label = format!(
             "Generate {n} character portrait{plural} via fal.ai ({}) — each image is billed. Run? (y/N)",
             self.image.model,
         );
+        self.pending_portraits = Some(selected);
         self.open_prompt(Pending::ConfirmPortraits, label, "", None);
     }
 
-    /// Generate the character portraits off the UI thread (#238): one image per
-    /// bible character, saved under `marketing/images/characters/`. Confirmed by
-    /// [`start_portrait`](App::start_portrait) first. The result is applied by
-    /// [`poll_ai`](App::poll_ai).
+    /// Generate the picked character portraits off the UI thread (#238/#244),
+    /// saved under `marketing/images/characters/`. The result is applied by
+    /// [`poll_ai`](App::poll_ai). A no-op if the selection was cleared.
     pub(crate) fn generate_portraits(&mut self) {
-        let targets = self.character_portrait_targets();
-        self.spawn_image_job("marketing/images/characters", "⟳ Generating portraits…", targets);
+        if let Some(targets) = self.pending_portraits.take() {
+            self.spawn_image_job("marketing/images/characters", "⟳ Generating portraits…", targets);
+        }
     }
 
     /// Run an image job off the UI thread (#238/#239): generate one image per

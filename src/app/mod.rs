@@ -141,6 +141,9 @@ pub struct App {
     /// Cached local image model (#240), loaded once on first use and reused;
     /// empty for the remote image backend. Type-erased like `local_backend`.
     image_backend: Arc<Mutex<Option<Arc<dyn ai::image::ImageBackend>>>>,
+    /// The portrait targets `(slug, name, prompt)` the author picked (#244),
+    /// awaiting the cost confirm; taken when they confirm, cleared on cancel.
+    pending_portraits: Option<Vec<(String, String, String)>>,
     /// Continuity findings waiting to be shown — stashed while a timeline
     /// conflict is resolved first, then opened by [`App::open_findings`].
     pending_findings: Vec<Finding>,
@@ -210,6 +213,7 @@ impl App {
             vc_task: Task::idle(),
             local_backend: Arc::new(Mutex::new(None)),
             image_backend: Arc::new(Mutex::new(None)),
+            pending_portraits: None,
             pending_findings: Vec::new(),
             triage: Vec::new(),
             pending_pass: None,
@@ -1074,7 +1078,10 @@ impl App {
                     self.mode = closed;
                     self.generate_portraits();
                 }
-                _ => self.mode = closed,
+                _ => {
+                    self.pending_portraits = None; // discard the picked selection
+                    self.mode = closed;
+                }
             },
             Pending::ConfirmScene => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
