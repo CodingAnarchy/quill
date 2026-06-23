@@ -6,6 +6,7 @@
 mod ai;
 mod analysis;
 mod app;
+mod atomic;
 mod buffer;
 mod config;
 mod date;
