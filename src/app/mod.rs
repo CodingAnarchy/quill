@@ -24,10 +24,11 @@ use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
     BibleConflict, BibleReview, Command, Find, Finding, Findings, GitAction, MetaEdit, MetaField,
-    Mode, Op, Overlay, Palette, PaletteItem, Pending, PromptState, RefFiles, VimPending, VimState,
-    Yank,
+    Mode, Op, Overlay, Palette, PaletteItem, Pending, ProjectBrowser, PromptState, RefFiles,
+    VimPending, VimState, Yank,
 };
 use crate::project::{Manifest, Project};
+use crate::recent;
 use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
 
@@ -177,6 +178,9 @@ pub struct App {
     /// so the idle cadence clears it exactly once when the buffer goes clean
     /// rather than issuing a remove on every idle tick.
     recovery_written: bool,
+    /// The project the author chose in the browser, held while the unsaved-
+    /// changes confirm is open (#270); taken when they confirm the switch.
+    pending_switch: Option<PathBuf>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -232,6 +236,7 @@ impl App {
             workflow_run: None,
             pending_recovery: None,
             recovery_written: false,
+            pending_switch: None,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -519,6 +524,7 @@ impl App {
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
             Mode::RefFiles(_) => self.on_key_reffiles(key),
+            Mode::ProjectBrowser(_) => self.on_key_project_browser(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
             Mode::Visual { .. } => self.on_key_visual(key),
@@ -817,6 +823,92 @@ impl App {
             self.buffer.replace_text(&rec.body);
             self.recovery_written = true; // the sidecar already matches; a save clears it
             self.message = Some("Recovered unsaved work — review and save.".into());
+        }
+    }
+
+    // --- Project browser & switching (#270) -------------------------------
+
+    /// Open the project browser over the recently-opened projects (newest first).
+    /// Empty until at least one project has been opened.
+    fn open_project_browser(&mut self) {
+        let projects = recent::list();
+        if projects.is_empty() {
+            self.message = Some("No recent projects yet — opened projects show up here.".into());
+            return;
+        }
+        self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser { projects, selected: 0 }));
+    }
+
+    /// Navigate the project browser (#270): arrows move, Enter switches to the
+    /// selected project, Esc returns to editing.
+    fn on_key_project_browser(&mut self, key: KeyEvent) {
+        let Mode::ProjectBrowser(state) = &mut self.mode else {
+            return;
+        };
+        if let Some(s) = assist::list_move(state.selected, state.projects.len(), key.code) {
+            state.selected = s;
+            return;
+        }
+        match key.code {
+            KeyCode::Enter => {
+                let target = state.projects[state.selected].path.clone();
+                self.request_switch(target);
+            }
+            KeyCode::Esc => self.mode = self.editing_mode(),
+            _ => {}
+        }
+    }
+
+    /// Switch to `target`, guarding unsaved work first: if the buffer is dirty,
+    /// confirm a save-and-switch; if `target` is already open, say so; otherwise
+    /// switch straight away.
+    fn request_switch(&mut self, target: PathBuf) {
+        let target = target.canonicalize().unwrap_or(target);
+        let current = self.project.root.canonicalize().unwrap_or_else(|_| self.project.root.clone());
+        if target == current {
+            self.message = Some("That project is already open.".into());
+            self.mode = self.editing_mode();
+            return;
+        }
+        if self.edit_dirty() {
+            self.pending_switch = Some(target);
+            self.open_prompt(Pending::ConfirmSwitch, "Unsaved changes — save and switch project? (y/N)", "", None);
+        } else {
+            self.switch_to(target);
+        }
+    }
+
+    /// Save and finalize the current project, then load `target` in place — the
+    /// running editor adopts the new project wholesale, with no state carried
+    /// over. A save failure aborts the switch (the current project stays put);
+    /// an open failure leaves the current project open with a message.
+    fn switch_to(&mut self, target: PathBuf) {
+        self.leave_continuous(); // flush the continuous window back to its chapters
+        if self.flush_active().is_err() {
+            return; // save failed — message set; don't risk the unsaved work
+        }
+        self.clear_recovery(); // work is saved; finalize this project's recovery sidecar
+
+        let opened = Project::open(&target).and_then(|project| {
+            let buffer = Buffer::from_path(project.active_path())?;
+            Ok((project, buffer))
+        });
+        match opened {
+            Ok((project, buffer)) => {
+                let root = project.root.clone();
+                let title = project.manifest.title.clone();
+                // A fresh App resets every per-project field (buffer, manuscript,
+                // splits, tally baselines, caches, VC status) in one move.
+                *self = App::new(buffer, project);
+                self.load_history();
+                recent::record(&root, &title);
+                self.message = Some(format!("Opened \u{201c}{title}\u{201d}"));
+                self.offer_recovery(); // honor the incoming project's unsaved work, if any
+            }
+            Err(e) => {
+                self.message = Some(format!("Couldn't open project: {e}"));
+                self.mode = self.editing_mode();
+            }
         }
     }
 
@@ -1194,6 +1286,21 @@ impl App {
                     self.pending_recovery = None;
                 }
             },
+            Pending::ConfirmSwitch => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    // switch_to saves the current project, then replaces the app
+                    // state (which resets the mode); on failure it restores a
+                    // resting mode itself.
+                    match self.pending_switch.take() {
+                        Some(target) => self.switch_to(target),
+                        None => self.mode = closed,
+                    }
+                }
+                _ => {
+                    self.pending_switch = None;
+                    self.mode = closed;
+                }
+            },
             Pending::ConfirmPortraits => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
@@ -1357,6 +1464,9 @@ impl App {
             // Open the run-workflow menu (#226) — the author's named action
             // sequences. Ctrl-x: "execute" a workflow.
             KeyCode::Char('x') => self.open_workflow_palette(),
+            // Open the project browser (#270) — switch to a recently-opened
+            // project without leaving the editor. Ctrl-b: "browse" projects.
+            KeyCode::Char('b') => self.open_project_browser(),
             // Toggle the continuous-manuscript view. Ctrl-l ("long" view), not
             // Ctrl-m — terminals deliver Ctrl-m as Enter.
             KeyCode::Char('l') => self.toggle_continuous(),

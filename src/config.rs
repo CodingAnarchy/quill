@@ -10,12 +10,19 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-/// `$XDG_CONFIG_HOME/quill/config.toml`, else `$HOME/.config/quill/config.toml`.
-pub fn config_path() -> Option<PathBuf> {
+/// Quill's config directory: `$XDG_CONFIG_HOME/quill`, else `$HOME/.config/quill`.
+/// Home of the config file and other global state shared across projects (e.g.
+/// the recent-projects list, #270).
+pub fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("quill").join("config.toml"))
+    Some(base.join("quill"))
+}
+
+/// `$XDG_CONFIG_HOME/quill/config.toml`, else `$HOME/.config/quill/config.toml`.
+pub fn config_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("config.toml"))
 }
 
 /// Add a `[workflows]` entry to the home config file (#232), creating the file /

@@ -18,6 +18,7 @@ mod history;
 mod manuscript;
 mod mode;
 mod project;
+mod recent;
 mod recovery;
 mod report;
 mod syntax;
@@ -63,11 +64,14 @@ fn main() -> io::Result<()> {
             std::process::exit(1);
         }
     };
+    // Remember this project so the in-app project browser (#270) can offer it.
+    let (root, title) = (project.root.clone(), project.manifest.title.clone());
     let mut app = App::new(buffer, project);
     // Resume today's word-delta counters from the history log.
     app.load_history();
     // If a previous session left unsaved work behind (a crash), offer it back.
     app.offer_recovery();
+    recent::record(&root, &title);
 
     // Drop restores the terminal on a normal or `?`-error exit, but the release
     // `panic = "abort"` profile never unwinds — so install a panic hook too.

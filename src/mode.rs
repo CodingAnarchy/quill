@@ -86,6 +86,10 @@ pub enum Mode {
     /// (#165). Reached with `f` from the chapter browser; Enter opens the selected
     /// file in a side pane. Boxed (carries the file list).
     RefFiles(Box<RefFiles>),
+    /// Browsing recently-opened projects to switch to (#270): a navigable list;
+    /// Enter switches to the selected project, Esc cancels. Boxed (carries the
+    /// project list).
+    ProjectBrowser(Box<ProjectBrowser>),
 }
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
@@ -177,6 +181,14 @@ pub(crate) struct Find {
 /// stable target for the arrow keys.
 pub struct RefFiles {
     pub(crate) files: Vec<std::path::PathBuf>,
+    pub(crate) selected: usize,
+}
+
+/// State for an open [`Mode::ProjectBrowser`] (#270): the recently-opened
+/// projects and the selected row. Captured when the browser opens, so the list
+/// is a stable target for the arrow keys.
+pub struct ProjectBrowser {
+    pub(crate) projects: Vec<crate::recent::RecentProject>,
     pub(crate) selected: usize,
 }
 
@@ -587,6 +599,10 @@ pub(crate) enum Pending {
     /// Crash recovery (#263): unsaved work from a previous session was found.
     /// `y`/`r` restores it, `d` discards the sidecar, Esc keeps it for later.
     ConfirmRecovery,
+    /// y/N: there are unsaved changes — save the current project and switch to
+    /// the one chosen in the project browser (#270). The target waits in
+    /// `App::pending_switch`.
+    ConfirmSwitch,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).
