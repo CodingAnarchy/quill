@@ -17,6 +17,7 @@
 
 use std::fs;
 
+use crate::atomic;
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
 use crate::frontmatter::{self, Epigraph, FrontMatter};
 use crate::project::Project;
@@ -175,7 +176,7 @@ impl Manuscript {
                     .filter(|f| !f.is_empty())
                     .map(FrontMatter::as_str);
                 let content = frontmatter::join(front, &body);
-                fs::write(project.chapter_path(s.index), content.as_bytes())?;
+                atomic::write(&project.chapter_path(s.index), content.as_bytes())?;
                 // Count the prose only, not the front matter keys.
                 project.set_chapter_words(s.index, count_words(&body));
                 s.dirty = false;

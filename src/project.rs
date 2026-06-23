@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic;
 use crate::buffer::count_words;
 use crate::frontmatter::{self, Band, Epigraph, FrontMatter, Role, Status};
 
@@ -498,7 +499,7 @@ impl Project {
         let mut fm = front.map(FrontMatter::from_raw).unwrap_or_default();
         f(&mut fm);
         let front = (!fm.is_empty()).then(|| fm.as_str());
-        fs::write(&path, frontmatter::join(front, body).as_bytes())?;
+        atomic::write(&path, frontmatter::join(front, body).as_bytes())?;
         self.cache_chapter_meta(index, Some(&fm));
         Ok(())
     }
@@ -523,7 +524,7 @@ impl Project {
         let text = toml::to_string_pretty(&self.manifest).map_err(|e| {
             std::io::Error::other(format!("could not serialize manifest: {e}"))
         })?;
-        fs::write(Self::manifest_path(&self.root), text)
+        atomic::write(&Self::manifest_path(&self.root), text.as_bytes())
     }
 
     // --- Structure editing -------------------------------------------------

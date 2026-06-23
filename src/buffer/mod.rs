@@ -13,6 +13,7 @@ use ropey::Rope;
 use tree_sitter::{InputEdit, Point};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::atomic;
 use crate::frontmatter::FrontMatter;
 use crate::syntax::Syntax;
 
@@ -227,7 +228,7 @@ impl Buffer {
             .filter(|f| !f.is_empty())
             .map(FrontMatter::as_str);
         let content = crate::frontmatter::join(front, &body);
-        fs::write(path, content.as_bytes())?;
+        atomic::write(path, content.as_bytes())?;
         self.dirty = false;
         Ok(())
     }
