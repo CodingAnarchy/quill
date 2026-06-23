@@ -28,6 +28,7 @@ use crate::mode::{
     Yank,
 };
 use crate::project::{Manifest, Project};
+use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
@@ -168,6 +169,14 @@ pub struct App {
     /// where it is. `Some` while a run is in progress — including while it's
     /// suspended waiting on an async AI step. Drives the step state machine.
     workflow_run: Option<workflows::WorkflowRun>,
+    /// Crash recovery (#263): unsaved work found at launch, awaiting the author's
+    /// restore/discard choice. `Some` only while the recovery prompt is open;
+    /// taken when they restore, cleared when they discard or defer.
+    pending_recovery: Option<recovery::Recovery>,
+    /// Whether a recovery sidecar is currently on disk for this session's edits,
+    /// so the idle cadence clears it exactly once when the buffer goes clean
+    /// rather than issuing a remove on every idle tick.
+    recovery_written: bool,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -221,6 +230,8 @@ impl App {
             triggers: loaded.triggers,
             pending_workflow: None,
             workflow_run: None,
+            pending_recovery: None,
+            recovery_written: false,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -290,6 +301,7 @@ impl App {
         buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
         self.tally_words();
         self.refresh_vc_status();
+        self.capture_recovery();
     }
 
     /// Attribute each chapter's word change since the last idle tick to today's
@@ -715,6 +727,10 @@ impl App {
                 Err(e) => self.message = Some(format!("Save failed: {e}")),
             }
         }
+        // A clean save means there's nothing left to recover (#263).
+        if !self.edit_dirty() {
+            self.clear_recovery();
+        }
         // Checkpoint today's momentum to the history log.
         self.persist_snapshot();
         // Run the on-save workflow trigger (#228). This is the explicit-save
@@ -722,6 +738,86 @@ impl App {
         // continuous view) save the buffer directly and intentionally don't fire
         // it. A no-op when this save is itself a workflow's own step — no recursion.
         self.trigger_on_save();
+    }
+
+    // --- Crash recovery (#263) --------------------------------------------
+
+    /// Capture or clear the recovery sidecar on the idle cadence. Only the
+    /// single-chapter view maps the buffer 1:1 to a file; the continuous view
+    /// writes back per chapter on its own transitions and is out of scope here.
+    /// The sidecar is written while the buffer is dirty and removed once it goes
+    /// clean — tracked by `recovery_written`, so a clean buffer issues at most
+    /// one remove rather than one per idle tick.
+    fn capture_recovery(&mut self) {
+        if self.manuscript.is_some() {
+            return;
+        }
+        if self.buffer.dirty {
+            let rec = recovery::Recovery {
+                chapter_file: self.project.active_file().to_string(),
+                body: self.buffer.text(),
+            };
+            if recovery::write(&self.project.root, &rec).is_ok() {
+                self.recovery_written = true;
+            }
+        } else if self.recovery_written {
+            self.clear_recovery();
+        }
+    }
+
+    /// Remove the recovery sidecar — nothing left to recover (a clean save, an
+    /// explicit discard, or a deliberate quit despite unsaved changes).
+    fn clear_recovery(&mut self) {
+        recovery::clear(&self.project.root);
+        self.recovery_written = false;
+    }
+
+    /// At launch, offer back any unsaved work a previous session left behind.
+    /// A sidecar whose chapter is gone, or whose body already matches what's on
+    /// disk (so nothing was actually lost), is stale and silently cleared.
+    pub fn offer_recovery(&mut self) {
+        let Some(rec) = recovery::read(&self.project.root) else {
+            return;
+        };
+        let Some(index) = self.project.index_of_file(&rec.chapter_file) else {
+            recovery::clear(&self.project.root);
+            return;
+        };
+        let disk_body = self.project.chapter_body(index);
+        if buffer::normalize_trailing_newline(&disk_body) == buffer::normalize_trailing_newline(&rec.body) {
+            recovery::clear(&self.project.root); // already saved — nothing was lost
+            return;
+        }
+        let title = self.project.chapter_title(index).unwrap_or("a chapter").to_string();
+        self.pending_recovery = Some(rec);
+        self.open_prompt(
+            Pending::ConfirmRecovery,
+            format!(
+                "Unsaved work for \"{title}\" from a previous session — restore (y), discard (d), or keep for later (Esc)"
+            ),
+            "",
+            None,
+        );
+    }
+
+    /// Restore the unsaved work the recovery prompt offered: make its chapter
+    /// active and load the recovered prose into the buffer. The buffer is now
+    /// dirty, so a save persists it and the sidecar keeps protecting it meanwhile.
+    fn restore_recovery(&mut self) {
+        let Some(rec) = self.pending_recovery.take() else {
+            return;
+        };
+        let Some(index) = self.project.index_of_file(&rec.chapter_file) else {
+            self.clear_recovery();
+            self.message = Some("Could not recover: that chapter no longer exists.".into());
+            return;
+        };
+        self.activate_chapter(index); // a no-op when it's already the active chapter
+        if self.project.active_file() == rec.chapter_file {
+            self.buffer.replace_text(&rec.body);
+            self.recovery_written = true; // the sidecar already matches; a save clears it
+            self.message = Some("Recovered unsaved work — review and save.".into());
+        }
     }
 
     fn next_chapter(&mut self) {
@@ -873,7 +969,10 @@ impl App {
                     self.should_quit = true;
                 }
             }
-            "q!" => self.should_quit = true,
+            "q!" => {
+                self.clear_recovery(); // explicit discard — don't re-offer next launch (#263)
+                self.should_quit = true;
+            }
             other => self.message = Some(format!("Not an editor command: {other}")),
         }
     }
@@ -1039,7 +1138,12 @@ impl App {
 
         match pending {
             Pending::Quit => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.should_quit = true,
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    // Deliberately quitting despite unsaved changes is an explicit
+                    // discard, so don't re-offer this work next launch (#263).
+                    self.clear_recovery();
+                    self.should_quit = true;
+                }
                 _ => self.mode = closed,
             },
             Pending::Delete { at } => match key.code {
@@ -1072,6 +1176,23 @@ impl App {
                     self.restore_chapter();
                 }
                 _ => self.mode = closed,
+            },
+            Pending::ConfirmRecovery => match key.code {
+                KeyCode::Char('y' | 'Y' | 'r' | 'R') => {
+                    self.mode = closed;
+                    self.restore_recovery();
+                }
+                KeyCode::Char('d' | 'D') => {
+                    self.mode = closed;
+                    self.pending_recovery = None;
+                    self.clear_recovery();
+                    self.message = Some("Discarded recovered work.".into());
+                }
+                _ => {
+                    // Esc / any other key: keep the sidecar, decide next launch.
+                    self.mode = closed;
+                    self.pending_recovery = None;
+                }
             },
             Pending::ConfirmPortraits => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {

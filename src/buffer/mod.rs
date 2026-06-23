@@ -242,6 +242,24 @@ impl Buffer {
         self.rope.to_string()
     }
 
+    /// Replace the entire prose body with `text`, marking the buffer dirty and
+    /// resetting the cursor to the start. The path and front matter are left as
+    /// they are. Used by crash recovery (#263) to load a previous session's
+    /// unsaved work back into the active chapter; the undo history starts fresh
+    /// from the recovered text.
+    pub fn replace_text(&mut self, text: &str) {
+        self.rope = Rope::from_str(text);
+        self.syntax = Syntax::new(text);
+        self.syntax_dirty = false;
+        self.cursor = Cursor::default();
+        self.goal_x = None;
+        self.word_count_cache.set(None);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.group_open = false;
+        self.dirty = true;
+    }
+
     /// The text of a single line, without its trailing newline.
     pub fn line(&self, idx: usize) -> String {
         if idx >= self.rope.len_lines() {

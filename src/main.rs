@@ -16,6 +16,7 @@ mod history;
 mod manuscript;
 mod mode;
 mod project;
+mod recovery;
 mod report;
 mod syntax;
 mod text;
@@ -59,6 +60,8 @@ fn main() -> io::Result<()> {
     let mut app = App::new(buffer, project);
     // Resume today's word-delta counters from the history log.
     app.load_history();
+    // If a previous session left unsaved work behind (a crash), offer it back.
+    app.offer_recovery();
 
     // Drop restores the terminal on a normal or `?`-error exit, but the release
     // `panic = "abort"` profile never unwinds — so install a panic hook too.
