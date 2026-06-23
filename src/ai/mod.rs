@@ -9,6 +9,7 @@
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
 pub mod bible;
+pub mod brainstorm;
 pub mod character;
 pub mod constrain;
 pub mod continuity;
@@ -104,6 +105,8 @@ pub enum Outcome {
     Style(Result<style::Style, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
+    /// Story brainstorming from a premise (#255).
+    Brainstorm(Result<brainstorm::Brainstorm, AiError>),
     /// Marketing copy — blurb variants & taglines (#236).
     Marketing(Result<marketing::Marketing, AiError>),
     /// Social posts — per-platform promo copy (#237).
@@ -134,6 +137,7 @@ impl Outcome {
             Outcome::Naming(r) => r.as_ref().err(),
             Outcome::Style(r) => r.as_ref().err(),
             Outcome::Submission(r) => r.as_ref().err(),
+            Outcome::Brainstorm(r) => r.as_ref().err(),
             Outcome::Marketing(r) => r.as_ref().err(),
             Outcome::Social(r) => r.as_ref().err(),
             Outcome::Voice(r) => r.as_ref().err(),

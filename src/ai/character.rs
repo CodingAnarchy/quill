@@ -235,20 +235,10 @@ pub fn render_profile(c: &Character, notes: &str, today: &str) -> String {
 /// The regenerated body (everything between the generated markers).
 fn generated_block(c: &Character) -> String {
     let mut s = String::new();
-    let bullets = |s: &mut String, heading: &str, items: &[String]| {
-        if !items.is_empty() {
-            s.push_str(&format!("## {heading}\n"));
-            for it in items {
-                s.push_str(&format!("- {it}\n"));
-            }
-            s.push('\n');
-        }
-    };
-
     if let Some(role) = &c.role {
         s.push_str(&format!("**Role:** {role}\n\n"));
     }
-    bullets(&mut s, "Physical", &c.physical);
+    bible::bullet_section(&mut s, "Physical", &c.physical);
     if let Some(voice) = c.voice.as_ref().filter(|v| !v.is_empty()) {
         s.push_str("## Voice\n");
         let labeled = |s: &mut String, label: &str, items: &[String]| {
@@ -266,7 +256,7 @@ fn generated_block(c: &Character) -> String {
         }
         s.push('\n');
     }
-    bullets(&mut s, "Personality", &c.personality);
+    bible::bullet_section(&mut s, "Personality", &c.personality);
     if !c.relationships.is_empty() {
         s.push_str("## Relationships\n");
         for r in &c.relationships {
@@ -274,7 +264,7 @@ fn generated_block(c: &Character) -> String {
         }
         s.push('\n');
     }
-    bullets(&mut s, "Goals", &c.goals);
+    bible::bullet_section(&mut s, "Goals", &c.goals);
     if !c.arc.is_empty() {
         s.push_str("## Arc\n");
         for beat in &c.arc {

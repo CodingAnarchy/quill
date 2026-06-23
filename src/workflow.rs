@@ -146,6 +146,9 @@ fn expand<'a>(
                 Action::Ai(AiAction::Ask) => {
                     return Err(format!("step '{step}' needs a typed question — not usable in a workflow"))
                 }
+                Action::Ai(AiAction::Brainstorm) => {
+                    return Err(format!("step '{step}' needs a typed premise — not usable in a workflow"))
+                }
                 Action::Ai(AiAction::Portrait | AiAction::Scene) => {
                     return Err(format!("step '{step}' is interactive — not usable in a workflow"))
                 }

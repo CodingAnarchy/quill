@@ -28,6 +28,20 @@ on the next pass.\n{front}generated: {today}\ndigest: {digest}\n---\n\n\
     )
 }
 
+/// Append a `## {heading}` section with one `- ` bullet per item and a trailing
+/// blank line, or nothing when `items` is empty — the shared shape for the
+/// bullet-list sections in generated bible / notes blocks.
+pub(crate) fn bullet_section(body: &mut String, heading: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    body.push_str(&format!("## {heading}\n"));
+    for item in items {
+        body.push_str(&format!("- {item}\n"));
+    }
+    body.push('\n');
+}
+
 /// The author's Notes block from an existing file, or the placeholder so a fresh
 /// file still has the section.
 pub fn extract_notes(existing: &str) -> String {

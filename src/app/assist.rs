@@ -9,6 +9,7 @@ use super::*;
 
 use std::sync::{Arc, Mutex};
 
+use crate::ai::brainstorm::{self, Brainstorm};
 use crate::ai::cost;
 use crate::ai::fal::FalBackend;
 use crate::ai::image::{self, ImageBackend, ImageReport, ImageRequest};
@@ -262,6 +263,7 @@ impl App {
             ai("Scaffold / outline", "Beat outline + structural gaps", AiAction::Scaffold),
             ai("Name & term consistency", "Spelling variants (cheap pass)", AiAction::Naming),
             ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
+            ai("Brainstorm ideas", "Premises, themes & conflicts from a spark (off-manuscript)", AiAction::Brainstorm),
             ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
@@ -408,9 +410,11 @@ impl App {
     /// interactive actions (Ask, Triage), which issue no costed pass.
     fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
         match action {
-            // No text-token estimate: Ask/Triage are interactive/local, and the
+            // No whole-manuscript estimate: Ask/Triage/Brainstorm are interactive
+            // and send no manuscript (Brainstorm sends only a premise), and the
             // image passes (#238/#239) are billed per image with their own confirm.
-            AiAction::Ask | AiAction::Triage | AiAction::Portrait | AiAction::Scene => None,
+            AiAction::Ask | AiAction::Triage | AiAction::Brainstorm | AiAction::Portrait
+            | AiAction::Scene => None,
             AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
             _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
@@ -427,6 +431,9 @@ impl App {
             AiAction::Scaffold => self.analyze_scaffold(),
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
+            AiAction::Brainstorm => {
+                self.open_prompt(Pending::Brainstorm, "Premise or idea: ", "", None)
+            }
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
             AiAction::Marketing => self.analyze_marketing(),
@@ -650,6 +657,37 @@ impl App {
             let req = submission::build_request(manuscript, &model);
             Outcome::Submission(backend.complete(&req).and_then(|r| submission::parse(&r.text)))
         });
+    }
+
+    /// Brainstorm story ideas from a premise (#255) — the first generative pass.
+    /// Sends only the premise (no manuscript), so it works on an empty project;
+    /// the ideas are written to `bible/brainstorm.md` by [`App::poll_ai`].
+    pub(crate) fn brainstorm(&mut self, premise: &str) {
+        let premise = premise.trim().to_string();
+        if premise.is_empty() {
+            return;
+        }
+        let model = self.ai.model.clone();
+        self.spawn_outcome("⟳ Brainstorming…", move |backend| {
+            let req = brainstorm::build_request(&premise, &model);
+            Outcome::Brainstorm(backend.complete(&req).and_then(|r| brainstorm::parse(&r.text)))
+        });
+    }
+
+    /// Apply a brainstorm pass (#255): write the idea notes to `bible/brainstorm.md`,
+    /// conflict-reviewed and off-manuscript (never a chapter file, never prose).
+    pub(crate) fn apply_brainstorm(&mut self, result: Result<Brainstorm, ai::AiError>) {
+        self.overlay = None;
+        let ideas = match result {
+            Ok(b) => b,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let today = date::iso(date::today());
+        let path = self.project.root.join("bible").join("brainstorm.md");
+        self.apply_bible_with_findings(path, "brainstorm", |notes| brainstorm::render(&ideas, notes, &today), Vec::new());
     }
 
     /// Generate marketing copy (#236) — blurb variants & taglines; written to
@@ -1164,6 +1202,7 @@ impl App {
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),
                     Outcome::Submission(r) => self.apply_submission(r),
+                    Outcome::Brainstorm(r) => self.apply_brainstorm(r),
                     Outcome::Marketing(r) => self.apply_marketing(r),
                     Outcome::Social(r) => self.apply_social(r),
                     Outcome::Voice(r) => self.apply_voice(r),
