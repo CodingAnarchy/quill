@@ -15,6 +15,7 @@ use crate::ai::image::{self, ImageBackend, ImageReport, ImageRequest};
 use crate::ai::marketing::{self, Marketing};
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
+use crate::ai::scene_brief;
 use crate::ai::social::{self, Social};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
@@ -55,6 +56,34 @@ fn condense(text: &str, max_chars: usize) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     joined.chars().take(max_chars).collect()
+}
+
+/// The active chapter's input for a scene illustration (#247): identity, the full
+/// text (to distill from), the setting bible, and a prose-excerpt fallback prompt.
+struct SceneInput {
+    slug: String,
+    title: String,
+    text: String,
+    setting: String,
+    fallback_prompt: String,
+}
+
+/// Build the scene image prompt (#247): distill a visual brief via the text
+/// backend when one is available, else use the prose-excerpt fallback. Runs on the
+/// worker thread, so any distill failure (or no text backend) degrades quietly to
+/// the fallback — the verified #239 behavior.
+fn scene_prompt_for(text_spec: Option<BackendSpec>, scene: &SceneInput, book: &str, model: &str) -> String {
+    if let Some(spec) = text_spec {
+        if let Ok(backend) = spec.build() {
+            let req = scene_brief::build_request(scene.text.clone(), model);
+            if let Ok(resp) = backend.complete(&req) {
+                if !resp.text.trim().is_empty() {
+                    return image::scene_prompt(book, &scene.title, &resp.text, &scene.setting);
+                }
+            }
+        }
+    }
+    scene.fallback_prompt.clone()
 }
 
 /// Write image bytes to `path`, creating parent directories (#238). Runs on the
@@ -803,46 +832,85 @@ impl App {
             self.message = Some(e.to_string());
             return;
         }
-        if self.scene_targets().is_empty() {
+        let Some(scene) = self.active_scene() else {
             self.message = Some("The active chapter has no text to illustrate".into());
             return;
-        }
-        let chapter =
-            self.project.chapter_title(self.project.active_index()).unwrap_or("this chapter").to_string();
+        };
         let label = format!(
-            "Illustrate \"{chapter}\" via fal.ai ({}) — the image is billed. Run? (y/N)",
-            self.image.model,
+            "Illustrate \"{}\" via fal.ai ({}) — the image is billed. Run? (y/N)",
+            scene.title, self.image.model,
         );
         self.open_prompt(Pending::ConfirmScene, label, "", None);
     }
 
     /// Generate a scene illustration of the active chapter off the UI thread
-    /// (#239), saved under `marketing/images/scenes/`. The result is applied by
+    /// (#239/#247), saved under `marketing/images/scenes/`. When the text AI is
+    /// ready it first distills a visual brief of the chapter's pivotal moment
+    /// (#247); otherwise it falls back to the prose-excerpt prompt. Applied by
     /// [`poll_ai`](App::poll_ai).
     pub(crate) fn generate_scene(&mut self) {
-        let targets = self.scene_targets();
-        self.spawn_image_job("marketing/images/scenes", "⟳ Illustrating the scene…", targets);
+        if self.ai_task.is_busy() {
+            self.message = Some("An AI request is already in flight…".into());
+            return;
+        }
+        let Some(scene) = self.active_scene() else {
+            return;
+        };
+        let image_spec = match self.image_backend_spec() {
+            Ok(spec) => spec,
+            Err(e) => {
+                self.message = Some(e.to_string());
+                return;
+            }
+        };
+        // Optional distill step: the text backend, if it's configured. None → the
+        // worker uses the prose-excerpt fallback prompt.
+        let text_spec = self.backend_spec().ok();
+        let book = self.project.manifest.title.clone();
+        let text_model = self.ai.model.clone();
+        let image_model = self.image.model.clone();
+        let dir = self.project.root.join("marketing").join("images").join("scenes");
+        self.ai_task.spawn(move || {
+            let backend = match image_spec.build() {
+                Ok(b) => b,
+                Err(e) => return Outcome::Image(Err(e)),
+            };
+            let prompt = scene_prompt_for(text_spec, &scene, &book, &text_model);
+            let mut report = ImageReport::default();
+            match backend.generate(&ImageRequest { prompt, model: image_model }) {
+                Ok(img) => {
+                    let file = format!("{}.{}", scene.slug, img.ext);
+                    match save_image(&dir.join(&file), &img.bytes) {
+                        Ok(()) => report.saved.push(format!("marketing/images/scenes/{file}")),
+                        Err(e) => report.failed.push(format!("{}: {e}", scene.title)),
+                    }
+                }
+                Err(e) => report.failed.push(format!("{}: {e}", scene.title)),
+            }
+            Outcome::Image(Ok(report))
+        });
+        self.message = Some("⟳ Illustrating the scene…".into());
     }
 
-    /// The scene target — a single `(slug, chapter title, prompt)` for the active
-    /// chapter, the prompt built from a scene excerpt + the setting bible. Empty
-    /// when the active chapter has no prose.
-    fn scene_targets(&self) -> Vec<(String, String, String)> {
+    /// The active chapter's scene input (#247): its slug, title, full text, the
+    /// setting bible, and a prose-excerpt fallback prompt. `None` when the chapter
+    /// has no prose.
+    fn active_scene(&self) -> Option<SceneInput> {
         let idx = self.project.active_index();
-        let excerpt = condense(&self.chapter_text(idx), 600);
+        let text = self.chapter_text(idx);
+        let excerpt = condense(&text, 600);
         if excerpt.is_empty() {
-            return Vec::new();
+            return None;
         }
-        let chapter = self.project.chapter_title(idx).unwrap_or("Scene").to_string();
+        let title = self.project.chapter_title(idx).unwrap_or("Scene").to_string();
         let slug = std::path::Path::new(self.project.chapter_file(idx))
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("scene")
             .to_string();
-        let setting_raw = bible::raw_file(&self.project.root, "setting.md");
-        let setting = condense(crate::frontmatter::split(&setting_raw).1, 400);
-        let prompt = image::scene_prompt(&self.project.manifest.title, &chapter, &excerpt, &setting);
-        vec![(slug, chapter, prompt)]
+        let setting = condense(crate::frontmatter::split(&bible::raw_file(&self.project.root, "setting.md")).1, 400);
+        let fallback_prompt = image::scene_prompt(&self.project.manifest.title, &title, &excerpt, &setting);
+        Some(SceneInput { slug, title, text, setting, fallback_prompt })
     }
 
     /// Apply an image pass (#238/#239): summarize the saved images and any
