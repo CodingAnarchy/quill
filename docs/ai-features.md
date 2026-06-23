@@ -79,6 +79,11 @@ The palette actions:
   questions, themes, and central conflicts, written as editable notes to
   `bible/brainstorm.md`. Works at chapter zero (no manuscript needed), off by
   default, off-manuscript and conflict-reviewed; idea notes, never prose scenes.
+- **Draft characters** (#256) — *generative*: from a concept/premise (not the
+  manuscript), invent a starter cast and write it to `bible/characters/` in the
+  same #74 format (marked AI-generated, editable). Works at chapter zero; the
+  drafted cast then feeds the extractive character pass and reports once prose
+  exists. Scaffolding the author reshapes, never manuscript prose.
 - **Ask the manuscript** (#73) — a grounded question, answered with chapter
   citations in an overlay.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to

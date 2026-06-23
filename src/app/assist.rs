@@ -264,6 +264,7 @@ impl App {
             ai("Name & term consistency", "Spelling variants (cheap pass)", AiAction::Naming),
             ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
             ai("Brainstorm ideas", "Premises, themes & conflicts from a spark (off-manuscript)", AiAction::Brainstorm),
+            ai("Draft characters", "Starter cast from a concept (no manuscript needed)", AiAction::DraftCharacters),
             ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
@@ -413,8 +414,8 @@ impl App {
             // No whole-manuscript estimate: Ask/Triage/Brainstorm are interactive
             // and send no manuscript (Brainstorm sends only a premise), and the
             // image passes (#238/#239) are billed per image with their own confirm.
-            AiAction::Ask | AiAction::Triage | AiAction::Brainstorm | AiAction::Portrait
-            | AiAction::Scene => None,
+            AiAction::Ask | AiAction::Triage | AiAction::Brainstorm | AiAction::DraftCharacters
+            | AiAction::Portrait | AiAction::Scene => None,
             AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
             _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
@@ -433,6 +434,9 @@ impl App {
             AiAction::Style => self.analyze_style(),
             AiAction::Brainstorm => {
                 self.open_prompt(Pending::Brainstorm, "Premise or idea: ", "", None)
+            }
+            AiAction::DraftCharacters => {
+                self.open_prompt(Pending::DraftCharacters, "Concept / premise: ", "", None)
             }
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
@@ -671,6 +675,21 @@ impl App {
         self.spawn_outcome("⟳ Brainstorming…", move |backend| {
             let req = brainstorm::build_request(&premise, &model);
             Outcome::Brainstorm(backend.complete(&req).and_then(|r| brainstorm::parse(&r.text)))
+        });
+    }
+
+    /// Draft a starter character cast from a concept (#256) — generative, no
+    /// manuscript. Reuses the extractive pass's `Outcome::Characters` so the
+    /// profiles are written to `bible/characters/` by [`apply_characters`].
+    pub(crate) fn draft_characters(&mut self, concept: &str) {
+        let concept = concept.trim().to_string();
+        if concept.is_empty() {
+            return;
+        }
+        let model = self.ai.model.clone();
+        self.spawn_outcome("⟳ Drafting characters…", move |backend| {
+            let req = character::build_concept_request(&concept, &model);
+            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
         });
     }
 
@@ -1254,7 +1273,9 @@ impl App {
             }
         };
         if chars.is_empty() {
-            self.message = Some("No characters found.".into());
+            // Shared by the extractive pass (#74) and the generative draft (#256),
+            // so phrase it for both: nothing extracted / nothing drafted.
+            self.message = Some("No character profiles produced.".into());
             return;
         }
         for c in &mut chars {
