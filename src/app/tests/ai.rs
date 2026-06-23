@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 13, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 14, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -752,13 +752,51 @@ fn portrait_pass_confirms_before_spending() {
 }
 
 #[test]
-fn portrait_results_summarize_saved_and_failed() {
-    let (mut app, dir) = two_chapter_app("portrait-apply");
-    app.apply_portraits(Ok(ai::image::ImageReport {
-        saved: vec!["marketing/images/characters/mara.png".into()],
+fn image_results_summarize_saved_and_failed() {
+    let (mut app, dir) = two_chapter_app("image-apply");
+    app.apply_images(Ok(ai::image::ImageReport {
+        saved: vec!["marketing/images/characters/mara.jpg".into()],
         failed: vec!["Tomas: network error".into()],
     }));
     assert!(app.overlay.is_some(), "summary overlay opens");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn scene_pass_needs_image_generation_enabled() {
+    let (mut app, dir) = two_chapter_app("scene-off");
+    app.image = ai::image::ImageSettings::default(); // off
+    app.start_scene();
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm when image gen is off");
+    assert!(app.message.as_deref().unwrap_or("").contains("Image generation is off"), "{:?}", app.message);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn scene_pass_confirms_for_the_active_chapter() {
+    let (mut app, dir) = two_chapter_app("scene-confirm");
+    image_on(&mut app);
+    // The active chapter ("One") has prose in two_chapter_app, so there's a scene.
+    app.start_scene();
+    match &app.mode {
+        Mode::Prompt(p) => {
+            assert!(p.label.contains("One"), "names the active chapter: {}", p.label);
+            assert!(p.label.contains("fal.ai") && p.label.contains("billed"), "{}", p.label);
+        }
+        _ => panic!("expected the scene cost confirm"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn scene_pass_needs_chapter_text() {
+    let (mut app, dir) = two_chapter_app("scene-empty");
+    image_on(&mut app);
+    // Empty the active chapter's buffer so there's nothing to illustrate.
+    app.buffer = crate::buffer::Buffer::from_text("");
+    app.start_scene();
+    assert!(!matches!(app.mode, Mode::Prompt(_)));
+    assert!(app.message.as_deref().unwrap_or("").contains("no text to illustrate"), "{:?}", app.message);
     fs::remove_dir_all(&dir).ok();
 }
 

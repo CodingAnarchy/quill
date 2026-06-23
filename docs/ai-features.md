@@ -106,6 +106,10 @@ The palette actions:
   settings); confirms before generating since each image is billed. Needs the
   character pass to have run first. The image backend sits behind a trait so a
   local option can be added later (#240).
+- **Scene illustration** (#239) — an illustration of the active chapter, built from
+  a scene excerpt plus the setting bible (for visual consistency), via the same
+  image backend, saved to `marketing/images/scenes/`. Off-manuscript; confirms
+  before generating (billed per image).
 - **Revision triage** (#82) — every finding surfaced this session (continuity,
   setting, style, naming, structural gaps), aggregated into one de-duplicated
   list in the findings overlay. Local only — no request. Marking a finding as an

@@ -44,11 +44,35 @@ enum Staged {
     Failed(String),
 }
 
+/// Condense prose for an image prompt (#239): drop markdown heading lines,
+/// collapse runs of whitespace, and cap at `max_chars` (on a char boundary), so a
+/// whole chapter becomes a compact scene description the image model can use.
+fn condense(text: &str, max_chars: usize) -> String {
+    let joined = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>()
+        .join(" ");
+    joined.chars().take(max_chars).collect()
+}
+
 /// Write image bytes to `path`, creating parent directories (#238). Runs on the
-/// worker thread, so it returns a plain message rather than using `App`.
+/// worker thread, so it returns a plain message rather than using `App`. Removes
+/// any existing sibling with the same stem but a different extension first, so
+/// regenerating in a different format replaces rather than accumulates (e.g. a
+/// later `.jpg` doesn't leave a stale `.png` behind).
 fn save_image(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
+    if let (Some(parent), Some(stem)) = (path.parent(), path.file_stem()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.file_stem() == Some(stem) && p != path {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
     }
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
@@ -169,6 +193,7 @@ impl App {
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
             ai("Social posts", "X / Facebook / Instagram copy (off-manuscript)", AiAction::Social),
             ai("Character portraits", "Portrait images from the character bible (fal.ai)", AiAction::Portrait),
+            ai("Scene illustration", "Illustrate the active chapter (fal.ai)", AiAction::Scene),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
@@ -201,7 +226,9 @@ impl App {
             // Triage is local aggregation — it works with the AI backend off.
             Action::Ai(AiAction::Triage) => None,
             // Image generation has its own opt-in / key, separate from the text AI.
-            Action::Ai(AiAction::Portrait) => self.image.check_ready().err().map(|e| e.to_string()),
+            Action::Ai(AiAction::Portrait | AiAction::Scene) => {
+                self.image.check_ready().err().map(|e| e.to_string())
+            }
             Action::Ai(_) => self.ai.check_ready().err().map(|e| e.to_string()),
             // Export compiles per-chapter files; the continuous view holds an
             // unsaved window, so leave it first.
@@ -306,8 +333,8 @@ impl App {
     fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
         match action {
             // No text-token estimate: Ask/Triage are interactive/local, and the
-            // portrait pass is image generation with its own confirm (#238).
-            AiAction::Ask | AiAction::Triage | AiAction::Portrait => None,
+            // image passes (#238/#239) are billed per image with their own confirm.
+            AiAction::Ask | AiAction::Triage | AiAction::Portrait | AiAction::Scene => None,
             AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
             _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
@@ -329,6 +356,7 @@ impl App {
             AiAction::Marketing => self.analyze_marketing(),
             AiAction::Social => self.analyze_social(),
             AiAction::Portrait => self.start_portrait(),
+            AiAction::Scene => self.start_scene(),
             AiAction::Triage => self.open_triage(),
         }
     }
@@ -593,6 +621,19 @@ impl App {
     /// [`start_portrait`](App::start_portrait) first. The result is applied by
     /// [`poll_ai`](App::poll_ai).
     pub(crate) fn generate_portraits(&mut self) {
+        let targets = self.character_portrait_targets();
+        self.spawn_image_job("marketing/images/characters", "⟳ Generating portraits…", targets);
+    }
+
+    /// Run an image job off the UI thread (#238/#239): generate one image per
+    /// `(slug, label, prompt)` target via the image backend and save each under
+    /// `<subdir>/<slug>.<ext>`, reporting saved files and per-target failures. The
+    /// shared worker behind the portrait and scene passes. A no-op for no targets;
+    /// the busy/key guards mirror the text spawn path.
+    fn spawn_image_job(&mut self, subdir: &'static str, message: &str, targets: Vec<(String, String, String)>) {
+        if targets.is_empty() {
+            return;
+        }
         if self.ai_task.is_busy() {
             self.message = Some("An AI request is already in flight…".into());
             return;
@@ -601,33 +642,29 @@ impl App {
             self.message = Some("No image API key configured".into());
             return;
         };
-        let targets = self.character_portrait_targets();
-        if targets.is_empty() {
-            return;
-        }
         let model = self.image.model.clone();
-        let dir = self.project.root.join("marketing").join("images").join("characters");
+        let dir = self.project.root.join(subdir);
         // The remote backend is trivial to construct, so we build it here and move
         // it into the worker. The local image model (#240) is heavy and will need
         // the build-on-worker + cached-slot pattern the text `BackendSpec` uses.
         let backend: Box<dyn ImageBackend> = Box::new(FalBackend::new(key));
         self.ai_task.spawn(move || {
             let mut report = ImageReport::default();
-            for (slug, name, prompt) in targets {
+            for (slug, label, prompt) in targets {
                 match backend.generate(&ImageRequest { prompt, model: model.clone() }) {
                     Ok(img) => {
                         let file = format!("{slug}.{}", img.ext);
                         match save_image(&dir.join(&file), &img.bytes) {
-                            Ok(()) => report.saved.push(format!("marketing/images/characters/{file}")),
-                            Err(e) => report.failed.push(format!("{name}: {e}")),
+                            Ok(()) => report.saved.push(format!("{subdir}/{file}")),
+                            Err(e) => report.failed.push(format!("{label}: {e}")),
                         }
                     }
-                    Err(e) => report.failed.push(format!("{name}: {e}")),
+                    Err(e) => report.failed.push(format!("{label}: {e}")),
                 }
             }
             Outcome::Image(Ok(report))
         });
-        self.message = Some("⟳ Generating portraits…".into());
+        self.message = Some(message.to_string());
     }
 
     /// The portrait targets — `(slug, name, prompt)` per character in the bible,
@@ -658,8 +695,58 @@ impl App {
         out
     }
 
-    /// Apply a portrait pass (#238): summarize the saved images and any failures.
-    pub(crate) fn apply_portraits(&mut self, result: Result<ImageReport, ai::AiError>) {
+    /// Begin a scene-illustration pass (#239): gate on image readiness and the
+    /// active chapter having text, then confirm before spending.
+    pub(crate) fn start_scene(&mut self) {
+        if let Err(e) = self.image.check_ready() {
+            self.message = Some(e.to_string());
+            return;
+        }
+        if self.scene_targets().is_empty() {
+            self.message = Some("The active chapter has no text to illustrate".into());
+            return;
+        }
+        let chapter =
+            self.project.chapter_title(self.project.active_index()).unwrap_or("this chapter").to_string();
+        let label = format!(
+            "Illustrate \"{chapter}\" via fal.ai ({}) — the image is billed. Run? (y/N)",
+            self.image.model,
+        );
+        self.open_prompt(Pending::ConfirmScene, label, "", None);
+    }
+
+    /// Generate a scene illustration of the active chapter off the UI thread
+    /// (#239), saved under `marketing/images/scenes/`. The result is applied by
+    /// [`poll_ai`](App::poll_ai).
+    pub(crate) fn generate_scene(&mut self) {
+        let targets = self.scene_targets();
+        self.spawn_image_job("marketing/images/scenes", "⟳ Illustrating the scene…", targets);
+    }
+
+    /// The scene target — a single `(slug, chapter title, prompt)` for the active
+    /// chapter, the prompt built from a scene excerpt + the setting bible. Empty
+    /// when the active chapter has no prose.
+    fn scene_targets(&self) -> Vec<(String, String, String)> {
+        let idx = self.project.active_index();
+        let excerpt = condense(&self.chapter_text(idx), 600);
+        if excerpt.is_empty() {
+            return Vec::new();
+        }
+        let chapter = self.project.chapter_title(idx).unwrap_or("Scene").to_string();
+        let slug = std::path::Path::new(self.project.chapter_file(idx))
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("scene")
+            .to_string();
+        let setting_raw = bible::raw_file(&self.project.root, "setting.md");
+        let setting = condense(crate::frontmatter::split(&setting_raw).1, 400);
+        let prompt = image::scene_prompt(&self.project.manifest.title, &chapter, &excerpt, &setting);
+        vec![(slug, chapter, prompt)]
+    }
+
+    /// Apply an image pass (#238/#239): summarize the saved images and any
+    /// failures. Shared by the portrait and scene passes (both `Outcome::Image`).
+    pub(crate) fn apply_images(&mut self, result: Result<ImageReport, ai::AiError>) {
         self.overlay = None;
         let report = match result {
             Ok(r) => r,
@@ -669,12 +756,12 @@ impl App {
             }
         };
         if report.saved.is_empty() && report.failed.is_empty() {
-            self.message = Some("No portraits generated".into());
+            self.message = Some("No images generated".into());
             return;
         }
         let mut lines = Vec::new();
         if !report.saved.is_empty() {
-            lines.push(Line::raw("Portraits generated:"));
+            lines.push(Line::raw("Images generated:"));
             lines.push(Line::raw(""));
             lines.extend(report.saved.iter().map(|s| Line::raw(format!("  {s}"))));
             lines.push(Line::raw(""));
@@ -910,7 +997,7 @@ impl App {
                     Outcome::Marketing(r) => self.apply_marketing(r),
                     Outcome::Social(r) => self.apply_social(r),
                     Outcome::Voice(r) => self.apply_voice(r),
-                    Outcome::Image(r) => self.apply_portraits(r),
+                    Outcome::Image(r) => self.apply_images(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }

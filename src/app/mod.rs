@@ -1072,6 +1072,13 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            Pending::ConfirmScene => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.generate_scene();
+                }
+                _ => self.mode = closed,
+            },
             // The text prompts share the editing keys; only Enter differs.
             Pending::NewChapter { .. }
             | Pending::Rename { .. }
