@@ -125,6 +125,13 @@ The palette actions:
 - **Social posts** (#237) — ready-to-post promo copy shaped to each platform's
   conventions (X / Facebook / Instagram), written to `marketing/social/` (one file
   per platform). Off-manuscript and conflict-reviewed; edit and regenerate freely.
+- **Ad creative** (#251) — platform-ready ad copy (headlines, primary text /
+  descriptions, suggested targeting/keywords, and an ad-image brief) shaped to
+  Amazon Ads, Meta, and X, written to `marketing/ads/` (one file per platform).
+  Drafts from the manuscript and folds in your existing marketing copy (#236/#237)
+  to stay on-brand. Off-manuscript and conflict-reviewed; paste into any ad
+  manager. (The ad image is a brief — render one with the image features or supply
+  your own; account/API publishing is epic #105.)
 - **Character portraits** (#238, #244) — portrait images of the bible characters,
   built from their profiles and generated via the image backend, saved to
   `marketing/images/characters/`. Off-manuscript files the author owns and

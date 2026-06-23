@@ -8,6 +8,7 @@
 //! `docs/ai-features.md`. AI is opt-in and off by default: the manuscript only
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
+pub mod ad_creative;
 pub mod bible;
 pub mod brainstorm;
 pub mod character;
@@ -107,6 +108,8 @@ pub enum Outcome {
     Submission(Result<Submission, AiError>),
     /// Story brainstorming from a premise (#255).
     Brainstorm(Result<brainstorm::Brainstorm, AiError>),
+    /// Platform-ready ad creative & copy (#251).
+    AdCreative(Result<ad_creative::AdCreative, AiError>),
     /// Marketing copy — blurb variants & taglines (#236).
     Marketing(Result<marketing::Marketing, AiError>),
     /// Social posts — per-platform promo copy (#237).
@@ -138,6 +141,7 @@ impl Outcome {
             Outcome::Style(r) => r.as_ref().err(),
             Outcome::Submission(r) => r.as_ref().err(),
             Outcome::Brainstorm(r) => r.as_ref().err(),
+            Outcome::AdCreative(r) => r.as_ref().err(),
             Outcome::Marketing(r) => r.as_ref().err(),
             Outcome::Social(r) => r.as_ref().err(),
             Outcome::Voice(r) => r.as_ref().err(),
