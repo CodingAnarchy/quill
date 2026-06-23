@@ -52,7 +52,9 @@ pub struct LocalImageBackend {
 impl LocalImageBackend {
     /// Download (cached) and load the SD v1.5 weights for this machine.
     pub fn load() -> Result<Self, AiError> {
-        let device = Device::new_metal(0).or_else(|_| Device::new_cuda(0)).unwrap_or(Device::Cpu);
+        let device = crate::ai::model_select::best_device();
+        // SD v1.5 at 512² with standard steps/guidance. Hardware-aware model and
+        // resolution selection is deferred to the local-model epic (#83/#85).
         let config = StableDiffusionConfig::v1_5(None, Some(512), Some(512));
 
         let hub = Api::new().map_err(|e| api(format!("hf-hub: {e}")))?;

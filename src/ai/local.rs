@@ -63,7 +63,7 @@ impl LocalBackend {
     /// Load a quantized Qwen from a `GGUF` file plus its `tokenizer.json`. Uses
     /// Metal when candle was built with it (macOS), else CPU.
     pub fn load(gguf_path: &str, tokenizer_path: &str) -> Result<Self, AiError> {
-        let device = Device::new_metal(0).or_else(|_| Device::new_cuda(0)).unwrap_or(Device::Cpu);
+        let device = model_select::best_device();
         let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| api(format!("tokenizer: {e}")))?;
         let mut file = std::fs::File::open(gguf_path).map_err(|e| api(format!("open gguf: {e}")))?;
         let content = gguf_file::Content::read(&mut file).map_err(|e| api(format!("read gguf: {e}")))?;
