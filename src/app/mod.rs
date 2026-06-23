@@ -1101,7 +1101,8 @@ impl App {
             | Pending::DescribeWorkflow
             | Pending::NameNewWorkflow
             | Pending::Brainstorm
-            | Pending::DraftCharacters => {
+            | Pending::DraftCharacters
+            | Pending::DraftSetting => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1169,6 +1170,11 @@ impl App {
                                 // Back to editing; the profiles arrive asynchronously.
                                 self.mode = closed;
                                 self.draft_characters(text);
+                            }
+                            Pending::DraftSetting => {
+                                // Back to editing; the setting bible arrives asynchronously.
+                                self.mode = closed;
+                                self.draft_setting(text);
                             }
                             Pending::NameNewWorkflow => {
                                 self.mode = closed;

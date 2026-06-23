@@ -268,6 +268,7 @@ impl Action {
         Action::Ai(AiAction::Style),
         Action::Ai(AiAction::Brainstorm),
         Action::Ai(AiAction::DraftCharacters),
+        Action::Ai(AiAction::DraftSetting),
         Action::Ai(AiAction::Voice),
         Action::Ai(AiAction::Submission),
         Action::Ai(AiAction::Marketing),
@@ -297,6 +298,7 @@ impl Action {
             Action::Ai(AiAction::Style) => "ai:style",
             Action::Ai(AiAction::Brainstorm) => "ai:brainstorm",
             Action::Ai(AiAction::DraftCharacters) => "ai:draft-characters",
+            Action::Ai(AiAction::DraftSetting) => "ai:draft-setting",
             Action::Ai(AiAction::Voice) => "ai:voice",
             Action::Ai(AiAction::Submission) => "ai:submission",
             Action::Ai(AiAction::Marketing) => "ai:marketing",
@@ -326,6 +328,7 @@ impl Action {
             Action::Ai(AiAction::Style) => "AI · Prose & style",
             Action::Ai(AiAction::Brainstorm) => "AI · Brainstorm ideas",
             Action::Ai(AiAction::DraftCharacters) => "AI · Draft characters",
+            Action::Ai(AiAction::DraftSetting) => "AI · Draft setting",
             Action::Ai(AiAction::Voice) => "AI · Character voice",
             Action::Ai(AiAction::Submission) => "AI · Submission material",
             Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
@@ -382,6 +385,8 @@ pub(crate) enum AiAction {
     Brainstorm,
     /// Draft a starter character cast from a concept — generative (#256).
     DraftCharacters,
+    /// Draft a starter setting bible from a concept — generative (#257).
+    DraftSetting,
     /// Character voice consistency — dialogue & POV/narration (#183).
     Voice,
     Submission,
@@ -582,6 +587,8 @@ pub(crate) enum Pending {
     Brainstorm,
     /// Text input: a concept to draft a starter character cast from (#256).
     DraftCharacters,
+    /// Text input: a concept to draft a starter setting bible from (#257).
+    DraftSetting,
     /// Text input: a plain-language description of a workflow to generate (#232).
     DescribeWorkflow,
     /// Text input: confirm or edit the name for the workflow the AI proposed
