@@ -9,6 +9,7 @@ use super::*;
 
 use std::sync::{Arc, Mutex};
 
+use crate::ai::ad_creative::{self, AdCreative};
 use crate::ai::brainstorm::{self, Brainstorm};
 use crate::ai::cost;
 use crate::ai::fal::FalBackend;
@@ -270,6 +271,7 @@ impl App {
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
             ai("Social posts", "X / Facebook / Instagram copy (off-manuscript)", AiAction::Social),
+            ai("Ad creative", "Amazon / Meta / X ad copy & targeting (off-manuscript)", AiAction::AdCreative),
             ai("Character portraits", "Portrait images from the character bible (fal.ai)", AiAction::Portrait),
             ai("Scene illustration", "Illustrate the active chapter (fal.ai)", AiAction::Scene),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
@@ -446,6 +448,7 @@ impl App {
             AiAction::Submission => self.analyze_submission(),
             AiAction::Marketing => self.analyze_marketing(),
             AiAction::Social => self.analyze_social(),
+            AiAction::AdCreative => self.analyze_ad_creative(),
             AiAction::Portrait => self.start_portrait(),
             AiAction::Scene => self.start_scene(),
             AiAction::Triage => self.open_triage(),
@@ -747,6 +750,42 @@ impl App {
             let req = social::build_request(manuscript, &model);
             Outcome::Social(backend.complete(&req).and_then(|r| social::parse(&r.text)))
         });
+    }
+
+    /// Generate ad creative & copy (#251) — per-platform ad fields written to
+    /// `marketing/ads/` by [`App::poll_ai`]. Folds in any existing marketing copy
+    /// (#236/#237) so the ads stay on-brand.
+    pub(crate) fn analyze_ad_creative(&mut self) {
+        let marketing = self.marketing_copy_context();
+        self.spawn_ai("⟳ Drafting ad creative…", move |backend, manuscript, model| {
+            let req = ad_creative::build_request(manuscript, &marketing, &model);
+            Outcome::AdCreative(backend.complete(&req).and_then(|r| ad_creative::parse(&r.text)))
+        });
+    }
+
+    /// The author's existing marketing copy (#236/#237) as on-brand context for
+    /// the ad pass — the blurbs/taglines and social posts already written, bodies
+    /// only (front matter stripped). Empty when none exist yet.
+    pub(crate) fn marketing_copy_context(&self) -> String {
+        let root = self.project.root.join("marketing");
+        let files = ["blurbs.md", "taglines.md", "social/x.md", "social/facebook.md", "social/instagram.md"];
+        let mut out = String::new();
+        for file in files {
+            if let Ok(text) = std::fs::read_to_string(root.join(file)) {
+                out.push_str(crate::frontmatter::split(&text).1.trim());
+                out.push_str("\n\n");
+            }
+        }
+        out
+    }
+
+    /// Apply an ad-creative pass (#251): write the per-platform ad copy to
+    /// `marketing/ads/`, conflict-reviewed and off-manuscript.
+    pub(crate) fn apply_ad_creative(&mut self, result: Result<AdCreative, ai::AiError>) {
+        match result {
+            Ok(creative) => self.write_off_manuscript("Ad creative", "marketing/ads", creative.artifacts()),
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
     }
 
     /// Begin a character-portrait pass (#238): gate on image readiness and the
@@ -1244,6 +1283,7 @@ impl App {
                     Outcome::Style(r) => self.apply_style(r),
                     Outcome::Submission(r) => self.apply_submission(r),
                     Outcome::Brainstorm(r) => self.apply_brainstorm(r),
+                    Outcome::AdCreative(r) => self.apply_ad_creative(r),
                     Outcome::Marketing(r) => self.apply_marketing(r),
                     Outcome::Social(r) => self.apply_social(r),
                     Outcome::Voice(r) => self.apply_voice(r),

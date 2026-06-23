@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 17, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 18, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -807,6 +807,42 @@ fn social_skips_a_platform_with_no_posts() {
     assert!(dir.join("marketing/social/x.md").exists());
     assert!(!dir.join("marketing/social/facebook.md").exists(), "no empty facebook file");
     assert!(!dir.join("marketing/social/instagram.md").exists());
+    fs::remove_dir_all(&dir).ok();
+}
+
+// --- #251: ad creative ------------------------------------------------------
+
+#[test]
+fn ad_creative_writes_a_file_per_platform_off_manuscript() {
+    let (mut app, dir) = two_chapter_app("ad-creative");
+    let before = fs::read_to_string(dir.join("one.md")).unwrap();
+    let ad = |h: &str| ai::ad_creative::Ad {
+        headlines: vec![h.into()],
+        body: vec!["A locket. A reckoning.".into()],
+        targeting: vec!["fantasy readers".into()],
+        image_brief: "a fog-bound coast at dawn".into(),
+    };
+    app.apply_ad_creative(Ok(ai::ad_creative::AdCreative {
+        amazon: ad("Unearth the secret"),
+        meta: ad("She came home to bury it"),
+        x: ad("Some doors stay shut"),
+    }));
+    assert!(fs::read_to_string(dir.join("marketing/ads/amazon.md")).unwrap().contains("Unearth the secret"));
+    assert!(fs::read_to_string(dir.join("marketing/ads/meta.md")).unwrap().contains("## Suggested targeting"));
+    assert!(fs::read_to_string(dir.join("marketing/ads/x.md")).unwrap().contains("## Ad image"));
+    assert!(app.overlay.is_some(), "summary overlay");
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn ad_creative_picks_up_existing_marketing_copy() {
+    let (app, dir) = two_chapter_app("ad-creative-context");
+    let mk = dir.join("marketing");
+    fs::create_dir_all(&mk).unwrap();
+    fs::write(mk.join("blurbs.md"), "---\ntitle: x\n---\n\n<!-- generated:start -->\nA locket and a lie.\n<!-- generated:end -->\n").unwrap();
+    let ctx = app.marketing_copy_context();
+    assert!(ctx.contains("A locket and a lie"), "reads existing marketing copy: {ctx:?}");
     fs::remove_dir_all(&dir).ok();
 }
 

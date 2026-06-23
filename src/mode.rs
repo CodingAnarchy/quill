@@ -273,6 +273,7 @@ impl Action {
         Action::Ai(AiAction::Submission),
         Action::Ai(AiAction::Marketing),
         Action::Ai(AiAction::Social),
+        Action::Ai(AiAction::AdCreative),
         Action::Ai(AiAction::Portrait),
         Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
@@ -303,6 +304,7 @@ impl Action {
             Action::Ai(AiAction::Submission) => "ai:submission",
             Action::Ai(AiAction::Marketing) => "ai:marketing",
             Action::Ai(AiAction::Social) => "ai:social",
+            Action::Ai(AiAction::AdCreative) => "ai:ad-creative",
             Action::Ai(AiAction::Portrait) => "ai:portrait",
             Action::Ai(AiAction::Scene) => "ai:scene",
             Action::Ai(AiAction::Triage) => "triage",
@@ -333,6 +335,7 @@ impl Action {
             Action::Ai(AiAction::Submission) => "AI · Submission material",
             Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
             Action::Ai(AiAction::Social) => "AI · Social posts",
+            Action::Ai(AiAction::AdCreative) => "AI · Ad creative",
             Action::Ai(AiAction::Portrait) => "AI · Character portraits",
             Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
@@ -394,6 +397,8 @@ pub(crate) enum AiAction {
     Marketing,
     /// Social posts — per-platform promo copy, off-manuscript (#237).
     Social,
+    /// Platform-ready ad creative & copy, off-manuscript (#251).
+    AdCreative,
     /// Character portrait images from the character bible (#238).
     Portrait,
     /// A key-scene illustration of the active chapter (#239).
