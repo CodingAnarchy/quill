@@ -959,6 +959,39 @@ mod tests {
     }
 
     #[test]
+    fn open_reports_a_malformed_manifest_without_panicking() {
+        let dir = temp_dir("bad-manifest");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // Broken TOML — an unterminated array-of-tables header.
+        fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters]\n").unwrap();
+
+        let err = Project::open(&dir).err().expect("a malformed manifest is an error, not a panic");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains(MANIFEST_NAME), "clear message: {err}");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_tolerates_garbage_front_matter() {
+        let dir = temp_dir("bad-frontmatter");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(Project::manifest_path(&dir), "title = \"B\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n").unwrap();
+        // A fenced block whose contents are not valid YAML at all.
+        fs::write(dir.join("one.md"), "---\n: : : not yaml [}{\n\tstatus\n---\nThe prose body.\n").unwrap();
+
+        // Opening caches each chapter's front matter — garbage must not panic; the
+        // typed fields just come back empty, and the prose body is intact.
+        let project = Project::open(&dir).expect("garbage front matter should not fail the open");
+        assert_eq!(project.chapter_body(0), "The prose body.\n");
+        assert!(project.manifest.chapters[0].status.is_none());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn add_rename_swap_remove_persist() {
         let dir = temp_dir("structure");
         let _ = fs::remove_dir_all(&dir);

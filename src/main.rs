@@ -26,7 +26,7 @@ mod workflow;
 mod wrap;
 
 use std::io::{self, Stdout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::{
@@ -44,19 +44,23 @@ use crate::buffer::Buffer;
 use crate::project::Project;
 
 fn main() -> io::Result<()> {
-    // A project lives in a directory (default: the current one). A directory
-    // with a manifest is opened; one without is initialized as a new project.
+    // A project lives in a directory (default: the current one).
     let dir = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let project = if Project::manifest_path(&dir).exists() {
-        Project::open(&dir)?
-    } else {
-        Project::create(&dir)?
+    // A foreseeable data-path failure at startup — a malformed manifest, an
+    // unreadable chapter, a directory we can't write — exits with a clear,
+    // single-line message instead of a panic or Rust's `Error: Custom {…}`
+    // debug dump (#264). The terminal isn't in raw mode yet, so stderr is clean.
+    let (project, buffer) = match load_project(&dir) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            eprintln!("quill: cannot open project at {}: {e}", dir.display());
+            std::process::exit(1);
+        }
     };
-    let buffer = Buffer::from_path(project.active_path())?;
     let mut app = App::new(buffer, project);
     // Resume today's word-delta counters from the history log.
     app.load_history();
@@ -74,6 +78,21 @@ fn main() -> io::Result<()> {
     // Record today's momentum so it survives the next reopen.
     app.persist_snapshot();
     result
+}
+
+/// Open the project at `dir` — opening an existing one (a directory with a
+/// manifest) or initializing a new one in an empty directory — and load its
+/// active chapter. Every foreseeable failure (a malformed manifest, an
+/// unreadable chapter, a directory that can't be created or written) comes back
+/// as an `Err` carrying a clear message, never a panic (#264).
+fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
+    let project = if Project::manifest_path(dir).exists() {
+        Project::open(dir)?
+    } else {
+        Project::create(dir)?
+    };
+    let buffer = Buffer::from_path(project.active_path())?;
+    Ok((project, buffer))
 }
 
 /// Undo the terminal setup from [`Tui::new`]: leave raw mode and the alternate
@@ -159,6 +178,34 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tmpdir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("quill-main-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn load_project_reports_a_malformed_manifest_instead_of_panicking() {
+        let dir = tmpdir("bad-manifest");
+        // A manifest that exists but is broken TOML: opened, not re-created.
+        std::fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters]\n").unwrap();
+        let err = load_project(&dir).err().expect("a malformed manifest should be an error");
+        assert!(
+            err.to_string().contains(crate::project::MANIFEST_NAME),
+            "the message should name the manifest: {err}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_project_initializes_an_empty_directory() {
+        let dir = tmpdir("fresh");
+        let (project, _buffer) = load_project(&dir).expect("an empty dir becomes a new project");
+        assert!(Project::manifest_path(&project.root).exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn restore_terminal_leaves_alt_screen_and_shows_cursor() {
