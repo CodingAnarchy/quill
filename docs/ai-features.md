@@ -74,6 +74,11 @@ there, so it can't freeze the UI).
 
 The palette actions:
 
+- **Brainstorm ideas** (#255) — the first *generative* pass: from a premise or
+  open prompt (not the manuscript), brainstorm premise variations, "what if"
+  questions, themes, and central conflicts, written as editable notes to
+  `bible/brainstorm.md`. Works at chapter zero (no manuscript needed), off by
+  default, off-manuscript and conflict-reviewed; idea notes, never prose scenes.
 - **Ask the manuscript** (#73) — a grounded question, answered with chapter
   citations in an overlay.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to

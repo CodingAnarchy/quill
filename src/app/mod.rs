@@ -1099,7 +1099,8 @@ impl App {
             | Pending::SetRemote
             | Pending::ExCommand
             | Pending::DescribeWorkflow
-            | Pending::NameNewWorkflow => {
+            | Pending::NameNewWorkflow
+            | Pending::Brainstorm => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1157,6 +1158,11 @@ impl App {
                                 // Back to editing; the proposal arrives asynchronously.
                                 self.mode = closed;
                                 self.generate_workflow(text);
+                            }
+                            Pending::Brainstorm => {
+                                // Back to editing; the ideas arrive asynchronously.
+                                self.mode = closed;
+                                self.brainstorm(text);
                             }
                             Pending::NameNewWorkflow => {
                                 self.mode = closed;
