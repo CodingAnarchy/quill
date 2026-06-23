@@ -58,10 +58,21 @@ fn condense(text: &str, max_chars: usize) -> String {
 }
 
 /// Write image bytes to `path`, creating parent directories (#238). Runs on the
-/// worker thread, so it returns a plain message rather than using `App`.
+/// worker thread, so it returns a plain message rather than using `App`. Removes
+/// any existing sibling with the same stem but a different extension first, so
+/// regenerating in a different format replaces rather than accumulates (e.g. a
+/// later `.jpg` doesn't leave a stale `.png` behind).
 fn save_image(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
+    if let (Some(parent), Some(stem)) = (path.parent(), path.file_stem()) {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.file_stem() == Some(stem) && p != path {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
     }
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
