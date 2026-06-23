@@ -869,7 +869,8 @@ impl App {
         let book = self.project.manifest.title.clone();
         let text_model = self.ai.model.clone();
         let image_model = self.image.model.clone();
-        let dir = self.project.root.join("marketing").join("images").join("scenes");
+        let subdir = "marketing/images/scenes";
+        let dir = self.project.root.join(subdir);
         self.ai_task.spawn(move || {
             let backend = match image_spec.build() {
                 Ok(b) => b,
@@ -881,7 +882,7 @@ impl App {
                 Ok(img) => {
                     let file = format!("{}.{}", scene.slug, img.ext);
                     match save_image(&dir.join(&file), &img.bytes) {
-                        Ok(()) => report.saved.push(format!("marketing/images/scenes/{file}")),
+                        Ok(()) => report.saved.push(format!("{subdir}/{file}")),
                         Err(e) => report.failed.push(format!("{}: {e}", scene.title)),
                     }
                 }
