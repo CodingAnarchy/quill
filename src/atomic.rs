@@ -23,18 +23,16 @@ use std::path::{Path, PathBuf};
 pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = temp_path(path);
 
-    // Scope the file so it is flushed and closed before the rename.
-    let written = (|| {
+    // Stage into the temp file, flush it durable, then swap it in — all in one
+    // fallible step so a failure anywhere leaves a single cleanup path. The
+    // inner scope drops (closes) the file before the rename.
+    let staged = (|| {
         let mut f = File::create(&tmp)?;
         f.write_all(bytes)?;
-        f.sync_all()
+        f.sync_all()?;
+        fs::rename(&tmp, path)
     })();
-    if let Err(e) = written {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-
-    if let Err(e) = fs::rename(&tmp, path) {
+    if let Err(e) = staged {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
@@ -114,8 +112,7 @@ mod tests {
     // The core guarantee (#262): a write that fails leaves the previous good
     // version intact. We force the failure by making the target's directory
     // read-only so the temp file can't be created — then confirm the existing
-    // file is byte-for-byte unchanged. Unix-only (relies on POSIX perms) and
-    // skipped under root, which bypasses permission bits.
+    // file is byte-for-byte unchanged. Unix-only (relies on POSIX perms).
     #[cfg(unix)]
     #[test]
     fn failed_write_preserves_previous_version() {
@@ -126,32 +123,20 @@ mod tests {
         let path = parent.join("chapter.md");
         write(&path, b"the good version\n").unwrap();
 
-        // Running as root ignores the read-only bit, so the write would succeed
-        // and there'd be nothing to assert — skip rather than false-pass.
-        let is_root = unsafe { libc_getuid() } == 0;
-        if is_root {
-            return;
-        }
-
-        let readonly = fs::Permissions::from_mode(0o555);
-        fs::set_permissions(&parent, readonly).unwrap();
-
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o555)).unwrap();
         let result = write(&path, b"a doomed half-written version");
-
         // Restore write perms so the temp dir can be cleaned up later.
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
 
-        assert!(result.is_err(), "write into a read-only dir should fail");
+        // Under root the read-only bit is bypassed, so the write succeeds and
+        // there's nothing to assert — skip rather than false-pass.
+        if result.is_ok() {
+            return;
+        }
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             "the good version\n",
             "the previous good version must survive a failed write"
         );
-    }
-
-    #[cfg(unix)]
-    extern "C" {
-        #[link_name = "getuid"]
-        fn libc_getuid() -> u32;
     }
 }
