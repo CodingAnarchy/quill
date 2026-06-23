@@ -120,6 +120,29 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
     }
 }
 
+const CONCEPT_SYSTEM: &str = "You are a worldbuilding editor helping an author \
+start a novel from a concept, before any draft exists. From the concept or \
+premise, INVENT a starter setting bible: group it into categories such as \
+Geography & locations, the rules of any magic or technology system, Factions, \
+Cultures, and World history — each a list of named entries with a concise detail. \
+Also list the invented place names and terms as a gazetteer. These are \
+first-draft suggestions the author will reshape, not canon. Do NOT write prose or \
+scenes. Leave `findings` empty — there's no manuscript to check rules against.";
+
+/// Build a generative request (#257): draft a starter setting bible from a
+/// concept / premise (no manuscript), into the same schema the extractive pass
+/// returns.
+pub fn build_concept_request(concept: &str, model: &str) -> Request {
+    Request {
+        system: Some(CONCEPT_SYSTEM.to_string()),
+        cached_context: format!("Concept / premise:\n{concept}"),
+        user: "Draft the starter setting bible and gazetteer as specified.".to_string(),
+        model: model.to_string(),
+        max_tokens: MAX_OUTPUT_TOKENS,
+        json_schema: Some(schema()),
+    }
+}
+
 const REVISE_SYSTEM: &str = "You are a worldbuilding editor maintaining an \
 existing setting bible. You are given the current bible (built from the whole \
 manuscript) and only the chapters that have changed since. Revise it: update the \
@@ -198,6 +221,14 @@ mod tests {
                 chapters: vec!["The Duel".into()],
             }],
         }
+    }
+
+    #[test]
+    fn concept_request_carries_the_concept_not_a_manuscript() {
+        let req = build_concept_request("a city built inside a dormant volcano", "claude-opus-4-8");
+        assert!(req.cached_context.contains("dormant volcano"));
+        assert!(req.system.as_deref().unwrap().contains("INVENT"), "asks to invent, not extract");
+        assert!(req.json_schema.is_some(), "same schema as the extractive pass");
     }
 
     #[test]

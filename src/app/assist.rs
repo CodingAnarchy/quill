@@ -265,6 +265,7 @@ impl App {
             ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
             ai("Brainstorm ideas", "Premises, themes & conflicts from a spark (off-manuscript)", AiAction::Brainstorm),
             ai("Draft characters", "Starter cast from a concept (no manuscript needed)", AiAction::DraftCharacters),
+            ai("Draft setting", "Starter worldbuilding bible from a concept", AiAction::DraftSetting),
             ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
             ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
             ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
@@ -415,7 +416,7 @@ impl App {
             // and send no manuscript (Brainstorm sends only a premise), and the
             // image passes (#238/#239) are billed per image with their own confirm.
             AiAction::Ask | AiAction::Triage | AiAction::Brainstorm | AiAction::DraftCharacters
-            | AiAction::Portrait | AiAction::Scene => None,
+            | AiAction::DraftSetting | AiAction::Portrait | AiAction::Scene => None,
             AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
             _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
@@ -437,6 +438,9 @@ impl App {
             }
             AiAction::DraftCharacters => {
                 self.open_prompt(Pending::DraftCharacters, "Concept / premise: ", "", None)
+            }
+            AiAction::DraftSetting => {
+                self.open_prompt(Pending::DraftSetting, "Concept / premise: ", "", None)
             }
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
@@ -667,13 +671,8 @@ impl App {
     /// Sends only the premise (no manuscript), so it works on an empty project;
     /// the ideas are written to `bible/brainstorm.md` by [`App::poll_ai`].
     pub(crate) fn brainstorm(&mut self, premise: &str) {
-        let premise = premise.trim().to_string();
-        if premise.is_empty() {
-            return;
-        }
-        let model = self.ai.model.clone();
-        self.spawn_outcome("⟳ Brainstorming…", move |backend| {
-            let req = brainstorm::build_request(&premise, &model);
+        self.spawn_generative(premise, "⟳ Brainstorming…", |backend, premise, model| {
+            let req = brainstorm::build_request(premise, &model);
             Outcome::Brainstorm(backend.complete(&req).and_then(|r| brainstorm::parse(&r.text)))
         });
     }
@@ -682,15 +681,38 @@ impl App {
     /// manuscript. Reuses the extractive pass's `Outcome::Characters` so the
     /// profiles are written to `bible/characters/` by [`apply_characters`].
     pub(crate) fn draft_characters(&mut self, concept: &str) {
-        let concept = concept.trim().to_string();
-        if concept.is_empty() {
+        self.spawn_generative(concept, "⟳ Drafting characters…", |backend, concept, model| {
+            let req = character::build_concept_request(concept, &model);
+            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
+        });
+    }
+
+    /// Draft a starter setting bible from a concept (#257) — generative, no
+    /// manuscript. Reuses the extractive pass's `Outcome::Setting` so the bible is
+    /// written to `bible/setting.md` by [`apply_setting`].
+    pub(crate) fn draft_setting(&mut self, concept: &str) {
+        self.spawn_generative(concept, "⟳ Drafting setting…", |backend, concept, model| {
+            let req = setting::build_concept_request(concept, &model);
+            Outcome::Setting(backend.complete(&req).and_then(|r| setting::parse(&r.text)))
+        });
+    }
+
+    /// Spawn a generative AI pass (#255/#256/#257) from a short typed input — a
+    /// premise or concept, not the manuscript. Trims and guards the input, then
+    /// runs `produce` off the worker thread (the input + model are handed to it).
+    /// A no-op for empty input; works on an empty project.
+    fn spawn_generative(
+        &mut self,
+        input: &str,
+        message: &str,
+        produce: impl FnOnce(&dyn Backend, &str, String) -> Outcome + Send + 'static,
+    ) {
+        let input = input.trim().to_string();
+        if input.is_empty() {
             return;
         }
         let model = self.ai.model.clone();
-        self.spawn_outcome("⟳ Drafting characters…", move |backend| {
-            let req = character::build_concept_request(&concept, &model);
-            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
-        });
+        self.spawn_outcome(message, move |backend| produce(backend, &input, model));
     }
 
     /// Apply a brainstorm pass (#255): write the idea notes to `bible/brainstorm.md`,

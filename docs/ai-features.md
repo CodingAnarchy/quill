@@ -84,6 +84,11 @@ The palette actions:
   same #74 format (marked AI-generated, editable). Works at chapter zero; the
   drafted cast then feeds the extractive character pass and reports once prose
   exists. Scaffolding the author reshapes, never manuscript prose.
+- **Draft setting** (#257) — *generative*: from a concept, invent a starter
+  setting / worldbuilding bible to `bible/setting.md` in the same #77 format
+  (categorized entries + gazetteer, marked AI-generated, editable). Works at
+  chapter zero and later feeds the setting rule-consistency checks. Scaffolding,
+  never prose.
 - **Ask the manuscript** (#73) — a grounded question, answered with chapter
   citations in an overlay.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to
