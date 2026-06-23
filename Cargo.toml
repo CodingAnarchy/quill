@@ -36,9 +36,11 @@ tokenizers = { version = "0.20", optional = true }
 # Hardware detection + direct model download for hardware-aware selection (#85).
 sysinfo = { version = "0.33", optional = true }
 hf-hub = { version = "0.4", optional = true }
+# PNG encoding for the local image backend (#240) — only needed with `local`.
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 
 [features]
-local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
+local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub", "dep:image"]
 
 # On macOS, give candle the Metal backend (GPU). Cargo unions these features into
 # the optional deps above, so `--features local` is CPU elsewhere and Metal here.

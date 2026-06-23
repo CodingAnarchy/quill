@@ -55,6 +55,18 @@ pub fn default_model() -> String {
     "fal-ai/flux/schnell".to_string()
 }
 
+/// Which image provider to generate with (#240).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageBackendKind {
+    /// The remote fal.ai API (needs a key; sends the prompt off-machine).
+    #[default]
+    Remote,
+    /// A local Stable-Diffusion model (runs offline; nothing leaves the machine,
+    /// no per-image cost). Behind the `local` cargo feature.
+    Local,
+}
+
 /// Image-generation settings from the `[image]` config section. Off by default;
 /// its own opt-in and key, separate from the text `[ai]` settings.
 #[derive(Clone, Deserialize)]
@@ -62,15 +74,27 @@ pub fn default_model() -> String {
 pub struct ImageSettings {
     /// Opt-in for image generation.
     pub enabled: bool,
-    /// The provider API key (env `FAL_KEY` overrides this, see [`load`](ImageSettings::load)).
+    /// Which provider to use (`remote` or `local`).
+    pub backend: ImageBackendKind,
+    /// Privacy switch: when true, force the local backend so nothing ever leaves
+    /// the machine, regardless of `backend`.
+    pub offline: bool,
+    /// The remote provider API key (env `FAL_KEY` overrides this, see
+    /// [`load`](ImageSettings::load)). Unused by the local backend.
     pub api_key: Option<String>,
-    /// The provider model id (a fal.ai model, e.g. `fal-ai/flux/schnell`).
+    /// The remote provider model id (a fal.ai model, e.g. `fal-ai/flux/schnell`).
     pub model: String,
 }
 
 impl Default for ImageSettings {
     fn default() -> Self {
-        Self { enabled: false, api_key: None, model: default_model() }
+        Self {
+            enabled: false,
+            backend: ImageBackendKind::Remote,
+            offline: false,
+            api_key: None,
+            model: default_model(),
+        }
     }
 }
 
@@ -102,8 +126,20 @@ impl ImageSettings {
         super::resolved_key(&self.api_key)
     }
 
+    /// The backend that will actually run, accounting for the privacy switch:
+    /// `offline` forces local; otherwise the configured `backend`.
+    pub fn backend(&self) -> ImageBackendKind {
+        if self.offline {
+            ImageBackendKind::Local
+        } else {
+            self.backend
+        }
+    }
+
     /// Whether image generation is usable as configured, or why not — the gate for
-    /// the portrait/scene actions.
+    /// the portrait/scene actions. Local needs no key (it loads on first use); the
+    /// remote backend needs one. (Whether the local model is *compiled in* is
+    /// checked when the backend is built — see `image_backend_spec`.)
     pub fn check_ready(&self) -> Result<(), AiError> {
         if !self.enabled {
             return Err(AiError::NotConfigured(
@@ -112,12 +148,15 @@ impl ImageSettings {
                     .into(),
             ));
         }
-        if self.resolved_key().is_none() {
-            return Err(AiError::NotConfigured(
-                "No image API key — set FAL_KEY or `api_key` under [image] in the config".into(),
-            ));
+        match self.backend() {
+            ImageBackendKind::Local => Ok(()),
+            ImageBackendKind::Remote if self.resolved_key().is_some() => Ok(()),
+            ImageBackendKind::Remote => Err(AiError::NotConfigured(
+                "No image API key — set FAL_KEY or `api_key` under [image] in the config \
+                 (or set `backend = \"local\"`)"
+                    .into(),
+            )),
         }
-        Ok(())
     }
 }
 
@@ -168,6 +207,19 @@ mod tests {
         assert!(no_key.check_ready().unwrap_err().to_string().contains("key"));
         let ready = ImageSettings { enabled: true, api_key: Some("k".into()), ..Default::default() };
         assert!(ready.check_ready().is_ok());
+    }
+
+    #[test]
+    fn local_backend_needs_no_key() {
+        let s = ImageSettings { enabled: true, backend: ImageBackendKind::Local, ..Default::default() };
+        assert!(s.check_ready().is_ok(), "local needs no key");
+    }
+
+    #[test]
+    fn offline_forces_local_and_needs_no_key() {
+        let s = ImageSettings { enabled: true, offline: true, ..Default::default() };
+        assert_eq!(s.backend(), ImageBackendKind::Local);
+        assert!(s.check_ready().is_ok());
     }
 
     #[test]

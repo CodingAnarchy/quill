@@ -16,6 +16,8 @@ pub mod cost;
 pub mod fal;
 pub mod image;
 pub mod incremental;
+#[cfg(feature = "local")]
+pub mod local_image;
 pub mod marketing;
 #[cfg(feature = "local")]
 pub mod local;

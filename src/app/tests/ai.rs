@@ -763,6 +763,26 @@ fn image_results_summarize_saved_and_failed() {
 }
 
 #[test]
+#[cfg(not(feature = "local"))]
+fn image_pass_reports_when_the_local_backend_isnt_compiled() {
+    let (mut app, dir) = two_chapter_app("image-local-uncompiled");
+    app.image = ai::image::ImageSettings {
+        enabled: true,
+        backend: ai::image::ImageBackendKind::Local,
+        ..Default::default()
+    };
+    write_character(&dir, "mara", "Mara");
+    app.start_portrait();
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm; local model isn't built in");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("--features local"),
+        "explains how to enable: {:?}",
+        app.message
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn scene_pass_needs_image_generation_enabled() {
     let (mut app, dir) = two_chapter_app("scene-off");
     app.image = ai::image::ImageSettings::default(); // off
