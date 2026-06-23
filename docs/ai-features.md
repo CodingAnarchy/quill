@@ -110,13 +110,13 @@ The palette actions:
 - **Social posts** (#237) — ready-to-post promo copy shaped to each platform's
   conventions (X / Facebook / Instagram), written to `marketing/social/` (one file
   per platform). Off-manuscript and conflict-reviewed; edit and regenerate freely.
-- **Character portraits** (#238) — portrait images of the bible characters, built
-  from their profiles and generated via a remote image backend (fal.ai), saved to
+- **Character portraits** (#238, #244) — portrait images of the bible characters,
+  built from their profiles and generated via the image backend, saved to
   `marketing/images/characters/`. Off-manuscript files the author owns and
-  regenerates. Its own `[image]` opt-in + key (separate from the text `[ai]`
-  settings); confirms before generating since each image is billed. Needs the
-  character pass to have run first. The image backend sits behind a trait so a
-  local option can be added later (#240).
+  regenerates. A picker lets you generate one chosen character or the whole cast;
+  the cost confirm reflects the count (each image is billed). Its own `[image]`
+  opt-in + key (separate from the text `[ai]` settings). Needs the character pass
+  to have run first.
 - **Scene illustration** (#239) — an illustration of the active chapter, built from
   a scene excerpt plus the setting bible (for visual consistency), via the same
   image backend, saved to `marketing/images/scenes/`. Off-manuscript; confirms

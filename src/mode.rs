@@ -212,6 +212,18 @@ pub(crate) enum Command {
     RunWorkflow(usize),
     /// Start building a workflow from a plain-language description (#232).
     NewWorkflowFromPrompt,
+    /// Generate portraits for the chosen character(s) (#244).
+    Portrait(PortraitChoice),
+}
+
+/// Which character(s) a portrait pass should generate (#244), chosen from the
+/// character-portrait picker.
+#[derive(Clone, Copy)]
+pub(crate) enum PortraitChoice {
+    /// Every character in the bible.
+    All,
+    /// The character at this index in the (sorted) bible list.
+    One(usize),
 }
 
 /// A single invokable Quill action — the unified registry (#225). The run-action
