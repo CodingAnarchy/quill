@@ -1,0 +1,127 @@
+//! Chapter CRUD and navigation (activate, create, rename, move, delete).
+//! Extracted from `mod.rs` (#314).
+
+
+
+
+
+use crate::buffer::Buffer;
+
+use super::App;
+use super::ONLY_CHAPTER_MSG;
+
+impl App {
+    pub(super) fn activate_chapter(&mut self, index: usize) {
+        if index >= self.project.manifest.chapters.len() || index == self.project.active_index() {
+            return;
+        }
+        // Flush the chapter we're leaving before loading the next.
+        if self.flush_active().is_err() {
+            return;
+        }
+        match Buffer::from_path(self.project.chapter_path(index)) {
+            Ok(buffer) => {
+                self.buffer = buffer;
+                self.project.set_active(index);
+                // No need to cache the new active chapter's count: while active,
+                // chapter_word_count reads it live from the buffer.
+                if let Some(title) = self.project.active_title() {
+                    self.message = Some(format!("Chapter: {title}"));
+                }
+            }
+            Err(e) => self.message = Some(format!("Open failed: {e}")),
+        }
+    }
+
+    pub(super) fn chapter_count(&self) -> usize {
+        self.project.manifest.chapters.len()
+    }
+
+    pub(super) fn next_chapter(&mut self) {
+        self.activate_chapter(self.project.active_index() + 1);
+    }
+
+    pub(super) fn prev_chapter(&mut self) {
+        // At chapter 0 this targets 0 — a no-op via activate_chapter's guard.
+        self.activate_chapter(self.project.active_index().saturating_sub(1));
+    }
+
+    pub(super) fn create_chapter(&mut self, at: usize, title: &str) -> usize {
+        match self.project.add_chapter(at, title) {
+            Ok(()) => self.message = Some(format!("Added '{title}'")),
+            Err(e) => self.message = Some(format!("Add failed: {e}")),
+        }
+        at.min(self.chapter_count() - 1)
+    }
+
+    pub(super) fn rename_chapter(&mut self, at: usize, title: &str) {
+        match self.project.rename_chapter(at, title) {
+            Ok(()) => self.message = Some(format!("Renamed to '{title}'")),
+            Err(e) => self.message = Some(format!("Rename failed: {e}")),
+        }
+    }
+
+    /// Move chapter `sel` up or down one slot; returns its new position (the
+    /// active chapter follows its content automatically via identity tracking).
+    pub(super) fn move_chapter(&mut self, sel: usize, up: bool) -> usize {
+        let target = if up {
+            sel.checked_sub(1)
+        } else {
+            (sel + 1 < self.chapter_count()).then_some(sel + 1)
+        };
+        let Some(j) = target else { return sel };
+        // Reordering stays within a band — a section can't be shuffled out of
+        // front/back matter into the body or vice versa (#180).
+        if self.project.chapter_band(sel) != self.project.chapter_band(j) {
+            self.message = Some("Reordering stays within front matter / body / back matter.".into());
+            return sel;
+        }
+        match self.project.swap_chapters(sel, j) {
+            Ok(()) => j,
+            Err(e) => {
+                self.message = Some(format!("Move failed: {e}"));
+                sel
+            }
+        }
+    }
+
+    /// Delete chapter `at`; returns the chapter the browser should select next.
+    pub(super) fn delete_chapter(&mut self, at: usize) -> usize {
+        if self.chapter_count() <= 1 {
+            self.message = Some(ONLY_CHAPTER_MSG.into());
+            return at;
+        }
+        // Deleting the active chapter is the one structural edit that changes the
+        // buffer's content — every other op keeps the active file present, so its
+        // index just re-derives.
+        let deleting_active = at == self.project.active_index();
+        if deleting_active && self.buffer.dirty {
+            // Persist the latest text first so the copy moved to unused/ is current.
+            let _ = self.buffer.save();
+        }
+        // The chapter's words leave the manuscript — booked as "moved to unused"
+        // today, not as words deleted (that's prose editing).
+        let removed_words = self.chapter_word_count(at);
+        if let Err(e) = self.project.remove_chapter(at) {
+            self.message = Some(format!("Delete failed: {e}"));
+            return at.min(self.chapter_count() - 1);
+        }
+
+        if deleting_active {
+            // The active file is gone — point at a neighbor and reload.
+            let neighbor = at.min(self.chapter_count() - 1);
+            self.project.set_active(neighbor);
+            match Buffer::from_path(self.project.active_path()) {
+                Ok(buffer) => self.buffer = buffer,
+                Err(e) => self.message = Some(format!("Open failed: {e}")),
+            }
+        }
+        self.moved_to_unused += removed_words;
+        // Absorb the structural drop so the next tally doesn't book it as removed:
+        // re-baseline every chapter to its current count (this also drops the
+        // deleted file's stale entry, since the map is rebuilt by file identity).
+        self.seed_baselines();
+        self.message = Some("Moved chapter to unused/".into());
+        at.min(self.chapter_count() - 1)
+    }
+}

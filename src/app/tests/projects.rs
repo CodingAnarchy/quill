@@ -6,6 +6,9 @@ use super::*;
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::mode::WizardStep;
+use crate::recent;
+
 /// These tests redirect the global config dir (where the recent-projects list
 /// lives) to a temp dir via `XDG_CONFIG_HOME`. The env var is process-global, so
 /// serialize them — and isolate each one's recents — under this lock.
