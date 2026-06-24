@@ -1301,6 +1301,55 @@ mod tests {
 
     // --- Multi-book series (#328) -----------------------------------------
 
+    /// Write a `books`-shaped series manifest with `books` books of `per_book`
+    /// chapters each (and their files), for the multi-book perf guard.
+    fn write_series_project(dir: &Path, books: usize, per_book: usize) -> String {
+        let mut manifest = String::from("title = \"Series\"\n\n");
+        for b in 0..books {
+            fs::create_dir_all(dir.join(format!("b{b}"))).unwrap();
+            manifest.push_str(&format!("[[books]]\ntitle = \"Book {b}\"\n\n"));
+            for i in 0..per_book {
+                let file = format!("b{b}/ch{i}.md");
+                manifest.push_str(&format!("[[books.chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+                let mut body = String::from("---\nstatus: draft\npov: Mara\n---\n# Chapter\n\n");
+                for _ in 0..50 {
+                    body.push_str("The night was dark and the road was very long indeed.\n");
+                }
+                fs::write(dir.join(&file), body).unwrap();
+            }
+        }
+        manifest
+    }
+
+    /// Opening a series-sized *multi-book* project (the new `[[books]]` format,
+    /// #328) stays within the same budget as the single-book series guard — it
+    /// runs the books-array parse and the active-book hoist, then caches only the
+    /// active book's chapters. Catches a regression that eagerly reads every
+    /// book's files at open, or to O(n²) parse work on the larger manifest.
+    #[test]
+    #[ignore]
+    fn open_is_fast_for_a_multi_book_series() {
+        use std::time::Instant;
+
+        let (books, per_book) = (6, 250); // 1500 chapters across the series
+        let dir = temp_dir("perf-open-multibook");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = write_series_project(&dir, books, per_book);
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+        let t = Instant::now();
+        let project = Project::open(&dir).unwrap();
+        let dt = t.elapsed();
+
+        println!("open {books}-book series ({} chapters total) = {dt:?}", books * per_book);
+        assert_eq!(project.book_count(), books);
+        assert_eq!(project.manifest.chapters.len(), per_book, "active book is hoisted");
+        assert!(dt.as_millis() < 500, "open took {dt:?}");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     /// Write a two-book series manifest (and its chapter files) to `dir`.
     fn write_series(dir: &Path) {
         let _ = fs::remove_dir_all(dir);
