@@ -96,6 +96,12 @@ posts). Revision triage collects every finding into one list to work through.
 Each pass runs off the editor thread, so the editor never freezes, and a pass
 that would cost more than your threshold asks before spending.
 
+Stuck on a word? "Word search" is an in-context thesaurus: it prefills the word
+under your cursor — add constraints in plain words ("2 syllables, Anglo-Saxon,
+common; 8 results") if you like — and returns candidate words or short phrases
+with definitions, using the current line only to judge fit. It hands you options
+to choose from; it never rewrites your sentence.
+
 Already have notes? "Import notes" (in the Ctrl-K menu) takes a Markdown file —
 or a folder of them — preserves the original under bible/sources/, and folds
 whatever it finds (characters, setting and world systems, the timeline, an

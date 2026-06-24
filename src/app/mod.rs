@@ -1616,6 +1616,7 @@ impl App {
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
             | Pending::AskAi
+            | Pending::Thesaurus
             | Pending::Commit
             | Pending::SetRemote
             | Pending::ExCommand
@@ -1665,6 +1666,11 @@ impl App {
                                 // asynchronously in the overlay.
                                 self.mode = closed;
                                 self.ask_ai(text);
+                            }
+                            Pending::Thesaurus => {
+                                // Back to editing; the candidates arrive in the overlay.
+                                self.mode = closed;
+                                self.thesaurus(text);
                             }
                             Pending::Commit => {
                                 self.mode = closed;

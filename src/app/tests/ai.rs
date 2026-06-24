@@ -429,9 +429,35 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 18, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 19, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn word_search_prompt_is_prefilled_with_the_word_under_the_cursor() {
+    let (mut app, dir) = two_chapter_app("thesaurus-prefill");
+    app.start_thesaurus(); // cursor is at the start of "first chapter"
+    match &app.mode {
+        Mode::Prompt(s) => {
+            assert!(matches!(s.pending, Pending::Thesaurus));
+            assert_eq!(s.input, "first", "prefilled with the word under the cursor");
+        }
+        _ => panic!("word search should open a prompt"),
+    }
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn applying_word_search_results_opens_the_overlay() {
+    let (mut app, dir) = two_chapter_app("thesaurus-apply");
+    let words = crate::ai::thesaurus::parse(
+        r#"{"words":[{"text":"melancholy","definition":"a pensive sadness","syllables":4}]}"#,
+    )
+    .unwrap();
+    app.apply_thesaurus(Ok(words));
+    assert!(app.overlay.is_some(), "candidates are shown in the AI overlay");
     fs::remove_dir_all(&dir).ok();
 }
 
