@@ -1005,7 +1005,7 @@ impl App {
                 let nums: Vec<usize> = text.split_whitespace().filter_map(|t| t.parse().ok()).collect();
                 match nums[..] {
                     [words, chapters, ..] if words > 0 && chapters > 0 => {
-                        self.project.manifest.goals = Some(Goals { words, chapters, words_per_page: 250 });
+                        self.project.manifest.goals = Some(Goals { words, chapters, words_per_page: 250, daily: None });
                         self.message = match self.project.save_manifest() {
                             Ok(()) => Some("Writing goals set.".into()),
                             Err(e) => Some(format!("Couldn't save goals: {e}")),
