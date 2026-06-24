@@ -595,11 +595,19 @@ fn applying_an_import_writes_the_bible_files() {
     let mut app = open_app(&cur);
 
     let imported = crate::ai::import::parse(
-        r#"{"characters":[{"name":"Mara"}],"setting":{"categories":[{"name":"Places","entries":[{"name":"Saltmarsh","detail":"a fog-bound coast"}]}],"gazetteer":["Saltmarsh"],"findings":[]}}"#,
+        r#"{
+            "characters":[{"name":"Mara"}],
+            "setting":{"categories":[{"name":"Magic","entries":[{"name":"Tidecalling","detail":"pull the sea"}]}],"gazetteer":["Saltmarsh"],"findings":[]},
+            "timeline":{"events":[{"description":"Mara finds the locket","chapter":"One","story_order":1}],"findings":[]},
+            "outline":{"outline":[{"chapter":"One","beats":["Mara arrives home"]}],"gaps":[]}
+        }"#,
     )
     .unwrap();
     app.apply_import(Ok(imported));
 
-    assert!(app.project.root.join("bible").join("characters").join("mara.md").exists(), "character bible written");
-    assert!(app.project.root.join("bible").join("setting.md").exists(), "setting bible written");
+    let bible = app.project.root.join("bible");
+    assert!(bible.join("characters").join("mara.md").exists(), "character bible written");
+    assert!(bible.join("setting.md").exists(), "setting bible written (incl. magic system)");
+    assert!(bible.join("timeline.md").exists(), "timeline written");
+    assert!(bible.join("outline.md").exists(), "outline written");
 }

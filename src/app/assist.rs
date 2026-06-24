@@ -1567,28 +1567,40 @@ impl App {
             self.enrich_mentions(c);
         }
         let setting = imported.setting;
+        let timeline = imported.timeline;
+        let outline = imported.outline;
         let setting_has = !setting.categories.is_empty() || !setting.gazetteer.is_empty();
-        if chars.is_empty() && !setting_has {
+        let timeline_has = !timeline.events.is_empty();
+        let outline_has = !outline.outline.is_empty();
+        if chars.is_empty() && !setting_has && !timeline_has && !outline_has {
             self.message = Some(format!("Imported {source}: no bible content found in the notes."));
             return;
         }
 
         let today = date::iso(date::today());
+        let bible = self.project.root.join("bible");
+        // Stage every produced file; collect all hand-edit conflicts into one
+        // review so a single import never opens several in a row.
+        let mut staged: Vec<Staged> = Vec::new();
+        for c in &chars {
+            let path = bible.join("characters").join(format!("{}.md", bible::slug(&c.name)));
+            staged.push(self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)));
+        }
+        if setting_has {
+            staged.push(self.stage_bible(bible.join("setting.md"), "setting", |notes| setting::render(&setting, notes, &today)));
+        }
+        if timeline_has {
+            staged.push(self.stage_bible(bible.join("timeline.md"), "timeline", |notes| continuity::render_timeline(&timeline, notes, &today)));
+        }
+        if outline_has {
+            staged.push(self.stage_bible(bible.join("outline.md"), "outline", |notes| scaffold::render_outline(&outline, notes, &today)));
+        }
+
         let mut conflicts = Vec::new();
         let mut failures = Vec::new();
         let mut written = 0;
-        let cdir = self.project.root.join("bible").join("characters");
-        for c in &chars {
-            let path = cdir.join(format!("{}.md", bible::slug(&c.name)));
-            match self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)) {
-                Staged::Wrote => written += 1,
-                Staged::Conflict(x) => conflicts.push(x),
-                Staged::Failed(m) => failures.push(m),
-            }
-        }
-        if setting_has {
-            let path = self.project.root.join("bible").join("setting.md");
-            match self.stage_bible(path, "setting", |notes| setting::render(&setting, notes, &today)) {
+        for result in staged {
+            match result {
                 Staged::Wrote => written += 1,
                 Staged::Conflict(x) => conflicts.push(x),
                 Staged::Failed(m) => failures.push(m),
@@ -1598,7 +1610,7 @@ impl App {
         if !failures.is_empty() {
             self.message = Some(write_failure_message(&failures));
         } else if conflicts.is_empty() {
-            self.show_ai(import_summary_lines(&source, chars.len(), setting_has, written));
+            self.show_ai(import_summary_lines(&source, chars.len(), setting_has, timeline_has, outline_has, written));
         } else {
             let pending = conflicts.len();
             self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
@@ -2084,16 +2096,24 @@ fn collect_import_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
 }
 
-/// Summary lines for a completed notes import (#283).
-fn import_summary_lines(source: &str, characters: usize, setting: bool, written: usize) -> Vec<Line<'static>> {
+/// Summary lines for a completed notes import (#283/#288).
+fn import_summary_lines(
+    source: &str,
+    characters: usize,
+    setting: bool,
+    timeline: bool,
+    outline: bool,
+    written: usize,
+) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::raw(format!("Imported {source} into the story bible.")),
         Line::raw(""),
         Line::raw(format!("Characters: {characters}")),
     ];
-    if setting {
-        lines.push(Line::raw("Setting:    updated".to_string()));
-    }
+    let yes = |on: bool| if on { "updated" } else { "—" };
+    lines.push(Line::raw(format!("Setting:    {}", yes(setting))));
+    lines.push(Line::raw(format!("Timeline:   {}", yes(timeline))));
+    lines.push(Line::raw(format!("Outline:    {}", yes(outline))));
     lines.push(Line::raw(format!("Files written: {written}  (bible/)")));
     lines.push(Line::raw(""));
     lines.push(Line::raw("The original notes are preserved under bible/sources/."));
