@@ -119,6 +119,9 @@ pub struct ProjectsConfig {
     /// lists every project under it. `~` expands to the home directory. Absent
     /// when unset — the browser then shows only recent projects.
     pub home: Option<String>,
+    /// Whether a newly-created project offers the setup wizard (#282). Defaults
+    /// to on; set `setup_wizard = false` to never be prompted.
+    pub setup_wizard: Option<bool>,
 }
 
 impl ProjectsConfig {
@@ -140,6 +143,11 @@ impl ProjectsConfig {
     /// The configured projects-home as an absolute path with `~` expanded, if set.
     pub fn home_dir(&self) -> Option<PathBuf> {
         self.home.as_deref().map(expand_tilde)
+    }
+
+    /// Whether a new project should offer the setup wizard (#282); on by default.
+    pub fn wizard_enabled(&self) -> bool {
+        self.setup_wizard.unwrap_or(true)
     }
 }
 
@@ -176,8 +184,15 @@ mod tests {
 
     #[test]
     fn projects_home_passes_an_absolute_path_through() {
-        let cfg = ProjectsConfig { home: Some("/books".into()) };
+        let cfg = ProjectsConfig { home: Some("/books".into()), ..Default::default() };
         assert_eq!(cfg.home_dir(), Some(PathBuf::from("/books")));
+    }
+
+    #[test]
+    fn the_setup_wizard_is_on_by_default_and_opt_out() {
+        assert!(ProjectsConfig::default().wizard_enabled(), "on by default");
+        let off: ProjectsConfig = toml::from_str("setup_wizard = false").unwrap();
+        assert!(!off.wizard_enabled(), "opt out with setup_wizard = false");
     }
 
     #[test]

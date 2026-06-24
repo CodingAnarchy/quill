@@ -225,6 +225,38 @@ pub struct DirEntry {
     pub(crate) is_parent: bool,
 }
 
+/// A step in the new-project setup wizard (#282), offered in turn after a
+/// project is created. Each is individually skippable; the AI steps are skipped
+/// outright when AI is off.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum WizardStep {
+    /// Writing goals → the manifest (drives the progress report).
+    Goals,
+    /// Draft a starter cast from a concept (AI) → the character bible.
+    Characters,
+    /// Draft the setting from a concept (AI) → the setting bible.
+    Setting,
+    /// A free-form note → `notes.md`.
+    Notes,
+}
+
+impl WizardStep {
+    /// The step after this one, or `None` when the wizard is finished.
+    pub(crate) fn next(self) -> Option<WizardStep> {
+        match self {
+            WizardStep::Goals => Some(WizardStep::Characters),
+            WizardStep::Characters => Some(WizardStep::Setting),
+            WizardStep::Setting => Some(WizardStep::Notes),
+            WizardStep::Notes => None,
+        }
+    }
+
+    /// Whether this step needs the AI backend (so it's skipped when AI is off).
+    pub(crate) fn needs_ai(self) -> bool {
+        matches!(self, WizardStep::Characters | WizardStep::Setting)
+    }
+}
+
 /// State for an open [`Mode::Palette`]: the available AI actions and the selected
 /// row.
 pub struct Palette {
@@ -644,6 +676,12 @@ pub(crate) enum Pending {
     /// Text input: the path (location + name) for a new project to create from
     /// the project browser (#273). Created and opened on Enter.
     NewProject,
+    /// y/N: offer the new-project setup wizard (#282). `y` starts it at the first
+    /// step; anything else lands in the editor.
+    WizardStart,
+    /// Text input for one setup-wizard step (#282): blank skips the step, Esc
+    /// dismisses the rest of the wizard.
+    Wizard(WizardStep),
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).

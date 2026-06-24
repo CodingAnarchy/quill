@@ -188,6 +188,11 @@ home = "~/Writing"
 Every project under that folder then appears in the browser, ready to open —
 no need to have opened it before. Without it, the browser just shows recents.
 
+When you create a project, a short setup wizard offers to scaffold it — writing
+goals, a starter cast and setting (with AI, when enabled), and a first note.
+Every step is skippable and the whole thing is dismissible (Esc); turn it off
+entirely with `setup_wizard = false` under `[projects]`.
+
 ### Vim mode (opt-in)
 
 Authors with Vim muscle memory can turn on modal editing. It's off by default —
