@@ -341,6 +341,7 @@ impl App {
             Action::ProgressReport => self.open_progress_report(),
             Action::AnalysisReport => self.open_analysis_report(),
             Action::Ai(a) => self.start_ai_action(a, force),
+            Action::UserGuide => self.open_guide(),
         }
     }
 

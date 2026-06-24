@@ -14,6 +14,7 @@ mod datapath_tests;
 mod date;
 mod export;
 mod frontmatter;
+mod guide;
 mod history;
 mod manuscript;
 mod mode;

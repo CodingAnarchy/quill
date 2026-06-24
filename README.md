@@ -150,6 +150,7 @@ byte-for-byte.
 | *(typing)*     | insert text                     |
 | Arrows         | move cursor                     |
 | Home / End     | start / end of line             |
+| F1             | open the built-in user's guide  |
 | Ctrl-Z / Ctrl-Y| undo / redo                     |
 | Ctrl-F         | find (then `r` to replace)      |
 | Ctrl-S         | save                            |
