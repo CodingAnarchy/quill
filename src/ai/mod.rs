@@ -17,6 +17,7 @@ pub mod continuity;
 pub mod cost;
 pub mod fal;
 pub mod image;
+pub mod import;
 pub mod incremental;
 #[cfg(feature = "local")]
 pub mod local_image;
@@ -120,6 +121,8 @@ pub enum Outcome {
     Image(Result<image::ImageReport, AiError>),
     /// A workflow generated from a plain-language description (#232).
     Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
+    /// A story bible extracted from imported notes (#283).
+    Import(Result<import::Imported, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -147,6 +150,7 @@ impl Outcome {
             Outcome::Voice(r) => r.as_ref().err(),
             Outcome::Image(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
+            Outcome::Import(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
     }

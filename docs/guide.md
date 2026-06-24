@@ -96,6 +96,10 @@ posts). Revision triage collects every finding into one list to work through.
 Each pass runs off the editor thread, so the editor never freezes, and a pass
 that would cost more than your threshold asks before spending.
 
+Already have notes? "Import notes" (in the Ctrl-K menu) takes a Markdown file —
+or a folder of them — preserves the original under bible/sources/, and folds its
+contents into the character and setting bibles in Quill's format.
+
 
 ACTIONS & WORKFLOWS
 

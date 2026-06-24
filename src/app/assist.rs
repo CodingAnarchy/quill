@@ -342,6 +342,7 @@ impl App {
             Action::AnalysisReport => self.open_analysis_report(),
             Action::Ai(a) => self.start_ai_action(a, force),
             Action::UserGuide => self.open_guide(),
+            Action::ImportNotes => self.start_import(),
         }
     }
 
@@ -1290,6 +1291,7 @@ impl App {
                     Outcome::Voice(r) => self.apply_voice(r),
                     Outcome::Image(r) => self.apply_images(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
+                    Outcome::Import(r) => self.apply_import(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
                 // The in-flight pass is done; a clean bible apply already recorded
@@ -1481,6 +1483,127 @@ impl App {
         self.apply_bible_with_findings(path, "setting", |notes| {
             setting::render(&setting, notes, &today)
         }, findings);
+    }
+
+    // --- Notes import (#283) ----------------------------------------------
+
+    /// Prompt for a notes file (or a folder of them) to import into the story
+    /// bible. Available with AI off too — the source is preserved regardless.
+    pub(crate) fn start_import(&mut self) {
+        self.open_prompt(Pending::ImportNotes, "Import notes — path to a .md file or a folder of them:", "", None);
+    }
+
+    /// Import Markdown notes into the story bible: preserve every source file
+    /// under `bible/sources/`, then (when AI is on) run one extractive pass over
+    /// their combined text to generate/update the bible. A folder imports all the
+    /// `.md` files directly inside it, collectively.
+    pub(crate) fn import_notes(&mut self, path: &str) {
+        let path = std::path::PathBuf::from(path.trim());
+        let files = collect_import_files(&path);
+        if files.is_empty() {
+            self.message = Some(format!("No Markdown files to import at {}", path.display()));
+            return;
+        }
+
+        // Preserve each source and gather its text, labelled so the AI can tell
+        // the files apart in the combined input.
+        let dest_dir = self.project.root.join("bible").join("sources");
+        let mut combined = String::new();
+        let mut preserved = 0;
+        let mut failures = Vec::new();
+        for f in &files {
+            let text = match std::fs::read_to_string(f) {
+                Ok(t) => t,
+                Err(e) => {
+                    failures.push(format!("{}: {e}", f.display()));
+                    continue;
+                }
+            };
+            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "notes.md".into());
+            if let Err(msg) = self.write_file(&dest_dir.join(&name), &text) {
+                failures.push(msg);
+                continue;
+            }
+            preserved += 1;
+            combined.push_str(&format!("## {name}\n\n{text}\n\n"));
+        }
+        if preserved == 0 {
+            self.message = Some(write_failure_message(&failures));
+            return;
+        }
+
+        let label = match &files[..] {
+            [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "notes".into()),
+            _ => format!("{preserved} files"),
+        };
+        // With AI off, the source is safely preserved but the bible can't be built.
+        if self.ai.check_ready().is_err() {
+            self.message = Some(format!("Saved {label} to bible/sources — enable AI to build the story bible from it."));
+            return;
+        }
+        self.import_source = Some(label);
+        self.spawn_generative(&combined, "⟳ Importing notes…", |backend, notes, model| {
+            let req = ai::import::build_request(notes.to_string(), &model);
+            Outcome::Import(backend.complete(&req).and_then(|r| ai::import::parse(&r.text)))
+        });
+    }
+
+    /// Apply an import pass: stage the generated character and setting files (and
+    /// surface any hand-edit conflicts together in one review), exactly like the
+    /// character/setting passes.
+    pub(crate) fn apply_import(&mut self, result: Result<ai::import::Imported, ai::AiError>) {
+        self.overlay = None;
+        let source = self.import_source.take().unwrap_or_else(|| "notes".into());
+        let imported = match result {
+            Ok(i) => i,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+
+        let mut chars = imported.characters;
+        for c in &mut chars {
+            self.enrich_mentions(c);
+        }
+        let setting = imported.setting;
+        let setting_has = !setting.categories.is_empty() || !setting.gazetteer.is_empty();
+        if chars.is_empty() && !setting_has {
+            self.message = Some(format!("Imported {source}: no bible content found in the notes."));
+            return;
+        }
+
+        let today = date::iso(date::today());
+        let mut conflicts = Vec::new();
+        let mut failures = Vec::new();
+        let mut written = 0;
+        let cdir = self.project.root.join("bible").join("characters");
+        for c in &chars {
+            let path = cdir.join(format!("{}.md", bible::slug(&c.name)));
+            match self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)) {
+                Staged::Wrote => written += 1,
+                Staged::Conflict(x) => conflicts.push(x),
+                Staged::Failed(m) => failures.push(m),
+            }
+        }
+        if setting_has {
+            let path = self.project.root.join("bible").join("setting.md");
+            match self.stage_bible(path, "setting", |notes| setting::render(&setting, notes, &today)) {
+                Staged::Wrote => written += 1,
+                Staged::Conflict(x) => conflicts.push(x),
+                Staged::Failed(m) => failures.push(m),
+            }
+        }
+
+        if !failures.is_empty() {
+            self.message = Some(write_failure_message(&failures));
+        } else if conflicts.is_empty() {
+            self.show_ai(import_summary_lines(&source, chars.len(), setting_has, written));
+        } else {
+            let pending = conflicts.len();
+            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
+            self.message = Some(format!("Imported {source}: wrote {written} · {pending} need review"));
+        }
     }
 
     /// Apply a scaffolding pass: write the beat outline to `bible/outline.md` and
@@ -1937,6 +2060,46 @@ fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
 }
 
 /// The summary overlay shown after a clean character pass (no conflicts).
+/// The Markdown files to import from `path` (#283): the file itself if it's a
+/// `.md` file, or every `.md` directly inside it if it's a folder (sorted), so a
+/// folder imports its notes collectively. Empty when the path is neither.
+fn collect_import_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let is_md = |p: &std::path::Path| {
+        p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md"))
+    };
+    if path.is_dir() {
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(path)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && is_md(p))
+            .collect();
+        files.sort();
+        files
+    } else if path.is_file() && is_md(path) {
+        vec![path.to_path_buf()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Summary lines for a completed notes import (#283).
+fn import_summary_lines(source: &str, characters: usize, setting: bool, written: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::raw(format!("Imported {source} into the story bible.")),
+        Line::raw(""),
+        Line::raw(format!("Characters: {characters}")),
+    ];
+    if setting {
+        lines.push(Line::raw("Setting:    updated".to_string()));
+    }
+    lines.push(Line::raw(format!("Files written: {written}  (bible/)")));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw("The original notes are preserved under bible/sources/."));
+    lines
+}
+
 fn character_summary_lines(total: usize, written: usize, drift: usize) -> Vec<Line<'static>> {
     vec![
         Line::raw("Character analysis complete."),

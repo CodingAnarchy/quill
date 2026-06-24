@@ -99,15 +99,23 @@ chapters by their title.";
 /// The JSON Schema for a character-extraction reply (matches the model-provided
 /// fields of [`Character`], wrapped in a `characters` array).
 pub fn schema() -> Value {
-    let string_array = json!({ "type": "array", "items": { "type": "string" } });
     json!({
         "type": "object",
-        "properties": {
-            "characters": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
+        "properties": { "characters": items_schema() },
+        "required": ["characters"],
+        "additionalProperties": false
+    })
+}
+
+/// The array-of-character-profiles schema on its own, so other passes (the notes
+/// import, #283) can compose it without the `{ "characters": … }` wrapper.
+pub fn items_schema() -> Value {
+    let string_array = json!({ "type": "array", "items": { "type": "string" } });
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
                         "name": { "type": "string" },
                         "aliases": string_array,
                         "role": { "type": "string" },
@@ -164,10 +172,6 @@ pub fn schema() -> Value {
                     "required": ["name"],
                     "additionalProperties": false
                 }
-            }
-        },
-        "required": ["characters"],
-        "additionalProperties": false
     })
 }
 

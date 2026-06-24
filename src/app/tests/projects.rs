@@ -530,3 +530,76 @@ fn the_wizard_can_be_disabled_in_config() {
     assert_eq!(app.project.manifest.title, "New Book", "still created and opened");
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no wizard when disabled");
 }
+
+// --- Notes import (#283) ---------------------------------------------------
+
+#[test]
+fn importing_with_ai_off_preserves_the_source_file() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-off"); // no [ai] config → AI is off
+    let cur = make_project("import-off-cur", "Book", "c\n");
+    let mut app = open_app(&cur);
+
+    let notes = std::env::temp_dir().join(format!("quill-notes-{}-a.md", std::process::id()));
+    fs::write(&notes, "# Mara\n\nA sailor with a locket.\n").unwrap();
+    app.import_notes(notes.to_str().unwrap());
+
+    let preserved = app.project.root.join("bible").join("sources").join(notes.file_name().unwrap());
+    assert!(preserved.exists(), "the source is preserved even with AI off");
+    assert!(fs::read_to_string(&preserved).unwrap().contains("locket"));
+    assert!(app.message.as_deref().unwrap_or("").contains("enable AI"), "tells the author AI is needed: {:?}", app.message);
+    fs::remove_file(&notes).ok();
+}
+
+#[test]
+fn importing_a_directory_preserves_all_markdown_collectively() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-dir");
+    let cur = make_project("import-dir-cur", "Book", "c\n");
+    let mut app = open_app(&cur);
+
+    let notesdir = std::env::temp_dir().join(format!("quill-notesdir-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&notesdir);
+    fs::create_dir_all(&notesdir).unwrap();
+    fs::write(notesdir.join("chars.md"), "# Mara\n").unwrap();
+    fs::write(notesdir.join("world.md"), "# Saltmarsh\n").unwrap();
+    fs::write(notesdir.join("ignore.txt"), "not markdown\n").unwrap();
+
+    app.import_notes(notesdir.to_str().unwrap());
+
+    let srcdir = app.project.root.join("bible").join("sources");
+    assert!(srcdir.join("chars.md").exists() && srcdir.join("world.md").exists(), "every .md preserved");
+    assert!(!srcdir.join("ignore.txt").exists(), "non-markdown is skipped");
+    fs::remove_dir_all(&notesdir).ok();
+}
+
+#[test]
+fn importing_a_missing_path_reports_no_files() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-missing");
+    let cur = make_project("import-missing-cur", "Book", "c\n");
+    let mut app = open_app(&cur);
+
+    let missing = std::env::temp_dir().join(format!("quill-nope-{}-x.md", std::process::id()));
+    let _ = fs::remove_file(&missing);
+    app.import_notes(missing.to_str().unwrap());
+
+    assert!(app.message.as_deref().unwrap_or("").contains("No Markdown files"));
+}
+
+#[test]
+fn applying_an_import_writes_the_bible_files() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-apply");
+    let cur = make_project("import-apply-cur", "Book", "c\n");
+    let mut app = open_app(&cur);
+
+    let imported = crate::ai::import::parse(
+        r#"{"characters":[{"name":"Mara"}],"setting":{"categories":[{"name":"Places","entries":[{"name":"Saltmarsh","detail":"a fog-bound coast"}]}],"gazetteer":["Saltmarsh"],"findings":[]}}"#,
+    )
+    .unwrap();
+    app.apply_import(Ok(imported));
+
+    assert!(app.project.root.join("bible").join("characters").join("mara.md").exists(), "character bible written");
+    assert!(app.project.root.join("bible").join("setting.md").exists(), "setting bible written");
+}
