@@ -109,7 +109,15 @@ impl App {
         match self.stage_bible(path, name, render) {
             Staged::Wrote => {
                 self.record_pass_state(); // the bible now reflects this manuscript state (#90)
-                self.open_findings();
+                if self.series_bible_running() {
+                    // Mid series-bible refresh (#341): the findings are already in
+                    // revision triage. Don't pop an overlay the next book's pass
+                    // would immediately clobber — the driver's summary points the
+                    // author to triage when the whole run finishes.
+                    self.pending_findings.clear();
+                } else {
+                    self.open_findings();
+                }
             }
             Staged::Conflict(conflict) => {
                 self.mode = Mode::BibleReview(Box::new(BibleReview {
@@ -262,24 +270,29 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                let target = f.items.get(f.selected).and_then(|it| it.chapters.first()).cloned();
+                let item = f.items.get(f.selected).cloned();
                 self.mode = self.editing_mode();
-                if let Some(title) = target {
-                    if let Some(i) = (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title.as_str())) {
-                        self.activate_chapter(i);
-                    } else {
-                        self.message = Some(format!("Chapter '{title}' not found"));
+                if let Some(item) = item {
+                    self.focus_finding_book(item.book);
+                    if let Some(title) = item.chapters.first() {
+                        if let Some(i) = (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title.as_str())) {
+                            self.activate_chapter(i);
+                        } else {
+                            self.message = Some(format!("Chapter '{title}' not found"));
+                        }
                     }
                 }
             }
             // Turn the finding into an `xxx` TODO marker in its chapter (a note,
             // not prose). The keypress is the confirmation.
             KeyCode::Char('i') => {
-                if let Some(item) = f.items.get(f.selected) {
-                    let chapter = item.chapters.first().cloned();
-                    let note = item.summary.clone();
-                    if let Some(title) = chapter {
-                        self.insert_todo(&title, &note);
+                let item = f.items.get(f.selected).cloned();
+                if let Some(item) = item {
+                    if let Some(title) = item.chapters.first() {
+                        // A series finding (#341) may sit in another book; switch
+                        // there first so the marker lands in the right chapter.
+                        self.focus_finding_book(item.book);
+                        self.insert_todo(title, &item.summary);
                     } else {
                         self.message = Some("No chapter to mark".into());
                     }
@@ -287,6 +300,18 @@ impl App {
             }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
+        }
+    }
+
+    /// Switch to the book a series finding belongs to (#341) before jumping or
+    /// marking, so a finding from a non-active book lands in the right chapter.
+    /// A `None` book (active-book / standalone passes) or the already-active book
+    /// is a no-op.
+    fn focus_finding_book(&mut self, book: Option<usize>) {
+        if let Some(b) = book {
+            if b != self.project.active_book() {
+                self.switch_book(b);
+            }
         }
     }
 

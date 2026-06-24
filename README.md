@@ -397,12 +397,15 @@ novel's file is unchanged, and Quill opens the first book. Still ahead:
 - **Series export** — *landed:* the export menu (`Ctrl-E`) compiles either the
   whole series (books in order, each delimited per format) or just the active
   book, in any of the four formats. A standalone novel's export is unchanged.
-- **Series story bible** — *in progress:* **Refresh series bible** (the `Ctrl-K`
-  menu) brings characters, the timeline, and the setting up to date across every
-  book — one book per AI call, in reading order, so the bible spans the series
-  without ever sending the whole saga at once. Each book builds on the bible the
-  earlier books wrote; only changed books re-run, and `Esc` cancels. Cross-book
-  continuity *findings* are next.
+- **Series story bible** — *landed:* **Refresh series bible** (the `Ctrl-K` menu)
+  brings characters, the timeline, and the setting up to date across every book —
+  one book per AI call, in reading order, so the bible spans the series without
+  ever sending the whole saga at once. Each book builds on the bible the earlier
+  books wrote; only changed books re-run, and `Esc` cancels. Because each book is
+  checked against that accumulated bible, the timeline and setting **findings span
+  the series too** — a contradiction between book one and book three (a character
+  who died reappearing, a world rule broken later) lands in revision triage,
+  attributed to its book, and jumping to it switches books.
 
 ### AI assistance (Claude)
 

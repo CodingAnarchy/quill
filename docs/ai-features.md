@@ -262,6 +262,24 @@ The fast active-book passes (Ctrl-A) stay as they were. *Trade-off:* a deleted
 chapter in a series book leaves a stale bible entry until a full rebuild — the
 cost of not re-scanning every book on each refresh.
 
+**Cross-book findings** (#341) fall out of the same mechanism. The timeline and
+setting passes already report contradictions against the bible they're given;
+during a series refresh that bible is the *accumulated* one, carrying the state
+the earlier books established. So when book three's pass runs, it checks book
+three's chapters against a timeline that already records book one's events — and a
+character who died in book one but reappears in book three, or a world rule book
+two set and book four breaks, is flagged even though no single request ever holds
+more than one book's prose. The revise prompts say so explicitly: the bible
+records material *not shown* in this request, and contradictions with it count.
+
+These findings accumulate into the **same revision-triage list** (the Ctrl-K
+"Revision triage" action) rather than popping an overlay after every book — the
+refresh's summary line reports how many landed. Each carries the book it was found
+in (chapter titles repeat across books, so a bare title is ambiguous): triage
+shows it as `[Book Two · Dusk]`, dedup is per-book, and pressing Enter (or `i` to
+mark an `xxx`) switches to that book before jumping. A standalone novel's findings
+are unchanged — they target the active book, as before.
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API

@@ -134,7 +134,10 @@ folder in one step.
 Writing a series? "Refresh series bible" (in the Ctrl-K menu, for multi-book
 projects) brings the characters, timeline, and setting up to date across every
 book — one book at a time, in reading order, so the bible spans the whole series.
-Only changed books re-run, progress shows per book, and Esc cancels.
+Only changed books re-run, progress shows per book, and Esc cancels. Because each
+book is checked against the running bible, the timeline and setting findings catch
+cross-book contradictions too; they land in Revision triage tagged with their
+book, and jumping to one switches books for you.
 
 
 ACTIONS & WORKFLOWS

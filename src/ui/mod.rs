@@ -17,6 +17,7 @@ use crate::mode::{
 };
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
+use crate::project::Project;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
 mod editor;
@@ -52,7 +53,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         return;
     }
     if let Mode::Findings(findings) = &app.mode {
-        draw_findings(frame, area, findings);
+        draw_findings(frame, area, findings, &app.project);
         return;
     }
     if let Mode::Palette(palette) = &app.mode {
@@ -317,16 +318,24 @@ fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrowser) {
 }
 
 /// Render the findings as a navigable triage list.
-fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings) {
+fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, project: &Project) {
     let title = format!(" Findings ({}) ", findings.items.len());
     let rows = findings.items.iter().enumerate().map(|(i, item)| {
-        let chapters = if item.chapters.is_empty() {
-            String::new()
-        } else {
-            format!("  [{}]", item.chapters.join(", "))
+        // In a series, a finding carries the book it was found in (#341); show it
+        // so cross-book findings are attributed (chapter titles can repeat).
+        let book = item
+            .book
+            .filter(|_| project.book_count() > 1)
+            .and_then(|b| project.book_title(b));
+        let chapters = item.chapters.join(", ");
+        let loc = match (book, chapters.is_empty()) {
+            (None, true) => String::new(),
+            (None, false) => format!("  [{chapters}]"),
+            (Some(t), true) => format!("  [{t}]"),
+            (Some(t), false) => format!("  [{t} · {chapters}]"),
         };
         Line::from(Span::styled(
-            format!("{}{}{chapters}", marker(i == findings.selected), item.summary),
+            format!("{}{}{loc}", marker(i == findings.selected), item.summary),
             row_style(i == findings.selected),
         ))
     });
