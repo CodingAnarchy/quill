@@ -31,6 +31,8 @@ use crate::report::{self, Momentum, PartDelta};
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod assist;
 mod bible_review;
+mod palette;
+mod worker;
 mod exporting;
 mod images;
 mod search;

@@ -13,7 +13,7 @@ use crate::ai::{self, bible, Outcome};
 use crate::mode::{Command, Mode, Palette, PaletteItem, PortraitChoice, Pending};
 
 use super::App;
-use super::assist::BackendSpec;
+use super::worker::BackendSpec;
 
 /// Condense prose for an image prompt (#239): drop markdown heading lines,
 /// collapse runs of whitespace, and cap at `max_chars` (on a char boundary), so a
