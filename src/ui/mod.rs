@@ -286,7 +286,7 @@ fn draw_project_browser(frame: &mut Frame, area: Rect, browser: &ProjectBrowser,
             Span::styled(format!("  — {}", p.path.display()), Style::default().fg(Color::DarkGray)),
         ])
     });
-    draw_list_overlay(frame, area, " Projects ", "Projects — ↑↓ move · enter open · b browse files · esc cancel", rows);
+    draw_list_overlay(frame, area, " Projects ", "Projects — ↑↓ move · enter open · b browse files · n new project · esc cancel", rows);
 }
 
 /// Render the filesystem navigator (#271): the current directory's subfolders,
@@ -306,7 +306,7 @@ fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrowser) {
         ))
     });
     let title = format!(" {} ", browser.cwd.display());
-    draw_list_overlay(frame, area, &title, "Browse — ↑↓ move · enter open/into · ← up · esc cancel", rows);
+    draw_list_overlay(frame, area, &title, "Browse — ↑↓ move · enter open/into · n new project · ← up · esc cancel", rows);
 }
 
 /// Render the findings as a navigable triage list.

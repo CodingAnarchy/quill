@@ -342,3 +342,90 @@ fn with_no_projects_home_only_recents_are_listed() {
 
     assert_eq!(browser_titles(&app), vec!["Alpha".to_string()], "no home configured — just recents");
 }
+
+// --- New project (#273) ----------------------------------------------------
+
+#[test]
+fn creating_a_new_project_initializes_and_opens_it() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("create");
+    let parent = books_dir("create-parent");
+    let cur = make_project("create-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    let target = parent.join("Fresh Book");
+    app.create_project_at(target.clone());
+
+    assert!(Project::manifest_path(&target).exists(), "the project is initialized on disk");
+    assert_eq!(app.project.manifest.title, "Fresh Book", "it becomes the active project");
+    let titles: Vec<String> = recent::list().into_iter().map(|r| r.title).collect();
+    assert!(titles.contains(&"Fresh Book".to_string()), "it's added to recents: {titles:?}");
+}
+
+#[test]
+fn creating_refuses_to_clobber_an_existing_project() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("clobber");
+    let existing = make_project("clobber-existing", "Existing", "important prose\n");
+    let cur = make_project("clobber-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    app.create_project_at(existing.clone());
+
+    assert_eq!(app.project.manifest.title, "Current", "the current project is untouched");
+    assert!(app.message.as_deref().unwrap_or("").contains("already exists"));
+    assert!(
+        fs::read_to_string(existing.join("one.md")).unwrap().contains("important prose"),
+        "the existing project's files are not clobbered"
+    );
+}
+
+#[test]
+fn n_in_the_browser_prompts_for_a_new_project_path() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("prompt");
+    let cur = make_project("prompt-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    app.on_key(ctrl('b'));
+    app.on_key(key(KeyCode::Char('n')));
+
+    match &app.mode {
+        Mode::Prompt(s) => {
+            assert!(matches!(s.pending, Pending::NewProject));
+            assert!(s.input.ends_with('/'), "prefilled with a base location: {:?}", s.input);
+        }
+        _ => panic!("n should open the new-project prompt"),
+    }
+}
+
+#[test]
+fn the_new_project_prompt_creates_and_opens_on_enter() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("prompt-create");
+    let parent = books_dir("pc-parent");
+    let cur = make_project("pc-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    app.prompt_new_project(parent.clone());
+    type_str(&mut app, "Brand New");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.manifest.title, "Brand New");
+    assert!(Project::manifest_path(&parent.join("Brand New")).exists());
+}
+
+#[test]
+fn a_new_project_path_with_no_name_is_rejected() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("empty-name");
+    let parent = books_dir("en-parent");
+    let cur = make_project("en-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    app.prompt_new_project(parent.clone()); // input is "<parent>/", no name appended
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.manifest.title, "Current", "nothing is created without a name");
+    assert!(app.message.as_deref().unwrap_or("").contains("folder name"));
+}

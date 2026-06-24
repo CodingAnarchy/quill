@@ -863,8 +863,51 @@ impl App {
                 }
             }
             KeyCode::Char('b') => self.open_dir_browser(),
+            KeyCode::Char('n') => {
+                let base = self.new_project_base();
+                self.prompt_new_project(base);
+            }
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
+        }
+    }
+
+    // --- New project (#273) -----------------------------------------------
+
+    /// The default location for a new project: the configured projects-home
+    /// (#272), else beside the current project.
+    fn new_project_base(&self) -> PathBuf {
+        ProjectsConfig::load()
+            .home_dir()
+            .filter(|p| p.is_dir())
+            .or_else(|| self.project.root.canonicalize().ok().and_then(|r| r.parent().map(Path::to_path_buf)))
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    /// Prompt for a new project's path, prefilled with `base` and a trailing
+    /// separator so the author just types a name (and can edit the location).
+    fn prompt_new_project(&mut self, base: PathBuf) {
+        let prefill = format!("{}/", base.display());
+        self.open_prompt(Pending::NewProject, "New project — path: ", &prefill, None);
+    }
+
+    /// Create a new project at `target` and open it in place. Refuses to clobber
+    /// an existing project, and surfaces a clear message on any failure rather
+    /// than crashing (#264/#273).
+    fn create_project_at(&mut self, target: PathBuf) {
+        if Project::manifest_path(&target).exists() {
+            self.message = Some(format!("A project already exists at {}", target.display()));
+            self.mode = self.editing_mode();
+            return;
+        }
+        match Project::create(&target) {
+            // switch_to saves the current project, opens the new one, and records
+            // it in recents — the same path a normal switch takes.
+            Ok(_) => self.switch_to(target),
+            Err(e) => {
+                self.message = Some(format!("Couldn't create project: {e}"));
+                self.mode = self.editing_mode();
+            }
         }
     }
 
@@ -953,6 +996,10 @@ impl App {
                 if let Some(parent) = state.cwd.parent().map(Path::to_path_buf) {
                     self.browse_into(parent);
                 }
+            }
+            KeyCode::Char('n') => {
+                let base = state.cwd.clone(); // create the new project under the folder being browsed
+                self.prompt_new_project(base);
             }
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
@@ -1430,7 +1477,8 @@ impl App {
             | Pending::NameNewWorkflow
             | Pending::Brainstorm
             | Pending::DraftCharacters
-            | Pending::DraftSetting => {
+            | Pending::DraftSetting
+            | Pending::NewProject => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1507,6 +1555,16 @@ impl App {
                             Pending::NameNewWorkflow => {
                                 self.mode = closed;
                                 self.save_generated_workflow(text);
+                            }
+                            Pending::NewProject => {
+                                // A trailing separator means no name was typed
+                                // after the prefilled location (#273).
+                                if text.is_empty() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR) {
+                                    self.mode = closed;
+                                    self.message = Some("Enter a path ending in the new project's folder name.".into());
+                                } else {
+                                    self.create_project_at(PathBuf::from(text));
+                                }
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),

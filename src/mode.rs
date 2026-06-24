@@ -629,6 +629,9 @@ pub(crate) enum Pending {
     /// the one chosen in the project browser (#270). The target waits in
     /// `App::pending_switch`.
     ConfirmSwitch,
+    /// Text input: the path (location + name) for a new project to create from
+    /// the project browser (#273). Created and opened on Enter.
+    NewProject,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).
