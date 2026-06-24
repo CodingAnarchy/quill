@@ -276,6 +276,7 @@ impl App {
             ai("Scene illustration", "Illustrate the active chapter (fal.ai)", AiAction::Scene),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
             ai("Word search", "In-context thesaurus for a word or phrase (reference only)", AiAction::Thesaurus),
+            ai("Editorial read", "Flag structural / continuity / line issues — no fixes", AiAction::Editorial),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
     }
@@ -460,6 +461,7 @@ impl App {
             AiAction::Scene => self.start_scene(),
             AiAction::Triage => self.open_triage(),
             AiAction::Thesaurus => self.start_thesaurus(),
+            AiAction::Editorial => self.analyze_editorial(),
         }
     }
 
@@ -647,6 +649,16 @@ impl App {
         self.spawn_ai("⟳ Reviewing prose & style…", |backend, manuscript, model| {
             let req = style::build_request(manuscript, &model);
             Outcome::Style(backend.complete(&req).and_then(|r| style::parse(&r.text)))
+        });
+    }
+
+    /// Start an editorial read (#293): flag structural / continuity / line issues
+    /// across the manuscript — observations only, never fixes — applied by
+    /// [`App::poll_ai`] into the revision-triage list.
+    pub(crate) fn analyze_editorial(&mut self) {
+        self.spawn_ai("⟳ Editorial read…", |backend, manuscript, model| {
+            let req = ai::editorial::build_request(manuscript, &model);
+            Outcome::Editorial(backend.complete(&req).and_then(|r| ai::editorial::parse(&r.text)))
         });
     }
 
@@ -1299,6 +1311,7 @@ impl App {
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Import(r) => self.apply_import(r),
                     Outcome::Thesaurus(r) => self.apply_thesaurus(r),
+                    Outcome::Editorial(r) => self.apply_editorial(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
                 // The in-flight pass is done; a clean bible apply already recorded
@@ -1769,6 +1782,31 @@ impl App {
             .map(|f| Finding {
                 summary: format!("{}: {}", f.kind, f.detail),
                 chapters: f.chapters.clone(),
+            })
+            .collect();
+        self.show_findings(findings);
+    }
+
+    /// Apply an editorial read (#293): turn each fix-free note into a triage
+    /// finding (`focus: concern`, plus a quoted span for line-level issues) and
+    /// surface them in the findings list.
+    pub(crate) fn apply_editorial(&mut self, result: Result<Vec<ai::editorial::Note>, ai::AiError>) {
+        let notes = match result {
+            Ok(n) => n,
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                return;
+            }
+        };
+        let findings = notes
+            .into_iter()
+            .map(|n| {
+                let at = n
+                    .location
+                    .filter(|s| !s.is_empty())
+                    .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
+                    .unwrap_or_default();
+                Finding { summary: format!("{}: {}{at}", n.focus, n.concern), chapters: n.chapters }
             })
             .collect();
         self.show_findings(findings);

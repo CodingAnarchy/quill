@@ -15,6 +15,7 @@ pub mod character;
 pub mod constrain;
 pub mod continuity;
 pub mod cost;
+pub mod editorial;
 pub mod fal;
 pub mod image;
 pub mod import;
@@ -126,6 +127,8 @@ pub enum Outcome {
     Import(Result<import::Imported, AiError>),
     /// In-context thesaurus / word search candidates (#290).
     Thesaurus(Result<Vec<thesaurus::Word>, AiError>),
+    /// Editorial read — fix-free flags (structural / continuity / line) (#293).
+    Editorial(Result<Vec<editorial::Note>, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -155,6 +158,7 @@ impl Outcome {
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Import(r) => r.as_ref().err(),
             Outcome::Thesaurus(r) => r.as_ref().err(),
+            Outcome::Editorial(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
     }
