@@ -146,11 +146,28 @@ impl State {
     pub fn record(root: &Path, tracker: &str, built: &str, chapters: Digests) -> std::io::Result<()> {
         let mut state = State::load(root);
         state.trackers.insert(tracker.to_string(), PassState { built: built.to_string(), chapters });
+        Self::save(root, &state)
+    }
+
+    /// Merge one book's chapter digests into a tracker's record (#339), leaving
+    /// the other books' entries in place — so a series refresh updates the book it
+    /// just folded in without forgetting what the earlier books were built from.
+    /// (A book's deleted chapters leave a stale entry until a full rebuild; that's
+    /// the series trade-off for not re-scanning every book.)
+    pub fn record_merge(root: &Path, tracker: &str, built: &str, chapters: Digests) -> std::io::Result<()> {
+        let mut state = State::load(root);
+        let entry = state.trackers.entry(tracker.to_string()).or_default();
+        entry.built = built.to_string();
+        entry.chapters.extend(chapters);
+        Self::save(root, &state)
+    }
+
+    fn save(root: &Path, state: &State) -> std::io::Result<()> {
         let path = state_path(root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let body = toml::to_string(&state).map_err(std::io::Error::other)?;
+        let body = toml::to_string(state).map_err(std::io::Error::other)?;
         std::fs::write(path, body)
     }
 }
@@ -161,6 +178,22 @@ mod tests {
 
     fn digests(pairs: &[(&str, &str)]) -> Digests {
         pairs.iter().map(|(f, d)| (f.to_string(), d.to_string())).collect()
+    }
+
+    #[test]
+    fn record_merge_keeps_the_other_books_entries() {
+        let dir = std::env::temp_dir().join(format!("quill-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Book one records; book two folds in via merge — book one survives (#339).
+        State::record(&dir, "characters", "d", digests(&[("b1/one.md", "a")])).unwrap();
+        State::record_merge(&dir, "characters", "e", digests(&[("b2/one.md", "b")])).unwrap();
+        let recorded = State::load(&dir).built_from("characters").unwrap().clone();
+        assert!(recorded.contains_key("b1/one.md") && recorded.contains_key("b2/one.md"), "{recorded:?}");
+        // A plain record still replaces (single-book deletion handling, unchanged).
+        State::record(&dir, "characters", "f", digests(&[("b1/one.md", "a")])).unwrap();
+        let replaced = State::load(&dir).built_from("characters").unwrap().clone();
+        assert!(!replaced.contains_key("b2/one.md"), "record replaces: {replaced:?}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -144,7 +144,7 @@ impl App {
     /// / conflicts queued by [`App::poll_ai`].
     pub(crate) fn analyze_characters(&mut self, force: bool) {
         let t = bible_tracker(AiAction::Characters).expect("characters is a bible tracker");
-        self.run_bible_tracker(t, force, character::build_request, character::build_incremental_request, |r| {
+        self.run_bible_tracker(t, self.project.active_book(), force, character::build_request, character::build_incremental_request, |r| {
             Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
         });
     }
@@ -153,7 +153,7 @@ impl App {
     /// timeline + findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_continuity(&mut self, force: bool) {
         let t = bible_tracker(AiAction::Continuity).expect("continuity is a bible tracker");
-        self.run_bible_tracker(t, force, continuity::build_request, continuity::build_incremental_request, |r| {
+        self.run_bible_tracker(t, self.project.active_book(), force, continuity::build_request, continuity::build_incremental_request, |r| {
             Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
         });
     }
@@ -162,7 +162,7 @@ impl App {
     /// setting bible + rule findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_setting(&mut self, force: bool) {
         let t = bible_tracker(AiAction::Setting).expect("setting is a bible tracker");
-        self.run_bible_tracker(t, force, setting::build_request, setting::build_incremental_request, |r| {
+        self.run_bible_tracker(t, self.project.active_book(), force, setting::build_request, setting::build_incremental_request, |r| {
             Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
         });
     }

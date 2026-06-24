@@ -1167,7 +1167,7 @@ fn a_clean_bible_pass_records_what_it_built_from() {
     let (mut app, dir) = two_chapter_app("incr-record");
     let built = app.chapter_digests();
     // Stand in for what analyze_characters sets just before spawning the request.
-    app.pending_pass = Some(("characters".to_string(), built.clone()));
+    app.pending_pass = Some(("characters".to_string(), built.clone(), false));
     app.apply_characters(Ok(vec![Character { name: "Mara".into(), ..Default::default() }]));
     let state = ai::incremental::State::load(&dir);
     assert_eq!(state.built_from("characters"), Some(&built), "the pass recorded its manuscript state");
