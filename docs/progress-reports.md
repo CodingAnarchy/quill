@@ -46,6 +46,14 @@ travel with the manuscript and stay human-readable. Word, page, and chapter
 counts aggregate across the project's per-chapter files. Pages are always
 *derived* from words via `words_per_page`, never tracked directly.
 
+In a multi-book series (#276), each book carries its own `goals` block in its
+manifest entry, and the report tracks the **active book** against that book's
+goal. The report also leads with a one-line **series total** (words across all
+books) so the whole-saga figure sits above the active book's detail; a
+standalone novel shows no series line. The book and series word counts come from
+the same cached per-chapter metadata the single-book counts use, summed up the
+series → book → part → chapter tree, so they cost no extra file reads.
+
 ```yaml
 ---
 title: Red State Earth

@@ -60,6 +60,30 @@ pub struct ChapterEntry {
     pub role: Option<Role>,
 }
 
+impl ChapterEntry {
+    /// Refresh the cached front-matter metadata from `front` (none clears it).
+    /// The chapter file is the source of truth; this populates the transient
+    /// caches that power the pane, counts, and tree without re-reading.
+    fn cache_meta(&mut self, front: Option<&FrontMatter>) {
+        self.status = front.and_then(FrontMatter::status);
+        self.summary = front.and_then(FrontMatter::summary);
+        self.pov = front.and_then(FrontMatter::pov);
+        self.goal = front.and_then(FrontMatter::goal);
+        self.role = front.and_then(FrontMatter::role);
+    }
+}
+
+/// Read `entry`'s file under `root` and refresh its cached word count and
+/// front-matter metadata (#331). Shared by the active book's caching and the
+/// other books of a series, so every book's counts/roles are populated at open
+/// without re-reading later. One file read; never holds the body text.
+fn cache_chapter(root: &Path, entry: &mut ChapterEntry) {
+    let text = fs::read_to_string(root.join(&entry.file)).unwrap_or_default();
+    let (front, body) = frontmatter::split(&text);
+    entry.words = count_words(body);
+    entry.cache_meta(front.map(FrontMatter::from_raw).as_ref());
+}
+
 /// The author's writing goals (see [`docs/progress-reports.md`]). Pages are
 /// always derived from words via `words_per_page`, never tracked directly.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -393,6 +417,19 @@ impl Project {
             project.reorder_by_band();
             project.active = project.manifest.chapters[0].file.clone();
         }
+        // Cache the other books' chapters too (#331), so book and series totals
+        // are real without re-reading later. One file read per chapter; the
+        // active book is already cached above (it lives in the manifest).
+        let active = project.active_book;
+        let root = project.root.clone();
+        for (b, book) in project.books.iter_mut().enumerate() {
+            if b == active {
+                continue;
+            }
+            for entry in &mut book.chapters {
+                cache_chapter(&root, entry);
+            }
+        }
         Ok(project)
     }
 
@@ -537,15 +574,9 @@ impl Project {
     /// Read chapter `index` from disk once and refresh its cached word count and
     /// front-matter metadata (status / summary / POV). Used at open.
     fn read_chapter_cache(&mut self, index: usize) {
-        let text = self.read_chapter(index);
-        let (front, body) = frontmatter::split(&text);
-        let words = count_words(body);
-        let fm = front.map(FrontMatter::from_raw);
-        if let Some(chapter) = self.manifest.chapters.get_mut(index) {
-            chapter.words = words;
+        if index < self.manifest.chapters.len() {
+            cache_chapter(&self.root, &mut self.manifest.chapters[index]);
         }
-        // One place owns the front-matter → cache mapping.
-        self.cache_chapter_meta(index, fm.as_ref());
     }
 
     /// Read chapter `index`'s file from disk, or "" if it can't be read. The
@@ -629,11 +660,7 @@ impl Project {
     /// (used after the active chapter's front matter is edited in its buffer).
     pub fn cache_chapter_meta(&mut self, index: usize, front: Option<&FrontMatter>) {
         if let Some(chapter) = self.manifest.chapters.get_mut(index) {
-            chapter.status = front.and_then(|f| f.status());
-            chapter.summary = front.and_then(|f| f.summary());
-            chapter.pov = front.and_then(|f| f.pov());
-            chapter.goal = front.and_then(|f| f.goal());
-            chapter.role = front.and_then(|f| f.role());
+            chapter.cache_meta(front);
         }
     }
 
@@ -759,6 +786,14 @@ impl Project {
             self.books.get(i).and_then(|b| b.parts.as_ref())
         };
         parts.map(Vec::as_slice)
+    }
+
+    /// Total cached words in book `i` (#331), summed from its chapters' cached
+    /// counts. The App layer counts the *active* book from the live buffer
+    /// instead (its active chapter), so a live series total is built there — see
+    /// `App::book_word_count` / `App::series_word_count`.
+    pub fn book_word_count(&self, i: usize) -> usize {
+        self.book_chapters(i).iter().map(|c| c.words).sum()
     }
 
     /// The grouping term ("part", "act", …) for book `i`, defaulting to "part".
@@ -1401,10 +1436,12 @@ mod tests {
     }
 
     /// Opening a series-sized *multi-book* project (the new `[[books]]` format,
-    /// #328) stays within the same budget as the single-book series guard — it
-    /// runs the books-array parse and the active-book hoist, then caches only the
-    /// active book's chapters. Catches a regression that eagerly reads every
-    /// book's files at open, or to O(n²) parse work on the larger manifest.
+    /// #328) stays within the same budget as the single-book series guard. It
+    /// runs the books-array parse, the active-book hoist, and (since #331) one
+    /// read per chapter across every book to cache word counts for series
+    /// rollups — the same total file work as a single book of the same size, so
+    /// it stays linear. Catches a regression to O(n²) parse/cache work on the
+    /// larger manifest.
     #[test]
     #[ignore]
     fn open_is_fast_for_a_multi_book_series() {

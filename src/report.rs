@@ -38,6 +38,13 @@ pub struct PartDelta {
 /// #182), `chapters` body chapters, `todo` TODO markers, and today's `momentum`,
 /// as of `today`. Rows are styled (the word delta is colored). Returns a short
 /// hint when no goals are set.
+/// A multi-book series summary for the report header (#331): total words across
+/// every book and the book count. `None` for a standalone novel.
+pub struct SeriesSummary {
+    pub words: usize,
+    pub books: usize,
+}
+
 #[allow(clippy::too_many_arguments)] // the report's measured inputs read clearer flat than boxed
 pub fn lines(
     manifest: &Manifest,
@@ -48,15 +55,24 @@ pub fn lines(
     momentum: &Momentum,
     parts: &[PartDelta],
     today: Date,
+    series: Option<SeriesSummary>,
 ) -> Vec<Line<'static>> {
-    let Some(goals) = &manifest.goals else {
-        return vec![
-            Line::raw("No writing goals set."),
-            Line::raw("Add a [goals] block to book.toml (words, chapters)."),
-        ];
-    };
-
     let mut out = Vec::new();
+    // The whole-series total leads the report; the body below is the active book.
+    if let Some(s) = &series {
+        out.push(Line::raw(format!(
+            "series:   {} words across {} books",
+            thousands(s.words as i64),
+            s.books,
+        )));
+        out.push(Line::raw(""));
+    }
+
+    let Some(goals) = &manifest.goals else {
+        out.push(Line::raw("No writing goals set."));
+        out.push(Line::raw("Add a [goals] block to book.toml (words, chapters)."));
+        return out;
+    };
     let wpp = goals.words_per_page.max(1);
     let pages = (words / wpp) as i64;
 
@@ -275,7 +291,7 @@ fn percent(numerator: usize, denominator: usize) -> String {
 }
 
 /// Group an integer with thousands separators, e.g. `163,204`.
-fn thousands(n: i64) -> String {
+pub(crate) fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, ch) in digits.chars().enumerate() {
@@ -339,7 +355,7 @@ mod tests {
     fn reproduces_the_worked_example() {
         // The spec's sample, as of report date 2026-06-16 (156 days in).
         let today = date::parse("2026-06-16").unwrap();
-        let rows = lines(&manifest(), 163_204, 0, 56, 12, &momentum(), &[], today);
+        let rows = lines(&manifest(), 163_204, 0, 56, 12, &momentum(), &[], today, None);
         let report = text(&rows);
 
         assert!(report.contains("story :   163,204 / 150,000  words ( 108.80 % )"), "{report}");
@@ -363,7 +379,7 @@ mod tests {
         let today = date::parse("2026-06-16").unwrap();
         let mut m = manifest();
         m.goals.as_mut().unwrap().daily = Some(1_000); // net today is +2,860
-        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today));
+        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today, None));
         assert!(report.contains("daily goal:         +2,860 / 1,000 words  ( met \u{2713} )"), "{report}");
     }
 
@@ -372,14 +388,14 @@ mod tests {
         let today = date::parse("2026-06-16").unwrap();
         let mut m = manifest();
         m.goals.as_mut().unwrap().daily = Some(5_000); // net +2,860 of 5,000
-        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today));
+        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today, None));
         assert!(report.contains("daily goal:         +2,860 / 5,000 words  ( 57% \u{b7} 2,140 to go )"), "{report}");
     }
 
     #[test]
     fn no_daily_goal_shows_no_daily_line() {
         let today = date::parse("2026-06-16").unwrap();
-        let report = text(&lines(&manifest(), 163_204, 0, 56, 0, &momentum(), &[], today));
+        let report = text(&lines(&manifest(), 163_204, 0, 56, 0, &momentum(), &[], today, None));
         assert!(!report.contains("daily goal:"), "no daily line without a target: {report}");
     }
 
@@ -387,7 +403,7 @@ mod tests {
     fn front_back_matter_words_are_shown_but_not_counted() {
         let today = date::parse("2026-06-16").unwrap();
         // 140k body words against a 150k goal, plus 8k in front/back matter.
-        let rows = lines(&manifest(), 140_000, 8_000, 56, 0, &momentum(), &[], today);
+        let rows = lines(&manifest(), 140_000, 8_000, 56, 0, &momentum(), &[], today, None);
         let report = text(&rows);
         // The goal measures the body words, not body + sections.
         assert!(report.contains("story :   140,000 / 150,000  words ( 93.33 % )"), "{report}");
@@ -399,7 +415,7 @@ mod tests {
     #[test]
     fn no_section_words_means_no_extra_line() {
         let today = date::parse("2026-06-16").unwrap();
-        let rows = lines(&manifest(), 140_000, 0, 56, 0, &momentum(), &[], today);
+        let rows = lines(&manifest(), 140_000, 0, 56, 0, &momentum(), &[], today, None);
         assert!(!text(&rows).contains("front/back matter"), "all-body report is unchanged");
     }
 
@@ -407,13 +423,13 @@ mod tests {
     fn word_delta_is_colored_by_sign() {
         let today = date::parse("2026-06-16").unwrap();
 
-        let gain = lines(&manifest(), 1000, 0, 2, 0, &momentum(), &[], today);
+        let gain = lines(&manifest(), 1000, 0, 2, 0, &momentum(), &[], today, None);
         let row = gain.iter().find(|l| text(std::slice::from_ref(l)).contains("today's word delta")).unwrap();
         assert_eq!(row.spans[1].content, "+2,860");
         assert_eq!(row.spans[1].style.fg, Some(Color::Green));
 
         let loss = Momentum { added: 10, removed: 300, moved_to_unused: 0 };
-        let rows = lines(&manifest(), 1000, 0, 2, 0, &loss, &[], today);
+        let rows = lines(&manifest(), 1000, 0, 2, 0, &loss, &[], today, None);
         let row = rows.iter().find(|l| text(std::slice::from_ref(l)).contains("today's word delta")).unwrap();
         assert_eq!(row.spans[1].content, "-290");
         assert_eq!(row.spans[1].style.fg, Some(Color::Red));
@@ -428,7 +444,7 @@ mod tests {
             PartDelta { name: "The Gathering".into(), words: 12_450, goal: Some(15_000), added: 1_486, removed: 159 },
             PartDelta { name: "Part 2".into(), words: 8_200, goal: None, added: 12, removed: 16 },
         ];
-        let rows = lines(&m, 163_204, 0, 56, 12, &momentum(), &parts, today);
+        let rows = lines(&m, 163_204, 0, 56, 12, &momentum(), &parts, today, None);
         let report = text(&rows);
 
         assert!(report.contains("act deltas:"), "{report}");
@@ -450,7 +466,7 @@ mod tests {
     #[test]
     fn no_parts_omits_the_block() {
         let today = date::parse("2026-06-16").unwrap();
-        let rows = lines(&manifest(), 163_204, 0, 56, 12, &momentum(), &[], today);
+        let rows = lines(&manifest(), 163_204, 0, 56, 12, &momentum(), &[], today, None);
         assert!(!text(&rows).contains("deltas:") || text(&rows).contains("word delta:"), "{}", text(&rows));
         assert!(!text(&rows).contains("part deltas:"), "{}", text(&rows));
     }
@@ -459,7 +475,7 @@ mod tests {
     fn no_goals_shows_a_hint() {
         let mut m = manifest();
         m.goals = None;
-        let rows = lines(&m, 1000, 0, 2, 0, &momentum(), &[], date::parse("2026-06-16").unwrap());
+        let rows = lines(&m, 1000, 0, 2, 0, &momentum(), &[], date::parse("2026-06-16").unwrap(), None);
         assert!(text(&rows).contains("No writing goals set."), "{}", text(&rows));
     }
 

@@ -109,12 +109,16 @@ fn the_book_switcher_lists_every_book_with_the_active_one_marked() {
 
 // --- Tree navigator (#330) --------------------------------------------------
 
-/// The visible tree row labels, indent-prefixed, in display order.
+/// The visible tree row labels, indent-prefixed, with the `· N w` count suffix
+/// stripped — structural assertions read the shape, the counts test reads counts.
 fn tree_labels(app: &App) -> Vec<String> {
     let Mode::Tree(t) = &app.mode else { panic!("not in the tree navigator") };
     app.tree_rows(&t.expanded)
         .iter()
-        .map(|r| format!("{}{}", "  ".repeat(r.indent as usize), r.label))
+        .map(|r| {
+            let label = r.label.split("  ·  ").next().unwrap_or(&r.label);
+            format!("{}{}", "  ".repeat(r.indent as usize), label)
+        })
         .collect()
 }
 
@@ -185,10 +189,45 @@ fn the_tree_groups_chapters_under_part_headers() {
     app.open_tree();
     let Mode::Tree(t) = &app.mode else { panic!() };
     let rows = app.tree_rows(&t.expanded);
-    let act = rows.iter().position(|r| r.label == "Act I").expect("part header present");
+    let act = rows.iter().position(|r| r.label.starts_with("Act I")).expect("part header present");
     // Chapters sit under (and indented past) the part header.
-    assert_eq!(rows[act + 1].label, "One");
+    assert!(rows[act + 1].label.starts_with("One"));
     assert!(rows[act + 1].indent > rows[act].indent, "chapter indented under the part");
+}
+
+fn report_text(app: &App) -> String {
+    app.report_lines()
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn the_progress_report_shows_a_series_total() {
+    let (app, _dir) = series_app("report-series");
+    let text = report_text(&app);
+    assert!(text.contains("series:") && text.contains("6 words across 2 books"), "{text}");
+}
+
+#[test]
+fn a_standalone_report_has_no_series_line() {
+    let (app, _dir) = two_chapter_app("report-single");
+    assert!(!report_text(&app).contains("series:"));
+}
+
+#[test]
+fn the_tree_rolls_up_word_counts() {
+    // series_app: book one = "alpha one"(2) + "alpha two"(2) = 4; book two = "beta one"(2).
+    let (mut app, _dir) = series_app("tree-counts");
+    app.open_tree();
+    let label = |needle: &str| {
+        let Mode::Tree(t) = &app.mode else { panic!() };
+        app.tree_rows(&t.expanded).into_iter().find(|r| r.label.contains(needle)).expect("row").label
+    };
+    assert!(label("The Saga").contains("6 w"), "series total = 4 + 2"); // {}
+    assert!(label("Book One").contains("4 w"), "book one total");
+    assert!(label("Dawn").contains("2 w"), "chapter count");
 }
 
 /// Building the tree rows for a series-sized project reads only cached metadata

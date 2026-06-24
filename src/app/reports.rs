@@ -30,6 +30,12 @@ impl App {
             removed: self.removed,
             moved_to_unused: self.moved_to_unused,
         };
+        // A whole-series total leads the report when the project holds more than
+        // one book (#331); a standalone novel shows just its own figures.
+        let series = (self.project.book_count() > 1).then(|| report::SeriesSummary {
+            words: self.series_word_count(),
+            books: self.project.book_count(),
+        });
         report::lines(
             &self.project.manifest,
             self.body_word_count(),    // the goal & projection track the novel (#182)
@@ -39,6 +45,7 @@ impl App {
             &momentum,
             &self.part_deltas(),
             date::today(),
+            series,
         )
     }
 
