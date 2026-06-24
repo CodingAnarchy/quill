@@ -25,6 +25,8 @@ use crate::atomic;
 use crate::buffer::count_words;
 use crate::frontmatter::{self, Band, Epigraph, FrontMatter, Role, Status};
 
+mod structure;
+
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
 
@@ -61,6 +63,12 @@ pub struct ChapterEntry {
 }
 
 impl ChapterEntry {
+    /// A new entry with the given title and file; the transient caches start
+    /// empty (populated from the file at open and as the chapter is edited).
+    pub(crate) fn new(title: String, file: String) -> Self {
+        Self { title, file, words: 0, status: None, summary: None, pov: None, goal: None, role: None }
+    }
+
     /// Refresh the cached front-matter metadata from `front` (none clears it).
     /// The chapter file is the source of truth; this populates the transient
     /// caches that power the pane, counts, and tree without re-reading.
@@ -474,16 +482,7 @@ impl Project {
     /// manifest. Used by `create`, and by `open` as a safety net.
     fn add_default_chapter(&mut self) -> std::io::Result<()> {
         let n = self.manifest.chapters.len() + 1;
-        let entry = ChapterEntry {
-            title: format!("Chapter {n}"),
-            file: format!("chapter-{n}.md"),
-            words: 0,
-            status: None,
-            summary: None,
-            pov: None,
-            goal: None,
-            role: None,
-        };
+        let entry = ChapterEntry::new(format!("Chapter {n}"), format!("chapter-{n}.md"));
         let path = self.root.join(&entry.file);
         if !path.exists() {
             fs::write(&path, "")?;
@@ -853,66 +852,6 @@ impl Project {
     // does the fallible filesystem work first, then mutates the manifest and
     // persists, so a failed file op leaves the project intact.
 
-    /// Insert a new empty chapter titled `title` at position `at` (clamped to
-    /// the end). Its file is created on disk.
-    pub fn add_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
-        let at = at.min(self.manifest.chapters.len());
-        let file = self.unique_chapter_file();
-        fs::write(self.root.join(&file), "")?;
-        self.manifest.chapters.insert(
-            at,
-            ChapterEntry {
-                title: title.to_string(),
-                file,
-                words: 0,
-                status: None,
-                summary: None,
-                pov: None,
-                goal: None,
-                role: None,
-            },
-        );
-        self.save_manifest()
-    }
-
-    /// Rename the chapter at `at` (title only; its file is unchanged).
-    pub fn rename_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
-        if let Some(chapter) = self.manifest.chapters.get_mut(at) {
-            chapter.title = title.to_string();
-        }
-        self.save_manifest()
-    }
-
-    /// Swap two chapters' positions in the order.
-    pub fn swap_chapters(&mut self, a: usize, b: usize) -> std::io::Result<()> {
-        self.manifest.chapters.swap(a, b);
-        self.save_manifest()
-    }
-
-    /// Remove the chapter at `at`, moving its file into the project's `unused/`
-    /// directory rather than deleting it, so nothing the author wrote is lost.
-    pub fn remove_chapter(&mut self, at: usize) -> std::io::Result<()> {
-        let src = self.chapter_path(at);
-        if src.exists() {
-            let unused = self.root.join("unused");
-            fs::create_dir_all(&unused)?;
-            let dest = unique_dest(&unused, &self.manifest.chapters[at].file);
-            fs::rename(&src, &dest)?;
-        }
-        self.manifest.chapters.remove(at);
-        self.save_manifest()
-    }
-
-    /// Smallest `chapter-{n}.md` not already used by the manifest or on disk.
-    fn unique_chapter_file(&self) -> String {
-        let used: std::collections::HashSet<&str> =
-            self.manifest.chapters.iter().map(|c| c.file.as_str()).collect();
-        (1..)
-            .map(|n| format!("chapter-{n}.md"))
-            .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())
-            .expect("an unbounded range always yields a free name")
-    }
-
     /// A minimal in-memory project (one chapter, no files on disk) for tests and
     /// headless rendering. Like real projects, it always has an active chapter.
     #[cfg(test)]
@@ -927,16 +866,7 @@ impl Project {
         let chapters: Vec<ChapterEntry> = titles
             .iter()
             .enumerate()
-            .map(|(i, title)| ChapterEntry {
-                title: (*title).to_string(),
-                file: format!("chapter-{}.md", i + 1),
-                words: 0,
-                status: None,
-                summary: None,
-                pov: None,
-                goal: None,
-                role: None,
-            })
+            .map(|(i, title)| ChapterEntry::new((*title).to_string(), format!("chapter-{}.md", i + 1)))
             .collect();
         let active = chapters[0].file.clone();
         Self {
@@ -984,24 +914,6 @@ fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
     }
 }
 
-/// A path inside `dir` for `file`, appending `-1`, `-2`, … to the stem if a file
-/// of that name already exists there (so moving to `unused/` never clobbers).
-fn unique_dest(dir: &Path, file: &str) -> PathBuf {
-    let candidate = dir.join(file);
-    if !candidate.exists() {
-        return candidate;
-    }
-    let path = Path::new(file);
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(file);
-    let ext = path.extension().and_then(|s| s.to_str());
-    (1..)
-        .map(|k| match ext {
-            Some(e) => dir.join(format!("{stem}-{k}.{e}")),
-            None => dir.join(format!("{stem}-{k}")),
-        })
-        .find(|c| !c.exists())
-        .expect("an unbounded range always yields a free name")
-}
 
 #[cfg(test)]
 mod tests {
@@ -1372,19 +1284,6 @@ mod tests {
         assert_eq!(reopened.manifest.chapters.len(), 1);
         assert!(dir.join("unused").join(&removed_file).exists());
         assert!(!dir.join(&removed_file).exists());
-
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn unique_dest_avoids_clobbering() {
-        let dir = temp_dir("unused-dest");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("a.md"), "x").unwrap();
-
-        assert_eq!(unique_dest(&dir, "b.md"), dir.join("b.md")); // free
-        assert_eq!(unique_dest(&dir, "a.md"), dir.join("a-1.md")); // taken → suffixed
 
         fs::remove_dir_all(&dir).ok();
     }
