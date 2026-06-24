@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use super::http::{self, Header};
 use super::{is_ok, AiError, Backend, Request, Response, Usage};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -53,7 +54,7 @@ impl Backend for ClaudeBackend {
         let id = value
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| AiError::Api("batch response had no id".into()))?;
+            .ok_or_else(|| AiError::ApiMalformed("batch response had no id".into()))?;
         let status_url = format!("{BATCH_URL}/{id}");
 
         for _ in 0..BATCH_MAX_POLLS {
@@ -65,74 +66,50 @@ impl Backend for ClaudeBackend {
                 let results_url = batch
                     .get("results_url")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| AiError::Api("batch ended without a results url".into()))?;
+                    .ok_or_else(|| AiError::ApiMalformed("batch ended without a results url".into()))?;
                 return parse_batch_result(&self.get_text(results_url)?, BATCH_ID);
             }
             thread::sleep(BATCH_POLL);
         }
         // Don't invite a blind retry: the submitted batch keeps running (and
         // billing) server-side, so re-running would pay for a second one.
-        Err(AiError::Api(
-            "batch still processing after the time limit — it should finish on its own shortly (re-running starts a new, separately-billed batch)".into(),
-        ))
+        Err(AiError::Network {
+            status: None,
+            message: "batch still processing after the time limit — it should finish on its own shortly (re-running starts a new, separately-billed batch)".into(),
+        })
     }
 }
 
 impl ClaudeBackend {
+    /// The auth headers every Claude request carries.
+    fn auth(&self) -> [Header<'_>; 2] {
+        [("x-api-key", self.key.as_str()), ("anthropic-version", API_VERSION)]
+    }
+
     /// POST `body` to `url` with the auth headers; returns the HTTP status and the
     /// parsed JSON body (the API returns JSON on errors too, so we read it on any
     /// status to surface its `error.message`).
     fn post(&self, url: &str, body: &Value) -> Result<(u16, Value), AiError> {
-        let mut res = ureq::post(url)
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .header("x-api-key", &self.key)
-            .header("anthropic-version", API_VERSION)
-            .header("content-type", "application/json")
-            .send_json(body)
-            .map_err(|e| AiError::Network(e.to_string()))?;
-        let status = res.status().as_u16();
-        let value = res.body_mut().read_json().map_err(|e| AiError::Api(e.to_string()))?;
-        Ok((status, value))
+        let [key, version] = self.auth();
+        http::post_json(url, &[key, version, ("content-type", "application/json")], body)
     }
 
     /// GET `url` as JSON with the auth headers.
     fn get_json(&self, url: &str) -> Result<(u16, Value), AiError> {
-        let mut res = ureq::get(url)
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .header("x-api-key", &self.key)
-            .header("anthropic-version", API_VERSION)
-            .call()
-            .map_err(|e| AiError::Network(e.to_string()))?;
-        let status = res.status().as_u16();
-        let value = res.body_mut().read_json().map_err(|e| AiError::Api(e.to_string()))?;
-        Ok((status, value))
+        http::get_json(url, &self.auth())
     }
 
     /// GET `url` as raw text (the batch results are JSONL, not a JSON document).
     fn get_text(&self, url: &str) -> Result<String, AiError> {
-        ureq::get(url)
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .header("x-api-key", &self.key)
-            .header("anthropic-version", API_VERSION)
-            .call()
-            .map_err(|e| AiError::Network(e.to_string()))?
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| AiError::Api(e.to_string()))
+        http::get_text(url, &self.auth())
     }
 }
 
-/// An `AiError::Api` from an error response body (Anthropic returns a JSON
-/// `error.message`).
+/// The `Network` error for an error response body (Anthropic returns a JSON
+/// `error.message`); `Display` prepends the status.
 fn api_error(status: u16, value: &Value) -> AiError {
     let msg = value.pointer("/error/message").and_then(Value::as_str).unwrap_or("unknown error");
-    AiError::Api(format!("{status}: {msg}"))
+    AiError::Network { status: Some(status), message: msg.to_string() }
 }
 
 /// The Message Batches submit body: a batch of one request, the standard message
@@ -145,23 +122,26 @@ fn batch_submit_body(req: &Request) -> Value {
 /// succeeded, and pull the answer out of its message.
 fn parse_batch_result(jsonl: &str, custom_id: &str) -> Result<Response, AiError> {
     for line in jsonl.lines().filter(|l| !l.trim().is_empty()) {
-        let value: Value = serde_json::from_str(line).map_err(|e| AiError::Api(format!("bad batch result: {e}")))?;
+        let value: Value =
+            serde_json::from_str(line).map_err(|e| AiError::ApiMalformed(format!("bad batch result: {e}")))?;
         if value.get("custom_id").and_then(Value::as_str) != Some(custom_id) {
             continue;
         }
         let result = value.get("result");
         return match result.and_then(|r| r.get("type")).and_then(Value::as_str) {
             Some("succeeded") => {
-                let message = result.and_then(|r| r.get("message")).ok_or_else(|| {
-                    AiError::Api("batch result missing its message".into())
-                })?;
+                let message = result
+                    .and_then(|r| r.get("message"))
+                    .ok_or_else(|| AiError::ApiMalformed("batch result missing its message".into()))?;
                 parse_response(message)
             }
-            Some(other) => Err(AiError::Api(format!("batch request {other}"))),
-            None => Err(AiError::Api("batch result had no outcome".into())),
+            Some(other) => {
+                Err(AiError::Network { status: None, message: format!("batch request {other}") })
+            }
+            None => Err(AiError::ApiMalformed("batch result had no outcome".into())),
         };
     }
-    Err(AiError::Api(format!("no batch result for '{custom_id}'")))
+    Err(AiError::ApiMalformed(format!("no batch result for '{custom_id}'")))
 }
 
 /// The Messages API request body. The manuscript is the first user content block
@@ -209,7 +189,7 @@ fn parse_response(value: &Value) -> Result<Response, AiError> {
         })
         .unwrap_or_default();
     if text.trim().is_empty() {
-        return Err(AiError::Api("empty response".into()));
+        return Err(AiError::ApiMalformed("empty response".into()));
     }
 
     let usage = value
@@ -284,7 +264,7 @@ mod tests {
     #[test]
     fn parse_response_rejects_empty_content() {
         let value = json!({ "content": [], "usage": {} });
-        assert!(matches!(parse_response(&value), Err(AiError::Api(_))));
+        assert!(matches!(parse_response(&value), Err(AiError::ApiMalformed(_))));
     }
 
     fn req() -> Request {
@@ -318,13 +298,13 @@ mod tests {
     #[test]
     fn parse_batch_result_reports_a_failed_request() {
         let jsonl = r#"{"custom_id":"rebuild","result":{"type":"errored","error":{}}}"#;
-        assert!(matches!(parse_batch_result(jsonl, "rebuild"), Err(AiError::Api(_))));
+        assert!(matches!(parse_batch_result(jsonl, "rebuild"), Err(AiError::Network { .. })));
     }
 
     #[test]
     fn parse_batch_result_errors_when_its_id_is_absent() {
         let jsonl = r#"{"custom_id":"other","result":{"type":"succeeded"}}"#;
-        assert!(matches!(parse_batch_result(jsonl, "rebuild"), Err(AiError::Api(_))));
-        assert!(matches!(parse_batch_result("", "rebuild"), Err(AiError::Api(_))));
+        assert!(matches!(parse_batch_result(jsonl, "rebuild"), Err(AiError::ApiMalformed(_))));
+        assert!(matches!(parse_batch_result("", "rebuild"), Err(AiError::ApiMalformed(_))));
     }
 }

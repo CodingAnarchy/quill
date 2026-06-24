@@ -19,7 +19,7 @@ impl Backend for MockBackend {
     fn complete(&self, _req: &ai::Request) -> Result<ai::Response, ai::AiError> {
         match &self.result {
             Ok(text) => Ok(ai::Response { text: text.clone(), usage: Default::default() }),
-            Err(()) => Err(ai::AiError::Api("boom".into())),
+            Err(()) => Err(ai::AiError::Network { status: None, message: "boom".into() }),
         }
     }
 }

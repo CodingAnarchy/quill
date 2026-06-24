@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn parse_rejects_bad_json() {
-        assert!(matches!(parse("not json"), Err(AiError::Api(_))));
+        assert!(matches!(parse("not json"), Err(AiError::ModelNonCompliance(_))));
     }
 
     #[test]

@@ -46,15 +46,15 @@ impl LocalBackend {
         let rec = model_select::recommend(ram_gb, accel);
         let model = rec.model.ok_or_else(|| AiError::NotConfigured(rec.reasoning.clone()))?;
 
-        let hub = hf_hub::api::sync::Api::new().map_err(|e| api(format!("hf-hub: {e}")))?;
+        let hub = hf_hub::api::sync::Api::new().map_err(|e| internal(format!("hf-hub: {e}")))?;
         let gguf = hub
             .model(model.gguf_repo.to_string())
             .get(model.gguf_file)
-            .map_err(|e| api(format!("download {}: {e}", model.gguf_file)))?;
+            .map_err(|e| internal(format!("download {}: {e}", model.gguf_file)))?;
         let tokenizer = hub
             .model(model.tokenizer_repo.to_string())
             .get("tokenizer.json")
-            .map_err(|e| api(format!("download tokenizer: {e}")))?;
+            .map_err(|e| internal(format!("download tokenizer: {e}")))?;
 
         let backend = Self::load(gguf.to_str().unwrap_or_default(), tokenizer.to_str().unwrap_or_default())?;
         Ok((backend, rec))
@@ -64,10 +64,10 @@ impl LocalBackend {
     /// Metal when candle was built with it (macOS), else CPU.
     pub fn load(gguf_path: &str, tokenizer_path: &str) -> Result<Self, AiError> {
         let device = model_select::best_device();
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| api(format!("tokenizer: {e}")))?;
-        let mut file = std::fs::File::open(gguf_path).map_err(|e| api(format!("open gguf: {e}")))?;
-        let content = gguf_file::Content::read(&mut file).map_err(|e| api(format!("read gguf: {e}")))?;
-        let model = Qwen2::from_gguf(content, &mut file, &device).map_err(|e| api(format!("load gguf: {e}")))?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| internal(format!("tokenizer: {e}")))?;
+        let mut file = std::fs::File::open(gguf_path).map_err(|e| internal(format!("open gguf: {e}")))?;
+        let content = gguf_file::Content::read(&mut file).map_err(|e| internal(format!("read gguf: {e}")))?;
+        let model = Qwen2::from_gguf(content, &mut file, &device).map_err(|e| internal(format!("load gguf: {e}")))?;
         Ok(Self { model: Mutex::new(model), tokenizer, device })
     }
 
@@ -92,11 +92,11 @@ impl Backend for LocalBackend {
         let prompt_ids = self
             .tokenizer
             .encode(prompt, true)
-            .map_err(|e| api(format!("encode: {e}")))?
+            .map_err(|e| internal(format!("encode: {e}")))?
             .get_ids()
             .to_vec();
 
-        let mut model = self.model.lock().map_err(|_| api("model lock poisoned".into()))?;
+        let mut model = self.model.lock().map_err(|_| internal("model lock poisoned".into()))?;
         let mut constraint = req.json_schema.as_ref().map(Constraint::new);
 
         // Prompt pass → logits for the first generated token.
@@ -125,7 +125,7 @@ impl Backend for LocalBackend {
         let text = match &constraint {
             // The constraint accumulated the exact accepted text already.
             Some(c) => c.text().to_string(),
-            None => self.tokenizer.decode(&generated, true).map_err(|e| api(format!("decode: {e}")))?,
+            None => self.tokenizer.decode(&generated, true).map_err(|e| internal(format!("decode: {e}")))?,
         };
         Ok(Response { text, usage: Usage { output_tokens: generated.len() as u32, ..Usage::default() } })
     }
@@ -136,13 +136,13 @@ impl LocalBackend {
     fn step(&self, model: &mut Qwen2, tokens: &[u32], pos: usize) -> Result<Vec<f32>, AiError> {
         let input = Tensor::new(tokens, &self.device)
             .and_then(|t| t.unsqueeze(0))
-            .map_err(|e| api(format!("input tensor: {e}")))?;
+            .map_err(|e| internal(format!("input tensor: {e}")))?;
         model
             .forward(&input, pos)
             .and_then(|l| l.squeeze(0))
             .and_then(|l| l.to_dtype(candle_core::DType::F32))
             .and_then(|l| l.to_vec1::<f32>())
-            .map_err(|e| api(format!("forward: {e}")))
+            .map_err(|e| internal(format!("forward: {e}")))
     }
 
     /// Pick the highest-logit token whose detokenized piece keeps the output a
@@ -158,12 +158,12 @@ impl LocalBackend {
         generated: &[u32],
     ) -> Result<Option<u32>, AiError> {
         let ranked = rank_desc(logits);
-        let prev = self.tokenizer.decode(generated, true).map_err(|e| api(format!("decode: {e}")))?;
+        let prev = self.tokenizer.decode(generated, true).map_err(|e| internal(format!("decode: {e}")))?;
         for id in ranked {
             // The piece this token adds = decode(generated+id) minus decode(generated).
             let mut ids = generated.to_vec();
             ids.push(id);
-            let whole = self.tokenizer.decode(&ids, true).map_err(|e| api(format!("decode: {e}")))?;
+            let whole = self.tokenizer.decode(&ids, true).map_err(|e| internal(format!("decode: {e}")))?;
             let Some(piece) = whole.strip_prefix(&prev) else {
                 continue; // detokenization wasn't a clean extension — skip this candidate
             };
@@ -205,8 +205,8 @@ fn rank_desc(logits: &[f32]) -> Vec<u32> {
     idx
 }
 
-fn api(msg: String) -> AiError {
-    AiError::Api(msg)
+fn internal(msg: String) -> AiError {
+    AiError::Internal(msg)
 }
 
 #[cfg(test)]
