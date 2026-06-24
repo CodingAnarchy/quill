@@ -686,6 +686,7 @@ fn ctrl_r_opens_the_report_and_any_key_closes_it() {
         words: 150_000,
         chapters: 60,
         words_per_page: 250,
+        daily: None,
     });
 
     app.on_key(ctrl('r'));

@@ -54,6 +54,7 @@ goals:
   words: 150000              # target word count
   chapters: 60              # target chapter count
   words_per_page: 250        # pages = words / words_per_page
+  daily: 1000               # optional daily word-count target (#277); omit to disable
 markers:
   todo: xxx                 # token counted on the "xxx:" line (case-insensitive)
 unused_heading: Unused        # chapters/sections under this heading are excluded
@@ -145,6 +146,7 @@ nothing is hidden. An all-body project is unaffected (the line is omitted).
 | `xxx` | count of the configured TODO marker |
 | `moved to unused` | today's `moved_to_unused` |
 | `today's word delta` | net `added - removed`, with `(+added -removed)` shown |
+| `daily goal` (when `goals.daily` set) | today's net `added - removed` against `daily`: `met ✓`, else `% · remaining to go` |
 | `{part_label} deltas` | per-part name + current words + net `part_added[n] - part_removed[n]` with adds/dels |
 | `days since start` | `report_date - start_date`, in days |
 | `average rate` | `floor(W / days_since_start)` words/day |

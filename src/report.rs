@@ -117,6 +117,11 @@ pub fn lines(
     )));
     out.push(Line::raw(""));
     out.push(delta_line(momentum));
+    // Today's progress toward the daily target (#277), when one is set. Uses the
+    // same net (added − removed) as the delta line above, so the two agree.
+    if let Some(daily) = goals.daily.filter(|&d| d > 0) {
+        out.push(daily_goal_line(momentum, daily));
+    }
     out.extend(part_lines(parts, manifest.part_label()));
 
     // --- Rate & projected completion --------------------------------------
@@ -135,6 +140,24 @@ pub fn lines(
     out
 }
 
+/// Today's progress toward the daily word-count target (#277): the net words
+/// today (colored like the delta line) against the goal, with how many remain or
+/// that it's met. `daily` is guaranteed non-zero by the caller.
+fn daily_goal_line(momentum: &Momentum, daily: usize) -> Line<'static> {
+    let net = momentum.added as i64 - momentum.removed as i64;
+    let status = if net >= daily as i64 {
+        "met \u{2713}".to_string()
+    } else {
+        let pct = (net.max(0) as f64 / daily as f64 * 100.0) as i64;
+        format!("{pct}% \u{b7} {} to go", thousands(daily as i64 - net))
+    };
+    Line::from(vec![
+        Span::raw("daily goal:         "),
+        colored_net_span(net),
+        Span::raw(format!(" / {} words  ( {status} )", thousands(daily as i64))),
+    ])
+}
+
 /// The "today's word delta" row, with the net colored green (gain) or red (loss)
 /// and the additions/deletions breakdown dimmed.
 fn delta_line(momentum: &Momentum) -> Line<'static> {
@@ -143,19 +166,21 @@ fn delta_line(momentum: &Momentum) -> Line<'static> {
     Line::from(spans)
 }
 
+/// A net word count as a signed, colored span: green with a `+` for a gain, red
+/// for a loss. Shared by the delta line, the per-part rows, and the daily goal.
+fn colored_net_span(net: i64) -> Span<'static> {
+    let color = if net >= 0 { Color::Green } else { Color::Red };
+    let signed = if net >= 0 { format!("+{}", thousands(net)) } else { thousands(net) };
+    Span::styled(signed, Style::default().fg(color))
+}
+
 /// The colored net-delta span (green gain / red loss) followed by the dimmed
 /// `(+added -removed)` breakdown. Shared by the global delta line and each
 /// per-part row.
 fn signed_delta_spans(added: usize, removed: usize) -> Vec<Span<'static>> {
     let net = added as i64 - removed as i64;
-    let color = if net >= 0 { Color::Green } else { Color::Red };
-    let signed = if net >= 0 {
-        format!("+{}", thousands(net))
-    } else {
-        thousands(net)
-    };
     vec![
-        Span::styled(signed, Style::default().fg(color)),
+        colored_net_span(net),
         Span::styled(
             format!("   (+{} -{})", thousands(added as i64), thousands(removed as i64)),
             Style::default().fg(Color::DarkGray),
@@ -287,6 +312,7 @@ mod tests {
                 words: 150_000,
                 chapters: 60,
                 words_per_page: 250,
+                daily: None,
             }),
             parts: None,
             chapters: Vec::new(),
@@ -330,6 +356,31 @@ mod tests {
         assert!(report.contains("average rate:      1,046 words / day"), "{report}");
         assert!(report.contains("to go:             0 words ; 0 days ( 16 Jun 2026 )"), "{report}");
         assert!(report.contains("to go (expansion): 11,657 words ; 11 days ( 27 Jun 2026 )"), "{report}");
+    }
+
+    #[test]
+    fn daily_goal_shows_met_when_today_clears_it() {
+        let today = date::parse("2026-06-16").unwrap();
+        let mut m = manifest();
+        m.goals.as_mut().unwrap().daily = Some(1_000); // net today is +2,860
+        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today));
+        assert!(report.contains("daily goal:         +2,860 / 1,000 words  ( met \u{2713} )"), "{report}");
+    }
+
+    #[test]
+    fn daily_goal_shows_words_remaining() {
+        let today = date::parse("2026-06-16").unwrap();
+        let mut m = manifest();
+        m.goals.as_mut().unwrap().daily = Some(5_000); // net +2,860 of 5,000
+        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today));
+        assert!(report.contains("daily goal:         +2,860 / 5,000 words  ( 57% \u{b7} 2,140 to go )"), "{report}");
+    }
+
+    #[test]
+    fn no_daily_goal_shows_no_daily_line() {
+        let today = date::parse("2026-06-16").unwrap();
+        let report = text(&lines(&manifest(), 163_204, 0, 56, 0, &momentum(), &[], today));
+        assert!(!report.contains("daily goal:"), "no daily line without a target: {report}");
     }
 
     #[test]

@@ -72,6 +72,11 @@ pub struct Goals {
     /// manuscript page (250); override for e.g. mass-market or children's books.
     #[serde(default = "default_words_per_page")]
     pub words_per_page: usize,
+    /// Optional daily word-count target (#277) — today's progress is shown
+    /// against it on the progress report. Absent when unset (the report is then
+    /// unchanged); old manifests without the key still parse and round-trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily: Option<usize>,
 }
 
 fn default_words_per_page() -> usize {
@@ -782,6 +787,23 @@ mod tests {
     }
 
     #[test]
+    fn daily_goal_parses_and_round_trips_and_is_optional() {
+        // A [goals] block with a daily target parses it.
+        let toml = "title = \"B\"\n\n[goals]\nwords = 90000\nchapters = 40\ndaily = 1000\n";
+        let m: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(m.goals.as_ref().unwrap().daily, Some(1000));
+
+        // Round-trips when set...
+        let out = toml::to_string_pretty(&m).unwrap();
+        assert!(out.contains("daily = 1000"), "daily persists: {out}");
+
+        // ...and is omitted entirely when unset (old manifests still parse).
+        let none: Manifest = toml::from_str("title = \"B\"\n\n[goals]\nwords = 90000\nchapters = 40\n").unwrap();
+        assert_eq!(none.goals.as_ref().unwrap().daily, None);
+        assert!(!toml::to_string_pretty(&none).unwrap().contains("daily"), "no daily key when unset");
+    }
+
+    #[test]
     fn book_metadata_persists_and_old_manifests_still_parse() {
         let dir = temp_dir("book-meta");
         let _ = fs::remove_dir_all(&dir);
@@ -837,6 +859,7 @@ mod tests {
             words: 150_000,
             chapters: 60,
             words_per_page: 250,
+            daily: None,
         });
         project.save_manifest().unwrap();
 

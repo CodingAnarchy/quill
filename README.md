@@ -41,7 +41,9 @@ keystrokes that stay out of the way.
   projected finish date. Includes daily momentum — today's word delta (added vs.
   deleted), broken down **per part** (a configurable grouping of chapters),
   backed by an append-only snapshot log so the day's progress survives a reopen.
-  Full spec in [`docs/progress-reports.md`](docs/progress-reports.md).
+  Set a **daily word-count target** (`daily` under `[goals]`) and the report
+  shows today's net words against it — met, or how many remain. Full spec in
+  [`docs/progress-reports.md`](docs/progress-reports.md).
 - **Epigraphs** — a quotation (single- or multi-line / verse) and attribution on
   a chapter (front matter) or the book (manifest), rendered set-apart above the
   body (the book's at the start of the manuscript). The quotation is edited in
@@ -368,11 +370,6 @@ read/write a human-readable **story bible** kept in the project.
   and a local-model backend for fully offline use.
 - Full design, model choices, and privacy model in
   [`docs/ai-features.md`](docs/ai-features.md).
-
-### Editing & workflow
-
-- Per-session / daily word-count target (today's goal, beyond the per-chapter /
-  part / book goals that already ship)
 
 ### Vim-style keybindings & modes
 
