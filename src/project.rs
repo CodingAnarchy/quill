@@ -272,7 +272,7 @@ impl Manifest {
     /// contiguous body block after the band reorder. The single source for the
     /// front-to-body mapping the parts logic relies on.
     pub fn front_chapter_count(&self) -> usize {
-        self.chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count()
+        front_chapter_count(&self.chapters)
     }
 
     /// The configured TODO marker, defaulting to `xxx`.
@@ -300,8 +300,21 @@ impl Manifest {
         // position is the offset past the front matter (saturating: a Body chapter
         // always sits at or after `front`, but don't panic if that ever drifts).
         let n = chapter_index.saturating_sub(self.front_chapter_count()) + 1;
-        self.parts.as_ref()?.iter().position(|p| p.chapters[0] <= n && n <= p.chapters[1])
+        part_at_body_position(self.parts.as_deref()?, n)
     }
+}
+
+/// Count of leading front-matter chapters (#185) in a band-ordered chapter list.
+/// Shared by [`Manifest::front_chapter_count`] and the series tree (#330).
+pub(crate) fn front_chapter_count(chapters: &[ChapterEntry]) -> usize {
+    chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count()
+}
+
+/// The 0-based part containing 1-based **body** position `body_pos`, if any. Part
+/// ranges are inclusive 1-based positions among the body chapters (#185). Shared
+/// by [`Manifest::part_of`] and the series tree (#330) so the mapping can't drift.
+pub(crate) fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
+    parts.iter().position(|p| p.chapters[0] <= body_pos && body_pos <= p.chapters[1])
 }
 
 /// A loaded project: where it lives, its manifest (structure + cached word
@@ -727,7 +740,36 @@ impl Project {
         }
     }
 
-    #[allow(dead_code)]
+    /// The chapters of book `i` (#330): the live manifest list for the active
+    /// book (band-ordered), or the stored book's list otherwise. Empty if out of
+    /// range.
+    pub fn book_chapters(&self, i: usize) -> &[ChapterEntry] {
+        if self.books.is_empty() || i == self.active_book {
+            &self.manifest.chapters
+        } else {
+            self.books.get(i).map_or(&[], |b| b.chapters.as_slice())
+        }
+    }
+
+    /// The `parts` overlay of book `i`, if any (#330).
+    pub fn book_parts(&self, i: usize) -> Option<&[Part]> {
+        let parts = if self.books.is_empty() || i == self.active_book {
+            self.manifest.parts.as_ref()
+        } else {
+            self.books.get(i).and_then(|b| b.parts.as_ref())
+        };
+        parts.map(Vec::as_slice)
+    }
+
+    /// The grouping term ("part", "act", …) for book `i`, defaulting to "part".
+    pub fn book_part_label(&self, i: usize) -> &str {
+        if self.books.is_empty() || i == self.active_book {
+            self.manifest.part_label()
+        } else {
+            self.books.get(i).and_then(|b| b.part_label.as_deref()).unwrap_or("part")
+        }
+    }
+
     /// The series title, when this project is a multi-book series (#328); `None`
     /// for a standalone novel (whose `series` field, if any, is just a label).
     pub fn series_title(&self) -> Option<&str> {

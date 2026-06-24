@@ -93,6 +93,11 @@ pub enum Mode {
     /// (#165). Reached with `f` from the chapter browser; Enter opens the selected
     /// file in a side pane. Boxed (carries the file list).
     RefFiles(Box<RefFiles>),
+    /// The series tree navigator (#330): the whole project as a series → book →
+    /// part → chapter tree, navigable with the keyboard. Enter on a chapter jumps
+    /// there (switching books if needed); books expand/collapse. Boxed (carries
+    /// the selection + expansion state).
+    Tree(Box<Tree>),
     /// Browsing recently-opened projects to switch to (#270): a navigable list;
     /// Enter switches to the selected project, Esc cancels. Boxed (carries the
     /// project list).
@@ -201,6 +206,15 @@ pub struct RefFiles {
 pub struct ProjectBrowser {
     pub(crate) projects: Vec<crate::recent::RecentProject>,
     pub(crate) selected: usize,
+}
+
+/// State for the series tree navigator (#330): the selected visible row and the
+/// set of expanded book indices. The visible rows are derived from the project
+/// on demand (cheap, from cached metadata) rather than stored, so the tree never
+/// goes stale against the manifest.
+pub struct Tree {
+    pub(crate) selected: usize,
+    pub(crate) expanded: std::collections::HashSet<usize>,
 }
 
 /// State for an open [`Mode::DirBrowser`] (#271): a filesystem navigator for
@@ -335,6 +349,8 @@ pub(crate) enum Action {
     NewProjectFromNotes,
     /// Switch the active book of a multi-book series (#329).
     SwitchBook,
+    /// Open the series tree navigator (#330).
+    SeriesTree,
 }
 
 impl Action {
@@ -371,6 +387,7 @@ impl Action {
         Action::ImportNotes,
         Action::NewProjectFromNotes,
         Action::SwitchBook,
+        Action::SeriesTree,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -408,6 +425,7 @@ impl Action {
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
             Action::SwitchBook => "book:switch",
+            Action::SeriesTree => "tree",
         }
     }
 
@@ -445,6 +463,7 @@ impl Action {
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
             Action::SwitchBook => "Switch book",
+            Action::SeriesTree => "Project tree",
         }
     }
 

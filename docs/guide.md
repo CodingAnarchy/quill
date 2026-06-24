@@ -59,6 +59,12 @@ editor, chapter list, and reports follow the book you pick, and the chapter
 you're leaving is saved first. A standalone novel is just a one-book project, so
 the command says there's only one book.
 
+"Project tree" (also in the Ctrl-K menu) opens a navigator for the whole
+project: the series, its books, their parts, and their chapters, as an indented
+tree. Arrow keys move; → expands a book and ← collapses it; Enter opens the
+selected chapter (switching books if it's in another) or expands a book. A
+standalone novel shows a one-book tree.
+
 When you create a project, a short setup wizard offers to scaffold it: writing
 goals, a starter cast and setting (drafted by the AI when it's enabled), and a
 first note. Every step is skippable and the whole wizard is dismissible with
