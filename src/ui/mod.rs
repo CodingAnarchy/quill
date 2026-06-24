@@ -13,7 +13,7 @@ use crate::app::App;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::mode::{
     BibleReview, DirBrowser, Findings, Mode, Overlay, OverlayKind, Palette, ProjectBrowser,
-    RefFiles, Search, SearchStage,
+    RefFiles, Search, SearchStage, Tree,
 };
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
@@ -57,6 +57,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::Palette(palette) = &app.mode {
         draw_palette(frame, area, palette);
+        return;
+    }
+    if let Mode::Tree(tree) = &app.mode {
+        draw_tree(frame, area, app, tree);
         return;
     }
     if let Mode::ProjectBrowser(browser) = &app.mode {
@@ -327,6 +331,37 @@ fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings) {
         ))
     });
     draw_list_overlay(frame, area, &title, "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close", rows);
+}
+
+/// The series tree navigator (#330): the project as an indented series → book →
+/// part → chapter tree. Rows are derived from cached metadata (never files); the
+/// selected row is reversed and the active book/chapter is accented.
+fn draw_tree(frame: &mut Frame, area: Rect, app: &App, tree: &Tree) {
+    let rows = app.tree_rows(&tree.expanded);
+    let sel = tree.selected.min(rows.len().saturating_sub(1));
+    let title = format!(" {} ", app.project.series_title().unwrap_or("Project"));
+    let lines: Vec<Line<'static>> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let text = format!("{}{}{}", marker(i == sel), "  ".repeat(r.indent as usize), r.label);
+            let style = if i == sel {
+                row_style(true)
+            } else if r.active {
+                active_style()
+            } else {
+                Style::default()
+            };
+            Line::from(Span::styled(text, style))
+        })
+        .collect();
+    draw_list_overlay(
+        frame,
+        area,
+        &title,
+        "Project tree — ↑↓ move · → expand · ← collapse · enter open / expand · esc close",
+        lines.into_iter(),
+    );
 }
 
 /// The selection marker for a list row.

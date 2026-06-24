@@ -49,6 +49,7 @@ mod counts;
 mod persistence;
 mod project_ops;
 mod prompts;
+mod tree;
 mod vim;
 mod wizard;
 
@@ -403,6 +404,7 @@ impl App {
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
             Mode::RefFiles(_) => self.on_key_reffiles(key),
+            Mode::Tree(_) => self.on_key_tree(key),
             Mode::ProjectBrowser(_) => self.on_key_project_browser(key),
             Mode::DirBrowser(_) => self.on_key_dir_browser(key),
             Mode::Insert => self.on_key_insert(key),

@@ -115,6 +115,7 @@ impl App {
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
             Action::SwitchBook => self.open_book_switcher(),
+            Action::SeriesTree => self.open_tree(),
         }
     }
 

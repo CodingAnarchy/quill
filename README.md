@@ -383,11 +383,11 @@ novel's file is unchanged, and Quill opens the first book. Still ahead:
 
 - **Series support** — *landed:* the manifest models a series → book → part →
   chapter tree, and the **Switch book** command moves the editor, chapter pane,
-  and reports between books from inside Quill. Next: rolled-up counts across the
-  series.
-- **Tree navigation** — an outline/navigation pane that walks the full tree and
-  jumps between books, parts, and chapters, with rolled-up word counts at each
-  level.
+  and reports between books from inside Quill.
+- **Tree navigation** — *landed:* the **Project tree** navigator (run-action
+  menu, `Ctrl-K`) walks the full series → book → part → chapter tree and jumps to
+  any chapter (expanding books, switching the active book as needed). Next:
+  rolled-up word counts at each level of the tree and the progress report.
 
 ### AI assistance (Claude)
 
