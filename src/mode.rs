@@ -329,6 +329,8 @@ pub(crate) enum Action {
     /// Import a Markdown notes file (or a folder of them) into the story bible
     /// (#283).
     ImportNotes,
+    /// Create a new project from a folder of notes (#286).
+    NewProjectFromNotes,
 }
 
 impl Action {
@@ -361,6 +363,7 @@ impl Action {
         Action::Ai(AiAction::Triage),
         Action::UserGuide,
         Action::ImportNotes,
+        Action::NewProjectFromNotes,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -394,6 +397,7 @@ impl Action {
             Action::Ai(AiAction::Triage) => "triage",
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
+            Action::NewProjectFromNotes => "new-from-notes",
         }
     }
 
@@ -427,6 +431,7 @@ impl Action {
             Action::Ai(AiAction::Triage) => "Revision triage",
             Action::UserGuide => "User's guide",
             Action::ImportNotes => "Import notes → story bible",
+            Action::NewProjectFromNotes => "New project from a folder of notes",
         }
     }
 
@@ -691,6 +696,10 @@ pub(crate) enum Pending {
     /// Text input: a path to a Markdown notes file (or a folder of them) to
     /// import into the story bible (#283).
     ImportNotes,
+    /// Text input: the folder of notes to start a new project from (#286).
+    NewFromNotesSource,
+    /// Text input: the path for the new project created from notes (#286).
+    NewFromNotesDest,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).

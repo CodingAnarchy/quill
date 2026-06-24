@@ -99,7 +99,9 @@ that would cost more than your threshold asks before spending.
 Already have notes? "Import notes" (in the Ctrl-K menu) takes a Markdown file —
 or a folder of them — preserves the original under bible/sources/, and folds
 whatever it finds (characters, setting and world systems, the timeline, an
-outline) into the matching bible documents in Quill's format.
+outline) into the matching bible documents in Quill's format. To start from
+scratch, "New project from a folder of notes" creates a project and imports the
+folder in one step.
 
 
 ACTIONS & WORKFLOWS
