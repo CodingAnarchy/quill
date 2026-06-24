@@ -1,0 +1,129 @@
+Quill — User's Guide
+
+Quill is a terminal editor for writing novels. It keeps you in the prose: a
+centered, fixed-width page, a live word count, and a small set of keystrokes.
+Press F1 any time to reopen this guide; scroll with the arrow keys, and press
+any other key to close it.
+
+
+WRITING
+
+Just type. Text flows into a centered column sized like a printed page; the
+status bar shows the live word count and your position. Editing is Unicode-
+correct — movement and deletion work on whole characters. Ctrl-Z undoes a burst
+of typing and Ctrl-Y redoes it. Ctrl-+ and Ctrl-- widen and narrow the column.
+
+Markdown is understood as you write: emphasis (*italic*, **bold**) renders
+softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
+in-chapter outline pane.
+
+
+CHAPTERS & NAVIGATION
+
+A project is a folder of chapters (one Markdown file each) plus a book.toml
+manifest. Ctrl-N and Ctrl-P step to the next and previous chapter. Ctrl-G opens
+the chapter browser: arrow keys move, Enter opens the selected chapter, "o"
+opens it in a side pane, and "f" lists the project's reference files (the story
+bible and loose notes). From the browser you can also create, rename, reorder,
+and delete chapters, and set each chapter's status, summary, and section.
+
+Ctrl-L toggles the continuous-manuscript view, which flows across chapter
+boundaries and writes edits back to the right files, while never holding more
+than a few chapters in memory.
+
+Ctrl-W begins a window command for split panes: split the editor, open another
+chapter or a bible entry or a docked report beside the prose, switch focus,
+resize, and close. (See docs/windows.md for the full set.)
+
+
+PROJECTS
+
+Ctrl-B opens the project browser so you can move between books without quitting.
+It lists your recently-opened projects, newest first; Enter switches to one in
+place (saving the current project first, and confirming if there are unsaved
+changes). Press "b" to browse the filesystem for a project that isn't listed
+yet, or "n" to create a brand-new one — type its path and Quill makes the
+folder, manifest, and first chapter, then opens it.
+
+Point Quill at the folder where you keep your books, in
+~/.config/quill/config.toml, for a complete library view:
+
+    [projects]
+    home = "~/Writing"
+
+Every project under that folder then appears in the browser, ready to open.
+
+
+SAVING & SAFETY
+
+Ctrl-S saves the active chapter (or the continuous window). Saves are atomic: an
+interrupted save never corrupts a file, and the previous version always
+survives. If Quill exits unexpectedly, the next launch offers back any unsaved
+work. Ctrl-Q quits, prompting first if there are unsaved changes.
+
+
+REPORTS
+
+Ctrl-R opens the progress report: completion against your goals, a projected
+final length and finish date from your writing pace, and today's word delta
+(set goals and a start date in book.toml). Ctrl-T opens the analysis report:
+per-chapter readability, pacing, sentence lengths, and overused words and
+phrases. Both are scrollable; any other key closes them.
+
+
+EXPORT
+
+Ctrl-E opens the export menu: Markdown (one compiled document), Word (.docx in
+standard manuscript format), Scrivener (a .scriv bundle), or Vellum (a .docx
+tuned for Vellum import). Files land under export/.
+
+
+AI ASSISTANCE (opt-in)
+
+With AI enabled in your config, Ctrl-A opens the AI command palette. The
+assistant is a helper, never a co-writer: it tracks, outlines, marks, and
+observes, but it never writes or rewrites your manuscript prose. It can build a
+story bible (characters, timeline, setting), flag continuity and naming issues,
+observe style, brainstorm ideas, draft a starter cast or setting from a concept,
+and produce off-manuscript material (a synopsis, query letter, blurbs, social
+posts). Revision triage collects every finding into one list to work through.
+
+Each pass runs off the editor thread, so the editor never freezes, and a pass
+that would cost more than your threshold asks before spending.
+
+
+ACTIONS & WORKFLOWS
+
+Ctrl-K opens the run-action menu: every invokable action — save, each export,
+the reports, the AI passes, and this guide — in one searchable list, each run
+through the same path its shortcut uses. An action that can't run right now
+stays listed with the reason.
+
+Ctrl-X runs a workflow: a named sequence of actions you define in config.toml,
+so a single command can, say, save, refresh the character bible, flag
+continuity, and export. Workflows can also fire on save or from a Vim key.
+
+
+KEY REFERENCE
+
+  F1              this guide
+  Ctrl-S          save
+  Ctrl-Q          quit (prompts if unsaved)
+  Ctrl-Z / Ctrl-Y undo / redo
+  Ctrl-F          find (then "r" to replace)
+  Ctrl-O          toggle the chapter / outline pane
+  Ctrl-L          toggle the continuous manuscript
+  Ctrl-N / Ctrl-P next / previous chapter
+  Ctrl-G          browse chapters
+  Ctrl-B          browse / switch projects
+  Ctrl-W          window panes (split, focus, resize, close)
+  Ctrl-+ / Ctrl-- widen / narrow the text column
+  Ctrl-R          progress report
+  Ctrl-T          analysis report
+  Ctrl-E          export menu
+  Ctrl-A          AI command palette
+  Ctrl-K          run action
+  Ctrl-X          run workflow
+
+Vim-style modal editing is available, off by default; enable it with
+[editor] vim = true in your config.

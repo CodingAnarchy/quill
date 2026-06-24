@@ -182,6 +182,9 @@ fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &Overlay) {
     let (title, wrap) = match overlay.kind {
         OverlayKind::Report(label) => (format!(" {book} — {label} ({hint}) "), false),
         OverlayKind::AiPanel => (format!(" AI — Claude ({hint}) "), true),
+        // The guide ships pre-wrapped to a readable width; keep it unwrapped so its
+        // key-reference columns stay aligned and the scroll bound stays exact.
+        OverlayKind::Guide => (format!(" Quill — user's guide ({hint}) "), false),
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let mut paragraph = Paragraph::new(lines.clone()).block(block).scroll((scroll, 0));

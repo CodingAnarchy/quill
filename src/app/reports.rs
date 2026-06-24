@@ -17,6 +17,12 @@ impl App {
         self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
     }
 
+    /// Open the built-in user's guide overlay (F1, and the run-action menu) (#281).
+    pub(crate) fn open_guide(&mut self) {
+        let lines = crate::guide::TEXT.lines().map(|l| Line::raw(l.to_string())).collect();
+        self.overlay = Some(Overlay::guide(lines));
+    }
+
     /// The progress report's rows, computed once when it's opened.
     pub(crate) fn report_lines(&self) -> Vec<Line<'static>> {
         let momentum = Momentum {

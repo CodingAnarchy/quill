@@ -28,6 +28,8 @@ pub enum OverlayKind {
     Report(&'static str),
     /// The word-wrapped AI answer / summary panel.
     AiPanel,
+    /// The built-in user's guide (#281) — a fixed help document.
+    Guide,
 }
 
 impl Overlay {
@@ -39,6 +41,11 @@ impl Overlay {
     /// The AI answer / summary overlay, scrolled to the top.
     pub fn ai(lines: Vec<Line<'static>>) -> Self {
         Self { lines, kind: OverlayKind::AiPanel, scroll: 0 }
+    }
+
+    /// The user's-guide overlay (#281), scrolled to the top.
+    pub fn guide(lines: Vec<Line<'static>>) -> Self {
+        Self { lines, kind: OverlayKind::Guide, scroll: 0 }
     }
 }
 
@@ -285,6 +292,8 @@ pub(crate) enum Action {
     AnalysisReport,
     /// Run an AI pass / open an AI view (Ctrl-A).
     Ai(AiAction),
+    /// Open the built-in user's guide (F1) (#281).
+    UserGuide,
 }
 
 impl Action {
@@ -315,6 +324,7 @@ impl Action {
         Action::Ai(AiAction::Portrait),
         Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
+        Action::UserGuide,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -346,6 +356,7 @@ impl Action {
             Action::Ai(AiAction::Portrait) => "ai:portrait",
             Action::Ai(AiAction::Scene) => "ai:scene",
             Action::Ai(AiAction::Triage) => "triage",
+            Action::UserGuide => "guide",
         }
     }
 
@@ -377,6 +388,7 @@ impl Action {
             Action::Ai(AiAction::Portrait) => "AI · Character portraits",
             Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
+            Action::UserGuide => "User's guide",
         }
     }
 

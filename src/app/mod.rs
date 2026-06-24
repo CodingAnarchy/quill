@@ -476,6 +476,18 @@ impl App {
         // A fresh keystroke clears any stale status message.
         self.message = None;
 
+        // F1 opens the user's guide from an editing mode (#281). Guarded so it
+        // doesn't pre-empt a key's meaning elsewhere: with an overlay already up,
+        // F1 falls through and closes it like any other key; in a prompt/menu the
+        // mode owns its keys.
+        if key.code == KeyCode::F(1)
+            && self.overlay.is_none()
+            && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+        {
+            self.open_guide();
+            return;
+        }
+
         // While a workflow is running (suspended on an async step), Esc cancels it
         // — cleanly, after the current step finishes (#227). Only in an editing
         // mode: a prompt/palette owns Esc itself (a cost-confirm cancels there).
