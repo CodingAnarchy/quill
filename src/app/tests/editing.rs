@@ -1,11 +1,10 @@
 //! Tests for undo/redo and find/replace over the active chapter.
 
 use super::*;
-use std::fs;
 
 #[test]
 fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
-    let (mut app, dir) = two_chapter_app("undo");
+    let (mut app, _dir) = two_chapter_app("undo");
     let original = app.buffer.text();
     type_str(&mut app, "ZZZ");
     app.on_idle(); // seal the typing burst into one undo group
@@ -15,12 +14,11 @@ fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
     assert_eq!(app.buffer.text(), original, "undo restores the original text");
     app.on_key(ctrl('y'));
     assert!(app.buffer.text().contains("ZZZ"), "redo reapplies the edit");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn undo_is_guarded_in_the_continuous_view() {
-    let (mut app, dir) = two_chapter_app("undo-continuous");
+    let (mut app, _dir) = two_chapter_app("undo-continuous");
     app.on_key(ctrl('l')); // enter the continuous-manuscript view
     assert!(app.manuscript.is_some());
     app.on_key(ctrl('z'));
@@ -29,7 +27,6 @@ fn undo_is_guarded_in_the_continuous_view() {
         "{:?}",
         app.message
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 /// Match count and current index while in search mode.
@@ -42,7 +39,7 @@ fn search_state(app: &App) -> (usize, usize) {
 
 #[test]
 fn ctrl_f_finds_and_navigates_matches() {
-    let (mut app, dir) = two_chapter_app("find");
+    let (mut app, _dir) = two_chapter_app("find");
     // Active chapter is "first chapter" — "r" occurs in "first" and "chapter".
     app.on_key(ctrl('f'));
     assert!(matches!(app.mode, Mode::Search(_)), "Ctrl-f enters search");
@@ -61,12 +58,11 @@ fn ctrl_f_finds_and_navigates_matches() {
 
     app.on_key(key(KeyCode::Esc));
     assert!(matches!(app.mode, Mode::Insert), "Esc leaves search");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn find_then_replace_all() {
-    let (mut app, dir) = two_chapter_app("replace-all");
+    let (mut app, _dir) = two_chapter_app("replace-all");
     app.on_key(ctrl('f'));
     type_str(&mut app, "chapter");
     app.on_key(key(KeyCode::Enter)); // navigate
@@ -78,12 +74,11 @@ fn find_then_replace_all() {
     assert!(matches!(app.mode, Mode::Insert));
     assert_eq!(app.buffer.text(), "first section\n");
     assert!(app.message.as_deref().unwrap_or("").contains("Replaced 1"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn replace_current_match_only_with_y() {
-    let (mut app, dir) = two_chapter_app("replace-y");
+    let (mut app, _dir) = two_chapter_app("replace-y");
     // Two matches for "r"; replace only the first, then bail.
     app.on_key(ctrl('f'));
     type_str(&mut app, "r");
@@ -96,12 +91,11 @@ fn replace_current_match_only_with_y() {
 
     assert_eq!(app.buffer.text(), "fiRst chapter\n", "only the first match was replaced");
     assert!(app.message.as_deref().unwrap_or("").contains("Replaced 1"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn replace_is_undoable() {
-    let (mut app, dir) = two_chapter_app("replace-undo");
+    let (mut app, _dir) = two_chapter_app("replace-undo");
     app.on_key(ctrl('f'));
     type_str(&mut app, "chapter");
     app.on_key(key(KeyCode::Enter));
@@ -113,5 +107,4 @@ fn replace_is_undoable() {
     // The replace went through the normal edit path, so undo reverses it (#145).
     app.on_key(ctrl('z'));
     assert_eq!(app.buffer.text(), "first chapter\n", "undo restores the pre-replace text");
-    fs::remove_dir_all(&dir).ok();
 }

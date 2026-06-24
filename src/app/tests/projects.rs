@@ -564,6 +564,7 @@ fn importing_a_directory_preserves_all_markdown_collectively() {
     let notesdir = std::env::temp_dir().join(format!("quill-notesdir-{}", std::process::id()));
     let _ = fs::remove_dir_all(&notesdir);
     fs::create_dir_all(&notesdir).unwrap();
+    let notesdir = TempProject::new(notesdir);
     fs::write(notesdir.join("chars.md"), "# Mara\n").unwrap();
     fs::write(notesdir.join("world.md"), "# Saltmarsh\n").unwrap();
     fs::write(notesdir.join("ignore.txt"), "not markdown\n").unwrap();
@@ -573,7 +574,6 @@ fn importing_a_directory_preserves_all_markdown_collectively() {
     let srcdir = app.project.root.join("bible").join("sources");
     assert!(srcdir.join("chars.md").exists() && srcdir.join("world.md").exists(), "every .md preserved");
     assert!(!srcdir.join("ignore.txt").exists(), "non-markdown is skipped");
-    fs::remove_dir_all(&notesdir).ok();
 }
 
 #[test]

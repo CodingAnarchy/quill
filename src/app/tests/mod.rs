@@ -4,7 +4,42 @@
 use super::*;
 use crate::project::Project;
 use std::fs;
-use std::path::PathBuf;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+
+/// Owns a test's temp project directory and removes it on `Drop` (#317), so the
+/// tree is cleaned on both the success and the panic (failing-assertion) paths —
+/// no per-test `fs::remove_dir_all` line to remember, and no orphaned dirs left
+/// behind by a failing run. Derefs to `Path`, so `&dir`, `dir.join(..)`, and the
+/// like keep working as they did with the bare `PathBuf`.
+pub struct TempProject {
+    path: PathBuf,
+}
+
+impl TempProject {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Deref for TempProject {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for TempProject {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempProject {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
 
 mod actions;
 mod ai;
@@ -33,7 +68,7 @@ fn type_str(app: &mut App, s: &str) {
 }
 
 /// A two-chapter project on disk with distinct content per chapter.
-fn two_chapter_app(name: &str) -> (App, PathBuf) {
+fn two_chapter_app(name: &str) -> (App, TempProject) {
     let mut dir = std::env::temp_dir();
     dir.push(format!("quill-app-{}-{}", std::process::id(), name));
     let _ = fs::remove_dir_all(&dir);
@@ -61,5 +96,5 @@ fn two_chapter_app(name: &str) -> (App, PathBuf) {
     // workflow tests set these explicitly.
     app.workflows = Vec::new();
     app.triggers = Default::default();
-    (app, dir)
+    (app, TempProject::new(dir))
 }
