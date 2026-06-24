@@ -326,6 +326,9 @@ pub(crate) enum Action {
     Ai(AiAction),
     /// Open the built-in user's guide (F1) (#281).
     UserGuide,
+    /// Import a Markdown notes file (or a folder of them) into the story bible
+    /// (#283).
+    ImportNotes,
 }
 
 impl Action {
@@ -357,6 +360,7 @@ impl Action {
         Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
         Action::UserGuide,
+        Action::ImportNotes,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -389,6 +393,7 @@ impl Action {
             Action::Ai(AiAction::Scene) => "ai:scene",
             Action::Ai(AiAction::Triage) => "triage",
             Action::UserGuide => "guide",
+            Action::ImportNotes => "import",
         }
     }
 
@@ -421,6 +426,7 @@ impl Action {
             Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
             Action::UserGuide => "User's guide",
+            Action::ImportNotes => "Import notes → story bible",
         }
     }
 
@@ -682,6 +688,9 @@ pub(crate) enum Pending {
     /// Text input for one setup-wizard step (#282): blank skips the step, Esc
     /// dismisses the rest of the wizard.
     Wizard(WizardStep),
+    /// Text input: a path to a Markdown notes file (or a folder of them) to
+    /// import into the story bible (#283).
+    ImportNotes,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).

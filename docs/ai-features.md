@@ -89,6 +89,13 @@ The palette actions:
   (categorized entries + gazetteer, marked AI-generated, editable). Works at
   chapter zero and later feeds the setting rule-consistency checks. Scaffolding,
   never prose.
+- **Import notes** (#283) — point Quill at an existing Markdown notes file (or a
+  folder of them) and it preserves the source under `bible/sources/`, then runs
+  one *extractive* pass over the combined text to generate/update the character
+  and setting bibles in the project's format — merging via the usual generated
+  markers + preserved Notes, with hand-edit conflicts surfaced in the bible
+  review. Available (for source preservation) even with AI off. Off-manuscript,
+  never prose. Run it from the Ctrl-K menu ("Import notes → story bible").
 - **Ask the manuscript** (#73) — a grounded question, answered with chapter
   citations in an overlay.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to

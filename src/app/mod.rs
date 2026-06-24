@@ -186,6 +186,9 @@ pub struct App {
     /// finishes — only one AI pass runs at a time, so the second is queued here
     /// and fired by `poll_ai` when the first completes.
     wizard_pending_setting: Option<String>,
+    /// A label for the notes import in flight (#283) — a file name or a count —
+    /// shown in the summary when the pass applies; taken by `apply_import`.
+    import_source: Option<String>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -243,6 +246,7 @@ impl App {
             recovery_written: false,
             pending_switch: None,
             wizard_pending_setting: None,
+            import_source: None,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -1599,7 +1603,8 @@ impl App {
             | Pending::DraftCharacters
             | Pending::DraftSetting
             | Pending::NewProject
-            | Pending::Wizard(_) => {
+            | Pending::Wizard(_)
+            | Pending::ImportNotes => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1692,6 +1697,14 @@ impl App {
                                 // next one — or finish (#282).
                                 self.apply_wizard_step(step, text);
                                 self.wizard_open(step.next());
+                            }
+                            Pending::ImportNotes => {
+                                self.mode = closed;
+                                if text.is_empty() {
+                                    self.message = Some("Import cancelled — no path.".into());
+                                } else {
+                                    self.import_notes(text);
+                                }
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
