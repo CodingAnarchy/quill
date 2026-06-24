@@ -386,8 +386,11 @@ novel's file is unchanged, and Quill opens the first book. Still ahead:
   and reports between books from inside Quill.
 - **Tree navigation** — *landed:* the **Project tree** navigator (run-action
   menu, `Ctrl-K`) walks the full series → book → part → chapter tree and jumps to
-  any chapter (expanding books, switching the active book as needed). Next:
-  rolled-up word counts at each level of the tree and the progress report.
+  any chapter (expanding books, switching the active book as needed).
+- **Rolled-up counts** — *landed:* the tree shows a word count at every level
+  (chapter, part, book, and the whole series), and the progress report leads with
+  a series total for a multi-book project. Per-book goals live in each book's
+  manifest entry. Next: compile/export across the whole series.
 
 ### AI assistance (Claude)
 

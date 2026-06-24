@@ -14,6 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::frontmatter::Band;
 use crate::mode::{Mode, Tree};
 use crate::project::{front_chapter_count, part_at_body_position, ChapterEntry};
+use crate::report::thousands;
 
 use super::App;
 
@@ -56,7 +57,7 @@ impl App {
         if multi {
             rows.push(TreeRow {
                 indent: 0,
-                label: format!("▾ {}", self.project.series_title().unwrap_or("Series")),
+                label: format!("▾ {}  ·  {} w", self.project.series_title().unwrap_or("Series"), thousands(self.series_word_count() as i64)),
                 active: false,
                 node: TreeNode::Series,
             });
@@ -67,7 +68,12 @@ impl App {
             let active_book = b == self.project.active_book();
             rows.push(TreeRow {
                 indent: book_indent,
-                label: format!("{} {}", if is_expanded { "▾" } else { "▸" }, self.project.book_title(b).unwrap_or("(untitled)")),
+                label: format!(
+                    "{} {}  ·  {} w",
+                    if is_expanded { "▾" } else { "▸" },
+                    self.project.book_title(b).unwrap_or("(untitled)"),
+                    thousands(self.book_word_count(b) as i64),
+                ),
                 active: active_book,
                 node: TreeNode::Book(b),
             });
@@ -85,6 +91,27 @@ impl App {
         let parts = self.project.book_parts(b);
         let order = band_order(chapters);
         let front = front_chapter_count(chapters);
+        // Word count for the chapter at index `ci`: the active book is counted
+        // live (its active chapter from the buffer), the others from the cache.
+        let words_at = |ci: usize| {
+            if active_book {
+                self.chapter_word_count(ci)
+            } else {
+                chapters[ci].words
+            }
+        };
+        // Per-part totals for this book's part headers.
+        let part_words: Vec<usize> = parts.map_or_else(Vec::new, |ps| {
+            let mut totals = vec![0usize; ps.len()];
+            for (pos, &ci) in order.iter().enumerate() {
+                if Band::of(chapters[ci].role) == Band::Body {
+                    if let Some(pi) = part_at_body_position(ps, pos.saturating_sub(front) + 1) {
+                        totals[pi] += words_at(ci);
+                    }
+                }
+            }
+            totals
+        });
         let mut last_part: Option<usize> = None;
         for (pos, &ci) in order.iter().enumerate() {
             let ch = &chapters[ci];
@@ -102,7 +129,7 @@ impl App {
                         .unwrap_or_else(|| format!("{} {}", self.project.book_part_label(b), pi + 1));
                     rows.push(TreeRow {
                         indent: book_indent + 1,
-                        label: name,
+                        label: format!("{name}  ·  {} w", thousands(part_words[pi] as i64)),
                         active: false,
                         node: TreeNode::Chapter { book: b, file: ch.file.clone() },
                     });
@@ -113,7 +140,7 @@ impl App {
             let chap_indent = book_indent + 1 + u16::from(part.is_some());
             rows.push(TreeRow {
                 indent: chap_indent,
-                label: ch.title.clone(),
+                label: format!("{}  ·  {} w", ch.title, thousands(words_at(ci) as i64)),
                 active: active_book && self.project.active_file() == ch.file,
                 node: TreeNode::Chapter { book: b, file: ch.file.clone() },
             });

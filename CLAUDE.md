@@ -113,8 +113,9 @@ What they assert:
   project holds small per-chapter metadata only, never chapter body text.
 - `open_is_fast_for_a_multi_book_series` (`project.rs`) — opening the multi-book
   `[[books]]` format (#328) at series scale (1500 chapters across 6 books) runs
-  the books-array parse + active-book hoist and caches only the active book
-  (~10ms); catches a regression that eagerly reads every book's files at open.
+  the books-array parse + active-book hoist and (since #331) caches every book's
+  word counts for series rollups, the same total file work as one book of that
+  size (~20ms); catches a regression to O(n²) work on the larger manifest.
 - `switching_books_is_fast_in_a_series` (`project.rs`) — switching the active
   book of a multi-book series (#329) caches the target book's chapters once
   (the bounded work `open` does for one book), never the whole series (~10ms).

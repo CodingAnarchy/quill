@@ -138,4 +138,20 @@ impl App {
     pub fn section_word_count(&self) -> usize {
         self.project_word_count() - self.body_word_count()
     }
+
+    /// Total words in book `b` (#331): the active book counted live (its active
+    /// chapter from the buffer), the others from their caches.
+    pub fn book_word_count(&self, b: usize) -> usize {
+        if b == self.project.active_book() {
+            self.project_word_count()
+        } else {
+            self.project.book_word_count(b)
+        }
+    }
+
+    /// Total words across the whole series (#331): the active book live, the rest
+    /// from their caches. Equals `project_word_count` for a standalone novel.
+    pub fn series_word_count(&self) -> usize {
+        (0..self.project.book_count()).map(|b| self.book_word_count(b)).sum()
+    }
 }
