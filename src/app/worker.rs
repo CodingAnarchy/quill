@@ -158,17 +158,24 @@ impl App {
     /// (#90) — shared by the cost estimate and the run so they always agree. A
     /// missing/empty bible can't be revised and isn't truly "up to date" (e.g. it
     /// was hand-deleted while the state file lingered), so it rebuilds in full.
-    fn plan_bible_pass(&self, t: &BibleTracker) -> (ai::incremental::Scope, String, ai::incremental::Digests) {
+    fn plan_bible_pass(&self, t: &BibleTracker, book: usize) -> (ai::incremental::Scope, String, ai::incremental::Digests) {
         let prior = match t.source {
             BibleSource::Dir(dir) => bible::raw_dir(&self.project.root, dir),
             BibleSource::File(file) => bible::raw_file(&self.project.root, file),
         };
-        let current = self.chapter_digests();
+        let current = self.book_digests(book);
         let scope = if prior.trim().is_empty() {
             ai::incremental::Scope::Full
         } else {
             let state = ai::incremental::State::load(&self.project.root);
-            ai::incremental::decide(state.built_from(t.key), &current, self.ai.refresh_after_changes)
+            // Scope the recorded digests to THIS book's files, so the other books'
+            // chapters never register as "removed" and force a needless rebuild
+            // (#339). For a standalone novel every file is the one book's, so this
+            // is the same record `decide` saw before.
+            let prior_book: Option<ai::incremental::Digests> = state.built_from(t.key).map(|d| {
+                d.iter().filter(|(f, _)| current.contains_key(*f)).map(|(f, g)| (f.clone(), g.clone())).collect()
+            });
+            ai::incremental::decide(prior_book.as_ref(), &current, self.ai.refresh_after_changes)
         };
         (scope, prior, current)
     }
@@ -179,14 +186,21 @@ impl App {
     pub(super) fn run_bible_tracker(
         &mut self,
         t: BibleTracker,
+        book: usize,
         force: bool,
         full: impl FnOnce(String, &str) -> ai::Request,
         incr: impl FnOnce(&str, &str, &str) -> ai::Request,
         finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
     ) {
-        let (scope, prior, current) = self.plan_bible_pass(&t);
+        let (scope, prior, current) = self.plan_bible_pass(&t, book);
         // The AI palette's `R` forces a full rebuild regardless of the delta (#176).
         let scope = if force { ai::incremental::Scope::Full } else { scope };
+        // In a multi-book series the bible spans every book, so a "full" pass for
+        // one book must *revise* the shared bible with that book's chapters, not
+        // rebuild from scratch and discard the other books (#339). It also folds
+        // its digests into the state rather than replacing it. A standalone novel
+        // has one book, so this is exactly the prior single-book behavior.
+        let series = self.project.book_count() > 1;
         // Full rebuilds run through the Batch API (half price, higher latency) on
         // the Claude backend; the local backend has no batch path.
         let claude = self.ai.backend() == ai::BackendKind::Claude;
@@ -197,13 +211,23 @@ impl App {
                     Some(format!("{}: bible is current — no chapters changed since the last pass.", t.key));
                 return;
             }
-            ai::incremental::Scope::Full => (full(self.manuscript_text(), &model), t.full_msg, claude),
+            ai::incremental::Scope::Full if prior.trim().is_empty() || !series => {
+                // First build (no bible yet), or a standalone novel: rebuild from
+                // the whole book. `book_render(book, None)` is the active book's
+                // whole manuscript for a single-book project.
+                (full(self.book_render(book, None), &model), t.full_msg, claude)
+            }
+            ai::incremental::Scope::Full => {
+                // Series, bible exists: revise it with all of this book's chapters.
+                (incr(&prior, &self.book_render(book, None), &model), t.full_msg, false)
+            }
             ai::incremental::Scope::Incremental(changed) => {
-                (incr(&prior, &self.chapters_text(&changed), &model), t.incr_msg, false)
+                (incr(&prior, &self.book_render(book, Some(&changed)), &model), t.incr_msg, false)
             }
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
-        self.pending_pass = Some((t.key.to_string(), current));
+        // A series merges the book's digests into the state; a standalone replaces.
+        self.pending_pass = Some((t.key.to_string(), current, series));
         let message = if batch {
             format!("{base_msg} (batch — may take a few minutes)")
         } else {
@@ -228,22 +252,56 @@ impl App {
         });
     }
 
-    /// The chapter `file → content-digest` map for the manuscript as it is now —
-    /// the revision-delta baseline for incremental scoping (#90).
+    /// The chapter `file → content-digest` map for the active book (#90). Used by
+    /// the incremental-scoping tests to seed and inspect state.
+    #[cfg(test)]
     pub(crate) fn chapter_digests(&self) -> ai::incremental::Digests {
-        (0..self.chapter_count())
-            .filter_map(|i| {
-                let file = self.project.chapter_file(i);
-                (!file.is_empty())
-                    .then(|| (file.to_string(), ai::incremental::digest(&self.chapter_text(i))))
-            })
+        self.book_digests(self.project.active_book())
+    }
+
+    /// The text of the active book's chapters whose files are in `files`, each
+    /// under its title heading — the changed-chapter context for a pass (#90).
+    pub(crate) fn chapters_text(&self, files: &[String]) -> String {
+        self.book_render(self.project.active_book(), Some(files))
+    }
+
+    /// Book `b`'s `file → content-digest` map (#339): the active book's active
+    /// chapter is read live from the buffer, every other chapter from disk.
+    pub(crate) fn book_digests(&self, b: usize) -> ai::incremental::Digests {
+        self.project
+            .book_chapters(b)
+            .iter()
+            .filter(|c| !c.file.is_empty())
+            .map(|c| (c.file.clone(), ai::incremental::digest(&self.book_chapter_text(b, &c.file))))
             .collect()
     }
 
-    /// The text of the chapters whose files are in `files`, each under its title
-    /// heading — the changed-chapter context for an incremental pass (#90).
-    pub(crate) fn chapters_text(&self, files: &[String]) -> String {
-        self.render_chapters(|i| files.iter().any(|f| f == self.project.chapter_file(i)))
+    /// One chapter's prose for book `b`, by file (#339): live from the buffer for
+    /// the active book's active chapter, from disk otherwise — never holding more
+    /// than the editing window in memory.
+    fn book_chapter_text(&self, b: usize, file: &str) -> String {
+        if b == self.project.active_book() {
+            self.project.index_of_file(file).map_or_else(String::new, |i| self.chapter_text(i))
+        } else {
+            self.project.read_chapter_parts(file).0
+        }
+    }
+
+    /// Book `b`'s chapters serialized under title headings — all of them, or just
+    /// those whose file is in `keep` — the request context for a book pass (#339).
+    fn book_render(&self, b: usize, keep: Option<&[String]>) -> String {
+        let mut out = String::new();
+        for c in self.project.book_chapters(b) {
+            if keep.is_some_and(|files| !files.iter().any(|f| f == &c.file)) {
+                continue;
+            }
+            out.push_str("# ");
+            out.push_str(&c.title);
+            out.push_str("\n\n");
+            out.push_str(self.book_chapter_text(b, &c.file).trim_end());
+            out.push_str("\n\n");
+        }
+        out
     }
 
     /// Record what the just-applied bible pass was built from (#90), so the next
@@ -251,9 +309,14 @@ impl App {
     /// doesn't undo the pass that already succeeded. A no-op for non-bible passes
     /// (which leave `pending_pass` unset).
     pub(super) fn record_pass_state(&mut self) {
-        if let Some((tracker, digests)) = self.pending_pass.take() {
+        if let Some((tracker, digests, merge)) = self.pending_pass.take() {
             let today = date::iso(date::today());
-            let _ = ai::incremental::State::record(&self.project.root, &tracker, &today, digests);
+            let root = &self.project.root;
+            let _ = if merge {
+                ai::incremental::State::record_merge(root, &tracker, &today, digests)
+            } else {
+                ai::incremental::State::record(root, &tracker, &today, digests)
+            };
         }
     }
 
@@ -268,7 +331,7 @@ impl App {
         if force {
             return self.manuscript_text().len(); // a forced rebuild sends the whole book
         }
-        let (scope, prior, _) = self.plan_bible_pass(&t);
+        let (scope, prior, _) = self.plan_bible_pass(&t, self.project.active_book());
         match scope {
             ai::incremental::Scope::UpToDate => 0,
             ai::incremental::Scope::Full => self.manuscript_text().len(),

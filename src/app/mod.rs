@@ -168,8 +168,9 @@ pub struct App {
     triage: Vec<Finding>,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
-    /// cleanly. `(tracker, digests)`; `None` when no bible pass is pending.
-    pending_pass: Option<(String, ai::incremental::Digests)>,
+    /// cleanly. `(tracker, digests, merge)` — `merge` keeps the other books'
+    /// state when folding one book of a series (#339); `None` when none pending.
+    pending_pass: Option<(String, ai::incremental::Digests, bool)>,
     /// Author-defined workflows (#226) from the `[workflows]` config — named,
     /// ordered sequences of registry actions run as one step. Loaded once at
     /// startup, sorted by name for a stable run-workflow menu.

@@ -195,6 +195,34 @@ fn the_tree_groups_chapters_under_part_headers() {
     assert!(rows[act + 1].indent > rows[act].indent, "chapter indented under the part");
 }
 
+// --- Series bible: book-scoped passes (#339) --------------------------------
+
+#[test]
+fn book_digests_are_scoped_to_one_book() {
+    let (app, _dir) = series_app("book-digests");
+    let b0: Vec<String> = app.book_digests(0).into_keys().collect();
+    let b1: Vec<String> = app.book_digests(1).into_keys().collect();
+    assert_eq!(b0, ["b1/one.md", "b1/two.md"], "book one's files only");
+    assert_eq!(b1, ["b2/one.md"], "book two's files only");
+}
+
+#[test]
+fn folding_a_book_into_the_bible_keeps_the_other_books_state() {
+    use crate::ai::incremental::State;
+    let (mut app, dir) = series_app("fold-keeps");
+    // Book one's character pass already recorded what it was built from.
+    State::record(&dir, "characters", "2026-06-24", app.book_digests(0)).unwrap();
+    // Folding book two in is a series pass: it merges, not replaces.
+    app.pending_pass = Some(("characters".into(), app.book_digests(1), true));
+    app.record_pass_state();
+
+    let recorded = State::load(&dir).built_from("characters").unwrap().clone();
+    assert!(
+        recorded.contains_key("b1/one.md") && recorded.contains_key("b2/one.md"),
+        "book one wasn't forgotten when book two folded in: {recorded:?}"
+    );
+}
+
 // --- Series export (#332) ---------------------------------------------------
 
 #[test]
