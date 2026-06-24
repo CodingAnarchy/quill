@@ -1304,6 +1304,8 @@ impl App {
                 self.advance_after_ai(Some("request failed".into()));
             }
         }
+        // Fire a setup wizard's deferred setting draft once the worker is free (#282).
+        self.pump_wizard_drafts();
     }
 
     /// Show an AI result — a Q&A answer or a pass summary — as the full-screen

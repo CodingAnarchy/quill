@@ -429,3 +429,104 @@ fn a_new_project_path_with_no_name_is_rejected() {
     assert_eq!(app.project.manifest.title, "Current", "nothing is created without a name");
     assert!(app.message.as_deref().unwrap_or("").contains("folder name"));
 }
+
+// --- Setup wizard (#282) ---------------------------------------------------
+
+fn at_step(app: &App, step: WizardStep) -> bool {
+    matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::Wizard(st) if st == step))
+}
+
+/// Create a new project (with the wizard enabled) and return the app sitting at
+/// the wizard's opening y/N prompt.
+fn app_at_new_project(tag: &str) -> (App, PathBuf) {
+    isolate(tag);
+    let parent = books_dir(&format!("{tag}-p"));
+    let cur = make_project(&format!("{tag}-cur"), "Current", "c\n");
+    let mut app = open_app(&cur);
+    let target = parent.join("New Book");
+    app.create_project_at(target.clone());
+    (app, target)
+}
+
+#[test]
+fn creating_a_project_offers_the_setup_wizard() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (app, target) = app_at_new_project("wiz-offer");
+    assert_eq!(app.project.manifest.title, "New Book", "the project was created and opened");
+    assert!(Project::manifest_path(&target).exists());
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::WizardStart)), "wizard offered");
+}
+
+#[test]
+fn declining_the_wizard_lands_in_the_editor() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (mut app, _t) = app_at_new_project("wiz-decline");
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "declining lands in the editor");
+}
+
+#[test]
+fn the_goals_step_records_goals_in_the_manifest() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (mut app, _t) = app_at_new_project("wiz-goals");
+    app.on_key(key(KeyCode::Char('y'))); // start → Goals
+    assert!(at_step(&app, WizardStep::Goals));
+    type_str(&mut app, "80000 30");
+    app.on_key(key(KeyCode::Enter));
+
+    let goals = app.project.manifest.goals.clone().expect("goals recorded");
+    assert_eq!((goals.words, goals.chapters), (80000, 30));
+    let manifest = fs::read_to_string(Project::manifest_path(&app.project.root)).unwrap();
+    assert!(manifest.contains("80000"), "goals persisted to book.toml");
+}
+
+#[test]
+fn ai_steps_are_skipped_when_ai_is_off() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (mut app, _t) = app_at_new_project("wiz-noai");
+    app.on_key(key(KeyCode::Char('y'))); // → Goals
+    app.on_key(key(KeyCode::Enter)); // skip goals (blank)
+    // AI is off in tests, so Characters and Setting are skipped → straight to Notes.
+    assert!(at_step(&app, WizardStep::Notes), "AI steps skipped when AI is off");
+}
+
+#[test]
+fn the_notes_step_writes_notes_md_and_finishes() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (mut app, _t) = app_at_new_project("wiz-notes");
+    app.on_key(key(KeyCode::Char('y')));
+    app.on_key(key(KeyCode::Enter)); // skip goals → Notes (AI off)
+    assert!(at_step(&app, WizardStep::Notes));
+    type_str(&mut app, "remember the locket");
+    app.on_key(key(KeyCode::Enter));
+
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "the wizard finishes");
+    let notes = fs::read_to_string(app.project.root.join("notes.md")).unwrap();
+    assert!(notes.contains("remember the locket"));
+}
+
+#[test]
+fn esc_dismisses_the_rest_of_the_wizard() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (mut app, _t) = app_at_new_project("wiz-esc");
+    app.on_key(key(KeyCode::Char('y'))); // → Goals
+    app.on_key(key(KeyCode::Esc));
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "Esc ends the wizard");
+}
+
+#[test]
+fn the_wizard_can_be_disabled_in_config() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("wiz-off");
+    let cfg_dir = crate::config::config_dir().unwrap();
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(cfg_dir.join("config.toml"), "[projects]\nsetup_wizard = false\n").unwrap();
+
+    let parent = books_dir("wiz-off-p");
+    let cur = make_project("wiz-off-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+    app.create_project_at(parent.join("New Book"));
+
+    assert_eq!(app.project.manifest.title, "New Book", "still created and opened");
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no wizard when disabled");
+}

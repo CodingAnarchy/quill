@@ -53,6 +53,11 @@ Point Quill at the folder where you keep your books, in
 
 Every project under that folder then appears in the browser, ready to open.
 
+When you create a project, a short setup wizard offers to scaffold it: writing
+goals, a starter cast and setting (drafted by the AI when it's enabled), and a
+first note. Every step is skippable and the whole wizard is dismissible with
+Esc — turn it off with "setup_wizard = false" under [projects].
+
 
 SAVING & SAFETY
 
