@@ -230,7 +230,7 @@ fn a_stuck_step_times_out() {
     let (mut app, dir) = two_chapter_app("wf-timeout");
     // A spawned-but-unpolled task keeps `ai_task` busy (simulating a request in
     // flight); the run is backdated past the per-step timeout.
-    app.ai_task.spawn(|| ai::Outcome::Error(ai::AiError::Network("stuck".into())));
+    app.ai_task.spawn(|| ai::Outcome::Error(ai::AiError::Network { status: None, message: "stuck".into() }));
     app.begin_workflow_for_test("pass", vec![Action::Ai(AiAction::Continuity)]);
     app.expire_workflow_step();
     app.tick_workflow_timeout();

@@ -57,16 +57,16 @@ impl LocalImageBackend {
         // resolution selection is deferred to the local-model epic (#83/#85).
         let config = StableDiffusionConfig::v1_5(None, Some(512), Some(512));
 
-        let hub = Api::new().map_err(|e| api(format!("hf-hub: {e}")))?;
+        let hub = Api::new().map_err(|e| internal(format!("hf-hub: {e}")))?;
         let fetch = |repo: &str, file: &str| -> Result<std::path::PathBuf, AiError> {
-            hub.model(repo.to_string()).get(file).map_err(|e| api(format!("download {file}: {e}")))
+            hub.model(repo.to_string()).get(file).map_err(|e| internal(format!("download {file}: {e}")))
         };
         let tokenizer_path = fetch(TOKENIZER_REPO, "tokenizer.json")?;
         let clip_path = fetch(SD_REPO, CLIP_WEIGHTS)?;
         let unet_path = fetch(SD_REPO, UNET_WEIGHTS)?;
         let vae_path = fetch(SD_REPO, VAE_WEIGHTS)?;
 
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| api(e.to_string()))?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| internal(e.to_string()))?;
         let pad_id = pad_token(&tokenizer, &config)?;
         let clip = stable_diffusion::build_clip_transformer(&config.clip, clip_path, &device, DType::F32)
             .map_err(weights)?;
@@ -87,7 +87,7 @@ impl LocalImageBackend {
     /// Tokenize `text` to a `(1, max_position_embeddings)` id tensor, padded.
     fn tokens(&self, text: &str) -> Result<Tensor, AiError> {
         let mut ids =
-            self.tokenizer.encode(text, true).map_err(|e| api(e.to_string()))?.get_ids().to_vec();
+            self.tokenizer.encode(text, true).map_err(|e| internal(e.to_string()))?.get_ids().to_vec();
         ids.resize(self.config.clip.max_position_embeddings, self.pad_id);
         Tensor::new(ids.as_slice(), &self.device).map_err(weights)?.unsqueeze(0).map_err(weights)
     }
@@ -143,7 +143,7 @@ impl ImageBackend for LocalImageBackend {
 fn pad_token(tokenizer: &Tokenizer, config: &StableDiffusionConfig) -> Result<u32, AiError> {
     let vocab = tokenizer.get_vocab(true);
     let token = config.clip.pad_with.as_deref().unwrap_or("<|endoftext|>");
-    vocab.get(token).copied().ok_or_else(|| api(format!("tokenizer has no '{token}' token")))
+    vocab.get(token).copied().ok_or_else(|| internal(format!("tokenizer has no '{token}' token")))
 }
 
 /// Encode a `(3, H, W)` u8 tensor to PNG bytes.
@@ -154,16 +154,16 @@ fn encode_png(image: &Tensor) -> Result<Vec<u8>, AiError> {
     let mut bytes = Vec::new();
     image::codecs::png::PngEncoder::new(&mut bytes)
         .write_image(&pixels, w as u32, h as u32, image::ExtendedColorType::Rgb8)
-        .map_err(|e| api(e.to_string()))?;
+        .map_err(|e| internal(e.to_string()))?;
     Ok(bytes)
 }
 
-fn api(msg: String) -> AiError {
-    AiError::Api(msg)
+fn internal(msg: String) -> AiError {
+    AiError::Internal(msg)
 }
 
 fn weights(e: candle_core::Error) -> AiError {
-    AiError::Api(format!("local image: {e}"))
+    AiError::Internal(format!("local image: {e}"))
 }
 
 #[cfg(test)]

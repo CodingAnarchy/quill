@@ -17,6 +17,7 @@ pub mod continuity;
 pub mod cost;
 pub mod editorial;
 pub mod fal;
+mod http;
 pub mod image;
 pub mod import;
 pub mod incremental;
@@ -194,23 +195,39 @@ pub struct Usage {
     pub cache_read_tokens: u32,
 }
 
-/// Why a request couldn't be completed.
+/// Why a request couldn't be completed (#319).
 #[derive(Debug)]
 pub enum AiError {
     /// AI is disabled, offline, or no key is configured — nothing was sent.
     NotConfigured(String),
-    /// The transport/HTTP call failed.
-    Network(String),
-    /// The API returned an error status or an unparseable body.
-    Api(String),
+    /// The HTTP call failed, the server returned an error status, or a remote
+    /// operation failed or didn't finish (a batch erroring out or running past
+    /// the time limit). `status` is `Some(code)` when the server responded with
+    /// an HTTP error, `None` when there's no status to report (a failed
+    /// connection, or a remote operation that never produced one).
+    Network { status: Option<u16>, message: String },
+    /// The server responded, but the body wasn't the shape we expected — an
+    /// unreadable body, a missing field, or an empty completion.
+    ApiMalformed(String),
+    /// The model's reply didn't satisfy the requested JSON schema.
+    ModelNonCompliance(String),
+    /// A failure on our side: a poisoned lock or a local-inference error. Only
+    /// the `local` backends produce it, so it's unconstructed in default builds.
+    #[cfg_attr(not(feature = "local"), allow(dead_code))]
+    Internal(String),
 }
 
 impl fmt::Display for AiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AiError::NotConfigured(m) => write!(f, "{m}"),
-            AiError::Network(m) => write!(f, "network error: {m}"),
-            AiError::Api(m) => write!(f, "API error: {m}"),
+            AiError::Network { status: Some(code), message } => {
+                write!(f, "network error ({code}): {message}")
+            }
+            AiError::Network { status: None, message } => write!(f, "network error: {message}"),
+            AiError::ApiMalformed(m) => write!(f, "malformed API response: {m}"),
+            AiError::ModelNonCompliance(m) => write!(f, "model did not comply: {m}"),
+            AiError::Internal(m) => write!(f, "internal error: {m}"),
         }
     }
 }
@@ -249,9 +266,11 @@ pub(crate) fn manuscript_request(
 }
 
 /// Deserialize a structured AI reply, wrapping a parse failure in a uniform
-/// `bad {kind} JSON` message (#313) so every feature reports it the same way.
+/// `bad {kind} JSON` message (#313) so every feature reports it the same way. A
+/// failure here means the model didn't honor the requested schema (#319).
 pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(text: &str, kind: &str) -> Result<T, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad {kind} JSON: {e}")))
+    serde_json::from_str(text)
+        .map_err(|e| AiError::ModelNonCompliance(format!("bad {kind} JSON: {e}")))
 }
 
 /// The JSON-Schema fragment for an array of strings — shared by the feature

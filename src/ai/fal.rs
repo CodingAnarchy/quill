@@ -5,6 +5,7 @@
 
 use serde_json::{json, Value};
 
+use super::http;
 use super::image::{self, GeneratedImage, ImageBackend, ImageRequest};
 use super::{is_ok, AiError};
 
@@ -43,35 +44,28 @@ impl FalBackend {
     /// POST `body` to `url` with the fal auth header; returns the HTTP status and
     /// the parsed JSON body (fal returns JSON on errors too).
     fn post(&self, url: &str, body: &Value) -> Result<(u16, Value), AiError> {
-        let mut res = ureq::post(url)
-            .config()
-            .http_status_as_error(false)
-            .build()
-            .header("authorization", &format!("Key {}", self.key))
-            .header("content-type", "application/json")
-            .send_json(body)
-            .map_err(|e| AiError::Network(e.to_string()))?;
-        let status = res.status().as_u16();
-        let value = res.body_mut().read_json().map_err(|e| AiError::Api(e.to_string()))?;
-        Ok((status, value))
+        let auth = format!("Key {}", self.key);
+        http::post_json(url, &[("authorization", &auth), ("content-type", "application/json")], body)
     }
 
-    /// Download the generated image bytes from its (fal-hosted) URL.
+    /// Download the generated image bytes from its (fal-hosted) URL. Bespoke (not
+    /// in `http`) because it reads raw bytes under a size cap, not JSON.
     fn download(&self, url: &str) -> Result<Vec<u8>, AiError> {
         let mut res = ureq::get(url)
             .config()
             .http_status_as_error(false)
             .build()
             .call()
-            .map_err(|e| AiError::Network(e.to_string()))?;
-        if !is_ok(res.status().as_u16()) {
-            return Err(AiError::Network(format!("image download failed: {}", res.status())));
+            .map_err(|e| AiError::Network { status: None, message: e.to_string() })?;
+        let status = res.status().as_u16();
+        if !is_ok(status) {
+            return Err(AiError::Network { status: Some(status), message: "image download failed".into() });
         }
         res.body_mut()
             .with_config()
             .limit(MAX_IMAGE_BYTES)
             .read_to_vec()
-            .map_err(|e| AiError::Network(e.to_string()))
+            .map_err(|e| AiError::Network { status: None, message: e.to_string() })
     }
 }
 
@@ -91,24 +85,25 @@ fn body(req: &ImageRequest) -> Value {
 fn first_image(value: &Value) -> Result<(String, String), AiError> {
     let image = value
         .pointer("/images/0")
-        .ok_or_else(|| AiError::Api("fal response had no image".into()))?;
+        .ok_or_else(|| AiError::ApiMalformed("fal response had no image".into()))?;
     let url = image
         .get("url")
         .and_then(Value::as_str)
-        .ok_or_else(|| AiError::Api("fal image had no url".into()))?;
+        .ok_or_else(|| AiError::ApiMalformed("fal image had no url".into()))?;
     let content_type =
         image.get("content_type").and_then(Value::as_str).unwrap_or("image/png");
     Ok((url.to_string(), content_type.to_string()))
 }
 
-/// An `AiError::Api` from a fal error body (it reports a `detail` message).
+/// The `Network` error for a fal error body (it reports a `detail` message);
+/// `Display` prepends the status.
 fn api_error(status: u16, value: &Value) -> AiError {
     let msg = value
         .pointer("/detail")
         .and_then(Value::as_str)
         .or_else(|| value.get("detail").and_then(|d| d.pointer("/0/msg")).and_then(Value::as_str))
         .unwrap_or("unknown error");
-    AiError::Api(format!("{status}: {msg}"))
+    AiError::Network { status: Some(status), message: msg.to_string() }
 }
 
 #[cfg(test)]
@@ -140,7 +135,7 @@ mod tests {
 
     #[test]
     fn first_image_errors_when_absent() {
-        assert!(matches!(first_image(&json!({ "images": [] })), Err(AiError::Api(_))));
+        assert!(matches!(first_image(&json!({ "images": [] })), Err(AiError::ApiMalformed(_))));
     }
 
     #[test]

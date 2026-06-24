@@ -146,7 +146,7 @@ impl BackendSpec {
 /// requests (the model resets its KV cache each request, so reuse is correct).
 #[cfg(feature = "local")]
 fn build_local(slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Backend>, ai::AiError> {
-    let mut guard = slot.lock().map_err(|_| ai::AiError::Api("model lock poisoned".into()))?;
+    let mut guard = slot.lock().map_err(|_| ai::AiError::Internal("model lock poisoned".into()))?;
     if let Some(backend) = guard.as_ref() {
         return Ok(backend.clone());
     }
@@ -190,7 +190,7 @@ impl ImageBackendSpec {
 fn build_local_image(
     slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
 ) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
-    let mut guard = slot.lock().map_err(|_| ai::AiError::Api("image model lock poisoned".into()))?;
+    let mut guard = slot.lock().map_err(|_| ai::AiError::Internal("image model lock poisoned".into()))?;
     if let Some(backend) = guard.as_ref() {
         return Ok(backend.clone());
     }
