@@ -275,6 +275,7 @@ impl App {
             ai("Character portraits", "Portrait images from the character bible (fal.ai)", AiAction::Portrait),
             ai("Scene illustration", "Illustrate the active chapter (fal.ai)", AiAction::Scene),
             ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
+            ai("Word search", "In-context thesaurus for a word or phrase (reference only)", AiAction::Thesaurus),
         ];
         self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
     }
@@ -421,7 +422,10 @@ impl App {
             // and send no manuscript (Brainstorm sends only a premise), and the
             // image passes (#238/#239) are billed per image with their own confirm.
             AiAction::Ask | AiAction::Triage | AiAction::Brainstorm | AiAction::DraftCharacters
-            | AiAction::DraftSetting | AiAction::Portrait | AiAction::Scene => None,
+            | AiAction::DraftSetting | AiAction::Portrait | AiAction::Scene
+            // The thesaurus sends only a word/phrase + the current line, not the
+            // manuscript, so there's nothing whole-book to estimate (#290).
+            | AiAction::Thesaurus => None,
             AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
             _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
@@ -455,6 +459,7 @@ impl App {
             AiAction::Portrait => self.start_portrait(),
             AiAction::Scene => self.start_scene(),
             AiAction::Triage => self.open_triage(),
+            AiAction::Thesaurus => self.start_thesaurus(),
         }
     }
 
@@ -1293,6 +1298,7 @@ impl App {
                     Outcome::Image(r) => self.apply_images(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
                     Outcome::Import(r) => self.apply_import(r),
+                    Outcome::Thesaurus(r) => self.apply_thesaurus(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
                 // The in-flight pass is done; a clean bible apply already recorded
@@ -1492,6 +1498,51 @@ impl App {
     /// bible. Available with AI off too — the source is preserved regardless.
     pub(crate) fn start_import(&mut self) {
         self.open_prompt(Pending::ImportNotes, "Import notes — path to a .md file or a folder of them:", "", None);
+    }
+
+    // --- In-context thesaurus / word search (#290) ------------------------
+
+    /// Open the word-search prompt, prefilled with the word under the cursor so the
+    /// common case is "land on a word, invoke, hit enter (or add filters)".
+    pub(crate) fn start_thesaurus(&mut self) {
+        let buffer = self.edit_buffer();
+        let prefill = buffer
+            .text_object(TextObject::Word, false)
+            .map(|(lo, hi)| buffer.byte_slice(lo, hi))
+            .map(|w| w.trim().to_string())
+            .filter(|w| !w.is_empty())
+            .unwrap_or_default();
+        self.open_prompt(
+            Pending::Thesaurus,
+            "Word search — word/phrase, then any filters (e.g. \u{201c}sad; 2 syllables, Anglo-Saxon; 8\u{201d}): ",
+            &prefill,
+            None,
+        );
+    }
+
+    /// Run the word search: the typed request plus the current line as context
+    /// (for fit only). Off the editor thread; the candidates arrive in an overlay.
+    pub(crate) fn thesaurus(&mut self, request: &str) {
+        let request = request.trim().to_string();
+        if request.is_empty() {
+            self.message = Some("Word search: nothing to look up.".into());
+            return;
+        }
+        let buffer = self.edit_buffer();
+        let context = buffer.line(buffer.cursor.line);
+        let model = self.ai.model.clone();
+        self.spawn_outcome("\u{27f3} Searching words\u{2026}", move |backend| {
+            let req = ai::thesaurus::build_request(&request, &context, &model);
+            Outcome::Thesaurus(backend.complete(&req).and_then(|r| ai::thesaurus::parse(&r.text)))
+        });
+    }
+
+    /// Show the word-search results in the AI overlay.
+    pub(crate) fn apply_thesaurus(&mut self, result: Result<Vec<ai::thesaurus::Word>, ai::AiError>) {
+        match result {
+            Ok(words) => self.show_ai(thesaurus_lines(&words)),
+            Err(e) => self.message = Some(format!("AI: {e}")),
+        }
     }
 
     // --- New project from a folder of notes (#286) ------------------------
@@ -2151,6 +2202,35 @@ fn import_summary_lines(
     lines.push(Line::raw(format!("Files written: {written}  (bible/)")));
     lines.push(Line::raw(""));
     lines.push(Line::raw("The original notes are preserved under bible/sources/."));
+    lines
+}
+
+/// Render word-search candidates for the AI overlay (#290): one block per
+/// candidate — the word/phrase and its definition, with any syllable/origin/
+/// rarity tags, and a usage note on its own dimmed line.
+fn thesaurus_lines(words: &[ai::thesaurus::Word]) -> Vec<Line<'static>> {
+    if words.is_empty() {
+        return vec![Line::raw("No matches — try loosening the constraints.")];
+    }
+    let mut lines = vec![Line::raw(format!("{} candidates:", words.len())), Line::raw("")];
+    for w in words {
+        let mut tags: Vec<String> = Vec::new();
+        if let Some(s) = w.syllables {
+            tags.push(format!("{s} syl"));
+        }
+        if let Some(o) = w.origin.as_deref().filter(|s| !s.is_empty()) {
+            tags.push(o.to_string());
+        }
+        if let Some(r) = w.rarity.as_deref().filter(|s| !s.is_empty()) {
+            tags.push(r.to_string());
+        }
+        let tail = if tags.is_empty() { String::new() } else { format!("  ({})", tags.join(" \u{b7} ")) };
+        lines.push(Line::raw(format!("{} \u{2014} {}{tail}", w.text, w.definition)));
+        if let Some(note) = w.note.as_deref().filter(|s| !s.is_empty()) {
+            let dim = ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray);
+            lines.push(Line::from(Span::styled(format!("    {note}"), dim)));
+        }
+    }
     lines
 }
 

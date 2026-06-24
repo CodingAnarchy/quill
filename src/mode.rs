@@ -361,6 +361,7 @@ impl Action {
         Action::Ai(AiAction::Portrait),
         Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
+        Action::Ai(AiAction::Thesaurus),
         Action::UserGuide,
         Action::ImportNotes,
         Action::NewProjectFromNotes,
@@ -395,6 +396,7 @@ impl Action {
             Action::Ai(AiAction::Portrait) => "ai:portrait",
             Action::Ai(AiAction::Scene) => "ai:scene",
             Action::Ai(AiAction::Triage) => "triage",
+            Action::Ai(AiAction::Thesaurus) => "ai:thesaurus",
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
@@ -429,6 +431,7 @@ impl Action {
             Action::Ai(AiAction::Portrait) => "AI · Character portraits",
             Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
+            Action::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
             Action::UserGuide => "User's guide",
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
@@ -498,6 +501,8 @@ pub(crate) enum AiAction {
     Scene,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
+    /// In-context thesaurus / word search for a word or phrase (#290).
+    Thesaurus,
 }
 
 /// The version-control actions reachable from the Git palette (#54).
@@ -665,6 +670,8 @@ pub(crate) enum Pending {
     Rename { at: usize },
     /// Text input: a question to ask the AI about the manuscript.
     AskAi,
+    /// Text input: a word/phrase (and optional filters) for the thesaurus (#290).
+    Thesaurus,
     /// Text input: a message for a version-control commit (#131).
     Commit,
     /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.

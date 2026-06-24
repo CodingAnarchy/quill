@@ -105,6 +105,14 @@ The palette actions:
   from the Ctrl-K menu ("Import notes → story bible").
 - **Ask the manuscript** (#73) — a grounded question, answered with chapter
   citations in an overlay.
+- **Word search** (#290) — an in-context thesaurus: name a word or phrase (the
+  word under the cursor is prefilled) plus optional plain-language constraints
+  (count, closeness, syllable count, language of origin, rarity); the current
+  line is sent as *context for fit only*. Returns candidate words/short phrases
+  with brief definitions in the overlay. A **reference tool, not a co-writer** —
+  it returns only candidates for the requested slot and never rewrites the line
+  or any other prose. Sends just the word + line (no manuscript), so it's cheap
+  and skips the cost confirm.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to
   `bible/characters/<slug>.md`.
 - **Timeline & continuity** (#75) — an ordered timeline (`bible/timeline.md`) plus

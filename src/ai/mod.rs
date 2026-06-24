@@ -32,6 +32,7 @@ pub mod setting;
 pub mod social;
 pub mod style;
 pub mod submission;
+pub mod thesaurus;
 pub mod voice;
 pub mod workflow_gen;
 mod claude;
@@ -123,6 +124,8 @@ pub enum Outcome {
     Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
     /// A story bible extracted from imported notes (#283).
     Import(Result<import::Imported, AiError>),
+    /// In-context thesaurus / word search candidates (#290).
+    Thesaurus(Result<Vec<thesaurus::Word>, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -151,6 +154,7 @@ impl Outcome {
             Outcome::Image(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
             Outcome::Import(r) => r.as_ref().err(),
+            Outcome::Thesaurus(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
     }
