@@ -172,7 +172,9 @@ byte-for-byte.
 quitting. It lists your recently-opened projects (newest first); Enter switches
 to one in place, saving the current project first (and confirming if there are
 unsaved changes). Press **`b`** to browse the filesystem for a project that
-isn't in the list yet.
+isn't in the list yet, or **`n`** to start a brand-new project — type its path
+(prefilled with a sensible location) and Quill creates the folder, manifest, and
+first chapter, then opens it.
 
 To get a complete, always-current library view, point Quill at the folder where
 you keep your books in `~/.config/quill/config.toml`:
