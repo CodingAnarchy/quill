@@ -65,7 +65,7 @@ pub struct ChapterEntry {
 impl ChapterEntry {
     /// A new entry with the given title and file; the transient caches start
     /// empty (populated from the file at open and as the chapter is edited).
-    pub(crate) fn new(title: String, file: String) -> Self {
+    fn new(title: String, file: String) -> Self {
         Self { title, file, words: 0, status: None, summary: None, pov: None, goal: None, role: None }
     }
 

@@ -19,7 +19,7 @@ use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 mod editor;
 mod list_overlay;
 use list_overlay::{
-    draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser, marker, row_style,
+    draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser, list_row, marker, row_style,
 };
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -380,10 +380,7 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
     ];
     for (i, path) in state.files.iter().enumerate() {
         let label = path.strip_prefix(&app.project.root).unwrap_or(path).to_string_lossy();
-        lines.push(Line::from(Span::styled(
-            format!("{}{label}", marker(i == state.selected)),
-            row_style(i == state.selected),
-        )));
+        lines.push(list_row(i == state.selected, label.to_string(), None));
     }
     lines
 }
