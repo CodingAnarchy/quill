@@ -223,6 +223,46 @@ fn folding_a_book_into_the_bible_keeps_the_other_books_state() {
     );
 }
 
+// --- Series bible refresh driver (#340) -------------------------------------
+
+#[test]
+fn the_series_bible_refresh_is_gated_off_for_one_book() {
+    use crate::mode::Action;
+    let (app, _dir) = two_chapter_app("bible-gate");
+    assert!(app.action_status(Action::RefreshSeriesBible).is_some(), "single-book: unavailable");
+}
+
+#[test]
+fn starting_the_refresh_with_one_book_is_a_no_op() {
+    let (mut app, _dir) = two_chapter_app("bible-noop");
+    app.start_refresh_series_bible();
+    assert!(!app.has_series_bible_run());
+    assert!(app.message.as_deref().unwrap_or("").contains("one book"));
+}
+
+#[test]
+fn a_pass_error_stops_the_refresh() {
+    use crate::mode::AiAction;
+    let (mut app, _dir) = series_app("bible-error");
+    app.seed_series_bible_run(vec![(AiAction::Characters, 0), (AiAction::Characters, 1)]);
+    app.advance_series_bible(Some("boom".into()));
+    assert!(!app.has_series_bible_run(), "the run stopped");
+    assert!(app.message.as_deref().unwrap_or("").contains("boom"), "{:?}", app.message);
+}
+
+#[test]
+fn cancelling_stops_the_refresh_after_the_current_pass() {
+    use crate::mode::AiAction;
+    let (mut app, _dir) = series_app("bible-cancel");
+    app.seed_series_bible_run(vec![(AiAction::Characters, 0), (AiAction::Characters, 1)]);
+    app.cancel_series_bible();
+    assert!(app.has_series_bible_run(), "still running until the pass finishes");
+    // The in-flight pass completes; the cancel takes effect, later passes skipped.
+    app.advance_series_bible(None);
+    assert!(!app.has_series_bible_run());
+    assert!(app.message.as_deref().unwrap_or("").contains("cancelled"), "{:?}", app.message);
+}
+
 // --- Series export (#332) ---------------------------------------------------
 
 #[test]

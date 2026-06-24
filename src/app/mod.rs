@@ -49,6 +49,7 @@ mod counts;
 mod persistence;
 mod project_ops;
 mod prompts;
+mod series_bible;
 mod tree;
 mod vim;
 mod wizard;
@@ -185,6 +186,10 @@ pub struct App {
     /// where it is. `Some` while a run is in progress — including while it's
     /// suspended waiting on an async AI step. Drives the step state machine.
     workflow_run: Option<workflows::WorkflowRun>,
+    /// A "Refresh series bible" run in progress (#340), if any: the queue of
+    /// per-book bible passes and where it is. `Some` while the book-by-book
+    /// refresh is running (including suspended on an in-flight pass).
+    series_bible_run: Option<series_bible::SeriesBibleRun>,
     /// Crash recovery (#263): unsaved work found at launch, awaiting the author's
     /// restore/discard choice. `Some` only while the recovery prompt is open;
     /// taken when they restore, cleared when they discard or defer.
@@ -262,6 +267,7 @@ impl App {
             triggers: loaded.triggers,
             pending_workflow: None,
             workflow_run: None,
+            series_bible_run: None,
             pending_recovery: None,
             recovery_written: false,
             pending_switch: None,
@@ -364,6 +370,15 @@ impl App {
             && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
         {
             self.cancel_workflow();
+            return;
+        }
+        // Likewise Esc cancels a running series-bible refresh, cleanly after the
+        // in-flight pass (#340).
+        if self.series_bible_running()
+            && key.code == KeyCode::Esc
+            && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+        {
+            self.cancel_series_bible();
             return;
         }
 

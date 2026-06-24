@@ -351,6 +351,8 @@ pub(crate) enum Action {
     SwitchBook,
     /// Open the series tree navigator (#330).
     SeriesTree,
+    /// Refresh the whole series' story bible, book by book (#340).
+    RefreshSeriesBible,
 }
 
 impl Action {
@@ -388,6 +390,7 @@ impl Action {
         Action::NewProjectFromNotes,
         Action::SwitchBook,
         Action::SeriesTree,
+        Action::RefreshSeriesBible,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -426,6 +429,7 @@ impl Action {
             Action::NewProjectFromNotes => "new-from-notes",
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
+            Action::RefreshSeriesBible => "bible:series",
         }
     }
 
@@ -464,6 +468,7 @@ impl Action {
             Action::NewProjectFromNotes => "New project from a folder of notes",
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
+            Action::RefreshSeriesBible => "Refresh series bible",
         }
     }
 

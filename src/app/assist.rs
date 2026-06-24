@@ -143,28 +143,39 @@ impl App {
     /// when the bible already exists, else a full pass (#90). Profiles are written
     /// / conflicts queued by [`App::poll_ai`].
     pub(crate) fn analyze_characters(&mut self, force: bool) {
-        let t = bible_tracker(AiAction::Characters).expect("characters is a bible tracker");
-        self.run_bible_tracker(t, self.project.active_book(), force, character::build_request, character::build_incremental_request, |r| {
-            Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
-        });
+        self.run_book_bible_pass(AiAction::Characters, self.project.active_book(), force);
     }
 
     /// Start a timeline & continuity pass (incremental when possible, #90); the
     /// timeline + findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_continuity(&mut self, force: bool) {
-        let t = bible_tracker(AiAction::Continuity).expect("continuity is a bible tracker");
-        self.run_bible_tracker(t, self.project.active_book(), force, continuity::build_request, continuity::build_incremental_request, |r| {
-            Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
-        });
+        self.run_book_bible_pass(AiAction::Continuity, self.project.active_book(), force);
     }
 
     /// Start a setting & worldbuilding pass (incremental when possible, #90); the
     /// setting bible + rule findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_setting(&mut self, force: bool) {
-        let t = bible_tracker(AiAction::Setting).expect("setting is a bible tracker");
-        self.run_bible_tracker(t, self.project.active_book(), force, setting::build_request, setting::build_incremental_request, |r| {
-            Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
-        });
+        self.run_book_bible_pass(AiAction::Setting, self.project.active_book(), force);
+    }
+
+    /// Run one persistent-bible pass (#339) for `action` scoped to `book` — the
+    /// active-book passes call it with the active book; the series-bible refresh
+    /// (#340) drives it per book. Routes to each tracker's request builders.
+    pub(crate) fn run_book_bible_pass(&mut self, action: AiAction, book: usize, force: bool) {
+        let Some(t) = bible_tracker(action) else { return };
+        match action {
+            AiAction::Characters => self.run_bible_tracker(t, book, force, character::build_request, character::build_incremental_request, |r| {
+                Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
+            }),
+            AiAction::Continuity => self.run_bible_tracker(t, book, force, continuity::build_request, continuity::build_incremental_request, |r| {
+                Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
+            }),
+            AiAction::Setting => self.run_bible_tracker(t, book, force, setting::build_request, setting::build_incremental_request, |r| {
+                Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
+            }),
+            // `bible_tracker` returned `Some`, so `action` is one of the three above.
+            _ => unreachable!("run_book_bible_pass: non-bible action passed the tracker gate"),
+        }
     }
 
     /// Start a scaffolding pass; the beat outline + gap findings are applied by
