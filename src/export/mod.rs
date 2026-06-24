@@ -113,6 +113,26 @@ pub fn to_markdown(doc: &Document) -> String {
     out
 }
 
+/// Render a whole series as one Markdown document (#332): the series title and
+/// author once, then each book in order (each via [`to_markdown`], so its title
+/// leads a top-level section and its parts/chapters nest beneath). The books
+/// carry no `series`/`author` line of their own — the header above stands for the
+/// whole series.
+pub fn to_markdown_series(books: &[Document], series: Option<&str>, author: Option<&str>) -> String {
+    let mut out = String::new();
+    if let Some(series) = series {
+        out.push_str(series);
+        out.push_str("\n\n");
+    }
+    if let Some(author) = author {
+        out.push_str(&format!("by {author}\n\n"));
+    }
+    for book in books {
+        out.push_str(&to_markdown(book));
+    }
+    out
+}
+
 /// Drop a chapter body's leading `# {title}` line when it just repeats the
 /// chapter title (the compiled heading already carries it), so the export doesn't
 /// show the title twice. A body whose first heading differs from the title is
@@ -269,6 +289,26 @@ mod tests {
             }],
             back: vec![],
         }
+    }
+
+    #[test]
+    fn series_markdown_lists_books_in_order_under_the_series_title() {
+        let book = |title: &str, body: &str| Document {
+            title: title.into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part { name: None, chapters: vec![chapter("Ch", None, body)] }],
+            back: vec![],
+        };
+        let md = to_markdown_series(&[book("Book One", "alpha"), book("Book Two", "beta")], Some("The Saga"), Some("A. Writer"));
+        assert!(md.starts_with("The Saga\n\n"), "{md}");
+        let one = md.find("# Book One").expect("book one heading");
+        let two = md.find("# Book Two").expect("book two heading");
+        assert!(one < two, "books in order");
+        assert!(md.contains("alpha") && md.contains("beta"));
     }
 
     #[test]

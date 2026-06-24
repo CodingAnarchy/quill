@@ -195,6 +195,53 @@ fn the_tree_groups_chapters_under_part_headers() {
     assert!(rows[act + 1].indent > rows[act].indent, "chapter indented under the part");
 }
 
+// --- Series export (#332) ---------------------------------------------------
+
+#[test]
+fn exporting_the_series_compiles_every_book_in_order() {
+    use crate::mode::{ExportFormat, ExportScope};
+    let (mut app, dir) = series_app("export-series");
+    app.run_export(ExportFormat::Markdown, ExportScope::Series);
+
+    // The file is named for the series; it carries both books and their prose.
+    let out = fs::read_to_string(dir.join("export/the-saga.md")).unwrap();
+    assert!(out.starts_with("The Saga"), "{out}");
+    let one = out.find("# Book One").expect("book one");
+    let two = out.find("# Book Two").expect("book two");
+    assert!(one < two, "books in reading order");
+    // Prose from the active book and the disk-read inactive book both appear.
+    assert!(out.contains("alpha one") && out.contains("alpha two"), "active book prose");
+    assert!(out.contains("beta one"), "inactive book prose");
+}
+
+#[test]
+fn exporting_just_the_active_book_is_scoped_to_it() {
+    use crate::mode::{ExportFormat, ExportScope};
+    let (mut app, dir) = series_app("export-book");
+    app.run_export(ExportFormat::Markdown, ExportScope::ActiveBook);
+    // Named for the active book; carries its prose, not the other book's.
+    let out = fs::read_to_string(dir.join("export/book-one.md")).unwrap();
+    assert!(out.contains("alpha one") && !out.contains("beta one"), "{out}");
+}
+
+#[test]
+fn the_export_menu_offers_series_and_book_scopes() {
+    let (mut app, _dir) = series_app("export-menu");
+    app.open_export_palette();
+    let Mode::Palette(p) = &app.mode else { panic!("export palette") };
+    assert!(p.items.iter().any(|i| i.label.starts_with("Series → ")));
+    assert!(p.items.iter().any(|i| i.label.starts_with("This book → ")));
+}
+
+#[test]
+fn a_standalone_export_menu_is_unchanged() {
+    let (mut app, _dir) = two_chapter_app("export-single");
+    app.open_export_palette();
+    let Mode::Palette(p) = &app.mode else { panic!("export palette") };
+    assert_eq!(p.items.len(), 4);
+    assert_eq!(p.items[0].label, "Manuscript (Markdown)");
+}
+
 fn report_text(app: &App) -> String {
     app.report_lines()
         .iter()

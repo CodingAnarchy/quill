@@ -94,7 +94,9 @@ EXPORT
 
 Ctrl-E opens the export menu: Markdown (one compiled document), Word (.docx in
 standard manuscript format), Scrivener (a .scriv bundle), or Vellum (a .docx
-tuned for Vellum import). Files land under export/.
+tuned for Vellum import). Files land under export/. For a multi-book series, each
+format is offered twice — the whole series (books in reading order, delimited per
+format) or just the active book.
 
 
 AI ASSISTANCE (opt-in)

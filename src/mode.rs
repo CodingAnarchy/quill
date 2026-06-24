@@ -293,7 +293,7 @@ pub struct PaletteItem {
 pub(crate) enum Command {
     Ai(AiAction),
     Git(GitAction),
-    Export(ExportFormat),
+    Export(ExportFormat, ExportScope),
     /// Run a registry [`Action`] from the unified run-action menu (#225). This is
     /// the going-forward path; `Ai`/`Export` above remain as their own variants
     /// only because the AI and export palettes still emit them directly — folding
@@ -497,6 +497,14 @@ pub(crate) enum ExportFormat {
     Scriv,
     /// A Word `.docx` tuned for Vellum import — chapter titles as Heading 1 (#193).
     Vellum,
+}
+
+/// What an export covers (#332): just the active book, or the whole multi-book
+/// series. A standalone novel only ever exports its one book.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExportScope {
+    ActiveBook,
+    Series,
 }
 
 /// The AI actions reachable from the AI palette.

@@ -18,6 +18,36 @@ use super::{classify_block, inline_runs, xml_escape, Chapter, Document, Part, Pr
 /// directory). Any existing bundle there is replaced so the export always
 /// reflects the current project.
 pub fn write_scriv(doc: &Document, bundle: &Path) -> std::io::Result<()> {
+    write_bundle(bundle, |data, n| book_children(doc, data, n))
+}
+
+/// Write a whole series as one `.scriv` bundle (#332): the Manuscript draft
+/// folder holds a folder per book (in order), each wrapping that book's front
+/// matter, parts, and back matter. Single book → the same binder as
+/// [`write_scriv`] would, just nested one folder deeper.
+pub fn write_scriv_series(books: &[Document], bundle: &Path) -> std::io::Result<()> {
+    write_bundle(bundle, |data, n| {
+        let mut out = String::new();
+        for (i, book) in books.iter().enumerate() {
+            let children = book_children(book, data, n)?;
+            out.push_str(&format!(
+                "<BinderItem UUID=\"{}\" Type=\"Folder\"><Title>{}</Title><Children>{children}</Children></BinderItem>",
+                uuid(&format!("book:{i}")),
+                xml_escape(&book.title),
+            ));
+        }
+        Ok(out)
+    })
+}
+
+/// Assemble a `.scriv` bundle: create its `Files/Data` tree and version marker,
+/// build the Manuscript draft folder from `build_children` (which writes each
+/// document's `content.rtf` as it goes), add the Research and Trash folders, and
+/// write the `.scrivx`. A running counter seeds stable, unique UUIDs.
+fn write_bundle(
+    bundle: &Path,
+    build_children: impl FnOnce(&Path, &mut usize) -> std::io::Result<String>,
+) -> std::io::Result<()> {
     if bundle.exists() {
         std::fs::remove_dir_all(bundle)?;
     }
@@ -26,24 +56,12 @@ pub fn write_scriv(doc: &Document, bundle: &Path) -> std::io::Result<()> {
     // The version marker Scrivener 3 writes for its project format.
     std::fs::write(bundle.join("Files").join("version.txt"), "23")?;
 
-    // Build the binder tree, writing each document's content.rtf as we go. A
-    // running counter seeds stable, unique UUIDs (binder item ↔ Data dir).
     let mut n = 0usize;
-    let mut binder = String::new();
-    binder.push_str(&format!(
-        "<BinderItem UUID=\"{}\" Type=\"DraftFolder\"><Title>Manuscript</Title><Children>",
-        uuid("draft")
-    ));
-    for chapter in &doc.front {
-        binder.push_str(&text_item(chapter, &data, &mut n)?);
-    }
-    for part in &doc.parts {
-        binder.push_str(&part_items(part, &data, &mut n)?);
-    }
-    for chapter in &doc.back {
-        binder.push_str(&text_item(chapter, &data, &mut n)?);
-    }
-    binder.push_str("</Children></BinderItem>");
+    let children = build_children(&data, &mut n)?;
+    let mut binder = format!(
+        "<BinderItem UUID=\"{}\" Type=\"DraftFolder\"><Title>Manuscript</Title><Children>{children}</Children></BinderItem>",
+        uuid("draft"),
+    );
     // The two other special folders every Scrivener project carries, so it opens
     // without rebuilding them: a place for research, and the trash.
     binder.push_str(&format!(
@@ -66,6 +84,22 @@ pub fn write_scriv(doc: &Document, bundle: &Path) -> std::io::Result<()> {
     );
     let name = bundle.file_stem().and_then(|s| s.to_str()).unwrap_or("Manuscript");
     std::fs::write(bundle.join(format!("{name}.scrivx")), scrivx)
+}
+
+/// One book's binder children: front matter, then each part, then back matter,
+/// writing each document's `content.rtf` into `data`.
+fn book_children(doc: &Document, data: &Path, n: &mut usize) -> std::io::Result<String> {
+    let mut out = String::new();
+    for chapter in &doc.front {
+        out.push_str(&text_item(chapter, data, n)?);
+    }
+    for part in &doc.parts {
+        out.push_str(&part_items(part, data, n)?);
+    }
+    for chapter in &doc.back {
+        out.push_str(&text_item(chapter, data, n)?);
+    }
+    Ok(out)
 }
 
 /// A named part becomes a binder folder wrapping its chapters; an unnamed part
@@ -266,6 +300,37 @@ mod tests {
         assert!(find_rtf.contains("{\\b heavy}"), "bold run:\n{find_rtf}");
         assert!(find_rtf.contains("{\\i A line.}"), "epigraph italic:\n{find_rtf}");
         assert!(find_rtf.contains("5 * 3 stays literal"), "stray * verbatim:\n{find_rtf}");
+
+        std::fs::remove_dir_all(dir.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn series_scriv_nests_a_folder_per_book() {
+        let book = |title: &str, prose: &str| Document {
+            title: title.into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part { name: None, chapters: vec![chapter("Ch", None, prose)] }],
+            back: vec![],
+        };
+        let dir = std::env::temp_dir().join("quill-scriv-series-test").join("Saga.scriv");
+        write_scriv_series(&[book("Book One", "alpha"), book("Book Two", "beta")], &dir).unwrap();
+
+        let scrivx = std::fs::read_to_string(dir.join("Saga.scrivx")).unwrap();
+        // Each book is a folder under the Manuscript draft folder, in order.
+        assert!(scrivx.contains("Type=\"DraftFolder\""), "{scrivx}");
+        let one = scrivx.find("<Title>Book One</Title>").expect("book one folder");
+        let two = scrivx.find("<Title>Book Two</Title>").expect("book two folder");
+        assert!(one < two, "books in order:\n{scrivx}");
+        // Both books' chapters wrote their RTF (front + 2 books × 1 chapter = 2).
+        let rtfs = std::fs::read_dir(dir.join("Files/Data"))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().join("content.rtf").exists())
+            .count();
+        assert_eq!(rtfs, 2, "one content.rtf per book chapter");
 
         std::fs::remove_dir_all(dir.parent().unwrap()).ok();
     }
