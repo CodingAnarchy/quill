@@ -99,6 +99,58 @@ pub struct Part {
     pub goal: Option<usize>,
 }
 
+/// One book within a multi-book series (#276/#328). Holds the same per-book
+/// structure a standalone novel carries — title, optional book metadata, the
+/// optional `parts` overlay, and the ordered `chapters` — but not the
+/// series-level fields (`author`, `start_date`, `todo_marker`), which live once
+/// at the series root. A standalone novel has no `Book` values at all: its single
+/// book lives directly in the [`Manifest`] (so its `book.toml` is unchanged).
+///
+/// Scalar keys precede the `goals`/`parts` tables and the `chapters` array, so
+/// the TOML tables stay last (a TOML requirement) — same ordering rule as
+/// `Manifest`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Book {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epigraph: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epigraph_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_on_threshold: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goals: Option<Goals>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<Vec<Part>>,
+    #[serde(default)]
+    pub chapters: Vec<ChapterEntry>,
+}
+
+/// A multi-book project file: series-level metadata plus the ordered list of
+/// [`Book`]s (#328). This is the on-disk shape *only* when a project holds more
+/// than one book — recognized by a `books` array in `book.toml`. A standalone
+/// novel keeps the flat [`Manifest`] shape, so its file is untouched.
+///
+/// In memory the *active* book is hoisted into [`Project::manifest`] (so every
+/// existing per-chapter path keeps working on it); the other books are held on
+/// [`Project`] and written back here on save.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+struct SeriesFile {
+    /// The series title (the top-level `title` of a multi-book `book.toml`).
+    title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    todo_marker: Option<String>,
+    books: Vec<Book>,
+}
+
 /// The on-disk manifest (`book.toml`), deserialized.
 ///
 /// `title` is the book title; `subtitle`, `author`, and `series` are optional
@@ -106,6 +158,10 @@ pub struct Part {
 /// written before they existed still parse, and unset fields aren't written
 /// back. Scalar keys are declared before the `goals` table and the `chapters`
 /// array, so the TOML tables stay last (a TOML requirement).
+///
+/// For a multi-book series (#328), this holds the *active* book's structure;
+/// `title` is then the active book's title, `series` is the series title, and the
+/// full book list lives on [`Project`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub title: String,
@@ -151,6 +207,44 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Build the active-book manifest from a series file and one of its books
+    /// (#328): series-level fields come from the file root, per-book fields from
+    /// the book. The inverse of [`Manifest::into_book`].
+    fn from_series(series: &SeriesFile, book: &Book) -> Self {
+        Manifest {
+            title: book.title.clone(),
+            subtitle: book.subtitle.clone(),
+            author: series.author.clone(),
+            series: Some(series.title.clone()),
+            epigraph: book.epigraph.clone(),
+            epigraph_by: book.epigraph_by.clone(),
+            start_date: series.start_date.clone(),
+            todo_marker: series.todo_marker.clone(),
+            part_label: book.part_label.clone(),
+            run_on_threshold: book.run_on_threshold,
+            goals: book.goals.clone(),
+            parts: book.parts.clone(),
+            chapters: book.chapters.clone(),
+        }
+    }
+
+    /// The per-book fields of this (active) manifest, for writing back into the
+    /// series on save (#328). Series-level fields are dropped — they're held once
+    /// at the series root.
+    fn to_book(&self) -> Book {
+        Book {
+            title: self.title.clone(),
+            subtitle: self.subtitle.clone(),
+            epigraph: self.epigraph.clone(),
+            epigraph_by: self.epigraph_by.clone(),
+            part_label: self.part_label.clone(),
+            run_on_threshold: self.run_on_threshold,
+            goals: self.goals.clone(),
+            parts: self.parts.clone(),
+            chapters: self.chapters.clone(),
+        }
+    }
+
     /// The book epigraph, if a quotation is set.
     pub fn epigraph(&self) -> Option<Epigraph> {
         Epigraph::from_parts(self.epigraph.clone(), self.epigraph_by.clone())
@@ -209,6 +303,13 @@ pub struct Project {
     /// chapters that moved — not the whole project — every idle tick. Keyed by
     /// file so it survives reordering.
     words_changed: HashSet<String>,
+    /// The books of a multi-book series (#328), in series order. **Empty for a
+    /// standalone novel** — its single book lives entirely in `manifest`. When
+    /// non-empty, the entry at `active_book` mirrors `manifest` (kept in sync on
+    /// save); the others hold their structure until activated (#329).
+    books: Vec<Book>,
+    /// Index of the active book within `books` (0 for a standalone novel).
+    active_book: usize,
 }
 
 impl Project {
@@ -223,15 +324,29 @@ impl Project {
     pub fn open(dir: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = dir.as_ref().to_path_buf();
         let text = fs::read_to_string(Self::manifest_path(&root))?;
-        let manifest: Manifest = toml::from_str(&text).map_err(|e| {
+        let invalid = |e| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid {MANIFEST_NAME}: {e}"))
-        })?;
+        };
+        // A `books` array marks a multi-book series (#328); anything else is the
+        // flat single-book manifest, parsed and saved exactly as before. Peek via
+        // `toml::Value` so the single-book path is byte-for-byte unchanged.
+        let value: toml::Value = toml::from_str(&text).map_err(invalid)?;
+        let is_series = value.get("books").and_then(|b| b.as_array()).is_some_and(|b| !b.is_empty());
+        let (manifest, books, active_book) = if is_series {
+            let series: SeriesFile = value.try_into().map_err(invalid)?;
+            let manifest = Manifest::from_series(&series, &series.books[0]);
+            (manifest, series.books, 0)
+        } else {
+            (value.try_into().map_err(invalid)?, Vec::new(), 0)
+        };
 
         let mut project = Self {
             root,
             manifest,
             active: String::new(),
             words_changed: HashSet::new(),
+            books,
+            active_book,
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -280,6 +395,8 @@ impl Project {
             },
             active: String::new(),
             words_changed: HashSet::new(),
+            books: Vec::new(),
+            active_book: 0,
         };
         project.add_default_chapter()?;
         Ok(project)
@@ -524,12 +641,64 @@ impl Project {
         self.manifest.chapters.get(index).map(|c| c.title.as_str())
     }
 
-    /// Write the manifest back to `book.toml`.
+    /// Write the manifest back to `book.toml`. A standalone novel serializes the
+    /// flat manifest exactly as before; a multi-book series (#328) folds the live
+    /// active book back into the series list and writes the `[[books]]` form.
     pub fn save_manifest(&self) -> std::io::Result<()> {
-        let text = toml::to_string_pretty(&self.manifest).map_err(|e| {
-            std::io::Error::other(format!("could not serialize manifest: {e}"))
-        })?;
+        let err = |e| std::io::Error::other(format!("could not serialize manifest: {e}"));
+        let text = if self.books.is_empty() {
+            toml::to_string_pretty(&self.manifest).map_err(err)?
+        } else {
+            let mut books = self.books.clone();
+            books[self.active_book] = self.manifest.to_book();
+            let series = SeriesFile {
+                title: self.manifest.series.clone().unwrap_or_default(),
+                author: self.manifest.author.clone(),
+                start_date: self.manifest.start_date.clone(),
+                todo_marker: self.manifest.todo_marker.clone(),
+                books,
+            };
+            toml::to_string_pretty(&series).map_err(err)?
+        };
         atomic::write(&Self::manifest_path(&self.root), text.as_bytes())
+    }
+
+    // The series read API (#328). Consumed by the in-Quill book switcher (#329)
+    // and the tree-navigation pane (#330); exercised by this ticket's tests.
+    #[allow(dead_code)]
+    /// How many books the project holds — 1 for a standalone novel (#328).
+    pub fn book_count(&self) -> usize {
+        self.books.len().max(1)
+    }
+
+    #[allow(dead_code)]
+    /// The index of the active book within the series (0 for a standalone novel).
+    pub fn active_book(&self) -> usize {
+        self.active_book
+    }
+
+    #[allow(dead_code)]
+    /// The title of book `i`. The active book's live title comes from the
+    /// manifest; the others from the stored series list. `None` if out of range.
+    pub fn book_title(&self, i: usize) -> Option<&str> {
+        if self.books.is_empty() {
+            (i == 0).then_some(self.manifest.title.as_str())
+        } else if i == self.active_book {
+            Some(self.manifest.title.as_str())
+        } else {
+            self.books.get(i).map(|b| b.title.as_str())
+        }
+    }
+
+    #[allow(dead_code)]
+    /// The series title, when this project is a multi-book series (#328); `None`
+    /// for a standalone novel (whose `series` field, if any, is just a label).
+    pub fn series_title(&self) -> Option<&str> {
+        if self.books.is_empty() {
+            None
+        } else {
+            self.manifest.series.as_deref()
+        }
     }
 
     // --- Structure editing -------------------------------------------------
@@ -645,6 +814,8 @@ impl Project {
             },
             active,
             words_changed: HashSet::new(),
+            books: Vec::new(),
+            active_book: 0,
         }
     }
 }
@@ -1124,6 +1295,109 @@ mod tests {
         println!("open {n} chapters (series-sized) = {dt:?}");
         assert_eq!(project.manifest.chapters.len(), n);
         assert!(dt.as_millis() < 500, "open took {dt:?}");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- Multi-book series (#328) -----------------------------------------
+
+    /// Write a two-book series manifest (and its chapter files) to `dir`.
+    fn write_series(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
+        for sub in ["b1", "b2"] {
+            fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        for file in ["b1/one.md", "b1/two.md", "b2/one.md"] {
+            fs::write(dir.join(file), "prose\n").unwrap();
+        }
+        let manifest = "\
+title = \"The Saga\"
+author = \"A. Writer\"
+
+[[books]]
+title = \"Book One\"
+
+[[books.chapters]]
+title = \"Dawn\"
+file = \"b1/one.md\"
+
+[[books.chapters]]
+title = \"Noon\"
+file = \"b1/two.md\"
+
+[[books]]
+title = \"Book Two\"
+
+[[books.chapters]]
+title = \"Dusk\"
+file = \"b2/one.md\"
+";
+        fs::write(Project::manifest_path(dir), manifest).unwrap();
+    }
+
+    #[test]
+    fn a_multi_book_series_opens_on_the_first_book() {
+        let dir = temp_dir("series-open");
+        write_series(&dir);
+
+        let p = Project::open(&dir).unwrap();
+        assert_eq!(p.book_count(), 2);
+        assert_eq!(p.active_book(), 0);
+        assert_eq!(p.series_title(), Some("The Saga"));
+        assert_eq!(p.book_title(0), Some("Book One"));
+        assert_eq!(p.book_title(1), Some("Book Two"));
+        assert_eq!(p.book_title(2), None);
+        // The active book's structure is hoisted into the manifest, so every
+        // existing per-chapter path works on book one unchanged.
+        assert_eq!(p.manifest.title, "Book One");
+        assert_eq!(p.manifest.author.as_deref(), Some("A. Writer"));
+        let titles: Vec<&str> = p.manifest.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["Dawn", "Noon"]);
+        assert_eq!(p.active_file(), "b1/one.md");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_series_round_trips_through_save_and_reopen() {
+        let dir = temp_dir("series-roundtrip");
+        write_series(&dir);
+
+        // Open, save without structural change, reopen.
+        Project::open(&dir).unwrap().save_manifest().unwrap();
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        // Series-level scalars precede the [[books]] tables (valid TOML), and the
+        // inactive second book is preserved verbatim.
+        assert!(toml.find("title =").unwrap() < toml.find("[[books]]").unwrap(), "{toml}");
+        assert!(toml.contains("Book Two") && toml.contains("b2/one.md"), "inactive book preserved:\n{toml}");
+
+        let p = Project::open(&dir).unwrap();
+        assert_eq!(p.book_count(), 2);
+        assert_eq!(p.book_title(0), Some("Book One"));
+        assert_eq!(p.book_title(1), Some("Book Two"));
+        assert_eq!(p.series_title(), Some("The Saga"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_standalone_novel_is_unchanged_by_the_series_model() {
+        let dir = temp_dir("series-single");
+        let _ = fs::remove_dir_all(&dir);
+        let mut project = Project::create(&dir).unwrap(); // flat single-book manifest
+        project.manifest.series = Some("A label, not a series".into());
+        project.save_manifest().unwrap();
+
+        // No book lives in the series list, so it's not a multi-book project.
+        assert_eq!(project.book_count(), 1);
+        assert_eq!(project.active_book(), 0);
+        assert_eq!(project.series_title(), None); // a standalone `series` is just a label
+        assert_eq!(project.book_title(0), Some(project.manifest.title.as_str()));
+
+        // The flat manifest is serialized exactly as before — no books table.
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(!toml.contains("[[books]]") && !toml.contains("\nbooks "), "no series table:\n{toml}");
+        assert!(Project::open(&dir).is_ok());
 
         fs::remove_dir_all(&dir).ok();
     }
