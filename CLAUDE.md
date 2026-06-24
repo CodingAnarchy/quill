@@ -34,13 +34,26 @@ AI features are limited to:
 - **Markers** — inserting `xxx` TODO notes the author can act on.
 - **Analysis** — flags and findings (continuity, consistency, style *observations*),
   surfaced for the author to fix themselves; never an edited replacement.
+- **Reference lookup** — a thesaurus / word search the author *deliberately*
+  invokes for a specific word or phrase, returning candidate words (or short
+  phrases) the author chooses among. The lookup may read the surrounding line to
+  judge which candidates *fit*, but it returns only options for the requested
+  slot — it never rewrites that sentence, edits any other prose, or produces
+  unsolicited text. The author picks and places the word; Quill doesn't.
 
 When adding or changing an AI feature, hold it to this line: it may *track*,
-*outline*, *mark*, and *observe*, but the prose is the author's. A feature that
-would draft or reword manuscript text is out of scope — surface the issue, don't
-write the fix. (This retired the rewrite/tighten/expand "selection assistant";
-off-manuscript artifacts like a synopsis or query letter are the only prose the
-AI produces, and never inside the manuscript.)
+*outline*, *mark*, *observe*, and *look up*, but the prose is the author's. A
+feature that would draft or reword manuscript text is out of scope — surface the
+issue, don't write the fix. (This retired the rewrite/tighten/expand "selection
+assistant"; off-manuscript artifacts like a synopsis or query letter are the only
+prose the AI produces, and never inside the manuscript.)
+
+The line between *reference lookup* and *co-writing*: answering "a two-syllable,
+common word for X to end 'she was feeling…'" with a list of words is reference —
+the author asked for that one slot and chooses the result. Volunteering a rewrite
+of the sentence, suggesting edits to a passage the author didn't single out, or
+returning a drafted scene is co-writing, and out of scope. Context informs *fit*;
+it never licenses editing the surrounding prose.
 
 ## Code conventions
 
