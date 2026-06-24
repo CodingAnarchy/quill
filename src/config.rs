@@ -80,8 +80,8 @@ fn workflow_entry(name: &str, steps: &[String]) -> String {
 }
 
 /// Editor behavior from the `[editor]` section. The default keeps Quill's
-/// modeless editing unchanged.
-#[derive(Clone, Deserialize, Default)]
+/// modeless editing unchanged (but with smart typography on — see below).
+#[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct EditorConfig {
     /// Opt-in Vim-style modal editing (#27). Off by default — with it off the
@@ -91,6 +91,17 @@ pub struct EditorConfig {
     /// key that should trigger it (e.g. `down = "n"`). Validated when the editor
     /// builds its keymap; unknown actions are reported, not silently dropped.
     pub keys: HashMap<String, String>,
+    /// Smart typography (#296): as you type, straight quotes become curly
+    /// (`“” ‘’`), `--` becomes an em-dash (`—`), and `...` becomes an ellipsis
+    /// (`…`). **On by default** — set `smart_typography = false` for plain ASCII
+    /// punctuation (and an exact byte-for-byte round-trip of what you type).
+    pub smart_typography: bool,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self { vim: false, keys: HashMap::new(), smart_typography: true }
+    }
 }
 
 impl EditorConfig {

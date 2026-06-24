@@ -384,6 +384,15 @@ impl Buffer {
         }
     }
 
+    /// Up to `max` characters immediately before the cursor, for context-sensitive
+    /// input transforms like smart quotes (#296). O(max) — independent of line and
+    /// document size, so it stays off the per-keystroke cost ceiling.
+    pub fn text_before_cursor(&self, max: usize) -> String {
+        let end = self.cursor_char_idx();
+        let start = end.saturating_sub(max);
+        self.rope.slice(start..end).to_string()
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let idx = self.cursor_char_idx();
         let mut buf = [0u8; 4];

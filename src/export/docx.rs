@@ -238,6 +238,30 @@ mod tests {
     }
 
     #[test]
+    fn smart_typography_glyphs_pass_through_to_docx() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: None,
+                chapters: vec![crate::export::Chapter {
+                    title: "C".into(),
+                    epigraph: None,
+                    body: "He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}".into(),
+                }],
+            }],
+            back: vec![],
+        };
+        let bytes = to_docx(&d, Profile::Manuscript).unwrap();
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"), "curly glyphs reach the docx body");
+    }
+
+    #[test]
     fn produces_a_zip_with_the_required_parts() {
         let bytes = to_docx(&doc(), Profile::Manuscript).unwrap();
         assert_eq!(&bytes[..2], b"PK", "a zip container");

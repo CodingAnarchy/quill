@@ -143,7 +143,11 @@ Quill writes each chapter back unchanged except for one normalization: a
 non-empty file ends with exactly one trailing newline (the POSIX/git
 convention), and an empty file stays empty. Interior bytes, including line
 endings, are left exactly as you wrote them, so a conforming file round-trips
-byte-for-byte.
+byte-for-byte. (One opt-in exception: with **smart typography** on — the
+default — the punctuation you *type* is substituted at the keystroke, so curly
+quotes, em-dashes, and ellipses are what land in the file. A chapter Quill
+isn't editing is never touched; turn the setting off for plain-ASCII input. See
+[Smart typography](#smart-typography).)
 
 ## Keys
 
@@ -198,6 +202,27 @@ When you create a project, a short setup wizard offers to scaffold it — writin
 goals, a starter cast and setting (with AI, when enabled), and a first note.
 Every step is skippable and the whole thing is dismissible (Esc); turn it off
 entirely with `setup_wizard = false` under `[projects]`.
+
+### Smart typography
+
+A finished manuscript wants typographic punctuation, so Quill produces it as you
+type: straight quotes become correctly-oriented curly quotes (`“…”` `‘…’`, the
+direction chosen from what precedes them, so contraction apostrophes come out
+right too), `--` becomes an em-dash (`—`), and `...` becomes an ellipsis (`…`).
+This is mechanical punctuation, not prose — Quill orients the marks you're
+already typing, it never words anything.
+
+It's **on by default**. The substitution happens at the keystroke, so the curly
+characters are what's saved to disk and what every export (Word, Scrivener,
+Vellum, Markdown) carries through. Only the punctuation you actually type is
+changed; a chapter Quill isn't editing is never rewritten. Prefer plain ASCII
+(and an exact byte-for-byte round-trip of what you type)? Turn it off in
+`~/.config/quill/config.toml`:
+
+```toml
+[editor]
+smart_typography = false
+```
 
 ### Vim mode (opt-in)
 

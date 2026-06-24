@@ -149,5 +149,9 @@ KEY REFERENCE
   Ctrl-K          run action
   Ctrl-X          run workflow
 
+Smart typography is on by default: as you type, straight quotes become curly,
+-- becomes an em-dash, and ... becomes an ellipsis. For plain ASCII punctuation,
+set [editor] smart_typography = false in your config.
+
 Vim-style modal editing is available, off by default; enable it with
 [editor] vim = true in your config.

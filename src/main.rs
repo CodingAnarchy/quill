@@ -24,6 +24,7 @@ mod recovery;
 mod report;
 mod syntax;
 mod text;
+mod typography;
 mod ui;
 mod vcs;
 mod workflow;
