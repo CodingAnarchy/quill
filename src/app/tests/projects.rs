@@ -611,3 +611,64 @@ fn applying_an_import_writes_the_bible_files() {
     assert!(bible.join("timeline.md").exists(), "timeline written");
     assert!(bible.join("outline.md").exists(), "outline written");
 }
+
+// --- New project from a folder of notes (#286) -----------------------------
+
+/// A folder of Markdown notes (not a project), for the new-from-notes flow.
+fn notes_folder(tag: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("quill-notesrc-{}-{tag}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    for (name, body) in files {
+        fs::write(dir.join(name), body).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn new_from_notes_creates_the_project_and_preserves_the_sources() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("nfn"); // AI off → sources preserved, bible generation deferred
+    let cur = make_project("nfn-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    let notes = notes_folder("nfn", &[("chars.md", "# Mara\n"), ("world.md", "# Saltmarsh\n")]);
+    let dest = books_dir("nfn-dest").join("From Notes");
+
+    // Folder prompt → validates and asks for the project path.
+    app.begin_new_from_notes(notes.to_str().unwrap());
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::NewFromNotesDest)));
+    // Project-path prompt → create + import.
+    app.finish_new_from_notes(dest.to_str().unwrap());
+
+    assert_eq!(app.project.manifest.title, "From Notes", "the new project is created and opened");
+    let srcdir = dest.join("bible").join("sources");
+    assert!(srcdir.join("chars.md").exists() && srcdir.join("world.md").exists(), "every note preserved in the new project");
+    assert!(app.message.as_deref().unwrap_or("").contains("enable AI"), "AI off → bible generation deferred: {:?}", app.message);
+}
+
+#[test]
+fn new_from_notes_rejects_a_folder_with_no_markdown() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("nfn-empty");
+    let cur = make_project("nfn-empty-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    let empty = notes_folder("nfn-empty", &[("notes.txt", "not markdown\n")]);
+    app.begin_new_from_notes(empty.to_str().unwrap());
+
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no project-path prompt for an empty folder");
+    assert_eq!(app.project.manifest.title, "Current", "the current project is untouched");
+    assert!(app.message.as_deref().unwrap_or("").contains("No Markdown notes"));
+}
+
+#[test]
+fn new_from_notes_action_opens_the_folder_prompt() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("nfn-action");
+    let cur = make_project("nfn-action-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    app.run_action(crate::mode::Action::NewProjectFromNotes, false);
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::NewFromNotesSource)));
+}

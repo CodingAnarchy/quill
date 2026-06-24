@@ -189,6 +189,10 @@ pub struct App {
     /// A label for the notes import in flight (#283) — a file name or a count —
     /// shown in the summary when the pass applies; taken by `apply_import`.
     import_source: Option<String>,
+    /// The notes folder chosen for "new project from notes" (#286), held between
+    /// the folder prompt and the new-project-path prompt; taken when the project
+    /// is created and the import runs.
+    pending_notes_folder: Option<PathBuf>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -247,6 +251,7 @@ impl App {
             pending_switch: None,
             wizard_pending_setting: None,
             import_source: None,
+            pending_notes_folder: None,
             message: None,
         };
         // Baselines for the daily word tally: edits move each chapter from here.
@@ -916,25 +921,34 @@ impl App {
     /// an existing project, and surfaces a clear message on any failure rather
     /// than crashing (#264/#273).
     fn create_project_at(&mut self, target: PathBuf) {
-        if Project::manifest_path(&target).exists() {
+        // Offer the setup wizard only when the project was actually created and
+        // opened (#282), and the wizard isn't disabled.
+        if self.create_and_open(&target) && ProjectsConfig::load().wizard_enabled() {
+            self.start_wizard();
+        }
+    }
+
+    /// Create a new project at `target` and switch to it in place. Returns whether
+    /// the switch landed (false if a project already exists there, creation fails,
+    /// or a save aborts the switch), with a clear message set on failure. Shared
+    /// by "new empty project" (#273) and "new project from notes" (#286).
+    pub(crate) fn create_and_open(&mut self, target: &Path) -> bool {
+        if Project::manifest_path(target).exists() {
             self.message = Some(format!("A project already exists at {}", target.display()));
             self.mode = self.editing_mode();
-            return;
+            return false;
         }
-        match Project::create(&target) {
+        match Project::create(target) {
             // switch_to saves the current project, opens the new one, and records
             // it in recents — the same path a normal switch takes.
             Ok(_) => {
-                self.switch_to(target.clone());
-                // Offer the setup wizard only when the switch actually landed on
-                // the new project (a save failure aborts it) and it isn't disabled.
-                if self.project.root == target && ProjectsConfig::load().wizard_enabled() {
-                    self.start_wizard();
-                }
+                self.switch_to(target.to_path_buf());
+                self.project.root == *target
             }
             Err(e) => {
                 self.message = Some(format!("Couldn't create project: {e}"));
                 self.mode = self.editing_mode();
+                false
             }
         }
     }
@@ -1120,6 +1134,14 @@ impl App {
             KeyCode::Char('n') => {
                 let base = state.cwd.clone(); // create the new project under the folder being browsed
                 self.prompt_new_project(base);
+            }
+            // New project FROM the selected folder's notes (#286): the highlighted
+            // directory is the notes source. Skip the `..` row.
+            KeyCode::Char('N') => {
+                if let Some(entry) = state.entries.get(state.selected).filter(|e| !e.is_parent) {
+                    let folder = entry.path.clone();
+                    self.begin_new_from_notes(&folder.to_string_lossy());
+                }
             }
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
@@ -1604,7 +1626,9 @@ impl App {
             | Pending::DraftSetting
             | Pending::NewProject
             | Pending::Wizard(_)
-            | Pending::ImportNotes => {
+            | Pending::ImportNotes
+            | Pending::NewFromNotesSource
+            | Pending::NewFromNotesDest => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -1706,14 +1730,34 @@ impl App {
                                     self.import_notes(text);
                                 }
                             }
+                            Pending::NewFromNotesSource => {
+                                if text.is_empty() {
+                                    self.mode = closed;
+                                    self.message = Some("Cancelled — no notes folder.".into());
+                                } else {
+                                    // Validate the folder, then ask for the new project's path.
+                                    self.begin_new_from_notes(text);
+                                }
+                            }
+                            Pending::NewFromNotesDest => {
+                                if text.is_empty() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR) {
+                                    self.mode = closed;
+                                    self.pending_notes_folder = None;
+                                    self.message = Some("Enter a path ending in the new project's folder name.".into());
+                                } else {
+                                    self.finish_new_from_notes(text);
+                                }
+                            }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),
                         }
                     }
                     KeyCode::Esc => {
-                        // Cancelling the name prompt discards the AI workflow
-                        // proposal (#232); harmless no-op for the other prompts.
+                        // Cancelling discards any prompt-scoped staging: the AI
+                        // workflow proposal (#232) and the new-from-notes folder
+                        // (#286). Harmless no-op for the other prompts.
                         self.pending_workflow = None;
+                        self.pending_notes_folder = None;
                         self.mode = closed;
                     }
                     _ => {}

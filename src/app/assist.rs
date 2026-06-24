@@ -343,6 +343,7 @@ impl App {
             Action::Ai(a) => self.start_ai_action(a, force),
             Action::UserGuide => self.open_guide(),
             Action::ImportNotes => self.start_import(),
+            Action::NewProjectFromNotes => self.start_new_from_notes(),
         }
     }
 
@@ -1491,6 +1492,39 @@ impl App {
     /// bible. Available with AI off too — the source is preserved regardless.
     pub(crate) fn start_import(&mut self) {
         self.open_prompt(Pending::ImportNotes, "Import notes — path to a .md file or a folder of them:", "", None);
+    }
+
+    // --- New project from a folder of notes (#286) ------------------------
+
+    /// Prompt for a folder of notes to start a new project from.
+    pub(crate) fn start_new_from_notes(&mut self) {
+        self.open_prompt(Pending::NewFromNotesSource, "New project from notes — folder to import:", "", None);
+    }
+
+    /// Validate `folder` holds importable notes, then ask where to create the new
+    /// project. Shared by the folder prompt and the directory browser's `N` key.
+    pub(crate) fn begin_new_from_notes(&mut self, folder: &str) {
+        let folder = folder.trim();
+        if collect_import_files(std::path::Path::new(folder)).is_empty() {
+            self.message = Some(format!("No Markdown notes to import at {folder}"));
+            self.mode = self.editing_mode();
+            return;
+        }
+        self.pending_notes_folder = Some(std::path::PathBuf::from(folder));
+        let prefill = format!("{}/", self.new_project_base().display());
+        self.open_prompt(Pending::NewFromNotesDest, "New project — path:", &prefill, None);
+    }
+
+    /// Create the new project at `dest` and import the folder chosen earlier.
+    pub(crate) fn finish_new_from_notes(&mut self, dest: &str) {
+        let Some(folder) = self.pending_notes_folder.take() else {
+            self.mode = self.editing_mode();
+            return;
+        };
+        if self.create_and_open(std::path::Path::new(dest.trim())) {
+            // The new project is now active; import the notes into its bible.
+            self.import_notes(&folder.to_string_lossy());
+        }
     }
 
     /// Import Markdown notes into the story bible: preserve every source file
