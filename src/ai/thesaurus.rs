@@ -106,7 +106,7 @@ pub fn parse(text: &str) -> Result<Vec<Word>, AiError> {
         words: Vec<Word>,
     }
     let reply: Reply =
-        serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad word-search JSON: {e}")))?;
+        super::parse_json(text, "word-search")?;
     Ok(reply.words)
 }
 

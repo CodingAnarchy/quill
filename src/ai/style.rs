@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{AiError, Request};
 
 /// The result of a prose/style pass: the style observations.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -41,7 +41,7 @@ the issue for the author to address.";
 
 /// The JSON Schema for a prose/style reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -66,19 +66,12 @@ pub fn schema() -> Value {
 
 /// Build the prose/style request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Report the prose/style findings as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Report the prose/style findings as specified.", manuscript, model, schema())
 }
 
 /// Parse a structured prose/style reply.
 pub fn parse(text: &str) -> Result<Style, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad style JSON: {e}")))
+    super::parse_json(text, "style")
 }
 
 #[cfg(test)]

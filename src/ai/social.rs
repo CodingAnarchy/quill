@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{numbered_sections, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{numbered_sections, AiError, Request};
 
 /// A round of social posts, grouped by platform.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -50,7 +50,7 @@ Return the posts per platform as plain text.";
 
 /// The JSON Schema for a social-posts reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -66,19 +66,12 @@ pub fn schema() -> Value {
 /// Build the social-posts request: the manuscript as cached context, schema
 /// attached. Manuscript-only for now, like the marketing copy (#104).
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Write the social posts per platform as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Write the social posts per platform as specified.", manuscript, model, schema())
 }
 
 /// Parse a structured social-posts reply.
 pub fn parse(text: &str) -> Result<Social, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad social JSON: {e}")))
+    super::parse_json(text, "social")
 }
 
 #[cfg(test)]

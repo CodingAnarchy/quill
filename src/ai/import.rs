@@ -15,7 +15,7 @@ use super::character::Character;
 use super::continuity::Continuity;
 use super::scaffold::Scaffold;
 use super::setting::Setting;
-use super::{character, continuity, scaffold, setting, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{character, continuity, scaffold, setting, AiError, Request};
 
 /// The bible extracted from imported notes: characters, a setting bible, the
 /// story timeline, and a beat outline. Any section the notes don't cover comes
@@ -71,19 +71,12 @@ pub fn schema() -> Value {
 /// Build the import request: the author's notes as cached context, the combined
 /// schema attached.
 pub fn build_request(notes: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: notes,
-        user: "Organize these notes into the story bible as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Organize these notes into the story bible as specified.", notes, model, schema())
 }
 
 /// Parse a structured import reply.
 pub fn parse(text: &str) -> Result<Imported, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad import JSON: {e}")))
+    super::parse_json(text, "import")
 }
 
 #[cfg(test)]

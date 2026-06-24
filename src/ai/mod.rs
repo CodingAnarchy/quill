@@ -226,6 +226,40 @@ pub fn default_model() -> String {
 /// real request agree.
 pub const MAX_OUTPUT_TOKENS: u32 = 8192;
 
+/// Build the request shared by the manuscript-extraction (and concept-draft)
+/// passes (#313): a system prompt, a one-line user instruction, the text as
+/// cached context, the model, the default output bound, and the JSON schema.
+/// Passes with extra inputs (naming, voice, ad-creative, thesaurus) keep their
+/// own builders.
+pub(crate) fn manuscript_request(
+    system: &str,
+    user: &str,
+    cached_context: String,
+    model: &str,
+    schema: serde_json::Value,
+) -> Request {
+    Request {
+        system: Some(system.to_string()),
+        cached_context,
+        user: user.to_string(),
+        model: model.to_string(),
+        max_tokens: MAX_OUTPUT_TOKENS,
+        json_schema: Some(schema),
+    }
+}
+
+/// Deserialize a structured AI reply, wrapping a parse failure in a uniform
+/// `bad {kind} JSON` message (#313) so every feature reports it the same way.
+pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(text: &str, kind: &str) -> Result<T, AiError> {
+    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad {kind} JSON: {e}")))
+}
+
+/// The JSON-Schema fragment for an array of strings — shared by the feature
+/// schemas that previously each re-declared it (#313).
+pub(crate) fn string_array() -> serde_json::Value {
+    serde_json::json!({ "type": "array", "items": { "type": "string" } })
+}
+
 /// Which provider the AI features run against (#87).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{bible, AiError, Request};
 
 /// A round of brainstorm ideas from a premise.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -31,7 +31,7 @@ NOT a draft of the novel. Keep each a short, concrete note.";
 
 /// The JSON Schema for a brainstorm reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -48,19 +48,12 @@ pub fn schema() -> Value {
 /// Build the brainstorm request: the premise as context, schema attached. No
 /// manuscript is sent — this works on an empty project.
 pub fn build_request(premise: &str, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: format!("Premise / idea:\n{premise}"),
-        user: "Brainstorm story ideas from this premise as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Brainstorm story ideas from this premise as specified.", format!("Premise / idea:\n{premise}"), model, schema())
 }
 
 /// Parse a structured brainstorm reply.
 pub fn parse(text: &str) -> Result<Brainstorm, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad brainstorm JSON: {e}")))
+    super::parse_json(text, "brainstorm")
 }
 
 /// Render the brainstorm bible doc: a section per idea kind, then the author's

@@ -110,7 +110,7 @@ pub fn schema() -> Value {
 /// The array-of-character-profiles schema on its own, so other passes (the notes
 /// import, #283) can compose it without the `{ "characters": … }` wrapper.
 pub fn items_schema() -> Value {
-    let string_array = json!({ "type": "array", "items": { "type": "string" } });
+    let string_array = super::string_array();
     json!({
         "type": "array",
         "items": {
@@ -178,14 +178,7 @@ pub fn items_schema() -> Value {
 /// Build the character-extraction request: the manuscript as cached context, the
 /// schema attached so the reply is typed JSON.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Extract the character profiles as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Extract the character profiles as specified.", manuscript, model, schema())
 }
 
 const CONCEPT_SYSTEM: &str = "You are a story-bible assistant helping an author \
@@ -202,14 +195,7 @@ manuscript to contradict.";
 /// Build a generative request (#256): draft a starter cast from a concept /
 /// premise (no manuscript), into the same schema the extractive pass returns.
 pub fn build_concept_request(concept: &str, model: &str) -> Request {
-    Request {
-        system: Some(CONCEPT_SYSTEM.to_string()),
-        cached_context: format!("Concept / premise:\n{concept}"),
-        user: "Draft the starter character profiles as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(CONCEPT_SYSTEM, "Draft the starter character profiles as specified.", format!("Concept / premise:\n{concept}"), model, schema())
 }
 
 const REVISE_SYSTEM: &str = "You are a story-bible assistant maintaining an \
@@ -236,7 +222,7 @@ pub fn parse(text: &str) -> Result<Vec<Character>, AiError> {
         characters: Vec<Character>,
     }
     let reply: Reply =
-        serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad character JSON: {e}")))?;
+        super::parse_json(text, "character")?;
     Ok(reply.characters)
 }
 

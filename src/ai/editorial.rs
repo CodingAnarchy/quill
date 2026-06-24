@@ -10,7 +10,7 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{AiError, Request};
 
 /// One editorial flag: which lens it came from, the chapter(s) it concerns, an
 /// optional verbatim span to pinpoint it, and the plain-language concern.
@@ -74,14 +74,7 @@ pub fn schema() -> Value {
 
 /// Build the editorial request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Give the manuscript an editorial read and report the issues as specified — flags only, never a fix.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Give the manuscript an editorial read and report the issues as specified — flags only, never a fix.", manuscript, model, schema())
 }
 
 /// Parse a structured editorial reply.
@@ -91,7 +84,7 @@ pub fn parse(text: &str) -> Result<Vec<Note>, AiError> {
         notes: Vec<Note>,
     }
     let reply: Reply =
-        serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad editorial JSON: {e}")))?;
+        super::parse_json(text, "editorial")?;
     Ok(reply.notes)
 }
 

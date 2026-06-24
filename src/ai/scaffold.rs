@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{bible, AiError, Request};
 
 /// A structural pass: the beat outline plus the gaps found in it.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -44,7 +44,7 @@ only structural notes. Reference chapters by title.";
 
 /// The JSON Schema for a scaffolding reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -80,19 +80,12 @@ pub fn schema() -> Value {
 
 /// Build the scaffolding request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Produce the beat outline and the structural gaps as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Produce the beat outline and the structural gaps as specified.", manuscript, model, schema())
 }
 
 /// Parse a structured scaffolding reply.
 pub fn parse(text: &str) -> Result<Scaffold, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad scaffold JSON: {e}")))
+    super::parse_json(text, "scaffold")
 }
 
 /// Render the outline bible file via [`bible::render`]: a section of beats per

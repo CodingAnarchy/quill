@@ -61,7 +61,7 @@ title.";
 
 /// The JSON Schema for a setting reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -110,14 +110,7 @@ pub fn schema() -> Value {
 
 /// Build the setting request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Extract the setting bible, gazetteer, and rule findings as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Extract the setting bible, gazetteer, and rule findings as specified.", manuscript, model, schema())
 }
 
 const CONCEPT_SYSTEM: &str = "You are a worldbuilding editor helping an author \
@@ -133,14 +126,7 @@ scenes. Leave `findings` empty — there's no manuscript to check rules against.
 /// concept / premise (no manuscript), into the same schema the extractive pass
 /// returns.
 pub fn build_concept_request(concept: &str, model: &str) -> Request {
-    Request {
-        system: Some(CONCEPT_SYSTEM.to_string()),
-        cached_context: format!("Concept / premise:\n{concept}"),
-        user: "Draft the starter setting bible and gazetteer as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(CONCEPT_SYSTEM, "Draft the starter setting bible and gazetteer as specified.", format!("Concept / premise:\n{concept}"), model, schema())
 }
 
 const REVISE_SYSTEM: &str = "You are a worldbuilding editor maintaining an \
@@ -161,7 +147,7 @@ pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, mode
 
 /// Parse a structured setting reply.
 pub fn parse(text: &str) -> Result<Setting, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad setting JSON: {e}")))
+    super::parse_json(text, "setting")
 }
 
 /// Render the setting bible file via [`bible::render`]: a section per category, a

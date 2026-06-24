@@ -49,7 +49,7 @@ author to fix.";
 
 /// The JSON Schema for a voice-analysis reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -91,7 +91,7 @@ pub fn build_request(manuscript: String, voice_notes: &str, model: &str) -> Requ
 
 /// Parse a structured voice-analysis reply.
 pub fn parse(text: &str) -> Result<Voice, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad voice JSON: {e}")))
+    super::parse_json(text, "voice")
 }
 
 #[cfg(test)]

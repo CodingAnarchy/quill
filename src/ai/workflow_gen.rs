@@ -74,7 +74,7 @@ pub fn build_request(description: &str, vocab: &[(String, String)], model: &str)
 
 /// Parse a generated-workflow reply.
 pub fn parse(text: &str) -> Result<GeneratedWorkflow, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad workflow JSON: {e}")))
+    super::parse_json(text, "workflow")
 }
 
 #[cfg(test)]
