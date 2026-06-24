@@ -11,10 +11,14 @@ and provides an API key.
 Quill's AI **never generates or suggests manuscript prose** — no drafting,
 rewriting, tightening, expanding, or larger-edit suggestions. It is limited to
 **structure** (outlines, beat sheets, scene notes), **tracking** (the story
-bible), **markers** (`xxx` TODOs), and **analysis** (flags and findings the
-author fixes themselves). The prose is the author's. Off-manuscript artifacts
-like a synopsis, query letter, or marketing blurb are the only prose the AI
-produces, and never inside the manuscript.
+bible), **markers** (`xxx` TODOs), **analysis** (flags and findings the author
+fixes themselves), and **reference lookup** (a thesaurus / word search the author
+deliberately invokes for a specific word or phrase, returning candidate words the
+author chooses among — it may read the surrounding line to judge fit, but returns
+only options for the requested slot and never rewrites the sentence or any other
+prose). The prose is the author's. Off-manuscript artifacts like a synopsis,
+query letter, or marketing blurb are the only prose the AI produces, and never
+inside the manuscript.
 
 ## Configuration
 
