@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use similar::{ChangeTag, TextDiff};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -22,7 +21,7 @@ use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleConflict, BibleReview, Command, Finding, Findings, GitAction,
+    BibleReview, Command, Finding, Findings, GitAction,
     MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
 };
 use crate::project::{Manifest, Project};
@@ -31,7 +30,9 @@ use crate::report::{self, Momentum, PartDelta};
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod assist;
+mod bible_review;
 mod exporting;
+mod images;
 mod search;
 mod meta;
 mod panes;

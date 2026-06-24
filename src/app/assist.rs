@@ -6,24 +6,22 @@
 //! private fields). See `docs/ai-features.md`.
 
 use super::*;
+use super::bible_review::Staged;
 
 use std::sync::{Arc, Mutex};
 
 use crate::ai::ad_creative::{self, AdCreative};
 use crate::ai::brainstorm::{self, Brainstorm};
 use crate::ai::cost;
-use crate::ai::fal::FalBackend;
-use crate::ai::image::{self, ImageBackend, ImageReport, ImageRequest};
 use crate::ai::marketing::{self, Marketing};
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
-use crate::ai::scene_brief;
 use crate::ai::social::{self, Social};
 use crate::ai::style::{self, Style};
 use crate::ai::submission::{self, Submission};
 use crate::ai::voice;
 use crate::ai::workflow_gen::{self, GeneratedWorkflow};
-use crate::mode::{Action, AiAction, Command, Palette, PaletteItem, PortraitChoice};
+use crate::mode::{Action, AiAction, Command, Palette, PaletteItem};
 use crate::text::count_matches;
 
 /// The cost decision for starting a network AI action (#82): either run it now,
@@ -33,83 +31,9 @@ pub(crate) enum AiStart {
     Confirm(String),
 }
 
-/// The outcome of staging one generated file (#153) — a bible profile or a
-/// submission artifact. Distinguishes a successful write from a hand-edit
-/// conflict (queue for review) and from an I/O failure (surface to the author),
-/// so a failed write is never miscounted as success.
-enum Staged {
-    /// Written to disk.
-    Wrote,
-    /// The generated block was hand-edited since the last pass; queued for review.
-    Conflict(BibleConflict),
-    /// The write (or its parent-directory creation) failed; carries an
-    /// author-facing description.
-    Failed(String),
-}
-
-/// Condense prose for an image prompt (#239): drop markdown heading lines,
-/// collapse runs of whitespace, and cap at `max_chars` (on a char boundary), so a
-/// whole chapter becomes a compact scene description the image model can use.
-fn condense(text: &str, max_chars: usize) -> String {
-    let joined = text
-        .lines()
-        .filter(|l| !l.trim_start().starts_with('#'))
-        .flat_map(str::split_whitespace)
-        .collect::<Vec<_>>()
-        .join(" ");
-    joined.chars().take(max_chars).collect()
-}
-
-/// The active chapter's input for a scene illustration (#247): identity, the full
-/// text (to distill from), the setting bible, and a prose-excerpt fallback prompt.
-struct SceneInput {
-    slug: String,
-    title: String,
-    text: String,
-    setting: String,
-    fallback_prompt: String,
-}
-
-/// Build the scene image prompt (#247): distill a visual brief via the text
-/// backend when one is available, else use the prose-excerpt fallback. Runs on the
-/// worker thread, so any distill failure (or no text backend) degrades quietly to
-/// the fallback — the verified #239 behavior.
-fn scene_prompt_for(text_spec: Option<BackendSpec>, scene: &SceneInput, book: &str, model: &str) -> String {
-    if let Some(spec) = text_spec {
-        if let Ok(backend) = spec.build() {
-            let req = scene_brief::build_request(scene.text.clone(), model);
-            if let Ok(resp) = backend.complete(&req) {
-                if !resp.text.trim().is_empty() {
-                    return image::scene_prompt(book, &scene.title, &resp.text, &scene.setting);
-                }
-            }
-        }
-    }
-    scene.fallback_prompt.clone()
-}
-
-/// Write image bytes to `path`, creating parent directories (#238). Runs on the
-/// worker thread, so it returns a plain message rather than using `App`. Removes
-/// any existing sibling with the same stem but a different extension first, so
-/// regenerating in a different format replaces rather than accumulates (e.g. a
-/// later `.jpg` doesn't leave a stale `.png` behind).
-fn save_image(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
-    if let (Some(parent), Some(stem)) = (path.parent(), path.file_stem()) {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        if let Ok(entries) = std::fs::read_dir(parent) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.file_stem() == Some(stem) && p != path {
-                    let _ = std::fs::remove_file(p);
-                }
-            }
-        }
-    }
-    std::fs::write(path, bytes).map_err(|e| e.to_string())
-}
 
 /// A one-line status message for one or more failed writes (#153).
-fn write_failure_message(failures: &[String]) -> String {
+pub(super) fn write_failure_message(failures: &[String]) -> String {
     match failures.split_first() {
         Some((first, [])) => format!("Couldn't write {first}"),
         Some((first, rest)) => format!("Couldn't write {} files — first: {first}", rest.len() + 1),
@@ -124,7 +48,7 @@ const LOCAL_UNAVAILABLE: &str =
 
 /// A resolved backend choice, ready to build on the worker thread. Built here
 /// (not in `spawn_ai`) so loading the local model can't block the UI.
-enum BackendSpec {
+pub(super) enum BackendSpec {
     /// The Claude HTTP backend, with its API key.
     Claude(String),
     /// The local backend, sharing `App`'s cache slot so the loaded model is
@@ -134,7 +58,7 @@ enum BackendSpec {
 
 impl BackendSpec {
     /// Build (or fetch the cached) backend. Runs on the worker thread.
-    fn build(self) -> Result<Arc<dyn Backend>, ai::AiError> {
+    pub(super) fn build(self) -> Result<Arc<dyn Backend>, ai::AiError> {
         match self {
             BackendSpec::Claude(key) => Ok(Arc::new(ClaudeBackend::new(key))),
             BackendSpec::Local(slot) => build_local(slot),
@@ -161,50 +85,6 @@ fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Ba
     Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
 }
 
-/// Shown when the local *image* backend is selected but wasn't compiled in (#240).
-const LOCAL_IMAGE_UNAVAILABLE: &str =
-    "local image backend isn't in this build — rebuild Quill with `--features local`, or set `backend = \"remote\"` under [image]";
-
-/// A resolved image-backend choice, built on the worker thread (#238/#240) so a
-/// heavy local model load can't block the UI — mirroring [`BackendSpec`].
-enum ImageBackendSpec {
-    /// The remote fal.ai backend, with its API key.
-    Remote(String),
-    /// The local Stable-Diffusion backend, sharing `App`'s cache slot so the
-    /// loaded model is reused across requests.
-    Local(Arc<Mutex<Option<Arc<dyn ImageBackend>>>>),
-}
-
-impl ImageBackendSpec {
-    /// Build (or fetch the cached) image backend. Runs on the worker thread.
-    fn build(self) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
-        match self {
-            ImageBackendSpec::Remote(key) => Ok(Arc::new(FalBackend::new(key))),
-            ImageBackendSpec::Local(slot) => build_local_image(slot),
-        }
-    }
-}
-
-/// Load the local image model once and cache it in the shared slot (#240).
-#[cfg(feature = "local")]
-fn build_local_image(
-    slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
-) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
-    let mut guard = slot.lock().map_err(|_| ai::AiError::Internal("image model lock poisoned".into()))?;
-    if let Some(backend) = guard.as_ref() {
-        return Ok(backend.clone());
-    }
-    let backend: Arc<dyn ImageBackend> = Arc::new(ai::local_image::LocalImageBackend::load()?);
-    *guard = Some(backend.clone());
-    Ok(backend)
-}
-
-#[cfg(not(feature = "local"))]
-fn build_local_image(
-    _slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
-) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
-    Err(ai::AiError::NotConfigured(LOCAL_IMAGE_UNAVAILABLE.into()))
-}
 
 /// Where a persistent-bible tracker keeps its prior bible, for the incremental
 /// cache (#90).
@@ -497,12 +377,8 @@ impl App {
     /// open the name-confirm prompt (prefilled with the proposed name) so the
     /// author confirms, renames, or cancels before anything is written.
     pub(crate) fn apply_generated_workflow(&mut self, result: Result<GeneratedWorkflow, ai::AiError>) {
-        let gen = match result {
-            Ok(g) => g,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(gen) = self.ok_or_report(result) else {
+            return;
         };
         if gen.steps.is_empty() {
             self.message = Some(if gen.unmapped.is_empty() {
@@ -546,7 +422,7 @@ impl App {
 
     /// Accumulate a pass's findings into the session revision-triage list,
     /// de-duplicated.
-    fn accumulate_triage(&mut self, findings: &[Finding]) {
+    pub(super) fn accumulate_triage(&mut self, findings: &[Finding]) {
         for f in findings {
             if !self.triage.contains(f) {
                 self.triage.push(f.clone());
@@ -742,12 +618,8 @@ impl App {
     /// conflict-reviewed and off-manuscript (never a chapter file, never prose).
     pub(crate) fn apply_brainstorm(&mut self, result: Result<Brainstorm, ai::AiError>) {
         self.overlay = None;
-        let ideas = match result {
-            Ok(b) => b,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(ideas) = self.ok_or_report(result) else {
+            return;
         };
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("brainstorm.md");
@@ -808,280 +680,6 @@ impl App {
         }
     }
 
-    /// Begin a character-portrait pass (#238): gate on image readiness and the
-    /// character bible, then open the picker so the author chooses which
-    /// character(s) to generate (#244).
-    pub(crate) fn start_portrait(&mut self) {
-        if let Err(e) = self.image_backend_spec() {
-            self.message = Some(e.to_string());
-            return;
-        }
-        let targets = self.character_portrait_targets();
-        if targets.is_empty() {
-            self.message = Some("Run the character pass first to build the character bible".into());
-            return;
-        }
-        // Lead with "all", then one item per character. The choice carries the
-        // index; the targets are recomputed (stable order) when it's confirmed.
-        let mut items = vec![PaletteItem {
-            label: format!("All characters ({})", targets.len()),
-            desc: "a portrait for every character".into(),
-            command: Command::Portrait(PortraitChoice::All),
-        }];
-        items.extend(targets.iter().enumerate().map(|(i, (_, name, _))| PaletteItem {
-            label: name.clone(),
-            desc: "a portrait for this character".into(),
-            command: Command::Portrait(PortraitChoice::One(i)),
-        }));
-        self.mode = Mode::Palette(Box::new(Palette { title: "Character portrait", items, selected: 0 }));
-    }
-
-    /// Confirm the picked portrait selection (#244) before spending: stash the
-    /// chosen targets and open the cost confirm, whose count reflects the choice.
-    pub(crate) fn confirm_portraits(&mut self, choice: PortraitChoice) {
-        let targets = self.character_portrait_targets();
-        let selected = match choice {
-            PortraitChoice::All => targets,
-            PortraitChoice::One(i) => targets.into_iter().nth(i).map(|t| vec![t]).unwrap_or_default(),
-        };
-        if selected.is_empty() {
-            return;
-        }
-        let n = selected.len();
-        let plural = if n == 1 { "" } else { "s" };
-        let label = format!(
-            "Generate {n} character portrait{plural} via fal.ai ({}) — each image is billed. Run? (y/N)",
-            self.image.model,
-        );
-        self.pending_portraits = Some(selected);
-        self.open_prompt(Pending::ConfirmPortraits, label, "", None);
-    }
-
-    /// Generate the picked character portraits off the UI thread (#238/#244),
-    /// saved under `marketing/images/characters/`. The result is applied by
-    /// [`poll_ai`](App::poll_ai). A no-op if the selection was cleared.
-    pub(crate) fn generate_portraits(&mut self) {
-        if let Some(targets) = self.pending_portraits.take() {
-            self.spawn_image_job("marketing/images/characters", "⟳ Generating portraits…", targets);
-        }
-    }
-
-    /// Run an image job off the UI thread (#238/#239): generate one image per
-    /// `(slug, label, prompt)` target via the image backend and save each under
-    /// `<subdir>/<slug>.<ext>`, reporting saved files and per-target failures. The
-    /// shared worker behind the portrait and scene passes. A no-op for no targets;
-    /// the busy/key guards mirror the text spawn path.
-    fn spawn_image_job(&mut self, subdir: &'static str, message: &str, targets: Vec<(String, String, String)>) {
-        if targets.is_empty() {
-            return;
-        }
-        if self.ai_task.is_busy() {
-            self.message = Some("An AI request is already in flight…".into());
-            return;
-        }
-        // Resolve the backend choice on the UI thread (gating + fail-fast for an
-        // uncompiled local model); the heavy local load happens on the worker.
-        let spec = match self.image_backend_spec() {
-            Ok(spec) => spec,
-            Err(e) => {
-                self.message = Some(e.to_string());
-                return;
-            }
-        };
-        let model = self.image.model.clone();
-        let dir = self.project.root.join(subdir);
-        self.ai_task.spawn(move || {
-            let backend = match spec.build() {
-                Ok(b) => b,
-                Err(e) => return Outcome::Image(Err(e)),
-            };
-            let mut report = ImageReport::default();
-            for (slug, label, prompt) in targets {
-                match backend.generate(&ImageRequest { prompt, model: model.clone() }) {
-                    Ok(img) => {
-                        let file = format!("{slug}.{}", img.ext);
-                        match save_image(&dir.join(&file), &img.bytes) {
-                            Ok(()) => report.saved.push(format!("{subdir}/{file}")),
-                            Err(e) => report.failed.push(format!("{label}: {e}")),
-                        }
-                    }
-                    Err(e) => report.failed.push(format!("{label}: {e}")),
-                }
-            }
-            Outcome::Image(Ok(report))
-        });
-        self.message = Some(message.to_string());
-    }
-
-    /// Resolve the configured image backend (#238/#240) for building on the worker:
-    /// gate on readiness, supply the remote key, or fail fast when the local model
-    /// is selected but not compiled in.
-    fn image_backend_spec(&self) -> Result<ImageBackendSpec, ai::AiError> {
-        self.image.check_ready()?;
-        Ok(match self.image.backend() {
-            ai::image::ImageBackendKind::Remote => {
-                let key = self
-                    .image
-                    .resolved_key()
-                    .ok_or_else(|| ai::AiError::NotConfigured("no image API key".into()))?;
-                ImageBackendSpec::Remote(key.to_string())
-            }
-            ai::image::ImageBackendKind::Local => {
-                if cfg!(not(feature = "local")) {
-                    return Err(ai::AiError::NotConfigured(LOCAL_IMAGE_UNAVAILABLE.into()));
-                }
-                ImageBackendSpec::Local(self.image_backend.clone())
-            }
-        })
-    }
-
-    /// The portrait targets — `(slug, name, prompt)` per character in the bible,
-    /// the prompt built from that character's profile. Empty when no bible exists.
-    fn character_portrait_targets(&self) -> Vec<(String, String, String)> {
-        let dir = self.project.root.join("bible").join("characters");
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return Vec::new();
-        };
-        let mut files: Vec<std::path::PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
-            .collect();
-        files.sort();
-        let mut out = Vec::new();
-        for path in files {
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("character").to_string();
-            let name = bible::front_field(&text, "name")
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| slug.clone());
-            let description = crate::frontmatter::split(&text).1;
-            out.push((slug, name.clone(), image::portrait_prompt(&name, description)));
-        }
-        out
-    }
-
-    /// Begin a scene-illustration pass (#239): gate on image readiness and the
-    /// active chapter having text, then confirm before spending.
-    pub(crate) fn start_scene(&mut self) {
-        if let Err(e) = self.image_backend_spec() {
-            self.message = Some(e.to_string());
-            return;
-        }
-        let Some(scene) = self.active_scene() else {
-            self.message = Some("The active chapter has no text to illustrate".into());
-            return;
-        };
-        let label = format!(
-            "Illustrate \"{}\" via fal.ai ({}) — the image is billed. Run? (y/N)",
-            scene.title, self.image.model,
-        );
-        self.open_prompt(Pending::ConfirmScene, label, "", None);
-    }
-
-    /// Generate a scene illustration of the active chapter off the UI thread
-    /// (#239/#247), saved under `marketing/images/scenes/`. When the text AI is
-    /// ready it first distills a visual brief of the chapter's pivotal moment
-    /// (#247); otherwise it falls back to the prose-excerpt prompt. Applied by
-    /// [`poll_ai`](App::poll_ai).
-    pub(crate) fn generate_scene(&mut self) {
-        if self.ai_task.is_busy() {
-            self.message = Some("An AI request is already in flight…".into());
-            return;
-        }
-        let Some(scene) = self.active_scene() else {
-            return;
-        };
-        let image_spec = match self.image_backend_spec() {
-            Ok(spec) => spec,
-            Err(e) => {
-                self.message = Some(e.to_string());
-                return;
-            }
-        };
-        // Optional distill step: the text backend, if it's configured. None → the
-        // worker uses the prose-excerpt fallback prompt.
-        let text_spec = self.backend_spec().ok();
-        let book = self.project.manifest.title.clone();
-        let text_model = self.ai.model.clone();
-        let image_model = self.image.model.clone();
-        let subdir = "marketing/images/scenes";
-        let dir = self.project.root.join(subdir);
-        self.ai_task.spawn(move || {
-            let backend = match image_spec.build() {
-                Ok(b) => b,
-                Err(e) => return Outcome::Image(Err(e)),
-            };
-            let prompt = scene_prompt_for(text_spec, &scene, &book, &text_model);
-            let mut report = ImageReport::default();
-            match backend.generate(&ImageRequest { prompt, model: image_model }) {
-                Ok(img) => {
-                    let file = format!("{}.{}", scene.slug, img.ext);
-                    match save_image(&dir.join(&file), &img.bytes) {
-                        Ok(()) => report.saved.push(format!("{subdir}/{file}")),
-                        Err(e) => report.failed.push(format!("{}: {e}", scene.title)),
-                    }
-                }
-                Err(e) => report.failed.push(format!("{}: {e}", scene.title)),
-            }
-            Outcome::Image(Ok(report))
-        });
-        self.message = Some("⟳ Illustrating the scene…".into());
-    }
-
-    /// The active chapter's scene input (#247): its slug, title, full text, the
-    /// setting bible, and a prose-excerpt fallback prompt. `None` when the chapter
-    /// has no prose.
-    fn active_scene(&self) -> Option<SceneInput> {
-        let idx = self.project.active_index();
-        let text = self.chapter_text(idx);
-        let excerpt = condense(&text, 600);
-        if excerpt.is_empty() {
-            return None;
-        }
-        let title = self.project.chapter_title(idx).unwrap_or("Scene").to_string();
-        let slug = std::path::Path::new(self.project.chapter_file(idx))
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("scene")
-            .to_string();
-        let setting = condense(crate::frontmatter::split(&bible::raw_file(&self.project.root, "setting.md")).1, 400);
-        let fallback_prompt = image::scene_prompt(&self.project.manifest.title, &title, &excerpt, &setting);
-        Some(SceneInput { slug, title, text, setting, fallback_prompt })
-    }
-
-    /// Apply an image pass (#238/#239): summarize the saved images and any
-    /// failures. Shared by the portrait and scene passes (both `Outcome::Image`).
-    pub(crate) fn apply_images(&mut self, result: Result<ImageReport, ai::AiError>) {
-        self.overlay = None;
-        let report = match result {
-            Ok(r) => r,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
-        };
-        if report.saved.is_empty() && report.failed.is_empty() {
-            self.message = Some("No images generated".into());
-            return;
-        }
-        let mut lines = Vec::new();
-        if !report.saved.is_empty() {
-            lines.push(Line::raw("Images generated:"));
-            lines.push(Line::raw(""));
-            lines.extend(report.saved.iter().map(|s| Line::raw(format!("  {s}"))));
-            lines.push(Line::raw(""));
-            lines.push(Line::raw("Off-manuscript image files — yours to use and regenerate."));
-        }
-        if !report.failed.is_empty() {
-            lines.push(Line::raw(""));
-            lines.push(Line::raw(format!("{} failed:", report.failed.len())));
-            lines.extend(report.failed.iter().map(|f| Line::raw(format!("  {f}"))));
-        }
-        self.show_ai(lines);
-    }
 
     /// The known entity list for naming checks: the setting gazetteer plus the
     /// character names from the story bible. Empty when no bible has been built.
@@ -1230,7 +828,7 @@ impl App {
     /// run only re-analyzes what changed. Best effort — a state-write failure
     /// doesn't undo the pass that already succeeded. A no-op for non-bible passes
     /// (which leave `pending_pass` unset).
-    fn record_pass_state(&mut self) {
+    pub(super) fn record_pass_state(&mut self) {
         if let Some((tracker, digests)) = self.pending_pass.take() {
             let today = date::iso(date::today());
             let _ = ai::incremental::State::record(&self.project.root, &tracker, &today, digests);
@@ -1259,7 +857,7 @@ impl App {
     /// Choose the backend for a request from settings (after the readiness gate).
     /// Cheap — the heavy local-model load is deferred to [`BackendSpec::build`] on
     /// the worker thread.
-    fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
+    pub(super) fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
         self.ai.check_ready()?;
         Ok(match self.ai.backend() {
             ai::BackendKind::Claude => {
@@ -1333,8 +931,20 @@ impl App {
     /// Show an AI result — a Q&A answer or a pass summary — as the full-screen
     /// overlay, scrolled to the top. The single place an AI result becomes an
     /// overlay.
-    fn show_ai(&mut self, lines: Vec<Line<'static>>) {
+    pub(super) fn show_ai(&mut self, lines: Vec<Line<'static>>) {
         self.overlay = Some(Overlay::ai(lines));
+    }
+
+    /// Unwrap an AI result, or set the standard `AI: <error>` status and return
+    /// `None` — the shared error arm of the `apply_*`/`analyze_*` handlers (#315).
+    fn ok_or_report<T>(&mut self, result: Result<T, ai::AiError>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(e) => {
+                self.message = Some(format!("AI: {e}"));
+                None
+            }
+        }
     }
 
     /// Apply a completed Q&A result: open the answer overlay on success, or set a
@@ -1352,12 +962,8 @@ impl App {
     /// queue hand-edited files for review.
     pub(crate) fn apply_characters(&mut self, result: Result<Vec<Character>, ai::AiError>) {
         self.overlay = None; // a new result supersedes any prior overlay
-        let mut chars = match result {
-            Ok(c) => c,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(mut chars) = self.ok_or_report(result) else {
+            return;
         };
         if chars.is_empty() {
             // Shared by the extractive pass (#74) and the generative draft (#256),
@@ -1397,40 +1003,6 @@ impl App {
         }
     }
 
-    /// Stage a generated file: write it, or report a hand-edit conflict, or
-    /// report an I/O failure (#153). `render` receives the author's preserved
-    /// Notes block and returns the full file content. Shared by the character,
-    /// continuity/setting/scaffold, and submission passes.
-    fn stage_bible(&self, path: PathBuf, name: &str, render: impl Fn(&str) -> String) -> Staged {
-        let existing = std::fs::read_to_string(&path).ok();
-        let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
-        let proposed = render(&notes);
-        if let Some(current) = &existing {
-            if bible::is_hand_edited(current) {
-                let diff = unified_diff(current, &proposed);
-                return Staged::Conflict(BibleConflict { path, name: name.to_string(), proposed, diff });
-            }
-        }
-        match self.write_file(&path, &proposed) {
-            Ok(()) => Staged::Wrote,
-            Err(msg) => Staged::Failed(msg),
-        }
-    }
-
-    /// Write `content` to `path`, creating parent directories. On failure returns
-    /// an author-facing message (the project-relative path plus the OS error), so
-    /// the caller can surface it instead of silently dropping the write (#153).
-    fn write_file(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", self.display_path(path)))?;
-        }
-        std::fs::write(path, content).map_err(|e| format!("{}: {e}", self.display_path(path)))
-    }
-
-    /// A project-relative label for `path`, for author-facing messages.
-    fn display_path(&self, path: &std::path::Path) -> String {
-        path.strip_prefix(&self.project.root).unwrap_or(path).display().to_string()
-    }
 
     /// Count a character's name/alias mentions across the manuscript and record
     /// the last chapter it appears in — local "screen time" / "last seen", free.
@@ -1458,12 +1030,8 @@ impl App {
     /// (conflict-reviewed like any bible file) and open the findings overlay. If
     /// the timeline was hand-edited, resolve that first; the findings follow.
     pub(crate) fn apply_continuity(&mut self, result: Result<Continuity, ai::AiError>) {
-        let cont = match result {
-            Ok(c) => c,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(cont) = self.ok_or_report(result) else {
+            return;
         };
         let findings = cont
             .findings
@@ -1483,12 +1051,8 @@ impl App {
     /// Apply a setting pass: write `bible/setting.md` and surface rule-violation
     /// findings.
     pub(crate) fn apply_setting(&mut self, result: Result<Setting, ai::AiError>) {
-        let setting = match result {
-            Ok(s) => s,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(setting) = self.ok_or_report(result) else {
+            return;
         };
         let findings = setting
             .findings
@@ -1652,12 +1216,8 @@ impl App {
     pub(crate) fn apply_import(&mut self, result: Result<ai::import::Imported, ai::AiError>) {
         self.overlay = None;
         let source = self.import_source.take().unwrap_or_else(|| "notes".into());
-        let imported = match result {
-            Ok(i) => i,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(imported) = self.ok_or_report(result) else {
+            return;
         };
 
         let mut chars = imported.characters;
@@ -1719,12 +1279,8 @@ impl App {
     /// Apply a scaffolding pass: write the beat outline to `bible/outline.md` and
     /// surface the structural gaps as findings.
     pub(crate) fn apply_scaffold(&mut self, result: Result<Scaffold, ai::AiError>) {
-        let scaffold = match result {
-            Ok(s) => s,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(scaffold) = self.ok_or_report(result) else {
+            return;
         };
         let findings = scaffold
             .gaps
@@ -1744,12 +1300,8 @@ impl App {
     /// Apply a naming pass: surface the variant clusters as findings. Pure
     /// analysis — nothing is written (not even a bible file).
     pub(crate) fn apply_naming(&mut self, result: Result<Naming, ai::AiError>) {
-        let naming = match result {
-            Ok(n) => n,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(naming) = self.ok_or_report(result) else {
+            return;
         };
         let findings = naming
             .findings
@@ -1769,12 +1321,8 @@ impl App {
     /// Apply a prose/style pass: surface the observations as findings. Pure
     /// analysis — nothing is written.
     pub(crate) fn apply_style(&mut self, result: Result<Style, ai::AiError>) {
-        let style = match result {
-            Ok(s) => s,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(style) = self.ok_or_report(result) else {
+            return;
         };
         let findings = style
             .findings
@@ -1791,12 +1339,8 @@ impl App {
     /// finding (`focus: concern`, plus a quoted span for line-level issues) and
     /// surface them in the findings list.
     pub(crate) fn apply_editorial(&mut self, result: Result<Vec<ai::editorial::Note>, ai::AiError>) {
-        let notes = match result {
-            Ok(n) => n,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(notes) = self.ok_or_report(result) else {
+            return;
         };
         let findings = notes
             .into_iter()
@@ -1815,12 +1359,8 @@ impl App {
     /// Apply a character-voice pass (#183): surface the observations as findings,
     /// naming the character each concerns. Pure analysis — nothing is written.
     pub(crate) fn apply_voice(&mut self, result: Result<voice::Voice, ai::AiError>) {
-        let voice = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.message = Some(format!("AI: {e}"));
-                return;
-            }
+        let Some(voice) = self.ok_or_report(result) else {
+            return;
         };
         let findings = voice
             .findings
@@ -1913,68 +1453,6 @@ impl App {
         }
     }
 
-    /// Open a findings-only result (analysis passes that write no bible file):
-    /// clear any prior overlay, stash the findings, and open the overlay.
-    fn show_findings(&mut self, findings: Vec<Finding>) {
-        self.overlay = None;
-        self.accumulate_triage(&findings);
-        self.pending_findings = findings;
-        self.open_findings();
-    }
-
-    /// Write a single bible file and surface a set of findings — the shared shape
-    /// of the continuity and setting passes. Clears any prior overlay, stashes the
-    /// findings, writes the file, then opens the findings overlay — or, if the
-    /// file was hand-edited, reviews that conflict first (`advance_bible_review`
-    /// flushes the findings when the review queue drains).
-    fn apply_bible_with_findings(
-        &mut self,
-        path: PathBuf,
-        name: &str,
-        render: impl Fn(&str) -> String,
-        findings: Vec<Finding>,
-    ) {
-        self.overlay = None;
-        self.accumulate_triage(&findings);
-        self.pending_findings = findings;
-        match self.stage_bible(path, name, render) {
-            Staged::Wrote => {
-                self.record_pass_state(); // the bible now reflects this manuscript state (#90)
-                self.open_findings();
-            }
-            Staged::Conflict(conflict) => {
-                self.mode = Mode::BibleReview(Box::new(BibleReview {
-                    conflicts: vec![conflict],
-                    editing: None,
-                }));
-                self.message = Some(format!("{name} edited — review, then findings"));
-            }
-            Staged::Failed(msg) => {
-                // The analysis still holds, so show the findings — but report the
-                // failed write instead of claiming it was saved to the bible.
-                self.message = Some(write_failure_message(&[msg]));
-                let items = std::mem::take(&mut self.pending_findings);
-                if !items.is_empty() {
-                    self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
-                }
-            }
-        }
-    }
-
-    /// Open the stashed findings as a triage overlay, or summarize when there are
-    /// none (the bible file has already been written).
-    fn open_findings(&mut self) {
-        let items = std::mem::take(&mut self.pending_findings);
-        if items.is_empty() {
-            self.show_ai(vec![
-                Line::raw("Analysis complete."),
-                Line::raw(""),
-                Line::raw("Written to the story bible. No findings."),
-            ]);
-        } else {
-            self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
-        }
-    }
 
     /// Whether an AI request is currently in flight (for the status indicator).
     pub fn ai_busy(&self) -> bool {
@@ -1983,190 +1461,7 @@ impl App {
 
     // --- Story-bible conflict review --------------------------------------
 
-    pub(crate) fn on_key_bible_review(&mut self, key: KeyEvent) {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let editing = matches!(&self.mode, Mode::BibleReview(r) if r.editing.is_some());
 
-        if editing {
-            // Editing the proposed version before saving (same text keys as
-            // EditMeta, with bible-specific Ctrl-S / Esc).
-            match (ctrl, key.code) {
-                (true, KeyCode::Char('s')) => self.save_bible_edit(),
-                (_, KeyCode::Esc) => {
-                    if let Mode::BibleReview(r) = &mut self.mode {
-                        r.editing = None; // back to the diff for this conflict
-                    }
-                }
-                _ => {
-                    self.handle_text_edit_key(key);
-                }
-            }
-            return;
-        }
-
-        // Diff view: choose how to resolve the front conflict.
-        match key.code {
-            KeyCode::Char('o') => {
-                let failed = if let Mode::BibleReview(r) = &self.mode {
-                    r.conflicts
-                        .first()
-                        .and_then(|front| self.write_file(&front.path, &front.proposed).err())
-                } else {
-                    None
-                };
-                // A failed overwrite keeps the conflict (so the author can retry)
-                // and reports the error rather than silently advancing.
-                if let Some(msg) = failed {
-                    self.message = Some(write_failure_message(&[msg]));
-                } else {
-                    self.advance_bible_review();
-                }
-            }
-            KeyCode::Char('k') => self.advance_bible_review(),
-            KeyCode::Char('e') => {
-                if let Mode::BibleReview(r) = &mut self.mode {
-                    if let Some(front) = r.conflicts.first() {
-                        let buf = Buffer::from_text(&front.proposed);
-                        r.editing = Some(buf);
-                    }
-                }
-            }
-            KeyCode::Esc => {
-                self.mode = self.editing_mode();
-                self.message = Some("Review cancelled — kept your versions".into());
-            }
-            _ => {}
-        }
-    }
-
-    /// Persist the edited proposed version, then advance to the next conflict. A
-    /// failed write keeps the conflict and reports the error (#153).
-    fn save_bible_edit(&mut self) {
-        let failed = if let Mode::BibleReview(r) = &self.mode {
-            r.conflicts
-                .first()
-                .zip(r.editing.as_ref())
-                .and_then(|(front, buf)| self.write_file(&front.path, &buf.text()).err())
-        } else {
-            None
-        };
-        if let Some(msg) = failed {
-            self.message = Some(write_failure_message(&[msg]));
-            return; // leave the editor open on the unsaved conflict
-        }
-        if let Mode::BibleReview(r) = &mut self.mode {
-            r.editing = None;
-        }
-        self.advance_bible_review();
-    }
-
-    /// Drop the resolved front conflict; close the review when the queue empties.
-    fn advance_bible_review(&mut self) {
-        if let Mode::BibleReview(r) = &mut self.mode {
-            if !r.conflicts.is_empty() {
-                r.conflicts.remove(0);
-            }
-            if !r.conflicts.is_empty() {
-                return;
-            }
-        }
-        // Queue drained. A continuity pass leaves findings stashed — show them now;
-        // a character pass leaves none, so this falls back to insert mode.
-        if self.pending_findings.is_empty() {
-            self.mode = self.editing_mode();
-            self.message = Some("Bible review complete".into());
-        } else {
-            self.open_findings();
-        }
-    }
-
-    pub(crate) fn on_key_findings(&mut self, key: KeyEvent) {
-        let Mode::Findings(f) = &mut self.mode else {
-            return;
-        };
-        if let Some(s) = list_move(f.selected, f.items.len(), key.code) {
-            f.selected = s;
-            return;
-        }
-        match key.code {
-            KeyCode::Char('d') => {
-                if f.selected < f.items.len() {
-                    f.items.remove(f.selected);
-                    if f.items.is_empty() {
-                        self.mode = self.editing_mode();
-                    } else {
-                        f.selected = f.selected.min(f.items.len() - 1);
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                let target = f.items.get(f.selected).and_then(|it| it.chapters.first()).cloned();
-                self.mode = self.editing_mode();
-                if let Some(title) = target {
-                    if let Some(i) = (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title.as_str())) {
-                        self.activate_chapter(i);
-                    } else {
-                        self.message = Some(format!("Chapter '{title}' not found"));
-                    }
-                }
-            }
-            // Turn the finding into an `xxx` TODO marker in its chapter (a note,
-            // not prose). The keypress is the confirmation.
-            KeyCode::Char('i') => {
-                if let Some(item) = f.items.get(f.selected) {
-                    let chapter = item.chapters.first().cloned();
-                    let note = item.summary.clone();
-                    if let Some(title) = chapter {
-                        self.insert_todo(&title, &note);
-                    } else {
-                        self.message = Some("No chapter to mark".into());
-                    }
-                }
-            }
-            KeyCode::Esc => self.mode = Mode::Insert,
-            _ => {}
-        }
-    }
-
-    /// Append an `xxx — <note>` TODO marker to the body of the chapter titled
-    /// `title` (a note for the author; never prose). The active chapter is
-    /// flushed and reloaded so its open buffer sees the marker; other chapters
-    /// are appended on disk.
-    fn insert_todo(&mut self, title: &str, note: &str) {
-        let Some(i) = (0..self.chapter_count())
-            .find(|&i| self.project.chapter_title(i) == Some(title))
-        else {
-            self.message = Some(format!("Chapter '{title}' not found"));
-            return;
-        };
-        let marker = format!("\n\nxxx — {note}\n");
-
-        if i == self.project.active_index() {
-            // Persist current edits, append, and reload so the buffer is current.
-            if self.flush_active().is_err() {
-                return;
-            }
-        }
-        let path = self.project.chapter_path(i);
-        let mut body = std::fs::read_to_string(&path).unwrap_or_default();
-        body.push_str(&marker);
-        if std::fs::write(&path, body).is_err() {
-            self.message = Some("Failed to write marker".into());
-            return;
-        }
-        if i == self.project.active_index() {
-            // Reload so the open buffer shows the marker and isn't overwritten on
-            // the next save.
-            if let Ok(buffer) = Buffer::from_path(&path) {
-                self.buffer = buffer;
-            }
-            self.cache_focus_words();
-        }
-        // Non-active chapters: the marker is on disk; the report's `xxx` count
-        // reads bodies live, and leaving the word cache untouched keeps an
-        // AI-inserted note out of the author's word tally.
-        self.message = Some(format!("Marked xxx in '{title}'"));
-    }
 }
 
 /// The new selection for a navigable list given a key, or `None` if the key
@@ -2180,19 +1475,6 @@ pub(super) fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<us
     }
 }
 
-fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
-    TextDiff::from_lines(current, proposed)
-        .iter_all_changes()
-        .map(|change| {
-            let sign = match change.tag() {
-                ChangeTag::Delete => '-',
-                ChangeTag::Insert => '+',
-                ChangeTag::Equal => ' ',
-            };
-            format!("{sign}{}", change.value().trim_end_matches('\n'))
-        })
-        .collect()
-}
 
 /// The summary overlay shown after a clean character pass (no conflicts).
 /// The Markdown files to import from `path` (#283): the file itself if it's a
