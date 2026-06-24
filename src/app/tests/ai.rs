@@ -26,19 +26,18 @@ impl Backend for MockBackend {
 
 #[test]
 fn ask_with_ai_off_explains_how_to_enable() {
-    let (mut app, dir) = two_chapter_app("ai-off");
+    let (mut app, _dir) = two_chapter_app("ai-off");
     app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
     app.ask_ai("who is the protagonist?");
     assert!(!app.ai_task.is_busy(), "nothing should be sent when AI is off");
     assert!(app.overlay.is_none());
     assert!(app.message.as_deref().unwrap_or("").contains("off"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 #[cfg(not(feature = "local"))]
 fn offline_mode_selects_the_local_backend() {
-    let (mut app, dir) = two_chapter_app("ai-offline");
+    let (mut app, _dir) = two_chapter_app("ai-offline");
     app.ai = ai::Settings { enabled: true, offline: true, ..ai::Settings::default() };
     // Offline forces the local backend, even with a key present.
     app.ai.api_key = Some("k".into());
@@ -48,22 +47,20 @@ fn offline_mode_selects_the_local_backend() {
     // message explains how to enable it (rather than silently using Claude).
     assert!(!app.ai_task.is_busy());
     assert!(app.message.as_deref().unwrap_or("").contains("local"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 
 #[test]
 fn manuscript_text_includes_every_chapter() {
-    let (app, dir) = two_chapter_app("ai-manuscript");
+    let (app, _dir) = two_chapter_app("ai-manuscript");
     let m = app.manuscript_text();
     assert!(m.contains("# One") && m.contains("first chapter"), "{m}");
     assert!(m.contains("# Two") && m.contains("second chapter"), "{m}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn qa_answer_opens_the_overlay() {
-    let (mut app, dir) = two_chapter_app("ai-answer");
+    let (mut app, _dir) = two_chapter_app("ai-answer");
     // Drive the Q&A core with a mock backend (no network): build the request from
     // the manuscript, complete it, and apply the result like the async path does.
     let backend = MockBackend { result: Ok("Chapter One is about a locket.".into()) };
@@ -76,30 +73,27 @@ fn qa_answer_opens_the_overlay() {
         .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
         .collect();
     assert!(text.contains("about a locket"), "{text}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn qa_error_sets_a_message_not_a_panel() {
-    let (mut app, dir) = two_chapter_app("ai-err");
+    let (mut app, _dir) = two_chapter_app("ai-err");
     let backend = MockBackend { result: Err(()) };
     let req = ai::build_qa_request(app.manuscript_text(), "q", &app.ai.model);
     app.apply_qa_result(backend.complete(&req));
     assert!(app.overlay.is_none());
     assert!(app.message.as_deref().unwrap_or("").contains("boom"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: character tracking + story bible -----------------------------------
 
 #[test]
 fn enrich_mentions_counts_names_and_last_chapter() {
-    let (app, dir) = two_chapter_app("char-mentions"); // "first chapter" / "second chapter"
+    let (app, _dir) = two_chapter_app("char-mentions"); // "first chapter" / "second chapter"
     let mut c = Character { name: "chapter".into(), ..Default::default() };
     app.enrich_mentions(&mut c);
     assert_eq!(c.mentions, 2); // once in each chapter body
     assert_eq!(c.last_chapter.as_deref(), Some("Two"));
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -118,7 +112,6 @@ fn character_pass_writes_bible_files_and_summarizes() {
     assert!(content.contains("escape"));
     assert!(app.overlay.is_some(), "summary overlay should open");
     assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts → no review");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -137,12 +130,11 @@ fn failed_bible_write_is_reported_not_counted_as_success() {
     );
     assert!(app.overlay.is_none(), "no success summary when the write failed");
     assert!(!matches!(app.mode, Mode::BibleReview(_)), "a write failure isn't a conflict");
-    fs::remove_dir_all(&dir).ok();
 }
 
 /// Set up a project with a clean, then hand-edited, Mara profile; a second pass
 /// with new content must not overwrite it.
-fn conflict_app(name: &str) -> (App, PathBuf, PathBuf) {
+fn conflict_app(name: &str) -> (App, TempProject, PathBuf) {
     let (mut app, dir) = two_chapter_app(name);
     app.apply_characters(Ok(vec![Character {
         name: "Mara".into(),
@@ -163,36 +155,33 @@ fn conflict_app(name: &str) -> (App, PathBuf, PathBuf) {
 
 #[test]
 fn hand_edited_profile_enters_review_without_clobbering() {
-    let (app, dir, file) = conflict_app("char-conflict");
+    let (app, _dir, file) = conflict_app("char-conflict");
     assert!(matches!(app.mode, Mode::BibleReview(_)), "should queue a review");
     assert!(
         fs::read_to_string(&file).unwrap().contains("blue eyes"),
         "the hand edit must survive until resolved"
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn review_overwrite_writes_the_proposed_version() {
-    let (mut app, dir, file) = conflict_app("char-resolve-o");
+    let (mut app, _dir, file) = conflict_app("char-resolve-o");
     app.on_key(key(KeyCode::Char('o')));
     assert!(matches!(app.mode, Mode::Insert), "single conflict resolved → done");
     assert!(fs::read_to_string(&file).unwrap().contains("hazel eyes"), "proposed written");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn review_keep_preserves_the_authors_version() {
-    let (mut app, dir, file) = conflict_app("char-resolve-k");
+    let (mut app, _dir, file) = conflict_app("char-resolve-k");
     app.on_key(key(KeyCode::Char('k')));
     assert!(matches!(app.mode, Mode::Insert));
     assert!(fs::read_to_string(&file).unwrap().contains("blue eyes"), "kept the hand edit");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn review_edit_then_save_writes_the_edited_version() {
-    let (mut app, dir, file) = conflict_app("char-resolve-e");
+    let (mut app, _dir, file) = conflict_app("char-resolve-e");
     app.on_key(key(KeyCode::Char('e'))); // load proposed into the scratch editor
     assert!(matches!(&app.mode, Mode::BibleReview(r) if r.editing.is_some()));
     app.edit_buffer_mut().insert_char('!'); // tweak the proposed version
@@ -200,7 +189,6 @@ fn review_edit_then_save_writes_the_edited_version() {
     assert!(matches!(app.mode, Mode::Insert));
     let saved = fs::read_to_string(&file).unwrap();
     assert!(saved.contains("hazel eyes") && saved.contains('!'), "edited proposal saved");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: timeline & continuity ---------------------------------------------
@@ -227,7 +215,6 @@ fn continuity_writes_timeline_and_opens_findings() {
     let tl = fs::read_to_string(dir.join("bible/timeline.md")).expect("timeline written");
     assert!(tl.contains("alpha event"));
     assert!(matches!(app.mode, Mode::Findings(_)), "findings overlay should open");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -237,12 +224,11 @@ fn continuity_with_no_findings_summarizes() {
     assert!(dir.join("bible/timeline.md").exists());
     assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::Findings(_)));
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn findings_dismiss_removes_and_closes_when_empty() {
-    let (mut app, dir) = two_chapter_app("cont-dismiss");
+    let (mut app, _dir) = two_chapter_app("cont-dismiss");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
         kind: "age".into(),
         detail: "Mara is 30 then 28".into(),
@@ -251,12 +237,11 @@ fn findings_dismiss_removes_and_closes_when_empty() {
     assert!(matches!(app.mode, Mode::Findings(_)));
     app.on_key(key(KeyCode::Char('d'))); // dismiss the only finding
     assert!(matches!(app.mode, Mode::Insert), "empty list closes");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn findings_jump_activates_the_chapter() {
-    let (mut app, dir) = two_chapter_app("cont-jump");
+    let (mut app, _dir) = two_chapter_app("cont-jump");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
         kind: "location".into(),
         detail: "two places at once".into(),
@@ -265,7 +250,6 @@ fn findings_jump_activates_the_chapter() {
     app.on_key(key(KeyCode::Enter)); // jump to the finding's chapter
     assert!(matches!(app.mode, Mode::Insert));
     assert_eq!(app.project.active_index(), 1, "jumped to chapter Two");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -292,7 +276,6 @@ fn hand_edited_timeline_reviews_then_shows_findings() {
 
     app.on_key(key(KeyCode::Char('k'))); // keep mine → drains queue → findings open
     assert!(matches!(app.mode, Mode::Findings(_)), "findings follow the review");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: setting & worldbuilding -------------------------------------------
@@ -317,7 +300,6 @@ fn setting_writes_bible_and_opens_rule_findings() {
     assert!(file.contains("## Magic system"));
     assert!(file.contains("## Gazetteer"));
     assert!(matches!(app.mode, Mode::Findings(_)), "rule findings overlay opens");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -332,7 +314,6 @@ fn setting_with_no_violations_summarizes() {
     assert!(dir.join("bible/setting.md").exists());
     assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::Findings(_)));
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: scaffolding (outline + gaps + xxx insertion) ----------------------
@@ -349,7 +330,6 @@ fn scaffold_writes_outline_and_opens_gap_findings() {
     assert!(file.contains("## One") && file.contains("a beat"));
     assert!(file.contains("## Gaps"));
     assert!(matches!(app.mode, Mode::Findings(_)), "gap findings overlay opens");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -363,19 +343,17 @@ fn marking_a_finding_inserts_an_xxx_todo_in_a_nonactive_chapter() {
     app.on_key(key(KeyCode::Char('i'))); // mark xxx in "Two" (non-active → file)
     assert!(app.count_todo() > before, "the report's xxx count should rise");
     assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("xxx"), "marker on disk");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn marking_a_finding_in_the_active_chapter_updates_the_buffer() {
-    let (mut app, dir) = two_chapter_app("mark-active"); // active is "One"
+    let (mut app, _dir) = two_chapter_app("mark-active"); // active is "One"
     app.apply_scaffold(Ok(Scaffold {
         outline: vec![],
         gaps: vec![scaffold::Gap { detail: "weak open".into(), chapter: "One".into() }],
     }));
     app.on_key(key(KeyCode::Char('i')));
     assert!(app.buffer.text().contains("xxx"), "marker shows in the active buffer");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: naming & term consistency -----------------------------------------
@@ -396,12 +374,11 @@ fn known_entities_reads_gazetteer_and_character_names() {
     assert!(e.contains(&"lightsteel".to_string()));
     assert!(e.contains(&"Mara Vance".to_string()));
     assert!(!e.contains(&"nope".to_string()), "only the Gazetteer section is read");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn naming_findings_open_the_overlay() {
-    let (mut app, dir) = two_chapter_app("naming");
+    let (mut app, _dir) = two_chapter_app("naming");
     app.apply_naming(Ok(Naming {
         findings: vec![naming::NameFinding {
             name: "Mara".into(),
@@ -410,34 +387,31 @@ fn naming_findings_open_the_overlay() {
         }],
     }));
     assert!(matches!(app.mode, Mode::Findings(_)));
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn naming_with_no_variants_summarizes() {
-    let (mut app, dir) = two_chapter_app("naming-clean");
+    let (mut app, _dir) = two_chapter_app("naming-clean");
     app.apply_naming(Ok(Naming { findings: vec![] }));
     assert!(app.overlay.is_some());
     assert!(!matches!(app.mode, Mode::Findings(_)));
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: command palette ----------------------------------------------------
 
 #[test]
 fn palette_opens_with_the_ai_actions() {
-    let (mut app, dir) = two_chapter_app("palette");
+    let (mut app, _dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
         Mode::Palette(p) => assert_eq!(p.items.len(), 20, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn word_search_prompt_is_prefilled_with_the_word_under_the_cursor() {
-    let (mut app, dir) = two_chapter_app("thesaurus-prefill");
+    let (mut app, _dir) = two_chapter_app("thesaurus-prefill");
     app.start_thesaurus(); // cursor is at the start of "first chapter"
     match &app.mode {
         Mode::Prompt(s) => {
@@ -446,24 +420,22 @@ fn word_search_prompt_is_prefilled_with_the_word_under_the_cursor() {
         }
         _ => panic!("word search should open a prompt"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn applying_word_search_results_opens_the_overlay() {
-    let (mut app, dir) = two_chapter_app("thesaurus-apply");
+    let (mut app, _dir) = two_chapter_app("thesaurus-apply");
     let words = crate::ai::thesaurus::parse(
         r#"{"words":[{"text":"melancholy","definition":"a pensive sadness","syllables":4}]}"#,
     )
     .unwrap();
     app.apply_thesaurus(Ok(words));
     assert!(app.overlay.is_some(), "candidates are shown in the AI overlay");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn editorial_read_flags_land_in_the_findings_list_tagged_by_lens() {
-    let (mut app, dir) = two_chapter_app("editorial");
+    let (mut app, _dir) = two_chapter_app("editorial");
     let notes = crate::ai::editorial::parse(
         r#"{"notes":[
             {"focus":"structural","chapters":["One"],"concern":"the opening lacks stakes"},
@@ -484,37 +456,33 @@ fn editorial_read_flags_land_in_the_findings_list_tagged_by_lens() {
         }
         _ => panic!("editorial flags should open the findings list"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn palette_down_moves_the_selection() {
-    let (mut app, dir) = two_chapter_app("palette-nav");
+    let (mut app, _dir) = two_chapter_app("palette-nav");
     app.open_ai_palette();
     app.on_key(key(KeyCode::Down));
     match &app.mode {
         Mode::Palette(p) => assert_eq!(p.selected, 1),
         _ => panic!("expected the palette"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn palette_enter_on_ask_opens_the_question_prompt() {
-    let (mut app, dir) = two_chapter_app("palette-ask");
+    let (mut app, _dir) = two_chapter_app("palette-ask");
     app.open_ai_palette(); // "Ask the manuscript" is the first item
     app.on_key(key(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::Prompt(_)), "Ask opens the question prompt");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn palette_esc_closes_to_insert() {
-    let (mut app, dir) = two_chapter_app("palette-esc");
+    let (mut app, _dir) = two_chapter_app("palette-esc");
     app.open_ai_palette();
     app.on_key(key(KeyCode::Esc));
     assert!(matches!(app.mode, Mode::Insert));
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #255: brainstorm (generative, from a premise) --------------------------
@@ -534,57 +502,51 @@ fn brainstorm_writes_an_off_manuscript_doc() {
     assert!(doc.contains("## What if") && doc.contains("## Central conflicts"));
     assert!(doc.contains("Generated by Quill"), "marked AI-generated");
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn brainstorm_action_opens_a_premise_prompt() {
-    let (mut app, dir) = two_chapter_app("brainstorm-prompt");
+    let (mut app, _dir) = two_chapter_app("brainstorm-prompt");
     app.run_ai_action(crate::mode::AiAction::Brainstorm, false);
     assert!(matches!(app.mode, Mode::Prompt(_)), "asks for a premise");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn empty_premise_sends_nothing() {
-    let (mut app, dir) = two_chapter_app("brainstorm-empty");
+    let (mut app, _dir) = two_chapter_app("brainstorm-empty");
     app.ai = ai::Settings::default();
     app.ai.enabled = true;
     app.ai.api_key = Some("k".into());
     app.brainstorm("   ");
     assert!(!app.ai_task.is_busy(), "an empty premise sends no request");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #256: draft characters from a concept ----------------------------------
 
 #[test]
 fn draft_characters_action_opens_a_concept_prompt() {
-    let (mut app, dir) = two_chapter_app("draft-chars-prompt");
+    let (mut app, _dir) = two_chapter_app("draft-chars-prompt");
     app.run_ai_action(crate::mode::AiAction::DraftCharacters, false);
     assert!(matches!(app.mode, Mode::Prompt(_)), "asks for a concept");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn empty_concept_sends_nothing() {
-    let (mut app, dir) = two_chapter_app("draft-chars-empty");
+    let (mut app, _dir) = two_chapter_app("draft-chars-empty");
     app.ai = ai::Settings::default();
     app.ai.enabled = true;
     app.ai.api_key = Some("k".into());
     app.draft_characters("  ");
     assert!(!app.ai_task.is_busy(), "an empty concept sends no request");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #257: draft setting from a concept -------------------------------------
 
 #[test]
 fn draft_setting_action_opens_a_concept_prompt() {
-    let (mut app, dir) = two_chapter_app("draft-setting-prompt");
+    let (mut app, _dir) = two_chapter_app("draft-setting-prompt");
     app.run_ai_action(crate::mode::AiAction::DraftSetting, false);
     assert!(matches!(app.mode, Mode::Prompt(_)), "asks for a concept");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -608,7 +570,6 @@ fn drafted_setting_writes_to_the_bible_off_manuscript() {
     assert!(bible.contains("Geography & locations") && bible.contains("Saltmere"));
     assert!(bible.contains("Generated by Quill"), "marked AI-generated");
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -627,14 +588,13 @@ fn drafted_characters_write_to_the_bible_off_manuscript() {
     assert!(profile.contains("## Goals") && profile.contains("locket"));
     assert!(profile.contains("Generated by Quill"), "marked AI-generated");
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: prose & style ------------------------------------------------------
 
 #[test]
 fn style_findings_open_the_overlay() {
-    let (mut app, dir) = two_chapter_app("style");
+    let (mut app, _dir) = two_chapter_app("style");
     app.apply_style(Ok(ai::style::Style {
         findings: vec![ai::style::StyleFinding {
             kind: "POV".into(),
@@ -643,14 +603,13 @@ fn style_findings_open_the_overlay() {
         }],
     }));
     assert!(matches!(app.mode, Mode::Findings(_)));
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #183: character voice analysis -----------------------------------------
 
 #[test]
 fn voice_findings_open_the_overlay_and_name_the_character() {
-    let (mut app, dir) = two_chapter_app("voice");
+    let (mut app, _dir) = two_chapter_app("voice");
     app.apply_voice(Ok(ai::voice::Voice {
         findings: vec![ai::voice::VoiceFinding {
             kind: "dialogue".into(),
@@ -668,12 +627,11 @@ fn voice_findings_open_the_overlay_and_name_the_character() {
     }
     // Voice findings feed revision triage like the other passes.
     assert_eq!(app.triage.len(), 1);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn voice_pass_needs_the_character_bible() {
-    let (mut app, dir) = two_chapter_app("voice-no-bible");
+    let (mut app, _dir) = two_chapter_app("voice-no-bible");
     app.ai = ai::Settings::default();
     app.ai.enabled = true;
     app.ai.api_key = Some("k".into());
@@ -684,7 +642,6 @@ fn voice_pass_needs_the_character_bible() {
         "{:?}",
         app.message
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -701,16 +658,14 @@ fn voice_pass_needs_voice_profiles_not_just_a_character_file() {
     app.analyze_voice();
     assert!(!app.ai_task.is_busy());
     assert!(app.message.as_deref().unwrap_or("").contains("character pass first"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn style_with_no_findings_summarizes() {
-    let (mut app, dir) = two_chapter_app("style-clean");
+    let (mut app, _dir) = two_chapter_app("style-clean");
     app.apply_style(Ok(ai::style::Style { findings: vec![] }));
     assert!(app.overlay.is_some());
     assert!(!matches!(app.mode, Mode::Findings(_)));
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: submission material ------------------------------------------------
@@ -728,14 +683,13 @@ fn submission_writes_three_artifacts_and_summarizes() {
     assert!(fs::read_to_string(dir.join("submission/query.md")).unwrap().contains("Dear Agent"));
     assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts on a fresh write");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- Local analysis report --------------------------------------------------
 
 #[test]
 fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
-    let (mut app, dir) = two_chapter_app("analysis-open");
+    let (mut app, _dir) = two_chapter_app("analysis-open");
     assert!(app.overlay.is_none());
     app.on_key(ctrl('t'));
     let lines = app.overlay_lines().expect("analysis report opens");
@@ -748,12 +702,11 @@ fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
     assert!(text.contains("Sentence length"), "sentence section: {text}");
     assert!(text.contains("One") && text.contains("Two"), "both chapters listed: {text}");
     assert!(text.contains("Whole manuscript"), "overall row: {text}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn a_non_scroll_key_closes_the_analysis_report() {
-    let (mut app, dir) = two_chapter_app("analysis-close");
+    let (mut app, _dir) = two_chapter_app("analysis-close");
     app.viewport_height = 5;
     app.on_key(ctrl('t'));
     app.on_key(key(KeyCode::Down)); // scroll a bit first
@@ -761,12 +714,11 @@ fn a_non_scroll_key_closes_the_analysis_report() {
     app.on_key(key(KeyCode::Char('x'))); // not a scroll key → close
     assert!(app.overlay.is_none(), "a non-scroll key dismisses the report");
     assert_eq!(app.overlay_scroll(), 0, "scroll resets on close");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn the_analysis_report_scrolls_and_clamps() {
-    let (mut app, dir) = two_chapter_app("analysis-scroll");
+    let (mut app, _dir) = two_chapter_app("analysis-scroll");
     app.viewport_height = 5; // tiny screen → 3-row interior
     app.on_key(ctrl('t'));
     let len = app.overlay_lines().unwrap().len() as u16;
@@ -782,7 +734,6 @@ fn the_analysis_report_scrolls_and_clamps() {
     assert!(app.overlay.is_some(), "scroll keys don't close the overlay");
     app.on_key(key(KeyCode::Home));
     assert_eq!(app.overlay_scroll(), 0, "Home jumps back to the top");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -795,7 +746,6 @@ fn submission_never_touches_the_manuscript() {
         query: "Q".into(),
     }));
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #236: marketing copy ---------------------------------------------------
@@ -814,7 +764,6 @@ fn marketing_writes_blurbs_and_taglines_off_manuscript() {
     assert!(fs::read_to_string(dir.join("marketing/taglines.md")).unwrap().contains("- Some doors stay shut"));
     assert!(app.overlay.is_some(), "summary overlay");
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -826,7 +775,6 @@ fn marketing_with_no_taglines_writes_only_blurbs() {
     }));
     assert!(dir.join("marketing/blurbs.md").exists());
     assert!(!dir.join("marketing/taglines.md").exists(), "no empty taglines file");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #237: social posts -----------------------------------------------------
@@ -845,7 +793,6 @@ fn social_writes_a_file_per_platform_off_manuscript() {
     assert!(fs::read_to_string(dir.join("marketing/social/instagram.md")).unwrap().contains("#booklover"));
     assert!(app.overlay.is_some(), "summary overlay");
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -859,7 +806,6 @@ fn social_skips_a_platform_with_no_posts() {
     assert!(dir.join("marketing/social/x.md").exists());
     assert!(!dir.join("marketing/social/facebook.md").exists(), "no empty facebook file");
     assert!(!dir.join("marketing/social/instagram.md").exists());
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #251: ad creative ------------------------------------------------------
@@ -884,7 +830,6 @@ fn ad_creative_writes_a_file_per_platform_off_manuscript() {
     assert!(fs::read_to_string(dir.join("marketing/ads/x.md")).unwrap().contains("## Ad image"));
     assert!(app.overlay.is_some(), "summary overlay");
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -895,7 +840,6 @@ fn ad_creative_picks_up_existing_marketing_copy() {
     fs::write(mk.join("blurbs.md"), "---\ntitle: x\n---\n\n<!-- generated:start -->\nA locket and a lie.\n<!-- generated:end -->\n").unwrap();
     let ctx = app.marketing_copy_context();
     assert!(ctx.contains("A locket and a lie"), "reads existing marketing copy: {ctx:?}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- #238: character portraits ----------------------------------------------
@@ -922,17 +866,15 @@ fn portrait_pass_needs_image_generation_enabled() {
         "{:?}",
         app.message
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn portrait_pass_needs_the_character_bible() {
-    let (mut app, dir) = two_chapter_app("portrait-no-bible");
+    let (mut app, _dir) = two_chapter_app("portrait-no-bible");
     image_on(&mut app);
     app.start_portrait(); // no bible/characters yet
     assert!(!matches!(app.mode, Mode::Prompt(_)));
     assert!(app.message.as_deref().unwrap_or("").contains("character pass first"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -951,7 +893,6 @@ fn portrait_pass_opens_a_character_picker() {
         }
         _ => panic!("expected the character picker"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -965,7 +906,6 @@ fn picking_all_confirms_the_whole_cast() {
         Mode::Prompt(p) => assert!(p.label.contains("2 character portraits"), "{}", p.label),
         _ => panic!("expected the cost confirm"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -984,7 +924,6 @@ fn picking_one_confirms_and_generates_only_that_character() {
     let pending = app.pending_portraits.as_ref().expect("a selection is staged");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].0, "tomas", "the picked slug");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -996,18 +935,16 @@ fn cancelling_the_portrait_confirm_discards_the_selection() {
     assert!(app.pending_portraits.is_some());
     app.on_key(key(KeyCode::Esc)); // decline the confirm
     assert!(app.pending_portraits.is_none(), "the staged selection is dropped");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn image_results_summarize_saved_and_failed() {
-    let (mut app, dir) = two_chapter_app("image-apply");
+    let (mut app, _dir) = two_chapter_app("image-apply");
     app.apply_images(Ok(ai::image::ImageReport {
         saved: vec!["marketing/images/characters/mara.jpg".into()],
         failed: vec!["Tomas: network error".into()],
     }));
     assert!(app.overlay.is_some(), "summary overlay opens");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1027,22 +964,20 @@ fn image_pass_reports_when_the_local_backend_isnt_compiled() {
         "explains how to enable: {:?}",
         app.message
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn scene_pass_needs_image_generation_enabled() {
-    let (mut app, dir) = two_chapter_app("scene-off");
+    let (mut app, _dir) = two_chapter_app("scene-off");
     app.image = ai::image::ImageSettings::default(); // off
     app.start_scene();
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm when image gen is off");
     assert!(app.message.as_deref().unwrap_or("").contains("Image generation is off"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn scene_pass_confirms_for_the_active_chapter() {
-    let (mut app, dir) = two_chapter_app("scene-confirm");
+    let (mut app, _dir) = two_chapter_app("scene-confirm");
     image_on(&mut app);
     // The active chapter ("One") has prose in two_chapter_app, so there's a scene.
     app.start_scene();
@@ -1053,19 +988,17 @@ fn scene_pass_confirms_for_the_active_chapter() {
         }
         _ => panic!("expected the scene cost confirm"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn scene_pass_needs_chapter_text() {
-    let (mut app, dir) = two_chapter_app("scene-empty");
+    let (mut app, _dir) = two_chapter_app("scene-empty");
     image_on(&mut app);
     // Empty the active chapter's buffer so there's nothing to illustrate.
     app.buffer = crate::buffer::Buffer::from_text("");
     app.start_scene();
     assert!(!matches!(app.mode, Mode::Prompt(_)));
     assert!(app.message.as_deref().unwrap_or("").contains("no text to illustrate"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- AI: cost confirm & revision triage -------------------------------------
@@ -1079,7 +1012,7 @@ fn findings_len(app: &App) -> usize {
 
 #[test]
 fn an_expensive_pass_asks_for_confirmation_first() {
-    let (mut app, dir) = two_chapter_app("cost-confirm");
+    let (mut app, _dir) = two_chapter_app("cost-confirm");
     app.ai.cost_threshold = 0.0; // any non-empty manuscript exceeds it
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     match &app.mode {
@@ -1089,45 +1022,41 @@ fn an_expensive_pass_asks_for_confirmation_first() {
         }
         _ => panic!("expected the cost confirm prompt"),
     }
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn a_cheap_pass_runs_without_confirmation() {
-    let (mut app, dir) = two_chapter_app("cost-cheap");
+    let (mut app, _dir) = two_chapter_app("cost-cheap");
     app.ai.cost_threshold = 1_000.0; // nothing this small could exceed it
     app.start_ai_action(crate::mode::AiAction::Style, false);
     // It dispatched straight through (no key configured → a status message),
     // never stopping at a confirm prompt.
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm for a cheap pass");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn confirming_an_expensive_pass_dispatches_it() {
-    let (mut app, dir) = two_chapter_app("cost-yes");
+    let (mut app, _dir) = two_chapter_app("cost-yes");
     app.ai.cost_threshold = 0.0;
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     assert!(matches!(app.mode, Mode::Prompt(_)));
     app.on_key(key(KeyCode::Char('y'))); // confirm → dispatch (no key → message)
     assert!(!matches!(app.mode, Mode::Prompt(_)), "confirm closes the prompt");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn declining_an_expensive_pass_cancels_it() {
-    let (mut app, dir) = two_chapter_app("cost-no");
+    let (mut app, _dir) = two_chapter_app("cost-no");
     app.ai.cost_threshold = 0.0;
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     app.on_key(key(KeyCode::Char('n')));
     assert!(matches!(app.mode, Mode::Insert), "declining returns to editing");
     assert!(!app.ai_task.is_busy(), "nothing was sent");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn triage_accumulates_findings_across_passes_deduped() {
-    let (mut app, dir) = two_chapter_app("triage-accum");
+    let (mut app, _dir) = two_chapter_app("triage-accum");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
         kind: "object".into(),
         detail: "the locket changes color".into(),
@@ -1148,16 +1077,14 @@ fn triage_accumulates_findings_across_passes_deduped() {
     }])));
     app.open_triage();
     assert_eq!(findings_len(&app), 2, "two distinct findings, deduped");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn triage_with_no_findings_shows_a_message() {
-    let (mut app, dir) = two_chapter_app("triage-empty");
+    let (mut app, _dir) = two_chapter_app("triage-empty");
     app.open_triage();
     assert!(!matches!(app.mode, Mode::Findings(_)));
     assert!(app.message.as_deref().unwrap_or("").contains("No findings"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- Incremental pass scoping (#90) ----------------------------------------
@@ -1179,7 +1106,6 @@ fn an_up_to_date_bible_pass_makes_no_request() {
     app.analyze_characters(false);
     assert!(!app.ai_busy(), "an up-to-date bible spawns no request");
     assert!(app.message.as_deref().unwrap_or("").contains("current"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1194,7 +1120,6 @@ fn forcing_a_rebuild_overrides_an_up_to_date_bible() {
         app.manuscript_text().len(),
         "the palette's R (force) rebuilds from the whole manuscript anyway"
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1208,7 +1133,6 @@ fn a_hand_deleted_bible_rebuilds_even_when_state_says_current() {
         app.manuscript_text().len(),
         "a missing bible forces a full rebuild, not an up-to-date skip"
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1226,7 +1150,6 @@ fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
     // The incremental context is only the changed chapter, not the whole book.
     let changed = app.chapters_text(&["two.md".to_string()]);
     assert!(changed.contains("NEWWORD") && !changed.contains("first chapter"), "{changed}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1237,7 +1160,6 @@ fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
     write_character_bible(&dir);
     ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
     assert_eq!(app.pass_context_len(action, false), 0, "an up-to-date bible costs nothing to confirm");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1250,5 +1172,4 @@ fn a_clean_bible_pass_records_what_it_built_from() {
     let state = ai::incremental::State::load(&dir);
     assert_eq!(state.built_from("characters"), Some(&built), "the pass recorded its manuscript state");
     assert!(app.pending_pass.is_none(), "the snapshot was consumed");
-    fs::remove_dir_all(&dir).ok();
 }

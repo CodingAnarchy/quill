@@ -2,7 +2,6 @@
 //! restore / remote).
 
 use super::*;
-use std::fs;
 
 /// Open the Git palette (Ctrl-v), move to item `index`, and run it.
 fn git_menu(app: &mut App, index: usize) {
@@ -38,12 +37,11 @@ fn git_palette_initializes_version_control() {
     assert!(app.under_vc, "the project is now under version control");
     assert!(dir.join(".git").exists() && dir.join(".gitignore").exists());
     assert!(app.message.as_deref().unwrap_or("").contains("Initialized"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn vc_status_reflects_uncommitted_changes() {
-    let (mut app, dir) = two_chapter_app("vc-status");
+    let (mut app, _dir) = two_chapter_app("vc-status");
     git_menu(&mut app, 0); // Initialize → the project's files are uncommitted
     assert!(app.vc_changes > 0, "a fresh repo has uncommitted files");
 
@@ -57,12 +55,11 @@ fn vc_status_reflects_uncommitted_changes() {
     app.on_key(ctrl('s'));
     app.on_idle();
     assert!(app.vc_changes > 0, "dirty after a saved edit");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn git_palette_shows_commit_history() {
-    let (mut app, dir) = two_chapter_app("vc-log");
+    let (mut app, _dir) = two_chapter_app("vc-log");
     git_menu(&mut app, 0); // Initialize
     git_menu(&mut app, 1); // History — before any commit
     assert!(overlay_text(&app).contains("No commits yet"));
@@ -74,12 +71,11 @@ fn git_palette_shows_commit_history() {
 
     git_menu(&mut app, 1); // History
     assert!(overlay_text(&app).contains("first draft"), "history lists the commit");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn git_palette_commits_with_a_message() {
-    let (mut app, dir) = two_chapter_app("vcs-commit");
+    let (mut app, _dir) = two_chapter_app("vcs-commit");
     git_menu(&mut app, 0); // Initialize
     git_menu(&mut app, 0); // Commit
     assert!(matches!(app.mode, Mode::Prompt(_)), "a commit-message prompt opens");
@@ -88,12 +84,11 @@ fn git_palette_commits_with_a_message() {
     assert!(app.message.as_deref().unwrap_or("").starts_with("Committed"), "{:?}", app.message);
     // Everything was captured → the tree is now clean.
     assert_eq!(crate::vcs::commit(&app.project.root, "x").unwrap(), None);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn git_palette_shows_changes_diff() {
-    let (mut app, dir) = two_chapter_app("vc-diff");
+    let (mut app, _dir) = two_chapter_app("vc-diff");
     git_menu(&mut app, 0); // Initialize
     git_menu(&mut app, 0); // Commit
     type_str(&mut app, "base");
@@ -109,12 +104,11 @@ fn git_palette_shows_changes_diff() {
     app.on_key(ctrl('s'));
     git_menu(&mut app, 2); // Changes
     assert!(overlay_text(&app).contains("one.md"), "diff names the changed file");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn git_palette_restores_a_chapter() {
-    let (mut app, dir) = two_chapter_app("vc-restore");
+    let (mut app, _dir) = two_chapter_app("vc-restore");
     git_menu(&mut app, 0); // Initialize
     git_menu(&mut app, 0); // Commit
     type_str(&mut app, "base");
@@ -129,12 +123,11 @@ fn git_palette_restores_a_chapter() {
     app.on_key(key(KeyCode::Char('y')));
     assert!(!app.buffer.text().contains('Z'), "the edit was reverted: {:?}", app.buffer.text());
     assert!(app.message.as_deref().unwrap_or("").contains("Restored"), "{:?}", app.message);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn git_palette_configures_a_remote_then_offers_sync() {
-    let (mut app, dir) = two_chapter_app("vc-remote");
+    let (mut app, _dir) = two_chapter_app("vc-remote");
     git_menu(&mut app, 0); // Initialize
 
     // Before a remote: the menu offers "Set remote" but not Push/Pull.
@@ -159,5 +152,4 @@ fn git_palette_configures_a_remote_then_offers_sync() {
     let labels = palette_labels(&app);
     assert!(labels.contains(&"Push") && labels.contains(&"Pull"), "{labels:?}");
     assert!(labels.contains(&"Change remote") && !labels.contains(&"Set remote"), "{labels:?}");
-    fs::remove_dir_all(&dir).ok();
 }

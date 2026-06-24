@@ -15,13 +15,12 @@ fn window_cmd(app: &mut App, c: char) {
 
 #[test]
 fn ctrl_w_v_splits_and_ctrl_w_c_closes() {
-    let (mut app, dir) = two_chapter_app("split-open-close");
+    let (mut app, _dir) = two_chapter_app("split-open-close");
     assert!(app.split_view().is_none());
     window_cmd(&mut app, 'v'); // vertical split
     assert!(app.split_view().is_some(), "Ctrl-w v splits");
     window_cmd(&mut app, 'c'); // close
     assert!(app.split_view().is_none(), "Ctrl-w c closes the split");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -42,7 +41,6 @@ fn split_panes_edit_different_chapters_independently() {
     let two = fs::read_to_string(dir.join("two.md")).unwrap();
     assert!(one.contains("ONE-EDIT") && two.contains("TWO-EDIT"), "one:{one:?} two:{two:?}");
     assert!(!one.contains("TWO-EDIT"), "panes didn't cross-corrupt: {one:?}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -58,33 +56,30 @@ fn editing_the_same_chapter_in_both_panes_stays_consistent() {
     assert!(text.contains("AAA") && text.contains("BBB"), "edits accumulate, no clobber: {text:?}");
     let one = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(one.contains("AAA") && one.contains("BBB"), "{one}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn split_is_guarded_in_the_continuous_view() {
-    let (mut app, dir) = two_chapter_app("split-in-cont");
+    let (mut app, _dir) = two_chapter_app("split-in-cont");
     app.on_key(ctrl('l'));
     assert!(app.manuscript.is_some());
     window_cmd(&mut app, 'v');
     assert!(app.split_view().is_none(), "can't split the continuous view");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn entering_continuous_closes_a_split() {
-    let (mut app, dir) = two_chapter_app("cont-closes-split");
+    let (mut app, _dir) = two_chapter_app("cont-closes-split");
     window_cmd(&mut app, 'v');
     assert!(app.split_view().is_some());
     app.on_key(ctrl('l')); // continuous view takes the editor region
     assert!(app.split_view().is_none());
     assert!(app.manuscript.is_some());
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn ctrl_w_docks_an_open_report_beside_the_editor() {
-    let (mut app, dir) = two_chapter_app("dock-report");
+    let (mut app, _dir) = two_chapter_app("dock-report");
     app.on_key(ctrl('r')); // open the progress report full-screen
     assert!(app.overlay.is_some());
     window_cmd(&mut app, 'v'); // dock it into a split (#164)
@@ -96,12 +91,11 @@ fn ctrl_w_docks_an_open_report_beside_the_editor() {
     // Closing the pane returns to the single editor.
     window_cmd(&mut app, 'c');
     assert!(app.split_view().is_none());
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn focusing_a_docked_surface_scrolls_it() {
-    let (mut app, dir) = two_chapter_app("dock-scroll");
+    let (mut app, _dir) = two_chapter_app("dock-scroll");
     app.on_key(ctrl('t')); // analysis report — tall enough to scroll
     window_cmd(&mut app, 'v'); // dock
     app.surface_height.set(5); // the renderer sets this; supply it for the test
@@ -112,18 +106,16 @@ fn focusing_a_docked_surface_scrolls_it() {
     assert!(scrolled, "j scrolls the docked surface");
     app.on_key(key(KeyCode::Esc)); // Esc returns focus to the editor
     assert!(!app.surface_pane_focused());
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn docking_is_guarded_in_the_continuous_view() {
-    let (mut app, dir) = two_chapter_app("dock-cont");
+    let (mut app, _dir) = two_chapter_app("dock-cont");
     app.on_key(ctrl('l')); // continuous view
     app.on_key(ctrl('r')); // report opens full-screen
     window_cmd(&mut app, 'v'); // try to dock
     assert!(app.split_view().is_none(), "no docking in the continuous view");
     assert!(app.overlay.is_some(), "the overlay stays full-screen");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- Reference files in a pane (#165) --------------------------------------
@@ -157,7 +149,6 @@ fn reference_files_list_the_bible_and_skip_chapters() {
     assert!(names.contains(&"bible/characters/mara.md".to_string()), "{names:?}");
     assert!(names.contains(&"bible/setting.md".to_string()), "{names:?}");
     assert!(!names.iter().any(|n| n.ends_with("one.md") || n.ends_with("two.md")), "chapters excluded: {names:?}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -171,17 +162,15 @@ fn f_in_the_browser_opens_the_reference_file_list() {
         _ => panic!("expected RefFiles mode"),
     };
     assert_eq!(count, 2, "both bible files listed");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn reference_browser_reports_when_there_are_no_files() {
-    let (mut app, dir) = two_chapter_app("ref-empty");
+    let (mut app, _dir) = two_chapter_app("ref-empty");
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('f')));
     assert!(matches!(app.mode, Mode::Nav { .. }), "stays in the chapter browser");
     assert!(app.message.as_deref().unwrap_or("").contains("No reference files"));
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -194,17 +183,15 @@ fn opening_a_reference_file_puts_it_in_a_pane() {
     assert!(app.split_view().is_some(), "a reference pane opened");
     assert_eq!(other_pane_title(&app), "mara", "the pane is titled by the file");
     assert!(matches!(app.mode, Mode::Insert), "focus returns to the editor");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn o_in_the_browser_opens_the_selected_chapter_in_a_pane() {
-    let (mut app, dir) = two_chapter_app("ref-chapter-pane"); // active = "One"
+    let (mut app, _dir) = two_chapter_app("ref-chapter-pane"); // active = "One"
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select "Two"
     app.on_key(key(KeyCode::Char('o')));
     assert_eq!(other_pane_title(&app), "Two", "the other chapter opens in the pane");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -221,7 +208,6 @@ fn a_reference_pane_saves_independently() {
     let one = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(mara.contains("NOTE"), "the bible file saved its edit: {mara:?}");
     assert!(!one.contains("NOTE"), "the chapter is untouched: {one:?}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 // --- Resize & narrow-terminal collapse (#166) ------------------------------
@@ -232,7 +218,7 @@ fn split_ratio(app: &App) -> u16 {
 
 #[test]
 fn resize_grows_and_shrinks_the_focused_pane_within_bounds() {
-    let (mut app, dir) = two_chapter_app("resize");
+    let (mut app, _dir) = two_chapter_app("resize");
     window_cmd(&mut app, 'v'); // side-by-side, even split (focused pane is first)
     let even = split_ratio(&app);
     window_cmd(&mut app, '>'); // grow the focused pane
@@ -248,12 +234,11 @@ fn resize_grows_and_shrinks_the_focused_pane_within_bounds() {
     // Ctrl-w = resets to an even balance (#173).
     window_cmd(&mut app, '=');
     assert_eq!(split_ratio(&app), even, "Ctrl-w = equalizes the split");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn a_narrow_terminal_draws_only_the_focused_pane() {
-    let (mut app, dir) = two_chapter_app("narrow"); // one.md="first chapter"
+    let (mut app, _dir) = two_chapter_app("narrow"); // one.md="first chapter"
     window_cmd(&mut app, 'v'); // split (both panes on chapter One)
     window_cmd(&mut app, 'w'); // focus the other pane
     app.on_key(ctrl('n')); // move it to chapter Two ("second chapter")
@@ -268,7 +253,6 @@ fn a_narrow_terminal_draws_only_the_focused_pane() {
 
     // The split survives the squeeze: widening restores it.
     assert!(app.split_view().is_some(), "the split state is kept, just not drawn");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -285,5 +269,4 @@ fn editing_a_reference_pane_does_not_corrupt_the_chapter_word_cache() {
     // The bible file's word count must not have been written into chapter One's
     // cached entry (which feeds the outline pane and the progress report).
     assert_eq!(app.project.chapter_words(0), one_words, "chapter One's cached count is untouched");
-    fs::remove_dir_all(&dir).ok();
 }

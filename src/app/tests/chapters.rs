@@ -21,7 +21,7 @@ fn prompt_input(app: &App) -> &str {
 
 #[test]
 fn ctrl_n_and_ctrl_p_switch_chapters() {
-    let (mut app, dir) = two_chapter_app("nav");
+    let (mut app, _dir) = two_chapter_app("nav");
     assert_eq!(app.project.active_index(), 0);
     assert!(app.buffer.line(0).contains("first"));
 
@@ -32,21 +32,17 @@ fn ctrl_n_and_ctrl_p_switch_chapters() {
     app.on_key(ctrl('p'));
     assert_eq!(app.project.active_index(), 0);
     assert!(app.buffer.line(0).contains("first"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn next_previous_clamp_at_the_ends() {
-    let (mut app, dir) = two_chapter_app("clamp");
+    let (mut app, _dir) = two_chapter_app("clamp");
     app.on_key(ctrl('p')); // already at first — no-op
     assert_eq!(app.project.active_index(), 0);
 
     app.on_key(ctrl('n'));
     app.on_key(ctrl('n')); // already at last — no-op
     assert_eq!(app.project.active_index(), 1);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -62,13 +58,11 @@ fn switching_chapters_saves_pending_edits() {
     // Chapter one was persisted on the way out.
     let saved = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(saved.starts_with('X'), "expected edit saved, got: {saved:?}");
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn nav_mode_selects_and_opens_a_chapter() {
-    let (mut app, dir) = two_chapter_app("navmode");
+    let (mut app, _dir) = two_chapter_app("navmode");
     app.on_key(ctrl('g')); // focus the chapter pane
     assert!(matches!(app.mode, Mode::Nav { .. }));
     assert_eq!(nav_sel(&app), 0);
@@ -80,14 +74,6 @@ fn nav_mode_selects_and_opens_a_chapter() {
     assert!(matches!(app.mode, Mode::Insert));
     assert_eq!(app.project.active_index(), 1);
     assert!(app.buffer.line(0).contains("second"));
-
-    fs::remove_dir_all(&dir).ok();
-}
-
-fn typed(app: &mut App, s: &str) {
-    for c in s.chars() {
-        app.on_key(key(KeyCode::Char(c)));
-    }
 }
 
 fn project_titles(project: &Project) -> Vec<String> {
@@ -109,7 +95,7 @@ fn create_chapter_inserts_after_the_selection() {
     app.on_key(ctrl('g')); // Nav, selection on chapter 0
     app.on_key(key(KeyCode::Char('a'))); // add after selection
     assert!(matches!(app.mode, Mode::Prompt(_)));
-    typed(&mut app, "Interlude");
+    type_str(&mut app, "Interlude");
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(titles(&app), vec!["One", "Interlude", "Two"]);
@@ -118,8 +104,6 @@ fn create_chapter_inserts_after_the_selection() {
     assert_eq!(app.project.active_index(), 0);
     // Persisted.
     assert_eq!(project_titles(&Project::open(&dir).unwrap()), titles(&app));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -131,18 +115,16 @@ fn rename_chapter_edits_the_prefilled_title() {
     for _ in 0..3 {
         app.on_key(key(KeyCode::Backspace));
     }
-    typed(&mut app, "Uno");
+    type_str(&mut app, "Uno");
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(titles(&app)[0], "Uno");
     assert_eq!(project_titles(&Project::open(&dir).unwrap())[0], "Uno");
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn move_selected_reorders_and_active_follows() {
-    let (mut app, dir) = two_chapter_app("move");
+    let (mut app, _dir) = two_chapter_app("move");
     app.on_key(ctrl('g')); // selection 0 == active 0
     app.on_key(key(KeyCode::Char('J'))); // move chapter 0 down
 
@@ -150,8 +132,6 @@ fn move_selected_reorders_and_active_follows() {
     assert_eq!(nav_sel(&app), 1);
     // The active chapter ("One") followed its content to index 1.
     assert_eq!(app.project.active_title(), Some("One"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -167,13 +147,11 @@ fn delete_moves_file_to_unused_and_keeps_active_consistent() {
     // Active was chapter 0; untouched by deleting a later chapter.
     assert_eq!(app.project.active_index(), 0);
     assert!(app.buffer.line(0).contains("first"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn deleting_the_active_chapter_reloads_a_neighbor() {
-    let (mut app, dir) = two_chapter_app("delete-active");
+    let (mut app, _dir) = two_chapter_app("delete-active");
     app.on_key(ctrl('g')); // selection 0 == active 0 ("One")
     app.on_key(key(KeyCode::Char('d')));
     app.on_key(key(KeyCode::Char('y')));
@@ -182,13 +160,11 @@ fn deleting_the_active_chapter_reloads_a_neighbor() {
     assert_eq!(app.project.active_index(), 0);
     // Buffer was reloaded to the surviving chapter.
     assert!(app.buffer.line(0).contains("second"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn cannot_delete_the_only_chapter() {
-    let (mut app, dir) = two_chapter_app("last");
+    let (mut app, _dir) = two_chapter_app("last");
     // Remove one chapter, leaving a single chapter.
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('d')));
@@ -199,13 +175,11 @@ fn cannot_delete_the_only_chapter() {
     app.on_key(key(KeyCode::Char('d')));
     assert!(matches!(app.mode, Mode::Nav { .. })); // no confirm prompt opened
     assert_eq!(app.chapter_count(), 1);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn active_chapter_survives_insert_before_it() {
-    let (mut app, dir) = two_chapter_app("identity");
+    let (mut app, _dir) = two_chapter_app("identity");
     // Active is chapter 0 ("One"). Insert a chapter ahead of it.
     app.create_chapter(0, "Prologue");
 
@@ -214,8 +188,6 @@ fn active_chapter_survives_insert_before_it() {
     assert_eq!(app.project.active_index(), 1);
     assert_eq!(app.project.active_title(), Some("One"));
     assert!(app.buffer.line(0).contains("first"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -224,10 +196,10 @@ fn editing_book_metadata_persists_to_the_manifest() {
     app.on_key(ctrl('g')); // chapter browser
 
     app.on_key(key(KeyCode::Char('t'))); // book title (prefilled "Book")
-    typed(&mut app, " of Dust"); // -> "Book of Dust"
+    type_str(&mut app, " of Dust"); // -> "Book of Dust"
     app.on_key(key(KeyCode::Enter));
     app.on_key(key(KeyCode::Char('w'))); // author
-    typed(&mut app, "A. Writer");
+    type_str(&mut app, "A. Writer");
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(app.project.manifest.title, "Book of Dust");
@@ -237,13 +209,11 @@ fn editing_book_metadata_persists_to_the_manifest() {
     let reopened = Project::open(&dir).unwrap();
     assert_eq!(reopened.manifest.title, "Book of Dust");
     assert_eq!(reopened.manifest.author.as_deref(), Some("A. Writer"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn clearing_an_optional_book_field_removes_it() {
-    let (mut app, dir) = two_chapter_app("book-meta-clear");
+    let (mut app, _dir) = two_chapter_app("book-meta-clear");
     app.project.manifest.subtitle = Some("placeholder".into());
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('b'))); // subtitle prompt (prefilled)
@@ -253,8 +223,6 @@ fn clearing_an_optional_book_field_removes_it() {
     }
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.project.manifest.subtitle, None);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -264,11 +232,11 @@ fn setting_a_chapter_epigraph_edits_in_the_editor_then_chains_attribution() {
     app.on_key(key(KeyCode::Down)); // select chapter 1 (non-active → writes now)
     app.on_key(key(KeyCode::Char('g'))); // opens the editor on the quotation
     assert!(matches!(app.mode, Mode::EditMeta(_)));
-    typed(&mut app, "Call me Ishmael.");
+    type_str(&mut app, "Call me Ishmael.");
     app.on_key(ctrl('s')); // commit
     // Commit chains into the single-line attribution prompt.
     assert!(matches!(app.mode, Mode::Prompt(_)));
-    typed(&mut app, "Melville");
+    type_str(&mut app, "Melville");
     app.on_key(key(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::Nav { .. }));
 
@@ -276,8 +244,6 @@ fn setting_a_chapter_epigraph_edits_in_the_editor_then_chains_attribution() {
     assert!(on_disk.contains("epigraph: Call me Ishmael."), "got:\n{on_disk}");
     assert!(on_disk.contains("epigraph_by: Melville"), "got:\n{on_disk}");
     assert!(on_disk.contains("second chapter"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -286,9 +252,9 @@ fn a_multiline_chapter_epigraph_is_stored_as_a_block() {
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // chapter 1
     app.on_key(key(KeyCode::Char('g'))); // editor
-    typed(&mut app, "Roses are red");
+    type_str(&mut app, "Roses are red");
     app.on_key(key(KeyCode::Enter)); // a real line break in the editor
-    typed(&mut app, "Violets are blue");
+    type_str(&mut app, "Violets are blue");
     app.on_key(ctrl('s'));
     app.on_key(key(KeyCode::Esc)); // skip the attribution
 
@@ -304,8 +270,6 @@ fn a_multiline_chapter_epigraph_is_stored_as_a_block() {
         buf.front_matter().and_then(crate::frontmatter::FrontMatter::epigraph).unwrap().text,
         "Roses are red\nViolets are blue"
     );
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -313,9 +277,9 @@ fn setting_a_book_epigraph_persists_to_the_manifest() {
     let (mut app, dir) = two_chapter_app("book-epigraph");
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('G'))); // book epigraph editor
-    typed(&mut app, "Begin at the beginning.");
+    type_str(&mut app, "Begin at the beginning.");
     app.on_key(ctrl('s')); // commit → chains to attribution
-    typed(&mut app, "The King");
+    type_str(&mut app, "The King");
     app.on_key(key(KeyCode::Enter));
 
     let ep = app.project.manifest.epigraph().unwrap();
@@ -324,8 +288,6 @@ fn setting_a_book_epigraph_persists_to_the_manifest() {
     // Persisted to the manifest.
     let reopened = Project::open(&dir).unwrap();
     assert_eq!(reopened.manifest.epigraph().unwrap().attribution.as_deref(), Some("The King"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -343,8 +305,6 @@ fn cycling_status_on_the_active_chapter_persists_to_front_matter() {
     let on_disk = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(on_disk.starts_with("---\nstatus: revised\n---\n"), "got:\n{on_disk}");
     assert!(on_disk.contains("first chapter"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -353,7 +313,7 @@ fn editing_a_non_active_chapters_summary_writes_immediately() {
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select chapter 1 (not active)
     app.on_key(key(KeyCode::Char('m'))); // summary prompt
-    typed(&mut app, "The reckoning: part one");
+    type_str(&mut app, "The reckoning: part one");
     app.on_key(key(KeyCode::Enter));
 
     // Non-active edits hit disk right away, with quoting, prose untouched.
@@ -361,8 +321,6 @@ fn editing_a_non_active_chapters_summary_writes_immediately() {
     assert!(on_disk.starts_with("---\nsummary: \"The reckoning: part one\"\n---\n"), "got:\n{on_disk}");
     assert!(on_disk.contains("second chapter"));
     assert_eq!(app.project.chapter_summary(1), Some("The reckoning: part one"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -371,7 +329,7 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select chapter 1 (not active)
     app.on_key(key(KeyCode::Char('l'))); // word-goal prompt
-    typed(&mut app, "2500");
+    type_str(&mut app, "2500");
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(app.project.chapter_goal(1), Some(2500));
@@ -387,7 +345,6 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.project.chapter_goal(1), None, "blank clears the goal");
     assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("goal:"));
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -397,7 +354,7 @@ fn setting_a_section_role_persists_clears_and_survives_reopen() {
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select chapter "Two"
     app.on_key(key(KeyCode::Char('S'))); // section-role prompt
-    typed(&mut app, "prologue");
+    type_str(&mut app, "prologue");
     app.on_key(key(KeyCode::Enter));
 
     // "Two" became a prologue → it re-sorts ahead of the body (#180), and the
@@ -419,26 +376,24 @@ fn setting_a_section_role_persists_clears_and_survives_reopen() {
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.project.chapter_role(app.project.index_of_file("two.md").unwrap()), None);
     assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("role:"));
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn an_unknown_section_role_is_rejected_without_changing_it() {
-    let (mut app, dir) = two_chapter_app("role-bad");
+    let (mut app, _dir) = two_chapter_app("role-bad");
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::Char('S')));
-    typed(&mut app, "chapterish");
+    type_str(&mut app, "chapterish");
     app.on_key(key(KeyCode::Enter));
     assert!(app.message.as_deref().unwrap_or("").contains("Unknown section role"), "{:?}", app.message);
     assert_eq!(app.project.chapter_role(1), None, "an unknown role leaves it a body chapter");
-    fs::remove_dir_all(&dir).ok();
 }
 
 /// A project on disk with three files listed body / prologue / appendix in the
 /// manifest (deliberately out of band order) — front-matter and back-matter
 /// front matter set. Returns its dir.
-fn sectioned_project(name: &str) -> PathBuf {
+fn sectioned_project(name: &str) -> TempProject {
     let mut dir = std::env::temp_dir();
     dir.push(format!("quill-sect-{}-{}", std::process::id(), name));
     let _ = fs::remove_dir_all(&dir);
@@ -454,7 +409,7 @@ fn sectioned_project(name: &str) -> PathBuf {
     fs::write(dir.join("b.md"), "the body\n").unwrap();
     fs::write(dir.join("p.md"), "---\nrole: prologue\n---\nbefore\n").unwrap();
     fs::write(dir.join("a.md"), "---\nrole: appendix\n---\nnotes\n").unwrap();
-    dir
+    TempProject::new(dir)
 }
 
 #[test]
@@ -468,7 +423,6 @@ fn front_and_back_matter_sort_around_the_body_on_load() {
     assert_eq!(p.index_of_file("a.md"), Some(2));
     assert_eq!(p.chapter_role(0), Some(Role::Prologue));
     assert_eq!(p.body_chapter_count(), 1, "only the body file counts as a chapter");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -487,18 +441,16 @@ fn the_pane_groups_sections_under_band_headers() {
     assert!(screen.contains("1. Body"), "the body chapter is numbered:\n{screen}");
     // The total separates body words from section words (#181).
     assert!(screen.contains("in sections"), "section words kept clear of the body total:\n{screen}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn an_all_body_pane_keeps_the_flat_unnumbered_list() {
-    let (mut app, dir) = two_chapter_app("pane-flat"); // "One", "Two", no roles
+    let (mut app, _dir) = two_chapter_app("pane-flat"); // "One", "Two", no roles
     app.on_key(ctrl('g'));
     let screen = crate::ui::render_to_string(&app, 80, 16);
     assert!(screen.contains("CHAPTERS"), "still has the body header:\n{screen}");
     assert!(!screen.contains("FRONT MATTER") && !screen.contains("BACK MATTER"), "no section headers:\n{screen}");
     assert!(!screen.contains("1. One"), "no numbers without sections:\n{screen}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -525,16 +477,14 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
         !app.project.reference_files().iter().any(|p| p.to_string_lossy().contains("export")),
         "export/ is excluded from the reference-file browser"
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn ctrl_e_opens_the_export_menu() {
-    let (mut app, dir) = two_chapter_app("export-menu");
+    let (mut app, _dir) = two_chapter_app("export-menu");
     app.on_key(ctrl('e'));
     let Mode::Palette(p) = &app.mode else { panic!("expected the export palette") };
     assert_eq!(p.title, "Export");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -547,7 +497,6 @@ fn export_writes_a_docx_file() {
     assert!(app.message.as_deref().unwrap_or("").contains("Exported to export/"), "{:?}", app.message);
     let bytes = fs::read(dir.join("export").join("book.docx")).unwrap();
     assert_eq!(&bytes[..2], b"PK", "a .docx is a zip container");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -557,7 +506,6 @@ fn export_is_guarded_in_the_continuous_view() {
     app.run_export(crate::mode::ExportFormat::Markdown);
     assert!(app.message.as_deref().unwrap_or("").contains("Leave the continuous view"), "{:?}", app.message);
     assert!(!dir.join("export").exists(), "no file written from the continuous view");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -568,6 +516,7 @@ fn parts_map_to_body_chapters_not_sections() {
     dir.push(format!("quill-parts-sect-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    let dir = TempProject::new(dir);
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n\
@@ -600,7 +549,6 @@ fn parts_map_to_body_chapters_not_sections() {
     assert_eq!(app.project.manifest.part_of(1), Some(0), "first body chapter is in Act I");
     assert_eq!(app.project.manifest.part_of(4), Some(1), "fourth body chapter is in Act II");
     assert_eq!(app.project.manifest.part_of(5), None, "appendix is in no part");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -620,7 +568,6 @@ fn reordering_is_clamped_within_a_band() {
     app.on_key(key(KeyCode::Down)); // select the body (index 1)
     app.on_key(key(KeyCode::Char('K')));
     assert_eq!(app.project.index_of_file("b.md"), Some(1), "the body stays out of front matter");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -630,15 +577,13 @@ fn metadata_survives_reopening_the_project() {
     app.on_key(key(KeyCode::Down)); // chapter 1
     app.on_key(key(KeyCode::Char('s'))); // Draft
     app.on_key(key(KeyCode::Char('v'))); // POV prompt
-    typed(&mut app, "Mara");
+    type_str(&mut app, "Mara");
     app.on_key(key(KeyCode::Enter));
 
     // Reopen from disk: the cached metadata is read back from front matter.
     let reopened = Project::open(&dir).unwrap();
     assert_eq!(reopened.chapter_status(1), Some(crate::frontmatter::Status::Draft));
     assert_eq!(reopened.chapter_pov(1), Some("Mara"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -650,7 +595,7 @@ fn continuous_view_edits_persist_to_the_right_chapter() {
     // Move into chapter two and append to it.
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::End));
-    typed(&mut app, "Z");
+    type_str(&mut app, "Z");
 
     app.on_key(ctrl('l')); // leave continuous — saves on the way out
     assert!(app.manuscript.is_none());
@@ -661,8 +606,6 @@ fn continuous_view_edits_persist_to_the_right_chapter() {
     // Back in single-chapter view at the chapter the cursor was in.
     assert_eq!(app.project.active_index(), 1);
     assert!(app.buffer.line(0).contains("second"));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -674,13 +617,11 @@ fn entering_continuous_flushes_the_single_chapter() {
 
     app.on_key(ctrl('l')); // entering must flush the dirty single chapter
     assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn ctrl_r_opens_the_report_and_any_key_closes_it() {
-    let (mut app, dir) = two_chapter_app("report");
+    let (mut app, _dir) = two_chapter_app("report");
     app.project.manifest.start_date = Some("2026-01-11".into());
     app.project.manifest.goals = Some(crate::project::Goals {
         words: 150_000,
@@ -698,14 +639,12 @@ fn ctrl_r_opens_the_report_and_any_key_closes_it() {
     app.on_key(key(KeyCode::Char('x'))); // any key closes it (no edit)
     assert!(app.overlay.is_none());
     assert!(!app.buffer.line(0).contains('x'), "the dismissing key must not edit");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn idle_tallies_words_added_then_removed() {
-    let (mut app, dir) = two_chapter_app("tally"); // ch0 "first chapter" (2 words)
-    typed(&mut app, "new words "); // → "new words first chapter" (4 words): +2
+    let (mut app, _dir) = two_chapter_app("tally"); // ch0 "first chapter" (2 words)
+    type_str(&mut app, "new words "); // → "new words first chapter" (4 words): +2
     app.on_idle();
     assert_eq!(app.added, 2);
     assert_eq!(app.removed, 0);
@@ -716,8 +655,6 @@ fn idle_tallies_words_added_then_removed() {
     app.on_idle();
     assert_eq!(app.added, 2); // unchanged
     assert_eq!(app.removed, 2);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -725,19 +662,18 @@ fn an_edited_chapter_is_tallied_even_after_navigating_away() {
     // Edit ch0, then switch to ch1 before an idle tick. The tally must still book
     // ch0's delta — it tracks which chapters changed (#220), not just the active
     // one. (The single-chapter analogue of a continuous-view chapter paging out.)
-    let (mut app, dir) = two_chapter_app("tally-away"); // ch0 "first chapter" (2 words)
-    typed(&mut app, "new words "); // ch0 → +2, no idle yet
+    let (mut app, _dir) = two_chapter_app("tally-away"); // ch0 "first chapter" (2 words)
+    type_str(&mut app, "new words "); // ch0 → +2, no idle yet
     app.on_key(ctrl('n')); // switch to ch1 (flushes ch0, recording its new count)
     assert_eq!(app.project.active_index(), 1);
     app.on_idle();
     assert_eq!(app.added, 2, "ch0's edit was booked though it's no longer active");
     assert_eq!(app.removed, 0);
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn deleting_a_chapter_books_moved_to_unused_not_removed() {
-    let (mut app, dir) = two_chapter_app("moved"); // ch1 "second chapter" (2 words)
+    let (mut app, _dir) = two_chapter_app("moved"); // ch1 "second chapter" (2 words)
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select chapter 1
     app.on_key(key(KeyCode::Char('d')));
@@ -747,8 +683,6 @@ fn deleting_a_chapter_books_moved_to_unused_not_removed() {
 
     app.on_idle(); // the structural drop is not re-booked as removed
     assert_eq!(app.removed, 0);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -767,13 +701,11 @@ fn momentum_persists_and_resumes_across_a_reopen() {
     assert_eq!(reopened.added, 100);
     assert_eq!(reopened.removed, 5);
     assert_eq!(reopened.moved_to_unused, 3);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 /// A two-chapter project where each chapter is its own part ("Beginning",
 /// "End"), for exercising per-part attribution.
-fn parts_app(name: &str) -> (App, PathBuf) {
+fn parts_app(name: &str) -> (App, TempProject) {
     let mut dir = std::env::temp_dir();
     dir.push(format!("quill-app-{}-{}", std::process::id(), name));
     let _ = fs::remove_dir_all(&dir);
@@ -792,34 +724,32 @@ fn parts_app(name: &str) -> (App, PathBuf) {
 
     let project = Project::open(&dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
-    (App::new(buffer, project), dir)
+    (App::new(buffer, project), TempProject::new(dir))
 }
 
 #[test]
 fn edits_are_attributed_to_their_part() {
-    let (mut app, dir) = parts_app("attribute");
+    let (mut app, _dir) = parts_app("attribute");
     // Type in chapter 0 (the "Beginning" part).
-    typed(&mut app, "alpha beta "); // +2 words in ch0
+    type_str(&mut app, "alpha beta "); // +2 words in ch0
     app.on_idle();
     assert_eq!(app.part_added, vec![2, 0]);
 
     // Switch to chapter 1 (the "End" part) and type — switching flushes ch0,
     // so its cached count matches its baseline and isn't re-booked.
     app.on_key(ctrl('n'));
-    typed(&mut app, "gamma "); // +1 word in ch1
+    type_str(&mut app, "gamma "); // +1 word in ch1
     app.on_idle();
     assert_eq!(app.part_added, vec![2, 1]);
 
     // The global counters equal the sums of the parts.
     assert_eq!(app.added, app.part_added.iter().sum::<usize>());
     assert_eq!(app.removed, 0);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn deleting_a_chapter_does_not_book_a_part_removal() {
-    let (mut app, dir) = parts_app("part-delete");
+    let (mut app, _dir) = parts_app("part-delete");
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select chapter 1 ("End")
     app.on_key(key(KeyCode::Char('d')));
@@ -828,8 +758,6 @@ fn deleting_a_chapter_does_not_book_a_part_removal() {
     // Structural drop → moved_to_unused, not a per-part removal.
     assert_eq!(app.moved_to_unused, 2);
     assert_eq!(app.part_removed, vec![0, 0]);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -845,8 +773,6 @@ fn per_part_counters_persist_and_resume() {
     reopened.load_history();
     assert_eq!(reopened.part_added, vec![40, 12]);
     assert_eq!(reopened.part_removed, vec![3, 1]);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -870,8 +796,6 @@ fn resume_ignores_per_part_counts_when_the_parts_config_changed() {
     let mut reopened = App::new(buffer, project);
     reopened.load_history();
     assert_eq!(reopened.part_added, vec![0]); // one part, fresh
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -884,13 +808,11 @@ fn report_counts_todo_markers_across_chapters() {
 
     // Active chapter (one.md) from the buffer: 2; chapter two from disk: 1.
     assert_eq!(app.count_todo(), 3);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn word_counts_roll_up_and_update_live() {
-    let (mut app, dir) = two_chapter_app("counts"); // "first chapter", "second chapter"
+    let (mut app, _dir) = two_chapter_app("counts"); // "first chapter", "second chapter"
     assert_eq!(app.chapter_word_count(0), 2); // active, live from buffer
     assert_eq!(app.chapter_word_count(1), 2); // cached from file
     assert_eq!(app.project_word_count(), 4);
@@ -900,8 +822,6 @@ fn word_counts_roll_up_and_update_live() {
     app.on_key(key(KeyCode::Char(' ')));
     assert_eq!(app.chapter_word_count(0), 3);
     assert_eq!(app.project_word_count(), 5);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -910,6 +830,7 @@ fn the_report_counts_body_words_not_section_words() {
     dir.push(format!("quill-rep-sect-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    let dir = TempProject::new(dir);
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n[goals]\nwords = 100\nchapters = 5\n\n\
@@ -935,15 +856,14 @@ fn the_report_counts_body_words_not_section_words() {
         .join("\n");
     assert!(report.contains("5 / 100  words"), "the goal measures body words only:\n{report}");
     assert!(report.contains("(+3 words in front/back matter, not counted)"), "{report}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn word_count_cache_tracks_add_and_delete() {
-    let (mut app, dir) = two_chapter_app("counts-structure");
+    let (mut app, _dir) = two_chapter_app("counts-structure");
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('a'))); // add an empty chapter after ch.0
-    typed(&mut app, "New");
+    type_str(&mut app, "New");
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(app.chapter_count(), 3);
@@ -954,8 +874,6 @@ fn word_count_cache_tracks_add_and_delete() {
     app.on_key(key(KeyCode::Char('y')));
     assert_eq!(app.chapter_count(), 2);
     assert_eq!(app.project_word_count(), 4);
-
-    fs::remove_dir_all(&dir).ok();
 }
 
 
@@ -970,7 +888,6 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
         "the failure is surfaced: {:?}",
         app.message
     );
-    fs::remove_dir_all(&dir).ok();
 }
 
 
@@ -990,6 +907,7 @@ fn navigation_is_fast_in_a_series_sized_project() {
     dir.push(format!("quill-perf-nav-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    let dir = TempProject::new(dir);
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
@@ -1018,7 +936,6 @@ fn navigation_is_fast_in_a_series_sized_project() {
 
     println!("chapter switch in a {n}-chapter project = {per:?}");
     assert!(per.as_millis() < 10, "chapter switch took {per:?}");
-    fs::remove_dir_all(&dir).ok();
 }
 
 /// Performance guard (`cargo perf`). The daily word tally runs on every idle
@@ -1035,6 +952,7 @@ fn tally_is_independent_of_project_size() {
     dir.push(format!("quill-perf-tally-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    let dir = TempProject::new(dir);
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
@@ -1062,5 +980,4 @@ fn tally_is_independent_of_project_size() {
     // touching only the changed chapter keeps it an order of magnitude cheaper.
     println!("tally over a {n}-chapter project = {per:?}");
     assert!(per.as_micros() < 30, "tally took {per:?}");
-    fs::remove_dir_all(&dir).ok();
 }
