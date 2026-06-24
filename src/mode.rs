@@ -90,6 +90,10 @@ pub enum Mode {
     /// Enter switches to the selected project, Esc cancels. Boxed (carries the
     /// project list).
     ProjectBrowser(Box<ProjectBrowser>),
+    /// Browsing the filesystem to find a project not in the recent list (#271):
+    /// a directory navigator. Enter opens a project / descends a folder, `..`
+    /// goes up, Esc cancels. Boxed (carries the directory listing).
+    DirBrowser(Box<DirBrowser>),
 }
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
@@ -190,6 +194,28 @@ pub struct RefFiles {
 pub struct ProjectBrowser {
     pub(crate) projects: Vec<crate::recent::RecentProject>,
     pub(crate) selected: usize,
+}
+
+/// State for an open [`Mode::DirBrowser`] (#271): a filesystem navigator for
+/// finding a project that isn't in the recent list. Shows the subdirectories of
+/// `cwd` (projects marked), with a `..` entry to go up.
+pub struct DirBrowser {
+    pub(crate) cwd: std::path::PathBuf,
+    pub(crate) entries: Vec<DirEntry>,
+    pub(crate) selected: usize,
+}
+
+/// One row in the [`DirBrowser`]: a navigable directory.
+pub struct DirEntry {
+    /// Display label (`..` for the parent, else the directory name).
+    pub(crate) label: String,
+    /// The directory this row navigates to (the parent for `..`).
+    pub(crate) path: std::path::PathBuf,
+    /// Whether this directory is a Quill project (holds a `book.toml`), so Enter
+    /// opens it rather than descending into it.
+    pub(crate) is_project: bool,
+    /// Whether this is the `..` (go-up) row.
+    pub(crate) is_parent: bool,
 }
 
 /// State for an open [`Mode::Palette`]: the available AI actions and the selected
