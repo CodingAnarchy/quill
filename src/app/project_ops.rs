@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::buffer::Buffer;
 use crate::mode::{
-    DirBrowser, DirEntry, Mode, Pending, ProjectBrowser,
+    Command, DirBrowser, DirEntry, Mode, Palette, PaletteItem, Pending, ProjectBrowser,
 };
 use crate::config::ProjectsConfig;
 use crate::project::Project;
@@ -19,6 +19,54 @@ use crate::recent;
 use super::App;
 
 impl App {
+    /// Open the book switcher for a multi-book series (#329): list the books with
+    /// the active one marked, selecting one makes it active. A no-op (with a
+    /// status message) for a standalone novel.
+    pub(crate) fn open_book_switcher(&mut self) {
+        let count = self.project.book_count();
+        if count <= 1 {
+            self.message = Some("This project has only one book".into());
+            return;
+        }
+        let active = self.project.active_book();
+        let items = (0..count)
+            .map(|i| {
+                let title = self.project.book_title(i).unwrap_or("(untitled)").to_string();
+                let label = if i == active { format!("{title}  ·  current") } else { title };
+                PaletteItem { label, desc: format!("book {} of {count}", i + 1), command: Command::SwitchBook(i) }
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette { title: "Switch book", items, selected: active }));
+    }
+
+    /// Make book `index` the active one (#329): flush the outgoing book's edits,
+    /// swap the project to the target book, reload the editor on its first
+    /// chapter, and re-baseline the daily tally for the new book's structure.
+    pub(crate) fn switch_book(&mut self, index: usize) {
+        if index == self.project.active_book() || index >= self.project.book_count() {
+            return;
+        }
+        // The continuous view windows one book; drop to single-chapter, saving it.
+        self.leave_continuous();
+        // Persist the chapter we're leaving before swapping books — never drop work.
+        if self.flush_active().is_err() {
+            return;
+        }
+        self.project.set_active_book(index);
+        match Buffer::from_path(self.project.active_path()) {
+            Ok(buffer) => {
+                self.buffer = buffer;
+                // The new book has its own parts and chapters: re-baseline so its
+                // existing words aren't counted as today's writing and the per-part
+                // counters match its structure (#329).
+                self.reset_tally_for_active_book();
+                let title = self.project.book_title(index).unwrap_or("");
+                self.message = Some(format!("Book: {title}"));
+            }
+            Err(e) => self.message = Some(format!("Open failed: {e}")),
+        }
+    }
+
     /// Open the project browser over the recently-opened projects (newest first).
     /// Empty until at least one project has been opened.
     pub(super) fn open_project_browser(&mut self) {

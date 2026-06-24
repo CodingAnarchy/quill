@@ -268,11 +268,9 @@ impl App {
             pending_notes_folder: None,
             message: None,
         };
-        // Baselines for the daily word tally: edits move each chapter from here.
-        let parts = app.project.manifest.parts.as_ref().map_or(0, Vec::len);
-        app.part_added = vec![0; parts];
-        app.part_removed = vec![0; parts];
-        app.seed_baselines();
+        // Baselines + per-part counters for the daily word tally (sized to the
+        // active book's parts; edits move each chapter from here).
+        app.reset_tally_for_active_book();
         app.refresh_vc_status();
         // Surface dropped config — bad key remaps (#208) and bad workflow triggers
         // (#228) — rather than ignoring them silently.

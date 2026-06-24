@@ -43,6 +43,7 @@ impl Drop for TempProject {
 
 mod actions;
 mod ai;
+mod books;
 mod chapters;
 mod editing;
 mod panes;

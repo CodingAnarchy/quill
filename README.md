@@ -146,8 +146,9 @@ grows a `[[books]]` array, each book carrying its own `title`, `[[parts]]`, and
 `[[chapters]]`, with `title`/`author` at the top level naming the series. A
 standalone novel's `book.toml` has no `books` table and is read and written
 exactly as before — adding a series never changes a single-book file. When a
-project does hold several books, Quill opens the first one; switching between
-them and navigating the whole series come next in the epic.
+project does hold several books, Quill opens the first one; switch between them
+with the **Switch book** command (the run-action menu, `Ctrl-K`). Navigating the
+whole series as a tree comes next in the epic.
 
 Quill writes each chapter back unchanged except for one normalization: a
 non-empty file ends with exactly one trailing newline (the POSIX/git
@@ -380,9 +381,10 @@ overlay (named, inclusive chapter ranges). The manifest can now also record a
 chapters (see [Project & file format](#project--file-format)); a standalone
 novel's file is unchanged, and Quill opens the first book. Still ahead:
 
-- **Series support** — *foundation landed:* the manifest models a series → book
-  → part → chapter tree. Next: switching the active book from inside Quill, and
-  carrying the active book through the chapter pane and reports.
+- **Series support** — *landed:* the manifest models a series → book → part →
+  chapter tree, and the **Switch book** command moves the editor, chapter pane,
+  and reports between books from inside Quill. Next: rolled-up counts across the
+  series.
 - **Tree navigation** — an outline/navigation pane that walks the full tree and
   jumps between books, parts, and chapters, with rolled-up word counts at each
   level.
