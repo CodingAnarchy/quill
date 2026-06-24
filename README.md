@@ -139,6 +139,16 @@ and titles, and each chapter's prose lives in its own UTF-8 **Markdown** file.
 Both are portable plain text that opens in any editor, so a manuscript stays
 yours and travels well in git.
 
+A project usually holds one book — the manifest's `title`, optional `[[parts]]`,
+and `[[chapters]]` describe it directly. A project can also hold a **series of
+books** (the start of [multi-book support](#project-structure-multi-book-series--tree-navigation)): the manifest
+grows a `[[books]]` array, each book carrying its own `title`, `[[parts]]`, and
+`[[chapters]]`, with `title`/`author` at the top level naming the series. A
+standalone novel's `book.toml` has no `books` table and is read and written
+exactly as before — adding a series never changes a single-book file. When a
+project does hold several books, Quill opens the first one; switching between
+them and navigating the whole series come next in the epic.
+
 Quill writes each chapter back unchanged except for one normalization: a
 non-empty file ends with exactly one trailing newline (the POSIX/git
 convention), and an empty file stays empty. Interior bytes, including line
@@ -364,12 +374,15 @@ below are forward-looking.
 
 ### Project structure: multi-book series & tree navigation
 
-Today a project is a flat, ordered list of chapter files with an optional
-`parts` overlay (named, inclusive chapter ranges). Still ahead:
+A project is a flat, ordered list of chapter files with an optional `parts`
+overlay (named, inclusive chapter ranges). The manifest can now also record a
+**series of books** — a `[[books]]` array, each book with its own parts and
+chapters (see [Project & file format](#project--file-format)); a standalone
+novel's file is unchanged, and Quill opens the first book. Still ahead:
 
-- **Series support** — more than one **book** under a single project, with the
-  manifest recording a series → book → part → chapter tree rather than today's
-  single-book chapter list.
+- **Series support** — *foundation landed:* the manifest models a series → book
+  → part → chapter tree. Next: switching the active book from inside Quill, and
+  carrying the active book through the chapter pane and reports.
 - **Tree navigation** — an outline/navigation pane that walks the full tree and
   jumps between books, parts, and chapters, with rolled-up word counts at each
   level.

@@ -109,8 +109,12 @@ What they assert:
   every chapter file once (word count + front matter); even a 150-chapter
   novel opens in a few ms.
 - `open_is_fast_for_a_series_sized_project` (`project.rs`) — open scales linearly
-  and stays near-instant for a 1500-chapter (multi-book series) project (~30ms);
-  the project holds small per-chapter metadata only, never chapter body text.
+  and stays near-instant for a 1500-chapter single-book project (~30–60ms); the
+  project holds small per-chapter metadata only, never chapter body text.
+- `open_is_fast_for_a_multi_book_series` (`project.rs`) — opening the multi-book
+  `[[books]]` format (#328) at series scale (1500 chapters across 6 books) runs
+  the books-array parse + active-book hoist and caches only the active book
+  (~10ms); catches a regression that eagerly reads every book's files at open.
 - `navigation_is_fast_in_a_series_sized_project` (`app/tests/chapters.rs`) —
   switching chapters in a 600-chapter (series-sized) project reads/parses one
   chapter file, never work proportional to the project (~0.5ms/switch).
