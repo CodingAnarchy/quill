@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{AiError, Request};
 
 /// The three submission documents.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -51,19 +51,12 @@ pub fn schema() -> Value {
 
 /// Build the submission request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Write the synopsis, blurb, and query letter as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Write the synopsis, blurb, and query letter as specified.", manuscript, model, schema())
 }
 
 /// Parse a structured submission reply.
 pub fn parse(text: &str) -> Result<Submission, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad submission JSON: {e}")))
+    super::parse_json(text, "submission")
 }
 
 #[cfg(test)]

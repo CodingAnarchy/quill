@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{numbered_sections, AiError, Request, MAX_OUTPUT_TOKENS};
+use super::{numbered_sections, AiError, Request};
 
 /// A round of marketing copy: several blurb variants and several taglines.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -43,7 +43,7 @@ rewrite of the author's prose. Return the blurbs and taglines as plain text.";
 
 /// The JSON Schema for a marketing-copy reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -59,19 +59,12 @@ pub fn schema() -> Value {
 /// attached. Manuscript-only for now; the bible (names/stakes) could sharpen the
 /// copy later, but blurbs/taglines come mostly from the prose and tone (#104).
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    Request {
-        system: Some(SYSTEM.to_string()),
-        cached_context: manuscript,
-        user: "Write the blurb variants and taglines as specified.".to_string(),
-        model: model.to_string(),
-        max_tokens: MAX_OUTPUT_TOKENS,
-        json_schema: Some(schema()),
-    }
+    super::manuscript_request(SYSTEM, "Write the blurb variants and taglines as specified.", manuscript, model, schema())
 }
 
 /// Parse a structured marketing-copy reply.
 pub fn parse(text: &str) -> Result<Marketing, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad marketing JSON: {e}")))
+    super::parse_json(text, "marketing")
 }
 
 #[cfg(test)]

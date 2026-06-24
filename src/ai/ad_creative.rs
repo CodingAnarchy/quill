@@ -81,7 +81,7 @@ is marketing material, never part of the novel.";
 
 /// The JSON Schema for an ad-creative reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     let ad = json!({
         "type": "object",
         "properties": {
@@ -122,7 +122,7 @@ pub fn build_request(manuscript: String, marketing: &str, model: &str) -> Reques
 
 /// Parse a structured ad-creative reply.
 pub fn parse(text: &str) -> Result<AdCreative, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad ad-creative JSON: {e}")))
+    super::parse_json(text, "ad-creative")
 }
 
 #[cfg(test)]

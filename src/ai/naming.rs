@@ -46,7 +46,7 @@ suggest prose.";
 
 /// The JSON Schema for a naming reply.
 pub fn schema() -> Value {
-    let strings = json!({ "type": "array", "items": { "type": "string" } });
+    let strings = super::string_array();
     json!({
         "type": "object",
         "properties": {
@@ -93,7 +93,7 @@ pub fn build_request(manuscript: String, entities: &[String]) -> Request {
 
 /// Parse a structured naming reply.
 pub fn parse(text: &str) -> Result<Naming, AiError> {
-    serde_json::from_str(text).map_err(|e| AiError::Api(format!("bad naming JSON: {e}")))
+    super::parse_json(text, "naming")
 }
 
 #[cfg(test)]
