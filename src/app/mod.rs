@@ -1,7 +1,7 @@
 //! Top-level application state and the key handling that drives editing. The
 //! editor-mode types live in [`crate::mode`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +27,7 @@ use crate::mode::{
     MetaEdit, MetaField, Mode, Op, Overlay, Palette, PaletteItem, Pending, ProjectBrowser,
     PromptState, RefFiles, VimPending, VimState, Yank,
 };
+use crate::config::ProjectsConfig;
 use crate::project::{Manifest, Project};
 use crate::recent;
 use crate::recovery;
@@ -832,9 +833,15 @@ impl App {
     /// Open the project browser over the recently-opened projects (newest first).
     /// Empty until at least one project has been opened.
     fn open_project_browser(&mut self) {
-        // Always open, even with no recents — `b` (browse) must be reachable so a
-        // first-time author can still find a project on disk (#271).
-        let projects = recent::list();
+        // Recent projects first (newest), then every other project under the
+        // configured projects-home — a complete library view (#272). Omitted
+        // silently when no home is set. Always opens even when empty, so `b`
+        // (browse) stays reachable for a first-time author (#271).
+        let mut projects = recent::list();
+        if let Some(home) = ProjectsConfig::load().home_dir() {
+            let known: HashSet<PathBuf> = projects.iter().map(|p| p.path.clone()).collect();
+            projects.extend(recent::scan(&home).into_iter().filter(|p| !known.contains(&p.path)));
+        }
         self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser { projects, selected: 0 }));
     }
 

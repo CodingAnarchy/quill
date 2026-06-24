@@ -277,3 +277,68 @@ fn an_unreadable_directory_shows_a_message_without_crashing() {
     assert!(!matches!(app.mode, Mode::DirBrowser(_)), "an unreadable dir doesn't enter the browser");
     assert!(app.message.as_deref().unwrap_or("").contains("Can't open"), "a clear message: {:?}", app.message);
 }
+
+// --- Projects-home auto-list (#272) ---------------------------------------
+
+/// Point the `[projects] home` config at `home` (call after `isolate`, which set
+/// the config dir to a temp location).
+fn set_projects_home(home: &Path) {
+    let cfg_dir = crate::config::config_dir().unwrap();
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(cfg_dir.join("config.toml"), format!("[projects]\nhome = \"{}\"\n", home.display())).unwrap();
+}
+
+fn browser_titles(app: &App) -> Vec<String> {
+    match &app.mode {
+        Mode::ProjectBrowser(s) => s.projects.iter().map(|p| p.title.clone()).collect(),
+        _ => panic!("not in the project browser"),
+    }
+}
+
+#[test]
+fn projects_under_the_configured_home_appear_in_the_browser() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("home");
+    let lib = books_dir("home-lib");
+    project_in(&lib, "alpha", "Alpha", "a\n");
+    project_in(&lib, "beta", "Beta", "b\n");
+    set_projects_home(&lib);
+
+    // An app on an unrelated project, with no recents.
+    let other = make_project("home-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+
+    let titles = browser_titles(&app);
+    assert!(titles.contains(&"Alpha".to_string()) && titles.contains(&"Beta".to_string()), "home books listed: {titles:?}");
+}
+
+#[test]
+fn a_home_project_already_in_recents_is_not_duplicated() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("home-dedup");
+    let lib = books_dir("dedup-lib");
+    let a = project_in(&lib, "alpha", "Alpha", "a\n");
+    set_projects_home(&lib);
+    recent::record(&a, "Alpha"); // now both a recent and under the home
+
+    let other = make_project("dedup-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+
+    let count = browser_titles(&app).iter().filter(|t| *t == "Alpha").count();
+    assert_eq!(count, 1, "a project that's both recent and under home shows once");
+}
+
+#[test]
+fn with_no_projects_home_only_recents_are_listed() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("no-home");
+    let a = make_project("nohome-a", "Alpha", "a\n");
+    recent::record(&a, "Alpha");
+
+    let mut app = open_app(&a);
+    app.on_key(ctrl('b'));
+
+    assert_eq!(browser_titles(&app), vec!["Alpha".to_string()], "no home configured — just recents");
+}
