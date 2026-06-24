@@ -369,10 +369,10 @@ impl App {
     /// feature and clear the pending state. Called once per loop iteration so the
     /// result lands within the poll window.
     pub fn poll_ai(&mut self) {
-        // A stuck AI step shouldn't wedge a running workflow (#227) or series-bible
-        // refresh (#340).
-        self.tick_workflow_timeout();
-        self.tick_series_bible_timeout();
+        // A stuck AI step shouldn't wedge a running sequenced run — a workflow
+        // (#227) or a series-bible refresh (#340). One tick for whichever is
+        // active (#344).
+        self.tick_run_timeout();
         match self.ai_task.poll() {
             Poll::Ready(outcome) => {
                 self.message = None;
@@ -402,16 +402,14 @@ impl App {
                 // The in-flight pass is done; a clean bible apply already recorded
                 // its state (#90), so drop any snapshot a failed/conflicted one left.
                 self.pending_pass = None;
-                // If this AI request was a workflow step or a series-bible refresh
-                // pass, advance that run (each no-ops when it isn't theirs).
-                self.advance_after_ai(step_error.clone());
-                self.advance_series_bible(step_error);
+                // If this AI request was a sequenced-run step (a workflow or a
+                // series-bible refresh pass), advance that run (#344).
+                self.advance_run(step_error);
             }
             Poll::Pending => {}
             Poll::Died => {
                 self.message = Some("AI: request failed".into());
-                self.advance_after_ai(Some("request failed".into()));
-                self.advance_series_bible(Some("request failed".into()));
+                self.advance_run(Some("request failed".into()));
             }
         }
         // Fire a setup wizard's deferred setting draft once the worker is free (#282).

@@ -49,6 +49,7 @@ mod counts;
 mod persistence;
 mod project_ops;
 mod prompts;
+mod sequenced;
 mod series_bible;
 mod tree;
 mod vim;
@@ -362,23 +363,15 @@ impl App {
             return;
         }
 
-        // While a workflow is running (suspended on an async step), Esc cancels it
-        // — cleanly, after the current step finishes (#227). Only in an editing
-        // mode: a prompt/palette owns Esc itself (a cost-confirm cancels there).
-        if self.workflow_run.is_some()
+        // While a sequenced run is in progress (a workflow #227, or a series-bible
+        // refresh #340) suspended on an async step, Esc cancels it — cleanly, after
+        // the current step finishes (#344). Only in an editing mode: a prompt or
+        // palette owns Esc itself (a cost-confirm cancels there).
+        if self.sequenced_run_active()
             && key.code == KeyCode::Esc
             && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
         {
-            self.cancel_workflow();
-            return;
-        }
-        // Likewise Esc cancels a running series-bible refresh, cleanly after the
-        // in-flight pass (#340).
-        if self.series_bible_running()
-            && key.code == KeyCode::Esc
-            && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
-        {
-            self.cancel_series_bible();
+            self.cancel_run();
             return;
         }
 

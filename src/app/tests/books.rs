@@ -245,7 +245,7 @@ fn a_pass_error_stops_the_refresh() {
     use crate::mode::AiAction;
     let (mut app, _dir) = series_app("bible-error");
     app.seed_series_bible_run(vec![(AiAction::Characters, 0), (AiAction::Characters, 1)]);
-    app.advance_series_bible(Some("boom".into()));
+    app.advance_run(Some("boom".into()));
     assert!(!app.has_series_bible_run(), "the run stopped");
     assert!(app.message.as_deref().unwrap_or("").contains("boom"), "{:?}", app.message);
 }
@@ -255,12 +255,28 @@ fn cancelling_stops_the_refresh_after_the_current_pass() {
     use crate::mode::AiAction;
     let (mut app, _dir) = series_app("bible-cancel");
     app.seed_series_bible_run(vec![(AiAction::Characters, 0), (AiAction::Characters, 1)]);
-    app.cancel_series_bible();
+    app.cancel_run();
     assert!(app.has_series_bible_run(), "still running until the pass finishes");
     // The in-flight pass completes; the cancel takes effect, later passes skipped.
-    app.advance_series_bible(None);
+    app.advance_run(None);
     assert!(!app.has_series_bible_run());
     assert!(app.message.as_deref().unwrap_or("").contains("cancelled"), "{:?}", app.message);
+}
+
+#[test]
+fn a_stuck_series_bible_pass_times_out() {
+    use crate::ai;
+    use crate::mode::AiAction;
+    let (mut app, _dir) = series_app("bible-timeout");
+    // A spawned-but-unpolled task keeps `ai_task` busy (a request in flight); the
+    // run is backdated past the per-step timeout, so the shared guard (#344) drops it.
+    app.ai_task.spawn(|| ai::Outcome::Error(ai::AiError::Network { status: None, message: "stuck".into() }));
+    app.seed_series_bible_run(vec![(AiAction::Characters, 0)]);
+    app.expire_series_bible_step();
+    app.tick_run_timeout();
+    assert!(!app.has_series_bible_run(), "the stuck run was stopped");
+    assert!(!app.ai_task.is_busy(), "the stuck request was dropped");
+    assert!(app.message.as_deref().unwrap_or("").contains("timed out"), "{:?}", app.message);
 }
 
 // --- Cross-book findings (#341) ---------------------------------------------

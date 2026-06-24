@@ -161,7 +161,7 @@ fn an_async_step_completing_advances_to_the_next_step() {
     // Stand the run up at an AI step in flight, then deliver its result.
     app.begin_workflow_for_test("pass", vec![Action::Ai(AiAction::Continuity), Action::Save]);
     app.on_key(key(KeyCode::Char('Y'))); // edit so the trailing save has something to write
-    app.advance_after_ai(None); // the AI step finished cleanly
+    app.advance_run(None); // the AI step finished cleanly
     // It advanced past the AI step and ran the save, then finished.
     assert!(app.workflow_run.is_none(), "run finished after the trailing save");
     assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('Y'), "save step ran");
@@ -172,7 +172,7 @@ fn an_async_step_completing_advances_to_the_next_step() {
 fn an_async_step_error_stops_the_run() {
     let (mut app, _dir) = two_chapter_app("wf-ai-err");
     app.begin_workflow_for_test("pass", vec![Action::Ai(AiAction::Continuity), Action::Save]);
-    app.advance_after_ai(Some("network unreachable".into()));
+    app.advance_run(Some("network unreachable".into()));
     assert!(app.workflow_run.is_none(), "the run stopped");
     let msg = app.message.as_deref().unwrap_or("");
     assert!(msg.contains("stopped at step 1") && msg.contains("network unreachable"), "{msg}");
@@ -182,9 +182,9 @@ fn an_async_step_error_stops_the_run() {
 fn a_cancelled_run_stops_after_the_current_step() {
     let (mut app, _dir) = two_chapter_app("wf-cancel");
     app.begin_workflow_for_test("pass", vec![Action::Ai(AiAction::Continuity), Action::Save]);
-    app.cancel_workflow(); // requested while the AI step is in flight
+    app.cancel_run(); // requested while the AI step is in flight
     assert!(app.workflow_run.is_some(), "still running until the step finishes");
-    app.advance_after_ai(None); // the in-flight step finishes
+    app.advance_run(None); // the in-flight step finishes
     assert!(app.workflow_run.is_none(), "stopped after the current step");
     let msg = app.message.as_deref().unwrap_or("");
     assert!(msg.contains("cancelled") && msg.contains("1 step ran"), "{msg}");
@@ -219,7 +219,7 @@ fn a_stuck_step_times_out() {
     app.ai_task.spawn(|| ai::Outcome::Error(ai::AiError::Network { status: None, message: "stuck".into() }));
     app.begin_workflow_for_test("pass", vec![Action::Ai(AiAction::Continuity)]);
     app.expire_workflow_step();
-    app.tick_workflow_timeout();
+    app.tick_run_timeout();
     assert!(app.workflow_run.is_none(), "the stuck run was stopped");
     assert!(!app.ai_task.is_busy(), "the stuck request was dropped");
     assert!(app.message.as_deref().unwrap_or("").contains("timed out"), "{:?}", app.message);
