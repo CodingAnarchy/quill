@@ -131,6 +131,11 @@ outline) into the matching bible documents in Quill's format. To start from
 scratch, "New project from a folder of notes" creates a project and imports the
 folder in one step.
 
+Writing a series? "Refresh series bible" (in the Ctrl-K menu, for multi-book
+projects) brings the characters, timeline, and setting up to date across every
+book — one book at a time, in reading order, so the bible spans the whole series.
+Only changed books re-run, progress shows per book, and Esc cancels.
+
 
 ACTIONS & WORKFLOWS
 

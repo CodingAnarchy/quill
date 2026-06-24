@@ -242,6 +242,26 @@ while it processes; the status line shows `(batch — may take a few minutes)`.
 Incremental passes stay on the normal request (they're small and want low
 latency), and the local backend has no batch path (it runs the request normally).
 
+### Series bible (#336)
+
+A multi-book series shares **one** bible across its books, but the whole series
+at once won't fit a model's context window. So each persistent-bible pass is
+**book-scoped** (#339): it sends only that book's chapters (a first build, or just
+its changed chapters via the incremental scoping above) plus the existing shared
+bible to *revise* — never another book's prose. A book's "full" pass on a series
+revises the shared bible rather than rebuilding it, so folding one book in never
+discards the others.
+
+**Refresh series bible** (#340, the Ctrl-K menu, multi-book projects only) drives
+this across the whole series: it runs each book's character, timeline, and setting
+pass in reading order — one book per AI call — so each book builds on the bible
+the earlier books wrote. Only books with changes run; the status line shows
+per-book progress and **Esc** cancels cleanly after the in-flight pass. A
+standalone novel uses the per-book passes directly (the action is unavailable).
+The fast active-book passes (Ctrl-A) stay as they were. *Trade-off:* a deleted
+chapter in a series book leaves a stale bible entry until a full rebuild — the
+cost of not re-scanning every book on each refresh.
+
 ## Integration shape
 
 - **No official Anthropic SDK for Rust**, so Quill talks to the Messages API

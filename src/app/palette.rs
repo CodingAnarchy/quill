@@ -86,6 +86,12 @@ impl App {
             Action::SwitchBook if self.project.book_count() <= 1 => {
                 Some("this project has only one book".into())
             }
+            // The series-bible refresh needs more than one book and a ready AI
+            // backend (it spawns per-book passes) (#340).
+            Action::RefreshSeriesBible if self.project.book_count() <= 1 => {
+                Some("this project has only one book".into())
+            }
+            Action::RefreshSeriesBible => self.ai.check_ready().err().map(|e| e.to_string()),
             _ => None,
         }
     }
@@ -116,6 +122,7 @@ impl App {
             Action::NewProjectFromNotes => self.start_new_from_notes(),
             Action::SwitchBook => self.open_book_switcher(),
             Action::SeriesTree => self.open_tree(),
+            Action::RefreshSeriesBible => self.start_refresh_series_bible(),
         }
     }
 
