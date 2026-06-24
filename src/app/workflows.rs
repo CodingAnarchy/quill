@@ -5,53 +5,57 @@
 //! async AI steps off the UI thread (the existing worker-thread + `Outcome` path),
 //! one at a time.
 
-use std::time::{Duration, Instant};
-
 use super::palette::AiStart;
-use super::task::Task;
+use super::sequenced::{plural, SequencedRun, Sequenced};
 use super::*;
 
 use crate::mode::{Action, AiAction};
 use crate::workflow;
 
-/// How long a single async step may run before the no-hang guardrail aborts it
-/// and stops the workflow (#227). Generous — a real AI pass can take many
-/// seconds; this only catches a wedged request, not a slow one.
-const STEP_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// A workflow run in progress (#227): the resolved steps and the cursor through
-/// them, plus the bookkeeping the state machine needs while a run is suspended on
-/// an async step. Lives in `App::workflow_run` as `Some` for the run's lifetime.
+/// A workflow run in progress (#227): the resolved steps plus the shared
+/// sequenced-run bookkeeping (#344). Lives in `App::workflow_run` as `Some` for
+/// the run's lifetime.
 pub(crate) struct WorkflowRun {
     /// The workflow's name, for progress and summary messages.
     name: String,
     /// The fully-resolved steps, in order.
     actions: Vec<Action>,
-    /// The step currently running (or about to run); `actions.len()` when done.
-    index: usize,
-    /// Steps that completed (for the summary). Excludes skipped steps.
-    ran: usize,
-    /// AI steps skipped because AI is off (reported, not failed).
-    skipped: usize,
-    /// Set when the author asks to cancel: the run stops cleanly after the step
-    /// in flight finishes, rather than tearing it down mid-request.
-    cancelled: bool,
-    /// When the in-flight async step was spawned, for the per-step timeout.
-    started_at: Instant,
+    /// Cursor, tallies, cancel flag, and the in-flight step's start time (#344).
+    seq: SequencedRun,
 }
 
 impl WorkflowRun {
     fn new(name: String, actions: Vec<Action>) -> Self {
-        Self { name, actions, index: 0, ran: 0, skipped: 0, cancelled: false, started_at: Instant::now() }
+        Self { name, actions, seq: SequencedRun::new() }
     }
 }
 
-/// "step" / "steps" for a count.
-fn steps(n: usize) -> &'static str {
-    if n == 1 {
-        "step"
-    } else {
-        "steps"
+/// The workflow runner's [`Sequenced`] behavior (#344) — the marker the generic
+/// advance/timeout/cancel dispatch through.
+pub(crate) struct WorkflowDriver;
+
+impl Sequenced for WorkflowDriver {
+    fn run_mut(app: &mut App) -> Option<&mut SequencedRun> {
+        app.workflow_run.as_mut().map(|r| &mut r.seq)
+    }
+    fn run_ref(app: &App) -> Option<&SequencedRun> {
+        app.workflow_run.as_ref().map(|r| &r.seq)
+    }
+    fn drive(app: &mut App) {
+        app.advance_workflow();
+    }
+    fn stop(app: &mut App, reason: &str) {
+        app.stop_run(reason);
+    }
+    fn finish(app: &mut App) {
+        if let Some(run) = app.workflow_run.as_ref() {
+            let (name, ran) = (run.name.clone(), run.seq.ran);
+            app.finish_cancelled(&name, ran);
+        }
+    }
+    fn cancelling_message(app: &App) -> String {
+        let name = app.workflow_run.as_ref().map(|r| r.name.as_str()).unwrap_or("");
+        format!("Workflow '{name}': cancelling after this step…")
     }
 }
 
@@ -181,20 +185,20 @@ impl App {
             let Some(run) = self.workflow_run.as_ref() else {
                 return;
             };
-            if run.index >= run.actions.len() {
-                let (name, ran, skipped) = (run.name.clone(), run.ran, run.skipped);
+            if run.seq.index >= run.actions.len() {
+                let (name, ran, skipped) = (run.name.clone(), run.seq.ran, run.seq.skipped);
                 self.workflow_run = None;
                 let tail = if skipped > 0 { format!(" ({skipped} skipped)") } else { String::new() };
-                self.message = Some(format!("Ran workflow '{name}' — {ran} {}{tail}", steps(ran)));
+                self.message = Some(format!("Ran workflow '{name}' — {ran} {}{tail}", plural(ran, "step", "steps")));
                 return;
             }
-            let action = run.actions[run.index];
+            let action = run.actions[run.seq.index];
 
             // An async AI step with AI off is skipped (reported, not a failure).
             if !action.is_sync() && self.ai.check_ready().is_err() {
                 if let Some(run) = self.workflow_run.as_mut() {
-                    run.skipped += 1;
-                    run.index += 1;
+                    run.seq.skipped += 1;
+                    run.seq.index += 1;
                 }
                 continue;
             }
@@ -207,8 +211,8 @@ impl App {
             if action.is_sync() {
                 self.dispatch_action(action, false);
                 if let Some(run) = self.workflow_run.as_mut() {
-                    run.ran += 1;
-                    run.index += 1;
+                    run.seq.ran += 1;
+                    run.seq.index += 1;
                 }
                 continue;
             }
@@ -239,8 +243,8 @@ impl App {
     /// Also the resume path for a step the author confirmed past the cost gate.
     pub(crate) fn start_async_step(&mut self, action: AiAction) {
         let Some((name, step, total)) = self.workflow_run.as_mut().map(|run| {
-            run.started_at = Instant::now();
-            (run.name.clone(), run.index + 1, run.actions.len())
+            run.seq.touch();
+            (run.name.clone(), run.seq.index + 1, run.actions.len())
         }) else {
             return;
         };
@@ -258,70 +262,25 @@ impl App {
         ));
     }
 
-    /// Resume a run after its in-flight async step finished (called from
-    /// `poll_ai`). A no-op when no workflow is running. A step error stops the run;
-    /// a pending cancel stops it cleanly here, the just-finished step counted;
-    /// otherwise it advances to the next step.
-    pub(crate) fn advance_after_ai(&mut self, step_error: Option<String>) {
-        let Some(run) = self.workflow_run.as_mut() else {
-            return;
-        };
-        if let Some(e) = step_error {
-            self.stop_run(&e);
-            return;
-        }
-        run.ran += 1;
-        run.index += 1;
-        if run.cancelled {
-            let (name, ran) = (run.name.clone(), run.ran);
-            self.finish_cancelled(&name, ran);
-            return;
-        }
-        self.advance_workflow();
-    }
-
-    /// Ask the running workflow to stop after the current step finishes (#227) —
-    /// the clean cancel bound to Esc. The in-flight async step is left to complete;
-    /// [`advance_after_ai`](App::advance_after_ai) sees the flag and stops there.
-    pub(crate) fn cancel_workflow(&mut self) {
-        if let Some(run) = self.workflow_run.as_mut() {
-            run.cancelled = true;
-            self.message = Some(format!("Workflow '{}': cancelling after this step…", run.name));
-        }
-    }
-
     /// Cancel a run immediately, with nothing in flight — the path when the author
     /// declines an async step's cost confirm. Reports what ran. No-op if idle.
     pub(crate) fn decline_workflow(&mut self) {
         if let Some(run) = self.workflow_run.as_ref() {
-            let (name, ran) = (run.name.clone(), run.ran);
+            let (name, ran) = (run.name.clone(), run.seq.ran);
             self.finish_cancelled(&name, ran);
         }
     }
 
-    /// The no-hang guardrail (#227): if the in-flight async step has run past the
-    /// per-step timeout, drop it (its orphaned worker's result is ignored) and
-    /// stop the run. Called each poll; a no-op unless a step is actually stuck.
-    pub(crate) fn tick_workflow_timeout(&mut self) {
-        let Some(run) = self.workflow_run.as_ref() else {
-            return;
-        };
-        if !self.ai_task.is_busy() || run.started_at.elapsed() < STEP_TIMEOUT {
-            return;
-        }
-        self.ai_task = Task::idle();
-        self.stop_run("timed out");
-    }
-
     /// Stop the run at its current step with a reason — the one place the
     /// "stopped at step N (action): why" message is built, and the run cleared.
+    /// The [`WorkflowDriver`]'s [`Sequenced::stop`] hook (#344).
     fn stop_run(&mut self, reason: &str) {
         if let Some(run) = self.workflow_run.take() {
-            let action = run.actions[run.index];
+            let action = run.actions[run.seq.index];
             self.message = Some(format!(
                 "Workflow '{}' stopped at step {} ({}): {reason}",
                 run.name,
-                run.index + 1,
+                run.seq.index + 1,
                 action.name(),
             ));
         }
@@ -331,12 +290,11 @@ impl App {
     /// after-step cancel and the declined-confirm cancel.
     fn finish_cancelled(&mut self, name: &str, ran: usize) {
         self.workflow_run = None;
-        self.message = Some(format!("Workflow '{name}' cancelled — {ran} {} ran", steps(ran)));
+        self.message = Some(format!("Workflow '{name}' cancelled — {ran} {} ran", plural(ran, "step", "steps")));
     }
 
     /// Test seam: put a run in progress at its first step, so the async-step state
-    /// transitions (`advance_after_ai`, cancel, timeout) can be exercised without
-    /// a live backend.
+    /// transitions (advance, cancel, timeout) can be exercised without a backend.
     #[cfg(test)]
     pub(crate) fn begin_workflow_for_test(&mut self, name: &str, actions: Vec<Action>) {
         self.workflow_run = Some(WorkflowRun::new(name.into(), actions));
@@ -345,8 +303,10 @@ impl App {
     /// Test seam: backdate the in-flight step so the per-step timeout has elapsed.
     #[cfg(test)]
     pub(crate) fn expire_workflow_step(&mut self) {
+        use super::sequenced::STEP_TIMEOUT;
+        use std::time::Instant;
         if let Some(run) = self.workflow_run.as_mut() {
-            run.started_at = Instant::now().checked_sub(STEP_TIMEOUT * 2).unwrap_or_else(Instant::now);
+            run.seq.started_at = Instant::now().checked_sub(STEP_TIMEOUT * 2).unwrap_or_else(Instant::now);
         }
     }
 }

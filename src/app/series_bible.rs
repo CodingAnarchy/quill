@@ -1,20 +1,16 @@
 //! The "Refresh series bible" driver (#340): bring the whole series' story bible
 //! up to date by running each book's bible pass (#339) in reading order against
 //! the accumulating shared bible — one book per AI call, never the series at once
-//! — with per-book progress and Esc-to-cancel. It mirrors the workflow runner's
-//! async sequencing (a run-state advanced from `poll_ai` after each pass applies).
-//! The action is a no-op for a standalone novel, whose per-book passes are the
-//! fast everyday path.
+//! — with per-book progress and Esc-to-cancel. The async sequencing (advance,
+//! timeout, cancel) is the shared [`Sequenced`](super::sequenced) skeleton (#344);
+//! this module supplies only the per-book step (`run_series_bible_step`) and the
+//! refresh's messages. The action is a no-op for a standalone novel, whose
+//! per-book passes are the fast everyday path.
 
-use std::time::{Duration, Instant};
-
-use super::task::Task;
+use super::sequenced::{plural, SequencedRun, Sequenced};
 use super::*;
 
 use crate::mode::AiAction;
-
-/// A wedged pass shouldn't stall the refresh; drop it past this and stop (#340).
-const STEP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The bible trackers a series refresh runs, each accumulated across the books in
 /// reading order. The bibles are independent, so the order between trackers is
@@ -22,20 +18,12 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(120);
 const TRACKERS: [AiAction; 3] = [AiAction::Characters, AiAction::Continuity, AiAction::Setting];
 
 /// A series-bible refresh in progress (#340): the queue of `(tracker, book)`
-/// passes in order, the cursor through them, and the suspended-on-async
-/// bookkeeping. Lives in `App::series_bible_run` for the run's lifetime.
+/// passes in order, plus the shared sequenced-run bookkeeping (#344). Lives in
+/// `App::series_bible_run` for the run's lifetime.
 pub(crate) struct SeriesBibleRun {
     queue: Vec<(AiAction, usize)>,
-    /// The pass about to run (or in flight); `queue.len()` when done. Every step
-    /// past a pass bumps this and exactly one of `skipped`/(an implicit "ran"), so
-    /// the passes that sent a request are always `index - skipped`.
-    index: usize,
-    /// Passes skipped because that book was already current.
-    skipped: usize,
-    /// Set on Esc: stop cleanly after the in-flight pass finishes.
-    cancelled: bool,
-    /// When the in-flight pass was spawned, for the no-hang timeout.
-    started_at: Instant,
+    /// Cursor, tallies, cancel flag, and the in-flight pass's start time (#344).
+    seq: SequencedRun,
     /// The triage length when the run started, so the summary can report how many
     /// *new* cross-book findings (#341) this refresh added.
     triage_before: usize,
@@ -43,7 +31,35 @@ pub(crate) struct SeriesBibleRun {
 
 impl SeriesBibleRun {
     fn new(queue: Vec<(AiAction, usize)>, triage_before: usize) -> Self {
-        Self { queue, index: 0, skipped: 0, cancelled: false, started_at: Instant::now(), triage_before }
+        Self { queue, seq: SequencedRun::new(), triage_before }
+    }
+}
+
+/// The series-bible refresh's [`Sequenced`] behavior (#344) — the marker the
+/// generic advance/timeout/cancel dispatch through.
+pub(crate) struct SeriesBibleDriver;
+
+impl Sequenced for SeriesBibleDriver {
+    fn run_mut(app: &mut App) -> Option<&mut SequencedRun> {
+        app.series_bible_run.as_mut().map(|r| &mut r.seq)
+    }
+    fn run_ref(app: &App) -> Option<&SequencedRun> {
+        app.series_bible_run.as_ref().map(|r| &r.seq)
+    }
+    fn drive(app: &mut App) {
+        app.run_series_bible_step();
+    }
+    fn stop(app: &mut App, reason: &str) {
+        if let Some(run) = app.series_bible_run.take() {
+            let at = run.seq.index + 1;
+            app.message = Some(format!("Series bible refresh stopped at pass {at}: {reason}"));
+        }
+    }
+    fn finish(app: &mut App) {
+        app.finish_series_bible();
+    }
+    fn cancelling_message(_app: &App) -> String {
+        "Series bible refresh: cancelling after this pass…".to_string()
     }
 }
 
@@ -76,9 +92,9 @@ impl App {
     fn run_series_bible_step(&mut self) {
         loop {
             let (action, book) = match self.series_bible_run.as_mut() {
-                Some(run) if run.index < run.queue.len() => {
-                    run.started_at = Instant::now();
-                    run.queue[run.index]
+                Some(run) if run.seq.index < run.queue.len() => {
+                    run.seq.touch();
+                    run.queue[run.seq.index]
                 }
                 Some(_) => {
                     self.finish_series_bible(); // queue drained
@@ -90,7 +106,7 @@ impl App {
             if self.ai_task.is_busy() {
                 // The pass is in flight; show progress and wait for `poll_ai`.
                 if let Some(run) = self.series_bible_run.as_ref() {
-                    let (done, total) = (run.index + 1, run.queue.len());
+                    let (done, total) = (run.seq.index + 1, run.queue.len());
                     let title = self.project.book_title(book).unwrap_or("");
                     self.message = Some(format!(
                         "Refreshing series bible — {done}/{total}: {} · {title}… (Esc to cancel)",
@@ -101,39 +117,9 @@ impl App {
             }
             // Not busy → that book was already current (nothing to send): skip on.
             if let Some(run) = self.series_bible_run.as_mut() {
-                run.skipped += 1;
-                run.index += 1;
+                run.seq.skipped += 1;
+                run.seq.index += 1;
             }
-        }
-    }
-
-    /// Resume after an in-flight series-bible pass finished (called from `poll_ai`).
-    /// A no-op when no refresh is running. A pass error stops the run; a pending
-    /// cancel stops cleanly; otherwise it runs the next pass.
-    pub(crate) fn advance_series_bible(&mut self, step_error: Option<String>) {
-        let Some(run) = self.series_bible_run.as_mut() else {
-            return;
-        };
-        if let Some(e) = step_error {
-            let at = run.index + 1;
-            self.series_bible_run = None;
-            self.message = Some(format!("Series bible refresh stopped at pass {at}: {e}"));
-            return;
-        }
-        run.index += 1;
-        if run.cancelled {
-            self.finish_series_bible();
-            return;
-        }
-        self.run_series_bible_step();
-    }
-
-    /// Ask a running refresh to stop after the in-flight pass finishes (#340) — the
-    /// clean Esc cancel, mirroring the workflow cancel.
-    pub(crate) fn cancel_series_bible(&mut self) {
-        if let Some(run) = self.series_bible_run.as_mut() {
-            run.cancelled = true;
-            self.message = Some("Series bible refresh: cancelling after this pass…".into());
         }
     }
 
@@ -148,32 +134,18 @@ impl App {
     /// refresh — an active-book pass's findings target the active book, as before.
     ///
     /// Valid only while a pass is being *applied* — `poll_ai` runs the `apply_*`
-    /// that reads this before `advance_series_bible` bumps `index` to the next
-    /// pass, so `queue[index]` is the book that just landed.
+    /// that reads this before the run advances `index` to the next pass, so
+    /// `queue[index]` is the book that just landed.
     pub(crate) fn current_series_bible_book(&self) -> Option<usize> {
         let run = self.series_bible_run.as_ref()?;
-        run.queue.get(run.index).map(|&(_, book)| book)
+        run.queue.get(run.seq.index).map(|&(_, book)| book)
     }
 
-    /// The no-hang guardrail: drop a wedged in-flight pass and stop the run.
-    pub(crate) fn tick_series_bible_timeout(&mut self) {
-        let Some(run) = self.series_bible_run.as_ref() else {
-            return;
-        };
-        if !self.ai_task.is_busy() || run.started_at.elapsed() < STEP_TIMEOUT {
-            return;
-        }
-        self.ai_task = Task::idle();
-        let at = run.index + 1;
-        self.series_bible_run = None;
-        self.message = Some(format!("Series bible refresh timed out at pass {at}"));
-    }
-
-    /// Clear the run and report what it did.
+    /// Clear the run and report what it did — the [`SeriesBibleDriver`]'s
+    /// [`Sequenced::finish`] hook, and the normal drain-complete path (#344).
     fn finish_series_bible(&mut self) {
         if let Some(run) = self.series_bible_run.take() {
-            let (skipped, cancelled) = (run.skipped, run.cancelled);
-            let ran = run.index - skipped;
+            let (ran, skipped, cancelled) = (run.seq.ran, run.seq.skipped, run.seq.cancelled);
             let tail = if skipped > 0 { format!(" ({skipped} already current)") } else { String::new() };
             // New cross-book findings this run added to revision triage (#341).
             let found = self.triage.len().saturating_sub(run.triage_before);
@@ -183,7 +155,7 @@ impl App {
                 String::new()
             };
             let verb = if cancelled { "cancelled —" } else { "refreshed —" };
-            self.message = Some(format!("Series bible {verb} {ran} {}{tail}{findings}", passes(ran)));
+            self.message = Some(format!("Series bible {verb} {ran} {}{tail}{findings}", plural(ran, "pass", "passes")));
         }
     }
 }
@@ -201,13 +173,14 @@ impl App {
     pub(crate) fn has_series_bible_run(&self) -> bool {
         self.series_bible_run.is_some()
     }
-}
 
-fn passes(n: usize) -> &'static str {
-    if n == 1 {
-        "pass"
-    } else {
-        "passes"
+    /// Test seam: backdate the in-flight pass so the per-step timeout has elapsed.
+    pub(crate) fn expire_series_bible_step(&mut self) {
+        use super::sequenced::STEP_TIMEOUT;
+        use std::time::Instant;
+        if let Some(run) = self.series_bible_run.as_mut() {
+            run.seq.started_at = Instant::now().checked_sub(STEP_TIMEOUT * 2).unwrap_or_else(Instant::now);
+        }
     }
 }
 
