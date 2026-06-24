@@ -263,6 +263,59 @@ fn cancelling_stops_the_refresh_after_the_current_pass() {
     assert!(app.message.as_deref().unwrap_or("").contains("cancelled"), "{:?}", app.message);
 }
 
+// --- Cross-book findings (#341) ---------------------------------------------
+
+#[test]
+fn series_findings_are_attributed_to_their_book_and_accumulate_silently() {
+    use crate::ai::continuity::{Continuity, Finding};
+    use crate::mode::AiAction;
+    let (mut app, _dir) = series_app("bible-cross");
+    let mk = |chapter: &str| Continuity {
+        events: vec![],
+        findings: vec![Finding {
+            kind: "object".into(),
+            detail: "the locket changes color".into(),
+            chapters: vec![chapter.into()],
+        }],
+    };
+    // Book one's continuity pass is in flight: its finding is tagged to book 0,
+    // accumulated into triage, and must NOT pop a findings overlay mid-refresh.
+    app.seed_series_bible_run(vec![(AiAction::Continuity, 0)]);
+    app.apply_continuity(Ok(mk("Dawn")));
+    assert!(!matches!(app.mode, Mode::Findings(_)), "no overlay pops mid-refresh");
+
+    // Book two's pass next: an identical-looking finding is a *distinct* one,
+    // because it belongs to a different book (titles can repeat across books).
+    app.seed_series_bible_run(vec![(AiAction::Continuity, 1)]);
+    app.apply_continuity(Ok(mk("Dusk")));
+    assert_eq!(app.triage.len(), 2, "both books' findings accumulated");
+    assert_eq!(app.triage[0].book, Some(0));
+    assert_eq!(app.triage[1].book, Some(1));
+
+    // Re-running book two's pass doesn't double-count its own finding.
+    app.apply_continuity(Ok(mk("Dusk")));
+    assert_eq!(app.triage.len(), 2, "deduped within a book");
+}
+
+#[test]
+fn jumping_to_a_cross_book_finding_switches_books() {
+    use crate::mode::Finding;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (mut app, _dir) = series_app("bible-jump");
+    assert_eq!(app.project.active_book(), 0, "opens on book one");
+    // A finding in book two, surfaced in the (session-wide) triage list.
+    app.triage.push(Finding {
+        summary: "object: the locket".into(),
+        chapters: vec!["Dusk".into()],
+        book: Some(1),
+    });
+    app.open_triage();
+    assert!(matches!(app.mode, Mode::Findings(_)));
+    app.on_key_findings(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.project.active_book(), 1, "Enter switched to the finding's book");
+    assert!(app.buffer.text().contains("beta one"), "opened book two's chapter");
+}
+
 // --- Series export (#332) ---------------------------------------------------
 
 #[test]

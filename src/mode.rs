@@ -584,6 +584,12 @@ pub struct Finding {
     pub(crate) summary: String,
     /// Chapters involved; the first is the jump target.
     pub(crate) chapters: Vec<String>,
+    /// The book the finding belongs to in a multi-book series (#341):
+    /// `Some(index)` when a series-bible refresh produced it, so triage can
+    /// attribute and jump across books (chapter titles can repeat between
+    /// books). `None` targets the active book — every standalone-novel and
+    /// active-book pass, unchanged.
+    pub(crate) book: Option<usize>,
 }
 
 /// State for an open [`Mode::BibleReview`]: the queue of conflicting bible files

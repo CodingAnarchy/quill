@@ -448,12 +448,14 @@ impl App {
         let Some(cont) = self.ok_or_report(result) else {
             return;
         };
+        let book = self.current_series_bible_book();
         let findings = cont
             .findings
             .iter()
             .map(|f| Finding {
                 summary: format!("{}: {}", f.kind, f.detail),
                 chapters: f.chapters.clone(),
+                book,
             })
             .collect();
         let today = date::iso(date::today());
@@ -469,12 +471,14 @@ impl App {
         let Some(setting) = self.ok_or_report(result) else {
             return;
         };
+        let book = self.current_series_bible_book();
         let findings = setting
             .findings
             .iter()
             .map(|f| Finding {
                 summary: format!("{}: {}", f.rule, f.violation),
                 chapters: f.chapters.clone(),
+                book,
             })
             .collect();
         let today = date::iso(date::today());
@@ -703,6 +707,7 @@ impl App {
             .map(|g| Finding {
                 summary: format!("gap: {}", g.detail),
                 chapters: vec![g.chapter.clone()],
+                book: None,
             })
             .collect();
         let today = date::iso(date::today());
@@ -728,6 +733,7 @@ impl App {
                     format!("{} — also: {}", f.name, f.variants.join(", "))
                 },
                 chapters: f.chapters.clone(),
+                book: None,
             })
             .collect();
         self.show_findings(findings);
@@ -745,6 +751,7 @@ impl App {
             .map(|f| Finding {
                 summary: format!("{}: {}", f.kind, f.detail),
                 chapters: f.chapters.clone(),
+                book: None,
             })
             .collect();
         self.show_findings(findings);
@@ -765,7 +772,7 @@ impl App {
                     .filter(|s| !s.is_empty())
                     .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
                     .unwrap_or_default();
-                Finding { summary: format!("{}: {}{at}", n.focus, n.concern), chapters: n.chapters }
+                Finding { summary: format!("{}: {}{at}", n.focus, n.concern), chapters: n.chapters, book: None }
             })
             .collect();
         self.show_findings(findings);
@@ -787,6 +794,7 @@ impl App {
                     format!("{} ({}): {}", f.kind, f.character, f.detail)
                 },
                 chapters: f.chapters.clone(),
+                book: None,
             })
             .collect();
         self.show_findings(findings);

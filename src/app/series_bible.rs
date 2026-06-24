@@ -36,11 +36,14 @@ pub(crate) struct SeriesBibleRun {
     cancelled: bool,
     /// When the in-flight pass was spawned, for the no-hang timeout.
     started_at: Instant,
+    /// The triage length when the run started, so the summary can report how many
+    /// *new* cross-book findings (#341) this refresh added.
+    triage_before: usize,
 }
 
 impl SeriesBibleRun {
-    fn new(queue: Vec<(AiAction, usize)>) -> Self {
-        Self { queue, index: 0, skipped: 0, cancelled: false, started_at: Instant::now() }
+    fn new(queue: Vec<(AiAction, usize)>, triage_before: usize) -> Self {
+        Self { queue, index: 0, skipped: 0, cancelled: false, started_at: Instant::now(), triage_before }
     }
 }
 
@@ -63,7 +66,7 @@ impl App {
         }
         let books = self.project.book_count();
         let queue = TRACKERS.iter().flat_map(|&t| (0..books).map(move |b| (t, b))).collect();
-        self.series_bible_run = Some(SeriesBibleRun::new(queue));
+        self.series_bible_run = Some(SeriesBibleRun::new(queue, self.triage.len()));
         self.run_series_bible_step();
     }
 
@@ -139,6 +142,19 @@ impl App {
         self.series_bible_run.is_some()
     }
 
+    /// The book whose pass is in flight during a series-bible refresh (#341), so
+    /// the continuity/setting findings it produces can be attributed to that book
+    /// (their chapter titles can collide with another book's). `None` outside a
+    /// refresh — an active-book pass's findings target the active book, as before.
+    ///
+    /// Valid only while a pass is being *applied* — `poll_ai` runs the `apply_*`
+    /// that reads this before `advance_series_bible` bumps `index` to the next
+    /// pass, so `queue[index]` is the book that just landed.
+    pub(crate) fn current_series_bible_book(&self) -> Option<usize> {
+        let run = self.series_bible_run.as_ref()?;
+        run.queue.get(run.index).map(|&(_, book)| book)
+    }
+
     /// The no-hang guardrail: drop a wedged in-flight pass and stop the run.
     pub(crate) fn tick_series_bible_timeout(&mut self) {
         let Some(run) = self.series_bible_run.as_ref() else {
@@ -159,8 +175,15 @@ impl App {
             let (skipped, cancelled) = (run.skipped, run.cancelled);
             let ran = run.index - skipped;
             let tail = if skipped > 0 { format!(" ({skipped} already current)") } else { String::new() };
+            // New cross-book findings this run added to revision triage (#341).
+            let found = self.triage.len().saturating_sub(run.triage_before);
+            let findings = if found > 0 {
+                format!("; {found} in revision triage")
+            } else {
+                String::new()
+            };
             let verb = if cancelled { "cancelled —" } else { "refreshed —" };
-            self.message = Some(format!("Series bible {verb} {ran} {}{tail}", passes(ran)));
+            self.message = Some(format!("Series bible {verb} {ran} {}{tail}{findings}", passes(ran)));
         }
     }
 }
@@ -170,7 +193,8 @@ impl App {
     /// Seed a series-bible run so the state machine (advance / cancel / error) can
     /// be exercised without a live AI backend.
     pub(crate) fn seed_series_bible_run(&mut self, queue: Vec<(AiAction, usize)>) {
-        self.series_bible_run = Some(SeriesBibleRun::new(queue));
+        let before = self.triage.len();
+        self.series_bible_run = Some(SeriesBibleRun::new(queue, before));
     }
 
     /// Whether a run is recorded (test inspection).
