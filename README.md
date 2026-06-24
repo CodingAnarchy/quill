@@ -166,6 +166,25 @@ byte-for-byte.
 | Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
+### Projects (switch without relaunching)
+
+**Ctrl-B** opens the project browser so you can move between books without
+quitting. It lists your recently-opened projects (newest first); Enter switches
+to one in place, saving the current project first (and confirming if there are
+unsaved changes). Press **`b`** to browse the filesystem for a project that
+isn't in the list yet.
+
+To get a complete, always-current library view, point Quill at the folder where
+you keep your books in `~/.config/quill/config.toml`:
+
+```toml
+[projects]
+home = "~/Writing"
+```
+
+Every project under that folder then appears in the browser, ready to open —
+no need to have opened it before. Without it, the browser just shows recents.
+
 ### Vim mode (opt-in)
 
 Authors with Vim muscle memory can turn on modal editing. It's off by default —

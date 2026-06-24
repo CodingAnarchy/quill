@@ -110,12 +110,79 @@ impl EditorConfig {
     }
 }
 
+/// The `[projects]` section (#272): where the project browser looks for books
+/// beyond the recently-opened list.
+#[derive(Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectsConfig {
+    /// A folder holding your projects (e.g. `~/Writing`); the project browser
+    /// lists every project under it. `~` expands to the home directory. Absent
+    /// when unset — the browser then shows only recent projects.
+    pub home: Option<String>,
+}
+
+impl ProjectsConfig {
+    /// Load the `[projects]` section from the home config file. Best-effort: a
+    /// missing or unreadable file yields the defaults (no projects home).
+    pub fn load() -> Self {
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct File {
+            projects: ProjectsConfig,
+        }
+        config_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| toml::from_str::<File>(&t).ok())
+            .map(|f| f.projects)
+            .unwrap_or_default()
+    }
+
+    /// The configured projects-home as an absolute path with `~` expanded, if set.
+    pub fn home_dir(&self) -> Option<PathBuf> {
+        self.home.as_deref().map(expand_tilde)
+    }
+}
+
+/// Expand a leading `~` / `~/` to the home directory; leave any other path as-is.
+fn expand_tilde(path: &str) -> PathBuf {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    if path == "~" {
+        if let Some(h) = home() {
+            return h;
+        }
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(h) = home() {
+            return h.join(rest);
+        }
+    }
+    PathBuf::from(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn steps(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| (*x).to_string()).collect()
+    }
+
+    #[test]
+    fn projects_home_parses_and_expands_tilde() {
+        let cfg: ProjectsConfig = toml::from_str("home = \"~/Writing\"").unwrap();
+        let dir = cfg.home_dir().expect("home set");
+        assert!(dir.is_absolute(), "~ expanded to an absolute path: {dir:?}");
+        assert!(dir.ends_with("Writing"));
+    }
+
+    #[test]
+    fn projects_home_passes_an_absolute_path_through() {
+        let cfg = ProjectsConfig { home: Some("/books".into()) };
+        assert_eq!(cfg.home_dir(), Some(PathBuf::from("/books")));
+    }
+
+    #[test]
+    fn no_projects_home_is_none() {
+        assert_eq!(ProjectsConfig::default().home_dir(), None);
     }
 
     #[test]

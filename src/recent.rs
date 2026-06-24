@@ -12,11 +12,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config;
-use crate::project::Project;
+use crate::project::{Manifest, Project};
 
 /// How many projects to remember. Old enough to cover any working set; small
 /// enough that the browser is a glance, not a scroll.
 const MAX: usize = 20;
+
+/// Cap on directory entries examined when scanning a projects-home folder, so a
+/// pathologically large directory can never hang the browser (#272).
+const SCAN_LIMIT: usize = 1000;
 
 const FILE: &str = "recent-projects.json";
 
@@ -40,6 +44,38 @@ pub fn record(root: &Path, title: &str) {
     if let Some(dir) = config::config_dir() {
         record_in(&dir, root, title);
     }
+}
+
+/// Every project directly under `dir` (#272): a shallow, bounded scan — each
+/// immediate subdirectory holding a `book.toml` is a project, titled from its
+/// manifest (falling back to the folder name). Sorted by title. An unreadable
+/// `dir` yields an empty list rather than an error. Never recurses, and examines
+/// at most [`SCAN_LIMIT`] entries, so it stays responsive on a huge folder.
+pub fn scan(dir: &Path) -> Vec<RecentProject> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<RecentProject> = read
+        .flatten()
+        .take(SCAN_LIMIT)
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .filter_map(|path| {
+            // Title from the manifest alone — never read the chapters, so a
+            // library of many books still scans in a blink.
+            let text = std::fs::read_to_string(Project::manifest_path(&path)).ok()?;
+            let title = toml::from_str::<Manifest>(&text)
+                .map(|m| m.title)
+                .ok()
+                .filter(|t| !t.is_empty())
+                .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_default();
+            let path = path.canonicalize().unwrap_or(path);
+            Some(RecentProject { path, title })
+        })
+        .collect();
+    found.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    found
 }
 
 // --- Internals, parameterized by the config directory so they're testable
@@ -135,5 +171,32 @@ mod tests {
 
         assert!(list_in(&dir).is_empty(), "a vanished project is pruned from the list");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scan_finds_projects_and_skips_plain_folders() {
+        let home = std::env::temp_dir().join(format!("quill-home-{}-scan", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        Project::create(home.join("alpha")).unwrap();
+        Project::create(home.join("beta")).unwrap();
+        std::fs::create_dir_all(home.join("not-a-project")).unwrap();
+        // Give beta a real title so the manifest title (not the folder name) is used.
+        std::fs::write(Project::manifest_path(&home.join("beta")), "title = \"Zebra\"\n").unwrap();
+
+        let found = scan(&home);
+        let titles: Vec<_> = found.iter().map(|r| r.title.as_str()).collect();
+        // Sorted by title: "Chapter…"? alpha keeps its created title; check membership + sort.
+        assert_eq!(found.len(), 2, "only the two projects, not the plain folder: {titles:?}");
+        assert!(titles.contains(&"Zebra"), "title comes from the manifest: {titles:?}");
+        assert!(titles.windows(2).all(|w| w[0].to_lowercase() <= w[1].to_lowercase()), "sorted by title");
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn scan_of_a_missing_dir_is_empty() {
+        let missing = std::env::temp_dir().join(format!("quill-home-{}-missing", std::process::id()));
+        let _ = std::fs::remove_dir_all(&missing);
+        assert!(scan(&missing).is_empty());
     }
 }
