@@ -48,6 +48,7 @@ mod editing;
 mod panes;
 mod projects;
 mod recovery;
+mod typography;
 mod vcs;
 mod vim;
 mod workflows;
@@ -90,6 +91,9 @@ fn two_chapter_app(name: &str) -> (App, TempProject) {
     // tests don't depend on whether the dev has Vim mode (#27) enabled. The Vim
     // tests opt back in explicitly via `vim_app`.
     app.vim = false;
+    // Smart typography (#296) is on by default; pin it off so tests that type
+    // quotes/dashes/dots assert the literal ASCII (the typography tests opt in).
+    app.smart_typography = false;
     app.mode = Mode::Insert;
     // Likewise drop any workflows / triggers from the real config, so a developer
     // with an on-save trigger doesn't perturb the save-based tests (#228). The

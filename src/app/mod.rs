@@ -27,6 +27,7 @@ use crate::mode::{
 use crate::project::{Manifest, Project};
 use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
+use crate::typography;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod assist;
@@ -80,6 +81,10 @@ pub struct App {
     /// the editor's resting state is [`Mode::Normal`] and the status bar shows the
     /// mode; when off, editing is exactly as it has always been.
     pub vim: bool,
+    /// Smart typography (#296), from the `[editor]` config: substitute curly
+    /// quotes / em-dashes / ellipses as the author types prose. On by default;
+    /// when off, typed punctuation is inserted verbatim.
+    pub smart_typography: bool,
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
@@ -209,6 +214,7 @@ impl App {
         let under_vc = crate::vcs::is_repo(&project.root);
         let editor = crate::config::EditorConfig::load();
         let vim = editor.vim;
+        let smart_typography = editor.smart_typography;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let loaded = crate::workflow::load();
         let trigger_errors = loaded.errors;
@@ -222,6 +228,7 @@ impl App {
             // the modeless Insert.
             mode: if vim { Mode::Normal } else { Mode::Insert },
             vim,
+            smart_typography,
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
@@ -478,6 +485,29 @@ impl App {
     // --- Edit dispatch (single chapter or continuous) ----------------------
 
     fn edit_insert_char(&mut self, c: char) {
+        // Smart typography (#296): substitute curly quotes / em-dash / ellipsis
+        // for the punctuation just typed, keyed off the text before the cursor.
+        // Only the prose-edit path runs this; prompts and titles insert verbatim.
+        if self.smart_typography {
+            // The substitution only inspects the last ≤2 chars before the cursor.
+            let before = match &self.manuscript {
+                Some(m) => m.buffer().text_before_cursor(2),
+                None => self.buffer.text_before_cursor(2),
+            };
+            if let Some((delete, replacement)) = typography::substitute(c, &before) {
+                for _ in 0..delete {
+                    self.edit_backspace();
+                }
+                self.edit_insert_raw(replacement);
+                return;
+            }
+        }
+        self.edit_insert_raw(c);
+    }
+
+    /// Insert `c` verbatim into the active buffer (single or continuous), with no
+    /// typography substitution — the raw path `edit_insert_char` falls back to.
+    fn edit_insert_raw(&mut self, c: char) {
         match &mut self.manuscript {
             Some(m) => m.insert_char(c),
             None => self.buffer.insert_char(c),

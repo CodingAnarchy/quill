@@ -272,6 +272,24 @@ mod tests {
     }
 
     #[test]
+    fn smart_typography_glyphs_pass_through_to_markdown() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("C", None, "He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}")],
+            }],
+            back: vec![],
+        };
+        assert!(to_markdown(&d).contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"), "curly glyphs reach the Markdown/Vellum output");
+    }
+
+    #[test]
     fn renders_the_book_header_and_epigraph() {
         let md = to_markdown(&doc());
         assert!(md.starts_with("The Cycle\n\n# Red State Earth\n\n*a novel*\n\nby A. Writer\n\n"));

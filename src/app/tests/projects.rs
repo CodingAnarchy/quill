@@ -42,6 +42,7 @@ fn open_app(dir: &Path) -> App {
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
     app.vim = false;
+    app.smart_typography = false;
     app.mode = Mode::Insert;
     app.workflows = Vec::new();
     app.triggers = Default::default();

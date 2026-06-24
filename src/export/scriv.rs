@@ -286,6 +286,11 @@ mod tests {
     fn rtf_escapes_controls_and_unicode() {
         assert_eq!(rtf_escape("a\\b{c}"), "a\\\\b\\{c\\}");
         assert_eq!(rtf_escape("café"), "caf\\u233?");
+        // Smart-typography glyphs (#296) carry through as RTF \uN? escapes.
+        assert_eq!(
+            rtf_escape("\u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
+            "\\u8220?hi\\u8212?bye\\u8230?\\u8221?"
+        );
     }
 
     #[test]
