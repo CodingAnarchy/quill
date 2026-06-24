@@ -65,6 +65,9 @@ keystrokes that stay out of the way.
   part titles are styled **Heading 1**, which is where Vellum splits chapters on
   import (in Vellum: *File → Import Word File…* and pick the `.vellum.docx`), so
   chapters arrive as separate, correctly-ordered elements with emphasis intact.
+  For a multi-book **series**, the menu offers each format twice — the whole
+  series (books in reading order, each delimited per format: Markdown/Word book
+  headings, Scrivener book folders) or just the active book.
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
@@ -390,7 +393,10 @@ novel's file is unchanged, and Quill opens the first book. Still ahead:
 - **Rolled-up counts** — *landed:* the tree shows a word count at every level
   (chapter, part, book, and the whole series), and the progress report leads with
   a series total for a multi-book project. Per-book goals live in each book's
-  manifest entry. Next: compile/export across the whole series.
+  manifest entry.
+- **Series export** — *landed:* the export menu (`Ctrl-E`) compiles either the
+  whole series (books in order, each delimited per format) or just the active
+  book, in any of the four formats. A standalone novel's export is unchanged.
 
 ### AI assistance (Claude)
 

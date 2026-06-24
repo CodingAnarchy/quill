@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::ai::{cost, naming};
-use crate::mode::{Action, AiAction};
+use crate::mode::{Action, AiAction, ExportScope};
 use super::assist::list_move;
 
 /// The cost decision for starting a network AI action (#82): either run it now,
@@ -107,7 +107,7 @@ impl App {
     pub(crate) fn dispatch_action(&mut self, action: Action, force: bool) {
         match action {
             Action::Save => self.save_edit(),
-            Action::Export(f) => self.run_export(f),
+            Action::Export(f) => self.run_export(f, ExportScope::ActiveBook),
             Action::ProgressReport => self.open_progress_report(),
             Action::AnalysisReport => self.open_analysis_report(),
             Action::Ai(a) => self.start_ai_action(a, force),
@@ -137,7 +137,7 @@ impl App {
                 match command {
                     Some(Command::Ai(a)) => self.start_ai_action(a, force),
                     Some(Command::Git(g)) => self.start_git_action(g),
-                    Some(Command::Export(f)) => self.run_export(f),
+                    Some(Command::Export(f, scope)) => self.run_export(f, scope),
                     Some(Command::Run(a)) => self.run_action(a, force),
                     Some(Command::RunWorkflow(i)) => self.run_workflow(i),
                     Some(Command::NewWorkflowFromPrompt) => self.start_describe_workflow(),

@@ -7,25 +7,48 @@ use super::*;
 
 use crate::export::{self, Chapter, Document, Part};
 use crate::frontmatter::Band;
-use crate::mode::{Command, ExportFormat, Palette, PaletteItem};
+use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
+use crate::project::{front_chapter_count, part_at_body_position};
+
+/// The four export formats with their menu label and description.
+const FORMATS: [(ExportFormat, &str, &str); 4] = [
+    (ExportFormat::Markdown, "Manuscript (Markdown)", "One compiled .md file — hand off or convert"),
+    (ExportFormat::Docx, "Word (.docx)", "Standard manuscript format"),
+    (ExportFormat::Scriv, "Scrivener (.scriv)", "A project bundle — binder, parts, chapters"),
+    (ExportFormat::Vellum, "Vellum (.docx)", "Word tuned for Vellum — chapters split on Heading 1"),
+];
 
 impl App {
     /// Open the export menu (#7): pick a format, then [`run_export`] writes it.
+    /// A multi-book series (#332) offers each format twice — the whole series and
+    /// just the active book; a standalone novel lists the four formats as before.
     pub(crate) fn open_export_palette(&mut self) {
-        let item = |label: &str, desc: &str, format| PaletteItem { label: label.into(), desc: desc.into(), command: Command::Export(format) };
-        let items = vec![
-            item("Manuscript (Markdown)", "One compiled .md file — hand off or convert", ExportFormat::Markdown),
-            item("Word (.docx)", "Standard manuscript format", ExportFormat::Docx),
-            item("Scrivener (.scriv)", "A project bundle — binder, parts, chapters", ExportFormat::Scriv),
-            item("Vellum (.docx)", "Word tuned for Vellum — chapters split on Heading 1", ExportFormat::Vellum),
-        ];
+        let item = |label: String, desc: &str, format, scope| PaletteItem {
+            label,
+            desc: desc.into(),
+            command: Command::Export(format, scope),
+        };
+        let mut items = Vec::new();
+        if self.project.book_count() > 1 {
+            for (f, label, desc) in FORMATS {
+                items.push(item(format!("Series → {label}"), desc, f, ExportScope::Series));
+            }
+            for (f, label, desc) in FORMATS {
+                items.push(item(format!("This book → {label}"), desc, f, ExportScope::ActiveBook));
+            }
+        } else {
+            for (f, label, desc) in FORMATS {
+                items.push(item(label.to_string(), desc, f, ExportScope::ActiveBook));
+            }
+        }
         self.mode = Mode::Palette(Box::new(Palette { title: "Export", items, selected: 0 }));
     }
 
     /// Compile the manuscript and write it under `export/<slug>.<ext>` in the
     /// chosen format (#7), overwriting any previous one so it always reflects the
-    /// current project.
-    pub(crate) fn run_export(&mut self, format: ExportFormat) {
+    /// current project. `scope` picks the active book (#7) or the whole series
+    /// (#332); a standalone novel only ever has the one book.
+    pub(crate) fn run_export(&mut self, format: ExportFormat, scope: ExportScope) {
         // The continuous view's edits live in the windowed buffer, not the
         // per-chapter ones export reads — compile from the single-chapter view so
         // nothing is exported stale (same constraint as undo / structure edits).
@@ -33,44 +56,79 @@ impl App {
             self.message = Some("Leave the continuous view (Ctrl-l) before exporting.".into());
             return;
         }
-        let doc = self.export_document();
-        match format {
-            ExportFormat::Markdown => {
-                let markdown = export::to_markdown(&doc);
-                self.write_export("md", markdown.as_bytes());
+        match scope {
+            ExportScope::ActiveBook => {
+                let doc = self.export_document();
+                let name = bible::slug(&self.project.manifest.title);
+                self.write_book(format, &doc, &name);
             }
-            ExportFormat::Docx => self.write_docx(&doc, export::docx::Profile::Manuscript, "docx"),
-            // A distinct name so the Vellum .docx sits alongside the manuscript one.
-            ExportFormat::Vellum => self.write_docx(&doc, export::docx::Profile::Vellum, "vellum.docx"),
+            ExportScope::Series => {
+                let docs = self.export_series_documents();
+                let series = self.project.series_title().map(str::to_string);
+                let name = bible::slug(series.as_deref().unwrap_or("series"));
+                self.write_series(format, &docs, series.as_deref(), &name);
+            }
+        }
+    }
+
+    /// Write one book's [`Document`] in `format` to `export/<name>.<ext>`.
+    fn write_book(&mut self, format: ExportFormat, doc: &Document, name: &str) {
+        match format {
+            ExportFormat::Markdown => self.write_export(name, "md", export::to_markdown(doc).as_bytes()),
+            ExportFormat::Docx => self.write_docx(export::docx::to_docx(doc, export::docx::Profile::Manuscript), name, "docx"),
+            ExportFormat::Vellum => self.write_docx(export::docx::to_docx(doc, export::docx::Profile::Vellum), name, "vellum.docx"),
             ExportFormat::Scriv => {
-                // A `.scriv` is a bundle directory, not a single file.
-                let path = self.export_path("scriv");
+                let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
-                    .and_then(|()| export::scriv::write_scriv(&doc, &path));
+                    .and_then(|()| export::scriv::write_scriv(doc, &path));
                 self.report_export(&path, result);
             }
         }
     }
 
-    /// Compile to a `.docx` in `profile` and write it to `export/<slug>.<ext>`.
-    fn write_docx(&mut self, doc: &Document, profile: export::docx::Profile, ext: &str) {
-        match export::docx::to_docx(doc, profile) {
-            Ok(bytes) => self.write_export(ext, &bytes),
+    /// Write the whole series (one book per [`Document`], in order) in `format` to
+    /// `export/<name>.<ext>`, books delimited as each format allows (#332).
+    fn write_series(&mut self, format: ExportFormat, docs: &[Document], series: Option<&str>, name: &str) {
+        let author = self.project.manifest.author.clone();
+        match format {
+            ExportFormat::Markdown => {
+                self.write_export(name, "md", export::to_markdown_series(docs, series, author.as_deref()).as_bytes())
+            }
+            ExportFormat::Docx => self.write_docx(
+                export::docx::to_docx_series(docs, series, author.as_deref(), export::docx::Profile::Manuscript),
+                name,
+                "docx",
+            ),
+            ExportFormat::Vellum => self.write_docx(
+                export::docx::to_docx_series(docs, series, author.as_deref(), export::docx::Profile::Vellum),
+                name,
+                "vellum.docx",
+            ),
+            ExportFormat::Scriv => {
+                let path = self.export_path(name, "scriv");
+                let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
+                    .and_then(|()| export::scriv::write_scriv_series(docs, &path));
+                self.report_export(&path, result);
+            }
+        }
+    }
+
+    /// Write a compiled `.docx`'s bytes (or report the build error).
+    fn write_docx(&mut self, built: std::io::Result<Vec<u8>>, name: &str, ext: &str) {
+        match built {
+            Ok(bytes) => self.write_export(name, ext, &bytes),
             Err(e) => self.message = Some(format!("Export failed: {e}")),
         }
     }
 
-    /// `export/<slug>.<ext>` under the project root.
-    fn export_path(&self, ext: &str) -> std::path::PathBuf {
-        self.project
-            .root
-            .join("export")
-            .join(format!("{}.{ext}", bible::slug(&self.project.manifest.title)))
+    /// `export/<name>.<ext>` under the project root.
+    fn export_path(&self, name: &str, ext: &str) -> std::path::PathBuf {
+        self.project.root.join("export").join(format!("{name}.{ext}"))
     }
 
-    /// Write the export bytes to `export/<slug>.<ext>` and report the path.
-    fn write_export(&mut self, ext: &str, bytes: &[u8]) {
-        let path = self.export_path(ext);
+    /// Write the export bytes to `export/<name>.<ext>` and report the path.
+    fn write_export(&mut self, name: &str, ext: &str, bytes: &[u8]) {
+        let path = self.export_path(name, ext);
         let result = match path.parent() {
             Some(parent) => std::fs::create_dir_all(parent).and_then(|()| std::fs::write(&path, bytes)),
             None => std::fs::write(&path, bytes),
@@ -141,4 +199,75 @@ impl App {
         Chapter { title, epigraph: self.chapter_epigraph(i), body }
     }
 
+    /// One [`Document`] per book of the series, in reading order (#332): the
+    /// active book compiled live (its active chapter from the buffer), the others
+    /// read from disk.
+    fn export_series_documents(&self) -> Vec<Document> {
+        (0..self.project.book_count())
+            .map(|b| {
+                let mut doc = if b == self.project.active_book() {
+                    self.export_document()
+                } else {
+                    self.export_book_document(b)
+                };
+                // The series title and author are rendered once by the series
+                // writer, not repeated above every book.
+                doc.series = None;
+                doc.author = None;
+                doc
+            })
+            .collect()
+    }
+
+    /// Compile a non-active book into a [`Document`] (#332), reading its chapters'
+    /// prose and front matter from disk and grouping them into front / parts /
+    /// back the same way [`export_document`] does for the active book.
+    fn export_book_document(&self, b: usize) -> Document {
+        let chapters = self.project.book_chapters(b);
+        let parts = self.project.book_parts(b);
+        // Band order (front → body → back), then group body chapters by part.
+        let mut order: Vec<usize> = (0..chapters.len()).collect();
+        order.sort_by_key(|&i| Band::of(chapters[i].role));
+        let front_count = front_chapter_count(chapters);
+        let (mut front, mut back, mut body_parts) = (Vec::new(), Vec::new(), Vec::<Part>::new());
+        let mut prev: Option<Option<usize>> = None;
+        for (pos, &ci) in order.iter().enumerate() {
+            let ce = &chapters[ci];
+            let (body, fm) = self.project.read_chapter_parts(&ce.file);
+            let chapter = Chapter {
+                title: ce.title.clone(),
+                epigraph: fm.and_then(|f| f.epigraph()),
+                body: export::strip_repeated_title(&body, &ce.title),
+            };
+            match Band::of(ce.role) {
+                Band::Front => front.push(chapter),
+                Band::Back => back.push(chapter),
+                Band::Body => {
+                    let part = parts.and_then(|ps| part_at_body_position(ps, pos.saturating_sub(front_count) + 1));
+                    if prev != Some(part) {
+                        prev = Some(part);
+                        let name = part.map(|pi| {
+                            parts.unwrap()[pi]
+                                .name
+                                .clone()
+                                .unwrap_or_else(|| format!("{} {}", self.project.book_part_label(b), pi + 1))
+                        });
+                        body_parts.push(Part { name, chapters: Vec::new() });
+                    }
+                    body_parts.last_mut().unwrap().chapters.push(chapter);
+                }
+            }
+        }
+        Document {
+            title: self.project.book_title(b).unwrap_or("Untitled").to_string(),
+            subtitle: self.project.book_subtitle(b).map(str::to_string),
+            author: self.project.manifest.author.clone(),
+            // The series title is carried once by the series writer, not per book.
+            series: None,
+            epigraph: self.project.book_epigraph(b),
+            front,
+            parts: body_parts,
+            back,
+        }
+    }
 }

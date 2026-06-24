@@ -796,6 +796,36 @@ impl Project {
         self.book_chapters(i).iter().map(|c| c.words).sum()
     }
 
+    /// Book `i`'s subtitle, if any (#332): the active book's from the manifest,
+    /// the others from the stored series list.
+    pub fn book_subtitle(&self, i: usize) -> Option<&str> {
+        if self.books.is_empty() || i == self.active_book {
+            self.manifest.subtitle.as_deref()
+        } else {
+            self.books.get(i).and_then(|b| b.subtitle.as_deref())
+        }
+    }
+
+    /// Book `i`'s epigraph, if any (#332).
+    pub fn book_epigraph(&self, i: usize) -> Option<Epigraph> {
+        if self.books.is_empty() || i == self.active_book {
+            self.manifest.epigraph()
+        } else {
+            self.books
+                .get(i)
+                .and_then(|b| Epigraph::from_parts(b.epigraph.clone(), b.epigraph_by.clone()))
+        }
+    }
+
+    /// Read a chapter file's prose body and front matter from disk (#332) — for
+    /// books other than the active one, whose chapters aren't the live manifest.
+    /// Best-effort: an unreadable file yields empty prose.
+    pub fn read_chapter_parts(&self, file: &str) -> (String, Option<FrontMatter>) {
+        let text = fs::read_to_string(self.root.join(file)).unwrap_or_default();
+        let (front, body) = frontmatter::split(&text);
+        (body.to_string(), front.map(FrontMatter::from_raw))
+    }
+
     /// The grouping term ("part", "act", …) for book `i`, defaulting to "part".
     pub fn book_part_label(&self, i: usize) -> &str {
         if self.books.is_empty() || i == self.active_book {

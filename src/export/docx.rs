@@ -47,6 +47,38 @@ pub enum Profile {
 
 /// Compile a [`Document`] to the bytes of a `.docx` file in the given [`Profile`].
 pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
+    build_docx(document_xml(doc, profile), profile)
+}
+
+/// Compile a whole series (one book per [`Document`], in order) to one `.docx`
+/// (#332): a series title page (manuscript profile), then each book under its own
+/// title, page-broken from the last. Single book → the same body as [`to_docx`].
+pub fn to_docx_series(
+    books: &[Document],
+    series: Option<&str>,
+    author: Option<&str>,
+    profile: Profile,
+) -> std::io::Result<Vec<u8>> {
+    let mut body = String::new();
+    // Series title page (manuscript only — Vellum splits on Heading 1, so stray
+    // leading text would import as junk).
+    if profile == Profile::Manuscript {
+        if let Some(series) = series {
+            body.push_str(&para(r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#, run(series, true, false, Some(40))));
+        }
+        if let Some(author) = author {
+            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
+        }
+    }
+    for book in books {
+        body.push_str(&book_heading(&book.title, profile));
+        body.push_str(&book_body(book, profile));
+    }
+    build_docx(wrap_document(&body), profile)
+}
+
+/// Zip the four-part `.docx` package around a built `word/document.xml`.
+fn build_docx(document_xml: String, profile: Profile) -> std::io::Result<Vec<u8>> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default();
     // Vellum needs a Heading 1 style to recognize chapter breaks; the manuscript
@@ -61,7 +93,7 @@ pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
         ("_rels/.rels", RELS.to_string()),
         ("word/_rels/document.xml.rels", DOC_RELS.to_string()),
         ("word/styles.xml", styles),
-        ("word/document.xml", document_xml(doc, profile)),
+        ("word/document.xml", document_xml),
     ];
     for (name, content) in parts {
         zip.start_file(name, opts).map_err(std::io::Error::other)?;
@@ -70,32 +102,44 @@ pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
     Ok(zip.finish().map_err(std::io::Error::other)?.into_inner())
 }
 
-/// The `word/document.xml` body: the title block (manuscript only), then each
-/// part/chapter.
+/// The `word/document.xml` for one book: the title block (manuscript only), then
+/// its parts/chapters, wrapped in the document shell.
 fn document_xml(doc: &Document, profile: Profile) -> String {
     let mut body = String::new();
-
-    // Title page (manuscript only — Vellum sets title/author on import, and stray
-    // text before the first Heading 1 would import as junk front matter).
     if profile == Profile::Manuscript {
-        if let Some(series) = &doc.series {
-            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(series, false, false, None)));
-        }
-        body.push_str(&para(
-            r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
-            run(&doc.title, true, false, Some(36)),
-        ));
-        if let Some(subtitle) = &doc.subtitle {
-            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(subtitle, false, true, None)));
-        }
-        if let Some(author) = &doc.author {
-            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
-        }
-        if let Some(epigraph) = &doc.epigraph {
-            body.push_str(&epigraph_paras(epigraph));
-        }
+        body.push_str(&title_page(doc));
     }
+    body.push_str(&book_body(doc, profile));
+    wrap_document(&body)
+}
 
+/// A book's title page (manuscript profile): series line, big bold title,
+/// subtitle, author, and epigraph — each centered.
+fn title_page(doc: &Document) -> String {
+    let mut out = String::new();
+    if let Some(series) = &doc.series {
+        out.push_str(&para(r#"<w:jc w:val="center"/>"#, run(series, false, false, None)));
+    }
+    out.push_str(&para(
+        r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
+        run(&doc.title, true, false, Some(36)),
+    ));
+    if let Some(subtitle) = &doc.subtitle {
+        out.push_str(&para(r#"<w:jc w:val="center"/>"#, run(subtitle, false, true, None)));
+    }
+    if let Some(author) = &doc.author {
+        out.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
+    }
+    if let Some(epigraph) = &doc.epigraph {
+        out.push_str(&epigraph_paras(epigraph));
+    }
+    out
+}
+
+/// A book's part/chapter blocks (no title page) — shared by the single-book and
+/// series documents.
+fn book_body(doc: &Document, profile: Profile) -> String {
+    let mut body = String::new();
     for block in doc.blocks() {
         match block {
             Block::Part(name) => body.push_str(&heading(name, profile)),
@@ -112,8 +156,23 @@ fn document_xml(doc: &Document, profile: Profile) -> String {
             }
         }
     }
+    body
+}
 
-    // Letter page, 1" margins.
+/// A series book title: a page-broken centered line, larger than a chapter
+/// heading (manuscript), or a Heading 1 (Vellum, where it reads as a break).
+fn book_heading(title: &str, profile: Profile) -> String {
+    match profile {
+        Profile::Manuscript => para(
+            r#"<w:pageBreakBefore/><w:spacing w:before="360" w:after="360" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
+            run(title, true, false, Some(32)),
+        ),
+        Profile::Vellum => para(r#"<w:pStyle w:val="Heading1"/>"#, run(title, false, false, None)),
+    }
+}
+
+/// Wrap a built body in the `word/document.xml` shell (letter page, 1" margins).
+fn wrap_document(body: &str) -> String {
     let sect = r#"<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>"#;
     format!(
         concat!(
@@ -259,6 +318,31 @@ mod tests {
         let bytes = to_docx(&d, Profile::Manuscript).unwrap();
         let xml = part(&bytes, "word/document.xml");
         assert!(xml.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"), "curly glyphs reach the docx body");
+    }
+
+    #[test]
+    fn series_docx_carries_every_book_in_order() {
+        let book = |title: &str| crate::export::Document {
+            title: title.into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: None,
+                chapters: vec![crate::export::Chapter { title: "Ch".into(), epigraph: None, body: "prose".into() }],
+            }],
+            back: vec![],
+        };
+        let bytes =
+            to_docx_series(&[book("Book One"), book("Book Two")], Some("The Saga"), Some("A. Writer"), Profile::Manuscript)
+                .unwrap();
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains("The Saga") && xml.contains("by A. Writer"), "series title page");
+        let one = xml.find("Book One").expect("book one");
+        let two = xml.find("Book Two").expect("book two");
+        assert!(one < two, "books in order");
     }
 
     #[test]
