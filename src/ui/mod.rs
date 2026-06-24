@@ -11,16 +11,16 @@ use ratatui::{
 
 use crate::app::App;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
-use crate::mode::{
-    BibleReview, DirBrowser, Findings, Mode, Overlay, OverlayKind, Palette, ProjectBrowser,
-    RefFiles, Search, SearchStage, Tree,
-};
+use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
 use crate::app::{SplitContent, SplitDir};
 use crate::manuscript::SegmentHeader;
-use crate::project::Project;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
 mod editor;
+mod list_overlay;
+use list_overlay::{
+    draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser, list_row, marker, row_style,
+};
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
 /// itself into a given area. A custom trait rather than ratatui's `Widget`
@@ -268,80 +268,6 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
 }
 
 /// Render the AI command palette as a navigable action list.
-fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
-    let rows = palette.items.iter().enumerate().map(|(i, item)| {
-        Line::from(vec![
-            Span::styled(format!("{}{}", marker(i == palette.selected), item.label), row_style(i == palette.selected)),
-            Span::styled(format!("  — {}", item.desc), Style::default().fg(Color::DarkGray)),
-        ])
-    });
-    let title = format!(" {} ", palette.title);
-    // The `R` force-rebuild gesture only applies to the AI bible passes (#176).
-    let rebuild = if palette.title == "AI" { " · R rebuild bible (full)" } else { "" };
-    let help = format!("{} — ↑↓ move · enter run{rebuild} · esc close", palette.title);
-    draw_list_overlay(frame, area, &title, &help, rows);
-}
-
-/// Render the recently-opened projects as a navigable list (#270). The
-/// currently-open project is marked, and each row shows the title over its path.
-fn draw_project_browser(frame: &mut Frame, area: Rect, browser: &ProjectBrowser, current: &std::path::Path) {
-    let current = current.canonicalize();
-    let rows = browser.projects.iter().enumerate().map(|(i, p)| {
-        let here = current.as_ref().map(|c| c == &p.path).unwrap_or(false);
-        let tag = if here { "  (open)" } else { "" };
-        Line::from(vec![
-            Span::styled(format!("{}{}{tag}", marker(i == browser.selected), p.title), row_style(i == browser.selected)),
-            Span::styled(format!("  — {}", p.path.display()), Style::default().fg(Color::DarkGray)),
-        ])
-    });
-    draw_list_overlay(frame, area, " Projects ", "Projects — ↑↓ move · enter open · b browse files · n new project · esc cancel", rows);
-}
-
-/// Render the filesystem navigator (#271): the current directory's subfolders,
-/// with `..` to go up and Quill projects marked as openable.
-fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrowser) {
-    let rows = browser.entries.iter().enumerate().map(|(i, e)| {
-        let tag = if e.is_project {
-            "  (project — enter opens)"
-        } else if e.is_parent {
-            "  (up)"
-        } else {
-            "/"
-        };
-        Line::from(Span::styled(
-            format!("{}{}{tag}", marker(i == browser.selected), e.label),
-            row_style(i == browser.selected),
-        ))
-    });
-    let title = format!(" {} ", browser.cwd.display());
-    draw_list_overlay(frame, area, &title, "Browse — ↑↓ move · enter open/into · n new project · ← up · esc cancel", rows);
-}
-
-/// Render the findings as a navigable triage list.
-fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, project: &Project) {
-    let title = format!(" Findings ({}) ", findings.items.len());
-    let rows = findings.items.iter().enumerate().map(|(i, item)| {
-        // In a series, a finding carries the book it was found in (#341); show it
-        // so cross-book findings are attributed (chapter titles can repeat).
-        let book = item
-            .book
-            .filter(|_| project.book_count() > 1)
-            .and_then(|b| project.book_title(b));
-        let chapters = item.chapters.join(", ");
-        let loc = match (book, chapters.is_empty()) {
-            (None, true) => String::new(),
-            (None, false) => format!("  [{chapters}]"),
-            (Some(t), true) => format!("  [{t}]"),
-            (Some(t), false) => format!("  [{t} · {chapters}]"),
-        };
-        Line::from(Span::styled(
-            format!("{}{}{loc}", marker(i == findings.selected), item.summary),
-            row_style(i == findings.selected),
-        ))
-    });
-    draw_list_overlay(frame, area, &title, "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close", rows);
-}
-
 /// The series tree navigator (#330): the project as an indented series → book →
 /// part → chapter tree. Rows are derived from cached metadata (never files); the
 /// selected row is reversed and the active book/chapter is accented.
@@ -370,45 +296,6 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App, tree: &Tree) {
         &title,
         "Project tree — ↑↓ move · → expand · ← collapse · enter open / expand · esc close",
         lines.into_iter(),
-    );
-}
-
-/// The selection marker for a list row.
-fn marker(selected: bool) -> &'static str {
-    if selected {
-        "▸ "
-    } else {
-        "  "
-    }
-}
-
-/// The style for a list row (reversed when selected).
-fn row_style(selected: bool) -> Style {
-    if selected {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    }
-}
-
-/// Render a navigable list overlay: a bold help line, a blank, then the rows, in
-/// a bordered wrapping box. Shared by the findings and palette overlays.
-fn draw_list_overlay(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    help: &str,
-    rows: impl Iterator<Item = Line<'static>>,
-) {
-    let mut lines = vec![
-        Line::from(Span::styled(help.to_string(), Style::default().add_modifier(Modifier::BOLD))),
-        Line::raw(""),
-    ];
-    lines.extend(rows);
-    let block = Block::default().borders(Borders::ALL).title(title.to_string());
-    frame.render_widget(
-        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
-        area,
     );
 }
 
@@ -493,10 +380,7 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
     ];
     for (i, path) in state.files.iter().enumerate() {
         let label = path.strip_prefix(&app.project.root).unwrap_or(path).to_string_lossy();
-        lines.push(Line::from(Span::styled(
-            format!("{}{label}", marker(i == state.selected)),
-            row_style(i == state.selected),
-        )));
+        lines.push(list_row(i == state.selected, label.to_string(), None));
     }
     lines
 }
