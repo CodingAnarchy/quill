@@ -9,12 +9,16 @@ hits it mid-draft. You can't defend a target you don't measure.
 ## Running the suite
 
 ```sh
-cargo perf   # alias for: cargo test --release -- --ignored --nocapture
+cargo perf   # alias for: cargo test --release -- --ignored --nocapture --test-threads=1
 ```
 
 The benchmarks are `#[ignore]`d so they don't run under plain `cargo test`:
 they measure wall-clock time, which is only meaningful in a release build (a
-debug build is 3–18× slower and the thresholds false-fail). Run `cargo perf`
+debug build is 3–18× slower and the thresholds false-fail). They also run
+**single-threaded** (`--test-threads=1`): several guards build and read
+series-sized projects (thousands of files), and running them concurrently with
+the CPU-bound timing benchmarks (reparse, render, keystroke) would starve those
+of a core and false-fail their sub-frame thresholds. Run `cargo perf`
 **before every release**, and whenever you touch the parse, the edit path,
 rendering, or project load. `--nocapture` prints each measured time next to its
 target.
@@ -49,6 +53,7 @@ Corpora are generated deterministically in-test, so the suite needs no fixtures.
 | `open_is_fast_for_a_series_sized_project` | `project.rs` | 1500 chapters, one book | < 500 ms | Open scales linearly with the project (the per-chapter cache read is the only proportional work, and it's bounded). (Typically ~25–60 ms.) |
 | `open_is_fast_for_a_multi_book_series` | `project.rs` | 1500 chapters across 6 books (the `[[books]]` format, #328) | < 500 ms | Opening the multi-book manifest runs the books-array parse and the active-book hoist, then caches only the *active* book's chapters; catches a regression that eagerly reads every book's files at open. (Typically ~10 ms — faster than the single-book guard, since only one book is cached.) |
 | `navigation_is_fast_in_a_series_sized_project` | `app/tests/chapters.rs` | 600 chapters on disk | < 10 ms / switch | Switching chapters reads/parses one chapter file — never work proportional to the project. (Typically ~0.5 ms.) |
+| `switching_books_is_fast_in_a_series` | `project.rs` | 2 books × 750 chapters (#329) | < 500 ms | Switching the active book caches the target book's chapters once (the bounded work `open` does for one book) — never the whole series. (Typically ~10 ms.) |
 | `tally_is_independent_of_project_size` | `app/tests/chapters.rs` | 2000 chapters on disk | < 30 µs / idle tick | The daily word tally touches only the chapters that changed (the live active one, plus any whose cache moved), not all of them. A regression to the per-chapter walk would be ~50–100 µs here. (Typically ~6 µs.) |
 
 Budgets are deliberately generous headroom over the typical measured time: they

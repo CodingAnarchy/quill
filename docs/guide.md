@@ -53,6 +53,12 @@ Point Quill at the folder where you keep your books, in
 
 Every project under that folder then appears in the browser, ready to open.
 
+A project can hold a series of books. When it does, Quill opens the first book;
+run "Switch book" from the run-action menu (Ctrl-K) to move to another — the
+editor, chapter list, and reports follow the book you pick, and the chapter
+you're leaving is saved first. A standalone novel is just a one-book project, so
+the command says there's only one book.
+
 When you create a project, a short setup wizard offers to scaffold it: writing
 goals, a starter cast and setting (drafted by the AI when it's enabled), and a
 first note. Every step is skippable and the whole wizard is dismissible with

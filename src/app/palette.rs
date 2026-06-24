@@ -82,6 +82,10 @@ impl App {
             Action::Export(_) if self.manuscript.is_some() => {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
+            // Switching books only applies to a multi-book series (#329).
+            Action::SwitchBook if self.project.book_count() <= 1 => {
+                Some("this project has only one book".into())
+            }
             _ => None,
         }
     }
@@ -110,6 +114,7 @@ impl App {
             Action::UserGuide => self.open_guide(),
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
+            Action::SwitchBook => self.open_book_switcher(),
         }
     }
 
@@ -136,6 +141,7 @@ impl App {
                     Some(Command::RunWorkflow(i)) => self.run_workflow(i),
                     Some(Command::NewWorkflowFromPrompt) => self.start_describe_workflow(),
                     Some(Command::Portrait(c)) => self.confirm_portraits(c),
+                    Some(Command::SwitchBook(i)) => self.switch_book(i),
                     None => {}
                 }
             }

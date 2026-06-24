@@ -1,7 +1,11 @@
 # `cargo perf` runs the performance guards the way they're meant to run:
 # release build (their timing thresholds are tuned for the optimized binary),
-# the `#[ignore]`d timing tests only, with output shown. They're ignored by
-# default because plain `cargo test` is a debug build, where the unoptimized
-# code is 3–18× slower and would false-fail the thresholds.
+# the `#[ignore]`d timing tests only, with output shown, and **single-threaded**
+# (`--test-threads=1`). Serial matters: several guards build/read series-sized
+# projects (thousands of files), and running them concurrently with the
+# CPU-bound timing benchmarks (reparse, render, keystroke) starves those of a
+# core and false-fails their sub-frame thresholds. They're ignored by default
+# because plain `cargo test` is a debug build, where the unoptimized code is
+# 3–18× slower and would false-fail the thresholds.
 [alias]
-perf = "test --release -- --ignored --nocapture"
+perf = "test --release -- --ignored --nocapture --test-threads=1"

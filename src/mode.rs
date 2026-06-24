@@ -291,6 +291,8 @@ pub(crate) enum Command {
     NewWorkflowFromPrompt,
     /// Generate portraits for the chosen character(s) (#244).
     Portrait(PortraitChoice),
+    /// Make the book at this index the active book (#329).
+    SwitchBook(usize),
 }
 
 /// Which character(s) a portrait pass should generate (#244), chosen from the
@@ -331,6 +333,8 @@ pub(crate) enum Action {
     ImportNotes,
     /// Create a new project from a folder of notes (#286).
     NewProjectFromNotes,
+    /// Switch the active book of a multi-book series (#329).
+    SwitchBook,
 }
 
 impl Action {
@@ -366,6 +370,7 @@ impl Action {
         Action::UserGuide,
         Action::ImportNotes,
         Action::NewProjectFromNotes,
+        Action::SwitchBook,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -402,6 +407,7 @@ impl Action {
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
+            Action::SwitchBook => "book:switch",
         }
     }
 
@@ -438,6 +444,7 @@ impl Action {
             Action::UserGuide => "User's guide",
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
+            Action::SwitchBook => "Switch book",
         }
     }
 

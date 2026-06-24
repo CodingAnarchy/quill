@@ -10,6 +10,18 @@ use crate::frontmatter::Band;
 use super::App;
 
 impl App {
+    /// Re-initialize the daily word tally for the active book (#329): size the
+    /// per-part counters to its parts and re-baseline its chapters, so opening
+    /// (or switching to) a book neither misindexes a part nor counts the book's
+    /// existing words as today's writing. The session's global added/removed
+    /// totals carry over.
+    pub(super) fn reset_tally_for_active_book(&mut self) {
+        let parts = self.project.manifest.parts.as_ref().map_or(0, Vec::len);
+        self.part_added = vec![0; parts];
+        self.part_removed = vec![0; parts];
+        self.seed_baselines();
+    }
+
     /// Attribute each chapter's word change since the last idle tick to today's
     /// global and per-part added / removed counters. Walking per chapter (rather
     /// than the project total) lets a delta be booked to the part of the chapter

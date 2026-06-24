@@ -211,21 +211,39 @@ impl Manifest {
     /// (#328): series-level fields come from the file root, per-book fields from
     /// the book. The inverse of [`Manifest::into_book`].
     fn from_series(series: &SeriesFile, book: &Book) -> Self {
-        Manifest {
-            title: book.title.clone(),
-            subtitle: book.subtitle.clone(),
+        let mut manifest = Manifest {
+            title: String::new(),
+            subtitle: None,
             author: series.author.clone(),
             series: Some(series.title.clone()),
-            epigraph: book.epigraph.clone(),
-            epigraph_by: book.epigraph_by.clone(),
+            epigraph: None,
+            epigraph_by: None,
             start_date: series.start_date.clone(),
             todo_marker: series.todo_marker.clone(),
-            part_label: book.part_label.clone(),
-            run_on_threshold: book.run_on_threshold,
-            goals: book.goals.clone(),
-            parts: book.parts.clone(),
-            chapters: book.chapters.clone(),
-        }
+            part_label: None,
+            run_on_threshold: None,
+            goals: None,
+            parts: None,
+            chapters: Vec::new(),
+        };
+        manifest.load_book(book);
+        manifest
+    }
+
+    /// Replace this manifest's per-book fields with `book`'s, leaving series-level
+    /// fields (author, series, start_date, todo_marker) untouched. The inverse of
+    /// [`to_book`](Manifest::to_book); hoists a book into the active manifest when
+    /// opening (#328) or switching books (#329).
+    fn load_book(&mut self, book: &Book) {
+        self.title = book.title.clone();
+        self.subtitle = book.subtitle.clone();
+        self.epigraph = book.epigraph.clone();
+        self.epigraph_by = book.epigraph_by.clone();
+        self.part_label = book.part_label.clone();
+        self.run_on_threshold = book.run_on_threshold;
+        self.goals = book.goals.clone();
+        self.parts = book.parts.clone();
+        self.chapters = book.chapters.clone();
     }
 
     /// The per-book fields of this (active) manifest, for writing back into the
@@ -663,21 +681,40 @@ impl Project {
         atomic::write(&Self::manifest_path(&self.root), text.as_bytes())
     }
 
-    // The series read API (#328). Consumed by the in-Quill book switcher (#329)
-    // and the tree-navigation pane (#330); exercised by this ticket's tests.
-    #[allow(dead_code)]
     /// How many books the project holds — 1 for a standalone novel (#328).
     pub fn book_count(&self) -> usize {
         self.books.len().max(1)
     }
 
-    #[allow(dead_code)]
     /// The index of the active book within the series (0 for a standalone novel).
     pub fn active_book(&self) -> usize {
         self.active_book
     }
 
-    #[allow(dead_code)]
+    /// Switch the active book to `index` (#329): stash the live active book back
+    /// into the series, hoist the target book into the manifest, cache its
+    /// chapters, and select its first chapter. A no-op for a standalone novel or
+    /// an out-of-range / unchanged index. The caller flushes the outgoing book's
+    /// buffer and reloads the editor afterward.
+    pub fn set_active_book(&mut self, index: usize) {
+        if self.books.is_empty() || index >= self.books.len() || index == self.active_book {
+            return;
+        }
+        // Fold the live active book back into the series, then hoist the target.
+        self.books[self.active_book] = self.manifest.to_book();
+        self.manifest.load_book(&self.books[index]);
+        self.active_book = index;
+        // The old book's pending count changes no longer apply.
+        self.words_changed.clear();
+        // Cache the new book's chapters (word count + front matter) once, then
+        // band-order them — the same work `open` does for the first book.
+        for i in 0..self.manifest.chapters.len() {
+            self.read_chapter_cache(i);
+        }
+        self.reorder_by_band();
+        self.active = self.manifest.chapters.first().map_or(String::new(), |c| c.file.clone());
+    }
+
     /// The title of book `i`. The active book's live title comes from the
     /// manifest; the others from the stored series list. `None` if out of range.
     pub fn book_title(&self, i: usize) -> Option<&str> {
@@ -1425,6 +1462,65 @@ file = \"b2/one.md\"
         assert_eq!(p.book_title(0), Some("Book One"));
         assert_eq!(p.book_title(1), Some("Book Two"));
         assert_eq!(p.series_title(), Some("The Saga"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_active_book_hoists_the_target_and_round_trips() {
+        let dir = temp_dir("series-switch");
+        write_series(&dir);
+        let mut p = Project::open(&dir).unwrap();
+
+        p.set_active_book(1);
+        assert_eq!(p.active_book(), 1);
+        assert_eq!(p.manifest.title, "Book Two");
+        let titles: Vec<&str> = p.manifest.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["Dusk"]);
+        assert_eq!(p.active_file(), "b2/one.md");
+        assert_eq!(p.book_title(0), Some("Book One")); // the stored book is preserved
+        assert_eq!(p.book_title(1), Some("Book Two")); // the active book reads from the manifest
+
+        // Switching back restores book one; saving keeps both books.
+        p.set_active_book(0);
+        assert_eq!(p.manifest.title, "Book One");
+        p.save_manifest().unwrap();
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("Book One") && toml.contains("Book Two") && toml.contains("b2/one.md"), "{toml}");
+
+        // A no-op for an unchanged or out-of-range index.
+        p.set_active_book(0);
+        assert_eq!(p.active_book(), 0);
+        p.set_active_book(9);
+        assert_eq!(p.active_book(), 0);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Switching to a book reads its chapters once (word count + front matter),
+    /// the same bounded work `open` does for the first book — never the whole
+    /// series. Catches a regression that re-reads or re-parses superlinearly.
+    #[test]
+    #[ignore]
+    fn switching_books_is_fast_in_a_series() {
+        use std::time::Instant;
+
+        let (books, per_book) = (2, 750);
+        let dir = temp_dir("perf-switch-book");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = write_series_project(&dir, books, per_book);
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
+        let mut project = Project::open(&dir).unwrap();
+
+        let t = Instant::now();
+        project.set_active_book(1);
+        let dt = t.elapsed();
+
+        println!("switch to a {per_book}-chapter book = {dt:?}");
+        assert_eq!(project.active_book(), 1);
+        assert_eq!(project.manifest.chapters.len(), per_book);
+        assert!(dt.as_millis() < 500, "book switch took {dt:?}");
 
         fs::remove_dir_all(&dir).ok();
     }
