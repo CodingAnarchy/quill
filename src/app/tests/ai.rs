@@ -429,7 +429,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 19, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 20, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
     fs::remove_dir_all(&dir).ok();
@@ -458,6 +458,32 @@ fn applying_word_search_results_opens_the_overlay() {
     .unwrap();
     app.apply_thesaurus(Ok(words));
     assert!(app.overlay.is_some(), "candidates are shown in the AI overlay");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn editorial_read_flags_land_in_the_findings_list_tagged_by_lens() {
+    let (mut app, dir) = two_chapter_app("editorial");
+    let notes = crate::ai::editorial::parse(
+        r#"{"notes":[
+            {"focus":"structural","chapters":["One"],"concern":"the opening lacks stakes"},
+            {"focus":"line","chapters":["Two"],"location":"could of","concern":"usage (could of -> could have)"}
+        ]}"#,
+    )
+    .unwrap();
+    app.apply_editorial(Ok(notes));
+
+    match &app.mode {
+        Mode::Findings(f) => {
+            let summaries: Vec<&str> = f.items.iter().map(|i| i.summary.as_str()).collect();
+            assert!(summaries.iter().any(|s| s.starts_with("structural:") && s.contains("stakes")), "{summaries:?}");
+            assert!(
+                summaries.iter().any(|s| s.starts_with("line:") && s.contains('\u{201c}') && s.contains("could of")),
+                "line flag pinpoints a quoted span: {summaries:?}"
+            );
+        }
+        _ => panic!("editorial flags should open the findings list"),
+    }
     fs::remove_dir_all(&dir).ok();
 }
 

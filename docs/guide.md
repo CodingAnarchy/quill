@@ -102,6 +102,12 @@ common; 8 results") if you like — and returns candidate words or short phrases
 with definitions, using the current line only to judge fit. It hands you options
 to choose from; it never rewrites your sentence.
 
+Want an editor's read? "Editorial read" flags issues across three lenses —
+structural (pacing, stakes), continuity (contradictions between chapters), and
+line (grammar, usage, typos) — into the revision-triage list, each tagged by
+lens. It points out what to look at; it never suggests the fix or rewrites your
+prose — you decide what to change.
+
 Already have notes? "Import notes" (in the Ctrl-K menu) takes a Markdown file —
 or a folder of them — preserves the original under bible/sources/, and folds
 whatever it finds (characters, setting and world systems, the timeline, an

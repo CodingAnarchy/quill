@@ -362,6 +362,7 @@ impl Action {
         Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
         Action::Ai(AiAction::Thesaurus),
+        Action::Ai(AiAction::Editorial),
         Action::UserGuide,
         Action::ImportNotes,
         Action::NewProjectFromNotes,
@@ -397,6 +398,7 @@ impl Action {
             Action::Ai(AiAction::Scene) => "ai:scene",
             Action::Ai(AiAction::Triage) => "triage",
             Action::Ai(AiAction::Thesaurus) => "ai:thesaurus",
+            Action::Ai(AiAction::Editorial) => "ai:editorial",
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
@@ -432,6 +434,7 @@ impl Action {
             Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
             Action::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
+            Action::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
             Action::UserGuide => "User's guide",
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
@@ -503,6 +506,8 @@ pub(crate) enum AiAction {
     Triage,
     /// In-context thesaurus / word search for a word or phrase (#290).
     Thesaurus,
+    /// Editorial read — flag structural / continuity / line issues, no fixes (#293).
+    Editorial,
 }
 
 /// The version-control actions reachable from the Git palette (#54).

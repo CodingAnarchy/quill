@@ -126,6 +126,15 @@ The palette actions:
 - **Prose & style** (#79) — *semantic* findings (POV / tense consistency, voice
   drift, context-aware repeated phrasing); analysis only, no rewrites. Frequency
   metrics (crutch words, etc.) are the local-analysis report's job (#70).
+- **Editorial read** (#293) — a holistic editor's read across three lenses —
+  **structural** (pacing, stakes, a sagging middle), **continuity**
+  (contradictions across chapters), and **line** (grammar, usage, typos,
+  awkwardness) — surfaced as located, plain-language flags in the revision-triage
+  list, each tagged by lens (and line issues quoting the span). It *only points
+  out* issues: never a fix, a corrected sentence, or replacement prose — the
+  author decides what to change. The analysis category of the assistant-not-
+  co-writer rule, taken to its sharpest: advice you accept or ignore, not prose to
+  adopt.
 - **Character voice** (#183) — checks the manuscript against the character
   bible's **voice profiles** (the character pass now captures speech patterns,
   vocabulary/register, verbal tics, and sentence rhythm per character, editable
