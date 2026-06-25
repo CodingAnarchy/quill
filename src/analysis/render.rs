@@ -389,7 +389,7 @@ mod tests {
                 .iter()
                 .map(|s| crate::buffer::count_words(s))
                 .collect(),
-            style: style_flags(prose_text),
+            style: style_flags(prose_text, &WordLists::new()),
             dialogue: dialogue_split(prose_text),
             paragraph_lengths: paragraph_lengths(prose_text),
             lexical_variety: variety(prose_text),

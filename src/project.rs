@@ -121,6 +121,27 @@ fn default_words_per_page() -> usize {
     250
 }
 
+/// Per-project overrides for the analysis report's frequency word lists (#119),
+/// from the `[analysis]` table in `book.toml`. Each list *adjusts* the built-in
+/// defaults rather than replacing them — `*_add` extends, `*_remove` drops an
+/// entry — so an author needn't restate the whole default list. Words are matched
+/// lowercased. Absent (and empty lists) means the built-in defaults, unchanged.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Analysis {
+    /// Words to also exclude from the most-used-words list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stopwords_add: Vec<String>,
+    /// Built-in stopwords to stop excluding (so they can surface in the list).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stopwords_remove: Vec<String>,
+    /// Words to also count as filtering verbs in the style-flags section.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_words_add: Vec<String>,
+    /// Built-in filter words to stop counting.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_words_remove: Vec<String>,
+}
+
 /// A named, inclusive range of chapters — a grouping layer between book and
 /// chapter (see [`docs/progress-reports.md`]). `chapters` is `[start, end]`,
 /// 1-based and inclusive. `name` is optional; the report auto-labels an unnamed
@@ -181,6 +202,11 @@ pub struct Manifest {
     /// scalar key — keep it before the `goals`/`parts`/`chapters` tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_on_threshold: Option<usize>,
+    /// Per-project overrides for the analysis report's word lists (#119): add to
+    /// or remove from the built-in stopword and filter-word lists. A table, so it
+    /// must precede the `goals`/`parts`/`chapters` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<Analysis>,
     /// The author's writing goals; the progress report is empty without them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goals: Option<Goals>,
@@ -363,6 +389,7 @@ impl Project {
                 todo_marker: None,
                 part_label: None,
                 run_on_threshold: None,
+                analysis: None,
                 goals: None,
                 parts: None,
                 chapters: Vec::new(),
@@ -703,6 +730,7 @@ impl Project {
                 todo_marker: None,
                 part_label: None,
                 run_on_threshold: None,
+                analysis: None,
                 goals: None,
                 parts: None,
                 chapters,

@@ -90,6 +90,13 @@ impl App {
     /// the rest from disk) — on demand, never per frame.
     pub(crate) fn analysis_lines(&self) -> Vec<Line<'static>> {
         let threshold = self.project.manifest.run_on_threshold();
+        // The effective stopword / filter-word lists: built-in defaults adjusted
+        // by the project's `[analysis]` overrides (#119), built once for the report.
+        let mut lists = analysis::WordLists::new();
+        if let Some(a) = &self.project.manifest.analysis {
+            lists.override_stopwords(&a.stopwords_add, &a.stopwords_remove);
+            lists.override_filter_words(&a.filter_words_add, &a.filter_words_remove);
+        }
         let mut chapters = Vec::with_capacity(self.chapter_count());
         let mut longest = analysis::LongestSentences::new(5);
         let mut word_counts = HashMap::new();
@@ -109,8 +116,8 @@ impl App {
             }
             // Frequency tallies accumulate across the whole manuscript; phrases
             // are gathered per chapter so they don't span a chapter boundary.
-            analysis::tally_content_words(&text, &mut word_counts);
-            analysis::tally_phrases(&text, &mut phrase_counts);
+            analysis::tally_content_words(&text, &mut word_counts, &lists);
+            analysis::tally_phrases(&text, &mut phrase_counts, &lists);
             // Tokenize once: the just-appended slice is this chapter's lexical
             // variety; the whole pool is the overall variety (a true MATTR, not a
             // mean of the chapters').
@@ -123,7 +130,7 @@ impl App {
                 words: self.chapter_word_count(i),
                 stats,
                 sentence_lengths,
-                style: analysis::style_flags(&text),
+                style: analysis::style_flags(&text, &lists),
                 dialogue: analysis::dialogue_split(&text),
                 paragraph_lengths: analysis::paragraph_lengths(&text),
                 lexical_variety: analysis::lexical_variety_tokens(&tokens[token_start..]),

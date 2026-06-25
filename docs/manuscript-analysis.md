@@ -256,6 +256,31 @@ The manuscript's most frequent **content** words — stopwords (`the`, `and`,
 `she`, …) and very short words are excluded, so the list surfaces an author's
 real lexical tics (a character name, an overused verb) rather than grammar.
 
+## Customizing the word lists (#119)
+
+The stopword list (excluded from **most-used words**) and the filter-word list
+(counted in **style flags**) are baked-in defaults that encode editorial
+judgement — and the defaults won't fit every manuscript. A character named
+"Said" is silently dropped from the most-used list; a sci-fi draft leans on
+invented terms a generic list never anticipated; you may not consider "know" a
+filtering verb. A project tunes both lists from an `[analysis]` table in
+`book.toml`:
+
+```toml
+[analysis]
+stopwords_add = ["said", "only"]        # also exclude these from most-used words
+stopwords_remove = ["back", "got"]      # let these surface in most-used words
+filter_words_add = ["gazed", "stared"]  # also count these as filtering verbs
+filter_words_remove = ["know", "knew"]  # stop counting these as filtering verbs
+```
+
+The lists **adjust** the defaults rather than replacing them, so you only state
+the deltas — `*_add` extends, `*_remove` drops a built-in entry (an add wins a
+conflict). Matching is case-insensitive. With the table absent (or its lists
+empty) the built-in defaults apply, unchanged. The same effective lists drive
+both the style-flags section and the most-used-words list, so the report stays
+consistent. (The `-ly` non-adverb exceptions aren't configurable.)
+
 ## Reading the report
 
 Each chapter is one row — Ease, F–K, Fog, SMOG — with the whole-manuscript total
