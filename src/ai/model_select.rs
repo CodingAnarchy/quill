@@ -40,16 +40,33 @@ pub struct Model {
     /// Total system RAM (GB) below which this model isn't recommended — set
     /// conservatively, since the author is editing alongside inference.
     pub min_ram_gb: u32,
+    /// The model's input context window, in tokens (#378). The router routes a
+    /// pass on-device only when an available model's window can hold it, so a
+    /// long-context model can take a whole-manuscript pass the standard ones
+    /// can't.
+    pub context_tokens: u32,
 }
 
-/// Quantized Qwen2.5-Instruct options, smallest first (Q4_K_M throughout — the
-/// quality-per-byte sweet spot). Update as new Qwen releases land.
+/// The context window of the standard (non-extended) Qwen2.5-Instruct models, in
+/// tokens — used as the local bound when the author hasn't configured a model set
+/// (the single recommended model is one of these).
+pub const STANDARD_CONTEXT_TOKENS: u32 = 32_768;
+
+/// Quantized Qwen options, ascending by RAM (Q4_K_M throughout — the
+/// quality-per-byte sweet spot). The `*-1M` rows are the extended-context Qwen2.5
+/// variants (#378): the same weights, but a ~1M-token window for whole-book work.
+/// Update as new Qwen releases land. (The catalog is vetted for download/load in
+/// #379.)
 pub const MODELS: &[Model] = &[
-    Model { params: "0.5B", gguf_repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF", gguf_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-0.5B-Instruct", size_gb: 0.4, min_ram_gb: 3 },
-    Model { params: "1.5B", gguf_repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", gguf_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-1.5B-Instruct", size_gb: 1.0, min_ram_gb: 6 },
-    Model { params: "3B", gguf_repo: "Qwen/Qwen2.5-3B-Instruct-GGUF", gguf_file: "qwen2.5-3b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-3B-Instruct", size_gb: 2.0, min_ram_gb: 12 },
-    Model { params: "7B", gguf_repo: "Qwen/Qwen2.5-7B-Instruct-GGUF", gguf_file: "qwen2.5-7b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct", size_gb: 4.7, min_ram_gb: 24 },
-    Model { params: "14B", gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF", gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct", size_gb: 9.0, min_ram_gb: 48 },
+    Model { params: "0.5B", gguf_repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF", gguf_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-0.5B-Instruct", size_gb: 0.4, min_ram_gb: 3, context_tokens: STANDARD_CONTEXT_TOKENS },
+    Model { params: "1.5B", gguf_repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", gguf_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-1.5B-Instruct", size_gb: 1.0, min_ram_gb: 6, context_tokens: STANDARD_CONTEXT_TOKENS },
+    Model { params: "3B", gguf_repo: "Qwen/Qwen2.5-3B-Instruct-GGUF", gguf_file: "qwen2.5-3b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-3B-Instruct", size_gb: 2.0, min_ram_gb: 12, context_tokens: STANDARD_CONTEXT_TOKENS },
+    Model { params: "7B", gguf_repo: "Qwen/Qwen2.5-7B-Instruct-GGUF", gguf_file: "qwen2.5-7b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct", size_gb: 4.7, min_ram_gb: 24, context_tokens: STANDARD_CONTEXT_TOKENS },
+    // Extended-context (#378): a ~1M-token window in the 7B footprint, for
+    // whole-manuscript / series passes on-device. Long context is memory-hungry
+    // (the KV cache), hence the higher RAM floor than the standard 7B.
+    Model { params: "7B-1M", gguf_repo: "bartowski/Qwen2.5-7B-Instruct-1M-GGUF", gguf_file: "Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct-1M", size_gb: 4.7, min_ram_gb: 32, context_tokens: 1_010_000 },
+    Model { params: "14B", gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF", gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct", size_gb: 9.0, min_ram_gb: 48, context_tokens: STANDARD_CONTEXT_TOKENS },
 ];
 
 impl Model {
@@ -73,19 +90,35 @@ pub fn available(ids: &[String]) -> Vec<&'static Model> {
     MODELS.iter().filter(|m| ids.iter().any(|id| id == m.id())).collect()
 }
 
+/// The context window that bounds on-device routing for the configured set
+/// (#378): the largest window among the chosen models, or — when none are
+/// configured — the standard window, since the single recommended model is one of
+/// the standard ones. The router routes a pass local only when it fits this.
+pub fn local_window(ids: &[String]) -> u32 {
+    available(ids)
+        .iter()
+        .map(|m| m.context_tokens)
+        .max()
+        .unwrap_or(STANDARD_CONTEXT_TOKENS)
+}
+
 /// Below this many input tokens a request is "small" — a thesaurus lookup, a
 /// single-line check — and the smallest downloaded model serves it fastest.
 const SMALL_REQUEST_TOKENS: u32 = 2_000;
 
-/// Pick the best downloaded model for a request of `input_tokens` (#377): the
-/// smallest available model for a small request (lowest latency), the largest for
-/// a substantial one (best quality). `available` must be ascending by size (as
-/// [`available`] returns it); `None` only when nothing is downloaded.
+/// Pick the best downloaded model for a request of `input_tokens` (#377/#378):
+/// among the models whose context window can hold the request, the smallest for a
+/// small request (lowest latency) and the largest for a substantial one (best
+/// quality). `available` must be ascending by size (as [`available`] returns it).
+/// `None` when nothing downloaded can hold the request — the router then routes
+/// it to the cloud. This is what lets a long-context model take a whole-book pass
+/// the standard ones can't.
 pub fn pick_for(input_tokens: u32, available: &[&'static Model]) -> Option<&'static Model> {
+    let mut fits = available.iter().copied().filter(|m| m.context_tokens >= input_tokens);
     if input_tokens <= SMALL_REQUEST_TOKENS {
-        available.first().copied()
+        fits.next()
     } else {
-        available.last().copied()
+        fits.next_back()
     }
 }
 
@@ -207,13 +240,37 @@ mod tests {
     }
 
     #[test]
-    fn pick_for_takes_the_small_model_for_small_asks_and_the_big_one_otherwise() {
-        let models = available(&["0.5B".into(), "7B".into()]);
-        // A thesaurus-sized request → the smallest (fastest).
-        assert_eq!(pick_for(500, &models).map(|m| m.params), Some("0.5B"));
-        // A whole-manuscript-sized request → the largest available (best quality).
-        assert_eq!(pick_for(80_000, &models).map(|m| m.params), Some("7B"));
+    fn pick_for_respects_size_and_context_window() {
+        let std = available(&["0.5B".into(), "7B".into()]);
+        // A thesaurus-sized request → the smallest that fits (fastest).
+        assert_eq!(pick_for(500, &std).map(|m| m.params), Some("0.5B"));
+        // A big request that still fits the 32k window → the largest (best quality).
+        assert_eq!(pick_for(20_000, &std).map(|m| m.params), Some("7B"));
+        // Bigger than any standard window → nothing fits → cloud (None).
+        assert!(pick_for(80_000, &std).is_none(), "no standard model holds 80k tokens");
+
+        // With the long-context model downloaded, the big pass fits — on it (#378).
+        let long = available(&["7B".into(), "7B-1M".into()]);
+        assert_eq!(pick_for(80_000, &long).map(|m| m.params), Some("7B-1M"));
+
         // Nothing downloaded → nothing to pick.
         assert!(pick_for(500, &[]).is_none());
+    }
+
+    #[test]
+    fn local_window_takes_the_largest_configured_or_the_standard_default() {
+        // No set configured → the standard (recommended) model's window.
+        assert_eq!(local_window(&[]), STANDARD_CONTEXT_TOKENS);
+        // A standard set → still 32k.
+        assert_eq!(local_window(&["0.5B".into(), "7B".into()]), STANDARD_CONTEXT_TOKENS);
+        // A long-context model in the set raises the bound to its window.
+        assert!(local_window(&["7B".into(), "7B-1M".into()]) >= 1_000_000);
+    }
+
+    #[test]
+    fn extended_context_model_has_a_million_token_window() {
+        let m = by_id("7B-1M").expect("the 1M variant is in the table");
+        assert!(m.context_tokens >= 1_000_000, "{}", m.context_tokens);
+        assert_eq!(by_id("7B").unwrap().context_tokens, STANDARD_CONTEXT_TOKENS);
     }
 }

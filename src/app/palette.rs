@@ -247,6 +247,15 @@ impl App {
         ai::model_select::pick_for(tokens, &available)
     }
 
+    /// Whether a downloaded local model's context window can hold a pass of
+    /// `input_tokens` (#378) — the router routes on-device only when it can. With
+    /// no model set configured, the single recommended (standard, 32k) model is
+    /// the bound; otherwise it's the largest window among the configured set, so a
+    /// long-context model lets a whole-manuscript pass run locally.
+    fn local_fits(&self, input_tokens: u32) -> bool {
+        cfg!(feature = "local") && input_tokens <= ai::model_select::local_window(&self.ai.local_models)
+    }
+
     /// The cost decision for a network AI action (#82): run it now, or confirm
     /// first because the estimate exceeds the threshold. Shared by the AI palette
     /// ([`start_ai_action`]) and the workflow runner (#227) so a workflow's AI
@@ -265,6 +274,7 @@ impl App {
             configured: self.ai.backend,
             offline: self.ai.offline,
             local_available: cfg!(feature = "local"),
+            local_fits: self.local_fits(est.tokens),
             est,
             threshold: self.ai.cost_threshold,
         });
