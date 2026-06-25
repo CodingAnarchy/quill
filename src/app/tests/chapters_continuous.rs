@@ -1,0 +1,217 @@
+//! The continuous-manuscript view, the progress report, the daily word tally, and per-part momentum.
+
+use super::*;
+use crate::project::Project;
+use std::fs;
+
+#[test]
+fn continuous_view_edits_persist_to_the_right_chapter() {
+    let (mut app, dir) = two_chapter_app("continuous"); // "first chapter", "second chapter"
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some());
+
+    // Move into chapter two and append to it.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::End));
+    type_str(&mut app, "Z");
+
+    app.on_key(ctrl('l')); // leave continuous — saves on the way out
+    assert!(app.manuscript.is_none());
+
+    // The edit landed in chapter two's file; chapter one is untouched.
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
+    // Back in single-chapter view at the chapter the cursor was in.
+    assert_eq!(app.project.active_index(), 1);
+    assert!(app.buffer.line(0).contains("second"));
+}
+
+#[test]
+fn entering_continuous_flushes_the_single_chapter() {
+    let (mut app, dir) = two_chapter_app("continuous-flush");
+    // Edit chapter one in single view, then enter continuous without saving.
+    app.on_key(key(KeyCode::Char('X')));
+    assert!(app.buffer.dirty);
+
+    app.on_key(ctrl('l')); // entering must flush the dirty single chapter
+    assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
+}
+
+#[test]
+fn ctrl_r_opens_the_report_and_any_key_closes_it() {
+    let (mut app, _dir) = two_chapter_app("report");
+    app.project.manifest.start_date = Some("2026-01-11".into());
+    app.project.manifest.goals = Some(crate::project::Goals {
+        words: 150_000,
+        chapters: 60,
+        words_per_page: 250,
+        daily: None,
+    });
+
+    app.on_key(ctrl('r'));
+    let report = app.overlay_lines().expect("report should be open");
+    // It rendered the story line against the goals (styled rows → span text).
+    let line_text = |l: &Line| l.spans.iter().map(|s| s.content.to_string()).collect::<String>();
+    assert!(report.iter().any(|l| line_text(l).contains("/ 150,000  words")), "no story line");
+
+    app.on_key(key(KeyCode::Char('x'))); // any key closes it (no edit)
+    assert!(app.overlay.is_none());
+    assert!(!app.buffer.line(0).contains('x'), "the dismissing key must not edit");
+}
+
+#[test]
+fn idle_tallies_words_added_then_removed() {
+    let (mut app, _dir) = two_chapter_app("tally"); // ch0 "first chapter" (2 words)
+    type_str(&mut app, "new words "); // → "new words first chapter" (4 words): +2
+    app.on_idle();
+    assert_eq!(app.added, 2);
+    assert_eq!(app.removed, 0);
+
+    for _ in 0..10 {
+        app.on_key(key(KeyCode::Backspace)); // delete "new words " back out
+    }
+    app.on_idle();
+    assert_eq!(app.added, 2); // unchanged
+    assert_eq!(app.removed, 2);
+}
+
+#[test]
+fn an_edited_chapter_is_tallied_even_after_navigating_away() {
+    // Edit ch0, then switch to ch1 before an idle tick. The tally must still book
+    // ch0's delta — it tracks which chapters changed (#220), not just the active
+    // one. (The single-chapter analogue of a continuous-view chapter paging out.)
+    let (mut app, _dir) = two_chapter_app("tally-away"); // ch0 "first chapter" (2 words)
+    type_str(&mut app, "new words "); // ch0 → +2, no idle yet
+    app.on_key(ctrl('n')); // switch to ch1 (flushes ch0, recording its new count)
+    assert_eq!(app.project.active_index(), 1);
+    app.on_idle();
+    assert_eq!(app.added, 2, "ch0's edit was booked though it's no longer active");
+    assert_eq!(app.removed, 0);
+}
+
+#[test]
+fn deleting_a_chapter_books_moved_to_unused_not_removed() {
+    let (mut app, _dir) = two_chapter_app("moved"); // ch1 "second chapter" (2 words)
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('y'))); // confirm delete
+    assert_eq!(app.moved_to_unused, 2);
+    assert_eq!(app.removed, 0);
+
+    app.on_idle(); // the structural drop is not re-booked as removed
+    assert_eq!(app.removed, 0);
+}
+
+#[test]
+fn momentum_persists_and_resumes_across_a_reopen() {
+    let (mut app, dir) = two_chapter_app("resume");
+    app.added = 100;
+    app.removed = 5;
+    app.moved_to_unused = 3;
+    app.persist_snapshot();
+
+    // A fresh session over the same project resumes today's counters.
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut reopened = App::new(buffer, project);
+    reopened.load_history();
+    assert_eq!(reopened.added, 100);
+    assert_eq!(reopened.removed, 5);
+    assert_eq!(reopened.moved_to_unused, 3);
+}
+
+/// A two-chapter project where each chapter is its own part ("Beginning",
+/// "End"), for exercising per-part attribution.
+fn parts_app(name: &str) -> (App, TempProject) {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-app-{}-{}", std::process::id(), name));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\npart_label = \"part\"\n\n\
+         [[parts]]\nname = \"Beginning\"\nchapters = [1, 1]\n\n\
+         [[parts]]\nname = \"End\"\nchapters = [2, 2]\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+    fs::write(dir.join("two.md"), "second chapter\n").unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    (App::new(buffer, project), TempProject::new(dir))
+}
+
+#[test]
+fn edits_are_attributed_to_their_part() {
+    let (mut app, _dir) = parts_app("attribute");
+    // Type in chapter 0 (the "Beginning" part).
+    type_str(&mut app, "alpha beta "); // +2 words in ch0
+    app.on_idle();
+    assert_eq!(app.part_added, vec![2, 0]);
+
+    // Switch to chapter 1 (the "End" part) and type — switching flushes ch0,
+    // so its cached count matches its baseline and isn't re-booked.
+    app.on_key(ctrl('n'));
+    type_str(&mut app, "gamma "); // +1 word in ch1
+    app.on_idle();
+    assert_eq!(app.part_added, vec![2, 1]);
+
+    // The global counters equal the sums of the parts.
+    assert_eq!(app.added, app.part_added.iter().sum::<usize>());
+    assert_eq!(app.removed, 0);
+}
+
+#[test]
+fn deleting_a_chapter_does_not_book_a_part_removal() {
+    let (mut app, _dir) = parts_app("part-delete");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1 ("End")
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('y'))); // confirm delete
+    app.on_idle();
+    // Structural drop → moved_to_unused, not a per-part removal.
+    assert_eq!(app.moved_to_unused, 2);
+    assert_eq!(app.part_removed, vec![0, 0]);
+}
+
+#[test]
+fn per_part_counters_persist_and_resume() {
+    let (mut app, dir) = parts_app("part-resume");
+    app.part_added = vec![40, 12];
+    app.part_removed = vec![3, 1];
+    app.persist_snapshot();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut reopened = App::new(buffer, project);
+    reopened.load_history();
+    assert_eq!(reopened.part_added, vec![40, 12]);
+    assert_eq!(reopened.part_removed, vec![3, 1]);
+}
+
+#[test]
+fn resume_ignores_per_part_counts_when_the_parts_config_changed() {
+    // Persist a two-part day, then reopen with a one-part manifest: the
+    // mismatched per-part counters are dropped rather than mis-applied.
+    let (mut app, dir) = parts_app("part-mismatch");
+    app.part_added = vec![40, 12];
+    app.persist_snapshot();
+
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[parts]]\nname = \"Whole\"\nchapters = [1, 2]\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut reopened = App::new(buffer, project);
+    reopened.load_history();
+    assert_eq!(reopened.part_added, vec![0]); // one part, fresh
+}
