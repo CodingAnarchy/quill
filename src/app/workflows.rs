@@ -224,12 +224,19 @@ impl App {
                 return;
             };
             match self.ai_action_start(ai_action, false) {
-                AiStart::Confirm(label) => {
-                    // Suspend at the cost confirm; the y/N handler resumes or cancels.
-                    self.open_prompt(Pending::ConfirmAi(ai_action, false), label, "", None);
+                AiStart::Confirm { label, offer_local } => {
+                    // Suspend at the cost confirm; the handler resumes or cancels.
+                    self.open_prompt(
+                        Pending::ConfirmAi { action: ai_action, force: false, offer_local },
+                        label,
+                        "",
+                        None,
+                    );
                     return;
                 }
-                AiStart::Run => {
+                AiStart::Run(backend) => {
+                    // Route this step to the backend the router picked (#372).
+                    self.routed_backend.set(Some(backend));
                     self.start_async_step(ai_action);
                     return;
                 }

@@ -98,6 +98,13 @@ pub struct App {
     /// recomputed on the idle tick (never the keystroke path) and underlined by
     /// the editor. Empty until the first idle pass.
     pub(crate) spell_flags: Vec<(usize, usize)>,
+    /// One-shot per-action backend override from the hybrid router (#372): set just
+    /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
+    /// backend. A `Cell` so the read-only `backend_spec` can take it.
+    routed_backend: std::cell::Cell<Option<ai::BackendKind>>,
+    /// The backend of the in-flight AI request (#372), for the status indicator:
+    /// set when a request is built, cleared when it resolves.
+    ai_in_flight: std::cell::Cell<Option<ai::BackendKind>>,
     /// Inline author annotations (#302) for the active chapter, as live buffer
     /// ranges (sorted by start). Loaded when the chapter changes and re-anchored
     /// on the idle tick; empty in the continuous view. The chapter `.md` never
@@ -279,6 +286,8 @@ impl App {
             smart_typography,
             theme,
             spell_flags: Vec::new(),
+            routed_backend: std::cell::Cell::new(None),
+            ai_in_flight: std::cell::Cell::new(None),
             annotations,
             annotations_chapter,
             vim_state: VimState::default(),

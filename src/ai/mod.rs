@@ -28,6 +28,7 @@ pub mod marketing;
 pub mod local;
 pub mod model_select;
 pub mod naming;
+pub mod router;
 pub mod scaffold;
 pub mod scene_brief;
 pub mod setting;
@@ -314,6 +315,9 @@ pub struct Settings {
     pub enabled: bool,
     /// Which backend to use (`claude` or `local`).
     pub backend: BackendKind,
+    /// Hybrid routing policy (#372): how to pick local vs remote per action.
+    /// Defaults to `configured` (always `backend`), so routing is opt-in.
+    pub routing: router::Policy,
     /// Privacy switch: when true, force the local backend so nothing ever leaves
     /// the machine, regardless of `backend`.
     pub offline: bool,
@@ -336,6 +340,7 @@ impl Default for Settings {
         Self {
             enabled: false,
             backend: BackendKind::Claude,
+            routing: router::Policy::Configured,
             offline: false,
             model: default_model(),
             api_key: None,
@@ -385,16 +390,25 @@ impl Settings {
         }
     }
 
-    /// Whether the AI features are usable as configured, or why not — the single
-    /// readiness chokepoint (gates the palette and each request). Local is always
-    /// ready (it loads on first use); Claude needs an API key.
+    /// Whether the AI features are usable as configured, or why not — the
+    /// readiness chokepoint for the *active* backend (gates the palette and each
+    /// request). A thin wrapper over [`ready_for`](Self::ready_for) for the
+    /// backend [`backend`](Self::backend) resolves to.
     pub fn check_ready(&self) -> Result<(), AiError> {
+        self.ready_for(self.backend())
+    }
+
+    /// Whether `backend` specifically is usable, or why not. Local is always
+    /// ready (it loads on first use); Claude needs an API key. The hybrid router
+    /// (#372) checks the backend it actually picked, which may differ from the
+    /// configured one.
+    pub fn ready_for(&self, backend: BackendKind) -> Result<(), AiError> {
         if !self.enabled {
             return Err(AiError::NotConfigured(
                 "AI is off — set `enabled = true` under [ai] in ~/.config/quill/config.toml".into(),
             ));
         }
-        match self.backend() {
+        match backend {
             BackendKind::Local => Ok(()),
             BackendKind::Claude if self.resolved_key().is_some() => Ok(()),
             BackendKind::Claude => Err(AiError::NotConfigured(

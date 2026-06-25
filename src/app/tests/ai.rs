@@ -4,7 +4,10 @@
 use super::*;
 use crate::ai;
 use crate::ai::naming::{self, Naming};
+use crate::ai::router::Policy;
 use crate::ai::scaffold::{self, Scaffold};
+use crate::app::palette::AiStart;
+use crate::mode::AiAction;
 use std::fs;
 
 // --- AI: "Ask the manuscript" ----------------------------------------------
@@ -1017,7 +1020,7 @@ fn an_expensive_pass_asks_for_confirmation_first() {
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     match &app.mode {
         Mode::Prompt(s) => {
-            assert!(matches!(s.pending, Pending::ConfirmAi(_, _)), "cost confirm opens");
+            assert!(matches!(s.pending, Pending::ConfirmAi { .. }), "cost confirm opens");
             assert!(s.label.contains("run?"), "{}", s.label);
         }
         _ => panic!("expected the cost confirm prompt"),
@@ -1214,4 +1217,55 @@ fn switching_flips_between_claude_and_local() {
     app.toggle_ai_backend();
     assert_eq!(app.ai.backend, ai::BackendKind::Claude);
     assert_eq!(app.ai_backend_label(), "Claude (cloud)");
+}
+
+// --- Hybrid routing (#372) -------------------------------------------------
+
+#[test]
+fn offline_routes_costed_actions_on_device() {
+    let (mut app, _dir) = two_chapter_app("route-offline");
+    app.ai.enabled = true;
+    app.ai.offline = true; // the hard pin
+    assert!(
+        matches!(app.ai_action_start(AiAction::Continuity, false), AiStart::Run(ai::BackendKind::Local)),
+        "offline pins every pass on-device",
+    );
+}
+
+#[test]
+fn ask_policy_confirms_when_over_the_threshold() {
+    let (mut app, _dir) = two_chapter_app("route-ask");
+    app.ai.enabled = true;
+    app.ai.routing = Policy::Ask;
+    app.ai.cost_threshold = 0.0; // any non-empty manuscript is "over"
+    assert!(
+        matches!(app.ai_action_start(AiAction::Continuity, false), AiStart::Confirm { .. }),
+        "the ask policy surfaces the choice over the threshold",
+    );
+}
+
+#[test]
+fn the_default_policy_keeps_the_plain_cost_confirm() {
+    let (mut app, _dir) = two_chapter_app("route-default");
+    app.ai.enabled = true; // routing defaults to Configured
+    app.ai.cost_threshold = 0.0;
+    match app.ai_action_start(AiAction::Continuity, false) {
+        AiStart::Confirm { offer_local, label } => {
+            assert!(!offer_local, "the default policy doesn't offer a local detour");
+            assert!(label.contains("run?"), "{label}");
+        }
+        _ => panic!("expected the historical cost confirm"),
+    }
+}
+
+#[cfg(feature = "local")]
+#[test]
+fn prefer_local_runs_a_fitting_pass_on_device() {
+    let (mut app, _dir) = two_chapter_app("route-prefer-local");
+    app.ai.enabled = true;
+    app.ai.routing = Policy::PreferLocal;
+    assert!(
+        matches!(app.ai_action_start(AiAction::Continuity, false), AiStart::Run(ai::BackendKind::Local)),
+        "prefer-local keeps a small pass on-device",
+    );
 }

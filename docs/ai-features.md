@@ -80,6 +80,37 @@ pins local, so the switch reports the pin instead of overriding it — and
 selecting local in a build without `--features local` gives the same rebuild
 hint as the static setting rather than appearing to switch and then failing.
 
+**Hybrid routing (#372):** instead of one static backend, `[ai] routing` can pick
+local vs remote *per action*, turning the cost estimator from a warning into a
+decision. The policy is a pure function of (estimate, the action's local
+capability, preference), so it's predictable and testable:
+
+```toml
+[ai]
+routing = "configured"   # configured (default) | prefer-local | prefer-cloud | cost-ceiling | ask
+```
+
+- `configured` — always the session backend; the router is off (the historical
+  behavior, so an unset config is unchanged).
+- `prefer-local` — run on-device whenever the local backend is available and the
+  pass fits its context budget (~24k tokens); larger passes fall back to Claude
+  with a notice.
+- `prefer-cloud` — always Claude (with the usual over-threshold confirm).
+- `cost-ceiling` — Claude until the estimate exceeds `cost_threshold`, then route
+  on-device instead of paying (falling back to Claude only when the pass is too
+  big for local).
+- `ask` — when the estimate is over the threshold, offer the choice at the
+  confirm: **y** spend on Claude · **l** run locally · anything else cancels. The
+  label compares them (`~$0.34 on claude-opus-4-8 — or free on-device`).
+
+The decision is always visible: the confirm shows the comparison up front, and
+the in-flight status tag names the backend a pass is actually running on
+(`⟳ Claude` / `⟳ local`). The hard controls still win — `offline = true` keeps
+everything local, and a per-action choice at the `ask` confirm overrides the
+policy. A pass the local model can't hold is never silently routed to it; it
+falls back to the cloud with a notice. Routing only changes *where* an action
+runs — never whether it can touch manuscript prose.
+
 With AI enabled, **Ctrl-A** opens the **AI command palette** (#98) — one entry
 point listing every AI action; arrow to one and Enter runs it. (When AI is off,
 Ctrl-A explains how to enable it.) The status line shows a persistent `AI` tag

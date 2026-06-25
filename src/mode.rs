@@ -855,9 +855,11 @@ pub(crate) enum Pending {
     Thesaurus,
     /// Text input: a message for a version-control commit (#131).
     Commit,
-    /// y/N: run an AI action whose estimated cost exceeds the confirm threshold.
-    /// The bool is whether to force a full rebuild (#176).
-    ConfirmAi(AiAction, bool),
+    /// Confirm running an AI action whose estimated cost exceeds the threshold.
+    /// `force` is whether to force a full bible rebuild (#176); `offer_local` adds
+    /// "run locally instead" as a third choice when the hybrid router (#372) found
+    /// a usable local backend (`y` Claude · `l` local · anything else cancels).
+    ConfirmAi { action: AiAction, force: bool, offer_local: bool },
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,

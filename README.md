@@ -102,9 +102,12 @@ keystrokes that stay out of the way.
   (synopsis, blurb, query letter, marketing / social copy). Findings collect in a
   navigable **revision triage** list, and for a multi-book series the bible and
   its findings span every book. It runs against Claude or an on-device local
-  model, and you can **switch backends from the `Ctrl-K` menu** for the session
-  (offline for a flight, cloud for a heavier pass). Full design, model choices,
-  and privacy model in [`docs/ai-features.md`](docs/ai-features.md).
+  model: **switch backends from the `Ctrl-K` menu** for the session, or set a
+  **routing policy** (`[ai] routing`) that picks per action — keeping cheap,
+  frequent work on-device and reserving the paid cloud model for the passes whose
+  size needs it, surfacing the choice (cloud $ vs. free local) when it matters.
+  Full design, model choices, and privacy model in
+  [`docs/ai-features.md`](docs/ai-features.md).
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
@@ -549,17 +552,13 @@ story bible, and the performance and stability hardening (atomic saves, crash
 recovery, foreseeable-error handling, and a property-tested data path, backed by
 the benchmarked `cargo perf` suite in [`docs/performance.md`](docs/performance.md)).
 
-What remains genuinely ahead:
-
-- **Local-model backend (fully offline AI)** — run the AI features against an
-  in-process quantized model (via [`candle`](https://github.com/huggingface/candle),
-  Metal on Apple Silicon) so nothing ever leaves the machine, as an alternative
-  to the Claude backend. It's selectable with `[ai] backend = "local"` (or
-  `offline = true`) in `config.toml`, in a build compiled with `--features local`,
-  and can also be switched at runtime from the `Ctrl-K` menu (**Switch AI
-  backend**); without it the AI features use the Claude API (opt-in, off by
-  default). Still ahead: a hybrid router that picks local vs cloud per action by
-  cost and capability (#372).
+The last of the planned AI work has now shipped — the **fully-offline
+local-model backend** (an in-process quantized model via
+[`candle`](https://github.com/huggingface/candle), Metal on Apple Silicon, so
+nothing leaves the machine), the **runtime backend switch**, and **hybrid
+routing** that picks local vs cloud per action by cost and capability (see
+Features). The local backend is a build-time opt-in (`--features local`); a
+standard build is Claude-only. Nothing else is actively scheduled.
 
 The **AI boundary is fixed, not a roadmap item**: Quill's AI is an *assistant,
 not a co-writer*. It tracks, outlines, marks, observes, and looks up — it never

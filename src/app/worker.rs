@@ -388,10 +388,19 @@ impl App {
     /// Cheap — the heavy local-model load is deferred to [`BackendSpec::build`] on
     /// the worker thread.
     pub(super) fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
-        self.ai.check_ready()?;
-        Ok(match self.ai.backend() {
+        // The hybrid router (#372) may have picked a backend for this one request;
+        // otherwise fall back to the session backend. Consumed once.
+        let chosen = self.routed_backend.take().unwrap_or_else(|| self.ai.backend());
+        self.ai.ready_for(chosen)?;
+        // Fail fast on the UI thread when local wasn't compiled in, before we
+        // record it as in-flight or spawn a worker just to error.
+        if chosen == ai::BackendKind::Local && cfg!(not(feature = "local")) {
+            return Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()));
+        }
+        self.ai_in_flight.set(Some(chosen)); // the status bar shows where it runs
+        Ok(match chosen {
             ai::BackendKind::Claude => {
-                // check_ready already guaranteed a key for Claude; resolve it
+                // ready_for already guaranteed a key for Claude; resolve it
                 // defensively rather than unwrapping.
                 let key = self
                     .ai
@@ -399,15 +408,30 @@ impl App {
                     .ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
                 BackendSpec::Claude(key.to_string())
             }
-            ai::BackendKind::Local => {
-                // Fail fast on the UI thread when the local backend wasn't compiled
-                // in, so we don't spawn a worker just to error.
-                if cfg!(not(feature = "local")) {
-                    return Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()));
-                }
-                BackendSpec::Local(self.local_backend.clone())
-            }
+            ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone()),
         })
+    }
+
+    /// A label for the backend a running AI request is using (#372) — `Claude` or
+    /// `local` — for the in-flight status indicator. Defaults to the session
+    /// backend's label when nothing is recorded.
+    pub(crate) fn ai_in_flight_label(&self) -> &'static str {
+        match self.ai_in_flight.get().unwrap_or_else(|| self.ai.backend()) {
+            ai::BackendKind::Claude => "Claude",
+            ai::BackendKind::Local => "local",
+        }
+    }
+
+    /// Run an AI action the author confirmed at the routing prompt (#372), on the
+    /// chosen `backend`. Mid-workflow it runs as the suspended step; otherwise
+    /// directly. Shared by the cloud / local choices of the confirm.
+    pub(crate) fn run_confirmed_ai(&mut self, action: AiAction, force: bool, backend: ai::BackendKind) {
+        self.routed_backend.set(Some(backend));
+        if self.workflow_run.is_some() {
+            self.start_async_step(action);
+        } else {
+            self.run_ai_action(action, force);
+        }
     }
 
     /// Poll the in-flight AI request (non-blocking). On a result, dispatch by
@@ -421,6 +445,7 @@ impl App {
         match self.ai_task.poll() {
             Poll::Ready(outcome) => {
                 self.message = None;
+                self.ai_in_flight.set(None); // the request finished — clear the backend indicator
                 self.overlay = None; // a fresh result supersedes any open overlay
                 let step_error = outcome.error().map(|e| e.to_string());
                 match outcome {

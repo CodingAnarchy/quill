@@ -130,16 +130,16 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
-            Pending::ConfirmAi(action, force) => match key.code {
+            Pending::ConfirmAi { action, force, offer_local } => match key.code {
+                // Confirm: run on the paid cloud backend.
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
-                    // Mid-workflow, the confirm gates that step: run it as the
-                    // workflow's async step so the run advances on completion.
-                    if self.workflow_run.is_some() {
-                        self.start_async_step(action);
-                    } else {
-                        self.run_ai_action(action, force);
-                    }
+                    self.run_confirmed_ai(action, force, crate::ai::BackendKind::Claude);
+                }
+                // The hybrid router's third option (#372): run this one on-device.
+                KeyCode::Char('l') | KeyCode::Char('L') if offer_local => {
+                    self.mode = closed;
+                    self.run_confirmed_ai(action, force, crate::ai::BackendKind::Local);
                 }
                 _ => {
                     self.mode = closed;
