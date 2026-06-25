@@ -59,6 +59,16 @@ impl App {
                 }
                 return;
             }
+            // `]s` / `[s` jump to the next / previous misspelling (#359), Vim's
+            // own spell-nav bindings; any other second key cancels.
+            VimPending::Bracket { forward } => {
+                self.vim_state.pending = VimPending::None;
+                self.vim_state.count = None;
+                if c == 's' {
+                    self.navigate_spell_flag(if forward { 1 } else { -1 });
+                }
+                return;
+            }
             VimPending::None => {}
         }
 
@@ -96,6 +106,10 @@ impl App {
             'T' => Some(VimPending::Find(FindKind::TillBack)),
             // `"x` selects the register for the next yank / delete / put.
             '"' => Some(VimPending::Register),
+            // `]s` / `[s` spell-flag navigation (#359) — only as a standalone
+            // command, never as an operator motion.
+            ']' if self.vim_state.op.is_none() => Some(VimPending::Bracket { forward: true }),
+            '[' if self.vim_state.op.is_none() => Some(VimPending::Bracket { forward: false }),
             _ => None,
         };
         if let Some(p) = prefix {

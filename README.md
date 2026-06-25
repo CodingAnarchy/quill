@@ -339,6 +339,8 @@ Search:
   returns the cursor.
 - **`n`** repeats in the search direction, **`N`** the opposite (wrapping at the
   document ends with a notice); **`*`** searches for the word under the cursor.
+- **`]s`** / **`[s`** jump to the next / previous misspelled word (the spelling
+  sweep), wrapping at the ends.
 
 Command line:
 
@@ -439,11 +441,12 @@ is never flagged again in this project. Accepted words are stored, one per line,
 in a plain-text `dictionary.txt` at the project root — diffable and carried in
 git with the manuscript.
 
-To work through them, **Next misspelling** / **Previous misspelling** (also in
-the `Ctrl-K` palette) jump the cursor between flagged words, wrapping around the
-ends; a word you've since fixed or accepted is skipped, and when none are left it
-says so. So a spelling sweep is: jump to a flag, fix it (or accept the name),
-jump to the next.
+To work through them, **Next misspelling** / **Previous misspelling** (in the
+`Ctrl-K` palette) jump the cursor between flagged words, wrapping around the ends;
+a word you've since fixed or accepted is skipped, and when none are left it says
+so. In Vim mode the standard **`]s`** / **`[s`** do the same, so a spelling sweep
+is a quick repeated keystroke: jump to a flag, fix it (or accept the name), jump
+to the next.
 
 ## Layout
 
