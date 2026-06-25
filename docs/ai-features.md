@@ -93,9 +93,14 @@ local_models = ["1.5B", "7B"]   # ids from the model table; empty ⇒ the auto p
 
 Each model is downloaded on first use (cached and resumable) and then reused;
 several can be cached at once and switched between with no reload. An empty list
-keeps the prior behavior (one auto-selected model). *(Choosing and downloading
-models from inside the editor — rather than the config file — is the follow-up
-in #379.)*
+keeps the prior behavior (one auto-selected model).
+
+You needn't edit the config by hand: **Local AI models** in the `Ctrl-K` menu
+opens an in-editor manager (#379) that lists the catalog — each model with its
+size, RAM need, context window, and a one-line description — and lets you toggle
+which ones are in your set with Enter/Space (written back to `[ai] local_models`).
+*(Explicit download/remove with progress and on-disk status from the manager is
+the follow-up in #382; a chosen model still downloads on first use.)*
 
 **Context windows and whole-book passes (#378):** every model carries its real
 context window, and the router routes a pass on-device only when a downloaded

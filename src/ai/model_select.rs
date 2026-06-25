@@ -45,6 +45,9 @@ pub struct Model {
     /// long-context model can take a whole-manuscript pass the standard ones
     /// can't.
     pub context_tokens: u32,
+    /// A one-line characterization for the model manager (#379), so the author
+    /// chooses on quality/speed/context rather than guessing at a size id.
+    pub description: &'static str,
 }
 
 /// The context window of the standard (non-extended) Qwen2.5-Instruct models, in
@@ -58,15 +61,15 @@ pub const STANDARD_CONTEXT_TOKENS: u32 = 32_768;
 /// Update as new Qwen releases land. (The catalog is vetted for download/load in
 /// #379.)
 pub const MODELS: &[Model] = &[
-    Model { params: "0.5B", gguf_repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF", gguf_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-0.5B-Instruct", size_gb: 0.4, min_ram_gb: 3, context_tokens: STANDARD_CONTEXT_TOKENS },
-    Model { params: "1.5B", gguf_repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", gguf_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-1.5B-Instruct", size_gb: 1.0, min_ram_gb: 6, context_tokens: STANDARD_CONTEXT_TOKENS },
-    Model { params: "3B", gguf_repo: "Qwen/Qwen2.5-3B-Instruct-GGUF", gguf_file: "qwen2.5-3b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-3B-Instruct", size_gb: 2.0, min_ram_gb: 12, context_tokens: STANDARD_CONTEXT_TOKENS },
-    Model { params: "7B", gguf_repo: "Qwen/Qwen2.5-7B-Instruct-GGUF", gguf_file: "qwen2.5-7b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct", size_gb: 4.7, min_ram_gb: 24, context_tokens: STANDARD_CONTEXT_TOKENS },
+    Model { params: "0.5B", gguf_repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF", gguf_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-0.5B-Instruct", size_gb: 0.4, min_ram_gb: 3, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Tiny — instant, for quick lookups" },
+    Model { params: "1.5B", gguf_repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", gguf_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-1.5B-Instruct", size_gb: 1.0, min_ram_gb: 6, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Small — fast, for light passes" },
+    Model { params: "3B", gguf_repo: "Qwen/Qwen2.5-3B-Instruct-GGUF", gguf_file: "qwen2.5-3b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-3B-Instruct", size_gb: 2.0, min_ram_gb: 12, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Compact — a balance for modest machines" },
+    Model { params: "7B", gguf_repo: "Qwen/Qwen2.5-7B-Instruct-GGUF", gguf_file: "qwen2.5-7b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct", size_gb: 4.7, min_ram_gb: 24, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Capable — solid quality at 32k context" },
     // Extended-context (#378): a ~1M-token window in the 7B footprint, for
     // whole-manuscript / series passes on-device. Long context is memory-hungry
     // (the KV cache), hence the higher RAM floor than the standard 7B.
-    Model { params: "7B-1M", gguf_repo: "bartowski/Qwen2.5-7B-Instruct-1M-GGUF", gguf_file: "Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct-1M", size_gb: 4.7, min_ram_gb: 32, context_tokens: 1_010_000 },
-    Model { params: "14B", gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF", gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct", size_gb: 9.0, min_ram_gb: 48, context_tokens: STANDARD_CONTEXT_TOKENS },
+    Model { params: "7B-1M", gguf_repo: "bartowski/Qwen2.5-7B-Instruct-1M-GGUF", gguf_file: "Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct-1M", size_gb: 4.7, min_ram_gb: 32, context_tokens: 1_010_000, description: "Long context — whole-book passes (~1M tokens)" },
+    Model { params: "14B", gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF", gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct", size_gb: 9.0, min_ram_gb: 48, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Largest — best quality at 32k context" },
 ];
 
 impl Model {
@@ -74,6 +77,15 @@ impl Model {
     /// config key in `[ai] local_models` and the cache key for the loaded model.
     pub fn id(&self) -> &'static str {
         self.params
+    }
+
+    /// A compact context-window label for the model manager (#379): `"32k"`, `"1M"`.
+    pub fn context_label(&self) -> String {
+        if self.context_tokens >= 1_000_000 {
+            format!("{}M", self.context_tokens / 1_000_000)
+        } else {
+            format!("{}k", self.context_tokens / 1_000)
+        }
     }
 }
 
@@ -272,5 +284,16 @@ mod tests {
         let m = by_id("7B-1M").expect("the 1M variant is in the table");
         assert!(m.context_tokens >= 1_000_000, "{}", m.context_tokens);
         assert_eq!(by_id("7B").unwrap().context_tokens, STANDARD_CONTEXT_TOKENS);
+    }
+
+    #[test]
+    fn context_label_is_compact() {
+        assert_eq!(by_id("7B").unwrap().context_label(), "32k");
+        assert_eq!(by_id("7B-1M").unwrap().context_label(), "1M");
+    }
+
+    #[test]
+    fn every_model_has_a_description() {
+        assert!(MODELS.iter().all(|m| !m.description.is_empty()));
     }
 }

@@ -190,3 +190,24 @@ pub(super) fn draw_annotations(frame: &mut Frame, area: Rect, app: &crate::app::
     });
     draw_list_overlay(frame, area, &title, "Annotations — ↑↓ move · enter jump · d delete · esc close", rows);
 }
+
+/// Render the local AI model catalog (#379): each model with its characteristics
+/// and a one-line description, the ones in the author's set marked. Enter/Space
+/// toggles membership.
+pub(super) fn draw_model_manager(frame: &mut Frame, area: Rect, app: &crate::app::App, selected: usize) {
+    use crate::ai::model_select::MODELS;
+    let set = &app.ai.local_models;
+    let title = format!(" Local AI models ({} chosen) ", set.len());
+    let rows = MODELS.iter().enumerate().map(|(i, m)| {
+        let mark = if set.iter().any(|id| id == m.id()) { "● " } else { "○ " };
+        let stats = format!("{:.1} GB · needs {} GB RAM · {} ctx", m.size_gb, m.min_ram_gb, m.context_label());
+        list_row(i == selected, format!("{mark}Qwen2.5-{}", m.id()), Some(format!("{stats} — {}", m.description)))
+    });
+    // Local inference is a build-time opt-in; say so rather than imply it runs.
+    let help = if cfg!(feature = "local") {
+        "Local models — ↑↓ move · enter/space use/unuse · esc close"
+    } else {
+        "Local models — ↑↓ move · enter/space choose · esc close · (rebuild with --features local to run them)"
+    };
+    draw_list_overlay(frame, area, &title, help, rows);
+}
