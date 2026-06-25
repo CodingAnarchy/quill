@@ -67,6 +67,8 @@ pub struct Theme {
     pub mode_normal: Color,
     /// The Visual-mode status indicator.
     pub mode_visual: Color,
+    /// Background of an inline author annotation's anchored span (#302).
+    pub annotation: Color,
 }
 
 impl Default for Theme {
@@ -94,6 +96,7 @@ impl Theme {
             mode_insert: Color::Green,
             mode_normal: Color::Blue,
             mode_visual: Color::Magenta,
+            annotation: Color::Rgb(80, 70, 30),
         }
     }
 
@@ -114,6 +117,7 @@ impl Theme {
             mode_insert: Color::Rgb(0, 135, 0),
             mode_normal: Color::Blue,
             mode_visual: Color::Magenta,
+            annotation: Color::Rgb(250, 240, 180),
         }
     }
 
@@ -173,6 +177,7 @@ impl Theme {
             "mode_insert" => self.mode_insert = color,
             "mode_normal" => self.mode_normal = color,
             "mode_visual" => self.mode_visual = color,
+            "annotation" => self.annotation = color,
             _ => return false,
         }
         true
@@ -181,7 +186,7 @@ impl Theme {
 
 /// The overridable color-field keys (the `[theme]` keys other than `name`), for
 /// the describe-to-config vocabulary (#303) and any other schema-driven caller.
-pub(crate) const COLOR_FIELDS: [&str; 13] = [
+pub(crate) const COLOR_FIELDS: [&str; 14] = [
     "heading",
     "on_accent",
     "dim",
@@ -195,6 +200,7 @@ pub(crate) const COLOR_FIELDS: [&str; 13] = [
     "mode_insert",
     "mode_normal",
     "mode_visual",
+    "annotation",
 ];
 
 /// Whether `s` parses as a color value (for validating a proposed override).

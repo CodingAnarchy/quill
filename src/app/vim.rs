@@ -510,6 +510,12 @@ impl App {
             'y' => self.visual_operate(Op::Yank, anchor, linewise),
             // `p` replaces the selection with the register.
             'p' => self.visual_put(anchor, linewise),
+            // `m` annotates the selection with a note (#302), then leaves Visual.
+            'm' => {
+                let (start, end) = self.selection_bytes(anchor, linewise);
+                self.mode = Mode::Normal;
+                self.start_annotation_range(start, end);
+            }
             // Motions (and counts / multi-key prefixes) extend the selection by
             // reusing the Normal-mode dispatch (which remaps again to the same key).
             _ if is_motion_key(c) => self.on_key_normal(key),

@@ -172,3 +172,21 @@ pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, 
     });
     draw_list_overlay(frame, area, &title, "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close", rows);
 }
+
+/// Render the active chapter's inline annotations (#302) as a navigable list:
+/// each row is the note over the (dimmed) snippet of text it's anchored to.
+pub(super) fn draw_annotations(frame: &mut Frame, area: Rect, app: &crate::app::App, selected: usize) {
+    let buffer = app.edit_buffer();
+    let len = buffer.len_bytes();
+    let title = format!(" Annotations ({}) ", app.annotations.len());
+    let rows = app.annotations.iter().enumerate().map(|(i, a)| {
+        let (s, e) = (a.start.min(len), a.end.min(len));
+        let snippet = if s < e {
+            crate::text::ellipsize(&buffer.byte_slice(s, e), 40)
+        } else {
+            "(text gone)".to_string()
+        };
+        list_row(i == selected, a.note.clone(), Some(snippet))
+    });
+    draw_list_overlay(frame, area, &title, "Annotations — ↑↓ move · enter jump · d delete · esc close", rows);
+}

@@ -5,6 +5,7 @@
 
 mod ai;
 mod analysis;
+mod annotation;
 mod app;
 mod atomic;
 mod buffer;

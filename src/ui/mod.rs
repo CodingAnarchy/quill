@@ -19,8 +19,8 @@ use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 mod editor;
 mod list_overlay;
 use list_overlay::{
-    draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser, draw_project_search,
-    list_row, marker, row_style,
+    draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser,
+    draw_project_search, list_row, marker, row_style,
 };
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -57,6 +57,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::Findings(findings) = &app.mode {
         draw_findings(frame, area, findings, &app.project);
+        return;
+    }
+    if let Mode::Annotations { selected } = app.mode {
+        draw_annotations(frame, area, app, selected);
         return;
     }
     if let Mode::ProjectSearch(ps) = &app.mode {
@@ -751,7 +755,8 @@ mod tests {
     /// Focus mode and typewriter scrolling (#301) are both on here, over a corpus
     /// with no blank lines — the pathological case where the focused "paragraph"
     /// spans the whole buffer, so `focus_paragraph`'s line walk does its most
-    /// work. Confirms neither mode adds cost that breaks the frame budget.
+    /// work — plus a spread of inline annotations (#302) so their per-row/char
+    /// scan is timed. Confirms none of these adds cost that breaks the frame budget.
     #[test]
     #[ignore]
     fn render_stays_within_a_frame() {
@@ -772,6 +777,11 @@ mod tests {
         app.outline_visible = true;
         app.focus_mode = true;
         app.typewriter = true;
+        // A spread of inline annotations (#302) so the per-row/char annotation
+        // scan is exercised under the frame budget too.
+        app.annotations = (0..50)
+            .map(|i| crate::annotation::Live { start: i * 53, end: i * 53 + 5, note: "note".into() })
+            .collect();
 
         let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
         terminal.draw(|f| draw(f, &app)).unwrap(); // warm
@@ -917,6 +927,21 @@ mod tests {
         app.focus_mode = true;
         assert_eq!(first_letter_fg(&app, "alpha"), Some(dim), "the other paragraph dims");
         assert_ne!(first_letter_fg(&app, "bravo"), Some(dim), "the focused paragraph stays normal");
+    }
+
+    #[test]
+    fn an_annotated_span_is_marked_in_the_editor() {
+        let mut app = app_with("first chapter\n");
+        let anno_bg = app.theme.annotation;
+        // Anchor a note to "first" (bytes 0..5).
+        app.annotations = vec![crate::annotation::Live { start: 0, end: 5, note: "check".into() }];
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let marked = (0..40).any(|x| (0..8).any(|y| buf[(x, y)].style().bg == Some(anno_bg)));
+        assert!(marked, "the annotated span carries the annotation background");
     }
 
     #[test]

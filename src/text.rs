@@ -3,6 +3,18 @@
 //! TODO-marker count, and character-mention counting. One folding rule (per-
 //! character Unicode lowercase) so the three features can never disagree.
 
+/// Collapse `s`'s whitespace to single spaces and trim it to `max` characters,
+/// appending `…` when shortened — a one-line snippet for prompts and list rows
+/// (#302). Char-based, so it never splits a UTF-8 codepoint.
+pub fn ellipsize(s: &str, max: usize) -> String {
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        flat
+    } else {
+        format!("{}…", flat.chars().take(max).collect::<String>())
+    }
+}
+
 /// Run `f(start, end)` for each non-overlapping, case-insensitive match of
 /// `needle` in `text`, as byte ranges `[start, end)`. The one place the match
 /// rule lives; [`match_ranges`] and [`count_matches`] are thin wrappers.

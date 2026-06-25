@@ -138,6 +138,8 @@ impl App {
                 self.focus_mode = !self.focus_mode;
                 self.message = Some(format!("Focus mode {}.", on_off(self.focus_mode)));
             }
+            Action::AddAnnotation => self.start_annotation(),
+            Action::ReviewAnnotations => self.open_annotation_review(),
         }
     }
 

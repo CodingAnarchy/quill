@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::annotation::{Annotation, AnnotationFile};
 use crate::atomic;
 use crate::buffer::count_words;
 use crate::frontmatter::{self, Band, Epigraph, FrontMatter, Role, Status};
@@ -35,6 +36,9 @@ pub const MANIFEST_NAME: &str = "book.toml";
 
 /// The per-project custom spell-check dictionary file (#358), at the project root.
 pub const DICTIONARY_NAME: &str = "dictionary.txt";
+
+/// The per-project inline-annotations side file (#302), at the project root.
+pub const ANNOTATIONS_NAME: &str = "annotations.toml";
 
 /// One chapter's entry in the manifest: its display title, the file that holds
 /// its prose (relative to the project root), and a cached word count.
@@ -301,6 +305,10 @@ pub struct Project {
     /// invented names, places, coined terms — lowercased for case-insensitive
     /// matching. Loaded from `dictionary.txt` at the project root at open.
     dictionary: HashSet<String>,
+    /// Inline author annotations (#302): notes anchored to chapter byte ranges,
+    /// keyed by chapter file name. Loaded from `annotations.toml` at the project
+    /// root at open; kept out of the chapter `.md` files so exports stay clean.
+    annotations: Vec<Annotation>,
 }
 
 impl Project {
@@ -326,6 +334,7 @@ impl Project {
         let (manifest, books, active_book) = Manifest::from_toml_value(value).map_err(invalid)?;
 
         let dictionary = load_dictionary(&root);
+        let annotations = load_annotations(&root);
         let mut project = Self {
             root,
             manifest,
@@ -334,6 +343,7 @@ impl Project {
             books,
             active_book,
             dictionary,
+            annotations,
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -399,6 +409,7 @@ impl Project {
             books: Vec::new(),
             active_book: 0,
             dictionary: HashSet::new(),
+            annotations: Vec::new(),
         };
         project.add_default_chapter()?;
         Ok(project)
@@ -664,6 +675,51 @@ impl Project {
         Ok(true)
     }
 
+    /// The inline annotations (#302) anchored in chapter `file`, as live buffer
+    /// ranges (chapter-local offsets == buffer offsets in the single-chapter
+    /// view), in document order. Out-of-range offsets are the caller's to clamp.
+    pub fn annotations_for(&self, file: &str) -> Vec<crate::annotation::Live> {
+        let mut live: Vec<_> = self
+            .annotations
+            .iter()
+            .filter(|a| a.chapter == file)
+            .map(|a| crate::annotation::Live { start: a.start, end: a.end, note: a.note.clone() })
+            .collect();
+        live.sort_by_key(|a| (a.start, a.end));
+        live
+    }
+
+    /// Replace chapter `file`'s annotations with `live` (byte ranges + notes) and
+    /// write the whole side file (#302). Other chapters' annotations are kept.
+    /// Removing the file when nothing is left keeps the project tidy.
+    pub fn set_chapter_annotations(
+        &mut self,
+        file: &str,
+        live: &[crate::annotation::Live],
+    ) -> std::io::Result<()> {
+        self.annotations.retain(|a| a.chapter != file);
+        for a in live {
+            self.annotations.push(Annotation {
+                chapter: file.to_string(),
+                start: a.start,
+                end: a.end,
+                note: a.note.clone(),
+            });
+        }
+        let path = self.root.join(ANNOTATIONS_NAME);
+        if self.annotations.is_empty() {
+            // Nothing left anywhere — remove the side file rather than write `[]`.
+            return match fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            };
+        }
+        self.annotations.sort_by(|a, b| (&a.chapter, a.start, a.end).cmp(&(&b.chapter, b.start, b.end)));
+        let file = AnnotationFile { items: self.annotations.clone() };
+        let text = toml::to_string_pretty(&file).map_err(std::io::Error::other)?;
+        atomic::write(&path, text.as_bytes())
+    }
+
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
         self.chapter_path(self.active_index())
@@ -740,6 +796,7 @@ impl Project {
             books: Vec::new(),
             active_book: 0,
             dictionary: HashSet::new(),
+            annotations: Vec::new(),
         }
     }
 }
@@ -754,6 +811,16 @@ fn load_dictionary(root: &Path) -> HashSet<String> {
         .map(|l| l.trim().to_lowercase())
         .filter(|l| !l.is_empty())
         .collect()
+}
+
+/// Read the inline annotations side file (#302). Best-effort: a missing or
+/// malformed file yields no annotations rather than failing the open.
+fn load_annotations(root: &Path) -> Vec<Annotation> {
+    fs::read_to_string(root.join(ANNOTATIONS_NAME))
+        .ok()
+        .and_then(|text| toml::from_str::<AnnotationFile>(&text).ok())
+        .map(|f| f.items)
+        .unwrap_or_default()
 }
 
 /// Recursively gather `.md` files under `dir` into `out`, skipping the `unused/`
