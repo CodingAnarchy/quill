@@ -97,6 +97,19 @@ keeps the prior behavior (one auto-selected model). *(Choosing and downloading
 models from inside the editor — rather than the config file — is the follow-up
 in #379.)*
 
+**Context windows and whole-book passes (#378):** every model carries its real
+context window, and the router routes a pass on-device only when a downloaded
+model can hold it. The standard Qwen2.5 models hold ~32k tokens, so a big
+whole-manuscript or series pass would still fall back to the cloud — *unless* you
+download an **extended-context** variant. The catalog includes `7B-1M`
+(Qwen2.5-7B-Instruct-1M, a ~1,010,000-token window), so a `prefer-local` or
+`cost-ceiling` policy can run whole-book continuity, setting, and character
+passes entirely on-device — free, private, offline — instead of paying the cloud.
+The cloud fallback fires (with its notice) only when no downloaded model's window
+fits the pass. Long context is memory-hungry (the KV cache), so the extended
+models carry a higher RAM floor; the in-editor manager (#379) will surface that
+when choosing.
+
 **Hybrid routing (#372):** instead of one static backend, `[ai] routing` can pick
 local vs remote *per action*, turning the cost estimator from a warning into a
 decision. The policy is a pure function of (estimate, the action's local
