@@ -107,6 +107,13 @@ pub struct App {
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
+    /// Typewriter scrolling (#301), from the `[editor]` config: pin the cursor's
+    /// line to the vertical centre of the page instead of letting it drift to the
+    /// bottom. A toggle (palette action); off by default.
+    pub typewriter: bool,
+    /// Focus mode (#301), from the `[editor]` config: dim every paragraph but the
+    /// one under the cursor. A toggle (palette action); off by default.
+    pub focus_mode: bool,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
     /// Whether the project is under version control (#54). Cached so the status
@@ -235,6 +242,8 @@ impl App {
         let editor = crate::config::EditorConfig::load();
         let vim = editor.vim;
         let smart_typography = editor.smart_typography;
+        let typewriter = editor.typewriter;
+        let focus_mode = editor.focus_mode;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let (theme, theme_warnings) = crate::config::load_theme();
         // Make the loaded palette the active one for rendering (#300). `ui::draw`
@@ -260,6 +269,8 @@ impl App {
             vim_keys,
             should_quit: false,
             focus_width: 72,
+            typewriter,
+            focus_mode,
             outline_visible: false,
             under_vc,
             vc_changes: 0,

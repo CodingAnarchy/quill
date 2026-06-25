@@ -48,7 +48,12 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // Visual mode still shows the cursor — that's the selection's active end.
     let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))
         && !app.surface_pane_focused();
-    render_body(frame, column, buffer, &inserts, &conceal, search_matches, current_match, spell, editing);
+    // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
+    let focus = app.focus_mode.then(|| focus_paragraph(buffer));
+    render_body(
+        frame, column, buffer, &inserts, &conceal, search_matches, current_match, spell, app.typewriter,
+        focus, editing,
+    );
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
     if let Mode::EditMeta(meta) = &app.mode {
@@ -78,7 +83,8 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     let column = centered_column(body, app.focus_width);
     // No cursor in a reference pane, so conceal every emphasis marker uniformly.
     let conceal = buffer.syntax().conceal_ranges(None);
-    render_body(frame, column, buffer, &[], &conceal, &[], None, &[], false);
+    // A reference pane isn't where you write — no typewriter pin, no focus dim.
+    render_body(frame, column, buffer, &[], &conceal, &[], None, &[], false, None, false);
 }
 
 /// Render `buffer`'s soft-wrapped, styled prose into `column`, following the
@@ -94,6 +100,8 @@ fn render_body(
     matches: &[ByteRange],
     current: Option<ByteRange>,
     spell: &[ByteRange],
+    typewriter: bool,
+    focus: Option<ByteRange>,
     place_cursor: bool,
 ) {
     let height = column.height as usize;
@@ -111,8 +119,10 @@ fn render_body(
     let cstarts = crate::wrap::row_starts(&cline, wrap);
     let (cursor_subrow, _) = crate::wrap::visual_pos(&cline, &cstarts, cursor_byte - cline_start);
 
-    // Follow the cursor by *visual* row, centered but clamped so we never scroll
-    // past the top or leave blank space at the bottom. Bounded by the viewport.
+    // Follow the cursor by *visual* row, keeping it near the page centre. Normally
+    // the centre is clamped so we never scroll past the top or leave blank space at
+    // the bottom; with typewriter scrolling on (#301) we keep the cursor pinned at
+    // the centre even past the end, so the line you're writing never drifts down.
     let target_above = height / 2;
     let mut above_avail = header_rows(cursor_line) + cursor_subrow;
     let mut l = cursor_line;
@@ -120,15 +130,19 @@ fn render_body(
         l -= 1;
         above_avail += header_rows(l) + body_rows(l);
     }
-    let mut below_avail = body_rows(cursor_line) - 1 - cursor_subrow;
-    let mut l = cursor_line;
-    while l + 1 < total && below_avail < height {
-        l += 1;
-        below_avail += header_rows(l) + body_rows(l);
-    }
-    let keep_above = target_above
-        .max((height.saturating_sub(1)).saturating_sub(below_avail))
-        .min(above_avail);
+    let keep_above = if typewriter {
+        target_above.min(above_avail)
+    } else {
+        let mut below_avail = body_rows(cursor_line) - 1 - cursor_subrow;
+        let mut l = cursor_line;
+        while l + 1 < total && below_avail < height {
+            l += 1;
+            below_avail += header_rows(l) + body_rows(l);
+        }
+        target_above
+            .max((height.saturating_sub(1)).saturating_sub(below_avail))
+            .min(above_avail)
+    };
 
     let mut acc = header_rows(cursor_line) + cursor_subrow;
     let mut top = cursor_line;
@@ -161,6 +175,7 @@ fn render_body(
             matches,
             current,
             spell,
+            focus,
             wrap,
         );
         for (sub, line) in body.into_iter().enumerate() {
@@ -285,6 +300,7 @@ fn styled_line(
     matches: &[ByteRange],
     current: Option<ByteRange>,
     spell: &[ByteRange],
+    focus: Option<ByteRange>,
     width: usize,
 ) -> Vec<Line<'static>> {
     if text.is_empty() {
@@ -296,7 +312,7 @@ fn styled_line(
         .enumerate()
         .map(|(i, &rs)| {
             let re = starts.get(i + 1).copied().unwrap_or(text.len());
-            styled_row(syntax, line_start, text, rs, re, conceal, matches, current, spell)
+            styled_row(syntax, line_start, text, rs, re, conceal, matches, current, spell, focus)
         })
         .collect()
 }
@@ -314,6 +330,7 @@ fn styled_row(
     matches: &[ByteRange],
     current: Option<ByteRange>,
     spell: &[ByteRange],
+    focus: Option<ByteRange>,
 ) -> Line<'static> {
     let seg = &text[rs..re];
     if seg.is_empty() {
@@ -321,6 +338,12 @@ fn styled_row(
     }
     let seg_start = line_start + rs;
     let seg_end = line_start + re;
+    let theme = crate::theme::current(); // once per row, not per character
+    // Focus mode (#301): the row is entirely outside the focused paragraph, so it
+    // dims as a whole — caught here before any per-character styling work.
+    if focus.is_some_and(|(s, e)| seg_start >= e || seg_end <= s) {
+        return Line::from(Span::styled(seg.to_string(), Style::default().fg(theme.dim)));
+    }
     let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
     let concealed_here = conceal.iter().any(|&(s, e)| s < seg_end && e > seg_start);
     let match_here = matches.iter().any(|&(s, e)| s < seg_end && e > seg_start);
@@ -328,13 +351,14 @@ fn styled_row(
     // set without any entry in `matches`, so check it too before skipping styling.
     let current_here = current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
     let spell_here = spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    if hls.is_empty() && !concealed_here && !match_here && !current_here && !spell_here {
+    // A row fully inside the focused span (or focus off) needs no per-char dimming.
+    let focus_covers_row = focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
+    if hls.is_empty() && !concealed_here && !match_here && !current_here && !spell_here && focus_covers_row {
         return Line::raw(seg.to_string());
     }
 
     // Build runs character by character, since concealed chars are dropped and
     // visible runs may not be contiguous in the source.
-    let theme = crate::theme::current(); // once per row, not per character
     let mut spans: Vec<Span> = Vec::new();
     let mut run = String::new();
     let mut run_style = Style::default();
@@ -347,6 +371,13 @@ fn styled_row(
         // Misspelled words (#357) get an underline, layered on whatever else.
         if spell.iter().any(|&(s, e)| abs >= s && abs < e) {
             style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        // Focus mode (#301): a char outside the focused paragraph renders flat-dim,
+        // overriding any syntax/emphasis/match styling so the paragraph stands out.
+        if let Some((s, e)) = focus {
+            if abs < s || abs >= e {
+                style = Style::default().fg(theme.dim);
+            }
         }
         if !run.is_empty() && style != run_style {
             spans.push(Span::styled(std::mem::take(&mut run), run_style));
@@ -378,6 +409,29 @@ fn style_at(hls: &[Highlight], byte: usize, theme: Theme) -> Style {
 
 fn is_concealed(byte: usize, conceal: &[(usize, usize)]) -> bool {
     conceal.iter().any(|&(s, e)| byte >= s && byte < e)
+}
+
+/// The absolute byte range of the paragraph under the cursor (#301 focus mode):
+/// the run of consecutive non-blank lines around the cursor line. Everything
+/// outside it dims. A blank cursor line (between paragraphs) yields an empty span,
+/// so the whole page dims until the cursor re-enters prose. Prose paragraphs are
+/// single soft-wrapped lines, so the line walk almost always stops immediately.
+fn focus_paragraph(buffer: &Buffer) -> ByteRange {
+    let cursor_line = buffer.cursor.line;
+    let blank = |l: usize| buffer.line(l).trim().is_empty();
+    if blank(cursor_line) {
+        let at = buffer.line_start_byte(cursor_line);
+        return (at, at);
+    }
+    let mut first = cursor_line;
+    while first > 0 && !blank(first - 1) {
+        first -= 1;
+    }
+    let mut last = cursor_line;
+    while last + 1 < buffer.line_count() && !blank(last + 1) {
+        last += 1;
+    }
+    (buffer.line_start_byte(first), buffer.line_start_byte(last) + buffer.line(last).len())
 }
 
 /// A `focus_width`-wide prose column centered horizontally in `area` (full width

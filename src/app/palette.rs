@@ -130,6 +130,14 @@ impl App {
             Action::AcceptWord => self.accept_word_at_cursor(),
             Action::NextMisspelling => self.navigate_spell_flag(1),
             Action::PrevMisspelling => self.navigate_spell_flag(-1),
+            Action::ToggleTypewriter => {
+                self.typewriter = !self.typewriter;
+                self.message = Some(format!("Typewriter scrolling {}.", on_off(self.typewriter)));
+            }
+            Action::ToggleFocus => {
+                self.focus_mode = !self.focus_mode;
+                self.message = Some(format!("Focus mode {}.", on_off(self.focus_mode)));
+            }
         }
     }
 
@@ -248,5 +256,14 @@ impl App {
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::Editorial => self.analyze_editorial(),
         }
+    }
+}
+
+/// "on" / "off" for a toggle's status message.
+fn on_off(on: bool) -> &'static str {
+    if on {
+        "on"
+    } else {
+        "off"
     }
 }

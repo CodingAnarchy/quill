@@ -155,11 +155,25 @@ pub struct EditorConfig {
     /// The centered text column width in characters (#303). Defaults to 72; the
     /// runtime `+`/`-` adjustment still applies on top, this just sets the start.
     pub column_width: u16,
+    /// Typewriter scrolling (#301): keep the cursor's line pinned at the vertical
+    /// centre of the page, the text scrolling under it, instead of letting the
+    /// cursor drift to the bottom as a chapter grows. Off by default.
+    pub typewriter: bool,
+    /// Focus mode (#301): dim every paragraph but the one under the cursor, so the
+    /// passage you're shaping stands out. Off by default.
+    pub focus_mode: bool,
 }
 
 impl Default for EditorConfig {
     fn default() -> Self {
-        Self { vim: false, keys: HashMap::new(), smart_typography: true, column_width: 72 }
+        Self {
+            vim: false,
+            keys: HashMap::new(),
+            smart_typography: true,
+            column_width: 72,
+            typewriter: false,
+            focus_mode: false,
+        }
     }
 }
 

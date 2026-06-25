@@ -9,7 +9,12 @@ keystrokes that stay out of the way.
 ## Features
 
 - **Distraction-free page** — text is centered in a column of a fixed width
-  (like a printed page) rather than running edge to edge.
+  (like a printed page) rather than running edge to edge. Two optional modes go
+  further: **typewriter scrolling** pins the line you're writing to the centre of
+  the page (the text scrolls under it, instead of the cursor drifting to the
+  bottom), and **focus mode** dims every paragraph but the one under the cursor.
+  Both default off; toggle them from the command palette (Ctrl-K) or set them in
+  `[editor]` config.
 - **Rope-backed buffer** — fast inserts and deletes anywhere in a long
   manuscript, via [`ropey`](https://crates.io/crates/ropey).
 - **Unicode-correct cursoring** — movement and deletion work on grapheme
@@ -249,6 +254,25 @@ changed; a chapter Quill isn't editing is never rewritten. Prefer plain ASCII
 ```toml
 [editor]
 smart_typography = false
+```
+
+### Typewriter scrolling and focus mode
+
+Two optional aids for staying in the current line. **Typewriter scrolling** keeps
+the cursor's line pinned to the vertical centre of the page — the text scrolls
+under it as you write, instead of the cursor walking to the bottom as a chapter
+grows. **Focus mode** dims every paragraph but the one under the cursor (the
+paragraph is the run of non-blank lines around it), so the passage you're shaping
+stands out. Both default off.
+
+Toggle either one at any time from the command palette (Ctrl-K → "Typewriter
+scrolling" / "Focus mode"), or set your resting preference in
+`~/.config/quill/config.toml`:
+
+```toml
+[editor]
+typewriter = true
+focus_mode = true
 ```
 
 ### Color theme

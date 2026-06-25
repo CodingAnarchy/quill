@@ -747,6 +747,11 @@ mod tests {
     /// over the whole buffer, plus a nav row per chapter). If a future change
     /// makes rendering re-read files or do per-chapter work proportional to the
     /// novel, this catches it.
+    ///
+    /// Focus mode and typewriter scrolling (#301) are both on here, over a corpus
+    /// with no blank lines — the pathological case where the focused "paragraph"
+    /// spans the whole buffer, so `focus_paragraph`'s line walk does its most
+    /// work. Confirms neither mode adds cost that breaks the frame budget.
     #[test]
     #[ignore]
     fn render_stays_within_a_frame() {
@@ -765,6 +770,8 @@ mod tests {
         buffer.refresh_syntax();
         let mut app = App::new(buffer, project);
         app.outline_visible = true;
+        app.focus_mode = true;
+        app.typewriter = true;
 
         let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
         terminal.draw(|f| draw(f, &app)).unwrap(); // warm
@@ -847,6 +854,69 @@ mod tests {
         let screen = render(&app, 80, 8);
         assert!(screen.contains("italic word"), "screen:\n{screen}");
         assert!(!screen.contains('*'), "markers should be hidden:\n{screen}");
+    }
+
+    #[test]
+    fn typewriter_pins_the_cursor_line_to_the_centre() {
+        // A document taller than the page, cursor resting on the last line.
+        let mut text = String::new();
+        for i in 0..40 {
+            if i > 0 {
+                text.push('\n');
+            }
+            text.push_str(&format!("Line{i:02}"));
+        }
+        let mut app = app_with(&text); // typed in, so the cursor rests at the end
+        let h = 21u16;
+        let row_of_last = |app: &App| {
+            render(app, 40, h)
+                .lines()
+                .position(|l| l.contains("Line39"))
+                .expect("the last line is on screen")
+        };
+
+        // Off: the cursor's line has drifted to the bottom of the page.
+        app.typewriter = false;
+        let off = row_of_last(&app);
+        // On: it's lifted back to the vertical centre, text scrolling under it.
+        app.typewriter = true;
+        let on = row_of_last(&app);
+
+        assert!(on < off, "typewriter lifts the last line off the bottom: on={on} off={off}");
+        assert!((8..=12).contains(&on), "pinned near the centre of a 20-row page: {on}");
+    }
+
+    #[test]
+    fn focus_mode_dims_the_other_paragraphs() {
+        // Two paragraphs; the cursor (typed to the end) rests in the second.
+        let mut app = app_with("alpha alpha\n\nbravo bravo");
+        let dim = app.theme.dim;
+
+        let first_letter_fg = |app: &App, needle: &str| -> Option<Color> {
+            let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+            terminal.draw(|f| draw(f, app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let row = (0..12u16)
+                .find(|&y| (0..40).any(|x| buf[(x, y)].symbol() == "a" || buf[(x, y)].symbol() == "b") && {
+                    let line: String = (0..40).map(|x| buf[(x, y)].symbol()).collect();
+                    line.contains(needle)
+                })
+                .expect("paragraph on screen");
+            (0..40)
+                .map(|x| &buf[(x, row)])
+                .find(|c| c.symbol().chars().next().is_some_and(|ch| ch.is_alphabetic()))
+                .unwrap()
+                .style()
+                .fg
+        };
+
+        // Off (default): both paragraphs render in the normal prose colour.
+        assert_ne!(first_letter_fg(&app, "alpha"), Some(dim), "no dimming when focus mode is off");
+
+        // On: the other paragraph dims; the one under the cursor stays normal.
+        app.focus_mode = true;
+        assert_eq!(first_letter_fg(&app, "alpha"), Some(dim), "the other paragraph dims");
+        assert_ne!(first_letter_fg(&app, "bravo"), Some(dim), "the focused paragraph stays normal");
     }
 
     #[test]
