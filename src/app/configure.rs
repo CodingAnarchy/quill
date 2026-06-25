@@ -129,6 +129,8 @@ impl App {
         self.vim = editor.vim;
         self.smart_typography = editor.smart_typography;
         self.focus_width = editor.column_width;
+        self.typewriter = editor.typewriter;
+        self.focus_mode = editor.focus_mode;
         let (theme, _) = config::load_theme();
         self.theme = theme;
         theme::set_current(theme);

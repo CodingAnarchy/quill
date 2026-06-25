@@ -371,6 +371,10 @@ pub(crate) enum Action {
     NextMisspelling,
     /// Jump the cursor to the previous misspelled word (#359).
     PrevMisspelling,
+    /// Toggle typewriter scrolling — pin the cursor line to the page centre (#301).
+    ToggleTypewriter,
+    /// Toggle focus mode — dim every paragraph but the current one (#301).
+    ToggleFocus,
 }
 
 impl Action {
@@ -414,6 +418,8 @@ impl Action {
         Action::AcceptWord,
         Action::NextMisspelling,
         Action::PrevMisspelling,
+        Action::ToggleTypewriter,
+        Action::ToggleFocus,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -458,6 +464,8 @@ impl Action {
             Action::AcceptWord => "dict:accept",
             Action::NextMisspelling => "spell:next",
             Action::PrevMisspelling => "spell:prev",
+            Action::ToggleTypewriter => "view:typewriter",
+            Action::ToggleFocus => "view:focus",
         }
     }
 
@@ -502,6 +510,8 @@ impl Action {
             Action::AcceptWord => "Add word to dictionary",
             Action::NextMisspelling => "Next misspelling",
             Action::PrevMisspelling => "Previous misspelling",
+            Action::ToggleTypewriter => "Typewriter scrolling (toggle)",
+            Action::ToggleFocus => "Focus mode (toggle)",
         }
     }
 
