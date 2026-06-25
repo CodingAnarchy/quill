@@ -101,8 +101,10 @@ keystrokes that stay out of the way.
   into the bible; "ask the manuscript" Q&A; and off-manuscript artifacts
   (synopsis, blurb, query letter, marketing / social copy). Findings collect in a
   navigable **revision triage** list, and for a multi-book series the bible and
-  its findings span every book. Full design, model choices, and privacy model in
-  [`docs/ai-features.md`](docs/ai-features.md).
+  its findings span every book. It runs against Claude or an on-device local
+  model, and you can **switch backends from the `Ctrl-K` menu** for the session
+  (offline for a flight, cloud for a heavier pass). Full design, model choices,
+  and privacy model in [`docs/ai-features.md`](docs/ai-features.md).
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
@@ -552,12 +554,12 @@ What remains genuinely ahead:
 - **Local-model backend (fully offline AI)** — run the AI features against an
   in-process quantized model (via [`candle`](https://github.com/huggingface/candle),
   Metal on Apple Silicon) so nothing ever leaves the machine, as an alternative
-  to the Claude backend. It's selectable today with `[ai] backend = "local"` (or
-  `offline = true`) in `config.toml`, in a build compiled with `--features local`;
-  without that setting the AI features use the Claude API (opt-in, off by
-  default). Still ahead: switching the backend from inside Quill without editing
-  config or restarting (#371), and a hybrid router that picks local vs cloud per
-  action by cost and capability (#372).
+  to the Claude backend. It's selectable with `[ai] backend = "local"` (or
+  `offline = true`) in `config.toml`, in a build compiled with `--features local`,
+  and can also be switched at runtime from the `Ctrl-K` menu (**Switch AI
+  backend**); without it the AI features use the Claude API (opt-in, off by
+  default). Still ahead: a hybrid router that picks local vs cloud per action by
+  cost and capability (#372).
 
 The **AI boundary is fixed, not a roadmap item**: Quill's AI is an *assistant,
 not a co-writer*. It tracks, outlines, marks, observes, and looks up — it never

@@ -383,6 +383,8 @@ pub(crate) enum Action {
     AddAnnotation,
     /// Open the annotation review list for the active chapter (#302).
     ReviewAnnotations,
+    /// Switch the active AI backend between Claude and the local model (#371).
+    SwitchBackend,
 }
 
 impl Action {
@@ -430,6 +432,7 @@ impl Action {
         Action::ToggleFocus,
         Action::AddAnnotation,
         Action::ReviewAnnotations,
+        Action::SwitchBackend,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -478,6 +481,7 @@ impl Action {
             Action::ToggleFocus => "view:focus",
             Action::AddAnnotation => "annotate",
             Action::ReviewAnnotations => "annotate:review",
+            Action::SwitchBackend => "ai:backend",
         }
     }
 
@@ -526,6 +530,7 @@ impl Action {
             Action::ToggleFocus => "Focus mode (toggle)",
             Action::AddAnnotation => "Annotate selection",
             Action::ReviewAnnotations => "Review annotations",
+            Action::SwitchBackend => "Switch AI backend (Claude / local)",
         }
     }
 
