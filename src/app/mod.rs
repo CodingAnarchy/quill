@@ -370,6 +370,30 @@ impl App {
         });
     }
 
+    /// Move the cursor to the next (`dir >= 0`) or previous misspelled word in the
+    /// active buffer (#359), wrapping around the ends. Refreshes the flag set
+    /// first, so a word that's since been fixed or accepted isn't a target; when
+    /// none remain it says so rather than moving silently.
+    pub(crate) fn navigate_spell_flag(&mut self, dir: i32) {
+        self.refresh_spell_flags();
+        if self.spell_flags.is_empty() {
+            self.message = Some("No spelling flags.".into());
+            return;
+        }
+        let cur = self.edit_buffer().cursor_byte();
+        let target = if dir >= 0 {
+            self.spell_flags.iter().find(|&&(s, _)| s > cur).map_or(self.spell_flags[0].0, |&(s, _)| s)
+        } else {
+            self.spell_flags
+                .iter()
+                .rev()
+                .find(|&&(s, _)| s < cur)
+                .map_or(self.spell_flags[self.spell_flags.len() - 1].0, |&(s, _)| s)
+        };
+        let buffer = self.edit_buffer_mut();
+        buffer.cursor = buffer.cursor_at_byte(target);
+    }
+
     /// Accept the flagged word at the cursor into the project's custom dictionary
     /// (#358): add it (persisted to `dictionary.txt`), then clear the flag. The
     /// cursor must be on (or just past) a misspelled word; otherwise it says so.
