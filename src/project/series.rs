@@ -99,6 +99,7 @@ impl Manifest {
             todo_marker: series.todo_marker.clone(),
             part_label: None,
             run_on_threshold: None,
+            analysis: None,
             goals: None,
             parts: None,
             chapters: Vec::new(),

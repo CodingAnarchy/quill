@@ -463,6 +463,63 @@ const STOPWORDS: &[&str] = &[
     "too", "more", "most", "now", "back", "got", "get", "one", "like", "said",
 ];
 
+/// The effective frequency word lists for a report (#119): the built-in
+/// stopwords and filter words, adjusted by per-project `[analysis]` overrides.
+/// Built once per report and passed to the scanners instead of reading the
+/// module consts, so a project can tune what counts without touching the binary.
+/// Words are stored and matched lowercased.
+pub struct WordLists {
+    stopwords: HashSet<String>,
+    filter_words: HashSet<String>,
+}
+
+impl Default for WordLists {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WordLists {
+    /// The built-in defaults (no overrides) — identical to the historical
+    /// behavior, so an unconfigured project's report is unchanged.
+    pub fn new() -> Self {
+        Self {
+            stopwords: STOPWORDS.iter().map(|s| s.to_string()).collect(),
+            filter_words: FILTER_WORDS.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Apply `add`/`remove` overrides to the stopword list (#119): `remove` first
+    /// (drop built-ins), then `add` (extend), both lowercased.
+    pub fn override_stopwords(&mut self, add: &[String], remove: &[String]) {
+        adjust(&mut self.stopwords, add, remove);
+    }
+
+    /// Apply `add`/`remove` overrides to the filter-word list (#119).
+    pub fn override_filter_words(&mut self, add: &[String], remove: &[String]) {
+        adjust(&mut self.filter_words, add, remove);
+    }
+
+    fn is_stopword(&self, word: &str) -> bool {
+        self.stopwords.contains(word)
+    }
+
+    fn is_filter_word(&self, word: &str) -> bool {
+        self.filter_words.contains(word)
+    }
+}
+
+/// Drop `remove` from `set`, then add `add` — both lowercased. `remove` first so
+/// an add always wins a conflict.
+fn adjust(set: &mut HashSet<String>, add: &[String], remove: &[String]) {
+    for w in remove {
+        set.remove(&w.to_lowercase());
+    }
+    for w in add {
+        set.insert(w.to_lowercase());
+    }
+}
+
 /// Frequency-based style flags for a span of prose, in raw counts (densities are
 /// computed against `words` at render). Additive across chapters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -488,8 +545,9 @@ impl StyleFlags {
     }
 }
 
-/// Scan a span of prose for the frequency-based style flags.
-pub fn style_flags(text: &str) -> StyleFlags {
+/// Scan a span of prose for the frequency-based style flags, using `lists` for
+/// the filter-word set (#119).
+pub fn style_flags(text: &str, lists: &WordLists) -> StyleFlags {
     let mut flags = StyleFlags::default();
     let mut prev_to_be = false;
     for word in text.unicode_words() {
@@ -498,7 +556,7 @@ pub fn style_flags(text: &str) -> StyleFlags {
         if is_ly_adverb(&lower) {
             flags.adverbs_ly += 1;
         }
-        if FILTER_WORDS.contains(&lower.as_str()) {
+        if lists.is_filter_word(&lower) {
             flags.filter_words += 1;
         }
         let to_be = TO_BE.contains(&lower.as_str());
@@ -521,10 +579,10 @@ fn is_ly_adverb(word: &str) -> bool {
 
 /// Accumulate non-stopword content-word counts (lowercased) from `text` into
 /// `counts` — the basis for the "most-used words" list.
-pub fn tally_content_words(text: &str, counts: &mut HashMap<String, usize>) {
+pub fn tally_content_words(text: &str, counts: &mut HashMap<String, usize>, lists: &WordLists) {
     for word in text.unicode_words() {
         let lower = word.to_lowercase();
-        if lower.len() > 2 && !STOPWORDS.contains(&lower.as_str()) {
+        if lower.len() > 2 && !lists.is_stopword(&lower) {
             *counts.entry(lower).or_insert(0) += 1;
         }
     }
@@ -533,10 +591,10 @@ pub fn tally_content_words(text: &str, counts: &mut HashMap<String, usize>) {
 /// Accumulate trigram counts (lowercased, within `text` only so phrases don't
 /// span chapters) into `counts`, skipping trigrams that are entirely stopwords
 /// (e.g. "out of the") so the list surfaces real repeated phrasing.
-pub fn tally_phrases(text: &str, counts: &mut HashMap<String, usize>) {
+pub fn tally_phrases(text: &str, counts: &mut HashMap<String, usize>, lists: &WordLists) {
     let words: Vec<String> = text.unicode_words().map(str::to_lowercase).collect();
     for w in words.windows(3) {
-        if w.iter().all(|word| STOPWORDS.contains(&word.as_str())) {
+        if w.iter().all(|word| lists.is_stopword(word)) {
             continue;
         }
         *counts.entry(w.join(" ")).or_insert(0) += 1;
@@ -855,7 +913,7 @@ mod tests {
         // "slowly" / "quietly" = -ly adverbs; "only" is excluded. "saw"/"felt" are
         // filter words. "was" is a to-be form; "was locked" (to-be + -ed) is a
         // passive estimate.
-        let f = style_flags("She slowly saw the only door and felt it was locked quietly.");
+        let f = style_flags("She slowly saw the only door and felt it was locked quietly.", &WordLists::new());
         assert_eq!(f.adverbs_ly, 2, "slowly + quietly, not only");
         assert_eq!(f.filter_words, 2, "saw + felt");
         assert_eq!(f.weak_verbs, 1, "was");
@@ -865,7 +923,7 @@ mod tests {
     #[test]
     fn content_words_skip_stopwords_and_short_words() {
         let mut counts = HashMap::new();
-        tally_content_words("The locket and the locket on it", &mut counts);
+        tally_content_words("The locket and the locket on it", &mut counts, &WordLists::new());
         assert_eq!(counts.get("locket"), Some(&2));
         assert_eq!(counts.get("the"), None, "stopword excluded");
         assert_eq!(counts.get("on"), None, "short/stopword excluded");
@@ -875,9 +933,41 @@ mod tests {
     fn phrases_tally_trigrams_and_skip_all_stopword_runs() {
         let mut counts = HashMap::new();
         let text = "the locket gleamed. the locket gleamed again out of the box.";
-        tally_phrases(text, &mut counts);
+        tally_phrases(text, &mut counts, &WordLists::new());
         assert_eq!(counts.get("the locket gleamed"), Some(&2));
         assert_eq!(counts.get("out of the"), None, "all-stopword trigram skipped");
+    }
+
+    #[test]
+    fn stopword_overrides_extend_and_drop_defaults() {
+        let mut lists = WordLists::new();
+        // "said" is a built-in stopword — remove it so it can surface; add "locket".
+        lists.override_stopwords(&["locket".to_string()], &["Said".to_string()]); // remove is case-insensitive
+        let mut counts = HashMap::new();
+        tally_content_words("said said locket locket gleamed", &mut counts, &lists);
+        assert_eq!(counts.get("said"), Some(&2), "removed from stopwords → now counted");
+        assert_eq!(counts.get("locket"), None, "added to stopwords → excluded");
+        assert_eq!(counts.get("gleamed"), Some(&1));
+    }
+
+    #[test]
+    fn filter_word_overrides_extend_and_drop_defaults() {
+        let mut lists = WordLists::new();
+        // "saw" is a built-in filter word — remove it; add "gazed".
+        lists.override_filter_words(&["gazed".to_string()], &["saw".to_string()]);
+        let f = style_flags("She saw the door and gazed at it", &lists);
+        assert_eq!(f.filter_words, 1, "saw no longer counts, gazed now does");
+    }
+
+    #[test]
+    fn no_overrides_match_the_built_in_defaults() {
+        let mut a = HashMap::new();
+        let mut b = HashMap::new();
+        let text = "the saw and the locket and the door";
+        tally_content_words(text, &mut a, &WordLists::new());
+        tally_content_words(text, &mut b, &WordLists::default());
+        assert_eq!(a, b);
+        assert_eq!(a.get("the"), None, "built-in stopword still excluded by default");
     }
 
     #[test]
