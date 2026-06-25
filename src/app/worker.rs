@@ -8,8 +8,58 @@ use crate::mode::AiAction;
 
 /// Shown when the local backend is selected but wasn't compiled in. One source
 /// so the fast-fail (UI thread) and the `build_local` stub can't drift.
-const LOCAL_UNAVAILABLE: &str =
+pub(super) const LOCAL_UNAVAILABLE: &str =
     "local backend isn't in this build — rebuild Quill with `--features local`, or set `backend = \"claude\"`";
+
+/// Whether `model`'s GGUF is already in the `hf-hub` cache (#382) — a no-download
+/// lookup, so the manager can show on-disk status. Always `false` without the
+/// `local` feature (nothing can be downloaded there).
+#[cfg(feature = "local")]
+pub(super) fn model_downloaded(model: &ai::model_select::Model) -> bool {
+    hf_hub::Cache::from_env()
+        .model(model.gguf_repo.to_string())
+        .get(model.gguf_file)
+        .is_some()
+}
+#[cfg(not(feature = "local"))]
+pub(super) fn model_downloaded(_model: &ai::model_select::Model) -> bool {
+    false
+}
+
+/// Fetch `model`'s GGUF + tokenizer into the `hf-hub` cache (#382), without
+/// loading it — the explicit "download now" the manager offers (resumable, cached
+/// outside the project). Run on a worker thread.
+#[cfg(feature = "local")]
+pub(super) fn download_model(model: &ai::model_select::Model) -> Result<(), String> {
+    let hub = hf_hub::api::sync::Api::new().map_err(|e| format!("hf-hub: {e}"))?;
+    hub.model(model.gguf_repo.to_string())
+        .get(model.gguf_file)
+        .map_err(|e| format!("download {}: {e}", model.gguf_file))?;
+    hub.model(model.tokenizer_repo.to_string())
+        .get("tokenizer.json")
+        .map_err(|e| format!("download tokenizer: {e}"))?;
+    Ok(())
+}
+#[cfg(not(feature = "local"))]
+pub(super) fn download_model(_model: &ai::model_select::Model) -> Result<(), String> {
+    Err(LOCAL_UNAVAILABLE.to_string())
+}
+
+/// Delete `model`'s GGUF from the `hf-hub` cache to reclaim disk (#382). Only the
+/// large GGUF repo is removed; the tiny tokenizer is left (it may be shared).
+#[cfg(feature = "local")]
+pub(super) fn remove_model_files(model: &ai::model_select::Model) -> Result<(), String> {
+    let cache = hf_hub::Cache::from_env();
+    let dir = cache.path().join(hf_hub::Repo::model(model.gguf_repo.to_string()).folder_name());
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("remove {}: {e}", dir.display()))?;
+    }
+    Ok(())
+}
+#[cfg(not(feature = "local"))]
+pub(super) fn remove_model_files(_model: &ai::model_select::Model) -> Result<(), String> {
+    Err(LOCAL_UNAVAILABLE.to_string())
+}
 
 /// A resolved backend choice, ready to build on the worker thread. Built here
 /// (not in `spawn_ai`) so loading the local model can't block the UI.
@@ -537,5 +587,28 @@ impl App {
         out.sort();
         out.dedup();
         out
+    }
+}
+
+#[cfg(all(test, feature = "local"))]
+mod local_model_files_tests {
+    //! Vets the download / status / remove round-trip (#382) against the real
+    //! `hf-hub` cache. Ignored: needs network + disk. Uses the smallest model
+    //! (~400 MB). Run with:
+    //! `cargo test --features local download_status_remove -- --ignored --nocapture`
+    use crate::ai::model_select::MODELS;
+
+    #[test]
+    #[ignore]
+    fn download_status_remove_round_trip() {
+        let model = &MODELS[0]; // 0.5B — keep the download small
+        super::remove_model_files(model).expect("clean start"); // ignore prior state
+        assert!(!super::model_downloaded(model), "absent before download");
+
+        super::download_model(model).expect("download");
+        assert!(super::model_downloaded(model), "present after download");
+
+        super::remove_model_files(model).expect("remove");
+        assert!(!super::model_downloaded(model), "absent after remove");
     }
 }

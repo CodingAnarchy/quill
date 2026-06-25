@@ -922,6 +922,9 @@ pub(crate) enum Pending {
     /// Text input: the note for an inline annotation (#302) anchored to the byte
     /// range `[start, end)` of the active chapter. Enter saves it, Esc cancels.
     Annotate { start: usize, end: usize },
+    /// y/N: remove the downloaded local model with this id from disk (#382). The
+    /// id is a catalog `&'static str`, so [`Pending`] stays `Copy`.
+    ConfirmRemoveModel(&'static str),
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.

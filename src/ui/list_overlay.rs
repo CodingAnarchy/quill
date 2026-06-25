@@ -200,14 +200,16 @@ pub(super) fn draw_model_manager(frame: &mut Frame, area: Rect, app: &crate::app
     let title = format!(" Local AI models ({} chosen) ", set.len());
     let rows = MODELS.iter().enumerate().map(|(i, m)| {
         let mark = if set.iter().any(|id| id == m.id()) { "● " } else { "○ " };
-        let stats = format!("{:.1} GB · needs {} GB RAM · {} ctx", m.size_gb, m.min_ram_gb, m.context_label());
+        // On-disk status (#382), from the cached set — no per-frame cache probe.
+        let disk = if app.model_is_downloaded(m.id()) { " · ✓ downloaded" } else { "" };
+        let stats = format!("{:.1} GB · needs {} GB RAM · {} ctx{disk}", m.size_gb, m.min_ram_gb, m.context_label());
         list_row(i == selected, format!("{mark}Qwen2.5-{}", m.id()), Some(format!("{stats} — {}", m.description)))
     });
     // Local inference is a build-time opt-in; say so rather than imply it runs.
     let help = if cfg!(feature = "local") {
-        "Local models — ↑↓ move · enter/space use/unuse · esc close"
+        "Local models — ↑↓ move · enter/space use · d download · x remove · esc close"
     } else {
-        "Local models — ↑↓ move · enter/space choose · esc close · (rebuild with --features local to run them)"
+        "Local models — ↑↓ move · enter/space choose · esc close · (rebuild with --features local to download/run)"
     };
     draw_list_overlay(frame, area, &title, help, rows);
 }

@@ -49,6 +49,7 @@ mod books;
 mod chapters;
 mod configure;
 mod editing;
+mod models;
 mod panes;
 mod project_search;
 mod projects;

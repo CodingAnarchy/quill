@@ -97,10 +97,12 @@ keeps the prior behavior (one auto-selected model).
 
 You needn't edit the config by hand: **Local AI models** in the `Ctrl-K` menu
 opens an in-editor manager (#379) that lists the catalog — each model with its
-size, RAM need, context window, and a one-line description — and lets you toggle
-which ones are in your set with Enter/Space (written back to `[ai] local_models`).
-*(Explicit download/remove with progress and on-disk status from the manager is
-the follow-up in #382; a chosen model still downloads on first use.)*
+size, RAM need, context window, a one-line description, and whether it's on disk
+(`✓ downloaded`). **Enter / Space** toggles a model in your set (written back to
+`[ai] local_models`); **`d`** downloads one now (off the UI thread, the editor
+stays responsive); **`x`** removes a downloaded model to reclaim disk, after a
+confirm (#382). A model you add but don't explicitly download is still fetched on
+first use, as before.
 
 **Context windows and whole-book passes (#378):** every model carries its real
 context window, and the router routes a pass on-device only when a downloaded

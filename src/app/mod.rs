@@ -189,6 +189,13 @@ pub struct App {
     /// In-flight remote push/pull (#134/#152), run on a worker thread. Polled each
     /// loop tick by [`App::poll_vc`].
     vc_task: Task<VcMsg>,
+    /// A background local-model download (#382): `(model id, result)`, polled in
+    /// the event loop so a multi-gigabyte fetch never blocks the editor.
+    download_task: Task<(String, Result<(), String>)>,
+    /// Model ids known to be on disk (#382), refreshed when the manager opens and
+    /// after a download/remove — so the manager shows status without probing the
+    /// `hf-hub` cache every frame.
+    downloaded_models: Vec<String>,
     /// The loaded local backend, cached after first use (loading a model is slow)
     /// and shared with the worker thread. Keyed by model id (#377) so several
     /// downloaded models can be cached and reused as the router picks between them;
@@ -320,6 +327,8 @@ impl App {
             image: ai::image::ImageSettings::load(),
             ai_task: Task::idle(),
             vc_task: Task::idle(),
+            download_task: Task::idle(),
+            downloaded_models: Vec::new(),
             local_backend: Arc::new(Mutex::new(HashMap::new())),
             image_backend: Arc::new(Mutex::new(None)),
             pending_portraits: None,
