@@ -421,6 +421,17 @@ combos — arrive as distinct key events. It's detected automatically and restor
 on exit (including after a crash). On a terminal without support, Quill behaves
 exactly as before — nothing is enabled and no escape sequences are emitted.
 
+### Spell-checking
+
+Misspelled words are **underlined** as you write, checked against a bundled
+English dictionary. It's fully offline — no network, no API key — and runs on
+the idle tick, never on the keystroke path, so typing stays instant. Like the
+rest of Quill's analysis it only *flags*: it never changes your prose. Numbers
+and `xxx` markers aren't flagged. Invented names will be flagged for now;
+accepting a word into a per-project custom dictionary, and jumping between flags,
+are the next steps in this feature (the dictionary is SCOWL-derived en_US,
+bundled under `assets/dictionary/` with its license).
+
 ## Layout
 
 ```

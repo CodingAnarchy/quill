@@ -42,11 +42,13 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         _ => (&[], None),
     };
     let inserts = header_inserts(app, column.width);
+    // Misspelled-word flags (#357), computed on idle; underlined under the prose.
+    let spell = app.spell_flags.as_slice();
     // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
     // Visual mode still shows the cursor — that's the selection's active end.
     let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))
         && !app.surface_pane_focused();
-    render_body(frame, column, buffer, &inserts, &conceal, search_matches, current_match, editing);
+    render_body(frame, column, buffer, &inserts, &conceal, search_matches, current_match, spell, editing);
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
     if let Mode::EditMeta(meta) = &app.mode {
@@ -76,7 +78,7 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     let column = centered_column(body, app.focus_width);
     // No cursor in a reference pane, so conceal every emphasis marker uniformly.
     let conceal = buffer.syntax().conceal_ranges(None);
-    render_body(frame, column, buffer, &[], &conceal, &[], None, false);
+    render_body(frame, column, buffer, &[], &conceal, &[], None, &[], false);
 }
 
 /// Render `buffer`'s soft-wrapped, styled prose into `column`, following the
@@ -91,6 +93,7 @@ fn render_body(
     conceal: &[(usize, usize)],
     matches: &[ByteRange],
     current: Option<ByteRange>,
+    spell: &[ByteRange],
     place_cursor: bool,
 ) {
     let height = column.height as usize;
@@ -157,6 +160,7 @@ fn render_body(
             conceal,
             matches,
             current,
+            spell,
             wrap,
         );
         for (sub, line) in body.into_iter().enumerate() {
@@ -272,6 +276,7 @@ fn divider_line(title: &str, width: u16) -> Line<'static> {
 /// one line (no newline); `line_start` its absolute byte offset (highlights,
 /// conceal, and match ranges use document offsets). Returns one [`Line`] per
 /// wrapped row.
+#[allow(clippy::too_many_arguments)]
 fn styled_line(
     syntax: &Syntax,
     line_start: usize,
@@ -279,6 +284,7 @@ fn styled_line(
     conceal: &[(usize, usize)],
     matches: &[ByteRange],
     current: Option<ByteRange>,
+    spell: &[ByteRange],
     width: usize,
 ) -> Vec<Line<'static>> {
     if text.is_empty() {
@@ -290,7 +296,7 @@ fn styled_line(
         .enumerate()
         .map(|(i, &rs)| {
             let re = starts.get(i + 1).copied().unwrap_or(text.len());
-            styled_row(syntax, line_start, text, rs, re, conceal, matches, current)
+            styled_row(syntax, line_start, text, rs, re, conceal, matches, current, spell)
         })
         .collect()
 }
@@ -307,6 +313,7 @@ fn styled_row(
     conceal: &[(usize, usize)],
     matches: &[ByteRange],
     current: Option<ByteRange>,
+    spell: &[ByteRange],
 ) -> Line<'static> {
     let seg = &text[rs..re];
     if seg.is_empty() {
@@ -320,7 +327,8 @@ fn styled_row(
     // `current` (the search current match, or the Visual selection #205) can be
     // set without any entry in `matches`, so check it too before skipping styling.
     let current_here = current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
-    if hls.is_empty() && !concealed_here && !match_here && !current_here {
+    let spell_here = spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    if hls.is_empty() && !concealed_here && !match_here && !current_here && !spell_here {
         return Line::raw(seg.to_string());
     }
 
@@ -335,7 +343,11 @@ fn styled_row(
         if is_concealed(abs, conceal) {
             continue;
         }
-        let style = search_style(style_at(&hls, abs, theme), abs, matches, current, theme);
+        let mut style = search_style(style_at(&hls, abs, theme), abs, matches, current, theme);
+        // Misspelled words (#357) get an underline, layered on whatever else.
+        if spell.iter().any(|&(s, e)| abs >= s && abs < e) {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
         if !run.is_empty() && style != run_style {
             spans.push(Span::styled(std::mem::take(&mut run), run_style));
         }

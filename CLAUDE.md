@@ -128,6 +128,10 @@ What they assert:
 - `tally_is_independent_of_project_size` (`app/tests/chapters.rs`) — the daily
   word tally (every idle tick) touches only the chapters that changed, not all of
   them; flat (~6µs) even at 2000 chapters.
+- `spell_pass_is_fast_at_window_size` (`spell.rs`) — the idle spell-check pass
+  (#357) over a window-sized chapter stays well within a frame (~0.4ms at 11k
+  words), so flagging on idle never stutters. It runs on the idle tick, never the
+  keystroke path; the one-time dictionary parse is warmed before timing.
 
 The corpus, every benchmark, its target, and the rationale are written up in
 [`docs/performance.md`](docs/performance.md) — the pre-release perf gate. Run
