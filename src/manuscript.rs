@@ -121,6 +121,43 @@ impl Manuscript {
         out
     }
 
+    /// The manifest indices of the loaded chapters, in window order (#370). A
+    /// stable signature for the window — it changes when the window pages, not
+    /// when prose is edited — so the app knows when to reload annotations.
+    pub fn loaded_chapters(&self) -> Vec<usize> {
+        self.segments.iter().map(|s| s.index).collect()
+    }
+
+    /// Each loaded chapter's byte span in the concatenated buffer (#370):
+    /// `(manifest index, start_byte, end_byte)`, in window order. Lets the app
+    /// translate annotations between buffer-absolute and chapter-local offsets.
+    pub fn segment_spans(&self) -> Vec<(usize, usize, usize)> {
+        let mut out = Vec::with_capacity(self.segments.len());
+        let mut start_line = 0;
+        for s in &self.segments {
+            let start_byte = self.buffer.line_start_byte(start_line);
+            let end_line = start_line + s.lines;
+            let end_byte = if end_line >= self.buffer.line_count() {
+                self.buffer.len_bytes()
+            } else {
+                self.buffer.line_start_byte(end_line)
+            };
+            out.push((s.index, start_byte, end_byte));
+            start_line = end_line;
+        }
+        out
+    }
+
+    /// Whether the next [`reslide`](Self::reslide) would page the window (and so
+    /// rebuild the buffer), as opposed to a no-op (#370). The app persists
+    /// annotations before a rebuild, since it resets every buffer offset.
+    pub fn would_reslide(&self, project: &Project) -> bool {
+        let seg = self.owner_of_line(self.buffer.cursor.line);
+        let current = self.segments[seg].index;
+        let (lo, hi) = window_bounds(current, chapter_count(project));
+        lo != self.window_lo() || hi != self.window_hi()
+    }
+
     // --- Editing -----------------------------------------------------------
 
     /// Insert a character at the cursor, attributing it to the chapter the

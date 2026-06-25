@@ -683,7 +683,7 @@ impl Project {
             .annotations
             .iter()
             .filter(|a| a.chapter == file)
-            .map(|a| crate::annotation::Live { start: a.start, end: a.end, note: a.note.clone() })
+            .map(|a| crate::annotation::Live { chapter: file.to_string(), start: a.start, end: a.end, note: a.note.clone() })
             .collect();
         live.sort_by_key(|a| (a.start, a.end));
         live

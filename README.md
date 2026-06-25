@@ -555,8 +555,9 @@ to close.
 
 Annotations live in an `annotations.toml` side file at the project root, keyed by
 chapter — the chapter `.md` files stay clean, so **no export** (Markdown, Word,
-Scrivener, Vellum, EPUB) ever carries them. They're a single-chapter-view aid;
-the continuous view (`Ctrl-L`) doesn't show or anchor them.
+Scrivener, Vellum, EPUB) ever carries them. They work in both the single-chapter
+and continuous (`Ctrl-L`) views — in the continuous view a note is marked and
+anchored across the chapter window and saved back to the chapter that owns it.
 
 ## Layout
 

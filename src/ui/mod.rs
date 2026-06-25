@@ -824,7 +824,7 @@ mod tests {
         // A spread of inline annotations (#302) so the per-row/char annotation
         // scan is exercised under the frame budget too.
         app.annotations = (0..50)
-            .map(|i| crate::annotation::Live { start: i * 53, end: i * 53 + 5, note: "note".into() })
+            .map(|i| crate::annotation::Live { chapter: "7B".into(), start: i * 53, end: i * 53 + 5, note: "note".into() })
             .collect();
 
         let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
@@ -1044,7 +1044,7 @@ mod tests {
         let mut app = app_with("first chapter\n");
         let anno_bg = app.theme.annotation;
         // Anchor a note to "first" (bytes 0..5).
-        app.annotations = vec![crate::annotation::Live { start: 0, end: 5, note: "check".into() }];
+        app.annotations = vec![crate::annotation::Live { chapter: "one.md".into(), start: 0, end: 5, note: "check".into() }];
 
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal.draw(|f| draw(f, &app)).unwrap();
