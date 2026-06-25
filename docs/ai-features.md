@@ -80,6 +80,23 @@ pins local, so the switch reports the pin instead of overriding it — and
 selecting local in a build without `--features local` gives the same rebuild
 hint as the static setting rather than appearing to switch and then failing.
 
+**Local model set (#377):** by default the local backend loads the single
+hardware-recommended Qwen. Listing models in `[ai] local_models` instead makes a
+*set* available, and the router picks the best of them per request — the smallest
+for a quick lookup (lowest latency), the largest for a substantial pass (best
+quality):
+
+```toml
+[ai]
+local_models = ["1.5B", "7B"]   # ids from the model table; empty ⇒ the auto pick
+```
+
+Each model is downloaded on first use (cached and resumable) and then reused;
+several can be cached at once and switched between with no reload. An empty list
+keeps the prior behavior (one auto-selected model). *(Choosing and downloading
+models from inside the editor — rather than the config file — is the follow-up
+in #379.)*
+
 **Hybrid routing (#372):** instead of one static backend, `[ai] routing` can pick
 local vs remote *per action*, turning the cost estimator from a warning into a
 decision. The policy is a pure function of (estimate, the action's local

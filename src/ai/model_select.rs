@@ -52,6 +52,43 @@ pub const MODELS: &[Model] = &[
     Model { params: "14B", gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF", gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct", size_gb: 9.0, min_ram_gb: 48 },
 ];
 
+impl Model {
+    /// The stable id for this model — its parameter size (`"7B"`), used as the
+    /// config key in `[ai] local_models` and the cache key for the loaded model.
+    pub fn id(&self) -> &'static str {
+        self.params
+    }
+}
+
+/// The model with the given [`id`](Model::id), or `None` if unknown.
+pub fn by_id(id: &str) -> Option<&'static Model> {
+    MODELS.iter().find(|m| m.id() == id)
+}
+
+/// Resolve the author's chosen model ids (`[ai] local_models`) against the model
+/// table, in ascending size order regardless of how they were listed; unknown
+/// ids are dropped. Empty when none are configured — the caller then falls back
+/// to the single [`recommend`]ed model.
+pub fn available(ids: &[String]) -> Vec<&'static Model> {
+    MODELS.iter().filter(|m| ids.iter().any(|id| id == m.id())).collect()
+}
+
+/// Below this many input tokens a request is "small" — a thesaurus lookup, a
+/// single-line check — and the smallest downloaded model serves it fastest.
+const SMALL_REQUEST_TOKENS: u32 = 2_000;
+
+/// Pick the best downloaded model for a request of `input_tokens` (#377): the
+/// smallest available model for a small request (lowest latency), the largest for
+/// a substantial one (best quality). `available` must be ascending by size (as
+/// [`available`] returns it); `None` only when nothing is downloaded.
+pub fn pick_for(input_tokens: u32, available: &[&'static Model]) -> Option<&'static Model> {
+    if input_tokens <= SMALL_REQUEST_TOKENS {
+        available.first().copied()
+    } else {
+        available.last().copied()
+    }
+}
+
 /// On a CPU-only machine, don't recommend anything bigger than this — larger
 /// models are painfully slow without a GPU.
 const CPU_MAX_PARAMS: &str = "3B";
@@ -152,5 +189,31 @@ mod tests {
     #[test]
     fn table_is_ascending_by_ram_so_next_back_is_largest() {
         assert!(MODELS.windows(2).all(|w| w[0].min_ram_gb < w[1].min_ram_gb));
+    }
+
+    #[test]
+    fn by_id_finds_models_and_rejects_unknowns() {
+        assert_eq!(by_id("7B").map(|m| m.params), Some("7B"));
+        assert!(by_id("999B").is_none());
+    }
+
+    #[test]
+    fn available_resolves_ids_in_size_order_and_drops_unknowns() {
+        // Listed out of order, with a bogus id — comes back ascending, bogus gone.
+        let ids = vec!["7B".to_string(), "0.5B".to_string(), "bogus".to_string()];
+        let got: Vec<&str> = available(&ids).iter().map(|m| m.params).collect();
+        assert_eq!(got, vec!["0.5B", "7B"]);
+        assert!(available(&[]).is_empty(), "no config → caller falls back to recommend()");
+    }
+
+    #[test]
+    fn pick_for_takes_the_small_model_for_small_asks_and_the_big_one_otherwise() {
+        let models = available(&["0.5B".into(), "7B".into()]);
+        // A thesaurus-sized request → the smallest (fastest).
+        assert_eq!(pick_for(500, &models).map(|m| m.params), Some("0.5B"));
+        // A whole-manuscript-sized request → the largest available (best quality).
+        assert_eq!(pick_for(80_000, &models).map(|m| m.params), Some("7B"));
+        // Nothing downloaded → nothing to pick.
+        assert!(pick_for(500, &[]).is_none());
     }
 }

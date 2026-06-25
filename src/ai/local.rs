@@ -45,7 +45,14 @@ impl LocalBackend {
         let (ram_gb, accel) = detect_hardware();
         let rec = model_select::recommend(ram_gb, accel);
         let model = rec.model.ok_or_else(|| AiError::NotConfigured(rec.reasoning.clone()))?;
+        let backend = Self::for_model(model)?;
+        Ok((backend, rec))
+    }
 
+    /// Download (cached, resumable via `hf-hub`) and load a specific Qwen — the
+    /// model the router picked from the author's configured set (#377). Shared
+    /// with [`recommended`], which chooses the model from the hardware first.
+    pub fn for_model(model: &model_select::Model) -> Result<Self, AiError> {
         let hub = hf_hub::api::sync::Api::new().map_err(|e| internal(format!("hf-hub: {e}")))?;
         let gguf = hub
             .model(model.gguf_repo.to_string())
@@ -55,9 +62,7 @@ impl LocalBackend {
             .model(model.tokenizer_repo.to_string())
             .get("tokenizer.json")
             .map_err(|e| internal(format!("download tokenizer: {e}")))?;
-
-        let backend = Self::load(gguf.to_str().unwrap_or_default(), tokenizer.to_str().unwrap_or_default())?;
-        Ok((backend, rec))
+        Self::load(gguf.to_str().unwrap_or_default(), tokenizer.to_str().unwrap_or_default())
     }
 
     /// Load a quantized Qwen from a `GGUF` file plus its `tokenizer.json`. Uses
