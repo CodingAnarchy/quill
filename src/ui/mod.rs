@@ -19,7 +19,8 @@ use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 mod editor;
 mod list_overlay;
 use list_overlay::{
-    draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser, list_row, marker, row_style,
+    draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser, draw_project_search,
+    list_row, marker, row_style,
 };
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -54,6 +55,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     if let Mode::Findings(findings) = &app.mode {
         draw_findings(frame, area, findings, &app.project);
+        return;
+    }
+    if let Mode::ProjectSearch(ps) = &app.mode {
+        draw_project_search(frame, area, ps);
         return;
     }
     if let Mode::Palette(palette) = &app.mode {

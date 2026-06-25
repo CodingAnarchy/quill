@@ -15,7 +15,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::mode::{DirBrowser, Findings, Palette, ProjectBrowser};
+use crate::mode::{DirBrowser, Findings, Palette, ProjectBrowser, ProjectSearch, ProjectSearchStage};
 use crate::project::Project;
 
 /// The selection marker for a list row.
@@ -108,6 +108,47 @@ pub(super) fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrows
     });
     let title = format!(" {} ", browser.cwd.display());
     draw_list_overlay(frame, area, &title, "Browse — ↑↓ move · enter open/into · n new project · ← up · esc cancel", rows);
+}
+
+/// Render the manuscript-wide find & replace overlay (#295): a stage-specific
+/// help line over the matches, each row labeled with its chapter.
+pub(super) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &ProjectSearch) {
+    let n = ps.matches.len();
+    let span = ps.chapter_span();
+    let matches = |n: usize| if n == 1 { "match" } else { "matches" };
+    let chapters = |n: usize| if n == 1 { "chapter" } else { "chapters" };
+    let help = match ps.stage {
+        ProjectSearchStage::Query => {
+            format!("Find across manuscript: {}_ · enter search · esc cancel", ps.query)
+        }
+        ProjectSearchStage::Results => format!(
+            "'{}' — {n} {} in {span} {} · ↑↓ move · enter jump · r replace · esc close",
+            ps.query,
+            matches(n),
+            chapters(span),
+        ),
+        ProjectSearchStage::Replacement => {
+            format!("Replace '{}' with: {}_ · enter step · esc cancel", ps.query, ps.replacement)
+        }
+        ProjectSearchStage::Step => format!(
+            "'{}' → '{}' · y replace · n skip · a replace all · enter done ({n} left)",
+            ps.query, ps.replacement,
+        ),
+        ProjectSearchStage::Confirm => format!(
+            "Replace all {n} {} across {span} {}? (y/N)",
+            matches(n),
+            chapters(span),
+        ),
+    };
+    // Rows: the match list, with the selection highlighted while navigating.
+    let show_selection = matches!(ps.stage, ProjectSearchStage::Results | ProjectSearchStage::Step);
+    let rows: Vec<Line<'static>> = ps
+        .matches
+        .iter()
+        .enumerate()
+        .map(|(i, m)| list_row(show_selection && i == ps.selected, m.context.clone(), Some(m.title.clone())))
+        .collect();
+    draw_list_overlay(frame, area, " Find across manuscript ", &help, rows.into_iter());
 }
 
 /// Render the findings as a navigable triage list.

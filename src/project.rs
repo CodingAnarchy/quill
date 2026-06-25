@@ -572,6 +572,33 @@ impl Project {
         Ok(())
     }
 
+    /// Rewrite chapter `index`'s prose body on disk (#295), replacing each byte
+    /// range in `ranges` with `replacement`, with front matter preserved and the
+    /// cached word count refreshed. Ranges are byte offsets into the body and are
+    /// applied right-to-left so earlier offsets stay valid. The inverse of
+    /// [`edit_chapter_front_matter`](Self::edit_chapter_front_matter), which edits
+    /// the front matter and preserves the body. Used by manuscript-wide replace
+    /// for chapters other than the active one (whose live buffer is edited
+    /// directly so its change stays undoable).
+    pub(crate) fn replace_chapter_body(&mut self, index: usize, ranges: &[(usize, usize)], replacement: &str) {
+        let path = self.chapter_path(index);
+        let text = self.read_chapter(index);
+        let (front, body) = frontmatter::split(&text);
+        let mut body = body.to_string();
+        let mut ranges = ranges.to_vec();
+        ranges.sort_by_key(|&(s, _)| s);
+        for &(start, end) in ranges.iter().rev() {
+            if start <= end && end <= body.len() {
+                body.replace_range(start..end, replacement);
+            }
+        }
+        let front = front.map(FrontMatter::from_raw);
+        let content = frontmatter::join(front.as_ref().map(FrontMatter::as_str), &body);
+        if atomic::write(&path, content.as_bytes()).is_ok() {
+            self.read_chapter_cache(index); // refresh the cached word count
+        }
+    }
+
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
         self.chapter_path(self.active_index())
