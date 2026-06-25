@@ -128,6 +128,8 @@ impl App {
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),
             Action::AcceptWord => self.accept_word_at_cursor(),
+            Action::NextMisspelling => self.navigate_spell_flag(1),
+            Action::PrevMisspelling => self.navigate_spell_flag(-1),
         }
     }
 

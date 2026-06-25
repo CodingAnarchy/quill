@@ -364,6 +364,10 @@ pub(crate) enum Action {
     DescribeConfig,
     /// Accept the flagged word at the cursor into the project dictionary (#358).
     AcceptWord,
+    /// Jump the cursor to the next misspelled word (#359).
+    NextMisspelling,
+    /// Jump the cursor to the previous misspelled word (#359).
+    PrevMisspelling,
 }
 
 impl Action {
@@ -405,6 +409,8 @@ impl Action {
         Action::ProjectFind,
         Action::DescribeConfig,
         Action::AcceptWord,
+        Action::NextMisspelling,
+        Action::PrevMisspelling,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -447,6 +453,8 @@ impl Action {
             Action::ProjectFind => "find:project",
             Action::DescribeConfig => "config:describe",
             Action::AcceptWord => "dict:accept",
+            Action::NextMisspelling => "spell:next",
+            Action::PrevMisspelling => "spell:prev",
         }
     }
 
@@ -489,6 +497,8 @@ impl Action {
             Action::ProjectFind => "Find across manuscript",
             Action::DescribeConfig => "Configure by description",
             Action::AcceptWord => "Add word to dictionary",
+            Action::NextMisspelling => "Next misspelling",
+            Action::PrevMisspelling => "Previous misspelling",
         }
     }
 

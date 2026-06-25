@@ -435,7 +435,13 @@ per-project dictionary**: put the cursor on the underlined word and run **Add
 word to dictionary** from the `Ctrl-K` command palette. It clears immediately and
 is never flagged again in this project. Accepted words are stored, one per line,
 in a plain-text `dictionary.txt` at the project root — diffable and carried in
-git with the manuscript. (Jumping between flags is the next step in this feature.)
+git with the manuscript.
+
+To work through them, **Next misspelling** / **Previous misspelling** (also in
+the `Ctrl-K` palette) jump the cursor between flagged words, wrapping around the
+ends; a word you've since fixed or accepted is skipped, and when none are left it
+says so. So a spelling sweep is: jump to a flag, fix it (or accept the name),
+jump to the next.
 
 ## Layout
 
