@@ -363,7 +363,39 @@ impl App {
     fn refresh_spell_flags(&mut self) {
         let marker = self.project.manifest.todo_marker().to_ascii_lowercase();
         let text = self.edit_buffer().text();
-        self.spell_flags = crate::spell::misspellings(&text, |w| w.eq_ignore_ascii_case(&marker));
+        // Accept the TODO marker and any word in the project's custom dictionary
+        // (#358), so invented names aren't flagged.
+        self.spell_flags = crate::spell::misspellings(&text, |w| {
+            w.eq_ignore_ascii_case(&marker) || self.project.is_accepted(w)
+        });
+    }
+
+    /// Accept the flagged word at the cursor into the project's custom dictionary
+    /// (#358): add it (persisted to `dictionary.txt`), then clear the flag. The
+    /// cursor must be on (or just past) a misspelled word; otherwise it says so.
+    pub(crate) fn accept_word_at_cursor(&mut self) {
+        let cursor = self.edit_buffer().cursor_byte();
+        let flag = self
+            .spell_flags
+            .iter()
+            .copied()
+            .find(|&(s, e)| cursor >= s && cursor < e)
+            // Also accept when the cursor rests just after the word (e.g. right
+            // after typing it).
+            .or_else(|| self.spell_flags.iter().copied().find(|&(_, e)| cursor == e));
+        let Some((s, e)) = flag else {
+            self.message = Some("No flagged word at the cursor.".into());
+            return;
+        };
+        let word = self.edit_buffer().byte_slice(s, e);
+        match self.project.accept_word(&word) {
+            Ok(true) => {
+                self.refresh_spell_flags();
+                self.message = Some(format!("Added '{word}' to the dictionary."));
+            }
+            Ok(false) => self.message = Some(format!("'{word}' is already in the dictionary.")),
+            Err(err) => self.message = Some(format!("Couldn't write the dictionary: {err}")),
+        }
     }
 
 

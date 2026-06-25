@@ -427,10 +427,15 @@ Misspelled words are **underlined** as you write, checked against a bundled
 English dictionary. It's fully offline — no network, no API key — and runs on
 the idle tick, never on the keystroke path, so typing stays instant. Like the
 rest of Quill's analysis it only *flags*: it never changes your prose. Numbers
-and `xxx` markers aren't flagged. Invented names will be flagged for now;
-accepting a word into a per-project custom dictionary, and jumping between flags,
-are the next steps in this feature (the dictionary is SCOWL-derived en_US,
-bundled under `assets/dictionary/` with its license).
+and `xxx` markers aren't flagged. (The dictionary is SCOWL-derived en_US,
+bundled under `assets/dictionary/` with its license.)
+
+Fiction is full of invented names, so you can **accept a flagged word into a
+per-project dictionary**: put the cursor on the underlined word and run **Add
+word to dictionary** from the `Ctrl-K` command palette. It clears immediately and
+is never flagged again in this project. Accepted words are stored, one per line,
+in a plain-text `dictionary.txt` at the project root — diffable and carried in
+git with the manuscript. (Jumping between flags is the next step in this feature.)
 
 ## Layout
 
