@@ -239,6 +239,7 @@ impl App {
             | Pending::Wizard(_)
             | Pending::ImportNotes
             | Pending::NewFromNotesSource
+            | Pending::Annotate { .. }
             | Pending::NewFromNotesDest => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
@@ -270,6 +271,11 @@ impl App {
                                 // follow the chapter to its new index (#180).
                                 let moved = self.apply_meta(field, text);
                                 self.select(moved.unwrap_or(fallback));
+                            }
+                            Pending::Annotate { start, end } => {
+                                // Back to editing; the note anchors to its range (#302).
+                                self.mode = closed;
+                                self.create_annotation(start, end, text.to_string());
                             }
                             Pending::AskAi => {
                                 // Back to editing immediately; the answer arrives

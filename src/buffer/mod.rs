@@ -65,6 +65,11 @@ pub struct Buffer {
     /// lazily on the next read; `Cell` so the cheap [`word_count`] reader stays
     /// `&self`.
     word_count_cache: Cell<Option<usize>>,
+    /// Byte-range edits since the last drain (#302): each is `(start, old_end,
+    /// new_end)` — bytes `[start, old_end)` were replaced by `new_end - start`
+    /// new bytes. Recorded on the keystroke path, drained on idle so author
+    /// annotations can re-anchor without re-scanning the whole buffer.
+    anchor_edits: Vec<(usize, usize, usize)>,
 }
 
 impl Buffer {
@@ -85,6 +90,7 @@ impl Buffer {
             redo_stack: VecDeque::new(),
             group_open: false,
             word_count_cache: Cell::new(None),
+            anchor_edits: Vec::new(),
         }
     }
 
@@ -106,6 +112,7 @@ impl Buffer {
             redo_stack: VecDeque::new(),
             group_open: false,
             word_count_cache: Cell::new(None),
+            anchor_edits: Vec::new(),
         }
     }
 
@@ -137,6 +144,7 @@ impl Buffer {
             redo_stack: VecDeque::new(),
             group_open: false,
             word_count_cache: Cell::new(None),
+            anchor_edits: Vec::new(),
         })
     }
 
@@ -291,6 +299,7 @@ impl Buffer {
             new_end_position: point_at_byte(&self.rope, new_end_byte),
         };
         self.syntax.record_edit(&edit);
+        self.anchor_edits.push((start_byte, start_byte, new_end_byte));
         self.syntax_dirty = true;
     }
 
@@ -315,7 +324,15 @@ impl Buffer {
             new_end_position: point_at_byte(&self.rope, start_byte),
         };
         self.syntax.record_edit(&edit);
+        self.anchor_edits.push((start_byte, old_end_byte, start_byte));
         self.syntax_dirty = true;
+    }
+
+    /// Take the byte-range edits recorded since the last call (#302), to re-anchor
+    /// author annotations off the keystroke path. Each is `(start, old_end,
+    /// new_end)`: bytes `[start, old_end)` became `new_end - start` new bytes.
+    pub fn drain_anchor_edits(&mut self) -> Vec<(usize, usize, usize)> {
+        std::mem::take(&mut self.anchor_edits)
     }
 
     /// Reparse the document if it has changed since the last parse. Cheap to

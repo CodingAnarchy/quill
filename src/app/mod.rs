@@ -30,6 +30,7 @@ use crate::report::{self, Momentum, PartDelta};
 use crate::typography;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
+mod annotations;
 mod assist;
 mod bible_review;
 mod palette;
@@ -97,6 +98,15 @@ pub struct App {
     /// recomputed on the idle tick (never the keystroke path) and underlined by
     /// the editor. Empty until the first idle pass.
     pub(crate) spell_flags: Vec<(usize, usize)>,
+    /// Inline author annotations (#302) for the active chapter, as live buffer
+    /// ranges (sorted by start). Loaded when the chapter changes and re-anchored
+    /// on the idle tick; empty in the continuous view. The chapter `.md` never
+    /// holds them, so exports stay clean.
+    pub(crate) annotations: Vec<crate::annotation::Live>,
+    /// Which chapter file [`annotations`](Self::annotations) currently belongs to,
+    /// so the idle tick reloads them on a chapter switch (any seam) rather than
+    /// re-anchoring across chapters. Empty in the continuous view.
+    annotations_chapter: String,
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
@@ -252,6 +262,10 @@ impl App {
         crate::theme::set_current(theme);
         let loaded = crate::workflow::load();
         let trigger_errors = loaded.errors;
+        // Load the active chapter's annotations (#302) so they mark immediately,
+        // before the first idle tick.
+        let annotations_chapter = project.active_file().to_string();
+        let annotations = project.annotations_for(&annotations_chapter);
         let mut app = Self {
             buffer,
             project,
@@ -265,6 +279,8 @@ impl App {
             smart_typography,
             theme,
             spell_flags: Vec::new(),
+            annotations,
+            annotations_chapter,
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
@@ -364,6 +380,7 @@ impl App {
         buffer.refresh_syntax();
         buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
         self.refresh_spell_flags();
+        self.sync_annotations();
         self.tally_words();
         self.refresh_vc_status();
         self.capture_recovery();
@@ -509,6 +526,7 @@ impl App {
             Mode::EditMeta(_) => self.on_key_edit_meta(key),
             Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
+            Mode::Annotations { .. } => self.on_key_annotations(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
             Mode::ProjectSearch(_) => self.on_key_project_search(key),
@@ -689,6 +707,9 @@ impl App {
                 Ok(()) => {
                     self.cache_focus_words();
                     self.refresh_split_sibling(); // a clean sibling on this chapter reflects the save (#163)
+                    // Keep annotations.toml in lockstep with the saved prose (#302),
+                    // so the anchors match the bytes on disk.
+                    self.persist_annotations();
                     self.message = Some("Saved".into());
                 }
                 Err(e) => self.message = Some(format!("Save failed: {e}")),

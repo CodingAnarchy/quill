@@ -82,6 +82,10 @@ pub enum Mode {
     /// (open its chapter) or dismissed. Read-only over the prose. Boxed (carries
     /// the findings list).
     Findings(Box<Findings>),
+    /// Reviewing the active chapter's inline annotations (#302): a navigable list
+    /// where each can be jumped to or deleted. The items are read live from
+    /// `App::annotations`; this carries only the selected row.
+    Annotations { selected: usize },
     /// The AI command palette: a navigable list of AI actions, one of which runs
     /// on Enter. The single entry point for the AI features.
     Palette(Box<Palette>),
@@ -375,6 +379,10 @@ pub(crate) enum Action {
     ToggleTypewriter,
     /// Toggle focus mode — dim every paragraph but the current one (#301).
     ToggleFocus,
+    /// Annotate the selection (or word at the cursor) with a note (#302).
+    AddAnnotation,
+    /// Open the annotation review list for the active chapter (#302).
+    ReviewAnnotations,
 }
 
 impl Action {
@@ -420,6 +428,8 @@ impl Action {
         Action::PrevMisspelling,
         Action::ToggleTypewriter,
         Action::ToggleFocus,
+        Action::AddAnnotation,
+        Action::ReviewAnnotations,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -466,6 +476,8 @@ impl Action {
             Action::PrevMisspelling => "spell:prev",
             Action::ToggleTypewriter => "view:typewriter",
             Action::ToggleFocus => "view:focus",
+            Action::AddAnnotation => "annotate",
+            Action::ReviewAnnotations => "annotate:review",
         }
     }
 
@@ -512,6 +524,8 @@ impl Action {
             Action::PrevMisspelling => "Previous misspelling",
             Action::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Action::ToggleFocus => "Focus mode (toggle)",
+            Action::AddAnnotation => "Annotate selection",
+            Action::ReviewAnnotations => "Review annotations",
         }
     }
 
@@ -889,6 +903,9 @@ pub(crate) enum Pending {
     /// y/N: apply the configuration changes the AI proposed (#303); they wait in
     /// `App::pending_config`. `y` writes them, anything else cancels.
     ConfirmConfig,
+    /// Text input: the note for an inline annotation (#302) anchored to the byte
+    /// range `[start, end)` of the active chapter. Enter saves it, Esc cancels.
+    Annotate { start: usize, end: usize },
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.

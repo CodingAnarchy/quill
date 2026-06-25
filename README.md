@@ -35,6 +35,9 @@ keystrokes that stay out of the way.
   gracefully on a narrow terminal. Full details in [`docs/windows.md`](docs/windows.md).
 - **Rolled-up word counts** — live per-chapter counts and a project total in the
   chapter pane.
+- **Inline annotations** — pin a margin-style note to a span of text ("check
+  this date"); it's marked while editing, stays on its phrase as you revise, and
+  never appears in any export. Stored in a side file, listed and navigable.
 - **Chapter metadata** — set each chapter's status (draft / revised / final),
   a one-line summary, and POV character; stored as YAML front matter in the file
   (portable, and your other keys are preserved), with status shown in the pane.
@@ -471,6 +474,28 @@ a word you've since fixed or accepted is skipped, and when none are left it says
 so. In Vim mode the standard **`]s`** / **`[s`** do the same, so a spelling sweep
 is a quick repeated keystroke: jump to a flag, fix it (or accept the name), jump
 to the next.
+
+### Annotations
+
+Revision is a conversation with yourself, and an `xxx` marker is too blunt for it
+— it sits in the prose and would export as literal text if you missed it. An
+**annotation** is a margin-style note tied to a span of text ("check this date,"
+"is she still angry here?"): visible while you edit, never in the output.
+
+To leave one, select the text (Vim Visual mode, then **`m`**) or put the cursor
+on a word, then run **Annotate selection** from the `Ctrl-K` palette; type the
+note and press Enter. The annotated span gets a tinted background. Notes stay on
+their phrase as you edit around them — type before a note and it slides along;
+delete the text it's pinned to and the note goes with it.
+
+**Review annotations** (also in the palette) opens the chapter's notes as a list:
+**↑↓** to move, **Enter** to jump to one, **`d`** to delete (resolve) it, **Esc**
+to close.
+
+Annotations live in an `annotations.toml` side file at the project root, keyed by
+chapter — the chapter `.md` files stay clean, so **no export** (Markdown, Word,
+Scrivener, Vellum, EPUB) ever carries them. They're a single-chapter-view aid;
+the continuous view (`Ctrl-L`) doesn't show or anchor them.
 
 ## Layout
 

@@ -44,6 +44,9 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     let inserts = header_inserts(app, column.width);
     // Misspelled-word flags (#357), computed on idle; underlined under the prose.
     let spell = app.spell_flags.as_slice();
+    // Inline author annotations (#302): the anchored spans get a tinted
+    // background. Single-chapter view only (the continuous buffer spans chapters).
+    let annotations = if app.manuscript.is_none() { app.annotation_ranges() } else { Vec::new() };
     // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
     // Visual mode still shows the cursor — that's the selection's active end.
     let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))
@@ -51,8 +54,8 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
     let focus = app.focus_mode.then(|| focus_paragraph(buffer));
     render_body(
-        frame, column, buffer, &inserts, &conceal, search_matches, current_match, spell, app.typewriter,
-        focus, editing,
+        frame, column, buffer, &inserts, &conceal, search_matches, current_match, spell, &annotations,
+        app.typewriter, focus, editing,
     );
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
@@ -83,8 +86,8 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     let column = centered_column(body, app.focus_width);
     // No cursor in a reference pane, so conceal every emphasis marker uniformly.
     let conceal = buffer.syntax().conceal_ranges(None);
-    // A reference pane isn't where you write — no typewriter pin, no focus dim.
-    render_body(frame, column, buffer, &[], &conceal, &[], None, &[], false, None, false);
+    // A reference pane isn't where you write — no annotations, typewriter, or focus.
+    render_body(frame, column, buffer, &[], &conceal, &[], None, &[], &[], false, None, false);
 }
 
 /// Render `buffer`'s soft-wrapped, styled prose into `column`, following the
@@ -100,6 +103,7 @@ fn render_body(
     matches: &[ByteRange],
     current: Option<ByteRange>,
     spell: &[ByteRange],
+    annotations: &[ByteRange],
     typewriter: bool,
     focus: Option<ByteRange>,
     place_cursor: bool,
@@ -175,6 +179,7 @@ fn render_body(
             matches,
             current,
             spell,
+            annotations,
             focus,
             wrap,
         );
@@ -300,6 +305,7 @@ fn styled_line(
     matches: &[ByteRange],
     current: Option<ByteRange>,
     spell: &[ByteRange],
+    annotations: &[ByteRange],
     focus: Option<ByteRange>,
     width: usize,
 ) -> Vec<Line<'static>> {
@@ -312,7 +318,7 @@ fn styled_line(
         .enumerate()
         .map(|(i, &rs)| {
             let re = starts.get(i + 1).copied().unwrap_or(text.len());
-            styled_row(syntax, line_start, text, rs, re, conceal, matches, current, spell, focus)
+            styled_row(syntax, line_start, text, rs, re, conceal, matches, current, spell, annotations, focus)
         })
         .collect()
 }
@@ -330,6 +336,7 @@ fn styled_row(
     matches: &[ByteRange],
     current: Option<ByteRange>,
     spell: &[ByteRange],
+    annotations: &[ByteRange],
     focus: Option<ByteRange>,
 ) -> Line<'static> {
     let seg = &text[rs..re];
@@ -351,9 +358,17 @@ fn styled_row(
     // set without any entry in `matches`, so check it too before skipping styling.
     let current_here = current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
     let spell_here = spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let annotated_here = annotations.iter().any(|&(s, e)| s < seg_end && e > seg_start);
     // A row fully inside the focused span (or focus off) needs no per-char dimming.
     let focus_covers_row = focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
-    if hls.is_empty() && !concealed_here && !match_here && !current_here && !spell_here && focus_covers_row {
+    if hls.is_empty()
+        && !concealed_here
+        && !match_here
+        && !current_here
+        && !spell_here
+        && !annotated_here
+        && focus_covers_row
+    {
         return Line::raw(seg.to_string());
     }
 
@@ -371,6 +386,10 @@ fn styled_row(
         // Misspelled words (#357) get an underline, layered on whatever else.
         if spell.iter().any(|&(s, e)| abs >= s && abs < e) {
             style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        // Annotated spans (#302) get a tinted background, layered on the rest.
+        if annotations.iter().any(|&(s, e)| abs >= s && abs < e) {
+            style = style.bg(theme.annotation);
         }
         // Focus mode (#301): a char outside the focused paragraph renders flat-dim,
         // overriding any syntax/emphasis/match styling so the paragraph stands out.
