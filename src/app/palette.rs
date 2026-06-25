@@ -173,6 +173,7 @@ impl App {
             Action::AddAnnotation => self.start_annotation(),
             Action::ReviewAnnotations => self.open_annotation_review(),
             Action::SwitchBackend => self.toggle_ai_backend(),
+            Action::ManageModels => self.open_model_manager(),
         }
     }
 

@@ -32,6 +32,7 @@ use crate::typography;
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod annotations;
 mod assist;
+mod models;
 mod bible_review;
 mod palette;
 mod worker;
@@ -542,6 +543,7 @@ impl App {
             Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Annotations { .. } => self.on_key_annotations(key),
+            Mode::ModelManager { .. } => self.on_key_model_manager(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
             Mode::ProjectSearch(_) => self.on_key_project_search(key),

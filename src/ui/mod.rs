@@ -19,8 +19,8 @@ use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 mod editor;
 mod list_overlay;
 use list_overlay::{
-    draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_palette, draw_project_browser,
-    draw_project_search, list_row, marker, row_style,
+    draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_model_manager, draw_palette,
+    draw_project_browser, draw_project_search, list_row, marker, row_style,
 };
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -63,6 +63,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
         Mode::Findings(findings) => modal(frame, area, |f, r| draw_findings(f, r, findings, &app.project)),
         Mode::Annotations { selected } => modal(frame, area, |f, r| draw_annotations(f, r, app, *selected)),
+        Mode::ModelManager { selected } => modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected)),
         Mode::ProjectSearch(ps) => modal(frame, area, |f, r| draw_project_search(f, r, ps)),
         Mode::Palette(palette) => modal(frame, area, |f, r| draw_palette(f, r, palette)),
         Mode::Tree(tree) => modal(frame, area, |f, r| draw_tree(f, r, app, tree)),
@@ -985,6 +986,18 @@ mod tests {
         app.focus_mode = true;
         assert_eq!(first_letter_fg(&app, "alpha"), Some(dim), "the other paragraph dims");
         assert_ne!(first_letter_fg(&app, "bravo"), Some(dim), "the focused paragraph stays normal");
+    }
+
+    #[test]
+    fn the_model_manager_lists_the_catalog_with_characteristics() {
+        let mut app = app_with("text\n");
+        app.mode = Mode::ModelManager { selected: 0 };
+        let screen = render(&app, 100, 24);
+        assert!(screen.contains("Local AI models"), "{screen}");
+        // Models appear with their context window and description.
+        assert!(screen.contains("Qwen2.5-7B"), "the catalog is listed:\n{screen}");
+        assert!(screen.contains("1M ctx"), "the extended-context model's window shows:\n{screen}");
+        assert!(screen.contains("Long context"), "descriptions are shown:\n{screen}");
     }
 
     #[test]

@@ -86,6 +86,10 @@ pub enum Mode {
     /// where each can be jumped to or deleted. The items are read live from
     /// `App::annotations`; this carries only the selected row.
     Annotations { selected: usize },
+    /// The local AI model manager (#379): the model catalog with characteristics,
+    /// where the author toggles which to keep in their set. Reads the catalog and
+    /// the configured set live from `App`; carries only the selected row.
+    ModelManager { selected: usize },
     /// The AI command palette: a navigable list of AI actions, one of which runs
     /// on Enter. The single entry point for the AI features.
     Palette(Box<Palette>),
@@ -385,6 +389,8 @@ pub(crate) enum Action {
     ReviewAnnotations,
     /// Switch the active AI backend between Claude and the local model (#371).
     SwitchBackend,
+    /// Open the local AI model manager — choose which models to use (#379).
+    ManageModels,
 }
 
 impl Action {
@@ -433,6 +439,7 @@ impl Action {
         Action::AddAnnotation,
         Action::ReviewAnnotations,
         Action::SwitchBackend,
+        Action::ManageModels,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -482,6 +489,7 @@ impl Action {
             Action::AddAnnotation => "annotate",
             Action::ReviewAnnotations => "annotate:review",
             Action::SwitchBackend => "ai:backend",
+            Action::ManageModels => "ai:models",
         }
     }
 
@@ -531,6 +539,7 @@ impl Action {
             Action::AddAnnotation => "Annotate selection",
             Action::ReviewAnnotations => "Review annotations",
             Action::SwitchBackend => "Switch AI backend (Claude / local)",
+            Action::ManageModels => "Local AI models",
         }
     }
 
