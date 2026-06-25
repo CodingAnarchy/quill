@@ -45,6 +45,7 @@ mod vcs_actions;
 mod workflows;
 
 mod chapters;
+mod configure;
 mod counts;
 mod persistence;
 mod project_ops;
@@ -187,6 +188,9 @@ pub struct App {
     /// The steps of an AI-proposed workflow (#232) awaiting the author's
     /// name-confirm prompt; taken when they save it, cleared when they cancel.
     pending_workflow: Option<Vec<String>>,
+    /// AI-proposed config changes (#303) — validated `(dotted_key, value)` pairs
+    /// awaiting the author's y/N confirm; taken on apply, cleared on cancel.
+    pending_config: Option<Vec<(String, String)>>,
     /// The workflow currently executing (#227), if any: its resolved steps and
     /// where it is. `Some` while a run is in progress — including while it's
     /// suspended waiting on an async AI step. Drives the step state machine.
@@ -277,6 +281,7 @@ impl App {
             workflows: loaded.workflows,
             triggers: loaded.triggers,
             pending_workflow: None,
+            pending_config: None,
             workflow_run: None,
             series_bible_run: None,
             pending_recovery: None,

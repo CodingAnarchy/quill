@@ -92,6 +92,8 @@ impl App {
                 Some("this project has only one book".into())
             }
             Action::RefreshSeriesBible => self.ai.check_ready().err().map(|e| e.to_string()),
+            // Describe-to-config needs the AI to propose the settings (#303).
+            Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
             _ => None,
         }
     }
@@ -124,6 +126,7 @@ impl App {
             Action::SeriesTree => self.open_tree(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::ProjectFind => self.open_project_find(),
+            Action::DescribeConfig => self.start_describe_config(),
         }
     }
 

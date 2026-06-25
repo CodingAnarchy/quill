@@ -81,6 +81,60 @@ fn workflow_entry(name: &str, steps: &[String]) -> String {
     toml::to_string(&table).unwrap_or_default().trim_end().to_string()
 }
 
+/// Write a batch of `key = value` settings into the config file (#303), each
+/// under its `[section]`, preserving everything else in the file (other keys,
+/// sections, and comments). `value` is a ready-to-write TOML scalar literal
+/// (e.g. `true`, `64`, `"#1e1e24"`). Creates the file/section if absent.
+pub fn set_values(changes: &[(String, String, String)]) -> io::Result<PathBuf> {
+    let path = config_path().ok_or_else(|| io::Error::other("no config directory"))?;
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    for (section, key, value) in changes {
+        text = set_value(&text, section, key, value);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, text)?;
+    Ok(path)
+}
+
+/// Set `key = value` under `[section]` in `existing`, replacing the key in place
+/// if present, inserting it under the header if the section exists, or appending
+/// a new section otherwise. Everything else is left byte-for-byte.
+fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
+    let entry = format!("{key} = {value}");
+    let header = format!("[{section}]");
+    let mut lines: Vec<String> = existing.lines().map(String::from).collect();
+    let trailing_nl = existing.is_empty() || existing.ends_with('\n');
+
+    if let Some(h) = lines.iter().position(|l| l.trim() == header) {
+        // The section body runs to the next `[…]` header (or end of file).
+        let end = lines[h + 1..]
+            .iter()
+            .position(|l| l.trim_start().starts_with('['))
+            .map_or(lines.len(), |i| h + 1 + i);
+        let existing_key = (h + 1..end).find(|&i| {
+            lines[i].split_once('=').is_some_and(|(lhs, _)| lhs.trim() == key)
+        });
+        match existing_key {
+            Some(k) => lines[k] = entry,
+            None => lines.insert(h + 1, entry),
+        }
+    } else {
+        if lines.last().is_some_and(|l| !l.is_empty()) {
+            lines.push(String::new()); // a blank line before the new section
+        }
+        lines.push(header);
+        lines.push(entry);
+    }
+
+    let mut out = lines.join("\n");
+    if trailing_nl {
+        out.push('\n');
+    }
+    out
+}
+
 /// Editor behavior from the `[editor]` section. The default keeps Quill's
 /// modeless editing unchanged (but with smart typography on — see below).
 #[derive(Clone, Deserialize)]
@@ -98,11 +152,14 @@ pub struct EditorConfig {
     /// (`…`). **On by default** — set `smart_typography = false` for plain ASCII
     /// punctuation (and an exact byte-for-byte round-trip of what you type).
     pub smart_typography: bool,
+    /// The centered text column width in characters (#303). Defaults to 72; the
+    /// runtime `+`/`-` adjustment still applies on top, this just sets the start.
+    pub column_width: u16,
 }
 
 impl Default for EditorConfig {
     fn default() -> Self {
-        Self { vim: false, keys: HashMap::new(), smart_typography: true }
+        Self { vim: false, keys: HashMap::new(), smart_typography: true, column_width: 72 }
     }
 }
 
@@ -207,6 +264,45 @@ mod tests {
 
     fn steps(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| (*x).to_string()).collect()
+    }
+
+    #[test]
+    fn set_value_replaces_an_existing_key_in_place() {
+        let existing = "[editor]\nvim = false\nsmart_typography = true\n";
+        let out = set_value(existing, "editor", "vim", "true");
+        assert!(out.contains("vim = true"), "{out}");
+        assert!(!out.contains("vim = false"), "{out}");
+        assert!(out.contains("smart_typography = true"), "other keys kept: {out}");
+    }
+
+    #[test]
+    fn set_value_inserts_under_an_existing_section() {
+        let existing = "[editor]\nvim = true\n";
+        let out = set_value(existing, "editor", "column_width", "64");
+        assert!(out.contains("[editor]"), "{out}");
+        assert!(out.contains("vim = true") && out.contains("column_width = 64"), "{out}");
+    }
+
+    #[test]
+    fn set_value_appends_a_new_section_preserving_the_rest() {
+        let existing = "[editor]\nvim = true\n";
+        let out = set_value(existing, "theme", "name", "\"light\"");
+        assert!(out.contains("[editor]\nvim = true"), "existing section kept: {out}");
+        assert!(out.contains("[theme]") && out.contains("name = \"light\""), "{out}");
+    }
+
+    #[test]
+    fn set_value_writes_a_fresh_file_when_empty() {
+        let out = set_value("", "theme", "heading", "\"cyan\"");
+        assert_eq!(out, "[theme]\nheading = \"cyan\"\n");
+    }
+
+    #[test]
+    fn set_value_leaves_comments_on_other_lines() {
+        let existing = "# my settings\n[editor]\n# turn on vim\nvim = false\n";
+        let out = set_value(existing, "editor", "vim", "true");
+        assert!(out.contains("# my settings") && out.contains("# turn on vim"), "comments kept: {out}");
+        assert!(out.contains("vim = true"), "{out}");
     }
 
     #[test]

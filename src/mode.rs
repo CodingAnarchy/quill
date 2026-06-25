@@ -360,6 +360,8 @@ pub(crate) enum Action {
     RefreshSeriesBible,
     /// Find & replace across every chapter in the project (#295).
     ProjectFind,
+    /// Describe a configuration change in words; the AI proposes settings (#303).
+    DescribeConfig,
 }
 
 impl Action {
@@ -399,6 +401,7 @@ impl Action {
         Action::SeriesTree,
         Action::RefreshSeriesBible,
         Action::ProjectFind,
+        Action::DescribeConfig,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -439,6 +442,7 @@ impl Action {
             Action::SeriesTree => "tree",
             Action::RefreshSeriesBible => "bible:series",
             Action::ProjectFind => "find:project",
+            Action::DescribeConfig => "config:describe",
         }
     }
 
@@ -479,6 +483,7 @@ impl Action {
             Action::SeriesTree => "Project tree",
             Action::RefreshSeriesBible => "Refresh series bible",
             Action::ProjectFind => "Find across manuscript",
+            Action::DescribeConfig => "Configure by description",
         }
     }
 
@@ -851,6 +856,11 @@ pub(crate) enum Pending {
     /// Text input: confirm or edit the name for the workflow the AI proposed
     /// (#232); the steps wait in `App::pending_workflow`. Enter saves, Esc cancels.
     NameNewWorkflow,
+    /// Text input: a plain-language description of a configuration change (#303).
+    DescribeConfig,
+    /// y/N: apply the configuration changes the AI proposed (#303); they wait in
+    /// `App::pending_config`. `y` writes them, anything else cancels.
+    ConfirmConfig,
     /// Text input editing a metadata field (chapter front matter or book
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.

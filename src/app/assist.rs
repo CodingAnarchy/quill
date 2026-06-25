@@ -352,7 +352,7 @@ impl App {
 
     /// Unwrap an AI result, or set the standard `AI: <error>` status and return
     /// `None` — the shared error arm of the `apply_*`/`analyze_*` handlers (#315).
-    fn ok_or_report<T>(&mut self, result: Result<T, ai::AiError>) -> Option<T> {
+    pub(super) fn ok_or_report<T>(&mut self, result: Result<T, ai::AiError>) -> Option<T> {
         match result {
             Ok(value) => Some(value),
             Err(e) => {

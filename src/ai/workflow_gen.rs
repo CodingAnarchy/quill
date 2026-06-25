@@ -34,16 +34,6 @@ string. Put any part of the request that has no matching action into `unmapped` 
 (as a short phrase) rather than approximating it. Keep the steps in the order the \
 author described. Do not write or suggest any manuscript prose.";
 
-/// Render the allowed vocabulary — each `token` with a human description — as the
-/// context the model chooses steps from.
-fn vocab_context(vocab: &[(String, String)]) -> String {
-    let mut s = String::from("Available actions (use the exact token on the left):\n");
-    for (token, desc) in vocab {
-        s.push_str(&format!("- {token}: {desc}\n"));
-    }
-    s
-}
-
 /// The JSON Schema for a reply: `steps` is constrained to the vocabulary tokens.
 fn schema(tokens: &[String]) -> Value {
     json!({
@@ -64,7 +54,7 @@ pub fn build_request(description: &str, vocab: &[(String, String)], model: &str)
     let tokens: Vec<String> = vocab.iter().map(|(t, _)| t.clone()).collect();
     Request {
         system: Some(SYSTEM.to_string()),
-        cached_context: vocab_context(vocab),
+        cached_context: super::vocab_context("Available actions (use the exact token on the left):", vocab),
         user: format!("Describe-to-workflow request:\n{description}"),
         model: model.to_string(),
         max_tokens: MAX_TOKENS,

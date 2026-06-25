@@ -34,6 +34,7 @@ pub mod setting;
 pub mod social;
 pub mod style;
 pub mod submission;
+pub mod config_gen;
 pub mod thesaurus;
 pub mod voice;
 pub mod workflow_gen;
@@ -124,6 +125,8 @@ pub enum Outcome {
     Image(Result<image::ImageReport, AiError>),
     /// A workflow generated from a plain-language description (#232).
     Workflow(Result<workflow_gen::GeneratedWorkflow, AiError>),
+    /// Configuration changes proposed from a plain-language description (#303).
+    Config(Result<config_gen::GeneratedConfig, AiError>),
     /// A story bible extracted from imported notes (#283).
     Import(Result<import::Imported, AiError>),
     /// In-context thesaurus / word search candidates (#290).
@@ -157,6 +160,7 @@ impl Outcome {
             Outcome::Voice(r) => r.as_ref().err(),
             Outcome::Image(r) => r.as_ref().err(),
             Outcome::Workflow(r) => r.as_ref().err(),
+            Outcome::Config(r) => r.as_ref().err(),
             Outcome::Import(r) => r.as_ref().err(),
             Outcome::Thesaurus(r) => r.as_ref().err(),
             Outcome::Editorial(r) => r.as_ref().err(),
@@ -185,6 +189,17 @@ pub(crate) fn numbered_sections(label: &str, items: &[String]) -> String {
         .enumerate()
         .map(|(i, it)| format!("## {label} {}\n\n{}\n\n", i + 1, it.trim()))
         .collect()
+}
+
+/// Render a `(token, description)` vocabulary as cached context for a constrained
+/// generation request — `heading` then one `- token: desc` line each. Shared by
+/// describe-a-workflow (#232) and describe-a-config (#303).
+pub(crate) fn vocab_context(heading: &str, vocab: &[(String, String)]) -> String {
+    let mut s = format!("{heading}\n");
+    for (token, desc) in vocab {
+        s.push_str(&format!("- {token}: {desc}\n"));
+    }
+    s
 }
 
 /// Token usage reported by the backend (zeros when unknown).
