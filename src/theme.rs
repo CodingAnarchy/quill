@@ -179,6 +179,29 @@ impl Theme {
     }
 }
 
+/// The overridable color-field keys (the `[theme]` keys other than `name`), for
+/// the describe-to-config vocabulary (#303) and any other schema-driven caller.
+pub(crate) const COLOR_FIELDS: [&str; 13] = [
+    "heading",
+    "on_accent",
+    "dim",
+    "muted",
+    "match_current",
+    "match_other",
+    "status_bg",
+    "added",
+    "removed",
+    "revised",
+    "mode_insert",
+    "mode_normal",
+    "mode_visual",
+];
+
+/// Whether `s` parses as a color value (for validating a proposed override).
+pub(crate) fn is_color(s: &str) -> bool {
+    parse_color(s).is_some()
+}
+
 /// Parse a color from config: a named ANSI color (`cyan`, `darkgray`, …), a hex
 /// string (`#rrggbb` or `#rgb`), an `r,g,b` triple, or a 0–255 palette index.
 /// `None` on anything unrecognized.
@@ -268,6 +291,16 @@ mod tests {
         let (_, warnings) = Theme::from_config(None, &overrides);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("backgruond"), "{warnings:?}");
+    }
+
+    #[test]
+    fn every_color_field_is_settable() {
+        // COLOR_FIELDS (the override vocabulary) must stay in lockstep with the
+        // fields `set_field` actually accepts.
+        let mut t = Theme::dark();
+        for field in COLOR_FIELDS {
+            assert!(t.set_field(field, Color::Red), "{field} should be a settable color field");
+        }
     }
 
     #[test]

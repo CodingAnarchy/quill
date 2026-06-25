@@ -125,6 +125,17 @@ keystrokes that stay out of the way.
   it couldn't map, and shows the proposal for you to name and confirm — nothing is
   written to `config.toml` until you do, and the rest of your config is left as-is.
 
+- **Configure by description** — the same idea for *settings*: in the `Ctrl-K`
+  command palette, run **Configure by description** and say what you want — "turn
+  on Vim mode," "narrow the text column," "give me a warm dark theme." The AI
+  (when enabled) maps it onto concrete settings — `[editor]` options (Vim,
+  smart typography, column width) and `[theme]` colors — and shows the exact
+  changes for you to confirm. **Nothing is written until you confirm** (declining
+  changes nothing); on confirm they're written to `config.toml` (the rest of the
+  file left intact) and applied immediately. Anything that doesn't map to a real
+  setting is reported back, not invented, and the AI only ever touches settings —
+  never your manuscript.
+
 ## Build & run
 
 ```sh

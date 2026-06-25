@@ -394,6 +394,7 @@ impl App {
                     Outcome::Voice(r) => self.apply_voice(r),
                     Outcome::Image(r) => self.apply_images(r),
                     Outcome::Workflow(r) => self.apply_generated_workflow(r),
+                    Outcome::Config(r) => self.apply_generated_config(r),
                     Outcome::Import(r) => self.apply_import(r),
                     Outcome::Thesaurus(r) => self.apply_thesaurus(r),
                     Outcome::Editorial(r) => self.apply_editorial(r),

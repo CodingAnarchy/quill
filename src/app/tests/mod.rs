@@ -45,6 +45,7 @@ mod actions;
 mod ai;
 mod books;
 mod chapters;
+mod configure;
 mod editing;
 mod panes;
 mod project_search;

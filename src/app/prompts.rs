@@ -207,6 +207,19 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            // Apply the AI-proposed config changes (#303), or cancel (changing
+            // nothing). `y` writes and applies them; the editing mode that follows
+            // reflects any newly-toggled Vim setting.
+            Pending::ConfirmConfig => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.write_config_changes();
+                    self.mode = self.editing_mode();
+                }
+                _ => {
+                    self.pending_config = None;
+                    self.mode = closed;
+                }
+            },
             // The text prompts share the editing keys; only Enter differs.
             Pending::NewChapter { .. }
             | Pending::Rename { .. }
@@ -217,6 +230,7 @@ impl App {
             | Pending::SetRemote
             | Pending::ExCommand
             | Pending::DescribeWorkflow
+            | Pending::DescribeConfig
             | Pending::NameNewWorkflow
             | Pending::Brainstorm
             | Pending::DraftCharacters
@@ -288,6 +302,11 @@ impl App {
                                 // Back to editing; the proposal arrives asynchronously.
                                 self.mode = closed;
                                 self.generate_workflow(text);
+                            }
+                            Pending::DescribeConfig => {
+                                // Back to editing; the proposal arrives asynchronously (#303).
+                                self.mode = closed;
+                                self.generate_config(text);
                             }
                             Pending::Brainstorm => {
                                 // Back to editing; the ideas arrive asynchronously.
