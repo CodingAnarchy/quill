@@ -127,6 +127,7 @@ impl App {
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),
+            Action::AcceptWord => self.accept_word_at_cursor(),
         }
     }
 

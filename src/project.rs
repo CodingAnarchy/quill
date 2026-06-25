@@ -33,6 +33,9 @@ use series::Book;
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
 
+/// The per-project custom spell-check dictionary file (#358), at the project root.
+pub const DICTIONARY_NAME: &str = "dictionary.txt";
+
 /// One chapter's entry in the manifest: its display title, the file that holds
 /// its prose (relative to the project root), and a cached word count.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -268,6 +271,10 @@ pub struct Project {
     books: Vec<Book>,
     /// Index of the active book within `books` (0 for a standalone novel).
     active_book: usize,
+    /// The per-project custom spell-check dictionary (#358): accepted words —
+    /// invented names, places, coined terms — lowercased for case-insensitive
+    /// matching. Loaded from `dictionary.txt` at the project root at open.
+    dictionary: HashSet<String>,
 }
 
 impl Project {
@@ -292,6 +299,7 @@ impl Project {
         let value: toml::Value = toml::from_str(&text).map_err(invalid)?;
         let (manifest, books, active_book) = Manifest::from_toml_value(value).map_err(invalid)?;
 
+        let dictionary = load_dictionary(&root);
         let mut project = Self {
             root,
             manifest,
@@ -299,6 +307,7 @@ impl Project {
             words_changed: HashSet::new(),
             books,
             active_book,
+            dictionary,
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -362,6 +371,7 @@ impl Project {
             words_changed: HashSet::new(),
             books: Vec::new(),
             active_book: 0,
+            dictionary: HashSet::new(),
         };
         project.add_default_chapter()?;
         Ok(project)
@@ -599,6 +609,34 @@ impl Project {
         }
     }
 
+    /// Whether `word` is in the project's custom dictionary (#358),
+    /// case-insensitively — the seam the spell-checker's `accept` predicate uses.
+    pub fn is_accepted(&self, word: &str) -> bool {
+        self.dictionary.contains(&word.to_lowercase())
+    }
+
+    /// Accept `word` into the project's custom dictionary (#358): add it to the
+    /// in-memory set and append it to `dictionary.txt` at the project root (one
+    /// word per line, original case preserved for readability), so it's never
+    /// flagged again here and travels in git. A no-op (returns `Ok(false)`) when
+    /// the word — compared case-insensitively — is already accepted. Shared by the
+    /// accept-flagged-word action and #303's "add these names" path.
+    pub fn accept_word(&mut self, word: &str) -> std::io::Result<bool> {
+        let key = word.trim().to_lowercase();
+        if key.is_empty() || !self.dictionary.insert(key) {
+            return Ok(false);
+        }
+        let path = self.root.join(DICTIONARY_NAME);
+        let mut existing = fs::read_to_string(&path).unwrap_or_default();
+        if !existing.is_empty() && !existing.ends_with('\n') {
+            existing.push('\n');
+        }
+        existing.push_str(word.trim());
+        existing.push('\n');
+        atomic::write(&path, existing.as_bytes())?;
+        Ok(true)
+    }
+
     /// Path to the active chapter's file.
     pub fn active_path(&self) -> PathBuf {
         self.chapter_path(self.active_index())
@@ -673,8 +711,21 @@ impl Project {
             words_changed: HashSet::new(),
             books: Vec::new(),
             active_book: 0,
+            dictionary: HashSet::new(),
         }
     }
+}
+
+/// Read the project's custom dictionary (#358) from `dictionary.txt` at `root`
+/// into a lowercased set for case-insensitive matching. Best-effort: a missing
+/// file yields an empty set; blank lines are ignored.
+fn load_dictionary(root: &Path) -> HashSet<String> {
+    fs::read_to_string(root.join(DICTIONARY_NAME))
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.trim().to_lowercase())
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// Recursively gather `.md` files under `dir` into `out`, skipping the `unused/`
@@ -707,6 +758,38 @@ mod tests {
         let mut p = std::env::temp_dir();
         p.push(format!("quill-proj-{}-{}", std::process::id(), name));
         p
+    }
+
+    #[test]
+    fn accepts_words_into_the_project_dictionary() {
+        let dir = temp_dir("dict");
+        let _ = fs::remove_dir_all(&dir);
+        let mut p = Project::create(&dir).unwrap();
+
+        assert!(!p.is_accepted("Vashti"));
+        assert!(p.accept_word("Vashti").unwrap(), "newly added");
+        assert!(p.is_accepted("Vashti") && p.is_accepted("vashti"), "matched case-insensitively");
+        assert!(!p.accept_word("vashti").unwrap(), "deduped case-insensitively");
+
+        // Persisted to dictionary.txt (original case) and respected after reload.
+        let file = fs::read_to_string(dir.join(DICTIONARY_NAME)).unwrap();
+        assert!(file.contains("Vashti"), "{file}");
+        assert!(Project::open(&dir).unwrap().is_accepted("VASHTI"), "loaded on reopen");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn accepting_a_word_preserves_existing_dictionary_entries() {
+        let dir = temp_dir("dict-append");
+        let _ = fs::remove_dir_all(&dir);
+        let mut p = Project::create(&dir).unwrap();
+        fs::write(dir.join(DICTIONARY_NAME), "Aerendil\n").unwrap();
+        p.dictionary = load_dictionary(&dir); // re-read what we just wrote
+        p.accept_word("Vashti").unwrap();
+        let file = fs::read_to_string(dir.join(DICTIONARY_NAME)).unwrap();
+        assert!(file.contains("Aerendil") && file.contains("Vashti"), "both kept: {file}");
+        fs::remove_dir_all(&dir).ok();
     }
 
     /// Write an `n`-chapter project corpus (each chapter has front matter and a

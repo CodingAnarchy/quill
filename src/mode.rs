@@ -362,6 +362,8 @@ pub(crate) enum Action {
     ProjectFind,
     /// Describe a configuration change in words; the AI proposes settings (#303).
     DescribeConfig,
+    /// Accept the flagged word at the cursor into the project dictionary (#358).
+    AcceptWord,
 }
 
 impl Action {
@@ -402,6 +404,7 @@ impl Action {
         Action::RefreshSeriesBible,
         Action::ProjectFind,
         Action::DescribeConfig,
+        Action::AcceptWord,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -443,6 +446,7 @@ impl Action {
             Action::RefreshSeriesBible => "bible:series",
             Action::ProjectFind => "find:project",
             Action::DescribeConfig => "config:describe",
+            Action::AcceptWord => "dict:accept",
         }
     }
 
@@ -484,6 +488,7 @@ impl Action {
             Action::RefreshSeriesBible => "Refresh series bible",
             Action::ProjectFind => "Find across manuscript",
             Action::DescribeConfig => "Configure by description",
+            Action::AcceptWord => "Add word to dictionary",
         }
     }
 
