@@ -54,6 +54,11 @@ impl App {
             .map(|&a| {
                 let desc = match self.action_status(a) {
                     Some(reason) => format!("{} · unavailable: {reason}", a.name()),
+                    // The backend switch shows which backend is active right now,
+                    // so the author can see the state before flipping it (#371).
+                    None if matches!(a, Action::SwitchBackend) => {
+                        format!("{} · now: {}", a.name(), self.ai_backend_label())
+                    }
                     None => a.name().to_string(),
                 };
                 PaletteItem { label: a.label().into(), desc, command: Command::Run(a) }
@@ -140,6 +145,7 @@ impl App {
             }
             Action::AddAnnotation => self.start_annotation(),
             Action::ReviewAnnotations => self.open_annotation_review(),
+            Action::SwitchBackend => self.toggle_ai_backend(),
         }
     }
 

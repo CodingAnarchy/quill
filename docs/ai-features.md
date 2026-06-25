@@ -69,6 +69,17 @@ build-time opt-in: a standard build is Claude-only, and selecting `local` withou
 so every feature works against either; the local backend's structured output is
 guaranteed by constrained decoding, and it is free (no cost confirm).
 
+**Switching backends at runtime (#371):** besides the config setting, **Switch
+AI backend** in the `Ctrl-K` run-action menu flips the active backend between
+Claude and local without editing `config.toml` or restarting — its menu line
+shows which one is active right now (`… · now: Claude (cloud)`). The switch is
+**session-only**: the next AI request uses the new backend (the local model
+loads off the UI thread on first use, reusing its cached slot), and a restart
+reverts to the configured `backend`. `offline = true` stays authoritative — it
+pins local, so the switch reports the pin instead of overriding it — and
+selecting local in a build without `--features local` gives the same rebuild
+hint as the static setting rather than appearing to switch and then failing.
+
 With AI enabled, **Ctrl-A** opens the **AI command palette** (#98) — one entry
 point listing every AI action; arrow to one and Enter runs it. (When AI is off,
 Ctrl-A explains how to enable it.) The status line shows a persistent `AI` tag

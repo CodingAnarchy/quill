@@ -339,6 +339,51 @@ impl App {
         }
     }
 
+    /// A human label for the AI backend that will actually run (#371): the active
+    /// one, accounting for the `offline` privacy pin. Shown in the run-action menu
+    /// and the switch's confirmation.
+    pub(crate) fn ai_backend_label(&self) -> &'static str {
+        // `Settings::backend()` is the authoritative resolver — it already folds the
+        // `offline` pin into Local — so the mapping lives in one place; `offline` is
+        // read here only to word *why* it's local.
+        match self.ai.backend() {
+            ai::BackendKind::Claude => "Claude (cloud)",
+            ai::BackendKind::Local if self.ai.offline => "local (offline pinned)",
+            ai::BackendKind::Local => "local (on-device)",
+        }
+    }
+
+    /// Switch the active AI backend between Claude and the local model from inside
+    /// Quill (#371). Session-only — the next AI request re-reads the choice, the
+    /// local model loads off the UI thread on first use, and a restart reverts to
+    /// the `[ai] backend` in config. `offline = true` stays authoritative: it pins
+    /// local, so the toggle reports the pin rather than silently contradicting it.
+    pub(crate) fn toggle_ai_backend(&mut self) {
+        use ai::BackendKind;
+        if self.ai.offline {
+            self.message =
+                Some("Offline mode pins the local backend — unset `offline` under [ai] to switch.".into());
+            return;
+        }
+        let next = match self.ai.backend {
+            BackendKind::Claude => BackendKind::Local,
+            BackendKind::Local => BackendKind::Claude,
+        };
+        // Don't appear to switch to a local backend this build can't run (#371).
+        if next == BackendKind::Local && cfg!(not(feature = "local")) {
+            self.message = Some(LOCAL_UNAVAILABLE.into());
+            return;
+        }
+        self.ai.backend = next;
+        self.message = Some(match next {
+            BackendKind::Claude if self.ai.resolved_key().is_none() => {
+                "AI backend: Claude (cloud) for this session — set an API key to use it.".into()
+            }
+            BackendKind::Claude => "AI backend: Claude (cloud) for this session.".into(),
+            BackendKind::Local => "AI backend: local (on-device) for this session.".into(),
+        });
+    }
+
     /// Choose the backend for a request from settings (after the readiness gate).
     /// Cheap — the heavy local-model load is deferred to [`BackendSpec::build`] on
     /// the worker thread.

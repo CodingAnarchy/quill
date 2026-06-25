@@ -1173,3 +1173,45 @@ fn a_clean_bible_pass_records_what_it_built_from() {
     assert_eq!(state.built_from("characters"), Some(&built), "the pass recorded its manuscript state");
     assert!(app.pending_pass.is_none(), "the snapshot was consumed");
 }
+
+// --- AI backend switch (#371) ----------------------------------------------
+
+#[test]
+fn offline_pin_blocks_the_backend_switch() {
+    let (mut app, _dir) = two_chapter_app("be-offline");
+    app.ai.enabled = true;
+    app.ai.offline = true;
+    let before = app.ai.backend;
+    app.toggle_ai_backend();
+    assert_eq!(app.ai.backend, before, "the offline pin leaves the configured backend untouched");
+    assert!(app.message.as_deref().unwrap_or("").contains("Offline mode pins"), "{:?}", app.message);
+    assert_eq!(app.ai_backend_label(), "local (offline pinned)");
+}
+
+#[cfg(not(feature = "local"))]
+#[test]
+fn switching_to_local_without_the_feature_explains_how() {
+    let (mut app, _dir) = two_chapter_app("be-nolocal");
+    app.ai.enabled = true;
+    app.ai.backend = ai::BackendKind::Claude;
+    app.toggle_ai_backend(); // would flip to local, but it isn't compiled in
+    assert_eq!(app.ai.backend, ai::BackendKind::Claude, "stays on Claude rather than pretending to switch");
+    let msg = app.message.as_deref().unwrap_or("");
+    assert!(msg.contains("--features local"), "{msg}");
+}
+
+#[cfg(feature = "local")]
+#[test]
+fn switching_flips_between_claude_and_local() {
+    let (mut app, _dir) = two_chapter_app("be-flip");
+    app.ai.enabled = true;
+    app.ai.backend = ai::BackendKind::Claude;
+
+    app.toggle_ai_backend();
+    assert_eq!(app.ai.backend, ai::BackendKind::Local);
+    assert_eq!(app.ai_backend_label(), "local (on-device)");
+
+    app.toggle_ai_backend();
+    assert_eq!(app.ai.backend, ai::BackendKind::Claude);
+    assert_eq!(app.ai_backend_label(), "Claude (cloud)");
+}
