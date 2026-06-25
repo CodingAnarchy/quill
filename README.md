@@ -238,6 +238,39 @@ changed; a chapter Quill isn't editing is never rewritten. Prefer plain ASCII
 smart_typography = false
 ```
 
+### Color theme
+
+Quill ships two built-in themes — `dark` (the default) and `light` — selected in
+`~/.config/quill/config.toml`:
+
+```toml
+[theme]
+name = "light"
+```
+
+With no `[theme]` set, Quill uses `dark`, which is its original palette — so an
+unconfigured editor looks exactly as it always has. Any individual color can be
+overridden on top of the chosen theme; a value is an ANSI color name (`cyan`,
+`darkgray`, …), a hex string (`#1e1e24` or `#abc`), an `r,g,b` triple, or a
+0–255 palette index:
+
+```toml
+[theme]
+name = "dark"
+heading = "#7aa2f7"   # headings and accents
+dim = "gray"          # secondary text, hints, dividers
+status_bg = "16,16,20" # the status bar background
+match_current = "yellow"
+```
+
+The themeable fields are `heading`, `on_accent`, `dim`, `muted`,
+`match_current`, `match_other`, `status_bg`, `added`, `removed`, `revised`, and
+`mode_insert` / `mode_normal` / `mode_visual`. The theme drives the whole editor
+consistently — prose, syntax highlighting, headings, status bar, panes, and
+overlays. An unknown theme name, an unknown field, or an unparseable color is
+reported in the status line at startup and falls back to the default for that
+piece, rather than failing to start.
+
 ### Vim mode (opt-in)
 
 Authors with Vim muscle memory can turn on modal editing. It's off by default —

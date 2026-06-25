@@ -3,7 +3,7 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -41,6 +41,8 @@ struct NavPane<'a>(&'a App);
 struct StatusBar<'a>(&'a App);
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    // The render path styles from the active theme (#300); affirm it each frame.
+    crate::theme::set_current(app.theme);
     let area = frame.area();
 
     // A full-screen read-only overlay (progress / analysis report or AI answer),
@@ -253,11 +255,12 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         )),
         Line::raw(""),
     ];
+    let theme = crate::theme::current();
     for change in &front.diff {
         let color = match change.chars().next() {
-            Some('-') => Color::Red,
-            Some('+') => Color::Green,
-            _ => Color::DarkGray,
+            Some('-') => theme.removed,
+            Some('+') => theme.added,
+            _ => theme.dim,
         };
         lines.push(Line::from(Span::styled(change.clone(), Style::default().fg(color))));
     }
@@ -313,15 +316,16 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
 
 /// The accent style for the active/current item in the nav pane.
 fn active_style() -> Style {
-    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    Style::default().fg(crate::theme::current().heading).add_modifier(Modifier::BOLD)
 }
 
 /// Accent color for a chapter's revision status badge.
 fn status_style(status: Status) -> Style {
+    let theme = crate::theme::current();
     let color = match status {
-        Status::Draft => Color::DarkGray,
-        Status::Revised => Color::Yellow,
-        Status::Final => Color::Green,
+        Status::Draft => theme.dim,
+        Status::Revised => theme.revised,
+        Status::Final => theme.added,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
@@ -359,7 +363,7 @@ fn chapter_line(
     let mut spans = vec![Span::styled(format!("{label}  {count}"), style)];
     // A front/back-matter section shows its role (#179) as a dim italic tag.
     if let Some(role) = role {
-        let tag = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+        let tag = Style::default().fg(crate::theme::current().dim).add_modifier(Modifier::ITALIC);
         spans.push(Span::styled(format!(" · {}", role.label()), sel(tag)));
     }
     if let Some(status) = status {
@@ -379,7 +383,7 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
         )),
         Line::from(Span::styled(
             "enter open · f/esc back".to_string(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(crate::theme::current().dim),
         )),
         Line::raw(""),
     ];
@@ -408,7 +412,7 @@ fn heading_outline_lines(
             let style = if Some(i) == current {
                 active_style()
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(crate::theme::current().muted)
             };
             Line::from(Span::styled(format!("{indent}{}", h.title), style))
         })
@@ -427,11 +431,12 @@ fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<
 /// The top of the nav pane: book / series metadata above the chapter list.
 /// Series (if any) sits above the book title; subtitle and author follow.
 fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
+    let theme = crate::theme::current();
     let mut lines = Vec::new();
     if let Some(series) = &manifest.series {
         lines.push(Line::from(Span::styled(
             series.clone(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.dim),
         )));
     }
     lines.push(Line::from(Span::styled(
@@ -441,13 +446,13 @@ fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
     if let Some(subtitle) = &manifest.subtitle {
         lines.push(Line::from(Span::styled(
             subtitle.clone(),
-            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+            Style::default().fg(theme.muted).add_modifier(Modifier::ITALIC),
         )));
     }
     if let Some(author) = &manifest.author {
         lines.push(Line::from(Span::styled(
             format!("by {author}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.dim),
         )));
     }
     lines.push(Line::raw(""));
@@ -465,7 +470,7 @@ fn band_header(band: Band) -> Line<'static> {
     };
     Line::from(Span::styled(
         label.to_string(),
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        Style::default().fg(crate::theme::current().dim).add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -555,7 +560,7 @@ impl Pane for NavPane<'_> {
             format!("{total} words")
         };
         lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(total_line, Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled(total_line, Style::default().fg(crate::theme::current().dim))));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }
@@ -589,12 +594,13 @@ fn search_status(s: &Search) -> String {
 impl Pane for StatusBar<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
         let app = self.0;
+        let theme = app.theme;
         let buffer = app.edit_buffer();
 
         if let Mode::Prompt(prompt_state) = &app.mode {
             // Label plus any typed text (empty for y/N confirmations) — two
             // borrowed spans, no per-frame allocation.
-            let style = Style::default().fg(Color::Black).bg(Color::Yellow);
+            let style = Style::default().fg(theme.on_accent).bg(theme.match_current);
             let prompt = Paragraph::new(Line::from(vec![
                 Span::styled(prompt_state.label.as_str(), style),
                 Span::styled(prompt_state.input.as_str(), style),
@@ -606,7 +612,7 @@ impl Pane for StatusBar<'_> {
         // Find / replace (#144): the query line plus a match count or the
         // available actions for the current step.
         if let Mode::Search(s) = &app.mode {
-            let style = Style::default().fg(Color::Black).bg(Color::Yellow);
+            let style = Style::default().fg(theme.on_accent).bg(theme.match_current);
             let prompt = Paragraph::new(Line::from(Span::styled(search_status(s), style)));
             frame.render_widget(prompt, area);
             return;
@@ -679,16 +685,16 @@ impl Pane for StatusBar<'_> {
         // while actually in the editor (not browsing or editing a metadata field).
         let mode_chip = match app.mode {
             _ if !app.vim => None, // Vim mode off: no chip
-            Mode::Insert => Some(("INSERT", Color::Green)),
-            Mode::Visual { linewise: false, .. } => Some(("VISUAL", Color::Magenta)),
-            Mode::Visual { linewise: true, .. } => Some(("VISUAL LINE", Color::Magenta)),
-            Mode::Normal => Some(("NORMAL", Color::Blue)),
+            Mode::Insert => Some(("INSERT", theme.mode_insert)),
+            Mode::Visual { linewise: false, .. } => Some(("VISUAL", theme.mode_visual)),
+            Mode::Visual { linewise: true, .. } => Some(("VISUAL LINE", theme.mode_visual)),
+            Mode::Normal => Some(("NORMAL", theme.mode_normal)),
             _ => None, // not in the editor (browsing, prompt, …)
         }
         .map(|(label, bg)| {
             Span::styled(
                 format!(" {label} "),
-                Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.on_accent).bg(bg).add_modifier(Modifier::BOLD),
             )
         });
         let chip_w = mode_chip.as_ref().map_or(0, |s| s.content.chars().count());
@@ -700,11 +706,11 @@ impl Pane for StatusBar<'_> {
         spans.extend(mode_chip);
         spans.push(Span::styled(left, Style::default().add_modifier(Modifier::BOLD)));
         spans.push(Span::raw(" ".repeat(pad)));
-        spans.push(Span::styled(right, Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(right, Style::default().fg(theme.dim)));
         let line = Line::from(spans);
 
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 36))),
+            Paragraph::new(line).style(Style::default().bg(theme.status_bg)),
             area,
         );
     }
@@ -716,6 +722,7 @@ mod tests {
     use super::render_to_string as render;
     use crate::buffer::{Buffer, Cursor};
     use crate::project::Project;
+    use ratatui::style::Color;
     use ratatui::{backend::TestBackend, Terminal};
     use std::fs;
 

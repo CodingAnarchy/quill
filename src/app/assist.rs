@@ -970,7 +970,7 @@ fn thesaurus_lines(words: &[ai::thesaurus::Word]) -> Vec<Line<'static>> {
         let tail = if tags.is_empty() { String::new() } else { format!("  ({})", tags.join(" \u{b7} ")) };
         lines.push(Line::raw(format!("{} \u{2014} {}{tail}", w.text, w.definition)));
         if let Some(note) = w.note.as_deref().filter(|s| !s.is_empty()) {
-            let dim = ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray);
+            let dim = ratatui::style::Style::default().fg(crate::theme::current().dim);
             lines.push(Line::from(Span::styled(format!("    {note}"), dim)));
         }
     }
