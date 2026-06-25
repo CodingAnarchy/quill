@@ -42,11 +42,18 @@ impl Drop for TempProject {
 }
 
 mod actions;
-mod ai;
+mod ai_cost_routing;
+mod ai_generation;
+mod ai_images;
+mod ai_prose;
+mod ai_qa_trackers;
 mod analysis;
 mod annotations;
 mod books;
-mod chapters;
+mod chapters_continuous;
+mod chapters_counts_and_perf;
+mod chapters_editing;
+mod chapters_sections;
 mod configure;
 mod editing;
 mod models;
@@ -72,6 +79,19 @@ fn key(code: KeyCode) -> KeyEvent {
 fn type_str(app: &mut App, s: &str) {
     for c in s.chars() {
         app.on_key(key(KeyCode::Char(c)));
+    }
+}
+
+/// A continuity result with one event and the given findings — shared by the
+/// continuity-tracker tests and the triage tests (#318 split).
+fn cont_with(findings: Vec<continuity::Finding>) -> Continuity {
+    Continuity {
+        events: vec![continuity::Event {
+            description: "alpha event".into(),
+            chapter: "One".into(),
+            story_order: 1,
+        }],
+        findings,
     }
 }
 
