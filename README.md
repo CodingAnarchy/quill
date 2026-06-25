@@ -106,7 +106,9 @@ keystrokes that stay out of the way.
   **routing policy** (`[ai] routing`) that picks per action — keeping cheap,
   frequent work on-device and reserving the paid cloud model for the passes whose
   size needs it, surfacing the choice (cloud $ vs. free local) when it matters.
-  Full design, model choices, and privacy model in
+  With several local models available (`[ai] local_models`), the router also
+  picks the right-sized one per request — a small model for a quick lookup, a
+  larger one for a heavy pass. Full design, model choices, and privacy model in
   [`docs/ai-features.md`](docs/ai-features.md).
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —

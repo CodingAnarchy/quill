@@ -235,8 +235,8 @@ impl App {
                     return;
                 }
                 AiStart::Run(backend) => {
-                    // Route this step to the backend the router picked (#372).
-                    self.routed_backend.set(Some(backend));
+                    // Route this step to the backend (and local model) the router picked.
+                    self.route_request(backend, ai_action, false);
                     self.start_async_step(ai_action);
                     return;
                 }

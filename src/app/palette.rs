@@ -215,13 +215,36 @@ impl App {
         match self.ai_action_start(action, force) {
             AiStart::Run(backend) => {
                 // Route this request to the chosen backend (consumed by backend_spec).
-                self.routed_backend.set(Some(backend));
+                self.route_request(backend, action, force);
                 self.run_ai_action(action, force);
             }
             AiStart::Confirm { label, offer_local } => {
                 self.open_prompt(Pending::ConfirmAi { action, force, offer_local }, label, "", None)
             }
         }
+    }
+
+    /// Set the one-shot routing for the next AI request (#372/#377): the backend,
+    /// plus — when it's local — the model the router picks for this action's size
+    /// from the author's configured set. Both are consumed by `backend_spec`.
+    pub(crate) fn route_request(&self, backend: BackendKind, action: AiAction, force: bool) {
+        self.routed_backend.set(Some(backend));
+        if backend == BackendKind::Local {
+            self.routed_model.set(self.pick_local_model(action, force));
+        }
+    }
+
+    /// The local model best suited to this action (#377): the router picks from the
+    /// author's downloaded set (`[ai] local_models`) by the pass's size. `None`
+    /// when no set is configured — the backend then loads the single recommended
+    /// model, as before.
+    fn pick_local_model(&self, action: AiAction, force: bool) -> Option<&'static ai::model_select::Model> {
+        let available = ai::model_select::available(&self.ai.local_models);
+        if available.is_empty() {
+            return None;
+        }
+        let tokens = (self.pass_context_len(action, force) / 4) as u32;
+        ai::model_select::pick_for(tokens, &available)
     }
 
     /// The cost decision for a network AI action (#82): run it now, or confirm

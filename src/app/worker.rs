@@ -16,9 +16,10 @@ const LOCAL_UNAVAILABLE: &str =
 pub(super) enum BackendSpec {
     /// The Claude HTTP backend, with its API key.
     Claude(String),
-    /// The local backend, sharing `App`'s cache slot so the loaded model is
-    /// reused across requests.
-    Local(Arc<Mutex<Option<Arc<dyn Backend>>>>),
+    /// The local backend, sharing `App`'s per-model cache so a loaded model is
+    /// reused across requests. The `Model` (#377) is the one the router picked, or
+    /// `None` to load the single hardware-recommended model.
+    Local(Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>, Option<&'static ai::model_select::Model>),
 }
 
 impl BackendSpec {
@@ -26,27 +27,39 @@ impl BackendSpec {
     pub(super) fn build(self) -> Result<Arc<dyn Backend>, ai::AiError> {
         match self {
             BackendSpec::Claude(key) => Ok(Arc::new(ClaudeBackend::new(key))),
-            BackendSpec::Local(slot) => build_local(slot),
+            BackendSpec::Local(slot, model) => build_local(slot, model),
         }
     }
 }
 
-/// Load the local model once and cache it in the shared slot, reusing it on later
+/// Load the chosen local model once and cache it under its id, reusing it on later
 /// requests (the model resets its KV cache each request, so reuse is correct).
+/// `None` loads the single hardware-recommended model (cached under `"auto"`), so
+/// an author who configured no model set keeps the prior behavior (#377).
 #[cfg(feature = "local")]
-fn build_local(slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Backend>, ai::AiError> {
-    let mut guard = slot.lock().map_err(|_| ai::AiError::Internal("model lock poisoned".into()))?;
-    if let Some(backend) = guard.as_ref() {
+fn build_local(
+    slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
+    model: Option<&'static ai::model_select::Model>,
+) -> Result<Arc<dyn Backend>, ai::AiError> {
+    let key = model.map_or("auto", ai::model_select::Model::id);
+    let mut cache = slot.lock().map_err(|_| ai::AiError::Internal("model lock poisoned".into()))?;
+    if let Some(backend) = cache.get(key) {
         return Ok(backend.clone());
     }
-    let (backend, _rec) = ai::local::LocalBackend::recommended()?;
-    let backend: Arc<dyn Backend> = Arc::new(backend);
-    *guard = Some(backend.clone());
+    let loaded = match model {
+        Some(m) => ai::local::LocalBackend::for_model(m)?,
+        None => ai::local::LocalBackend::recommended()?.0,
+    };
+    let backend: Arc<dyn Backend> = Arc::new(loaded);
+    cache.insert(key.to_string(), backend.clone());
     Ok(backend)
 }
 
 #[cfg(not(feature = "local"))]
-fn build_local(_slot: Arc<Mutex<Option<Arc<dyn Backend>>>>) -> Result<Arc<dyn Backend>, ai::AiError> {
+fn build_local(
+    _slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
+    _model: Option<&'static ai::model_select::Model>,
+) -> Result<Arc<dyn Backend>, ai::AiError> {
     Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
 }
 
@@ -389,8 +402,10 @@ impl App {
     /// the worker thread.
     pub(super) fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
         // The hybrid router (#372) may have picked a backend for this one request;
-        // otherwise fall back to the session backend. Consumed once.
+        // otherwise fall back to the session backend. Both one-shots are consumed
+        // every call so a choice never leaks into a later request.
         let chosen = self.routed_backend.take().unwrap_or_else(|| self.ai.backend());
+        let model = self.routed_model.take();
         self.ai.ready_for(chosen)?;
         // Fail fast on the UI thread when local wasn't compiled in, before we
         // record it as in-flight or spawn a worker just to error.
@@ -408,7 +423,8 @@ impl App {
                     .ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
                 BackendSpec::Claude(key.to_string())
             }
-            ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone()),
+            // The router (#377) may have picked a specific model for this pass.
+            ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone(), model),
         })
     }
 
@@ -426,7 +442,7 @@ impl App {
     /// chosen `backend`. Mid-workflow it runs as the suspended step; otherwise
     /// directly. Shared by the cloud / local choices of the confirm.
     pub(crate) fn run_confirmed_ai(&mut self, action: AiAction, force: bool, backend: ai::BackendKind) {
-        self.routed_backend.set(Some(backend));
+        self.route_request(backend, action, force); // backend + the picked local model (#377)
         if self.workflow_run.is_some() {
             self.start_async_step(action);
         } else {

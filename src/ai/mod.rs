@@ -318,6 +318,10 @@ pub struct Settings {
     /// Hybrid routing policy (#372): how to pick local vs remote per action.
     /// Defaults to `configured` (always `backend`), so routing is opt-in.
     pub routing: router::Policy,
+    /// The local models the author wants available (#377), by id (`["1.5B",
+    /// "7B"]`); the router picks the best of these per request. Empty ⇒ the single
+    /// hardware-recommended model, as before.
+    pub local_models: Vec<String>,
     /// Privacy switch: when true, force the local backend so nothing ever leaves
     /// the machine, regardless of `backend`.
     pub offline: bool,
@@ -341,6 +345,7 @@ impl Default for Settings {
             enabled: false,
             backend: BackendKind::Claude,
             routing: router::Policy::Configured,
+            local_models: Vec::new(),
             offline: false,
             model: default_model(),
             api_key: None,

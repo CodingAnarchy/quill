@@ -105,6 +105,10 @@ pub struct App {
     /// The backend of the in-flight AI request (#372), for the status indicator:
     /// set when a request is built, cleared when it resolves.
     ai_in_flight: std::cell::Cell<Option<ai::BackendKind>>,
+    /// One-shot local model the router picked for the next request (#377), set
+    /// beside `routed_backend` when routing on-device and consumed by
+    /// `backend_spec`. `None` ⇒ the single hardware-recommended model.
+    routed_model: std::cell::Cell<Option<&'static ai::model_select::Model>>,
     /// Inline author annotations (#302) for the active chapter, as live buffer
     /// ranges (sorted by start). Loaded when the chapter changes and re-anchored
     /// on the idle tick; empty in the continuous view. The chapter `.md` never
@@ -185,10 +189,11 @@ pub struct App {
     /// loop tick by [`App::poll_vc`].
     vc_task: Task<VcMsg>,
     /// The loaded local backend, cached after first use (loading a model is slow)
-    /// and shared with the worker thread. Empty until the first local request;
-    /// stays empty when the Claude backend is used. Type-erased so it needs no
+    /// and shared with the worker thread. Keyed by model id (#377) so several
+    /// downloaded models can be cached and reused as the router picks between them;
+    /// empty until the first local request. Type-erased so it needs no
     /// `local`-feature cfg here.
-    local_backend: Arc<Mutex<Option<Arc<dyn Backend>>>>,
+    local_backend: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
     /// Cached local image model (#240), loaded once on first use and reused;
     /// empty for the remote image backend. Type-erased like `local_backend`.
     image_backend: Arc<Mutex<Option<Arc<dyn ai::image::ImageBackend>>>>,
@@ -288,6 +293,7 @@ impl App {
             spell_flags: Vec::new(),
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
+            routed_model: std::cell::Cell::new(None),
             annotations,
             annotations_chapter,
             vim_state: VimState::default(),
@@ -313,7 +319,7 @@ impl App {
             image: ai::image::ImageSettings::load(),
             ai_task: Task::idle(),
             vc_task: Task::idle(),
-            local_backend: Arc::new(Mutex::new(None)),
+            local_backend: Arc::new(Mutex::new(HashMap::new())),
             image_backend: Arc::new(Mutex::new(None)),
             pending_portraits: None,
             pending_findings: Vec::new(),
