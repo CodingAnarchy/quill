@@ -23,6 +23,11 @@ keystrokes that stay out of the way.
 - **Markdown-aware editing** — incremental `tree-sitter` parse drives live
   syntax highlighting, soft-rendered emphasis (markers hidden until you edit a
   span), and an in-chapter outline (Ctrl-O).
+- **Spell-checking** — misspelled words are underlined as you write (a bundled
+  en_US dictionary, checked off the keystroke path so typing stays instant);
+  accept invented names into a per-project dictionary, and sweep the flags from
+  the command palette or with `]s` / `[s` in Vim mode. See
+  [Spell-checking](#spell-checking).
 - **Project as a folder of chapters** — a `book.toml` manifest plus one
   Markdown file per chapter; create, rename, reorder, and delete chapters from
   the chapter browser (Ctrl-G) without touching the filesystem.
@@ -43,6 +48,12 @@ keystrokes that stay out of the way.
   (portable, and your other keys are preserved), with status shown in the pane.
 - **Book & series metadata** — title, subtitle, author, and series, stored in
   the `book.toml` manifest and shown as a header above the chapter list.
+- **Multi-book series & tree navigation** — a project can hold a whole series
+  (a `[[books]]` array, each book with its own parts and chapters) or a single
+  standalone novel, unchanged. **Switch book** (Ctrl-K) moves the editor, pane,
+  and reports between books; the **Project tree** navigator (Ctrl-K) walks the
+  series → book → part → chapter tree and jumps anywhere; word counts roll up at
+  every level and the progress report leads with a series total.
 - **Progress report** — set writing goals (target words, chapters, start date)
   in the manifest and press Ctrl-R for a one-screen report: completion against
   goals, a projected final length from your chapter pace, writing rate, and a
@@ -76,6 +87,22 @@ keystrokes that stay out of the way.
   For a multi-book **series**, the menu offers each format twice — the whole
   series (books in reading order, each delimited per format: Markdown/Word book
   headings, Scrivener book folders) or just the active book.
+
+- **AI assistance (opt-in)** — off by default; a draft only leaves the machine
+  when you enable AI and supply a key. Quill's AI is an **assistant, not a
+  co-writer** — it tracks, outlines, marks, observes, and looks up, but never
+  drafts or rewrites your prose. Talking to the Claude API (prompt caching, the
+  Batch API, structured outputs), it keeps a human-readable **story bible** in
+  the project and offers: character profiles & arcs; a timeline with continuity
+  findings; a setting / worldbuilding bible with rule-break findings;
+  outline / beat-sheet scaffolding (with `xxx` gap markers); name & term
+  consistency; prose & style and editorial reads (findings, never fixes); an
+  in-context **thesaurus** (candidate words for a slot you pick); notes import
+  into the bible; "ask the manuscript" Q&A; and off-manuscript artifacts
+  (synopsis, blurb, query letter, marketing / social copy). Findings collect in a
+  navigable **revision triage** list, and for a multi-book series the bible and
+  its findings span every book. Full design, model choices, and privacy model in
+  [`docs/ai-features.md`](docs/ai-features.md).
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
@@ -165,14 +192,14 @@ yours and travels well in git.
 
 A project usually holds one book — the manifest's `title`, optional `[[parts]]`,
 and `[[chapters]]` describe it directly. A project can also hold a **series of
-books** (the start of [multi-book support](#project-structure-multi-book-series--tree-navigation)): the manifest
-grows a `[[books]]` array, each book carrying its own `title`, `[[parts]]`, and
-`[[chapters]]`, with `title`/`author` at the top level naming the series. A
-standalone novel's `book.toml` has no `books` table and is read and written
-exactly as before — adding a series never changes a single-book file. When a
-project does hold several books, Quill opens the first one; switch between them
-with the **Switch book** command (the run-action menu, `Ctrl-K`). Navigating the
-whole series as a tree comes next in the epic.
+books**: the manifest grows a `[[books]]` array, each book carrying its own
+`title`, `[[parts]]`, and `[[chapters]]`, with `title`/`author` at the top level
+naming the series. A standalone novel's `book.toml` has no `books` table and is
+read and written exactly as before — adding a series never changes a single-book
+file. When a project does hold several books, Quill opens the first one; switch
+between them with the **Switch book** command, or walk the whole series →
+book → part → chapter tree with the **Project tree** navigator (both in the
+run-action menu, `Ctrl-K`).
 
 Quill writes each chapter back unchanged except for one normalization: a
 non-empty file ends with exactly one trailing newline (the POSIX/git
@@ -513,97 +540,28 @@ src/
 
 ## Roadmap
 
-The Markdown manuscript format, the project model, chapter/book metadata, and the
-progress report have **shipped** — see the Features section above. The sections
-below are forward-looking.
+Quill is a working editor today — everything in **Features** above has shipped,
+including the multi-book series model and tree navigation, Vim mode, export to
+Word / Scrivener / Vellum, the AI assistance surface and its series-spanning
+story bible, and the performance and stability hardening (atomic saves, crash
+recovery, foreseeable-error handling, and a property-tested data path, backed by
+the benchmarked `cargo perf` suite in [`docs/performance.md`](docs/performance.md)).
 
-### Project structure: multi-book series & tree navigation
+What remains genuinely ahead:
 
-A project is a flat, ordered list of chapter files with an optional `parts`
-overlay (named, inclusive chapter ranges). The manifest can now also record a
-**series of books** — a `[[books]]` array, each book with its own parts and
-chapters (see [Project & file format](#project--file-format)); a standalone
-novel's file is unchanged, and Quill opens the first book. Still ahead:
+- **Local-model backend (fully offline AI)** — run the AI features against an
+  in-process quantized model (via [`candle`](https://github.com/huggingface/candle),
+  Metal on Apple Silicon) so nothing ever leaves the machine, as an alternative
+  to the Claude backend. The engine exists behind a `local` cargo feature;
+  selecting it from settings is the remaining wiring. Until then the AI features
+  use the Claude API (opt-in, off by default).
 
-- **Series support** — *landed:* the manifest models a series → book → part →
-  chapter tree, and the **Switch book** command moves the editor, chapter pane,
-  and reports between books from inside Quill.
-- **Tree navigation** — *landed:* the **Project tree** navigator (run-action
-  menu, `Ctrl-K`) walks the full series → book → part → chapter tree and jumps to
-  any chapter (expanding books, switching the active book as needed).
-- **Rolled-up counts** — *landed:* the tree shows a word count at every level
-  (chapter, part, book, and the whole series), and the progress report leads with
-  a series total for a multi-book project. Per-book goals live in each book's
-  manifest entry.
-- **Series export** — *landed:* the export menu (`Ctrl-E`) compiles either the
-  whole series (books in order, each delimited per format) or just the active
-  book, in any of the four formats. A standalone novel's export is unchanged.
-- **Series story bible** — *landed:* **Refresh series bible** (the `Ctrl-K` menu)
-  brings characters, the timeline, and the setting up to date across every book —
-  one book per AI call, in reading order, so the bible spans the series without
-  ever sending the whole saga at once. Each book builds on the bible the earlier
-  books wrote; only changed books re-run, and `Esc` cancels. Because each book is
-  checked against that accumulated bible, the timeline and setting **findings span
-  the series too** — a contradiction between book one and book three (a character
-  who died reappearing, a world rule broken later) lands in revision triage,
-  attributed to its book, and jumping to it switches books.
-
-### AI assistance (Claude)
-
-Opt-in, off by default — a draft only leaves the machine when the author enables
-it and supplies a key. Talks to the Claude Messages API directly (no official
-Rust SDK), defaulting to `claude-opus-4-8`, using structured outputs, prompt
-caching (the manuscript is the ideal cache prefix), and the Batch API. Features
-read/write a human-readable **story bible** kept in the project.
-
-- **Character tracking** — AI-summarized profiles with per-chapter traits,
-  relationships, and arc, plus drift/contradiction flags.
-- **Timeline & continuity** — extract and order events; flag contradictions
-  (a character in two places, an object used after it's destroyed).
-- **Scaffolding** — generate outlines/beat sheets from a premise or partial
-  draft and insert `xxx` TODO markers at gaps (feeding the progress report).
-- **Setting & worldbuilding** — extract a setting bible (geography,
-  magic/tech systems, factions) and flag prose that breaks established rules.
-- **Also planned** — naming/term consistency, prose & style checks, "ask the
-  manuscript" Q&A, a selection rewrite assistant, synopsis/blurb generation,
-  and a local-model backend for fully offline use.
-- Full design, model choices, and privacy model in
-  [`docs/ai-features.md`](docs/ai-features.md).
-
-### Vim-style keybindings & modes
-
-- **Opt-in** modal editing for authors with Vim muscle memory; the default
-  modeless editing is unchanged when it's off.
-- Normal / Insert / Visual modes with a mode indicator; motions (`hjkl`,
-  `w b e`, `0 ^ $`, `gg`/`G`) and counts.
-- Operators with motions and text objects (`d`/`c`/`y` + `iw`/`aw`/…),
-  `x`, `p`/`P`, undo/redo, registers.
-- Search (`/`, `n`/`N`) and a command line (`:w`, `:q`, `:wq`); later,
-  configurable keybindings.
-
-### Export to Word / Scrivener / Vellum
-
-- Export the manuscript and its structure to the formats publishing actually
-  uses: Word (`.docx`, standard manuscript format), Scrivener (binder
-  hierarchy), and Vellum (per-chapter import).
-- Carry structural metadata through where supported — chapter titles become
-  titles, epigraphs render in place.
-- Word is the highest-leverage target: it's the submission standard, and both
-  Vellum and Scrivener import `.docx`.
-
-### Hardening: performance & stability
-
-Cross-cutting passes scheduled *after* the skeleton and feature set are built
-out. Small wins happen inline during feature work; these are the deliberate,
-focused passes before Quill is a daily driver.
-
-- **Performance** — stay instant on real manuscripts: typing, scrolling,
-  navigation, and save remain snappy from a short story up to a multi-book
-  series, backed by a benchmark suite with documented targets (run with
-  `cargo perf`; corpus and budgets in [`docs/performance.md`](docs/performance.md)).
-- **Stability** — never lose an author's words: atomic saves, autosave and
-  crash recovery, panic-free error handling, and a fuzzed, property-tested data
-  path.
+The **AI boundary is fixed, not a roadmap item**: Quill's AI is an *assistant,
+not a co-writer*. It tracks, outlines, marks, observes, and looks up — it never
+drafts, rewrites, or suggests manuscript prose. (An earlier "selection rewrite
+assistant" idea was retired on exactly this principle; off-manuscript artifacts
+like a synopsis or query letter are the only prose the AI produces.) The full
+design and privacy model live in [`docs/ai-features.md`](docs/ai-features.md).
 
 ## License
 
