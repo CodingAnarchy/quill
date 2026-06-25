@@ -700,12 +700,14 @@ impl Pane for StatusBar<'_> {
             let dirty = if dirtied { " ●" } else { "" };
             // Persistent AI indicator (independent of the transient message, which
             // clears on the next keystroke): in-flight spinner, else an enabled tag.
+            // While a request is in flight, name the backend it's actually running
+            // on (#372) — `⟳ Claude` or `⟳ local` — so a routed pass is visible.
             let ai_tag = if app.ai_busy() {
-                " · ⟳ Claude"
+                format!(" · ⟳ {}", app.ai_in_flight_label())
             } else if app.ai.enabled {
-                " · AI"
+                " · AI".to_string()
             } else {
-                ""
+                String::new()
             };
             // Version-control indicator (#54/#132): a clean repo shows "git", an
             // uncommitted one shows the changed-file count.

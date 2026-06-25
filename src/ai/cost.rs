@@ -43,6 +43,13 @@ pub fn label(est: &Estimate, model: &str) -> String {
     format!("{tokens} · ~${:.2} on {model}", est.dollars)
 }
 
+/// A label that compares the two backends for the routing confirm (#372): the
+/// remote dollar estimate beside the free on-device alternative, so the choice
+/// is grounded in a visible rationale rather than a hidden heuristic.
+pub fn compare_label(est: &Estimate, model: &str) -> String {
+    format!("{} — or free on-device", label(est, model))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +78,13 @@ mod tests {
         let l = label(&est, "claude-opus-4-8");
         assert!(l.contains("~31k tokens"), "{l}");
         assert!(l.contains("on claude-opus-4-8"), "{l}");
+    }
+
+    #[test]
+    fn compare_label_shows_both_backends() {
+        let est = estimate(124_000, 8192, "claude-opus-4-8");
+        let l = compare_label(&est, "claude-opus-4-8");
+        assert!(l.contains("on claude-opus-4-8"), "the remote price: {l}");
+        assert!(l.contains("free on-device"), "the local alternative: {l}");
     }
 }

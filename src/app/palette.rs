@@ -4,15 +4,16 @@
 
 use super::*;
 
-use crate::ai::{cost, naming};
+use crate::ai::{self, cost, naming, router, BackendKind};
 use crate::mode::{Action, AiAction, ExportScope};
 use super::assist::list_move;
 
-/// The cost decision for starting a network AI action (#82): either run it now,
-/// or confirm first (the estimate exceeds the threshold) with the confirm label.
+/// The routing decision for starting an AI action (#82/#372): run it now on a
+/// chosen backend, or confirm first (the estimate is over the threshold) — the
+/// confirm optionally offering "run locally instead" as a third choice.
 pub(crate) enum AiStart {
-    Run,
-    Confirm(String),
+    Run(BackendKind),
+    Confirm { label: String, offer_local: bool },
 }
 
 impl App {
@@ -81,7 +82,7 @@ impl App {
             Action::Ai(AiAction::Portrait | AiAction::Scene) => {
                 self.image_backend_spec().err().map(|e| e.to_string())
             }
-            Action::Ai(_) => self.ai.check_ready().err().map(|e| e.to_string()),
+            Action::Ai(_) => self.ai_startable(),
             // Export compiles per-chapter files; the continuous view holds an
             // unsaved window, so leave it first.
             Action::Export(_) if self.manuscript.is_some() => {
@@ -101,6 +102,32 @@ impl App {
             Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
             _ => None,
         }
+    }
+
+    /// Whether an AI action can start (#372), or why not. Normally the active
+    /// backend's readiness — but under a routing policy with a usable local
+    /// backend, an action can still run on-device even when Claude has no key, so
+    /// it isn't blocked. The default `Configured` policy keeps the exact prior
+    /// behavior (the session backend's readiness).
+    fn ai_startable(&self) -> Option<String> {
+        // The active backend being ready always suffices — covers `configured`, a
+        // keyed Claude, and the `offline` pin (exact prior behavior).
+        if self.ai.check_ready().is_ok() {
+            return None;
+        }
+        // Otherwise, only a policy that can actually fall back to local — not
+        // `prefer-cloud`, which always picks Claude — can run on a compiled-in
+        // on-device backend without a key. (A cheap check: the precise per-pass
+        // route would need the cost estimate, not worth a manuscript read per
+        // menu item; an unkeyed pass a policy still sends to Claude fails at run
+        // with the usual message.)
+        let local_fallback = cfg!(feature = "local")
+            && self.ai.enabled
+            && matches!(self.ai.routing, router::Policy::PreferLocal | router::Policy::CostCeiling | router::Policy::Ask);
+        if local_fallback {
+            return None;
+        }
+        self.ai.check_ready().err().map(|e| e.to_string())
     }
 
     /// Run a registry [`Action`] (#225) through the existing code path for its
@@ -186,9 +213,13 @@ impl App {
     /// interactive actions (Ask, Triage) run immediately.
     pub(crate) fn start_ai_action(&mut self, action: AiAction, force: bool) {
         match self.ai_action_start(action, force) {
-            AiStart::Run => self.run_ai_action(action, force),
-            AiStart::Confirm(label) => {
-                self.open_prompt(Pending::ConfirmAi(action, force), label, "", None)
+            AiStart::Run(backend) => {
+                // Route this request to the chosen backend (consumed by backend_spec).
+                self.routed_backend.set(Some(backend));
+                self.run_ai_action(action, force);
+            }
+            AiStart::Confirm { label, offer_local } => {
+                self.open_prompt(Pending::ConfirmAi { action, force, offer_local }, label, "", None)
             }
         }
     }
@@ -198,19 +229,32 @@ impl App {
     /// ([`start_ai_action`]) and the workflow runner (#227) so a workflow's AI
     /// step follows the same cost policy.
     pub(crate) fn ai_action_start(&self, action: AiAction, force: bool) -> AiStart {
-        // The local backend is free, so there's nothing to confirm — run directly.
-        if self.ai.backend() == ai::BackendKind::Local {
-            return AiStart::Run;
-        }
         let Some((model, max_tokens)) = self.cost_profile(action) else {
-            // Interactive / local-only action — no whole-manuscript request to estimate.
-            return AiStart::Run;
+            // Interactive / image action — no costed pass to route; run on the
+            // session backend (which an `offline` pin / the in-app switch resolve).
+            return AiStart::Run(self.ai.backend());
         };
+        // Estimate the remote cost, then let the hybrid router (#372) pick a backend
+        // from the policy, the estimate, and each backend's readiness.
         let est = cost::estimate(self.pass_context_len(action, force), max_tokens, model);
-        if est.dollars > self.ai.cost_threshold {
-            AiStart::Confirm(format!("{} — run? (y/N)", cost::label(&est, model)))
-        } else {
-            AiStart::Run
+        let route = router::route(&router::Inputs {
+            policy: self.ai.routing,
+            configured: self.ai.backend,
+            offline: self.ai.offline,
+            local_available: cfg!(feature = "local"),
+            est,
+            threshold: self.ai.cost_threshold,
+        });
+        match route.confirm {
+            None => AiStart::Run(route.backend),
+            Some(c) if c.offer_local => AiStart::Confirm {
+                label: format!("{} — y Claude · l local · N cancel", cost::compare_label(&est, model)),
+                offer_local: true,
+            },
+            Some(_) => AiStart::Confirm {
+                label: format!("{} — run? (y/N)", cost::label(&est, model)),
+                offer_local: false,
+            },
         }
     }
 
