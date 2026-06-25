@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Shadow, Wrap},
     Frame,
 };
 
@@ -46,44 +46,38 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     // A full-screen read-only overlay (progress / analysis report or AI answer),
-    // scrollable when it runs past the screen.
+    // scrollable when it runs past the screen, replaces the editor entirely.
     if let Some(overlay) = &app.overlay {
         draw_overlay(frame, area, &app.project.manifest.title, overlay);
         return;
     }
-    if let Mode::BibleReview(review) = &app.mode {
-        draw_bible_review(frame, area, review);
-        return;
-    }
-    if let Mode::Findings(findings) = &app.mode {
-        draw_findings(frame, area, findings, &app.project);
-        return;
-    }
-    if let Mode::Annotations { selected } = app.mode {
-        draw_annotations(frame, area, app, selected);
-        return;
-    }
-    if let Mode::ProjectSearch(ps) = &app.mode {
-        draw_project_search(frame, area, ps);
-        return;
-    }
-    if let Mode::Palette(palette) = &app.mode {
-        draw_palette(frame, area, palette);
-        return;
-    }
-    if let Mode::Tree(tree) = &app.mode {
-        draw_tree(frame, area, app, tree);
-        return;
-    }
-    if let Mode::ProjectBrowser(browser) = &app.mode {
-        draw_project_browser(frame, area, browser, &app.project.root);
-        return;
-    }
-    if let Mode::DirBrowser(browser) = &app.mode {
-        draw_dir_browser(frame, area, browser);
-        return;
-    }
 
+    // The editor is always the base layer; modal surfaces (#349) float over it on
+    // a dimmed backdrop, so the active surface is unmistakable and the editor
+    // recedes without disappearing.
+    draw_editor_base(frame, area, app);
+
+    // Box overlays each render through the shared `modal` frame (dim + shadow);
+    // a prompt lives on the status line, so it only dims the editor behind it.
+    match &app.mode {
+        Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
+        Mode::Findings(findings) => modal(frame, area, |f, r| draw_findings(f, r, findings, &app.project)),
+        Mode::Annotations { selected } => modal(frame, area, |f, r| draw_annotations(f, r, app, *selected)),
+        Mode::ProjectSearch(ps) => modal(frame, area, |f, r| draw_project_search(f, r, ps)),
+        Mode::Palette(palette) => modal(frame, area, |f, r| draw_palette(f, r, palette)),
+        Mode::Tree(tree) => modal(frame, area, |f, r| draw_tree(f, r, app, tree)),
+        Mode::ProjectBrowser(browser) => {
+            modal(frame, area, |f, r| draw_project_browser(f, r, browser, &app.project.root))
+        }
+        Mode::DirBrowser(browser) => modal(frame, area, |f, r| draw_dir_browser(f, r, browser)),
+        Mode::Prompt(_) => dim_backdrop(frame, area),
+        _ => {}
+    }
+}
+
+/// Draw the editor base layer: the prose pane (with the outline strip when shown)
+/// and the status line beneath it. Always drawn; modal overlays float on top.
+fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -105,6 +99,53 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     draw_editor_region(frame, editor_area, app);
     StatusBar(app).render(frame, chunks[1]);
+}
+
+/// Layer a floating modal over the already-drawn editor (#349): dim the editor as
+/// a backdrop, drop a shadow, clear the box area, then hand the inner rect to the
+/// overlay's own renderer. The single place every box overlay gets visual depth,
+/// so they're all treated alike rather than each opting in.
+fn modal(frame: &mut Frame, screen: Rect, draw_box: impl FnOnce(&mut Frame, Rect)) {
+    dim_backdrop(frame, screen);
+    let inner = modal_area(screen);
+    // The shadow sits down-and-right of the box, over the dimmed editor; shade
+    // glyphs render on any terminal, so the depth survives a limited palette.
+    let shadow = Shadow::dark_shade().style(Style::default().fg(crate::theme::current().dim));
+    frame.render_widget(&shadow, inner);
+    frame.render_widget(Clear, inner); // wipe the dimmed editor under the box so it stays crisp
+    draw_box(frame, inner);
+}
+
+/// The centered rect a floating modal occupies: inset from the screen so a dimmed
+/// margin (and the shadow) shows around it, and clear of the bottom status line.
+fn modal_area(screen: Rect) -> Rect {
+    let mx = (screen.width / 12).clamp(2, 8);
+    let my = (screen.height / 10).clamp(1, 4);
+    Rect {
+        x: screen.x + mx,
+        y: screen.y + my,
+        width: screen.width.saturating_sub(mx * 2),
+        // Leave the top/bottom margins plus the status line (and a row for the shadow).
+        height: screen.height.saturating_sub(my * 2 + 1),
+    }
+}
+
+/// De-emphasize the editor behind a modal by dimming every cell above the status
+/// line (#349). O(area), about what the live word count already costs per frame.
+/// `Modifier::DIM` degrades gracefully — a terminal that ignores it just shows the
+/// editor at normal brightness, with the framed, shadowed overlay still on top.
+fn dim_backdrop(frame: &mut Frame, screen: Rect) {
+    let buf = frame.buffer_mut();
+    let bottom = screen.bottom().saturating_sub(1); // keep the status line legible
+    for y in screen.top()..bottom {
+        for x in screen.left()..screen.right() {
+            let cell = &mut buf[(x, y)];
+            cell.modifier.insert(Modifier::DIM);
+            // Drop bold too: bold and faint fight on most terminals, so a bold
+            // heading wouldn't otherwise recede with the rest of the page.
+            cell.modifier.remove(Modifier::BOLD);
+        }
+    }
 }
 
 /// Render the whole app to a plain-text screen of the given size — a shared
@@ -793,6 +834,21 @@ mod tests {
 
         println!("render {words}w + 150-chapter outline = {dt:?}");
         assert!(dt.as_millis() < 16, "render took {dt:?}");
+
+        // And again with a modal overlay open (#349): the same editor plus the
+        // O(screen) backdrop dim and the shadowed box. Confirms the depth pass
+        // doesn't push a full frame past budget.
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL)); // open the run-action palette
+        assert!(matches!(app.mode, Mode::Palette(_)));
+        terminal.draw(|f| draw(f, &app)).unwrap(); // warm
+        let t = Instant::now();
+        for _ in 0..30 {
+            terminal.draw(|f| draw(f, &app)).unwrap();
+        }
+        let modal_dt = t.elapsed() / 30;
+        println!("render with a modal overlay = {modal_dt:?}");
+        assert!(modal_dt.as_millis() < 16, "modal render took {modal_dt:?}");
     }
 
     #[test]
@@ -927,6 +983,45 @@ mod tests {
         app.focus_mode = true;
         assert_eq!(first_letter_fg(&app, "alpha"), Some(dim), "the other paragraph dims");
         assert_ne!(first_letter_fg(&app, "bravo"), Some(dim), "the focused paragraph stays normal");
+    }
+
+    #[test]
+    fn an_open_modal_dims_the_editor_and_casts_a_shadow() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = app_with("# Heading one\n\nThe night was dark and long.\n");
+
+        let render = |app: &App| {
+            let mut t = Terminal::new(TestBackend::new(80, 20)).unwrap();
+            t.draw(|f| draw(f, app)).unwrap();
+            t.backend().buffer().clone()
+        };
+
+        // No modal open: nothing behind is dimmed.
+        let plain = render(&app);
+        let plain_dim = (0..80u16)
+            .flat_map(|x| (0..20u16).map(move |y| (x, y)))
+            .filter(|&(x, y)| plain[(x, y)].modifier.contains(Modifier::DIM))
+            .count();
+        assert_eq!(plain_dim, 0, "nothing is dimmed without a modal");
+
+        // Palette open: the editor behind dims, and the box casts a shadow.
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        assert!(matches!(app.mode, Mode::Palette(_)), "Ctrl-K opened the palette");
+        let buf = render(&app);
+        let mut dimmed = 0usize;
+        let mut shadow = false;
+        for y in 0..20u16 {
+            for x in 0..80u16 {
+                if buf[(x, y)].modifier.contains(Modifier::DIM) {
+                    dimmed += 1;
+                }
+                if buf[(x, y)].symbol() == "▓" {
+                    shadow = true;
+                }
+            }
+        }
+        assert!(dimmed > 0, "the editor behind the modal is dimmed");
+        assert!(shadow, "the modal casts a drop shadow");
     }
 
     #[test]

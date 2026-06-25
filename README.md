@@ -552,9 +552,12 @@ What remains genuinely ahead:
 - **Local-model backend (fully offline AI)** — run the AI features against an
   in-process quantized model (via [`candle`](https://github.com/huggingface/candle),
   Metal on Apple Silicon) so nothing ever leaves the machine, as an alternative
-  to the Claude backend. The engine exists behind a `local` cargo feature;
-  selecting it from settings is the remaining wiring. Until then the AI features
-  use the Claude API (opt-in, off by default).
+  to the Claude backend. It's selectable today with `[ai] backend = "local"` (or
+  `offline = true`) in `config.toml`, in a build compiled with `--features local`;
+  without that setting the AI features use the Claude API (opt-in, off by
+  default). Still ahead: switching the backend from inside Quill without editing
+  config or restarting (#371), and a hybrid router that picks local vs cloud per
+  action by cost and capability (#372).
 
 The **AI boundary is fixed, not a roadmap item**: Quill's AI is an *assistant,
 not a co-writer*. It tracks, outlines, marks, observes, and looks up — it never
