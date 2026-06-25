@@ -32,14 +32,19 @@ mod wrap;
 
 use std::io::{self, Stdout};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossterm::{
     cursor::Show,
-    event::{self, DisableMouseCapture, EnableMouseCapture},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
+        LeaveAlternateScreen,
     },
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -47,6 +52,11 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use crate::app::App;
 use crate::buffer::Buffer;
 use crate::project::Project;
+
+/// Whether the enhanced keyboard protocol was pushed at startup (#348), so
+/// teardown pops it only when we pushed it. Shared by the `Tui` drop guard and
+/// the panic hook (which has no per-instance state) via this process-global.
+static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 
 fn main() -> io::Result<()> {
     // A project lives in a directory (default: the current one).
@@ -112,6 +122,13 @@ fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
 /// mode and leaves the alternate screen, so it would skip the mouse-capture and
 /// cursor teardown that [`Tui::new`]'s `EnableMouseCapture` requires.
 fn restore_terminal(w: &mut impl io::Write) {
+    // Pop the enhanced keyboard protocol first, but only if we pushed it (#348),
+    // so a terminal that never had it enabled gets no stray escape sequence. The
+    // `swap` makes this idempotent: whichever teardown path runs first (the drop
+    // guard or the panic hook) pops, the other is a no-op.
+    if KEYBOARD_ENHANCED.swap(false, Ordering::SeqCst) {
+        let _ = execute!(w, PopKeyboardEnhancementFlags);
+    }
     let _ = disable_raw_mode();
     let _ = execute!(w, LeaveAlternateScreen, DisableMouseCapture, Show);
 }
@@ -137,6 +154,18 @@ impl Tui {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        // Turn on the terminal's enhanced ("Kitty") keyboard protocol when it's
+        // supported (#348), so combinations the legacy encoding can't tell apart
+        // — Tab vs Ctrl-I, Enter vs Ctrl-M, and various Ctrl/Shift combos — arrive
+        // as distinct key events. `DISAMBIGUATE_ESCAPE_CODES` is the high-value,
+        // low-risk flag: it doesn't add key-release/repeat events, so the existing
+        // press-only handling is unchanged. Terminals without support are left
+        // exactly as before; the query and push are best-effort.
+        if supports_keyboard_enhancement().unwrap_or(false)
+            && execute!(stdout, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)).is_ok()
+        {
+            KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
+        }
         Ok(Self {
             terminal: Terminal::new(CrosstermBackend::new(stdout))?,
         })
@@ -216,9 +245,13 @@ mod tests {
     }
 
     #[test]
-    fn restore_terminal_leaves_alt_screen_and_shows_cursor() {
+    fn restore_terminal_teardown_sequences() {
+        // Both phases share the process-global `KEYBOARD_ENHANCED`, so they're
+        // one sequential test (no cross-test race on the flag).
+
         // restore_terminal writes the teardown escapes to the given sink;
         // disable_raw_mode touches the (absent) tty and is harmlessly ignored.
+        KEYBOARD_ENHANCED.store(false, Ordering::SeqCst); // not pushed this session
         let mut out: Vec<u8> = Vec::new();
         restore_terminal(&mut out);
         let seq = String::from_utf8(out).unwrap();
@@ -226,5 +259,20 @@ mod tests {
         // shown. If these regress, a crash leaves the shell unusable.
         assert!(seq.contains("\x1b[?1049l"), "should leave alt screen: {seq:?}");
         assert!(seq.contains("\x1b[?25h"), "should show the cursor: {seq:?}");
+        // With the enhanced keyboard protocol never pushed, teardown must not emit
+        // its pop sequence — no stray escape on a terminal that didn't enable it.
+        assert!(!seq.contains("\x1b[<1u"), "no keyboard-enhancement pop when unpushed: {seq:?}");
+
+        // A session that enabled the enhanced protocol (#348) pops it on teardown.
+        KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
+        let mut out: Vec<u8> = Vec::new();
+        restore_terminal(&mut out);
+        assert!(String::from_utf8(out).unwrap().contains("\x1b[<1u"), "should pop the enhancement");
+        // The flag is cleared, so the second teardown path (panic hook after the
+        // drop guard) is a no-op — no double-pop.
+        assert!(!KEYBOARD_ENHANCED.load(Ordering::SeqCst), "flag cleared after pop");
+        let mut again: Vec<u8> = Vec::new();
+        restore_terminal(&mut again);
+        assert!(!String::from_utf8(again).unwrap().contains("\x1b[<1u"), "no double-pop");
     }
 }
