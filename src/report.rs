@@ -9,7 +9,7 @@
 //! [`lines`] to return styled rows (`Vec<Line>` or a small typed enum the UI
 //! colors) and add delta rows — not re-parse these strings for `+`/`-`.
 
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use time::Date;
 
@@ -185,7 +185,8 @@ fn delta_line(momentum: &Momentum) -> Line<'static> {
 /// A net word count as a signed, colored span: green with a `+` for a gain, red
 /// for a loss. Shared by the delta line, the per-part rows, and the daily goal.
 fn colored_net_span(net: i64) -> Span<'static> {
-    let color = if net >= 0 { Color::Green } else { Color::Red };
+    let theme = crate::theme::current();
+    let color = if net >= 0 { theme.added } else { theme.removed };
     let signed = if net >= 0 { format!("+{}", thousands(net)) } else { thousands(net) };
     Span::styled(signed, Style::default().fg(color))
 }
@@ -199,7 +200,7 @@ fn signed_delta_spans(added: usize, removed: usize) -> Vec<Span<'static>> {
         colored_net_span(net),
         Span::styled(
             format!("   (+{} -{})", thousands(added as i64), thousands(removed as i64)),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(crate::theme::current().dim),
         ),
     ]
 }
@@ -311,6 +312,7 @@ pub(crate) fn thousands(n: i64) -> String {
 mod tests {
     use super::*;
     use crate::project::{Goals, Manifest};
+    use ratatui::style::Color;
 
     fn manifest() -> Manifest {
         Manifest {

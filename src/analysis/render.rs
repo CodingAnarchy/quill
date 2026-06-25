@@ -3,7 +3,7 @@
 //! module; this is the only half that depends on `ratatui`.
 
 use super::*;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// One chapter's analysis inputs: its title, total word count (the rolled-up
@@ -354,7 +354,7 @@ fn bold(text: impl Into<String>) -> Line<'static> {
 }
 
 fn dim(text: impl Into<String>) -> Line<'static> {
-    Line::from(Span::styled(text.into(), Style::default().fg(Color::DarkGray)))
+    Line::from(Span::styled(text.into(), Style::default().fg(crate::theme::current().dim)))
 }
 
 /// Truncate to `max` characters with an ellipsis, counting by character so a

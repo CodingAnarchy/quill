@@ -272,13 +272,14 @@ impl App {
 /// Color a unified diff for the changes overlay (#135): additions green, removals
 /// red, file/hunk headers and context dimmed. Mirrors the bible-review diff.
 fn diff_lines(patch: &str) -> Vec<Line<'static>> {
+    let theme = crate::theme::current();
     patch
         .lines()
         .map(|l| {
             let color = match l.chars().next() {
-                Some('+') => Color::Green,
-                Some('-') => Color::Red,
-                _ => Color::DarkGray,
+                Some('+') => theme.added,
+                Some('-') => theme.removed,
+                _ => theme.dim,
             };
             Line::from(Span::styled(l.to_string(), Style::default().fg(color)))
         })

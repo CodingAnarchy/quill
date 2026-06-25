@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
@@ -89,6 +89,9 @@ pub struct App {
     /// quotes / em-dashes / ellipses as the author types prose. On by default;
     /// when off, typed punctuation is inserted verbatim.
     pub smart_typography: bool,
+    /// The active color theme (#300), from the `[theme]` config. Threaded through
+    /// the render path so the palette is data, not hard-coded literals.
+    pub theme: crate::theme::Theme,
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
@@ -225,6 +228,11 @@ impl App {
         let vim = editor.vim;
         let smart_typography = editor.smart_typography;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
+        let (theme, theme_warnings) = crate::config::load_theme();
+        // Make the loaded palette the active one for rendering (#300). `ui::draw`
+        // re-affirms it each frame; setting it here covers content built before
+        // the first draw (e.g. a report overlay).
+        crate::theme::set_current(theme);
         let loaded = crate::workflow::load();
         let trigger_errors = loaded.errors;
         let mut app = Self {
@@ -238,6 +246,7 @@ impl App {
             mode: if vim { Mode::Normal } else { Mode::Insert },
             vim,
             smart_typography,
+            theme,
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
@@ -290,6 +299,9 @@ impl App {
         }
         if !trigger_errors.is_empty() {
             warnings.push(format!("Workflow triggers ignored: {}", trigger_errors.join("; ")));
+        }
+        if !theme_warnings.is_empty() {
+            warnings.push(theme_warnings.join("; "));
         }
         if !warnings.is_empty() {
             app.message = Some(warnings.join(" · "));

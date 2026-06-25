@@ -50,7 +50,7 @@ pub use submission::Submission;
 
 use std::fmt;
 
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use serde::Deserialize;
 
@@ -424,7 +424,7 @@ pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
             "{} tokens in ({} cached) · {} out",
             u.input_tokens, u.cache_read_tokens, u.output_tokens
         ),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(crate::theme::current().dim),
     )));
     out
 }

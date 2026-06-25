@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::buffer::Buffer;
+use crate::theme::Theme;
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
 type ByteRange = (usize, usize);
@@ -53,7 +54,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 banner,
-                Style::default().fg(Color::Black).bg(Color::Cyan),
+                Style::default().fg(app.theme.on_accent).bg(app.theme.heading),
             ))),
             Rect { x: area.x, y: area.y, width: area.width, height: 1 },
         );
@@ -67,7 +68,7 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!(" {title}"),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            Style::default().fg(app.theme.dim).add_modifier(Modifier::BOLD),
         ))),
         Rect { x: area.x, y: area.y, width: area.width, height: 1 },
     );
@@ -235,18 +236,19 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
 /// attribution (`— Name`, dimmed), set off by blank lines. Never enters the
 /// buffer or any file.
 fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
+    let theme = crate::theme::current();
     let indent = "    ";
     let mut lines = vec![Line::raw("")];
     for line in epigraph.text.lines() {
         lines.push(Line::from(Span::styled(
             format!("{indent}{line}"),
-            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+            Style::default().fg(theme.muted).add_modifier(Modifier::ITALIC),
         )));
     }
     if let Some(attribution) = &epigraph.attribution {
         lines.push(Line::from(Span::styled(
             format!("{indent}— {attribution}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.dim),
         )));
     }
     lines.push(Line::raw(""));
@@ -261,7 +263,7 @@ fn divider_line(title: &str, width: u16) -> Line<'static> {
     Line::from(Span::styled(
         format!("{}{label}", " ".repeat(pad)),
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(crate::theme::current().dim)
             .add_modifier(Modifier::BOLD),
     ))
 }
@@ -324,6 +326,7 @@ fn styled_row(
 
     // Build runs character by character, since concealed chars are dropped and
     // visible runs may not be contiguous in the source.
+    let theme = crate::theme::current(); // once per row, not per character
     let mut spans: Vec<Span> = Vec::new();
     let mut run = String::new();
     let mut run_style = Style::default();
@@ -332,7 +335,7 @@ fn styled_row(
         if is_concealed(abs, conceal) {
             continue;
         }
-        let style = search_style(style_at(&hls, abs), abs, matches, current);
+        let style = search_style(style_at(&hls, abs, theme), abs, matches, current, theme);
         if !run.is_empty() && style != run_style {
             spans.push(Span::styled(std::mem::take(&mut run), run_style));
         }
@@ -349,11 +352,11 @@ fn styled_row(
 
 /// Merge every highlight covering `byte` into one style. Headings get a color;
 /// strong and emphasis layer on bold/italic, so nested `***x***` reads as both.
-fn style_at(hls: &[Highlight], byte: usize) -> Style {
+fn style_at(hls: &[Highlight], byte: usize, theme: Theme) -> Style {
     let mut style = Style::default();
     for h in hls.iter().filter(|h| byte >= h.start && byte < h.end) {
         style = match h.kind {
-            HighlightKind::Heading => style.fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            HighlightKind::Heading => style.fg(theme.heading).add_modifier(Modifier::BOLD),
             HighlightKind::Strong => style.add_modifier(Modifier::BOLD),
             HighlightKind::Emphasis => style.add_modifier(Modifier::ITALIC),
         };
@@ -380,14 +383,15 @@ fn search_style(
     byte: usize,
     matches: &[ByteRange],
     current: Option<ByteRange>,
+    theme: Theme,
 ) -> Style {
     if let Some((s, e)) = current {
         if byte >= s && byte < e {
-            return base.bg(Color::Yellow).fg(Color::Black);
+            return base.bg(theme.match_current).fg(theme.on_accent);
         }
     }
     if matches.iter().any(|&(s, e)| byte >= s && byte < e) {
-        return base.bg(Color::DarkGray);
+        return base.bg(theme.match_other);
     }
     base
 }

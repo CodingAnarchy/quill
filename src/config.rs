@@ -10,6 +10,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use crate::theme::Theme;
+
 /// Quill's config directory: `$XDG_CONFIG_HOME/quill`, else `$HOME/.config/quill`.
 /// Home of the config file and other global state shared across projects (e.g.
 /// the recent-projects list, #270).
@@ -119,6 +121,28 @@ impl EditorConfig {
             .map(|f| f.editor)
             .unwrap_or_default()
     }
+}
+
+/// Load the color theme from the `[theme]` section (#300): an optional `name`
+/// (`dark` / `light`) plus any per-field color overrides, all string values.
+/// Returns the theme and any warnings (bad name / field / color) for the caller
+/// to surface. A missing section (or a malformed one) yields the default theme.
+pub fn load_theme() -> (Theme, Vec<String>) {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct File {
+        // The whole `[theme]` table as string keys; `name` is pulled out, the
+        // rest are color-field overrides. Keeping it untyped means an unknown key
+        // is a reported warning, not a parse failure.
+        theme: HashMap<String, String>,
+    }
+    let mut table = config_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| toml::from_str::<File>(&t).ok())
+        .map(|f| f.theme)
+        .unwrap_or_default();
+    let name = table.remove("name");
+    Theme::from_config(name.as_deref(), &table)
 }
 
 /// The `[projects]` section (#272): where the project browser looks for books

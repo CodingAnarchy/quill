@@ -9,7 +9,7 @@ use std::path::Path;
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -42,7 +42,7 @@ pub(super) fn row_style(selected: bool) -> Style {
 pub(super) fn list_row(selected: bool, primary: String, secondary: Option<String>) -> Line<'static> {
     let mut spans = vec![Span::styled(format!("{}{primary}", marker(selected)), row_style(selected))];
     if let Some(s) = secondary {
-        spans.push(Span::styled(format!("  — {s}"), Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(format!("  — {s}"), Style::default().fg(crate::theme::current().dim)));
     }
     Line::from(spans)
 }
