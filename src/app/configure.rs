@@ -80,23 +80,46 @@ impl App {
         let Some(changes) = self.pending_config.take() else {
             return;
         };
-        // `changes` already holds `(dotted_key, toml literal)`; split the key into
-        // `(section, field)` for the writer.
-        let writes: Vec<(String, String, String)> = changes
-            .iter()
-            .filter_map(|(key, literal)| {
-                let (section, field) = key.split_once('.')?;
-                Some((section.to_string(), field.to_string(), literal.clone()))
-            })
-            .collect();
-        match config::set_values(&writes) {
-            Ok(path) => self.message = Some(format!("Applied {} to {}", count(writes.len()), path.display())),
-            Err(e) => {
-                self.message = Some(format!("Couldn't write config: {e}"));
-                return;
+        // Two write targets: `[editor]`/`[theme]` keys go to the home config file
+        // as `(section, field, toml literal)`; `dictionary.add` words go to the
+        // project's custom dictionary (#358), not the config.
+        let mut writes: Vec<(String, String, String)> = Vec::new();
+        let mut words: Vec<String> = Vec::new();
+        for (key, value) in &changes {
+            if key == "dictionary.add" {
+                words.push(value.clone());
+            } else if let Some((section, field)) = key.split_once('.') {
+                writes.push((section.to_string(), field.to_string(), value.clone()));
             }
         }
-        self.apply_config_live();
+
+        let mut applied = 0usize;
+        let mut errors: Vec<String> = Vec::new();
+        if !writes.is_empty() {
+            match config::set_values(&writes) {
+                Ok(_) => {
+                    applied += writes.len();
+                    self.apply_config_live();
+                }
+                Err(e) => errors.push(format!("config: {e}")),
+            }
+        }
+        for word in &words {
+            match self.project.accept_word(word) {
+                Ok(true) => applied += 1,
+                Ok(false) => {} // already in the dictionary — not a new change
+                Err(e) => errors.push(format!("dictionary: {e}")),
+            }
+        }
+        if !words.is_empty() {
+            self.refresh_spell_flags(); // accepted words clear immediately
+        }
+
+        self.message = Some(if errors.is_empty() {
+            format!("Applied {}.", count(applied))
+        } else {
+            format!("Applied {}; couldn't write {}", count(applied), errors.join("; "))
+        });
     }
 
     /// Re-read the just-written config and apply it to the running editor (#303),
@@ -136,6 +159,12 @@ fn settings_vocab() -> Vec<(String, String)> {
             format!("Color of {} — an ANSI name, #hex, r,g,b, or 0–255 index", color_role(field)),
         ));
     }
+    v.push((
+        "dictionary.add".to_string(),
+        "Add a word — an invented name, place, or coined term — to the project's custom spell-check \
+         dictionary so it stops being flagged (one word; repeat the key for several)"
+            .to_string(),
+    ));
     v
 }
 
@@ -164,6 +193,8 @@ fn color_role(field: &str) -> &'static str {
 /// "key (why)" phrase for the report. The key is already schema-constrained to
 /// the vocabulary, so this only checks the value. theme.name and the colors are
 /// quoted via the toml serializer so escaping always matches what the loader parses.
+/// The one exception is `dictionary.add`, which returns the bare word (not a TOML
+/// literal) — it's written to the project dictionary, not the config file.
 fn validate_change(key: &str, value: &str) -> Result<String, String> {
     let bad = |why: &str| Err(format!("{key} ({why})"));
     let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
@@ -187,6 +218,13 @@ fn validate_change(key: &str, value: &str) -> Result<String, String> {
                 bad("not a valid color")
             }
         }
+        // A dictionary word isn't a config literal — store the bare word for the
+        // project dictionary writer (#358); spell-check matches one word at a time.
+        "dictionary.add" => match value.trim() {
+            "" => bad("expected a word"),
+            w if w.split_whitespace().count() == 1 => Ok(w.to_string()),
+            _ => bad("expected a single word"),
+        },
         _ => bad("unknown setting"),
     }
 }
@@ -200,11 +238,11 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
-/// "1 setting" / "N settings".
+/// "1 change" / "N changes" — config settings and/or dictionary additions.
 fn count(n: usize) -> String {
     if n == 1 {
-        "1 setting".to_string()
+        "1 change".to_string()
     } else {
-        format!("{n} settings")
+        format!("{n} changes")
     }
 }

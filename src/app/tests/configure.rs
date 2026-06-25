@@ -68,6 +68,45 @@ fn nothing_mappable_reports_and_stages_nothing() {
 }
 
 #[test]
+fn dictionary_additions_go_to_the_project_dictionary() {
+    use crossterm::event::KeyCode;
+    let (mut app, dir) = two_chapter_app("cfg-dict");
+    app.apply_generated_config(Ok(GeneratedConfig {
+        changes: vec![change("dictionary.add", "Aerendil"), change("dictionary.add", "Vashti")],
+        unmapped: vec![],
+    }));
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmConfig)));
+
+    app.on_key(key(KeyCode::Char('y'))); // confirm
+
+    assert!(app.project.is_accepted("aerendil") && app.project.is_accepted("vashti"));
+    let file = fs::read_to_string(dir.join("dictionary.txt")).unwrap();
+    assert!(file.contains("Aerendil") && file.contains("Vashti"), "written to the project dictionary: {file}");
+}
+
+#[test]
+fn a_mix_of_settings_and_dictionary_words_stages_both() {
+    let (mut app, _dir) = two_chapter_app("cfg-mix");
+    app.apply_generated_config(Ok(GeneratedConfig {
+        changes: vec![change("editor.column_width", "64"), change("dictionary.add", "Vashti")],
+        unmapped: vec![],
+    }));
+    let staged = app.pending_config.as_ref().expect("both staged");
+    assert_eq!(staged.len(), 2);
+}
+
+#[test]
+fn dictionary_add_rejects_a_multi_word_value() {
+    let (mut app, _dir) = two_chapter_app("cfg-dict-bad");
+    app.apply_generated_config(Ok(GeneratedConfig {
+        changes: vec![change("dictionary.add", "Star Crystal")], // two words, not a token
+        unmapped: vec![],
+    }));
+    assert!(app.pending_config.is_none(), "nothing staged");
+    assert!(app.message.as_deref().unwrap_or("").contains("couldn't map"), "{:?}", app.message);
+}
+
+#[test]
 fn declining_the_confirm_changes_nothing() {
     use crossterm::event::KeyCode;
     let (mut app, _dir) = two_chapter_app("cfg-decline");

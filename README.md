@@ -127,14 +127,16 @@ keystrokes that stay out of the way.
 
 - **Configure by description** — the same idea for *settings*: in the `Ctrl-K`
   command palette, run **Configure by description** and say what you want — "turn
-  on Vim mode," "narrow the text column," "give me a warm dark theme." The AI
-  (when enabled) maps it onto concrete settings — `[editor]` options (Vim,
-  smart typography, column width) and `[theme]` colors — and shows the exact
-  changes for you to confirm. **Nothing is written until you confirm** (declining
-  changes nothing); on confirm they're written to `config.toml` (the rest of the
-  file left intact) and applied immediately. Anything that doesn't map to a real
-  setting is reported back, not invented, and the AI only ever touches settings —
-  never your manuscript.
+  on Vim mode," "narrow the text column," "give me a warm dark theme," or "add
+  Aerendil and Vashti to the dictionary so they stop getting flagged." The AI
+  (when enabled) maps it onto concrete changes — `[editor]` options (Vim,
+  smart typography, column width), `[theme]` colors, and words for the per-project
+  spell-check dictionary — and shows the exact changes for you to confirm.
+  **Nothing is written until you confirm** (declining changes nothing); on
+  confirm, settings are written to `config.toml` (the rest of the file left
+  intact) and dictionary words to the project's `dictionary.txt`, all applied
+  immediately. Anything that doesn't map to a real setting is reported back, not
+  invented, and the AI only ever touches configuration — never your manuscript.
 
 ## Build & run
 
