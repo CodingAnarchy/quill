@@ -20,10 +20,14 @@ impl App {
     /// edits since the last tick. The continuous view doesn't anchor annotations
     /// (its buffer spans several chapters), so the live set is empty there.
     ///
-    /// Re-anchoring follows the keystroke-path edit log only; an undo/redo
-    /// (whole-rope snapshot swap) isn't replayed here, so a note may drift after
-    /// one — a documented limitation, like the continuous view.
+    /// Undo/redo is handled separately (#370): a rope swap carries no edit delta,
+    /// so annotations are snapshotted alongside the buffer's undo stack and
+    /// restored, rather than re-mapped here.
     pub(crate) fn sync_annotations(&mut self) {
+        // Snapshot annotations for any edit group that opened, before the deltas
+        // below move them — keeps the undo history aligned with the buffer's (#370).
+        self.note_annotation_undo_point();
+
         // Always drain — discarding the deltas on a chapter switch / in continuous
         // view, so stale edits never apply to a later chapter's notes.
         let edits = self.edit_buffer_mut().drain_anchor_edits();
@@ -31,12 +35,14 @@ impl App {
         if self.manuscript.is_some() {
             self.annotations.clear();
             self.annotations_chapter.clear();
+            self.clear_annotation_history();
             return;
         }
         let file = self.project.active_file().to_string();
         if file != self.annotations_chapter {
             self.annotations = self.project.annotations_for(&file);
             self.annotations_chapter = file;
+            self.clear_annotation_history(); // a fresh buffer has no undo history
             return;
         }
         if edits.is_empty() {
@@ -55,6 +61,46 @@ impl App {
                 });
         }
         self.annotations.sort_by_key(|a| (a.start, a.end));
+    }
+
+    /// Snapshot the current annotations when a new undo group has opened (#370),
+    /// so the app's annotation history stays one-entry-per-group aligned with the
+    /// buffer's undo stack. Skipped in the continuous view (no per-buffer
+    /// annotation undo there yet); the flag is still consumed so it can't leak.
+    pub(crate) fn note_annotation_undo_point(&mut self) {
+        let opened = self.edit_buffer_mut().take_checkpointed();
+        if !opened || self.manuscript.is_some() {
+            return;
+        }
+        self.anno_undo.push_back(self.annotations.clone());
+        while self.anno_undo.len() > crate::buffer::Buffer::MAX_UNDO_GROUPS {
+            self.anno_undo.pop_front();
+        }
+        self.anno_redo.clear(); // a new edit invalidates redo, mirroring the buffer
+    }
+
+    /// Swap the live annotations to match an undo/redo of the rope (#370): pop the
+    /// pre-step snapshot off the matching stack and push the current onto the
+    /// other, the exact mirror of the buffer's `step`.
+    pub(crate) fn restore_annotation_history(&mut self, redo: bool) {
+        let current = self.annotations.clone();
+        let popped = if redo { self.anno_redo.pop_back() } else { self.anno_undo.pop_back() };
+        if let Some(prev) = popped {
+            if redo {
+                self.anno_undo.push_back(current);
+            } else {
+                self.anno_redo.push_back(current);
+            }
+            self.annotations = prev;
+        }
+    }
+
+    /// Drop the annotation undo/redo history — when the edit buffer is replaced
+    /// (chapter switch, continuous view, crash recovery), its undo stack resets
+    /// too (#370).
+    pub(crate) fn clear_annotation_history(&mut self) {
+        self.anno_undo.clear();
+        self.anno_redo.clear();
     }
 
     /// Annotated byte ranges to mark in the editor, clamped to the buffer so a

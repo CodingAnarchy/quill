@@ -70,6 +70,11 @@ pub struct Buffer {
     /// new bytes. Recorded on the keystroke path, drained on idle so author
     /// annotations can re-anchor without re-scanning the whole buffer.
     anchor_edits: Vec<(usize, usize, usize)>,
+    /// Set when a new undo group opens (#370), so the app can snapshot author
+    /// annotations in lockstep with the undo stack — undo/redo swaps the whole
+    /// rope without an edit delta, so annotations are restored, not re-mapped.
+    /// Read-and-cleared via [`take_checkpointed`](Buffer::take_checkpointed).
+    checkpointed: bool,
 }
 
 impl Buffer {
@@ -91,6 +96,7 @@ impl Buffer {
             group_open: false,
             word_count_cache: Cell::new(None),
             anchor_edits: Vec::new(),
+            checkpointed: false,
         }
     }
 
@@ -113,6 +119,7 @@ impl Buffer {
             group_open: false,
             word_count_cache: Cell::new(None),
             anchor_edits: Vec::new(),
+            checkpointed: false,
         }
     }
 
@@ -145,6 +152,7 @@ impl Buffer {
             group_open: false,
             word_count_cache: Cell::new(None),
             anchor_edits: Vec::new(),
+            checkpointed: false,
         })
     }
 
@@ -210,6 +218,7 @@ impl Buffer {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.group_open = false;
+        self.checkpointed = false; // fresh baseline — no annotation snapshot to take (#370)
         self.dirty = true;
     }
 
