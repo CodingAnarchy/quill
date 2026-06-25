@@ -534,3 +534,36 @@ fn modeless_default_is_unchanged_when_vim_is_off() {
     app.on_key(key(KeyCode::Esc));
     assert!(matches!(app.mode, Mode::Insert), "Esc does nothing without Vim mode");
 }
+
+#[test]
+fn bracket_s_jumps_between_misspellings() {
+    // "quikc" at byte 6, "wrnog" at byte 17; the rest are real words (#359).
+    let (mut app, _dir) = vim_app("vim-spell-nav");
+    app.buffer = Buffer::from_text("alpha quikc beta wrnog gamma");
+    app.on_idle();
+    assert_eq!(app.spell_flags.len(), 2, "{:?}", app.spell_flags);
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+
+    app.on_key(key(KeyCode::Char(']')));
+    app.on_key(key(KeyCode::Char('s')));
+    assert_eq!(app.buffer.cursor_byte(), 6, "]s → next misspelling");
+    app.on_key(key(KeyCode::Char(']')));
+    app.on_key(key(KeyCode::Char('s')));
+    assert_eq!(app.buffer.cursor_byte(), 17, "]s → next");
+    app.on_key(key(KeyCode::Char('[')));
+    app.on_key(key(KeyCode::Char('s')));
+    assert_eq!(app.buffer.cursor_byte(), 6, "[s → previous");
+}
+
+#[test]
+fn a_bracket_then_other_key_is_a_no_op() {
+    let (mut app, _dir) = vim_app("vim-bracket-abort");
+    app.buffer = Buffer::from_text("alpha quikc beta");
+    app.on_idle();
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.on_key(key(KeyCode::Char(']')));
+    app.on_key(key(KeyCode::Char('x'))); // not `s` — cancels, no jump, no edit
+    assert_eq!(app.buffer.cursor_byte(), 0, "cursor unmoved");
+    assert_eq!(app.buffer.text(), "alpha quikc beta", "no text change");
+    assert!(matches!(app.mode, Mode::Normal));
+}

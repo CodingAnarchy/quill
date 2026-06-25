@@ -170,6 +170,9 @@ pub(crate) enum VimPending {
     Object { around: bool },
     /// `"` seen — awaiting the register name (`a`–`z`).
     Register,
+    /// `]` / `[` seen — awaiting `s` for the spell-flag jump (#359): `]s` next
+    /// misspelling, `[s` previous. `forward` is the `]` form.
+    Bracket { forward: bool },
 }
 
 /// A Vim operator (#203): delete leaves Normal mode, change enters Insert, yank
