@@ -34,6 +34,18 @@ impl Buffer {
         }
         self.redo_stack.clear();
         self.group_open = true;
+        self.checkpointed = true; // signal the app to snapshot annotations (#370)
+    }
+
+    /// The retained-undo-groups cap, so the app's parallel annotation history
+    /// (#370) can stay the same depth as the buffer's and pop in lockstep.
+    pub const MAX_UNDO_GROUPS: usize = MAX_UNDO;
+
+    /// Whether a new undo group has opened since the last call (#370), clearing
+    /// the flag. The app reads this to snapshot annotations alongside the buffer's
+    /// undo stack, since undo/redo restores the rope without an edit delta.
+    pub fn take_checkpointed(&mut self) -> bool {
+        std::mem::take(&mut self.checkpointed)
     }
 
     /// Close the current edit group so the next edit starts a fresh undo entry.

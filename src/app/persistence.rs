@@ -130,6 +130,9 @@ impl App {
         self.activate_chapter(index); // a no-op when it's already the active chapter
         if self.project.active_file() == rec.chapter_file {
             self.buffer.replace_text(&rec.body);
+            // The recovered body is a fresh undo baseline, so the annotation
+            // undo/redo history starts over with it too (#370).
+            self.clear_annotation_history();
             self.recovery_written = true; // the sidecar already matches; a save clears it
             self.message = Some("Recovered unsaved work — review and save.".into());
         }

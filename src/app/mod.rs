@@ -119,6 +119,12 @@ pub struct App {
     /// so the idle tick reloads them on a chapter switch (any seam) rather than
     /// re-anchoring across chapters. Empty in the continuous view.
     annotations_chapter: String,
+    /// Annotation snapshots paralleling the buffer's undo / redo stacks (#370):
+    /// one per edit group, pushed when a group opens and restored alongside the
+    /// rope, so undo/redo moves notes back to where the text moved (a rope swap
+    /// carries no edit delta to re-anchor through).
+    anno_undo: std::collections::VecDeque<Vec<crate::annotation::Live>>,
+    anno_redo: std::collections::VecDeque<Vec<crate::annotation::Live>>,
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
@@ -304,6 +310,8 @@ impl App {
             routed_model: std::cell::Cell::new(None),
             annotations,
             annotations_chapter,
+            anno_undo: std::collections::VecDeque::new(),
+            anno_redo: std::collections::VecDeque::new(),
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
@@ -683,8 +691,12 @@ impl App {
             self.message = Some(format!("{verb} isn't available in the continuous view yet — Ctrl-l to return."));
             return;
         }
+        // Snapshot any open edit group's annotations before stepping, so the
+        // undo/redo stacks are aligned with the buffer's (#370).
+        self.note_annotation_undo_point();
         let changed = if redo { self.buffer.redo() } else { self.buffer.undo() };
         if changed {
+            self.restore_annotation_history(redo); // swap annotations with the rope
             self.cache_focus_words();
             self.message = None;
         } else {

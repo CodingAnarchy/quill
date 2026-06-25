@@ -119,3 +119,24 @@ fn annotations_are_not_offered_in_the_continuous_view() {
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no note prompt in the continuous view");
     assert!(app.message.as_deref().unwrap_or("").contains("single-chapter view"));
 }
+
+#[test]
+fn undo_and_redo_move_annotations_with_the_text() {
+    let (mut app, _dir) = two_chapter_app("anno-undo");
+    // "first chapter\n" — annotate "chapter" (bytes 6..13).
+    app.create_annotation(6, 13, "note on chapter".into());
+
+    // Type three chars at the very start; on idle the note re-anchors right.
+    app.buffer.cursor = Cursor { line: 0, col: 0 };
+    type_str(&mut app, "XYZ");
+    app.on_idle();
+    assert_eq!((app.annotations[0].start, app.annotations[0].end), (9, 16), "slid right by the insert");
+
+    // Undo the insertion → the note returns to its original span (#370).
+    app.on_key(ctrl('z'));
+    assert_eq!((app.annotations[0].start, app.annotations[0].end), (6, 13), "undo restores the anchor");
+
+    // Redo → it follows the text forward again.
+    app.on_key(ctrl('y'));
+    assert_eq!((app.annotations[0].start, app.annotations[0].end), (9, 16), "redo re-applies");
+}
