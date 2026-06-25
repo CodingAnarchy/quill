@@ -197,6 +197,7 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         // so its answer appears within the poll window even with no keypress.
         app.poll_ai();
         app.poll_vc(); // surface a finished push/pull (worker thread) before drawing
+        app.poll_model_download(); // surface a finished local-model download (#382)
         tui.draw(app)?;
 
         // Poll so we can stay responsive without busy-spinning.

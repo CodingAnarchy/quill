@@ -147,6 +147,13 @@ impl App {
                     self.decline_workflow();
                 }
             },
+            Pending::ConfirmRemoveModel(id) => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.remove_model(id);
+                }
+                _ => self.mode = closed,
+            },
             Pending::ConfirmRestore => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;

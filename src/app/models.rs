@@ -11,19 +11,23 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::task::Poll;
+use super::worker;
 use super::App;
-use crate::ai::model_select::MODELS;
+use crate::ai::model_select::{self, MODELS};
 use crate::config;
-use crate::mode::Mode;
+use crate::mode::{Mode, Pending};
 
 impl App {
-    /// Open the model manager over the catalog.
+    /// Open the model manager over the catalog, refreshing on-disk status first.
     pub(crate) fn open_model_manager(&mut self) {
+        self.refresh_downloaded_models();
         self.mode = Mode::ModelManager { selected: 0 };
     }
 
-    /// Key handling for the model manager: move, toggle the selected model in/out
-    /// of the author's set (Enter / Space), close (Esc).
+    /// Key handling for the model manager: move; toggle the selected model in/out
+    /// of the author's set (Enter / Space); download it (`d`); remove it (`x`);
+    /// close (Esc).
     pub(crate) fn on_key_model_manager(&mut self, key: KeyEvent) {
         let Mode::ModelManager { selected } = self.mode else {
             return;
@@ -32,14 +36,105 @@ impl App {
             self.mode = Mode::ModelManager { selected: s };
             return;
         }
+        let id = MODELS.get(selected).map(|m| m.id());
         match key.code {
             KeyCode::Enter | KeyCode::Char(' ') => {
-                if let Some(model) = MODELS.get(selected) {
-                    self.toggle_model_in_set(model.id());
+                if let Some(id) = id {
+                    self.toggle_model_in_set(id);
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(id) = id {
+                    self.start_model_download(id);
+                }
+            }
+            KeyCode::Char('x') => {
+                if let Some(id) = id {
+                    self.confirm_remove_model(id);
                 }
             }
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
+        }
+    }
+
+    /// Whether model `id` is downloaded, from the cached set (#382) — what the
+    /// manager rows show, without probing the cache per frame.
+    pub(crate) fn model_is_downloaded(&self, id: &str) -> bool {
+        self.downloaded_models.iter().any(|m| m == id)
+    }
+
+    /// Re-probe which catalog models are on disk (#382) and cache the result.
+    /// Cheap I/O, run on open and after a download / remove — never per frame.
+    fn refresh_downloaded_models(&mut self) {
+        self.downloaded_models =
+            MODELS.iter().filter(|m| worker::model_downloaded(m)).map(|m| m.id().to_string()).collect();
+    }
+
+    /// Start downloading model `id` on a worker thread (#382): the editor stays
+    /// responsive; [`poll_model_download`](Self::poll_model_download) surfaces the
+    /// result. Refuses without the `local` feature, or when already downloaded /
+    /// a download is in flight.
+    fn start_model_download(&mut self, id: &str) {
+        let Some(model) = model_select::by_id(id) else { return };
+        if cfg!(not(feature = "local")) {
+            self.message = Some(worker::LOCAL_UNAVAILABLE.to_string());
+            return;
+        }
+        if self.model_is_downloaded(id) {
+            self.message = Some(format!("Qwen2.5-{id} is already downloaded."));
+            return;
+        }
+        if self.download_task.is_busy() {
+            self.message = Some("A model download is already running.".into());
+            return;
+        }
+        let id = id.to_string();
+        self.download_task.spawn(move || (id, worker::download_model(model)));
+        self.message = Some(format!("Downloading Qwen2.5-{}… (~{:.1} GB)", model.id(), model.size_gb));
+    }
+
+    /// Surface a finished download (#382): refresh on-disk status and report.
+    /// Called once per event-loop tick.
+    pub fn poll_model_download(&mut self) {
+        match self.download_task.poll() {
+            Poll::Ready((id, Ok(()))) => {
+                self.refresh_downloaded_models();
+                self.message = Some(format!("Downloaded Qwen2.5-{id}."));
+            }
+            Poll::Ready((id, Err(e))) => self.message = Some(format!("Download of Qwen2.5-{id} failed: {e}")),
+            Poll::Pending => {}
+            Poll::Died => self.message = Some("Model download failed.".into()),
+        }
+    }
+
+    /// Confirm removing a downloaded model from disk (#382).
+    fn confirm_remove_model(&mut self, id: &'static str) {
+        if !self.model_is_downloaded(id) {
+            self.message = Some(format!("Qwen2.5-{id} isn't downloaded."));
+            return;
+        }
+        self.open_prompt(
+            Pending::ConfirmRemoveModel(id),
+            format!("Remove Qwen2.5-{id} from disk? (y/N)"),
+            "",
+            None,
+        );
+    }
+
+    /// Delete a downloaded model's files (#382), drop any cached loaded instance,
+    /// and refresh status. Confirmed via [`Pending::ConfirmRemoveModel`].
+    pub(crate) fn remove_model(&mut self, id: &str) {
+        let Some(model) = model_select::by_id(id) else { return };
+        match worker::remove_model_files(model) {
+            Ok(()) => {
+                if let Ok(mut cache) = self.local_backend.lock() {
+                    cache.remove(id); // forget the loaded model if it was cached
+                }
+                self.refresh_downloaded_models();
+                self.message = Some(format!("Removed Qwen2.5-{id} from disk."));
+            }
+            Err(e) => self.message = Some(format!("Couldn't remove Qwen2.5-{id}: {e}")),
         }
     }
 
