@@ -47,6 +47,7 @@ mod books;
 mod chapters;
 mod editing;
 mod panes;
+mod project_search;
 mod projects;
 mod recovery;
 mod typography;

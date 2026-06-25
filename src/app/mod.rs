@@ -48,6 +48,7 @@ mod chapters;
 mod counts;
 mod persistence;
 mod project_ops;
+mod project_search;
 mod prompts;
 mod sequenced;
 mod series_bible;
@@ -412,6 +413,7 @@ impl App {
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
+            Mode::ProjectSearch(_) => self.on_key_project_search(key),
             Mode::RefFiles(_) => self.on_key_reffiles(key),
             Mode::Tree(_) => self.on_key_tree(key),
             Mode::ProjectBrowser(_) => self.on_key_project_browser(key),

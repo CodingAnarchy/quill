@@ -89,6 +89,11 @@ pub enum Mode {
     /// the bottom, matches highlighted in the prose, navigated with n/N. Boxed
     /// (carries the query, replacement, and the match list).
     Search(Box<Search>),
+    /// Find / find-and-replace across every chapter in the project (#295): a
+    /// query line, a results overlay grouped by chapter, jump-to-match, and a
+    /// confirmed manuscript-wide replace. Distinct from the single-chapter
+    /// [`Search`]. Boxed (carries the query, replacement, and the match list).
+    ProjectSearch(Box<ProjectSearch>),
     /// Browsing the project's reference files — the story bible and loose notes
     /// (#165). Reached with `f` from the chapter browser; Enter opens the selected
     /// file in a side pane. Boxed (carries the file list).
@@ -353,6 +358,8 @@ pub(crate) enum Action {
     SeriesTree,
     /// Refresh the whole series' story bible, book by book (#340).
     RefreshSeriesBible,
+    /// Find & replace across every chapter in the project (#295).
+    ProjectFind,
 }
 
 impl Action {
@@ -391,6 +398,7 @@ impl Action {
         Action::SwitchBook,
         Action::SeriesTree,
         Action::RefreshSeriesBible,
+        Action::ProjectFind,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -430,6 +438,7 @@ impl Action {
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
             Action::RefreshSeriesBible => "bible:series",
+            Action::ProjectFind => "find:project",
         }
     }
 
@@ -469,6 +478,7 @@ impl Action {
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
             Action::RefreshSeriesBible => "Refresh series bible",
+            Action::ProjectFind => "Find across manuscript",
         }
     }
 
@@ -691,6 +701,75 @@ impl Search {
     pub(crate) fn current_match(&self) -> Option<(usize, usize)> {
         self.matches.get(self.current).copied()
     }
+}
+
+/// State for an open [`Mode::ProjectSearch`] — manuscript-wide find & replace
+/// (#295). `query`/`replacement` are public for the overlay; the match list and
+/// indices are the handler's business. Matches are byte ranges into each
+/// chapter's prose **body** (front matter excluded), collected on demand without
+/// holding every chapter's text at once.
+pub struct ProjectSearch {
+    pub(crate) stage: ProjectSearchStage,
+    /// The text being searched for, across every chapter.
+    pub query: String,
+    /// The replacement text (replace flow only).
+    pub replacement: String,
+    /// Every match across the manuscript, in chapter then document order.
+    pub(crate) matches: Vec<ProjectMatch>,
+    /// Index into `matches` of the current (highlighted) row.
+    pub(crate) selected: usize,
+    /// How many occurrences have been replaced, reported when the flow ends.
+    pub(crate) replaced: usize,
+}
+
+impl ProjectSearch {
+    pub(crate) fn new() -> Self {
+        Self {
+            stage: ProjectSearchStage::Query,
+            query: String::new(),
+            replacement: String::new(),
+            matches: Vec::new(),
+            selected: 0,
+            replaced: 0,
+        }
+    }
+
+    /// The number of distinct chapters the current matches span.
+    pub(crate) fn chapter_span(&self) -> usize {
+        let mut chapters: Vec<usize> = self.matches.iter().map(|m| m.chapter).collect();
+        chapters.dedup();
+        chapters.len()
+    }
+}
+
+/// One manuscript-wide match (#295): which chapter, the byte range within that
+/// chapter's prose body, and a short context snippet for the results list.
+pub(crate) struct ProjectMatch {
+    /// Chapter index (the jump target).
+    pub(crate) chapter: usize,
+    /// Byte range `[start, end)` within the chapter's body (front matter excluded).
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    /// The chapter's title, for grouping/labeling the row.
+    pub(crate) title: String,
+    /// The match's line, trimmed and clipped, shown as context.
+    pub(crate) context: String,
+}
+
+/// Which step of the manuscript-wide find / replace interaction is active (#295).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectSearchStage {
+    /// Typing the query; Enter runs the search across every chapter.
+    Query,
+    /// Results listed; navigate, jump to a match, or start a replace.
+    Results,
+    /// Typing the replacement text.
+    Replacement,
+    /// Stepping through matches, choosing replace / skip; `a` triggers the
+    /// confirmed replace-all.
+    Step,
+    /// y/N confirm before the irreversible manuscript-wide replace-all.
+    Confirm,
 }
 
 /// Which step of the find / replace interaction is active.

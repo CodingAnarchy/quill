@@ -356,6 +356,17 @@ replacing the query — type the replacement, then **y** replace this match,
 **n** skip, **a** replace all, **Esc** finish. Find & replace is scoped to the
 active chapter.
 
+**Find across manuscript** (the `Ctrl-K` command palette) is the project-wide
+counterpart: it searches *every* chapter and lists the matches grouped by
+chapter, each with a line of context. **↑ / ↓** move, **Enter** jumps to the
+match in its chapter, **r** starts a replace — type the replacement, then **y**
+replace the selected match, **n** skip, or **a** replace across the whole
+manuscript (confirmed first, since a cross-file replace isn't a single undo). A
+manuscript-wide replace rewrites each affected chapter file on disk, leaving
+front matter untouched, and reports how many occurrences changed and in how many
+chapters. Chapters are read one at a time, so a long series stays responsive.
+The single most common rename — a character or place, everywhere — is one pass.
+
 ## Layout
 
 ```
