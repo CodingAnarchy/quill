@@ -367,6 +367,16 @@ front matter untouched, and reports how many occurrences changed and in how many
 chapters. Chapters are read one at a time, so a long series stays responsive.
 The single most common rename — a character or place, everywhere — is one pass.
 
+### Terminal keyboard support
+
+On terminals that support the **enhanced ("Kitty") keyboard protocol** — kitty,
+foot, WezTerm, Ghostty, recent iTerm2, and others — Quill turns it on at startup
+(the `DISAMBIGUATE_ESCAPE_CODES` mode) so combinations the legacy encoding can't
+tell apart — `Tab` vs `Ctrl-I`, `Enter` vs `Ctrl-M`, and various `Ctrl`/`Shift`
+combos — arrive as distinct key events. It's detected automatically and restored
+on exit (including after a crash). On a terminal without support, Quill behaves
+exactly as before — nothing is enabled and no escape sequences are emitted.
+
 ## Layout
 
 ```
