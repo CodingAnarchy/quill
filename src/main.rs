@@ -22,6 +22,7 @@ mod project;
 mod recent;
 mod recovery;
 mod report;
+mod spell;
 mod syntax;
 mod text;
 mod theme;

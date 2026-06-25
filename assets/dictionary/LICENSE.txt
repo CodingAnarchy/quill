@@ -1,0 +1,24 @@
+COPYRIGHT, SOURCES, and CREDITS:
+
+The English dictionaries come directly from SCOWL 
+and is thus under the same copyright of SCOWL.  The affix file is
+a heavily modified version of the original english.aff file which was
+released as part of Geoff Kuenning's Ispell and as such is covered by
+his BSD license.  Part of SCOWL is also based on Ispell thus the
+Ispell copyright is included with the SCOWL copyright.
+
+The collective work is Copyright 2000-2018 by Kevin Atkinson as well
+as any of the copyrights mentioned below:
+
+  Copyright 2000-2018 by Kevin Atkinson
+
+  Permission to use, copy, modify, distribute and sell these word
+  lists, the associated scripts, the output created from the scripts,
+  and its documentation for any purpose is hereby granted without fee,
+  provided that the above copyright notice appears in all copies and
+  that both that copyright notice and this permission notice appear in
+  supporting documentation. Kevin Atkinson makes no representations
+  about the suitability of this array for any purpose. It is provided
+  "as is" without express or implied warranty.
+
+Alan Beale <biljir@pobox.com> also deserves special credit as he has,

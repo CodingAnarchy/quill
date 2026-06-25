@@ -51,6 +51,7 @@ mod panes;
 mod project_search;
 mod projects;
 mod recovery;
+mod spell;
 mod typography;
 mod vcs;
 mod vim;

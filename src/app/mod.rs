@@ -93,6 +93,10 @@ pub struct App {
     /// The active color theme (#300), from the `[theme]` config. Threaded through
     /// the render path so the palette is data, not hard-coded literals.
     pub theme: crate::theme::Theme,
+    /// Byte ranges of misspelled words in the active (edit) buffer (#357),
+    /// recomputed on the idle tick (never the keystroke path) and underlined by
+    /// the editor. Empty until the first idle pass.
+    pub(crate) spell_flags: Vec<(usize, usize)>,
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
@@ -251,6 +255,7 @@ impl App {
             vim,
             smart_typography,
             theme,
+            spell_flags: Vec::new(),
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
@@ -347,9 +352,18 @@ impl App {
         let buffer = self.edit_buffer_mut();
         buffer.refresh_syntax();
         buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
+        self.refresh_spell_flags();
         self.tally_words();
         self.refresh_vc_status();
         self.capture_recovery();
+    }
+
+    /// Recompute the misspelled-word flags for the active buffer (#357), off the
+    /// keystroke path. The configured TODO marker is never flagged.
+    fn refresh_spell_flags(&mut self) {
+        let marker = self.project.manifest.todo_marker().to_ascii_lowercase();
+        let text = self.edit_buffer().text();
+        self.spell_flags = crate::spell::misspellings(&text, |w| w.eq_ignore_ascii_case(&marker));
     }
 
 
