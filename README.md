@@ -183,7 +183,31 @@ keystrokes that stay out of the way.
   immediately. Anything that doesn't map to a real setting is reported back, not
   invented, and the AI only ever touches configuration — never your manuscript.
 
+## Install
+
+The quickest way to get a `quill` command on your `PATH`:
+
+```sh
+./install.sh
+```
+
+It builds a release binary with Cargo and installs it to `~/.local/bin` (no
+`sudo`, nothing in system paths), then tells you if that directory isn't on your
+`PATH` yet. Re-run it to upgrade in place. Override the location with
+`BIN_DIR=/usr/local/bin ./install.sh` (or `PREFIX=…`).
+
+Quill has optional Cargo features (currently `local`, the on-device AI backend).
+Run with no arguments and the script lists them with descriptions and lets you
+pick; or choose up front and skip the prompt with `./install.sh --features local`
+(or `--features ""` for none). A piped/non-interactive run builds with no
+optional features unless you pass them.
+
+Building requires a Rust toolchain ([rustup](https://rustup.rs)) — Quill is a
+from-source tool, and the script wraps the Cargo build rather than replacing it.
+
 ## Build & run
+
+To run from the checkout without installing, or to develop:
 
 ```sh
 cargo run --release -- path/to/book
