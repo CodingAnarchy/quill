@@ -878,6 +878,7 @@ fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
 mod tests {
     use super::*;
     use crate::buffer::Buffer;
+    use std::time::Instant;
 
     fn temp_dir(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
@@ -1286,7 +1287,6 @@ mod tests {
     #[test]
     #[ignore]
     fn open_is_fast_for_a_large_novel() {
-        use std::time::Instant;
 
         let dir = temp_dir("perf-open");
         let _ = fs::remove_dir_all(&dir);
@@ -1313,7 +1313,6 @@ mod tests {
     #[test]
     #[ignore]
     fn open_is_fast_for_a_series_sized_project() {
-        use std::time::Instant;
 
         let n = 1500;
         let dir = temp_dir("perf-open-series");

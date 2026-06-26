@@ -288,6 +288,7 @@ impl Project {
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+    use std::time::Instant;
 
     fn temp_dir(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
@@ -325,7 +326,6 @@ mod tests {
     #[test]
     #[ignore]
     fn open_is_fast_for_a_multi_book_series() {
-        use std::time::Instant;
 
         let (books, per_book) = (6, 250); // 1500 chapters across the series
         let dir = temp_dir("perf-open-multibook");
@@ -462,7 +462,6 @@ file = \"b2/one.md\"
     #[test]
     #[ignore]
     fn switching_books_is_fast_in_a_series() {
-        use std::time::Instant;
 
         let (books, per_book) = (2, 750);
         let dir = temp_dir("perf-switch-book");

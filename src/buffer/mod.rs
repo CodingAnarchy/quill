@@ -681,6 +681,7 @@ fn with_default_extension(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
 
     /// A unique-per-process temp path so parallel tests don't collide.
     fn temp_path(name: &str) -> PathBuf {
@@ -1013,7 +1014,6 @@ mod tests {
     #[test]
     #[ignore]
     fn keystroke_is_decoupled_from_document_size() {
-        use std::time::Instant;
 
         // A keystroke only *records* the edit; the reparse is deferred. So it
         // must be cheap regardless of buffer size. Stress it far past the real
@@ -1048,7 +1048,6 @@ mod tests {
     #[test]
     #[ignore]
     fn reparse_is_fast_at_window_size() {
-        use std::time::{Duration, Instant};
 
         // Realistic worst case: ~3 long chapters live at once (continuous view).
         let mut text = String::new();

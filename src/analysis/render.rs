@@ -3,6 +3,7 @@
 //! module; this is the only half that depends on `ratatui`.
 
 use super::*;
+use crate::theme;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -354,7 +355,7 @@ fn bold(text: impl Into<String>) -> Line<'static> {
 }
 
 fn dim(text: impl Into<String>) -> Line<'static> {
-    Line::from(Span::styled(text.into(), Style::default().fg(crate::theme::current().dim)))
+    Line::from(Span::styled(text.into(), Style::default().fg(theme::current().dim)))
 }
 
 /// Truncate to `max` characters with an ellipsis, counting by character so a

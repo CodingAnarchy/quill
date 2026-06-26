@@ -2,6 +2,7 @@
 //! editor-mode types live in [`crate::mode`].
 
 use std::collections::HashMap;
+use crate::theme;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -300,7 +301,7 @@ impl App {
         // Make the loaded palette the active one for rendering (#300). `ui::draw`
         // re-affirms it each frame; setting it here covers content built before
         // the first draw (e.g. a report overlay).
-        crate::theme::set_current(theme);
+        theme::set_current(theme);
         let loaded = crate::workflow::load();
         let trigger_errors = loaded.errors;
         // Load the active chapter's annotations (#302) so they mark immediately,

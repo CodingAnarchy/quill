@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::buffer::Buffer;
-use crate::theme::Theme;
+use crate::theme::{self, Theme};
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
 type ByteRange = (usize, usize);
@@ -262,7 +262,7 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
 /// attribution (`— Name`, dimmed), set off by blank lines. Never enters the
 /// buffer or any file.
 fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
-    let theme = crate::theme::current();
+    let theme = theme::current();
     let indent = "    ";
     let mut lines = vec![Line::raw("")];
     for line in epigraph.text.lines() {
@@ -289,7 +289,7 @@ fn divider_line(title: &str, width: u16) -> Line<'static> {
     Line::from(Span::styled(
         format!("{}{label}", " ".repeat(pad)),
         Style::default()
-            .fg(crate::theme::current().dim)
+            .fg(theme::current().dim)
             .add_modifier(Modifier::BOLD),
     ))
 }
@@ -347,7 +347,7 @@ fn styled_row(
     }
     let seg_start = line_start + rs;
     let seg_end = line_start + re;
-    let theme = crate::theme::current(); // once per row, not per character
+    let theme = theme::current(); // once per row, not per character
     // Focus mode (#301): the row is entirely outside the focused paragraph, so it
     // dims as a whole — caught here before any per-character styling work.
     if focus.is_some_and(|(s, e)| seg_start >= e || seg_end <= s) {

@@ -102,6 +102,7 @@ pub(crate) mod fail_point {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     // A unique directory per test, so parallel tests never observe each other's
     // transient temp files.
@@ -149,7 +150,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn failed_write_preserves_previous_version() {
-        use std::os::unix::fs::PermissionsExt;
 
         let parent = tmpdir("readonly").join("ro");
         fs::create_dir_all(&parent).unwrap();
