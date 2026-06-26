@@ -313,6 +313,17 @@ Already have a folder of notes? **New project from a folder of notes** (in the
 Ctrl-K menu) creates a project and imports every Markdown file in the folder into
 its story bible in one step — preserving the originals.
 
+Already have a **manuscript**? **Import a manuscript → new project** (in the
+Ctrl-K menu) turns an existing Markdown file into a chaptered Quill project: point
+it at the `.md`, give the new project a path, and Quill splits the file into one
+chapter per heading — on `##` when there's a single `#` title (Quill's own export
+shape), or on `#` when each chapter is a top-level heading — carrying the chapter
+titles into the manifest and the book title / author from a YAML front-matter
+block or the title page. Emphasis (`*`/`**`) is kept as-is, and the original file
+is copied from, never moved or changed. Word `.docx` and Scrivener `.scriv`
+sources are planned next (see the issues); today's importer is single-file
+Markdown.
+
 When you create a project, a short setup wizard offers to scaffold it — writing
 goals, a starter cast and setting (with AI, when enabled), and a first note.
 Every step is skippable and the whole thing is dismissible (Esc); turn it off

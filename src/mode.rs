@@ -363,6 +363,8 @@ pub(crate) enum Action {
     ImportNotes,
     /// Create a new project from a folder of notes (#286).
     NewProjectFromNotes,
+    /// Import an existing Markdown manuscript as a new project (#298).
+    ImportManuscript,
     /// Switch the active book of a multi-book series (#329).
     SwitchBook,
     /// Open the series tree navigator (#330).
@@ -428,6 +430,7 @@ impl Action {
         Action::UserGuide,
         Action::ImportNotes,
         Action::NewProjectFromNotes,
+        Action::ImportManuscript,
         Action::SwitchBook,
         Action::SeriesTree,
         Action::RefreshSeriesBible,
@@ -479,6 +482,7 @@ impl Action {
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
+            Action::ImportManuscript => "import:manuscript",
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
             Action::RefreshSeriesBible => "bible:series",
@@ -530,6 +534,7 @@ impl Action {
             Action::UserGuide => "User's guide",
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
+            Action::ImportManuscript => "Import a manuscript → new project",
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
             Action::RefreshSeriesBible => "Refresh series bible",
@@ -958,6 +963,10 @@ pub(crate) enum Pending {
     NewFromNotesSource,
     /// Text input: the path for the new project created from notes (#286).
     NewFromNotesDest,
+    /// Text input: a Markdown manuscript file to import as a new project (#298).
+    ImportManuscriptSource,
+    /// Text input: the path for the new project created from a manuscript (#298).
+    ImportManuscriptDest,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).

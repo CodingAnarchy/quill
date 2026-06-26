@@ -574,6 +574,69 @@ impl App {
         }
     }
 
+    // --- New project from an existing manuscript (#298) -------------------
+
+    /// Prompt for a Markdown manuscript file to import as a new project.
+    pub(crate) fn start_import_manuscript(&mut self) {
+        self.open_prompt(Pending::ImportManuscriptSource, "Import manuscript — Markdown file:", "", None);
+    }
+
+    /// Validate the chosen file is a Markdown manuscript, then ask where to create
+    /// the new project. Shared by the file prompt and the run-action entry point.
+    pub(crate) fn begin_import_manuscript(&mut self, file: &str) {
+        let path = std::path::Path::new(file.trim());
+        let is_md = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        if !(path.is_file() && is_md) {
+            self.message = Some(format!("Not a Markdown (.md) manuscript: {}", path.display()));
+            self.mode = self.editing_mode();
+            return;
+        }
+        self.pending_manuscript_source = Some(path.to_path_buf());
+        let prefill = format!("{}/", self.new_project_base().display());
+        self.open_prompt(Pending::ImportManuscriptDest, "New project — path:", &prefill, None);
+    }
+
+    /// Create the new project at `dest` and import the manuscript chosen earlier:
+    /// split it into per-chapter files in reading order. The source is read only —
+    /// never moved or altered.
+    pub(crate) fn finish_import_manuscript(&mut self, dest: &str) {
+        let Some(source) = self.pending_manuscript_source.take() else {
+            self.mode = self.editing_mode();
+            return;
+        };
+        let dest = std::path::PathBuf::from(dest.trim());
+        if Project::manifest_path(&dest).exists() {
+            self.message = Some(format!("A project already exists at {}", dest.display()));
+            self.mode = self.editing_mode();
+            return;
+        }
+        let text = match std::fs::read_to_string(&source) {
+            Ok(t) => t,
+            Err(e) => {
+                self.message = Some(format!("Couldn't read {}: {e}", source.display()));
+                self.mode = self.editing_mode();
+                return;
+            }
+        };
+        let parsed = crate::manuscript_import::parse_markdown(&text);
+        let chapters: Vec<(String, String)> =
+            parsed.chapters.into_iter().map(|c| (c.title, c.body)).collect();
+        let built = Project::create(&dest).and_then(|mut p| {
+            p.import_chapters(parsed.title.as_deref(), parsed.author.as_deref(), &chapters)
+                .map(|()| chapters.len())
+        });
+        match built {
+            Ok(n) => {
+                self.switch_to(dest); // open the finished project fresh from disk
+                self.message = Some(format!("Imported {n} chapters from {}", source.display()));
+            }
+            Err(e) => {
+                self.message = Some(format!("Import failed: {e}"));
+                self.mode = self.editing_mode();
+            }
+        }
+    }
+
     /// Import Markdown notes into the story bible: preserve every source file
     /// under `bible/sources/`, then (when AI is on) run one extractive pass over
     /// their combined text to generate/update the bible. A folder imports all the

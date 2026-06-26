@@ -415,6 +415,36 @@ impl Project {
         Ok(project)
     }
 
+    /// Replace this project's chapters with an imported manuscript (#298): write
+    /// each chapter body to its own file, rebuild the manifest in reading order,
+    /// and set the book title / author when the source supplied them. Existing
+    /// chapter files (e.g. the starter from [`create`](Self::create)) are removed
+    /// first. Writes go through the atomic-save path; the source is never touched.
+    pub fn import_chapters(
+        &mut self,
+        title: Option<&str>,
+        author: Option<&str>,
+        chapters: &[(String, String)],
+    ) -> std::io::Result<()> {
+        for c in &self.manifest.chapters {
+            let _ = fs::remove_file(self.root.join(&c.file)); // best effort
+        }
+        self.manifest.chapters.clear();
+        for (i, (ctitle, body)) in chapters.iter().enumerate() {
+            let file = format!("chapter-{}.md", i + 1);
+            atomic::write(&self.root.join(&file), body.as_bytes())?;
+            self.manifest.chapters.push(ChapterEntry::new(ctitle.clone(), file));
+        }
+        if let Some(t) = title.map(str::trim).filter(|t| !t.is_empty()) {
+            self.manifest.title = t.to_string();
+        }
+        if let Some(a) = author.map(str::trim).filter(|a| !a.is_empty()) {
+            self.manifest.author = Some(a.to_string());
+        }
+        self.active = self.manifest.chapters.first().map(|c| c.file.clone()).unwrap_or_default();
+        self.save_manifest()
+    }
+
     /// Append a starter chapter (creating its file if absent) and persist the
     /// manifest. Used by `create`, and by `open` as a safety net.
     fn add_default_chapter(&mut self) -> std::io::Result<()> {

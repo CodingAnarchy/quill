@@ -276,6 +276,9 @@ pub struct App {
     /// the folder prompt and the new-project-path prompt; taken when the project
     /// is created and the import runs.
     pending_notes_folder: Option<PathBuf>,
+    /// The Markdown manuscript file chosen to import (#298), held between the
+    /// source prompt and the new-project-path prompt; taken when the import runs.
+    pending_manuscript_source: Option<PathBuf>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -365,6 +368,7 @@ impl App {
             wizard_pending_setting: None,
             import_source: None,
             pending_notes_folder: None,
+            pending_manuscript_source: None,
             message: None,
         };
         // Baselines + per-part counters for the daily word tally (sized to the

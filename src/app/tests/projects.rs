@@ -676,3 +676,66 @@ fn new_from_notes_action_opens_the_folder_prompt() {
     app.run_action(crate::mode::Action::NewProjectFromNotes, false);
     assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::NewFromNotesSource)));
 }
+
+// --- Import an existing manuscript (#298) ---------------------------------
+
+#[test]
+fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-ms");
+    let cur = make_project("import-ms-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // A Quill-export-shaped manuscript: title + author, two `##` chapters.
+    let source = std::env::temp_dir().join(format!("quill-ms-{}.md", std::process::id()));
+    let manuscript = "# Salt and Iron\n\nby J. Reader\n\n## One\n\nThe sea was *grey*.\n\n## Two\n\nAnd it **ended**.\n";
+    fs::write(&source, manuscript).unwrap();
+    let dest = books_dir("import-ms-dest").join("Salt and Iron");
+
+    // File prompt → validates and asks for the project path.
+    app.begin_import_manuscript(source.to_str().unwrap());
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest)));
+    // Project-path prompt → create + split into chapters.
+    app.finish_import_manuscript(dest.to_str().unwrap());
+
+    // A valid project: manifest title/author from the source, one file per chapter.
+    assert_eq!(app.project.root, dest);
+    assert_eq!(app.project.manifest.title, "Salt and Iron");
+    assert_eq!(app.project.manifest.author.as_deref(), Some("J. Reader"));
+    let titles: Vec<&str> = app.project.manifest.chapters.iter().map(|c| c.title.as_str()).collect();
+    assert_eq!(titles, vec!["One", "Two"], "split on chapter headings, titles carried over");
+    let ch1 = fs::read_to_string(dest.join(&app.project.manifest.chapters[0].file)).unwrap();
+    assert_eq!(ch1, "The sea was *grey*.\n", "chapter body written, emphasis preserved");
+
+    // The original source is left untouched.
+    assert_eq!(fs::read_to_string(&source).unwrap(), manuscript, "import copies in; the source is read-only");
+    let _ = fs::remove_file(&source);
+}
+
+#[test]
+fn importing_rejects_a_non_markdown_file() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-ms-bad");
+    let cur = make_project("import-ms-bad-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    let txt = std::env::temp_dir().join(format!("quill-ms-bad-{}.txt", std::process::id()));
+    fs::write(&txt, "not markdown\n").unwrap();
+    app.begin_import_manuscript(txt.to_str().unwrap());
+
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no project-path prompt for a non-.md file");
+    assert_eq!(app.project.manifest.title, "Current", "the current project is untouched");
+    assert!(app.message.as_deref().unwrap_or("").contains("Not a Markdown"));
+    let _ = fs::remove_file(&txt);
+}
+
+#[test]
+fn import_manuscript_action_opens_the_file_prompt() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-ms-action");
+    let cur = make_project("import-ms-action-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    app.run_action(crate::mode::Action::ImportManuscript, false);
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptSource)));
+}
