@@ -36,8 +36,8 @@ use std::collections::VecDeque;
 
 use serde_json::{json, Value};
 
-use crate::ai::tool_loop::{self, Converse, ToolCall, Turn};
-use crate::ai::{tools, AiError, BackendKind, ClaudeBackend, MAX_OUTPUT_TOKENS};
+use crate::ai::tool_loop::{self, ToolCall, Turn};
+use crate::ai::{tools, AiError, BackendKind, MAX_OUTPUT_TOKENS};
 use crate::mode::{Action, AiAction};
 
 use super::palette::AiStart;
@@ -302,7 +302,8 @@ impl App {
         };
 
         // AI off / not configured: explain in the pane rather than failing obscurely.
-        if let Err(e) = self.ai.ready_for(BackendKind::Claude) {
+        // Checks the session backend (#310), so an offline/local setup is "ready".
+        if let Err(e) = self.ai.check_ready() {
             if let Some(a) = self.assistant_mut() {
                 a.note(&format!("The assistant is unavailable: {e}"));
             }
@@ -326,14 +327,16 @@ impl App {
         self.spawn_assistant_turn();
     }
 
-    /// Spawn one network turn on a worker thread (Claude-only for now, #389). The
-    /// result is collected by [`poll_assistant`](App::poll_assistant).
+    /// Spawn one tool-use turn on a worker thread, on the session backend — Claude
+    /// or the local model (#310). The backend is resolved on the UI thread and
+    /// built (loading the local model if needed) on the worker; the result is
+    /// collected by [`poll_assistant`](App::poll_assistant).
     fn spawn_assistant_turn(&mut self) {
-        let key = match self.ai.resolved_key() {
-            Some(k) => k.to_string(),
-            None => {
+        let spec = match self.assistant_backend() {
+            Ok(spec) => spec,
+            Err(e) => {
                 if let Some(a) = self.assistant_mut() {
-                    a.note("The assistant needs the Claude backend (no API key).");
+                    a.note(&format!("The assistant is unavailable: {e}"));
                 }
                 return;
             }
@@ -342,7 +345,13 @@ impl App {
         let tools = tools::assistant_tools();
         let Some(a) = self.assistant_mut() else { return };
         let body = tool_loop::build_body(&model, Some(SYSTEM), &a.messages, &tools, MAX_OUTPUT_TOKENS);
-        a.task.spawn(move || ClaudeBackend::new(key).respond(&body));
+        a.task.spawn(move || match spec.build() {
+            Ok(backend) => match backend.as_converse() {
+                Some(conv) => conv.respond(&body),
+                None => Err(AiError::NotConfigured("this backend has no tool-use support".into())),
+            },
+            Err(e) => Err(e),
+        });
     }
 
     /// Collect a finished network turn (called each event-loop tick). A final

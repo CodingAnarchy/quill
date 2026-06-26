@@ -79,6 +79,10 @@ impl Backend for ClaudeBackend {
             message: "batch still processing after the time limit — it should finish on its own shortly (re-running starts a new, separately-billed batch)".into(),
         })
     }
+
+    fn as_converse(&self) -> Option<&dyn Converse> {
+        Some(self)
+    }
 }
 
 impl Converse for ClaudeBackend {

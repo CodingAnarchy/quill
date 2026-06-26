@@ -73,6 +73,14 @@ pub trait Backend: Send + Sync {
     fn complete_batched(&self, req: &Request) -> Result<Response, AiError> {
         self.complete(req)
     }
+
+    /// This backend as the assistant's tool-use transport (#310), when it supports
+    /// one. Lets the assistant get a [`Converse`](tool_loop::Converse) from a
+    /// backend built through the shared [`Backend`] machinery, no downcast. `None`
+    /// for a backend with no tool-use path.
+    fn as_converse(&self) -> Option<&dyn tool_loop::Converse> {
+        None
+    }
 }
 
 /// One completion request. `cached_context` is the large, slowly-changing prefix
