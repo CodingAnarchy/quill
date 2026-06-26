@@ -561,13 +561,14 @@ impl Action {
         }
     }
 
-    /// Whether the authorial assistant (#307) may run this action autonomously as
-    /// a tool: it must finish during the call with an observable result and need
-    /// no further interaction. The async AI passes (assistant-triggered passes are
-    /// a follow-up, gated on cost #82/#4 and local tool-use #389) and the
-    /// interactive/modal pickers (book switch, tree, project find, annotate,
-    /// model manager, the notes importers) aren't exposed yet, so the model is
-    /// only offered the mechanical actions it can actually complete.
+    /// Whether the authorial assistant (#307/#392) may run this action as a tool:
+    /// the mechanical actions that finish during the call, plus the analysis passes
+    /// that run as a background request and surface findings in the editor (the
+    /// assistant parks until each lands, #392). Excluded: the interactive AI
+    /// actions that need typed input (Ask, Brainstorm, the drafts, the thesaurus,
+    /// the image passes), local-only Triage, and the modal pickers (book switch,
+    /// tree, project find, annotate, model manager, the notes importers) — and the
+    /// off-manuscript copy generators, kept out of autonomous reach for now.
     pub(crate) fn assistant_runnable(self) -> bool {
         matches!(
             self,
@@ -582,6 +583,16 @@ impl Action {
                 | Action::ToggleTypewriter
                 | Action::ToggleFocus
                 | Action::SwitchBackend
+                | Action::Ai(
+                    AiAction::Characters
+                        | AiAction::Continuity
+                        | AiAction::Setting
+                        | AiAction::Scaffold
+                        | AiAction::Naming
+                        | AiAction::Style
+                        | AiAction::Voice
+                        | AiAction::Editorial
+                )
         )
     }
 }

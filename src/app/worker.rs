@@ -514,6 +514,9 @@ impl App {
                 self.ai_in_flight.set(None); // the request finished — clear the backend indicator
                 self.overlay = None; // a fresh result supersedes any open overlay
                 let step_error = outcome.error().map(|e| e.to_string());
+                // If the assistant pane (#392) is waiting on this pass, capture its
+                // result before the outcome is consumed, then resume after applying.
+                let assistant_summary = self.assistant_pass_summary(&outcome);
                 match outcome {
                     Outcome::Answer(r) => self.apply_qa_result(r),
                     Outcome::Characters(r) => self.apply_characters(r),
@@ -542,9 +545,20 @@ impl App {
                 // If this AI request was a sequenced-run step (a workflow or a
                 // series-bible refresh pass), advance that run (#344).
                 self.advance_run(step_error);
+                // Resume the assistant pane's parked batch with the pass result (#392).
+                if let Some(summary) = assistant_summary {
+                    self.resume_assistant_pass(summary);
+                }
             }
             Poll::Pending => {}
             Poll::Died => {
+                // Resume the assistant if it was waiting on this (now dead) pass (#392).
+                if let Some(summary) = self.assistant_pass_summary(&Outcome::Error(ai::AiError::Network {
+                    status: None,
+                    message: "request failed".into(),
+                })) {
+                    self.resume_assistant_pass(summary);
+                }
                 self.message = Some("AI: request failed".into());
                 self.advance_run(Some("request failed".into()));
             }

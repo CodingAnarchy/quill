@@ -386,6 +386,30 @@ are unchanged — they target the active book, as before.
   network features. Account for a future local-model backend behind the same
   `quill-ai` trait.
 
+## The assistant pane (#307/#392)
+
+Every feature above is reachable from the AI palette (`Ctrl-A`), but the
+**assistant pane** (`Ctrl-W a`, docked beside the prose) is the conversational
+front door: the author types a request in plain language and the assistant runs
+the editor's registered actions to carry it out, keeping the conversation across
+turns. It drives the tool-use loop (#306) one turn at a time from the UI thread —
+network turns run off-thread so typing never freezes; tool execution runs on the
+UI thread where the editor state lives.
+
+The assistant can run the **mechanical** actions (save, export, the reports,
+spelling navigation, view toggles) and the **analysis passes** (continuity,
+characters, setting, scaffold, naming, style, voice, editorial). A pass runs as a
+normal background request and its findings open in the editor exactly as from the
+palette; the pane reports that it ran and the conversation continues. Because a
+pass costs money, the same cost gate applies: when the estimate exceeds the
+threshold the assistant asks for a `y` / skip confirmation **in the conversation**
+(not a modal, which would fight the pane for keys). The interactive AI actions
+that need their own typed input (ask, brainstorm, the drafts, the thesaurus, the
+image passes) and the off-manuscript copy generators aren't offered to the
+assistant; it stays Claude-only until the local backend learns tool-use (#389).
+The manuscript-prose boundary holds here too — the assistant never drafts or
+rewrites prose.
+
 ## The story bible
 
 AI features read from and write to a **story bible** — derived artifacts kept in

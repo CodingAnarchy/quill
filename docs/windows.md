@@ -37,10 +37,13 @@ the stacked split (one above the other, like Vim's `:split`). Navigate one pane
 elsewhere to compare two chapters.
 
 `Ctrl-w a` docks the **assistant pane** beside the editor. Type a request and
-press `Enter`; the assistant replies and runs editor actions on your behalf,
-keeping the conversation across turns. `Esc` cancels a run in flight (or, when
-idle, hands keys back to the editor); `Ctrl-w c` closes the pane. With AI off the
-pane says so rather than failing silently.
+press `Enter`; the assistant replies and runs editor actions on your behalf —
+mechanical ones (save, export, reports, navigation, view toggles) and the
+analysis passes (continuity, characters, style, …), whose findings open in the
+editor as they do from the palette. The conversation persists across turns. A
+costly pass first asks for a `y` / skip confirmation in the conversation. `Esc`
+cancels a run in flight (or, when idle, hands keys back to the editor); `Ctrl-w c`
+closes the pane. With AI off the pane says so rather than failing silently.
 
 With a report or AI answer already open full-screen, `Ctrl-w s` / `Ctrl-w v`
 **docks** it into a pane instead of splitting the editor, so the manuscript stays
