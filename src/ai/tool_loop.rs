@@ -145,6 +145,94 @@ pub(crate) fn tool_result_message(results: Vec<Value>) -> Value {
     json!({ "role": "user", "content": results })
 }
 
+// --- Constrained-choice adapter (#310) -------------------------------------
+//
+// A backend without native tool-calling (the local Qwen) still drives the loop by
+// making ONE *constrained* choice per turn — a JSON object `{action, message}`
+// where `action` is a tool name or `"respond"`. Constrained decoding
+// ([`crate::ai::constrain`]) guarantees a valid, on-list choice, so a small model
+// can't emit an unparseable or off-allowlist call (tools take no arguments yet,
+// #390, so a choice is just a name). The Claude backend keeps its native tool
+// path; this is the shim the local [`Converse`] impl builds on. The pure pieces
+// live here (not in the `local`-gated module) so they're tested in every build.
+
+/// The token a constrained choice uses to answer the author instead of calling a
+/// tool.
+pub(crate) const RESPOND: &str = "respond";
+
+/// The tool names offered in a loop body.
+pub(crate) fn tool_names(body: &Value) -> Vec<String> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .map(|ts| ts.iter().filter_map(|t| t["name"].as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// The JSON schema for one constrained choice: an `action` (a tool name or
+/// [`RESPOND`]) and a `message` (the answer when responding).
+pub(crate) fn choice_schema(tool_names: &[String]) -> Value {
+    let mut actions: Vec<Value> = tool_names.iter().map(|n| json!(n)).collect();
+    actions.push(json!(RESPOND));
+    json!({
+        "type": "object",
+        "properties": { "action": { "enum": actions }, "message": { "type": "string" } },
+        "required": ["action", "message"],
+    })
+}
+
+/// Flatten a loop body's `messages` into a plain transcript for a backend that
+/// takes a single prompt (no role/block structure): the manuscript and requests,
+/// the tools already run, and their results, in order.
+pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
+    let mut out = String::new();
+    for m in messages {
+        let assistant = m["role"].as_str() == Some("assistant");
+        match m["content"].as_array() {
+            Some(blocks) => {
+                for b in blocks {
+                    match b["type"].as_str() {
+                        Some("text") => {
+                            if assistant {
+                                out.push_str("Assistant: ");
+                            }
+                            out.push_str(b["text"].as_str().unwrap_or(""));
+                            out.push('\n');
+                        }
+                        Some("tool_use") => {
+                            out.push_str(&format!("(ran the tool: {})\n", b["name"].as_str().unwrap_or("")));
+                        }
+                        Some("tool_result") => {
+                            out.push_str(&format!("(tool result: {})\n", b["content"].as_str().unwrap_or("")));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None => {
+                if let Some(s) = m["content"].as_str() {
+                    out.push_str(s);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Parse a constrained `{action, message}` choice into a [`Turn`]: [`RESPOND`] is a
+/// final answer; any other action is the named tool call (no arguments yet, #390).
+pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
+    let v: Value =
+        serde_json::from_str(text).map_err(|e| AiError::ApiMalformed(format!("tool-use choice: {e}")))?;
+    let message = v["message"].as_str().unwrap_or("").to_string();
+    match v["action"].as_str() {
+        Some(a) if a != RESPOND && !a.is_empty() => {
+            Ok(Turn::ToolCalls(vec![ToolCall { id: format!("local-{a}"), name: a.to_string(), input: json!({}) }]))
+        }
+        _ => Ok(Turn::Final(message)),
+    }
+}
+
 /// The Messages API body for one turn: model, the running messages, and the tools.
 /// Shared by [`run`] and the assistant pane's UI-thread turn machine (#307), so
 /// both build the request the same way.
@@ -272,5 +360,63 @@ mod tests {
         let out = out.expect("the off-thread loop produced a result");
         assert_eq!(out.actions, vec!["save"]);
         assert_eq!(out.summary, "done");
+    }
+
+    // --- Constrained-choice adapter (#310) ---------------------------------
+
+    #[test]
+    fn choice_schema_offers_every_tool_plus_respond() {
+        let names = vec!["save".to_string(), "ai:continuity".to_string()];
+        let schema = choice_schema(&names);
+        let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+        let got: Vec<&str> = actions.iter().map(|a| a.as_str().unwrap()).collect();
+        assert_eq!(got, vec!["save", "ai:continuity", RESPOND]);
+        assert_eq!(schema["required"], json!(["action", "message"]));
+    }
+
+    #[test]
+    fn tool_names_reads_the_body_catalog() {
+        let body = json!({ "tools": [{ "name": "save" }, { "name": "report:progress" }] });
+        assert_eq!(tool_names(&body), vec!["save".to_string(), "report:progress".to_string()]);
+        assert!(tool_names(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn a_respond_choice_is_a_final_answer() {
+        let turn = parse_choice_turn(r#"{"action":"respond","message":"All done."}"#).unwrap();
+        match turn {
+            Turn::Final(t) => assert_eq!(t, "All done."),
+            Turn::ToolCalls(_) => panic!("respond should be a final answer"),
+        }
+    }
+
+    #[test]
+    fn a_tool_choice_is_a_named_call_with_no_args() {
+        let turn = parse_choice_turn(r#"{"action":"save","message":"saving"}"#).unwrap();
+        match turn {
+            Turn::ToolCalls(calls) => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].name, "save");
+                assert_eq!(calls[0].input, json!({}));
+            }
+            Turn::Final(_) => panic!("a tool action should be a call"),
+        }
+    }
+
+    #[test]
+    fn flatten_conversation_renders_the_turns_in_order() {
+        let messages = vec![
+            json!({ "role": "user", "content": [
+                { "type": "text", "text": "MANUSCRIPT" },
+                { "type": "text", "text": "save the chapter" },
+            ] }),
+            json!({ "role": "assistant", "content": [ { "type": "tool_use", "name": "save", "input": {} } ] }),
+            json!({ "role": "user", "content": [ { "type": "tool_result", "content": "Saved." } ] }),
+        ];
+        let flat = flatten_conversation(&messages);
+        assert!(flat.contains("MANUSCRIPT"));
+        assert!(flat.contains("save the chapter"));
+        assert!(flat.contains("ran the tool: save"));
+        assert!(flat.contains("tool result: Saved."));
     }
 }

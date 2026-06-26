@@ -124,9 +124,11 @@ keystrokes that stay out of the way.
   runs off the editor thread — typing never freezes — and **Esc** cancels a run in
   flight; **Ctrl-W c** closes the pane. A pass that would cost more than your
   threshold asks for a quick **y / skip** confirmation right in the conversation
-  rather than spending silently. Like the rest of Quill's AI it's an assistant,
-  not a co-writer (it won't draft or reword your prose), and with AI off the pane
-  explains that rather than failing silently.
+  rather than spending silently. It works on **either backend** — switch to the
+  local model (or pin `offline`) and the assistant runs fully on-device. Like the
+  rest of Quill's AI it's an assistant, not a co-writer (it won't draft or reword
+  your prose — it has no tool that can), and with AI off the pane explains that
+  rather than failing silently.
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and

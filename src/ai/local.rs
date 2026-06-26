@@ -23,6 +23,7 @@ use tokenizers::Tokenizer;
 
 use crate::ai::constrain::Constraint;
 use crate::ai::model_select::{self, Accel};
+use crate::ai::tool_loop::{self, Converse, Turn};
 use crate::ai::{AiError, Backend, Request, Response, Usage};
 
 /// Qwen end-of-turn / end-of-text tokens (stop signals for unconstrained decode).
@@ -133,6 +134,44 @@ impl Backend for LocalBackend {
             None => self.tokenizer.decode(&generated, true).map_err(|e| internal(format!("decode: {e}")))?,
         };
         Ok(Response { text, usage: Usage { output_tokens: generated.len() as u32, ..Usage::default() } })
+    }
+
+    fn as_converse(&self) -> Option<&dyn Converse> {
+        Some(self)
+    }
+}
+
+/// Assistant tool-use on the local backend (#310). The local Qwen has no native
+/// tool-calling, so each turn is one *constrained* choice — a JSON `{action,
+/// message}` over the registry-derived tool names plus `respond` — which
+/// constrained decoding ([`crate::ai::constrain`]) guarantees is valid and
+/// on-list. So the same [`tool_loop`] drives the assistant offline, and the
+/// prose-boundary guardrail (#308) holds identically: the model can only choose a
+/// vetted tool name (none writes prose), and the execution-layer allowlist
+/// re-checks it. Tool-use quality scales with the chosen model; whole-manuscript
+/// context needs an extended-context model (#378).
+impl Converse for LocalBackend {
+    fn respond(&self, body: &serde_json::Value) -> Result<Turn, AiError> {
+        let names = tool_loop::tool_names(body);
+        let messages = body["messages"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        let transcript = tool_loop::flatten_conversation(messages);
+        let tool_list = names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
+        let user = format!(
+            "{transcript}\nDecide the next step and reply as JSON {{\"action\", \"message\"}}. \
+             Set action to \"{}\" and put your reply in message to answer the author, or set \
+             action to one of [{tool_list}] to run that tool. You cannot write or edit prose.",
+            tool_loop::RESPOND,
+        );
+        let req = Request {
+            system: body["system"].as_str().map(str::to_string),
+            cached_context: String::new(),
+            user,
+            model: body["model"].as_str().unwrap_or("auto").to_string(),
+            max_tokens: body["max_tokens"].as_u64().unwrap_or(1024) as u32,
+            json_schema: Some(tool_loop::choice_schema(&names)),
+        };
+        let resp = self.complete(&req)?;
+        tool_loop::parse_choice_turn(&resp.text)
     }
 }
 
@@ -304,5 +343,42 @@ mod tests {
         assert!(parsed["name"].is_string());
         assert!(["protagonist", "antagonist", "minor"].contains(&parsed["role"].as_str().unwrap()));
         assert!(parsed["traits"].is_array());
+    }
+
+    /// Assistant tool-use on the local backend (#310): given a loop body with
+    /// tools, `respond` returns a parsed [`Turn`] whose tool call (if any) is one
+    /// of the offered tools — constrained decoding can't emit an off-list action.
+    /// Ignored (needs a model on disk); run with:
+    /// `QUILL_LOCAL_GGUF=… QUILL_LOCAL_TOKENIZER=… \
+    ///  cargo test --features local local_assistant -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn local_assistant_tool_use_picks_a_valid_action() {
+        let gguf = std::env::var("QUILL_LOCAL_GGUF").expect("QUILL_LOCAL_GGUF");
+        let tok = std::env::var("QUILL_LOCAL_TOKENIZER").expect("QUILL_LOCAL_TOKENIZER");
+        let backend = LocalBackend::load(&gguf, &tok).expect("load model");
+
+        let tools = vec![
+            json!({ "name": "save", "description": "Save the chapter", "input_schema": { "type": "object", "properties": {} } }),
+            json!({ "name": "report:progress", "description": "Open the progress report", "input_schema": { "type": "object", "properties": {} } }),
+        ];
+        let body = tool_loop::build_body(
+            "auto",
+            Some("You are the authorial assistant. You cannot write or edit prose."),
+            &[json!({ "role": "user", "content": [{ "type": "text", "text": "Save my work." }] })],
+            &tools,
+            256,
+        );
+
+        let turn = backend.respond(&body).expect("a parsed turn");
+        match turn {
+            Turn::ToolCalls(calls) => {
+                println!("LOCAL ASSISTANT CALLED: {:?}", calls.iter().map(|c| &c.name).collect::<Vec<_>>());
+                for c in &calls {
+                    assert!(["save", "report:progress"].contains(&c.name.as_str()), "off-list: {}", c.name);
+                }
+            }
+            Turn::Final(text) => println!("LOCAL ASSISTANT REPLIED: {text}"),
+        }
     }
 }

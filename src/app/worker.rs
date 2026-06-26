@@ -478,6 +478,28 @@ impl App {
         })
     }
 
+    /// The backend the assistant pane runs its tool-use turns on (#310): the
+    /// session backend (an `offline` pin forces local). Unlike [`backend_spec`],
+    /// it doesn't touch the pass status indicator or consume the per-pass routing
+    /// one-shots — the assistant has its own task and shows its own "thinking"
+    /// state, separate from `ai_task`.
+    pub(super) fn assistant_backend(&self) -> Result<BackendSpec, ai::AiError> {
+        let chosen = self.ai.backend();
+        self.ai.ready_for(chosen)?;
+        if chosen == ai::BackendKind::Local && cfg!(not(feature = "local")) {
+            return Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()));
+        }
+        Ok(match chosen {
+            ai::BackendKind::Claude => {
+                let key = self.ai.resolved_key().ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
+                BackendSpec::Claude(key.to_string())
+            }
+            // The assistant uses the hardware-recommended / configured model (no
+            // per-turn size routing); extended context (#378) is the author's choice.
+            ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone(), None),
+        })
+    }
+
     /// A label for the backend a running AI request is using (#372) — `Claude` or
     /// `local` — for the in-flight status indicator. Defaults to the session
     /// backend's label when nothing is recorded.

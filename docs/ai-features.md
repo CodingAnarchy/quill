@@ -406,7 +406,21 @@ threshold the assistant asks for a `y` / skip confirmation **in the conversation
 (not a modal, which would fight the pane for keys). The interactive AI actions
 that need their own typed input (ask, brainstorm, the drafts, the thesaurus, the
 image passes) and the off-manuscript copy generators aren't offered to the
-assistant; it stays Claude-only until the local backend learns tool-use (#389).
+assistant.
+
+The assistant runs on **either backend** (#310): it uses the session backend, so
+switching to the local model (the `Ctrl-K` backend switch, or an `offline` pin)
+makes the assistant work fully offline, with no change to the pane. Claude uses
+its native tool-calling; the local Qwen has none, so each local turn is one
+**constrained choice** — a JSON `{action, message}` over the registry-derived tool
+names plus `respond`, which constrained decoding (`src/ai/constrain.rs`)
+guarantees is valid and on-list. The model makes one choice per turn (it can run a
+tool, see the result, then choose again), so a small model never has to juggle
+several calls at once. Tool-use quality scales with the chosen model; a
+whole-manuscript request wants an extended-context model (#378). The
+prose-boundary guardrail holds identically offline — the local model can only
+choose a vetted tool name (none writes prose), and the same execution-layer
+allowlist re-checks it.
 
 ### The prose boundary, enforced (#308)
 
