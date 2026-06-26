@@ -154,6 +154,11 @@ pub struct App {
     /// Focus mode (#301), from the `[editor]` config: dim every paragraph but the
     /// one under the cursor. A toggle (palette action); off by default.
     pub focus_mode: bool,
+    /// Autosave interval in seconds (#409), from `[editor]`; `0` is off.
+    pub(crate) autosave_interval_secs: u64,
+    /// Time of the last input burst (reset each idle tick), so autosave can fire
+    /// only after the configured seconds of genuine idle (#409).
+    pub(crate) last_activity: std::time::Instant,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
     /// Whether the project is under version control (#54). Cached so the status
@@ -298,6 +303,7 @@ impl App {
         let smart_typography = editor.smart_typography;
         let typewriter = editor.typewriter;
         let focus_mode = editor.focus_mode;
+        let autosave_interval_secs = editor.autosave_interval_secs;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let (theme, theme_warnings) = crate::config::load_theme();
         // Make the loaded palette the active one for rendering (#300). `ui::draw`
@@ -338,6 +344,8 @@ impl App {
             focus_width: 72,
             typewriter,
             focus_mode,
+            autosave_interval_secs,
+            last_activity: std::time::Instant::now(),
             outline_visible: false,
             under_vc,
             vc_changes: 0,
@@ -439,6 +447,9 @@ impl App {
         self.tally_words();
         self.refresh_vc_status();
         self.capture_recovery();
+        // Mark this input burst's end, so autosave fires only after the
+        // configured seconds of genuine idle (#409).
+        self.last_activity = std::time::Instant::now();
     }
 
     /// Recompute the misspelled-word flags for the active buffer (#357), off the

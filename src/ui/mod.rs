@@ -784,7 +784,9 @@ impl Pane for StatusBar<'_> {
                 // a reference pane swapped into focus (#165) shows its file name.
                 None => (app.pane_title_for(buffer), buffer.dirty),
             };
-            let dirty = if dirtied { " ●" } else { "" };
+            // Save-state indicator (#409): ● when there are unsaved changes, ✓ when
+            // the buffer is on disk — so persistence is legible at a glance.
+            let dirty = if dirtied { " ●" } else { " ✓" };
             // Persistent AI indicator (independent of the transient message, which
             // clears on the next keystroke): in-flight spinner, else an enabled tag.
             // While a request is in flight, name the backend it's actually running

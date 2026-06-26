@@ -162,6 +162,11 @@ pub struct EditorConfig {
     /// Focus mode (#301): dim every paragraph but the one under the cursor, so the
     /// passage you're shaping stands out. Off by default.
     pub focus_mode: bool,
+    /// Autosave interval in seconds (#409): after this many seconds with no input,
+    /// the active chapter is saved automatically through the same atomic,
+    /// front-matter-preserving path as Ctrl-S (but without firing on-save
+    /// workflows). `0` (the default) turns autosave off — behavior unchanged.
+    pub autosave_interval_secs: u64,
 }
 
 impl Default for EditorConfig {
@@ -173,6 +178,7 @@ impl Default for EditorConfig {
             column_width: 72,
             typewriter: false,
             focus_mode: false,
+            autosave_interval_secs: 0,
         }
     }
 }
