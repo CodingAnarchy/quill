@@ -249,7 +249,8 @@ impl App {
             | Pending::Annotate { .. }
             | Pending::NewFromNotesDest
             | Pending::ImportManuscriptSource
-            | Pending::ImportManuscriptDest => {
+            | Pending::ImportManuscriptDest
+            | Pending::SprintDuration => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -401,6 +402,10 @@ impl App {
                                 } else {
                                     self.finish_import_manuscript(text);
                                 }
+                            }
+                            Pending::SprintDuration => {
+                                // begin_sprint restores the editing mode and reports.
+                                self.begin_sprint(text);
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),

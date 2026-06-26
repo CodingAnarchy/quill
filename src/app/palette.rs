@@ -104,6 +104,9 @@ impl App {
             Action::Assistant if self.manuscript.is_some() => {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
+            // Sprint controls reflect whether one is running (#299).
+            Action::StartSprint if self.sprint.is_some() => Some("a sprint is already running".into()),
+            Action::StopSprint if self.sprint.is_none() => Some("no sprint is running".into()),
             _ => None,
         }
     }
@@ -159,6 +162,8 @@ impl App {
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
             Action::ImportManuscript => self.start_import_manuscript(),
+            Action::StartSprint => self.start_sprint(),
+            Action::StopSprint => self.stop_sprint(),
             Action::SwitchBook => self.open_book_switcher(),
             Action::SeriesTree => self.open_tree(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),

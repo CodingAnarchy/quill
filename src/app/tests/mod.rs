@@ -63,6 +63,7 @@ mod project_search;
 mod projects;
 mod recovery;
 mod spell;
+mod sprint;
 mod typography;
 mod vcs;
 mod vim;
