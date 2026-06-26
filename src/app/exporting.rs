@@ -174,7 +174,9 @@ impl App {
                             chapters: Vec::new(),
                         });
                     }
-                    body_parts.last_mut().unwrap().chapters.push(chapter);
+                    // The first body chapter pushes a part (prev starts `None`), so
+                    // `body_parts` is non-empty by the time we reach here.
+                    body_parts.last_mut().expect("a body part was pushed above").chapters.push(chapter);
                 }
             }
         }
@@ -247,14 +249,19 @@ impl App {
                     if prev != Some(part) {
                         prev = Some(part);
                         let name = part.map(|pi| {
-                            parts.unwrap()[pi]
+                            // `part` is `Some` only when `parts` is `Some` (it came from
+                            // `parts.and_then(…)`), and `pi` is an in-bounds index from
+                            // `part_at_body_position`.
+                            parts.expect("a part index implies a parts table")[pi]
                                 .name
                                 .clone()
                                 .unwrap_or_else(|| format!("{} {}", self.project.book_part_label(b), pi + 1))
                         });
                         body_parts.push(Part { name, chapters: Vec::new() });
                     }
-                    body_parts.last_mut().unwrap().chapters.push(chapter);
+                    // A new part was just pushed on the first body chapter (prev starts
+                    // `None`), so `body_parts` is non-empty here.
+                    body_parts.last_mut().expect("a body part was pushed above").chapters.push(chapter);
                 }
             }
         }

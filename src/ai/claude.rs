@@ -334,6 +334,27 @@ mod tests {
     }
 
     #[test]
+    fn a_surprising_response_shape_errors_rather_than_panics() {
+        // Shapes the API shouldn't send, but might if it changes (#407): each must
+        // resolve to a Result we can inspect — never an indexing/unwrap panic.
+        for v in [
+            json!({}),
+            json!({ "content": "not an array" }),
+            json!({ "content": [ { "type": "image" } ] }),
+            json!("a bare string"),
+            json!(42),
+            json!({ "content": [ { "no": "type" } ], "usage": "wrong" }),
+        ] {
+            let _ = parse_response(&v); // must not panic
+            let _ = parse_turn(&v); // must not panic
+        }
+        // The empty / wrong-typed content cases are specifically surfaced errors.
+        assert!(matches!(parse_response(&json!({})), Err(AiError::ApiMalformed(_))));
+        assert!(matches!(parse_response(&json!({ "content": "x" })), Err(AiError::ApiMalformed(_))));
+        assert!(matches!(parse_turn(&json!({})), Err(AiError::ApiMalformed(_))));
+    }
+
+    #[test]
     fn parse_turn_reads_a_final_text_answer() {
         let value = json!({ "content": [ { "type": "text", "text": "Done — saved the chapter." } ] });
         match parse_turn(&value).unwrap() {

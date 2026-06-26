@@ -123,7 +123,9 @@ impl App {
             if body && part != last_part {
                 last_part = part;
                 if let Some(pi) = part {
-                    let name = parts.unwrap()[pi]
+                    // `part` is `Some` only when `parts` is `Some` (from `and_then`),
+                    // and `pi` is an in-bounds index from `part_at_body_position`.
+                    let name = parts.expect("a part index implies a parts table")[pi]
                         .name
                         .clone()
                         .unwrap_or_else(|| format!("{} {}", self.project.book_part_label(b), pi + 1));

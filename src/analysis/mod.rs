@@ -197,7 +197,9 @@ fn sentence_spans(text: &str) -> Vec<(usize, usize)> {
                 i += 1;
             }
             if word_pending && is_boundary(&chars, run, i) {
-                let s = chars[start.take().unwrap()].0;
+                // `start` is set whenever `word_pending` is — a word in progress
+                // always recorded where it began.
+                let s = chars[start.take().expect("a pending word has a recorded start")].0;
                 let e = if i < n { chars[i].0 } else { text.len() };
                 spans.push((s, e));
                 word_pending = false;
@@ -735,7 +737,9 @@ fn mattr(tokens: &[String], window: usize) -> f64 {
     let mut sum = distinct as f64;
     for i in window..n {
         let leaving = tokens[i - window].as_str();
-        let c = counts.get_mut(leaving).unwrap();
+        // Every token that enters the window was counted in, so one leaving it is
+        // always present in the map.
+        let c = counts.get_mut(leaving).expect("a token leaving the window was counted in");
         *c -= 1;
         if *c == 0 {
             distinct -= 1;
