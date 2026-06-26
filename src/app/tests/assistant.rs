@@ -1,10 +1,12 @@
 //! Tests for the authorial assistant pane (#307): opening / closing it via the
 //! window system, focus and input handling, and the UI-thread turn machine
-//! (final answers and tool execution), driven without a live backend.
+//! (final answers, tool execution, and the async-pass batch of #392), driven
+//! without a live backend.
 
 use super::*;
+use crate::ai::router::Policy;
 use crate::ai::tool_loop::{ToolCall, Turn};
-use crate::ai::AiError;
+use crate::ai::{AiError, BackendKind};
 use crate::app::{Assistant, Speaker, SplitContent};
 
 /// Send a Vim window command: the `Ctrl-w` prefix then `c`.
@@ -27,6 +29,22 @@ fn assistant_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
     app.ai.enabled = true;
     app.ai.api_key = None; // resolved_key() is None → no off-thread network turn
+    window_cmd(&mut app, 'a');
+    (app, dir)
+}
+
+/// An assistant pane where every AI pass is "over threshold" (cost 0), so a pass
+/// always asks for confirmation in the conversation (#392). A key is present so
+/// the pass is *available* and reaches the cost confirm; tests null it before any
+/// step that would actually spawn, so nothing networks.
+fn confirm_app(name: &str) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name);
+    app.ai.enabled = true;
+    app.ai.api_key = Some("test-key".into());
+    app.ai.offline = false;
+    app.ai.backend = BackendKind::Claude;
+    app.ai.routing = Policy::Configured;
+    app.ai.cost_threshold = 0.0;
     window_cmd(&mut app, 'a');
     (app, dir)
 }
@@ -89,9 +107,9 @@ fn a_tool_call_runs_the_action_and_records_it() {
 #[test]
 fn an_unrunnable_tool_is_refused_without_running() {
     let (mut app, _dir) = assistant_app("assistant-refuse");
-    // `ai:continuity` isn't in the assistant's catalog; if the model asks anyway,
-    // it's refused rather than dispatched.
-    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "ai:continuity")])));
+    // `book:switch` is a modal picker, outside the assistant's catalog; if the
+    // model asks for it anyway, it's refused rather than dispatched.
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "book:switch")])));
     let c = conv(&app);
     assert!(
         c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("can't be run")),
@@ -150,6 +168,70 @@ fn the_catalog_is_the_runnable_subset_of_the_registry() {
     assert_eq!(tools.len(), runnable, "one tool per runnable action");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"save"), "a synchronous action is offered");
-    assert!(!names.contains(&"ai:continuity"), "an async pass is not offered yet");
+    assert!(names.contains(&"ai:continuity"), "an analysis pass is offered (#392)");
+    assert!(!names.contains(&"ai:ask"), "an interactive AI action is not offered");
     assert!(!names.contains(&"book:switch"), "a modal picker is not offered");
+}
+
+#[test]
+fn an_ai_pass_asks_for_cost_confirmation_in_the_conversation() {
+    let (mut app, _dir) = confirm_app("assistant-pass-confirm");
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "ai:continuity")])));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("Reply 'y'")),
+        "a costly pass asks for confirmation in the pane rather than firing silently",
+    );
+    assert!(!c.is_running(), "nothing is running while it waits for the answer");
+}
+
+#[test]
+fn skipping_a_pass_records_it_and_continues() {
+    let (mut app, _dir) = confirm_app("assistant-pass-skip");
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "ai:continuity")])));
+    app.ai.api_key = None; // the post-skip turn must not network
+    // Decline the confirm: the input is the answer, not a new request.
+    type_str(&mut app, "n");
+    app.on_key(key(KeyCode::Enter));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("skipped")),
+        "declining the cost confirm skips the pass",
+    );
+}
+
+#[test]
+fn canceling_a_pending_confirm_clears_it() {
+    let (mut app, _dir) = confirm_app("assistant-pass-cancel");
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "ai:continuity")])));
+    app.on_key(key(KeyCode::Esc)); // cancels the whole request, dropping the confirm
+    app.ai.api_key = None; // the fresh request must not network
+    // A following line is a fresh request, not the (now-cleared) confirm answer.
+    type_str(&mut app, "hello");
+    app.on_key(key(KeyCode::Enter));
+    let c = conv(&app);
+    assert!(c.entries().iter().any(|e| e.text == "Canceled."), "Esc cancels the pending pass");
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("unavailable")),
+        "the next line is treated as a new request, so the confirm was cleared",
+    );
+}
+
+#[test]
+fn a_finished_pass_resumes_the_batch() {
+    let (mut app, _dir) = assistant_app("assistant-pass-resume");
+    // A pass is in flight, with a synchronous call queued behind it.
+    app.test_install_pass(call("p", "ai:continuity"), vec![call("s", "view:focus")]);
+    let before = app.focus_mode;
+    app.resume_assistant_pass("Done — Continuity. The findings are in the editor.".into());
+    assert_ne!(app.focus_mode, before, "the queued sync call ran after the pass resumed");
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.text.contains("ai:continuity") && e.text.contains("Done")),
+        "the pass result is reported in the conversation",
+    );
+    assert!(
+        c.entries().iter().any(|e| e.text.contains("view:focus")),
+        "the rest of the batch continues",
+    );
 }

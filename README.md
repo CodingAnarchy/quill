@@ -116,13 +116,17 @@ keystrokes that stay out of the way.
 
 - **Assistant pane** — open a conversational assistant docked beside the prose
   (**Ctrl-W a**) and ask in plain language: "save and export to Markdown",
-  "open the progress report", "jump to the next misspelling". It carries out the
-  request by running the editor's own actions and shows what it ran, and the
+  "open the progress report", "now check this for continuity". It carries out the
+  request by running the editor's own actions — including the analysis passes
+  (continuity, characters, setting, style, naming, scaffold, voice, editorial),
+  whose findings open in the editor as usual — and shows what it ran. The
   conversation persists across turns so a follow-up has the earlier context. It
   runs off the editor thread — typing never freezes — and **Esc** cancels a run in
-  flight; **Ctrl-W c** closes the pane. Like the rest of Quill's AI it's an
-  assistant, not a co-writer (it won't draft or reword your prose), and with AI
-  off the pane explains that rather than failing silently.
+  flight; **Ctrl-W c** closes the pane. A pass that would cost more than your
+  threshold asks for a quick **y / skip** confirmation right in the conversation
+  rather than spending silently. Like the rest of Quill's AI it's an assistant,
+  not a co-writer (it won't draft or reword your prose), and with AI off the pane
+  explains that rather than failing silently.
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
