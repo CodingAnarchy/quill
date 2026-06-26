@@ -19,7 +19,7 @@ use std::fs;
 
 use crate::atomic;
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
-use crate::frontmatter::{self, Epigraph, FrontMatter};
+use crate::frontmatter::{self, Epigraph, FrontMatter, Role};
 use crate::project::Project;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
@@ -39,6 +39,39 @@ struct Segment {
     front_matter: Option<FrontMatter>,
     /// Whether this chapter has edits not yet written to its file.
     dirty: bool,
+    /// The part or front/back-matter section this chapter belongs to (#412), for
+    /// the render-only structure header the continuous view draws at each
+    /// transition. `None` for a body chapter that's in no part.
+    structure: Option<Structure>,
+}
+
+/// A chapter's structural grouping for the continuous view's render-only header
+/// (#412): a manifest part, or a front/back-matter section. `label` is what the
+/// renderer shows; `key` identifies the grouping so the header is drawn only
+/// where the structure changes, never repeated within the same part/section.
+#[derive(Clone, PartialEq)]
+struct Structure {
+    label: String,
+    key: StructKey,
+}
+
+#[derive(Clone, PartialEq)]
+enum StructKey {
+    Part(usize),
+    Section(Role),
+}
+
+/// The structural grouping of chapter `index` for the continuous header (#412):
+/// its front/back-matter section if it has a role, else the manifest part it
+/// falls in, else `None` (a plain body chapter in no part). Derived from cached
+/// manifest metadata — no file reads, so it stays off the draw path's budget.
+fn structure_of(project: &Project, index: usize) -> Option<Structure> {
+    if let Some(role) = project.chapter_role(index) {
+        return Some(Structure { label: role.label().to_string(), key: StructKey::Section(role) });
+    }
+    let pi = project.manifest.part_of(index)?;
+    let label = project.book_part_display_name(project.active_book(), pi);
+    Some(Structure { label, key: StructKey::Part(pi) })
 }
 
 pub struct Manuscript {
@@ -56,6 +89,10 @@ pub struct SegmentHeader {
     pub index: usize,
     /// Divider title to draw above it, or `None` for the first loaded chapter.
     pub title: Option<String>,
+    /// The part/section name to draw above the divider (#412), set only where the
+    /// structure changes (the first loaded chapter, or a part/section boundary);
+    /// `None` to repeat nothing within the same part/section.
+    pub structure: Option<String>,
     /// The chapter's epigraph, if any.
     pub epigraph: Option<Epigraph>,
 }
@@ -109,13 +146,25 @@ impl Manuscript {
     pub fn segment_headers(&self) -> Vec<SegmentHeader> {
         let mut out = Vec::new();
         let mut start = 0;
+        let mut prev: Option<&Structure> = None;
         for (i, s) in self.segments.iter().enumerate() {
+            // Show the structure name at each transition: above the first loaded
+            // chapter (orientation — "you're in Part Two"), and wherever the
+            // part/section changes from the chapter above. Never repeated within
+            // the same grouping (#412).
+            let structure = s
+                .structure
+                .as_ref()
+                .filter(|cur| prev.is_none_or(|p| p.key != cur.key))
+                .map(|cur| cur.label.clone());
             out.push(SegmentHeader {
                 start,
                 index: s.index,
                 title: (i > 0).then(|| s.title.clone()),
+                structure,
                 epigraph: s.front_matter.as_ref().and_then(FrontMatter::epigraph),
             });
+            prev = s.structure.as_ref();
             start += s.lines;
         }
         out
@@ -283,6 +332,7 @@ impl Manuscript {
                 lines,
                 front_matter: front.map(FrontMatter::from_raw),
                 dirty: false,
+                structure: structure_of(project, index),
             });
         }
 
@@ -422,6 +472,101 @@ mod tests {
         // Chapter 1 (no front matter) is untouched.
         assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "Beta prose.\n");
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A four-body-chapter project split into two named parts (#412): body
+    /// positions 1-2 are "Part One", 3-4 are "Part Two".
+    fn project_with_parts(name: &str) -> (Project, PathBuf) {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("quill-ms-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = "title = \"Book\"\n\n\
+            [[parts]]\nname = \"Part One\"\nchapters = [1, 2]\n\n\
+            [[parts]]\nname = \"Part Two\"\nchapters = [3, 4]\n\n\
+            [[chapters]]\ntitle = \"Ch0\"\nfile = \"ch0.md\"\n\n\
+            [[chapters]]\ntitle = \"Ch1\"\nfile = \"ch1.md\"\n\n\
+            [[chapters]]\ntitle = \"Ch2\"\nfile = \"ch2.md\"\n\n\
+            [[chapters]]\ntitle = \"Ch3\"\nfile = \"ch3.md\"\n";
+        for i in 0..4 {
+            fs::write(dir.join(format!("ch{i}.md")), format!("body {i}\n")).unwrap();
+        }
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
+        (Project::open(&dir).unwrap(), dir)
+    }
+
+    #[test]
+    fn part_headers_show_at_each_transition_not_repeated() {
+        let (mut project, dir) = project_with_parts("part-headers");
+        project.set_active(2); // window loads chapters 1, 2, 3 (WINDOW = 3)
+        let m = Manuscript::open(&project).unwrap();
+        let structures: Vec<_> = m.segment_headers().into_iter().map(|h| h.structure).collect();
+        assert_eq!(
+            structures,
+            vec![
+                Some("Part One".to_string()), // first loaded chapter — orientation
+                Some("Part Two".to_string()), // the part boundary, drawn where it begins
+                None,                         // same part as the chapter above — not repeated
+            ],
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_first_loaded_chapter_names_its_part_for_orientation() {
+        // A window fully inside Part Two still shows "Part Two" up top, so the
+        // author flowing through the middle of a part knows where they are.
+        let (mut project, dir) = project_with_parts("part-orientation");
+        project.set_active(3); // window loads chapters 1, 2, 3 → but center 3 pulls back
+        let m = Manuscript::open(&project).unwrap();
+        // chapters 1 (Part One), 2 & 3 (Part Two): first header names the part it
+        // opens in regardless of whether a boundary is in view.
+        let first = &m.segment_headers()[0];
+        assert!(first.structure.is_some(), "the first loaded chapter names its part");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A project whose first chapter is a front-matter section (a prologue),
+    /// followed by plain body chapters in no part (#412).
+    fn project_with_section(name: &str) -> (Project, PathBuf) {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("quill-ms-{}-{}", std::process::id(), name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = "title = \"Book\"\n\n\
+            [[chapters]]\ntitle = \"Prologue\"\nfile = \"ch0.md\"\n\n\
+            [[chapters]]\ntitle = \"Ch1\"\nfile = \"ch1.md\"\n\n\
+            [[chapters]]\ntitle = \"Ch2\"\nfile = \"ch2.md\"\n";
+        fs::write(dir.join("ch0.md"), "---\nrole: prologue\n---\nopening\n").unwrap();
+        fs::write(dir.join("ch1.md"), "body 1\n").unwrap();
+        fs::write(dir.join("ch2.md"), "body 2\n").unwrap();
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
+        (Project::open(&dir).unwrap(), dir)
+    }
+
+    #[test]
+    fn section_headers_name_front_matter_and_body_chapters_show_nothing() {
+        let (project, dir) = project_with_section("section-header");
+        let m = Manuscript::open(&project).unwrap(); // active is chapter 0
+        let structures: Vec<_> = m.segment_headers().into_iter().map(|h| h.structure).collect();
+        assert_eq!(
+            structures,
+            vec![
+                Some("Prologue".to_string()), // the front-matter section names itself
+                None,                         // a body chapter in no part has no header
+                None,
+            ],
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_unstructured_project_draws_no_structure_headers() {
+        // The common case: no parts, no sections — the feature is invisible.
+        let (project, dir) = project_with("plain", &["a\n", "b\n", "c\n"]);
+        let m = Manuscript::open(&project).unwrap();
+        assert!(m.segment_headers().iter().all(|h| h.structure.is_none()));
         fs::remove_dir_all(&dir).ok();
     }
 

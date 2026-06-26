@@ -248,15 +248,7 @@ impl App {
                     let part = parts.and_then(|ps| part_at_body_position(ps, pos.saturating_sub(front_count) + 1));
                     if prev != Some(part) {
                         prev = Some(part);
-                        let name = part.map(|pi| {
-                            // `part` is `Some` only when `parts` is `Some` (it came from
-                            // `parts.and_then(…)`), and `pi` is an in-bounds index from
-                            // `part_at_body_position`.
-                            parts.expect("a part index implies a parts table")[pi]
-                                .name
-                                .clone()
-                                .unwrap_or_else(|| format!("{} {}", self.project.book_part_label(b), pi + 1))
-                        });
+                        let name = part.map(|pi| self.project.book_part_display_name(b, pi));
                         body_parts.push(Part { name, chapters: Vec::new() });
                     }
                     // A new part was just pushed on the first body chapter (prev starts

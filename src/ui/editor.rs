@@ -233,6 +233,7 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
             start: 0,
             index: app.project.active_index(),
             title: None,
+            structure: None,
             epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),
         }],
     };
@@ -240,6 +241,11 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
     let mut inserts = Vec::new();
     for header in &headers {
         let mut block = Vec::new();
+        // The part/section name sits above the chapter divider, where the
+        // structure changes (#412) — render-only, never in the buffer.
+        if let Some(structure) = &header.structure {
+            block.push(structure_line(structure, width));
+        }
         if let Some(title) = &header.title {
             block.push(divider_line(title, width));
         }
@@ -281,17 +287,32 @@ fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
     lines
 }
 
+/// A centered, faint part/section header, e.g. `PART TWO`, drawn above the
+/// chapter divider where the manuscript's structure changes (#412). Set apart
+/// from the dim-bold, title-case chapter divider by uppercasing and an accent
+/// color; like the divider it's render-only — never in the buffer or any file.
+fn structure_line(name: &str, width: u16) -> Line<'static> {
+    let style = Style::default()
+        .fg(theme::current().heading)
+        .add_modifier(Modifier::ITALIC);
+    centered_line(name.to_uppercase(), width, style)
+}
+
 /// A centered, dimmed chapter-break label, e.g. `—— Chapter Two ——`. Rendered
 /// only; it never enters the buffer or any file.
 fn divider_line(title: &str, width: u16) -> Line<'static> {
-    let label = format!("—— {title} ——");
+    let style = Style::default()
+        .fg(theme::current().dim)
+        .add_modifier(Modifier::BOLD);
+    centered_line(format!("—— {title} ——"), width, style)
+}
+
+/// A `label` padded to sit centered in `width` cells and styled — the shared
+/// shape of the chapter divider and the part/section header (#412), both of
+/// which are render-only.
+fn centered_line(label: String, width: u16, style: Style) -> Line<'static> {
     let pad = (width as usize).saturating_sub(label.chars().count()) / 2;
-    Line::from(Span::styled(
-        format!("{}{label}", " ".repeat(pad)),
-        Style::default()
-            .fg(theme::current().dim)
-            .add_modifier(Modifier::BOLD),
-    ))
+    Line::from(Span::styled(format!("{}{label}", " ".repeat(pad)), style))
 }
 
 /// Soft-wrap a logical line into its visual rows (#143) and style each. `text` is

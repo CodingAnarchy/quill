@@ -123,12 +123,7 @@ impl App {
             if body && part != last_part {
                 last_part = part;
                 if let Some(pi) = part {
-                    // `part` is `Some` only when `parts` is `Some` (from `and_then`),
-                    // and `pi` is an in-bounds index from `part_at_body_position`.
-                    let name = parts.expect("a part index implies a parts table")[pi]
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("{} {}", self.project.book_part_label(b), pi + 1));
+                    let name = self.project.book_part_display_name(b, pi);
                     rows.push(TreeRow {
                         indent: book_indent + 1,
                         label: format!("{name}  ·  {} w", thousands(part_words[pi] as i64)),

@@ -277,6 +277,17 @@ impl Project {
         }
     }
 
+    /// The display name of part `part_index` in book `i`: its given name, or the
+    /// auto-label `"{part_label} {n}"` for an unnamed part. Shared so the nav
+    /// tree, the export, and the continuous-view header (#412) name parts the
+    /// same way.
+    pub fn book_part_display_name(&self, i: usize, part_index: usize) -> String {
+        self.book_parts(i)
+            .and_then(|ps| ps.get(part_index))
+            .and_then(|p| p.name.clone())
+            .unwrap_or_else(|| format!("{} {}", self.book_part_label(i), part_index + 1))
+    }
+
     /// The series title, when this project is a multi-book series (#328); `None`
     /// for a standalone novel (whose `series` field, if any, is just a label).
     pub fn series_title(&self) -> Option<&str> {
