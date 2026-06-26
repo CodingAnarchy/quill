@@ -12,6 +12,7 @@ pub mod ad_creative;
 pub mod bible;
 pub mod brainstorm;
 pub mod character;
+#[cfg(feature = "local")] // constrained decoding only drives the local backend (#406)
 pub mod constrain;
 pub mod continuity;
 pub mod cost;

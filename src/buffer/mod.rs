@@ -78,9 +78,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    /// An empty, untitled buffer. Used by tests today; the path for a freshly
-    /// created chapter before its first save (#24) will reuse it.
-    #[allow(dead_code)]
+    /// An empty, untitled buffer. Test-only today; #24 (a freshly created chapter
+    /// before its first save) will reuse it — un-gate it then.
+    #[cfg(test)]
     pub fn empty() -> Self {
         Self {
             rope: Rope::new(),
@@ -606,11 +606,6 @@ impl Buffer {
         let n = count_words(&self.rope.to_string());
         self.word_count_cache.set(Some(n));
         n
-    }
-
-    #[allow(dead_code)] // part of the buffer's public API; used by upcoming stats UI
-    pub fn char_count(&self) -> usize {
-        self.rope.len_chars()
     }
 
     // --- Syntax ------------------------------------------------------------

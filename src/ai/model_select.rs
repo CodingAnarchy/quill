@@ -4,11 +4,10 @@
 //! is unit-tested in the normal suite); the hardware probe and the `hf-hub`
 //! download that act on a choice live in the `local`-gated backend.
 //!
-//! Always compiled (so the picker is tested in the normal suite) but its only
-//! non-test consumer is that gated backend, so it carries a `dead_code`
-//! allowance in default builds; the settings surface that exposes the
-//! recommendation to the author is #87.
-#![allow(dead_code)]
+//! Always compiled (so the picker is unit-tested in the normal suite); the items
+//! whose only non-test caller is the `local`-gated backend carry a tightly-scoped
+//! `#[cfg_attr(not(feature = "local"), allow(dead_code))]` rather than a
+//! module-wide allowance (#406).
 
 /// The best candle device this machine offers — Metal, then CUDA, then CPU. The
 /// two local backends (text #124 and image #240) share this probe.
@@ -19,6 +18,7 @@ pub fn best_device() -> candle_core::Device {
 }
 
 /// Whether the machine has a GPU accelerator candle can use, or is CPU-only.
+#[cfg_attr(not(feature = "local"), allow(dead_code))] // only the local backend's recommendation path calls these (#406)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Accel {
     /// Metal (Apple Silicon) or CUDA.
@@ -136,9 +136,11 @@ pub fn pick_for(input_tokens: u32, available: &[&'static Model]) -> Option<&'sta
 
 /// On a CPU-only machine, don't recommend anything bigger than this — larger
 /// models are painfully slow without a GPU.
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
 const CPU_MAX_PARAMS: &str = "3B";
 
 /// A recommendation: the chosen model (if any is viable) and the human reasoning.
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
 pub struct Recommendation {
     pub model: Option<&'static Model>,
     pub reasoning: String,
@@ -146,6 +148,7 @@ pub struct Recommendation {
 
 /// Pick the largest Qwen that fits `ram_gb` (and, on CPU, isn't too big to be
 /// usable). `None` with an explanation when the machine is too small.
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
 pub fn recommend(ram_gb: u32, accel: Accel) -> Recommendation {
     let cpu_cap = MODELS.iter().position(|m| m.params == CPU_MAX_PARAMS);
     let choice = MODELS
@@ -182,10 +185,12 @@ pub fn recommend(ram_gb: u32, accel: Accel) -> Recommendation {
     Recommendation { model: choice, reasoning }
 }
 
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
 fn ram_label(gb: u32) -> String {
     format!("{gb} GB")
 }
 
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
 fn accel_label(accel: Accel) -> &'static str {
     match accel {
         Accel::Gpu => "a GPU",
