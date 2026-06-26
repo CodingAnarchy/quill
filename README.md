@@ -116,10 +116,12 @@ keystrokes that stay out of the way.
 
 - **Assistant pane** — open a conversational assistant docked beside the prose
   (**Ctrl-W a**) and ask in plain language: "save and export to Markdown",
-  "open the progress report", "now check this for continuity". It carries out the
-  request by running the editor's own actions — including the analysis passes
-  (continuity, characters, setting, style, naming, scaffold, voice, editorial),
-  whose findings open in the editor as usual — and shows what it ran. The
+  "open the progress report", "now check this for continuity", "ask the
+  manuscript who the villain is". It carries out the request by running the
+  editor's own actions — the analysis passes (continuity, characters, setting,
+  style, naming, scaffold, voice, editorial) whose findings open in the editor,
+  and the ones that take an argument (a question to ask, a premise to brainstorm,
+  a concept to draft a bible from) — and shows what it ran. The
   conversation persists across turns so a follow-up has the earlier context. It
   runs off the editor thread — typing never freezes — and **Esc** cancels a run in
   flight; **Ctrl-W c** closes the pane. A pass that would cost more than your

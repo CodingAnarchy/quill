@@ -49,9 +49,25 @@ fn confirm_app(name: &str) -> (App, TempProject) {
     (app, dir)
 }
 
+/// An assistant pane on the local backend (offline), where AI actions are
+/// *available* without an API key — so the argument checks run — but the actual
+/// spawn no-ops in a build without the `local` feature, so nothing networks.
+fn offline_app(name: &str) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name);
+    app.ai.enabled = true;
+    app.ai.offline = true;
+    window_cmd(&mut app, 'a');
+    (app, dir)
+}
+
 /// A tool call with an empty input, the registry-derived shape.
 fn call(id: &str, name: &str) -> ToolCall {
     ToolCall { id: id.into(), name: name.into(), input: serde_json::json!({}) }
+}
+
+/// A tool call carrying typed arguments (#390).
+fn call_with(id: &str, name: &str, input: serde_json::Value) -> ToolCall {
+    ToolCall { id: id.into(), name: name.into(), input }
 }
 
 #[test]
@@ -169,7 +185,8 @@ fn the_catalog_is_the_runnable_subset_of_the_registry() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"save"), "a synchronous action is offered");
     assert!(names.contains(&"ai:continuity"), "an analysis pass is offered (#392)");
-    assert!(!names.contains(&"ai:ask"), "an interactive AI action is not offered");
+    assert!(names.contains(&"ai:ask"), "a text-argument action is offered (#390)");
+    assert!(!names.contains(&"ai:thesaurus"), "a cursor-context AI action is not offered");
     assert!(!names.contains(&"book:switch"), "a modal picker is not offered");
 }
 
@@ -217,6 +234,44 @@ fn canceling_a_pending_confirm_clears_it() {
     );
 }
 
+// --- Per-action tool inputs (#390) ---------------------------------------
+
+#[test]
+fn text_argument_tools_declare_a_typed_input_schema() {
+    use crate::ai::tools::assistant_tools;
+    let tools = assistant_tools();
+    let by = |name: &str| tools.iter().find(|t| t["name"] == name).cloned().unwrap();
+    // Ask takes a required "question"; an argument-free action keeps the empty schema.
+    let ask = by("ai:ask");
+    assert_eq!(ask["input_schema"]["properties"]["question"]["type"], "string");
+    assert_eq!(ask["input_schema"]["required"], serde_json::json!(["question"]));
+    let save = by("save");
+    assert_eq!(save["input_schema"]["properties"], serde_json::json!({}));
+}
+
+#[test]
+fn a_text_action_without_its_argument_is_refused() {
+    let (mut app, _dir) = offline_app("assistant-arg-missing");
+    // `ai:ask` is available offline but carries no question — refused, not fired.
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "ai:ask")])));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("needs a 'question'")),
+        "a text action with no argument is refused rather than opening a prompt",
+    );
+}
+
+#[test]
+fn a_question_answer_comes_back_in_the_conversation() {
+    use crate::ai::{Outcome, Response, Usage};
+    let (mut app, _dir) = assistant_app("assistant-ask-answer");
+    // A Q&A (ai:ask) is in flight; its answer should be the tool result, in full.
+    app.test_install_pass(call_with("q", "ai:ask", serde_json::json!({ "question": "Who is the villain?" })), vec![]);
+    let resp = Response { text: "Lord Marrow is the villain.".into(), usage: Usage::default() };
+    let summary = app.assistant_pass_summary(&Outcome::Answer(Ok(resp))).expect("a summary while awaiting");
+    assert_eq!(summary, "Lord Marrow is the villain.", "the answer itself comes back, not a generic note");
+}
+
 // --- Prose-boundary guardrail (#308) -------------------------------------
 
 #[test]
@@ -232,7 +287,8 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "report:progress", "report:analysis", "guide", "dict:accept", "spell:next",
         "spell:prev", "view:typewriter", "view:focus", "ai:backend", "ai:characters",
         "ai:continuity", "ai:setting", "ai:scaffold", "ai:naming", "ai:style",
-        "ai:voice", "ai:editorial",
+        "ai:voice", "ai:editorial", "ai:ask", "ai:brainstorm", "ai:draft-characters",
+        "ai:draft-setting",
     ];
     want.sort_unstable();
     assert_eq!(got, want, "the assistant's allowlist is the vetted safe set");
