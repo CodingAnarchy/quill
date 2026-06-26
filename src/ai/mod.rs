@@ -54,6 +54,7 @@ pub use submission::Submission;
 // `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
 use std::fmt;
+use crate::theme;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -469,7 +470,7 @@ pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
             "{} tokens in ({} cached) · {} out",
             u.input_tokens, u.cache_read_tokens, u.output_tokens
         ),
-        Style::default().fg(crate::theme::current().dim),
+        Style::default().fg(theme::current().dim),
     )));
     out
 }

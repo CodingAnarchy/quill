@@ -4,6 +4,7 @@
 //! `use super::*`.
 
 use super::*;
+use crate::theme;
 
 /// The result of a remote push/pull (#134), sent back from the worker thread to
 /// the UI thread. `reload` asks the UI to re-read the active chapter, since a pull
@@ -272,7 +273,7 @@ impl App {
 /// Color a unified diff for the changes overlay (#135): additions green, removals
 /// red, file/hunk headers and context dimmed. Mirrors the bible-review diff.
 fn diff_lines(patch: &str) -> Vec<Line<'static>> {
-    let theme = crate::theme::current();
+    let theme = theme::current();
     patch
         .lines()
         .map(|l| {

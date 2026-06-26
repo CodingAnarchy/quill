@@ -15,7 +15,7 @@ use crate::app::App;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
 use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
-use crate::theme::Theme;
+use crate::theme::{self, Theme};
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -45,7 +45,7 @@ struct StatusBar<'a>(&'a App);
 
 pub fn draw(frame: &mut Frame, app: &App) {
     // The render path styles from the active theme (#300); affirm it each frame.
-    crate::theme::set_current(app.theme);
+    theme::set_current(app.theme);
     let area = frame.area();
 
     // A full-screen read-only overlay (progress / analysis report or AI answer),
@@ -114,7 +114,7 @@ fn modal(frame: &mut Frame, screen: Rect, draw_box: impl FnOnce(&mut Frame, Rect
     let inner = modal_area(screen);
     // The shadow sits down-and-right of the box, over the dimmed editor; shade
     // glyphs render on any terminal, so the depth survives a limited palette.
-    let shadow = Shadow::dark_shade().style(Style::default().fg(crate::theme::current().dim));
+    let shadow = Shadow::dark_shade().style(Style::default().fg(theme::current().dim));
     frame.render_widget(&shadow, inner);
     frame.render_widget(Clear, inner); // wipe the dimmed editor under the box so it stays crisp
     draw_box(frame, inner);
@@ -387,7 +387,7 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         )),
         Line::raw(""),
     ];
-    let theme = crate::theme::current();
+    let theme = theme::current();
     for change in &front.diff {
         let color = match change.chars().next() {
             Some('-') => theme.removed,
@@ -448,12 +448,12 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
 
 /// The accent style for the active/current item in the nav pane.
 fn active_style() -> Style {
-    Style::default().fg(crate::theme::current().heading).add_modifier(Modifier::BOLD)
+    Style::default().fg(theme::current().heading).add_modifier(Modifier::BOLD)
 }
 
 /// Accent color for a chapter's revision status badge.
 fn status_style(status: Status) -> Style {
-    let theme = crate::theme::current();
+    let theme = theme::current();
     let color = match status {
         Status::Draft => theme.dim,
         Status::Revised => theme.revised,
@@ -495,7 +495,7 @@ fn chapter_line(
     let mut spans = vec![Span::styled(format!("{label}  {count}"), style)];
     // A front/back-matter section shows its role (#179) as a dim italic tag.
     if let Some(role) = role {
-        let tag = Style::default().fg(crate::theme::current().dim).add_modifier(Modifier::ITALIC);
+        let tag = Style::default().fg(theme::current().dim).add_modifier(Modifier::ITALIC);
         spans.push(Span::styled(format!(" · {}", role.label()), sel(tag)));
     }
     if let Some(status) = status {
@@ -515,7 +515,7 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
         )),
         Line::from(Span::styled(
             "enter open · f/esc back".to_string(),
-            Style::default().fg(crate::theme::current().dim),
+            Style::default().fg(theme::current().dim),
         )),
         Line::raw(""),
     ];
@@ -544,7 +544,7 @@ fn heading_outline_lines(
             let style = if Some(i) == current {
                 active_style()
             } else {
-                Style::default().fg(crate::theme::current().muted)
+                Style::default().fg(theme::current().muted)
             };
             Line::from(Span::styled(format!("{indent}{}", h.title), style))
         })
@@ -563,7 +563,7 @@ fn redundant_title_heading(headings: &[Heading], chapter_title: &str) -> Option<
 /// The top of the nav pane: book / series metadata above the chapter list.
 /// Series (if any) sits above the book title; subtitle and author follow.
 fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
-    let theme = crate::theme::current();
+    let theme = theme::current();
     let mut lines = Vec::new();
     if let Some(series) = &manifest.series {
         lines.push(Line::from(Span::styled(
@@ -602,7 +602,7 @@ fn band_header(band: Band) -> Line<'static> {
     };
     Line::from(Span::styled(
         label.to_string(),
-        Style::default().fg(crate::theme::current().dim).add_modifier(Modifier::BOLD),
+        Style::default().fg(theme::current().dim).add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -692,7 +692,7 @@ impl Pane for NavPane<'_> {
             format!("{total} words")
         };
         lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(total_line, Style::default().fg(crate::theme::current().dim))));
+        lines.push(Line::from(Span::styled(total_line, Style::default().fg(theme::current().dim))));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }
@@ -861,10 +861,14 @@ mod tests {
     use super::*;
     use super::render_to_string as render;
     use crate::buffer::{Buffer, Cursor};
+    use crate::manuscript::Manuscript;
     use crate::project::Project;
+    use crate::syntax::Heading;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::style::Color;
     use ratatui::{backend::TestBackend, Terminal};
     use std::fs;
+    use std::time::Instant;
 
     fn buffer_with(text: &str) -> Buffer {
         let mut b = Buffer::empty();
@@ -896,7 +900,6 @@ mod tests {
     #[test]
     #[ignore]
     fn render_stays_within_a_frame() {
-        use std::time::Instant;
 
         let titles: Vec<String> = (0..150).map(|i| format!("Chapter {i}")).collect();
         let title_refs: Vec<&str> = titles.iter().map(String::as_str).collect();
@@ -933,7 +936,6 @@ mod tests {
         // And again with a modal overlay open (#349): the same editor plus the
         // O(screen) backdrop dim and the shadowed box. Confirms the depth pass
         // doesn't push a full frame past budget.
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL)); // open the run-action palette
         assert!(matches!(app.mode, Mode::Palette(_)));
         terminal.draw(|f| draw(f, &app)).unwrap(); // warm
@@ -1094,7 +1096,6 @@ mod tests {
 
     #[test]
     fn an_open_modal_dims_the_editor_and_casts_a_shadow() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let mut app = app_with("# Heading one\n\nThe night was dark and long.\n");
 
         let render = |app: &App| {
@@ -1156,7 +1157,6 @@ mod tests {
 
     #[test]
     fn current_section_is_the_last_heading_at_or_before_the_cursor() {
-        use crate::syntax::Heading;
         let hs = vec![
             Heading { level: 1, title: "A".into(), start: 0 },
             Heading { level: 2, title: "B".into(), start: 50 },
@@ -1200,7 +1200,6 @@ mod tests {
 
     #[test]
     fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
-        use crate::syntax::Heading;
         let headings = vec![
             Heading { level: 1, title: "The Crossing".into(), start: 0 },
             Heading { level: 2, title: "At the ford".into(), start: 30 },
@@ -1310,7 +1309,6 @@ mod tests {
 
     #[test]
     fn editing_an_epigraph_shows_a_banner() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let mut app = app_with("Body.\n");
         app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL)); // → Nav
         app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)); // → epigraph editor
@@ -1347,7 +1345,6 @@ mod tests {
 
     #[test]
     fn continuous_view_shows_chapters_flowing_with_a_divider() {
-        use crate::manuscript::Manuscript;
 
         // A two-chapter project on disk (the manuscript window reads files).
         let mut dir = std::env::temp_dir();

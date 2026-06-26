@@ -82,6 +82,7 @@ fn words(text: &str) -> Vec<(usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     /// Nothing is accepted beyond the dictionary.
     fn nothing(_: &str) -> bool {
@@ -141,7 +142,6 @@ mod tests {
     #[test]
     #[ignore]
     fn spell_pass_is_fast_at_window_size() {
-        use std::time::Instant;
         let para = "The night was dark and the road was very long indeed and the captain walked on. ";
         let text = para.repeat(700); // ~10k words, larger than the ~3-chapter window
         let _ = misspellings("warm up the dictionary", nothing); // pay the parse once

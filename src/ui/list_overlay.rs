@@ -6,6 +6,7 @@
 //! used by the tree navigator and nav pane) live here too.
 
 use std::path::Path;
+use crate::theme;
 
 use ratatui::{
     layout::Rect,
@@ -42,7 +43,7 @@ pub(super) fn row_style(selected: bool) -> Style {
 pub(super) fn list_row(selected: bool, primary: String, secondary: Option<String>) -> Line<'static> {
     let mut spans = vec![Span::styled(format!("{}{primary}", marker(selected)), row_style(selected))];
     if let Some(s) = secondary {
-        spans.push(Span::styled(format!("  — {s}"), Style::default().fg(crate::theme::current().dim)));
+        spans.push(Span::styled(format!("  — {s}"), Style::default().fg(theme::current().dim)));
     }
     Line::from(spans)
 }
