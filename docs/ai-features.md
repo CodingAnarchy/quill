@@ -400,7 +400,15 @@ The assistant can run the **mechanical** actions (save, export, the reports,
 spelling navigation, view toggles) and the **analysis passes** (continuity,
 characters, setting, scaffold, naming, style, voice, editorial). A pass runs as a
 normal background request and its findings open in the editor exactly as from the
-palette; the pane reports that it ran and the conversation continues. Because a
+palette; the pane reports that it ran and the conversation continues.
+
+It can also run the actions that take an **argument** (#390): ask the manuscript a
+question, brainstorm from a premise, or draft a character / setting bible from a
+concept. Each tool's input schema is derived from the action itself (the single
+source from #306), so the model supplies the argument and the action runs with it
+instead of opening a prompt the assistant couldn't answer; a Q&A answer comes back
+in the conversation. (The thesaurus and image passes stay out — they need cursor
+context the assistant has no way to give.) Because a
 pass costs money, the same cost gate applies: when the estimate exceeds the
 threshold the assistant asks for a `y` / skip confirmation **in the conversation**
 (not a modal, which would fight the pane for keys). The interactive AI actions

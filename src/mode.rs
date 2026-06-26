@@ -562,13 +562,14 @@ impl Action {
     }
 
     /// Whether the authorial assistant (#307/#392) may run this action as a tool:
-    /// the mechanical actions that finish during the call, plus the analysis passes
-    /// that run as a background request and surface findings in the editor (the
-    /// assistant parks until each lands, #392). Excluded: the interactive AI
-    /// actions that need typed input (Ask, Brainstorm, the drafts, the thesaurus,
-    /// the image passes), local-only Triage, and the modal pickers (book switch,
-    /// tree, project find, annotate, model manager, the notes importers) — and the
-    /// off-manuscript copy generators, kept out of autonomous reach for now.
+    /// the mechanical actions that finish during the call, the analysis passes that
+    /// run as a background request and surface findings in the editor (the assistant
+    /// parks until each lands, #392), and the text-argument actions it can now
+    /// supply an argument to (#390) — Ask, Brainstorm, and the bible drafts.
+    /// Excluded: the thesaurus and image passes (they need cursor context the
+    /// assistant has no way to give), local-only Triage, the modal pickers (book
+    /// switch, tree, project find, annotate, model manager, the notes importers),
+    /// and the off-manuscript copy generators, kept out of autonomous reach.
     pub(crate) fn assistant_runnable(self) -> bool {
         matches!(
             self,
@@ -592,8 +593,26 @@ impl Action {
                         | AiAction::Style
                         | AiAction::Voice
                         | AiAction::Editorial
+                        | AiAction::Ask
+                        | AiAction::Brainstorm
+                        | AiAction::DraftCharacters
+                        | AiAction::DraftSetting
                 )
         )
+    }
+
+    /// The JSON property name of this action's single free-text argument (#390),
+    /// for the actions that take one — the question for Ask, the premise for
+    /// Brainstorm, the concept for the bible drafts. `None` for argument-free
+    /// actions. The single source the tool schema and the dispatch both read, so a
+    /// tool input never drifts from what the action consumes.
+    pub(crate) fn text_arg(self) -> Option<&'static str> {
+        match self {
+            Action::Ai(AiAction::Ask) => Some("question"),
+            Action::Ai(AiAction::Brainstorm) => Some("premise"),
+            Action::Ai(AiAction::DraftCharacters | AiAction::DraftSetting) => Some("concept"),
+            _ => None,
+        }
     }
 }
 

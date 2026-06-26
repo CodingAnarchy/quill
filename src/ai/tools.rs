@@ -33,13 +33,23 @@ pub fn assistant_tools() -> Vec<Value> {
     Action::ALL.iter().filter(|a| a.assistant_runnable()).map(|a| tool_for(*a)).collect()
 }
 
-/// One action's tool definition (Messages API shape).
+/// One action's tool definition (Messages API shape). The input schema is derived
+/// from the action's [`text_arg`](crate::mode::Action::text_arg) (#390): a single
+/// required string for the actions that take one (a question for Ask, a premise
+/// for Brainstorm, …), the empty object for argument-free actions.
 fn tool_for(action: Action) -> Value {
+    let input_schema = match action.text_arg() {
+        Some(arg) => json!({
+            "type": "object",
+            "properties": { arg: { "type": "string", "description": format!("the {arg} to run this action with") } },
+            "required": [arg],
+        }),
+        None => json!({ "type": "object", "properties": {} }),
+    };
     json!({
         "name": action.name(),
         "description": action.label(),
-        // No free-text arguments yet — the loop runs the named action as-is (#390).
-        "input_schema": { "type": "object", "properties": {} }
+        "input_schema": input_schema,
     })
 }
 

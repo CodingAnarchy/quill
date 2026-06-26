@@ -432,7 +432,7 @@ impl App {
         };
 
         while let Some(call) = conv.batch.pop_front() {
-            match self.assistant_run_action(&call.name) {
+            match self.assistant_run_action(&call.name, &call.input) {
                 Step::Sync(result) => {
                     conv.ran.push(call.name.clone());
                     conv.entries.push(Entry::tool(&format!("{} — {result}", call.name)));
@@ -475,16 +475,21 @@ impl App {
         self.drive_assistant_batch();
     }
 
-    /// The result text for an assistant-initiated pass that just finished, or
-    /// `None` when the pane isn't waiting on one (so [`poll_ai`](App::poll_ai)
-    /// resumes only its own passes). Read before the outcome is consumed.
+    /// The result text for an assistant-initiated pass / action that just finished,
+    /// or `None` when the pane isn't waiting on one (so [`poll_ai`](App::poll_ai)
+    /// resumes only its own work). Read before the outcome is consumed. A Q&A answer
+    /// (#390) comes back in full — it *is* the result the author asked for — while
+    /// the analysis passes report that their findings opened in the editor.
     pub(super) fn assistant_pass_summary(&self, outcome: &super::Outcome) -> Option<String> {
         let call = self.assistant()?.awaiting.as_ref()?;
-        let label = Action::from_name(&call.name).map_or("the pass", Action::label);
-        Some(match outcome.error() {
-            Some(e) => format!("error: {e}"),
-            None => format!("Done — {label}. The findings are in the editor."),
-        })
+        let label = Action::from_name(&call.name).map_or("the action", Action::label);
+        if let Some(e) = outcome.error() {
+            return Some(format!("error: {e}"));
+        }
+        if let super::Outcome::Answer(Ok(resp)) = outcome {
+            return Some(resp.text.clone());
+        }
+        Some(format!("Done — {label}. The result is in the editor."))
     }
 
     /// The author's `y`/skip answer to a pending cost confirm (#392): run the pass
@@ -539,7 +544,7 @@ impl App {
     /// model emits. The allowlist holds no prose-writing action, so the assistant
     /// has no capability to draft or edit chapter prose; the prompt's
     /// refuse-and-redirect is the first layer, this is the guarantee.
-    fn assistant_run_action(&mut self, name: &str) -> Step {
+    fn assistant_run_action(&mut self, name: &str, input: &Value) -> Step {
         let Some(action) = Action::from_name(name) else {
             return Step::Sync(format!(
                 "Blocked: there is no action '{name}'. You can't write or edit prose — \
@@ -555,6 +560,23 @@ impl App {
         if let Some(reason) = self.action_status(action) {
             return Step::Sync(format!("unavailable: {reason}"));
         }
+        // An action that takes a free-text argument (#390): run it with the value
+        // the model supplied — under its named parameter (Claude's native tools) or
+        // the generic `argument` key (the local constrained-choice path) — instead
+        // of the interactive prompt the assistant can't answer.
+        if let Some(arg_key) = action.text_arg() {
+            let text = input
+                .get(arg_key)
+                .or_else(|| input.get("argument"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                return Step::Sync(format!("{} needs a '{arg_key}' argument.", action.label()));
+            }
+            return self.fire_text_action(action, &text);
+        }
         if let Action::Ai(a) = action {
             return self.start_assistant_pass(a, action.label());
         }
@@ -563,11 +585,31 @@ impl App {
         Step::Sync(self.message.take().unwrap_or_else(|| format!("Ran {}.", action.label())))
     }
 
-    /// Begin an AI pass for the assistant: run it now when the cost is under the
-    /// threshold (or the router resolves a backend), or post a cost confirm to the
-    /// conversation when it isn't (#392 / #82). The pane is Claude-only for now
-    /// (#389), so the router's `offer_local` choice isn't surfaced — a confirm is a
-    /// plain y/skip, run on Claude.
+    /// Fire a text-argument AI action (#390) with the model's argument, on the
+    /// session backend. These run as a background request (like the analysis
+    /// passes) so the batch parks until [`poll_ai`](App::poll_ai) resumes it; the
+    /// Q&A answer comes back into the conversation (see `assistant_pass_summary`).
+    fn fire_text_action(&mut self, action: Action, text: &str) -> Step {
+        self.message = None;
+        match action {
+            Action::Ai(AiAction::Ask) => self.ask_ai(text),
+            Action::Ai(AiAction::Brainstorm) => self.brainstorm(text),
+            Action::Ai(AiAction::DraftCharacters) => self.draft_characters(text),
+            Action::Ai(AiAction::DraftSetting) => self.draft_setting(text),
+            _ => return Step::Sync(format!("{} can't take an argument here.", action.label())),
+        }
+        if self.ai_task.is_busy() {
+            Step::Started
+        } else {
+            Step::Sync(self.message.take().unwrap_or_else(|| "couldn't start the action".into()))
+        }
+    }
+
+    /// Begin an AI analysis pass for the assistant: run it now when the cost is
+    /// under the threshold (or the router resolves a backend), or post a cost
+    /// confirm to the conversation when it isn't (#392 / #82). The in-pane confirm
+    /// is a plain y/skip on the cloud backend (the router's `offer_local` choice
+    /// isn't surfaced here).
     fn start_assistant_pass(&mut self, action: AiAction, label: &str) -> Step {
         match self.ai_action_start(action, false) {
             AiStart::Run(backend) => {

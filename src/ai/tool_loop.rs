@@ -169,13 +169,18 @@ pub(crate) fn tool_names(body: &Value) -> Vec<String> {
 }
 
 /// The JSON schema for one constrained choice: an `action` (a tool name or
-/// [`RESPOND`]) and a `message` (the answer when responding).
+/// [`RESPOND`]), an `argument` (the text input for an action that takes one, #390),
+/// and a `message` (the answer when responding).
 pub(crate) fn choice_schema(tool_names: &[String]) -> Value {
     let mut actions: Vec<Value> = tool_names.iter().map(|n| json!(n)).collect();
     actions.push(json!(RESPOND));
     json!({
         "type": "object",
-        "properties": { "action": { "enum": actions }, "message": { "type": "string" } },
+        "properties": {
+            "action": { "enum": actions },
+            "argument": { "type": "string" },
+            "message": { "type": "string" },
+        },
         "required": ["action", "message"],
     })
 }
@@ -219,15 +224,21 @@ pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
     out
 }
 
-/// Parse a constrained `{action, message}` choice into a [`Turn`]: [`RESPOND`] is a
-/// final answer; any other action is the named tool call (no arguments yet, #390).
+/// Parse a constrained `{action, argument, message}` choice into a [`Turn`]:
+/// [`RESPOND`] is a final answer; any other action is the named tool call, carrying
+/// `argument` as a generic `{"argument": …}` input when present (the executor maps
+/// it to the action's named parameter, #390).
 pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
     let v: Value =
         serde_json::from_str(text).map_err(|e| AiError::ApiMalformed(format!("tool-use choice: {e}")))?;
     let message = v["message"].as_str().unwrap_or("").to_string();
     match v["action"].as_str() {
         Some(a) if a != RESPOND && !a.is_empty() => {
-            Ok(Turn::ToolCalls(vec![ToolCall { id: format!("local-{a}"), name: a.to_string(), input: json!({}) }]))
+            let input = match v["argument"].as_str() {
+                Some(arg) if !arg.is_empty() => json!({ "argument": arg }),
+                _ => json!({}),
+            };
+            Ok(Turn::ToolCalls(vec![ToolCall { id: format!("local-{a}"), name: a.to_string(), input }]))
         }
         _ => Ok(Turn::Final(message)),
     }
@@ -372,6 +383,19 @@ mod tests {
         let got: Vec<&str> = actions.iter().map(|a| a.as_str().unwrap()).collect();
         assert_eq!(got, vec!["save", "ai:continuity", RESPOND]);
         assert_eq!(schema["required"], json!(["action", "message"]));
+        assert_eq!(schema["properties"]["argument"]["type"], "string", "an action's text input (#390)");
+    }
+
+    #[test]
+    fn a_tool_choice_carries_its_argument() {
+        let turn = parse_choice_turn(r#"{"action":"ai:ask","argument":"Who dies?","message":""}"#).unwrap();
+        match turn {
+            Turn::ToolCalls(calls) => {
+                assert_eq!(calls[0].name, "ai:ask");
+                assert_eq!(calls[0].input, json!({ "argument": "Who dies?" }), "the argument rides as a generic key");
+            }
+            Turn::Final(_) => panic!("a tool action should be a call"),
+        }
     }
 
     #[test]

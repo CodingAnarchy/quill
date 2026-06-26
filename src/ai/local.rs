@@ -157,9 +157,10 @@ impl Converse for LocalBackend {
         let transcript = tool_loop::flatten_conversation(messages);
         let tool_list = names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
         let user = format!(
-            "{transcript}\nDecide the next step and reply as JSON {{\"action\", \"message\"}}. \
-             Set action to \"{}\" and put your reply in message to answer the author, or set \
-             action to one of [{tool_list}] to run that tool. You cannot write or edit prose.",
+            "{transcript}\nDecide the next step and reply as JSON {{\"action\", \"argument\", \"message\"}}. \
+             Set action to \"{}\" and put your reply in message to answer the author, or set action to \
+             one of [{tool_list}] to run that tool. When a tool needs input (e.g. a question for \
+             \"ai:ask\"), put it in argument. You cannot write or edit prose.",
             tool_loop::RESPOND,
         );
         let req = Request {
