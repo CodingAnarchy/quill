@@ -197,6 +197,7 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         // Surface a finished AI request (runs on a worker thread) before drawing,
         // so its answer appears within the poll window even with no keypress.
         app.poll_ai();
+        app.tick_sprint(); // end a writing sprint when its time is up (#299)
         app.poll_assistant(); // advance the assistant pane's tool-use loop (#307)
         app.poll_vc(); // surface a finished push/pull (worker thread) before drawing
         app.poll_model_download(); // surface a finished local-model download (#382)

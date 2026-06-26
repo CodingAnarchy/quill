@@ -803,6 +803,12 @@ impl Pane for StatusBar<'_> {
                 (true, 0) => " · git".into(),
                 (true, n) => format!(" · git ●{n}"),
             };
+            // A running writing sprint (#299): live countdown + net words written,
+            // always visible (independent of the transient message on the right).
+            let sprint_tag = match &app.sprint {
+                Some(s) => format!(" · {}", crate::app::sprint::status_segment(s.remaining(), s.words(app.project_word_count()))),
+                None => String::new(),
+            };
             let right = match &app.message {
                 Some(m) => format!("{m}  "),
                 None => format!(
@@ -812,7 +818,7 @@ impl Pane for StatusBar<'_> {
                     buffer.line_count()
                 ),
             };
-            (format!(" {name}{dirty}{vc_tag}{ai_tag}"), right)
+            (format!(" {name}{dirty}{vc_tag}{ai_tag}{sprint_tag}"), right)
         };
 
         // Vim mode (#27): a chip at the far left naming the editing mode. Only

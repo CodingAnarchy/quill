@@ -365,6 +365,10 @@ pub(crate) enum Action {
     NewProjectFromNotes,
     /// Import an existing Markdown manuscript as a new project (#298).
     ImportManuscript,
+    /// Start a timed writing sprint (#299).
+    StartSprint,
+    /// Stop the active writing sprint (#299).
+    StopSprint,
     /// Switch the active book of a multi-book series (#329).
     SwitchBook,
     /// Open the series tree navigator (#330).
@@ -446,6 +450,8 @@ impl Action {
         Action::SwitchBackend,
         Action::ManageModels,
         Action::Assistant,
+        Action::StartSprint,
+        Action::StopSprint,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -483,6 +489,8 @@ impl Action {
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
             Action::ImportManuscript => "import:manuscript",
+            Action::StartSprint => "sprint:start",
+            Action::StopSprint => "sprint:stop",
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
             Action::RefreshSeriesBible => "bible:series",
@@ -535,6 +543,8 @@ impl Action {
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
             Action::ImportManuscript => "Import a manuscript → new project",
+            Action::StartSprint => "Start a writing sprint",
+            Action::StopSprint => "Stop the writing sprint",
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
             Action::RefreshSeriesBible => "Refresh series bible",
@@ -967,6 +977,8 @@ pub(crate) enum Pending {
     ImportManuscriptSource,
     /// Text input: the path for the new project created from a manuscript (#298).
     ImportManuscriptDest,
+    /// Text input: how many minutes a writing sprint should run (#299).
+    SprintDuration,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).

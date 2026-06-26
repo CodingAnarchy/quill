@@ -63,6 +63,13 @@ keystrokes that stay out of the way.
   Set a **daily word-count target** (`daily` under `[goals]`) and the report
   shows today's net words against it — met, or how many remain. Full spec in
   [`docs/progress-reports.md`](docs/progress-reports.md).
+- **Writing sprints** — start a timed session (**Start a writing sprint** in the
+  Ctrl-K menu; pick a length in minutes) and the status bar shows a live countdown
+  and the words written since you began — the word-war / Pomodoro ritual a lot of
+  writers build momentum with. When the time's up (or you **Stop the writing
+  sprint**), Quill reports the words written, the time, and your words-per-minute.
+  It's non-modal — the timer lives in the status bar, typing is never interrupted —
+  and the count uses the same word accounting as the daily momentum line.
 - **Epigraphs** — a quotation (single- or multi-line / verse) and attribution on
   a chapter (front matter) or the book (manifest), rendered set-apart above the
   body (the book's at the start of the manuscript). The quotation is edited in

@@ -56,6 +56,7 @@ mod project_search;
 mod prompts;
 mod sequenced;
 mod series_bible;
+pub(crate) mod sprint; // the writing-sprint state + status segment, read by the UI (#299)
 mod tree;
 mod vim;
 mod wizard;
@@ -279,6 +280,9 @@ pub struct App {
     /// The Markdown manuscript file chosen to import (#298), held between the
     /// source prompt and the new-project-path prompt; taken when the import runs.
     pending_manuscript_source: Option<PathBuf>,
+    /// An active writing sprint (#299): a timed session with a live word count.
+    /// Session state, never persisted; `None` when no sprint is running.
+    pub(crate) sprint: Option<sprint::Sprint>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -369,6 +373,7 @@ impl App {
             import_source: None,
             pending_notes_folder: None,
             pending_manuscript_source: None,
+            sprint: None,
             message: None,
         };
         // Baselines + per-part counters for the daily word tally (sized to the
