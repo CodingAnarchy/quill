@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::http::{self, Header};
+use super::tool_loop::{Converse, ToolCall, Turn};
 use super::{is_ok, AiError, Backend, Request, Response, Usage};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -78,6 +79,48 @@ impl Backend for ClaudeBackend {
             message: "batch still processing after the time limit — it should finish on its own shortly (re-running starts a new, separately-billed batch)".into(),
         })
     }
+}
+
+impl Converse for ClaudeBackend {
+    /// One turn of the assistant tool-use loop (#306): POST the loop-built body
+    /// (messages + tools + the cached manuscript prefix) and parse the reply into
+    /// tool calls or a final answer.
+    fn respond(&self, body: &Value) -> Result<Turn, AiError> {
+        let (status, value) = self.post(API_URL, body)?;
+        if !is_ok(status) {
+            return Err(api_error(status, &value));
+        }
+        parse_turn(&value)
+    }
+}
+
+/// Parse a Messages API reply into a [`Turn`] (#306): any `tool_use` blocks become
+/// tool calls; otherwise the joined text is the final answer.
+fn parse_turn(value: &Value) -> Result<Turn, AiError> {
+    let blocks = value
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AiError::ApiMalformed("response had no content".into()))?;
+
+    let calls: Vec<ToolCall> = blocks
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .map(|b| ToolCall {
+            id: b.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
+            name: b.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+            input: b.get("input").cloned().unwrap_or_else(|| json!({})),
+        })
+        .collect();
+    if !calls.is_empty() {
+        return Ok(Turn::ToolCalls(calls));
+    }
+
+    let text = blocks
+        .iter()
+        .filter_map(|b| b.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("");
+    Ok(Turn::Final(text))
 }
 
 impl ClaudeBackend {
@@ -265,6 +308,34 @@ mod tests {
     fn parse_response_rejects_empty_content() {
         let value = json!({ "content": [], "usage": {} });
         assert!(matches!(parse_response(&value), Err(AiError::ApiMalformed(_))));
+    }
+
+    #[test]
+    fn parse_turn_reads_tool_use_blocks() {
+        let value = json!({
+            "content": [
+                { "type": "tool_use", "id": "t1", "name": "report:progress", "input": {} },
+                { "type": "tool_use", "id": "t2", "name": "save", "input": {} }
+            ]
+        });
+        match parse_turn(&value).unwrap() {
+            Turn::ToolCalls(calls) => {
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].name, "report:progress");
+                assert_eq!(calls[0].id, "t1");
+                assert_eq!(calls[1].name, "save");
+            }
+            Turn::Final(_) => panic!("expected tool calls"),
+        }
+    }
+
+    #[test]
+    fn parse_turn_reads_a_final_text_answer() {
+        let value = json!({ "content": [ { "type": "text", "text": "Done — saved the chapter." } ] });
+        match parse_turn(&value).unwrap() {
+            Turn::Final(text) => assert_eq!(text, "Done — saved the chapter."),
+            Turn::ToolCalls(_) => panic!("expected a final answer"),
+        }
     }
 
     fn req() -> Request {

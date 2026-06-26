@@ -37,6 +37,8 @@ pub mod style;
 pub mod submission;
 pub mod config_gen;
 pub mod thesaurus;
+pub mod tool_loop;
+pub mod tools;
 pub mod voice;
 pub mod workflow_gen;
 mod claude;
