@@ -407,8 +407,28 @@ threshold the assistant asks for a `y` / skip confirmation **in the conversation
 that need their own typed input (ask, brainstorm, the drafts, the thesaurus, the
 image passes) and the off-manuscript copy generators aren't offered to the
 assistant; it stays Claude-only until the local backend learns tool-use (#389).
-The manuscript-prose boundary holds here too — the assistant never drafts or
-rewrites prose.
+
+### The prose boundary, enforced (#308)
+
+A conversational pane invites the one request Quill must never fulfil — "rewrite
+this paragraph," "make this punchier," "draft the next scene." The boundary above
+holds here as a **two-layer, tested contract**, not a prompt nicety:
+
+1. **Refuse and redirect (prompt).** The system prompt tells the assistant it
+   cannot write or change prose and has no tool that does; asked to draft,
+   rewrite, tighten, expand, or reword, it refuses and offers what it *can* do
+   instead — flag continuity / style / voice issues for the author to fix, run an
+   analysis pass, or open a report.
+2. **Allowlist at the execution layer (code).** Every tool call is checked against
+   the registry-derived allowlist before it runs; a call to anything off-list —
+   or to a tool the model simply invented — is blocked in code, regardless of what
+   the model emits. The allowlist contains **no prose-writing action**, so the
+   assistant has no capability to edit chapter prose. It's an allowlist, not a
+   denylist: a newly added action is excluded until it's deliberately vetted in.
+
+Tests feed prose-generation requests and off-list / invented tool calls and
+assert nothing is written to the chapter and no off-list tool runs — so the
+riskiest surface is a guarantee, not a hope.
 
 ## The story bible
 

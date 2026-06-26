@@ -112,7 +112,7 @@ fn an_unrunnable_tool_is_refused_without_running() {
     app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "book:switch")])));
     let c = conv(&app);
     assert!(
-        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("can't be run")),
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("not a permitted")),
         "an action outside the catalog is declined",
     );
 }
@@ -215,6 +215,74 @@ fn canceling_a_pending_confirm_clears_it() {
         c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("unavailable")),
         "the next line is treated as a new request, so the confirm was cleared",
     );
+}
+
+// --- Prose-boundary guardrail (#308) -------------------------------------
+
+#[test]
+fn the_allowlist_is_exactly_the_vetted_safe_set() {
+    use crate::mode::Action;
+    // An allowlist, not a denylist: a new action is excluded until it's explicitly
+    // added here, so nothing — least of all a prose-writing action — joins by
+    // accident. None of these writes or edits chapter prose.
+    let mut got: Vec<&str> = Action::ALL.iter().filter(|a| a.assistant_runnable()).map(|a| a.name()).collect();
+    got.sort_unstable();
+    let mut want = vec![
+        "save", "export:markdown", "export:docx", "export:scriv", "export:vellum",
+        "report:progress", "report:analysis", "guide", "dict:accept", "spell:next",
+        "spell:prev", "view:typewriter", "view:focus", "ai:backend", "ai:characters",
+        "ai:continuity", "ai:setting", "ai:scaffold", "ai:naming", "ai:style",
+        "ai:voice", "ai:editorial",
+    ];
+    want.sort_unstable();
+    assert_eq!(got, want, "the assistant's allowlist is the vetted safe set");
+}
+
+#[test]
+fn an_unknown_prose_tool_is_blocked_in_code() {
+    let (mut app, _dir) = assistant_app("assistant-guard-unknown");
+    let before = app.buffer.text();
+    // The model invents a tool to fulfil "rewrite this paragraph". No such action
+    // exists, so it's blocked at the execution layer and nothing is written.
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "rewrite_paragraph")])));
+    assert_eq!(app.buffer.text(), before, "a hallucinated prose tool edits nothing");
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("no action")),
+        "the unknown tool is refused in code",
+    );
+}
+
+#[test]
+fn an_off_list_tool_is_blocked_in_code() {
+    let (mut app, _dir) = assistant_app("assistant-guard-offlist");
+    let before = app.buffer.text();
+    // `annotate` is a real action but off the assistant's allowlist; even if the
+    // model emits it, the execution layer refuses it regardless of the prompt.
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "annotate")])));
+    assert_eq!(app.buffer.text(), before);
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("not a permitted")),
+        "an off-allowlist action is blocked at the execution layer",
+    );
+}
+
+#[test]
+fn no_allowlisted_tool_edits_chapter_prose() {
+    use crate::mode::Action;
+    let (mut app, _dir) = assistant_app("assistant-guard-noedit");
+    let before = app.buffer.text();
+    // Run every synchronous allowlisted tool in one batch (the AI passes are async
+    // and gated separately, and also never edit prose): none touches the chapter.
+    let calls: Vec<ToolCall> = Action::ALL
+        .iter()
+        .filter(|a| a.assistant_runnable() && !matches!(a, Action::Ai(_)))
+        .enumerate()
+        .map(|(i, a)| call(&i.to_string(), a.name()))
+        .collect();
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(calls)));
+    assert_eq!(app.buffer.text(), before, "no assistant tool edits the chapter prose");
 }
 
 #[test]
