@@ -389,8 +389,9 @@ are unchanged — they target the active book, as before.
 ## The assistant pane (#307/#392)
 
 Every feature above is reachable from the AI palette (`Ctrl-A`), but the
-**assistant pane** (`Ctrl-W a`, docked beside the prose) is the conversational
-front door: the author types a request in plain language and the assistant runs
+**assistant pane** (`Ctrl-W a`, or from the `Ctrl-K` run-action menu — it's a
+registered action like the rest, #399; docked beside the prose) is the
+conversational front door: the author types a request in plain language and the assistant runs
 the editor's registered actions to carry it out, keeping the conversation across
 turns. It drives the tool-use loop (#306) one turn at a time from the UI thread —
 network turns run off-thread so typing never freezes; tool execution runs on the

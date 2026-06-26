@@ -391,6 +391,8 @@ pub(crate) enum Action {
     SwitchBackend,
     /// Open the local AI model manager — choose which models to use (#379).
     ManageModels,
+    /// Open the authorial assistant pane (#399), the same as `Ctrl-W a`.
+    Assistant,
 }
 
 impl Action {
@@ -440,6 +442,7 @@ impl Action {
         Action::ReviewAnnotations,
         Action::SwitchBackend,
         Action::ManageModels,
+        Action::Assistant,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -490,6 +493,7 @@ impl Action {
             Action::ReviewAnnotations => "annotate:review",
             Action::SwitchBackend => "ai:backend",
             Action::ManageModels => "ai:models",
+            Action::Assistant => "assistant",
         }
     }
 
@@ -540,6 +544,7 @@ impl Action {
             Action::ReviewAnnotations => "Review annotations",
             Action::SwitchBackend => "Switch AI backend (Claude / local)",
             Action::ManageModels => "Local AI models",
+            Action::Assistant => "Authorial assistant",
         }
     }
 

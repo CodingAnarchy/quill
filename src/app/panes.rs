@@ -169,7 +169,8 @@ impl App {
 
     /// Open the authorial assistant pane (#307), docked beside the editor. Already
     /// open → just give it focus. Single-chapter view only, like the other panes.
-    fn open_assistant(&mut self) {
+    /// Reached from `Ctrl-W a` and the `Ctrl-K` run-action menu (#399).
+    pub(super) fn open_assistant(&mut self) {
         if self.manuscript.is_some() {
             self.message = Some("Leave the continuous view (Ctrl-l) before opening the assistant.".into());
             return;
