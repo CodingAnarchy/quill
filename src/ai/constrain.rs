@@ -17,11 +17,9 @@
 //! recognizable `type`/`enum`. Numbers complete when a delimiter follows (always
 //! true inside objects/arrays); a bare top-level number is reported `Partial`.
 //!
-//! Its consumer — the candle decode loop that ranks logits and calls
-//! [`Constraint::pick`] — lands in the follow-up local-backend work (#87), hence
-//! the module-wide `dead_code` allowance for now; the logic is fully exercised by
-//! this module's tests.
-#![allow(dead_code)]
+//! Its consumer is the candle decode loop in [`crate::ai::local`], so this module
+//! is compiled only under `--features local` (gated at the `mod` declaration); the
+//! logic is fully exercised by this module's tests in that profile.
 
 use serde_json::Value;
 

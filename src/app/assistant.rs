@@ -7,9 +7,9 @@
 //!
 //! The tool-use loop has two seams that pull in opposite directions: the network
 //! turn must run *off* the UI thread (so typing never freezes), but executing an
-//! action mutates the editor and must run *on* it. Rather than run the all-in-one
-//! [`tool_loop::run`] off-thread and ferry every action back over a channel, the
-//! pane drives the loop one turn at a time from the UI thread:
+//! action mutates the editor and must run *on* it. Rather than run a whole loop
+//! off-thread and ferry every action back over a channel, the pane drives the loop
+//! one turn at a time from the UI thread, reusing the [`tool_loop`] building blocks:
 //!
 //! 1. A request spawns a single network turn on a worker via [`Task`].
 //! 2. [`App::poll_assistant`] (each event-loop tick) collects the result. A final

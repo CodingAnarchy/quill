@@ -16,7 +16,7 @@
 //! rather than re-parsing.
 
 use ropey::Rope;
-use tree_sitter::{InputEdit, Node, Point, Tree};
+use tree_sitter::{InputEdit, Node, Point};
 use tree_sitter_md::{MarkdownParseOptions, MarkdownParser, MarkdownTree};
 
 /// What a highlighted span represents. The renderer maps each to a `Style`.
@@ -153,12 +153,6 @@ impl Syntax {
     /// Headings in document order — the in-chapter outline.
     pub fn headings(&self) -> &[Heading] {
         &self.headings
-    }
-
-    /// The block-level syntax tree, for future structural consumers.
-    #[allow(dead_code)]
-    pub fn block_tree(&self) -> &Tree {
-        self.tree.block_tree()
     }
 }
 

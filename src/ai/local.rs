@@ -8,11 +8,9 @@
 //! parseable — the same guarantee the Claude backend gets from the API. Without a
 //! schema (e.g. Q&A) it decodes greedily.
 //!
-//! Wiring this `LocalBackend` into settings / backend-switching is #87; this
-//! module is the engine it will select — hence the `dead_code` allowance until
-//! that wiring lands. The end-to-end path is covered by the `#[ignore]`d
-//! integration test below (it needs a model on disk).
-#![allow(dead_code)]
+//! The whole module is `local`-gated and every item is reachable in that build
+//! (the backend's own paths plus the `#[ignore]`d integration tests), so it needs
+//! no `dead_code` allowance (#406).
 
 use std::sync::Mutex;
 
