@@ -234,10 +234,18 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
 /// transcript is pre-wrapped to the interior width so scrolling is line-exact.
 fn draw_assistant_pane(frame: &mut Frame, area: Rect, app: &App, conv: &Assistant, focused: bool) {
     let theme = &app.theme;
-    let title = if conv.is_running() {
-        " Assistant — thinking… (Esc cancels) "
+    // Title carries the live state and the run's running cost (#309).
+    let mut parts: Vec<String> = Vec::new();
+    if conv.is_running() {
+        parts.push("thinking… (Esc cancels)".into());
+    }
+    if conv.spent() > 0.0 {
+        parts.push(format!("~${:.2}", conv.spent()));
+    }
+    let title = if parts.is_empty() {
+        " Assistant ".to_string()
     } else {
-        " Assistant "
+        format!(" Assistant — {} ", parts.join(" · "))
     };
     let border = if focused { theme.heading } else { theme.dim };
     let block = Block::default().borders(Borders::ALL).title(title).border_style(Style::default().fg(border));

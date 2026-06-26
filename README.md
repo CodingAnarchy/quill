@@ -124,9 +124,10 @@ keystrokes that stay out of the way.
   a concept to draft a bible from) — and shows what it ran. The
   conversation persists across turns so a follow-up has the earlier context. It
   runs off the editor thread — typing never freezes — and **Esc** cancels a run in
-  flight; **Ctrl-W c** closes the pane. A pass that would cost more than your
-  threshold asks for a quick **y / skip** confirmation right in the conversation
-  rather than spending silently. It works on **either backend** — switch to the
+  flight; **Ctrl-W c** closes the pane. It's cost-aware: the pane shows the run's
+  running spend, a costly pass asks for a quick **y / skip** confirmation, and a
+  multi-step run that would pass your threshold asks before continuing rather than
+  spending silently. It works on **either backend** — switch to the
   local model (or pin `offline`) and the assistant runs fully on-device. Like the
   rest of Quill's AI it's an assistant, not a co-writer (it won't draft or reword
   your prose — it has no tool that can), and with AI off the pane explains that

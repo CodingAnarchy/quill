@@ -37,7 +37,7 @@ use std::collections::VecDeque;
 use serde_json::{json, Value};
 
 use crate::ai::tool_loop::{self, ToolCall, Turn};
-use crate::ai::{tools, AiError, BackendKind, MAX_OUTPUT_TOKENS};
+use crate::ai::{cost, tools, AiError, BackendKind, MAX_OUTPUT_TOKENS};
 use crate::mode::{Action, AiAction};
 
 use super::palette::AiStart;
@@ -132,6 +132,15 @@ pub(crate) struct Assistant {
     /// A call whose costly pass needs the author's `y`/skip in the conversation
     /// before it runs (#392 / #82): the pane waits for the next input as the answer.
     pending_confirm: Option<ToolCall>,
+    /// The current request's estimated spend so far (#309): a running ceiling over
+    /// the assistant's own network turns (the manuscript cached, not re-billed).
+    spent: f64,
+    /// Whether the author approved continuing this run past the cost threshold
+    /// (#309) — once given, the run finishes without asking again.
+    over_budget_ok: bool,
+    /// True while the pane waits for the author's `y`/stop answer to a budget
+    /// confirm (#309): the next input is that answer, not a new request.
+    pending_continue: bool,
     /// Tool calls run during the current request, for the "ran …" record.
     ran: Vec<String>,
     /// Tool-use turns spent on the current request, capped at [`tool_loop::MAX_TURNS`].
@@ -151,6 +160,9 @@ impl Assistant {
             batch_results: Vec::new(),
             awaiting: None,
             pending_confirm: None,
+            spent: 0.0,
+            over_budget_ok: false,
+            pending_continue: false,
             ran: Vec::new(),
             turns: 0,
         };
@@ -166,10 +178,10 @@ impl Assistant {
         self.task.is_busy() || self.awaiting.is_some()
     }
 
-    /// Whether anything is in progress, including a pending cost confirmation —
-    /// what Esc cancels.
+    /// Whether anything is in progress, including a pending cost or budget
+    /// confirmation — what Esc cancels.
     fn is_active(&self) -> bool {
-        self.is_running() || self.pending_confirm.is_some()
+        self.is_running() || self.pending_confirm.is_some() || self.pending_continue
     }
 
     /// Abandon the current request: drop the turn, any parked batch / pass /
@@ -181,10 +193,23 @@ impl Assistant {
         self.batch_results.clear();
         self.awaiting = None;
         self.pending_confirm = None;
+        self.pending_continue = false;
         self.ran.clear();
         self.turns = 0;
         self.entries.push(Entry::sys("Canceled."));
         self.follow();
+    }
+
+    /// Reset the per-request cost tracking (#309) — a new request starts fresh.
+    fn reset_spend(&mut self) {
+        self.spent = 0.0;
+        self.over_budget_ok = false;
+        self.pending_continue = false;
+    }
+
+    /// The estimated spend on the current request so far (#309), for the renderer.
+    pub(crate) fn spent(&self) -> f64 {
+        self.spent
     }
 
     /// The transcript lines, for the renderer.
@@ -279,8 +304,13 @@ impl App {
     /// idle — a fresh request that appends to the conversation and spawns the first
     /// network turn. A no-op while a run is in progress or the line is empty.
     fn submit_assistant(&mut self) {
+        // A pending confirmation consumes this line as the answer, not a new request.
         if self.assistant().is_some_and(|c| c.pending_confirm.is_some()) {
             self.answer_assistant_confirm();
+            return;
+        }
+        if self.assistant().is_some_and(|c| c.pending_continue) {
+            self.answer_assistant_continue();
             return;
         }
 
@@ -296,6 +326,7 @@ impl App {
             a.input.clear();
             a.ran.clear();
             a.turns = 0;
+            a.reset_spend(); // a new request starts a fresh budget (#309)
             a.entries.push(Entry::you(&request));
             a.follow();
             (request, a.messages.is_empty())
@@ -332,6 +363,26 @@ impl App {
     /// built (loading the local model if needed) on the worker; the result is
     /// collected by [`poll_assistant`](App::poll_assistant).
     fn spawn_assistant_turn(&mut self) {
+        // Budget gate (#309): the first turn always runs (the request can't proceed
+        // otherwise); once a run's projected spend crosses the threshold, confirm in
+        // the conversation before each further turn — until the author approves.
+        let est = self.assistant_turn_estimate();
+        let threshold = self.ai.cost_threshold;
+        let over_budget = self
+            .assistant()
+            .is_some_and(|c| c.spent > 0.0 && c.spent + est > threshold && !c.over_budget_ok);
+        if over_budget {
+            if let Some(a) = self.assistant_mut() {
+                a.note(&format!(
+                    "This run has cost about ${:.2}; continuing may pass your ${threshold:.2} threshold. \
+                     Reply 'y' to continue, anything else to stop.",
+                    a.spent,
+                ));
+                a.pending_continue = true;
+            }
+            return;
+        }
+
         let spec = match self.assistant_backend() {
             Ok(spec) => spec,
             Err(e) => {
@@ -344,6 +395,7 @@ impl App {
         let model = self.ai.model.clone();
         let tools = tools::assistant_tools();
         let Some(a) = self.assistant_mut() else { return };
+        a.spent += est; // count this turn against the run's budget (#309)
         let body = tool_loop::build_body(&model, Some(SYSTEM), &a.messages, &tools, MAX_OUTPUT_TOKENS);
         a.task.spawn(move || match spec.build() {
             Ok(backend) => match backend.as_converse() {
@@ -352,6 +404,55 @@ impl App {
             },
             Err(e) => Err(e),
         });
+    }
+
+    /// A ceiling estimate (#309) for the turn about to be sent: the manuscript as a
+    /// cached prefix plus the fresh conversation, on the session backend. Zero on
+    /// the local backend — on-device runs are free, so there's nothing to gate.
+    pub(super) fn assistant_turn_estimate(&self) -> f64 {
+        if self.ai.backend() != BackendKind::Claude {
+            return 0.0;
+        }
+        let Some(a) = self.assistant() else { return 0.0 };
+        // The manuscript is the first user block (the cached prefix); everything
+        // else — the request, tool calls, results, replies — is fresh this turn.
+        let (mut cached, mut fresh) = (0usize, 0usize);
+        for (mi, m) in a.messages.iter().enumerate() {
+            if let Some(blocks) = m["content"].as_array() {
+                for (bi, b) in blocks.iter().enumerate() {
+                    let len = b["text"].as_str().or_else(|| b["content"].as_str()).map_or(0, str::len);
+                    if mi == 0 && bi == 0 {
+                        cached += len;
+                    } else {
+                        fresh += len;
+                    }
+                }
+            }
+        }
+        cost::estimate_turn(cached, fresh, MAX_OUTPUT_TOKENS, &self.ai.model).dollars
+    }
+
+    /// The author's `y`/stop answer to a budget confirm (#309): approve the rest of
+    /// the run (no more asking) and continue, or stop it within budget.
+    fn answer_assistant_continue(&mut self) {
+        let yes = {
+            let Some(a) = self.assistant_mut() else { return };
+            let yes = matches!(a.input.trim().chars().next(), Some('y' | 'Y'));
+            a.input.clear();
+            a.pending_continue = false;
+            yes
+        };
+        if yes {
+            if let Some(a) = self.assistant_mut() {
+                a.over_budget_ok = true;
+            }
+            self.spawn_assistant_turn();
+        } else if let Some(a) = self.assistant_mut() {
+            a.entries.push(Entry::sys("Stopped to stay within budget."));
+            a.ran.clear();
+            a.turns = 0;
+            a.follow();
+        }
     }
 
     /// Collect a finished network turn (called each event-loop tick). A final
@@ -646,5 +747,20 @@ impl App {
             c.batch = rest.into();
             c.batch_results.clear();
         }
+    }
+
+    /// Pretend the current run has already spent `dollars`, so the budget gate
+    /// (#309) can be tested without driving real turns.
+    #[cfg(test)]
+    pub(super) fn test_set_spent(&mut self, dollars: f64) {
+        if let Some(c) = self.assistant_mut() {
+            c.spent = dollars;
+        }
+    }
+
+    /// Drive one turn spawn, exercising the budget gate (#309) without a backend.
+    #[cfg(test)]
+    pub(super) fn test_spawn_turn(&mut self) {
+        self.spawn_assistant_turn();
     }
 }

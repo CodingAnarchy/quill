@@ -272,6 +272,48 @@ fn a_question_answer_comes_back_in_the_conversation() {
     assert_eq!(summary, "Lord Marrow is the villain.", "the answer itself comes back, not a generic note");
 }
 
+// --- Multi-turn cost control (#309) --------------------------------------
+
+#[test]
+fn an_on_device_run_is_free_so_never_gated() {
+    let (app, _dir) = offline_app("budget-local");
+    assert_eq!(app.assistant_turn_estimate(), 0.0, "on-device runs cost nothing to gate");
+}
+
+#[test]
+fn a_cloud_run_estimates_a_nonzero_cost() {
+    let (app, _dir) = assistant_app("budget-cloud"); // Claude backend
+    assert!(app.assistant_turn_estimate() > 0.0, "a cloud turn has an estimable cost");
+}
+
+#[test]
+fn a_run_over_budget_asks_before_continuing() {
+    let (mut app, _dir) = assistant_app("budget-over"); // Claude, api_key None
+    app.ai.cost_threshold = 0.20;
+    app.test_set_spent(0.50); // this run has already spent past the threshold
+    app.test_spawn_turn(); // the next turn must ask first
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("Reply 'y' to continue")),
+        "a run over the threshold asks before spending more",
+    );
+}
+
+#[test]
+fn declining_the_budget_confirm_stops_the_run() {
+    let (mut app, _dir) = assistant_app("budget-stop");
+    app.ai.cost_threshold = 0.20;
+    app.test_set_spent(0.50);
+    app.test_spawn_turn(); // posts the budget confirm; pane keeps focus
+    type_str(&mut app, "n"); // decline
+    app.on_key(key(KeyCode::Enter));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.text.contains("Stopped to stay within budget")),
+        "declining the budget confirm stops the run cleanly",
+    );
+}
+
 // --- Prose-boundary guardrail (#308) -------------------------------------
 
 #[test]

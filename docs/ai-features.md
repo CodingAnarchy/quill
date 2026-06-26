@@ -411,7 +411,16 @@ in the conversation. (The thesaurus and image passes stay out — they need curs
 context the assistant has no way to give.) Because a
 pass costs money, the same cost gate applies: when the estimate exceeds the
 threshold the assistant asks for a `y` / skip confirmation **in the conversation**
-(not a modal, which would fight the pane for keys). The interactive AI actions
+(not a modal, which would fight the pane for keys).
+
+A conversational *loop* is many calls, not one, so it's cost-controlled too (#309).
+The pane shows the run's running spend in its title (`~$0.12`), and a ceiling
+estimate — the manuscript counted at the cached-prefix rate, not re-billed each
+turn — accumulates across turns. The first turn always runs; once a run's
+projected spend crosses the `[ai] cost_threshold`, the assistant asks `y` /
+stop **before each further turn**, so an agentic loop can't run away into a
+surprise bill. Esc cancels a run at any point, stopping further calls. On the
+local backend every turn is free, so the loop is never gated. The interactive AI actions
 that need their own typed input (ask, brainstorm, the drafts, the thesaurus, the
 image passes) and the off-manuscript copy generators aren't offered to the
 assistant.
