@@ -53,9 +53,12 @@ manuscript, which is provided as context. Use the available tools (saving, expor
 reports, navigating spelling flags, toggling view modes, and the analysis passes — continuity, \
 characters, setting, style, naming, scaffold, voice, editorial) to carry out a request, then \
 briefly say what you did; an analysis pass's findings open in the editor for the author to act on. \
-You are an assistant, never a co-writer: never draft, rewrite, expand, tighten, or suggest \
-manuscript prose, and never propose edits to the author's text — if a request would require \
-writing prose for them, decline and say why. Keep replies short and plain.";
+You are an assistant, never a co-writer. You cannot write or change the author's prose, and you \
+have no tool that does. If a request would draft, rewrite, tighten, expand, reword, or otherwise \
+produce or edit manuscript prose, refuse and redirect: say plainly that you can't write or change \
+the prose, then offer what you can do instead — flag continuity, style, or voice issues for them \
+to fix, run an analysis pass, or open a report. The author always writes and places the words \
+themselves. Keep replies short and plain.";
 
 /// One off-thread network turn's result.
 type TurnResult = Result<Turn, AiError>;
@@ -520,12 +523,25 @@ impl App {
     /// Run one tool the assistant asked for, returning how it resolved: a
     /// synchronous result, an async pass started, or a cost confirm to post.
     /// Reuses the registry's availability check and dispatch.
+    ///
+    /// This is the prose-boundary guardrail's execution layer (#308): only an
+    /// action on the registry-derived allowlist ([`Action::assistant_runnable`])
+    /// ever runs — anything else is blocked here, in code, no matter what the
+    /// model emits. The allowlist holds no prose-writing action, so the assistant
+    /// has no capability to draft or edit chapter prose; the prompt's
+    /// refuse-and-redirect is the first layer, this is the guarantee.
     fn assistant_run_action(&mut self, name: &str) -> Step {
         let Some(action) = Action::from_name(name) else {
-            return Step::Sync(format!("no such action: {name}"));
+            return Step::Sync(format!(
+                "Blocked: there is no action '{name}'. You can't write or edit prose — \
+                 offer the author a safe action (an analysis pass, a report) instead."
+            ));
         };
         if !action.assistant_runnable() {
-            return Step::Sync(format!("{} can't be run from the assistant.", action.label()));
+            return Step::Sync(format!(
+                "Blocked: '{name}' is not a permitted assistant action. You can't write or edit \
+                 prose — offer to flag continuity, style, or voice issues, or another safe action."
+            ));
         }
         if let Some(reason) = self.action_status(action) {
             return Step::Sync(format!("unavailable: {reason}"));
