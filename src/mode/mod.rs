@@ -68,8 +68,13 @@ pub enum Mode {
     /// input.
     Prompt(PromptState),
     /// Browsing the chapter list: arrows move the `selected` chapter, Enter
-    /// opens it.
-    Nav { selected: usize },
+    /// opens it. `filter` is the type-to-filter / quick-jump query (#410): when
+    /// non-empty the list shows only chapters whose title, status, or POV matches
+    /// (case-insensitive substring). `typing` is the filter-input sub-mode —
+    /// `/` enters it so keystrokes build the query instead of running the
+    /// browser's single-key commands; Esc leaves it (keeping the filter) and a
+    /// second Esc clears the filter.
+    Nav { selected: usize, filter: String, typing: bool },
     /// Editing a multi-line metadata field (an epigraph quotation) in the main
     /// editor: the full editing keys apply to a scratch buffer, Ctrl-S commits,
     /// Esc cancels. Boxed because it carries a whole [`Buffer`], far larger than

@@ -294,7 +294,7 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | Ctrl-X         | run workflow: pick one of your defined action sequences and run it |
 | Ctrl-B         | browse projects: switch to a recently-opened project, or press `b` to browse the filesystem for any project (saves the current first) |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
-| Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
+| Ctrl-G         | browse chapters (↑/↓, Enter; `/` filter / quick-jump by title·status·POV; `o` open in a pane, `f` reference files) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `a` assistant pane, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
@@ -540,6 +540,16 @@ character, **l** set a word-count goal, **S** set a section role (blank = body),
 **g** epigraph (quotation, then attribution). Book/series metadata
 (shown in the pane header): **t** book title, **b** subtitle, **w** author,
 **e** series, **G** book epigraph.
+
+**Type-to-filter / quick-jump** — in a long novel or a series, press **/** to
+filter the list as you type: the browser shows only chapters whose title, status,
+or POV contains the query (case-insensitive), and the selection snaps to the
+first match. **Enter** opens the highlighted chapter — so `/ m e e t Enter` jumps
+straight there. The bare-letter commands above would otherwise be typed text, so
+filtering lives behind `/`: while typing, **Esc** leaves the query *in place* (the
+commands now act on the narrowed list), and a second **Esc** clears the filter
+and restores the full list. The filter reads only cached metadata, so it stays
+instant even at series scale.
 
 A file can be marked as a non-chapter **section** (#53) with **S**: front matter
 (`foreword`, `preface`, `introduction`, `prologue`) or back matter (`epilogue`,

@@ -479,7 +479,7 @@ fn nav_status_bar_shows_the_selected_chapters_metadata() {
     app.project.manifest.chapters[1].pov = Some("Mara".into());
     app.project.manifest.chapters[1].status = Some(crate::frontmatter::Status::Revised);
     app.outline_visible = true;
-    app.mode = Mode::Nav { selected: 1 };
+    app.mode = Mode::Nav { selected: 1, filter: String::new(), typing: false };
     let screen = render(&app, 90, 14);
     assert!(screen.contains("A grand opening"), "screen:\n{screen}");
     assert!(screen.contains("POV: Mara"), "screen:\n{screen}");

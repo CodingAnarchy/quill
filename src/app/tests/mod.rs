@@ -55,6 +55,7 @@ mod books;
 mod chapters_continuous;
 mod chapters_counts_and_perf;
 mod chapters_editing;
+mod chapters_filter;
 mod chapters_sections;
 mod configure;
 mod editing;

@@ -724,9 +724,7 @@ impl App {
             KeyCode::Char('g') => {
                 self.leave_continuous();
                 self.outline_visible = true;
-                self.mode = Mode::Nav {
-                    selected: self.project.active_index(),
-                };
+                self.select(self.project.active_index());
             }
 
             // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.

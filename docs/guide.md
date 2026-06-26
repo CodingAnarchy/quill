@@ -24,8 +24,11 @@ A project is a folder of chapters (one Markdown file each) plus a book.toml
 manifest. Ctrl-N and Ctrl-P step to the next and previous chapter. Ctrl-G opens
 the chapter browser: arrow keys move, Enter opens the selected chapter, "o"
 opens it in a side pane, and "f" lists the project's reference files (the story
-bible and loose notes). From the browser you can also create, rename, reorder,
-and delete chapters, and set each chapter's status, summary, and section.
+bible and loose notes). Press "/" to filter the list as you type (by title,
+status, or POV) and quick-jump to a chapter; Enter opens the highlighted match,
+Esc keeps the filter for the browser's commands to act on, and a second Esc
+clears it. From the browser you can also create, rename, reorder, and delete
+chapters, and set each chapter's status, summary, and section.
 
 Ctrl-L toggles the continuous-manuscript view, which flows across chapter
 boundaries and writes edits back to the right files, while never holding more

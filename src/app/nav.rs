@@ -5,14 +5,26 @@ use super::*;
 
 impl App {
     pub(super) fn on_key_nav(&mut self, key: KeyEvent) {
-        let Mode::Nav { selected: sel } = self.mode else {
+        let Mode::Nav { selected: sel, typing, .. } = self.mode else {
             return;
         };
+        // In the filter-input sub-mode, keystrokes build the query (#410); the
+        // browser's single-key commands are reachable only outside it.
+        if typing {
+            self.on_key_nav_filter(key, sel);
+            return;
+        }
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.select(sel.saturating_sub(1)),
+            // Start the type-to-filter / quick-jump query (#410).
+            KeyCode::Char('/') => self.set_nav_typing(true),
+            // Movement skips chapters filtered out of the list.
+            KeyCode::Up | KeyCode::Char('k') => {
+                let s = self.nav_step(sel, false);
+                self.select(s);
+            }
             KeyCode::Down | KeyCode::Char('j') => {
-                let last = self.chapter_count() - 1;
-                self.select((sel + 1).min(last));
+                let s = self.nav_step(sel, true);
+                self.select(s);
             }
             KeyCode::Enter => {
                 self.activate_chapter(sel);
@@ -106,8 +118,149 @@ impl App {
                     );
                 }
             }
-            KeyCode::Esc => self.mode = Mode::Insert,
+            // Esc clears an active filter first (restoring the full list), then
+            // leaves the browser on a second press (#410).
+            KeyCode::Esc => {
+                if self.nav_has_filter() {
+                    self.clear_nav_filter();
+                } else {
+                    self.mode = Mode::Insert;
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// Keys for the chapter browser's filter-input sub-mode (#410): printable
+    /// characters build the query (live), Backspace edits it, the arrows move
+    /// within the matches, Enter quick-jumps to the highlighted one, and Esc
+    /// leaves input — keeping the filter so the browser's commands act on the
+    /// narrowed list (a second Esc, in command mode, clears it).
+    fn on_key_nav_filter(&mut self, key: KeyEvent, sel: usize) {
+        match key.code {
+            KeyCode::Esc => self.set_nav_typing(false),
+            KeyCode::Enter => {
+                if self.nav_chapter_matches(sel, &self.nav_query()) {
+                    self.activate_chapter(sel);
+                    self.mode = self.editing_mode();
+                }
+            }
+            KeyCode::Up => {
+                let s = self.nav_step(sel, false);
+                self.select(s);
+            }
+            KeyCode::Down => {
+                let s = self.nav_step(sel, true);
+                self.select(s);
+            }
+            KeyCode::Backspace => self.nav_filter_pop(),
+            KeyCode::Char(c) => self.nav_filter_push(c),
+            _ => {}
+        }
+    }
+
+    /// Whether chapter `index` passes the browser's active quick-jump filter
+    /// (#410): a case-insensitive substring match on the chapter's title, status
+    /// label, or POV — all cached metadata, so filtering reads no files and stays
+    /// instant at series scale. `q` is the already-lowercased query (empty = all
+    /// match), passed in so a full-list scan lowercases it once, not once per
+    /// chapter.
+    pub(crate) fn nav_chapter_matches(&self, index: usize, q: &str) -> bool {
+        if q.is_empty() {
+            return true;
+        }
+        self.project.chapter_title(index).unwrap_or_default().to_lowercase().contains(q)
+            || self.project.chapter_status(index).is_some_and(|s| s.label().to_lowercase().contains(q))
+            || self.project.chapter_pov(index).is_some_and(|p| p.to_lowercase().contains(q))
+    }
+
+    /// The active quick-jump query, lowercased (empty when not browsing or with
+    /// no filter), for [`nav_chapter_matches`](Self::nav_chapter_matches) (#410).
+    pub(crate) fn nav_query(&self) -> String {
+        match &self.mode {
+            Mode::Nav { filter, .. } => filter.to_lowercase(),
+            _ => String::new(),
+        }
+    }
+
+    /// How many chapters pass the active filter (#410) — for the browser's
+    /// status line; lowercases the query once for the whole scan.
+    pub(crate) fn nav_match_count(&self) -> usize {
+        let q = self.nav_query();
+        (0..self.chapter_count()).filter(|&i| self.nav_chapter_matches(i, &q)).count()
+    }
+
+    fn nav_has_filter(&self) -> bool {
+        matches!(&self.mode, Mode::Nav { filter, .. } if !filter.is_empty())
+    }
+
+    fn nav_selected(&self) -> usize {
+        if let Mode::Nav { selected, .. } = &self.mode {
+            *selected
+        } else {
+            0
+        }
+    }
+
+    fn set_nav_typing(&mut self, on: bool) {
+        if let Mode::Nav { typing, .. } = &mut self.mode {
+            *typing = on;
+        }
+    }
+
+    fn clear_nav_filter(&mut self) {
+        if let Mode::Nav { filter, typing, .. } = &mut self.mode {
+            filter.clear();
+            *typing = false;
+        }
+    }
+
+    fn nav_filter_push(&mut self, c: char) {
+        if let Mode::Nav { filter, .. } = &mut self.mode {
+            filter.push(c);
+        }
+        self.nav_snap();
+    }
+
+    fn nav_filter_pop(&mut self) {
+        if let Mode::Nav { filter, .. } = &mut self.mode {
+            filter.pop();
+        }
+        self.nav_snap();
+    }
+
+    /// After the filter changes, keep the selection on a visible chapter: if the
+    /// current one no longer matches, jump to the first that does (#410).
+    fn nav_snap(&mut self) {
+        let q = self.nav_query();
+        if !self.nav_chapter_matches(self.nav_selected(), &q) {
+            if let Some(first) = (0..self.chapter_count()).find(|&i| self.nav_chapter_matches(i, &q)) {
+                self.select(first);
+            }
+        }
+    }
+
+    /// The next (or previous, by `forward`) chapter that passes the filter, or
+    /// `from` unchanged when there's no further match in that direction (#410).
+    fn nav_step(&self, from: usize, forward: bool) -> usize {
+        let n = self.chapter_count();
+        let q = self.nav_query();
+        let mut i = from;
+        loop {
+            if forward {
+                if i + 1 >= n {
+                    return from;
+                }
+                i += 1;
+            } else {
+                if i == 0 {
+                    return from;
+                }
+                i -= 1;
+            }
+            if self.nav_chapter_matches(i, &q) {
+                return i;
+            }
         }
     }
 
