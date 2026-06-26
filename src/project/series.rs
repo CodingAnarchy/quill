@@ -77,7 +77,11 @@ impl Manifest {
         let is_series = value.get("books").and_then(|b| b.as_array()).is_some_and(|b| !b.is_empty());
         if is_series {
             let series: SeriesFile = value.try_into()?;
-            let manifest = Manifest::from_series(&series, &series.books[0]);
+            // `is_series` was true, so the `[[books]]` array was non-empty and
+            // deserializes to a non-empty Vec — a malformed/empty one would have
+            // failed `try_into` above, not reached here.
+            let first = series.books.first().expect("is_series guarantees a non-empty [[books]] array");
+            let manifest = Manifest::from_series(&series, first);
             Ok((manifest, series.books, 0))
         } else {
             Ok((value.try_into()?, Vec::new(), 0))

@@ -94,6 +94,37 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
 }
 
 #[test]
+fn a_part_range_past_the_chapters_exports_and_trees_without_panicking() {
+    // A valid-TOML but structurally-odd manifest (#407): a [[parts]] whose range
+    // points past the only chapter. The part just never matches a chapter, so the
+    // export compile and the series tree must report/skip it, not panic.
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-oddparts-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[parts]]\nname = \"Ghost\"\nchapters = [5, 9]\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "the only chapter\n").unwrap();
+    let dir = TempProject::new(dir);
+
+    let project = Project::open(&dir).expect("an out-of-range part range still opens");
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+
+    app.run_export(crate::mode::ExportFormat::Markdown, crate::mode::ExportScope::ActiveBook);
+    let out = fs::read_to_string(dir.join("export").join("book.md")).unwrap();
+    assert!(out.contains("the only chapter"), "the chapter still compiles:\n{out}");
+
+    app.open_tree(); // builds the series tree rows over the same odd parts
+    assert!(matches!(app.mode, Mode::Tree(_)), "the tree opens without panicking");
+}
+
+#[test]
 fn ctrl_e_opens_the_export_menu() {
     let (mut app, _dir) = two_chapter_app("export-menu");
     app.on_key(ctrl('e'));
