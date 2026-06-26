@@ -80,6 +80,12 @@ interrupted save never corrupts a file, and the previous version always
 survives. If Quill exits unexpectedly, the next launch offers back any unsaved
 work. Ctrl-Q quits, prompting first if there are unsaved changes.
 
+The status bar shows a save-state marker beside the chapter name: ✓ when the
+buffer is on disk, ● when you have unsaved changes. Set [editor]
+autosave_interval_secs = N in your config to save automatically after N seconds
+of idle (0, the default, is off); autosave uses the same atomic path as Ctrl-S
+but doesn't run on_save workflows.
+
 
 REPORTS
 

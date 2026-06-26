@@ -376,6 +376,36 @@ typewriter = true
 focus_mode = true
 ```
 
+### Autosave (opt-in)
+
+The status bar carries a save-state marker beside the chapter name: **✓** when
+the buffer matches what's on disk, **●** when you have unsaved changes. So you
+can always tell at a glance whether your work is persisted.
+
+Autosave keeps that marker green for you. Turn it on by giving it an idle
+interval, in seconds, in `~/.config/quill/config.toml`:
+
+```toml
+[editor]
+autosave_interval_secs = 30
+```
+
+With it set, Quill saves the active chapter after that many seconds with no
+input — never mid-keystroke, only once you pause. It goes through the same
+atomic, front-matter-preserving path as Ctrl-S, so your cursor, viewport, and
+chapter metadata are untouched; it just writes the file and flips the marker
+back to ✓. It works in both the single-chapter and continuous views.
+
+One deliberate difference from a manual save: an autosave does **not** fire your
+`[triggers] on_save` workflow. A workflow that, say, exports or runs an AI pass
+shouldn't churn every thirty seconds in the background — `on_save` stays tied to
+explicit saves (Ctrl-S / `:w`). If an autosave can't write (a disk error), the
+buffer simply stays dirty (the ● shows it) and the next manual save surfaces the
+error.
+
+The default is `0`, which turns autosave off — with it off, the editor behaves
+exactly as it always has, saving only when you ask.
+
 ### Color theme
 
 Quill ships two built-in themes — `dark` (the default) and `light` — selected in

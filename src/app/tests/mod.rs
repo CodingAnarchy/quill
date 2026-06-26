@@ -50,6 +50,7 @@ mod ai_qa_trackers;
 mod analysis;
 mod annotations;
 mod assistant;
+mod autosave;
 mod books;
 mod chapters_continuous;
 mod chapters_counts_and_perf;

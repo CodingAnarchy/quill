@@ -165,35 +165,11 @@ impl App {
 
     /// Save the active edit target (the continuous window, or the single chapter).
     pub(super) fn save_edit(&mut self) {
-        if let Some(mut m) = self.manuscript.take() {
-            let result = m.save(&mut self.project);
-            self.manuscript = Some(m);
-            if result.is_ok() {
-                self.persist_annotations(); // keep notes in lockstep with the saved prose (#370)
-            }
-            self.message = Some(match result {
-                Ok(()) => "Saved".into(),
-                Err(e) => format!("Save failed: {e}"),
-            });
-        } else {
-            match self.buffer.save() {
-                Ok(()) => {
-                    self.cache_focus_words();
-                    self.refresh_split_sibling(); // a clean sibling on this chapter reflects the save (#163)
-                    // Keep annotations.toml in lockstep with the saved prose (#302),
-                    // so the anchors match the bytes on disk.
-                    self.persist_annotations();
-                    self.message = Some("Saved".into());
-                }
-                Err(e) => self.message = Some(format!("Save failed: {e}")),
-            }
-        }
-        // A clean save means there's nothing left to recover (#263).
-        if !self.edit_dirty() {
-            self.clear_recovery();
-        }
-        // Checkpoint today's momentum to the history log.
-        self.persist_snapshot();
+        self.message = Some(match self.write_active() {
+            Ok(()) => "Saved".into(),
+            Err(e) => e,
+        });
+        self.finalize_save();
         // Run the on-save workflow trigger (#228). This is the explicit-save
         // command (Ctrl-S / `:w`); implicit flushes (chapter switch, leaving the
         // continuous view) save the buffer directly and intentionally don't fire
@@ -201,4 +177,61 @@ impl App {
         self.trigger_on_save();
     }
 
+    /// Write the active chapter (or the continuous window) to disk through the
+    /// same atomic, front-matter-preserving path as Ctrl-S, with the persistence
+    /// that travels with a save — annotations in lockstep (#302/#370), the
+    /// word-count cache, and a clean sibling pane (#163). Returns the error
+    /// message on failure. No status message and no on-save trigger, so it's
+    /// shared by the explicit save (which adds those) and autosave (#409).
+    fn write_active(&mut self) -> Result<(), String> {
+        if let Some(mut m) = self.manuscript.take() {
+            let result = m.save(&mut self.project);
+            self.manuscript = Some(m);
+            result.map_err(|e| format!("Save failed: {e}"))?;
+            self.persist_annotations();
+        } else {
+            self.buffer.save().map_err(|e| format!("Save failed: {e}"))?;
+            self.cache_focus_words();
+            self.refresh_split_sibling();
+            self.persist_annotations();
+        }
+        Ok(())
+    }
+
+    /// Autosave on the idle timer (#409): when enabled and there are unsaved
+    /// changes, save after the configured seconds of genuine idle. Driven from the
+    /// event loop (like `tick_sprint`), so it catches an idle pause even with no
+    /// keypress. Cheap and O(1) when off or already saved.
+    pub(crate) fn tick_autosave(&mut self) {
+        let secs = self.autosave_interval_secs;
+        if secs == 0 || !self.edit_dirty() {
+            return;
+        }
+        if self.last_activity.elapsed() >= std::time::Duration::from_secs(secs) {
+            self.autosave();
+            // Reset the idle window so a failed save doesn't retry every tick.
+            self.last_activity = std::time::Instant::now();
+        }
+    }
+
+    /// The autosave write: the same persistence as Ctrl-S minus the "Saved"
+    /// message and the on-save trigger (so an autosave-driven workflow can't
+    /// thrash, #228). On failure it stays dirty — the status indicator shows it,
+    /// and the next manual save surfaces the error.
+    fn autosave(&mut self) {
+        if self.write_active().is_err() {
+            return;
+        }
+        self.finalize_save();
+    }
+
+    /// The post-write tail shared by an explicit save and an autosave: a clean
+    /// buffer means there's nothing left to recover (#263), and either way we
+    /// checkpoint today's momentum to the history log.
+    fn finalize_save(&mut self) {
+        if !self.edit_dirty() {
+            self.clear_recovery();
+        }
+        self.persist_snapshot();
+    }
 }
