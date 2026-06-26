@@ -32,6 +32,7 @@ use crate::typography;
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod annotations;
 mod assist;
+mod assistant;
 mod models;
 mod bible_review;
 mod palette;
@@ -59,10 +60,11 @@ mod tree;
 mod vim;
 mod wizard;
 
-use panes::Split;
+use panes::{OtherPane, Split};
 pub(crate) use panes::{SplitContent, SplitDir};
 #[cfg(test)]
 pub(crate) use panes::SplitView; // the type name is only spelled in tests
+pub(crate) use assistant::{Assistant, Entry, Speaker};
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 
@@ -81,6 +83,10 @@ pub struct App {
     /// The second editor pane (#163), when the window is split. The focused pane
     /// is always `buffer`; this holds the other one.
     split: Option<Split>,
+    /// The assistant transcript's maximum scroll-up (#307), set by its renderer and
+    /// read by its key handler to clamp Up/Down (mirrors `surface_height`). The
+    /// conversation itself lives in the split's `OtherPane::Assistant`.
+    pub(crate) assistant_scroll_max: std::cell::Cell<u16>,
     /// True between a `Ctrl-w` window prefix and the command key that follows it.
     window_pending: bool,
     pub mode: Mode,
@@ -300,6 +306,7 @@ impl App {
             project,
             manuscript: None,
             split: None,
+            assistant_scroll_max: std::cell::Cell::new(0),
             window_pending: false,
             // With Vim mode on, the editor rests in Normal; otherwise it's always
             // the modeless Insert.
@@ -532,6 +539,18 @@ impl App {
         if self.window_pending {
             self.window_pending = false;
             self.window_command(key.code);
+            return;
+        }
+        // The assistant pane takes all keys while focused (#307): typing the
+        // request, submitting, scrolling, cancel/unfocus on Esc. Ctrl-w still
+        // starts a window command (switch focus, close the pane).
+        if self.assistant_pane_focused() {
+            let ctrl_w = matches!(key.code, KeyCode::Char('w')) && key.modifiers.contains(KeyModifiers::CONTROL);
+            if ctrl_w {
+                self.window_pending = true;
+            } else {
+                self.on_key_assistant(key);
+            }
             return;
         }
         // A read-only surface takes scroll keys: a docked surface pane with scroll

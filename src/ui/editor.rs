@@ -51,7 +51,8 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
     // Visual mode still shows the cursor — that's the selection's active end.
     let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))
-        && !app.surface_pane_focused();
+        && !app.surface_pane_focused()
+        && !app.assistant_pane_focused();
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
     let focus = app.focus_mode.then(|| focus_paragraph(buffer));
     render_body(

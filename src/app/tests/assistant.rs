@@ -1,0 +1,155 @@
+//! Tests for the authorial assistant pane (#307): opening / closing it via the
+//! window system, focus and input handling, and the UI-thread turn machine
+//! (final answers and tool execution), driven without a live backend.
+
+use super::*;
+use crate::ai::tool_loop::{ToolCall, Turn};
+use crate::ai::AiError;
+use crate::app::{Assistant, Speaker, SplitContent};
+
+/// Send a Vim window command: the `Ctrl-w` prefix then `c`.
+fn window_cmd(app: &mut App, c: char) {
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char(c)));
+}
+
+/// The docked assistant pane's conversation (the state now lives in the split).
+fn conv(app: &App) -> &Assistant {
+    match app.split_view().expect("a docked pane").content {
+        SplitContent::Assistant { conv, .. } => conv,
+        _ => panic!("the docked pane is not the assistant"),
+    }
+}
+
+/// An assistant pane open on a fresh two-chapter project, with no API key so the
+/// turn machine never spawns a real network call in tests.
+fn assistant_app(name: &str) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name);
+    app.ai.enabled = true;
+    app.ai.api_key = None; // resolved_key() is None → no off-thread network turn
+    window_cmd(&mut app, 'a');
+    (app, dir)
+}
+
+/// A tool call with an empty input, the registry-derived shape.
+fn call(id: &str, name: &str) -> ToolCall {
+    ToolCall { id: id.into(), name: name.into(), input: serde_json::json!({}) }
+}
+
+#[test]
+fn ctrl_w_a_opens_the_pane_and_ctrl_w_c_closes_it() {
+    let (mut app, _dir) = two_chapter_app("assistant-open-close");
+    assert!(app.split_view().is_none());
+    window_cmd(&mut app, 'a');
+    assert!(app.split_view().is_some(), "Ctrl-w a docks the assistant pane");
+    assert!(app.assistant_pane_focused(), "the new pane takes focus");
+    window_cmd(&mut app, 'c');
+    assert!(app.split_view().is_none(), "Ctrl-w c closes the pane");
+    assert!(!app.assistant_pane_focused());
+}
+
+#[test]
+fn typing_edits_the_request_line_and_esc_hands_focus_back() {
+    let (mut app, _dir) = assistant_app("assistant-typing");
+    type_str(&mut app, "hello");
+    assert_eq!(conv(&app).input(), "hello");
+    app.on_key(key(KeyCode::Backspace));
+    assert_eq!(conv(&app).input(), "hell");
+    // Esc (idle) unfocuses the pane but keeps it open and its conversation intact.
+    app.on_key(key(KeyCode::Esc));
+    assert!(!app.assistant_pane_focused(), "Esc hands keys back to the editor");
+    assert!(app.split_view().is_some(), "the pane stays docked");
+}
+
+#[test]
+fn a_final_answer_is_shown_in_the_transcript() {
+    let (mut app, _dir) = assistant_app("assistant-final");
+    app.apply_assistant_turn(Ok(Turn::Final("All set.".into())));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Assistant && e.text == "All set."),
+        "the model's reply is shown",
+    );
+    assert!(!c.is_running(), "the request is done");
+}
+
+#[test]
+fn a_tool_call_runs_the_action_and_records_it() {
+    let (mut app, _dir) = assistant_app("assistant-tool");
+    let before = app.focus_mode;
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "view:focus")])));
+    assert_ne!(app.focus_mode, before, "the toggle action actually ran");
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("view:focus")),
+        "the pane shows what it ran",
+    );
+}
+
+#[test]
+fn an_unrunnable_tool_is_refused_without_running() {
+    let (mut app, _dir) = assistant_app("assistant-refuse");
+    // `ai:continuity` isn't in the assistant's catalog; if the model asks anyway,
+    // it's refused rather than dispatched.
+    app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "ai:continuity")])));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::Tool && e.text.contains("can't be run")),
+        "an action outside the catalog is declined",
+    );
+}
+
+#[test]
+fn an_error_turn_is_surfaced() {
+    let (mut app, _dir) = assistant_app("assistant-error");
+    app.apply_assistant_turn(Err(AiError::Network { status: Some(500), message: "boom".into() }));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("boom")),
+        "the network error is shown",
+    );
+    assert!(!c.is_running());
+}
+
+#[test]
+fn the_turn_cap_stops_a_runaway_loop() {
+    let (mut app, _dir) = assistant_app("assistant-cap");
+    // Keep asking for a tool past the cap; the machine stops and says so.
+    for _ in 0..(crate::ai::tool_loop::MAX_TURNS + 1) {
+        app.apply_assistant_turn(Ok(Turn::ToolCalls(vec![call("a", "view:focus")])));
+    }
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("Stopped after")),
+        "the loop is bounded by MAX_TURNS",
+    );
+}
+
+#[test]
+fn submitting_with_ai_off_explains_rather_than_failing() {
+    let (mut app, _dir) = two_chapter_app("assistant-ai-off");
+    app.ai.enabled = false;
+    window_cmd(&mut app, 'a');
+    type_str(&mut app, "do something");
+    app.on_key(key(KeyCode::Enter));
+    let c = conv(&app);
+    assert!(
+        c.entries().iter().any(|e| e.who == Speaker::System && e.text.contains("unavailable")),
+        "the pane explains AI is off instead of erroring obscurely",
+    );
+    assert!(!c.is_running(), "nothing was spawned");
+}
+
+#[test]
+fn the_catalog_is_the_runnable_subset_of_the_registry() {
+    use crate::ai::tools::assistant_tools;
+    use crate::mode::Action;
+
+    let tools = assistant_tools();
+    let runnable = Action::ALL.iter().filter(|a| a.assistant_runnable()).count();
+    assert_eq!(tools.len(), runnable, "one tool per runnable action");
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"save"), "a synchronous action is offered");
+    assert!(!names.contains(&"ai:continuity"), "an async pass is not offered yet");
+    assert!(!names.contains(&"book:switch"), "a modal picker is not offered");
+}
