@@ -44,9 +44,10 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     let inserts = header_inserts(app, column.width);
     // Misspelled-word flags (#357), computed on idle; underlined under the prose.
     let spell = app.spell_flags.as_slice();
-    // Inline author annotations (#302): the anchored spans get a tinted
-    // background. Single-chapter view only (the continuous buffer spans chapters).
-    let annotations = if app.manuscript.is_none() { app.annotation_ranges() } else { Vec::new() };
+    // Inline author annotations (#302/#370): the anchored spans get a tinted
+    // background, in both the single-chapter and continuous views (the live ranges
+    // are buffer-absolute against whichever buffer is active).
+    let annotations = app.annotation_ranges();
     // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
     // Visual mode still shows the cursor — that's the selection's active end.
     let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))

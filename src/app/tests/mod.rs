@@ -129,3 +129,29 @@ fn two_chapter_app(name: &str) -> (App, TempProject) {
     app.triggers = Default::default();
     (app, TempProject::new(dir))
 }
+
+/// A three-chapter project (`c0/c1/c2.md` = "alpha"/"beta"/"gamma") with the same
+/// test pins as [`two_chapter_app`] — for the continuous-view tests, where the
+/// window holds several chapters at known byte offsets.
+fn three_chapter_app(name: &str) -> (App, TempProject) {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-app-{}-{}", std::process::id(), name));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let mut manifest = String::from("title = \"Book\"\n\n");
+    for (i, body) in ["alpha\n", "beta\n", "gamma\n"].iter().enumerate() {
+        manifest.push_str(&format!("[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"));
+        fs::write(dir.join(format!("c{i}.md")), body).unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.vim = false;
+    app.smart_typography = false;
+    app.mode = Mode::Insert;
+    app.workflows = Vec::new();
+    app.triggers = Default::default();
+    (app, TempProject::new(dir))
+}

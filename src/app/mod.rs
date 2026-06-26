@@ -115,10 +115,12 @@ pub struct App {
     /// on the idle tick; empty in the continuous view. The chapter `.md` never
     /// holds them, so exports stay clean.
     pub(crate) annotations: Vec<crate::annotation::Live>,
-    /// Which chapter file [`annotations`](Self::annotations) currently belongs to,
-    /// so the idle tick reloads them on a chapter switch (any seam) rather than
-    /// re-anchoring across chapters. Empty in the continuous view.
-    annotations_chapter: String,
+    /// A signature of the view the live [`annotations`](Self::annotations) were
+    /// loaded for (#370): `"S:<file>"` in the single-chapter view, `"C:<idx,…>"`
+    /// for the continuous window. The idle tick reloads (and re-translates)
+    /// annotations when this changes — a chapter switch, a window page, or a view
+    /// toggle — rather than re-anchoring across an unrelated layout.
+    annotations_context: String,
     /// Annotation snapshots paralleling the buffer's undo / redo stacks (#370):
     /// one per edit group, pushed when a group opens and restored alongside the
     /// rope, so undo/redo moves notes back to where the text moved (a rope swap
@@ -290,8 +292,9 @@ impl App {
         let trigger_errors = loaded.errors;
         // Load the active chapter's annotations (#302) so they mark immediately,
         // before the first idle tick.
-        let annotations_chapter = project.active_file().to_string();
-        let annotations = project.annotations_for(&annotations_chapter);
+        let active_file = project.active_file().to_string();
+        let annotations = project.annotations_for(&active_file);
+        let annotations_context = format!("S:{active_file}");
         let mut app = Self {
             buffer,
             project,
@@ -309,7 +312,7 @@ impl App {
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
             annotations,
-            annotations_chapter,
+            annotations_context,
             anno_undo: std::collections::VecDeque::new(),
             anno_redo: std::collections::VecDeque::new(),
             vim_state: VimState::default(),
@@ -633,6 +636,14 @@ impl App {
             self.manuscript = Some(m);
             return;
         }
+        // Flush the window's annotation offsets before dropping it (#370), so they
+        // match the just-saved prose; the single-chapter reload re-anchors them.
+        let bases: Vec<(String, usize)> = m
+            .segment_spans()
+            .into_iter()
+            .map(|(idx, start, _)| (self.project.chapter_file(idx).to_string(), start))
+            .collect();
+        self.persist_annotations_to(&bases);
         self.project.set_active(m.current_chapter());
         match Buffer::from_path(self.project.active_path()) {
             Ok(buffer) => {
@@ -720,6 +731,12 @@ impl App {
     /// if the continuous view's cursor crossed into another chapter.
     fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
         mv(self.edit_buffer_mut());
+        // A reslide rebuilds the buffer, resetting every offset, so flush the
+        // current annotation offsets to disk first — the next idle reloads and
+        // re-translates them for the paged window (#370).
+        if self.manuscript.as_ref().is_some_and(|m| m.would_reslide(&self.project)) {
+            self.persist_annotations();
+        }
         if let Some(mut m) = self.manuscript.take() {
             // reslide flushes pending edits then pages the window; either the save
             // or a chapter read (#154) can fail. The window is left intact on a
@@ -736,6 +753,9 @@ impl App {
         if let Some(mut m) = self.manuscript.take() {
             let result = m.save(&mut self.project);
             self.manuscript = Some(m);
+            if result.is_ok() {
+                self.persist_annotations(); // keep notes in lockstep with the saved prose (#370)
+            }
             self.message = Some(match result {
                 Ok(()) => "Saved".into(),
                 Err(e) => format!("Save failed: {e}"),

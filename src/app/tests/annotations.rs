@@ -110,14 +110,49 @@ fn review_list_jumps_to_and_deletes_annotations() {
 }
 
 #[test]
-fn annotations_are_not_offered_in_the_continuous_view() {
-    let (mut app, _dir) = two_chapter_app("anno-continuous");
+fn annotations_can_be_created_and_anchored_in_the_continuous_view() {
+    let (mut app, dir) = three_chapter_app("anno-continuous");
     app.toggle_continuous();
     assert!(app.manuscript.is_some(), "in the continuous view");
 
+    // Annotate "alpha" (buffer bytes 0..5) — the first loaded chapter.
     app.start_annotation_range(0, 5);
-    assert!(!matches!(app.mode, Mode::Prompt(_)), "no note prompt in the continuous view");
-    assert!(app.message.as_deref().unwrap_or("").contains("single-chapter view"));
+    assert!(matches!(app.mode, Mode::Prompt(_)), "the note prompt opens in continuous view");
+    type_str(&mut app, "first note");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.annotations.len(), 1);
+    assert_eq!(app.annotations[0].chapter, "c0.md", "tagged to the chapter that owns the span");
+
+    // Saving writes it to that chapter's side file, translated chapter-local.
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    let reopened = Project::open(&dir).unwrap();
+    let live = reopened.annotations_for("c0.md");
+    assert_eq!(live.len(), 1);
+    assert_eq!((live[0].start, live[0].end), (0, 5), "stored chapter-local, not buffer-absolute");
+}
+
+#[test]
+fn an_edit_re_anchors_a_later_chapters_note_in_the_continuous_view() {
+    let (mut app, dir) = three_chapter_app("anno-continuous-edit");
+    app.toggle_continuous();
+    // "beta" is the second loaded chapter, after "alpha\n" (6 bytes).
+    let beta_start = app.manuscript.as_ref().unwrap().segment_spans()[1].1;
+    app.start_annotation_range(beta_start, beta_start + 4); // "beta"
+    type_str(&mut app, "n");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.annotations[0].chapter, "c1.md");
+
+    // Type three chars at the very start (chapter 0); the note in chapter 1 slides.
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+    type_str(&mut app, "XYZ");
+    app.on_idle();
+    assert_eq!(app.annotations[0].start, beta_start + 3, "the later note re-anchored");
+
+    // It still persists chapter-local (unshifted) to its own chapter on save.
+    app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    let reopened = Project::open(&dir).unwrap();
+    let c1 = reopened.annotations_for("c1.md");
+    assert_eq!((c1[0].start, c1[0].end), (0, 4), "chapter-local offset unchanged by ch 0's edit");
 }
 
 #[test]

@@ -33,10 +33,14 @@ pub struct AnnotationFile {
     pub items: Vec<Annotation>,
 }
 
-/// An annotation anchored into the live edit buffer: a byte range plus the note.
+/// An annotation anchored into the live edit buffer: a byte range plus the note,
+/// tagged with the chapter file it belongs to. In the single-chapter view the
+/// range is chapter-local; in the continuous view (#370) it's buffer-absolute
+/// (offset by the owning segment's start) and `chapter` says where to persist it.
 /// Re-mapped as the prose is edited; persisted back to chapter-local offsets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Live {
+    pub chapter: String,
     pub start: usize,
     pub end: usize,
     pub note: String,
