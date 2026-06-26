@@ -18,6 +18,7 @@ mod frontmatter;
 mod guide;
 mod history;
 mod manuscript;
+mod manuscript_import;
 mod mode;
 mod project;
 mod recent;

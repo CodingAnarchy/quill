@@ -158,6 +158,7 @@ impl App {
             Action::UserGuide => self.open_guide(),
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
+            Action::ImportManuscript => self.start_import_manuscript(),
             Action::SwitchBook => self.open_book_switcher(),
             Action::SeriesTree => self.open_tree(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),

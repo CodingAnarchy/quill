@@ -247,7 +247,9 @@ impl App {
             | Pending::ImportNotes
             | Pending::NewFromNotesSource
             | Pending::Annotate { .. }
-            | Pending::NewFromNotesDest => {
+            | Pending::NewFromNotesDest
+            | Pending::ImportManuscriptSource
+            | Pending::ImportManuscriptDest => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
                     KeyCode::Backspace => {
@@ -380,6 +382,24 @@ impl App {
                                     self.message = Some("Enter a path ending in the new project's folder name.".into());
                                 } else {
                                     self.finish_new_from_notes(text);
+                                }
+                            }
+                            Pending::ImportManuscriptSource => {
+                                if text.is_empty() {
+                                    self.mode = closed;
+                                    self.message = Some("Cancelled — no manuscript file.".into());
+                                } else {
+                                    // Validate the file, then ask for the new project's path.
+                                    self.begin_import_manuscript(text);
+                                }
+                            }
+                            Pending::ImportManuscriptDest => {
+                                if text.is_empty() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR) {
+                                    self.mode = closed;
+                                    self.pending_manuscript_source = None;
+                                    self.message = Some("Enter a path ending in the new project's folder name.".into());
+                                } else {
+                                    self.finish_import_manuscript(text);
                                 }
                             }
                             // Confirmations never reach the text arm.
