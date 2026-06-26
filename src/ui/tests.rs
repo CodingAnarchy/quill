@@ -518,3 +518,49 @@ fn continuous_view_shows_chapters_flowing_with_a_divider() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn continuous_view_shows_part_headers_at_boundaries() {
+    // A three-chapter project split into two parts: chapter 1 is "Part One",
+    // chapters 2-3 are "Part Two". The continuous window loads all three and
+    // crosses the boundary (#412).
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("quill-ui-parts-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[parts]]\nname = \"Part One\"\nchapters = [1, 1]\n\n\
+         [[parts]]\nname = \"Part Two\"\nchapters = [2, 3]\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n\n\
+         [[chapters]]\ntitle = \"Three\"\nfile = \"three.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "Alpha prose here.\n").unwrap();
+    fs::write(dir.join("two.md"), "Beta prose here.\n").unwrap();
+    fs::write(dir.join("three.md"), "Gamma prose here.\n").unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.manuscript = Some(Manuscript::open(&app.project).unwrap());
+
+    let screen = render(&app, 60, 16);
+    // The part name is drawn (uppercased) where each part begins...
+    assert!(screen.contains("PART ONE"), "first part header:\n{screen}");
+    assert!(screen.contains("PART TWO"), "second part header:\n{screen}");
+    // ...above the chapter divider for the chapter that starts the part.
+    let part_two = screen.find("PART TWO").unwrap();
+    let divider_two = screen.find("—— Two ——").unwrap();
+    assert!(part_two < divider_two, "the part header sits above its divider:\n{screen}");
+    // It's display-only: the part name never entered the editable buffer.
+    let flow = app.manuscript.as_ref().unwrap().buffer();
+    assert!(
+        !flow.line_range_text(0, flow.line_count()).to_uppercase().contains("PART"),
+        "the structure header leaked into the buffer",
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}

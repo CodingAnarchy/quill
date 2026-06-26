@@ -33,7 +33,10 @@ keystrokes that stay out of the way.
   the chapter browser (Ctrl-G) without touching the filesystem.
 - **Two editing views** — chapter-at-a-time (default) or a continuous
   manuscript (Ctrl-L) that flows across chapter boundaries and writes edits back
-  to the right files, while never holding more than ~3 chapters in memory.
+  to the right files, while never holding more than ~3 chapters in memory. As you
+  flow through it, faint part and front/back-matter section headers mark each
+  structural transition (render-only, never in the buffer), so you always know
+  which part you're in.
 - **Split panes** — keep a reference beside the prose with Vim-style windows
   (Ctrl-W): split the editor, open another chapter / a story-bible entry / a
   docked report in a second pane, switch focus, resize, and close. Panes collapse

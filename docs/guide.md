@@ -29,7 +29,9 @@ and delete chapters, and set each chapter's status, summary, and section.
 
 Ctrl-L toggles the continuous-manuscript view, which flows across chapter
 boundaries and writes edits back to the right files, while never holding more
-than a few chapters in memory.
+than a few chapters in memory. Faint part and front/back-matter section headers
+mark each structural transition as you flow through it (render-only, like the
+chapter dividers), so you can tell which part you're in.
 
 Ctrl-W begins a window command for split panes: split the editor, open another
 chapter or a bible entry or a docked report beside the prose, switch focus,
