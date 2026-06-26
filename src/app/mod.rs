@@ -42,7 +42,7 @@ mod search;
 mod meta;
 mod panes;
 mod reports;
-mod task;
+pub(crate) mod task; // the generic background-task runner, reused by the assistant loop (#306)
 mod vcs_actions;
 mod workflows;
 
