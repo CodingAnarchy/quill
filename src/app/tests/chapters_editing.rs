@@ -6,7 +6,7 @@ use std::fs;
 
 fn nav_sel(app: &App) -> usize {
     match &app.mode {
-        Mode::Nav { selected } => *selected,
+        Mode::Nav { selected, .. } => *selected,
         _ => panic!("expected Nav mode"),
     }
 }

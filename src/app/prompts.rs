@@ -20,7 +20,7 @@ impl App {
     /// editor's resting mode.
     pub(super) fn closed_mode(&self, nav_return: Option<usize>) -> Mode {
         match nav_return {
-            Some(selected) => Mode::Nav { selected },
+            Some(selected) => Mode::Nav { selected, filter: String::new(), typing: false },
             None => self.editing_mode(),
         }
     }
@@ -61,8 +61,14 @@ impl App {
     }
 
     /// Enter (or stay in) the chapter browser with `selected` highlighted.
+    /// Moving the selection within the browser preserves any active filter /
+    /// quick-jump query (#410); entering from another mode starts unfiltered.
     pub(super) fn select(&mut self, selected: usize) {
-        self.mode = Mode::Nav { selected };
+        if let Mode::Nav { selected: s, .. } = &mut self.mode {
+            *s = selected;
+        } else {
+            self.mode = Mode::Nav { selected, filter: String::new(), typing: false };
+        }
     }
 
     /// Open the Vim Ex command line (#207): `:` then a command (`w`/`q`/`wq`/…).

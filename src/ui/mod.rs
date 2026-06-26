@@ -630,10 +630,16 @@ impl Pane for NavPane<'_> {
         let active = app.project.active_index();
 
         // The browser selection, if we're in Nav mode.
-        let nav_selected = match app.mode {
-            Mode::Nav { selected } => Some(selected),
+        let nav_selected = match &app.mode {
+            Mode::Nav { selected, .. } => Some(*selected),
             _ => None,
         };
+        // When a quick-jump filter is active (#410), the list shows only the
+        // chapters that match; body numbering still counts every chapter so the
+        // numbers stay stable as you filter. The query is lowercased once here,
+        // not once per chapter.
+        let filtering = matches!(&app.mode, Mode::Nav { filter, .. } if !filter.is_empty());
+        let nav_query = app.nav_query();
 
         // Count each chapter once for this frame, then reuse for the rows and
         // the total — so the active chapter's live count isn't recomputed twice.
@@ -650,6 +656,19 @@ impl Pane for NavPane<'_> {
         let mut body_n = 0usize;
         for (i, chapter) in app.project.manifest.chapters.iter().enumerate() {
             let band = bands[i];
+            // Body chapters carry a 1-based number once the list is grouped;
+            // sections show their role instead. Counted before the filter skip so
+            // a filtered list still shows each chapter's real number.
+            let number = (grouped && band == Band::Body).then(|| {
+                body_n += 1;
+                body_n
+            });
+            if filtering && !app.nav_chapter_matches(i, &nav_query) {
+                continue;
+            }
+            // The band header is emitted lazily, just before the first matching
+            // chapter of a band, so a filter that hides a whole band hides its
+            // header too.
             if shown_band != Some(band) {
                 if shown_band.is_some() {
                     lines.push(Line::raw("")); // a gap between bands
@@ -658,12 +677,6 @@ impl Pane for NavPane<'_> {
                 lines.push(Line::raw(""));
                 shown_band = Some(band);
             }
-            // Body chapters carry a 1-based number once the list is grouped;
-            // sections show their role instead.
-            let number = (grouped && band == Band::Body).then(|| {
-                body_n += 1;
-                body_n
-            });
 
             let is_active = i == active;
             let is_selected = nav_selected == Some(i);
@@ -752,29 +765,49 @@ impl Pane for StatusBar<'_> {
 
         // While browsing, the bar describes the *selected* chapter: its title,
         // and (unless a transient message is up) its summary / POV / status.
-        let (left, right) = if let Mode::Nav { selected } = app.mode {
+        let (left, right) = if let Mode::Nav { selected, filter, typing } = &app.mode {
+            let selected = *selected;
             let title = app.project.chapter_title(selected).unwrap_or("[untitled]");
-            let right = match &app.message {
-                Some(m) => format!("{m}  "),
-                None => {
-                    let mut parts = Vec::new();
-                    if let Some(s) = app.project.chapter_summary(selected) {
-                        parts.push(s.to_string());
+            // A quick-jump filter (#410) takes over the bar: the live query and a
+            // match count on the left, the highlighted chapter and the keys on the
+            // right. `/` enters this; Esc keeps the filter (commands now act on
+            // the narrowed list), a second Esc clears it.
+            if *typing || !filter.is_empty() {
+                let n = app.nav_match_count();
+                let count = match n {
+                    0 => "  no matches".to_string(),
+                    1 => "  1 match".to_string(),
+                    n => format!("  {n} matches"),
+                };
+                let hint = if *typing {
+                    "  · Enter open · Esc keep filter"
+                } else {
+                    "  · Esc clears · / refine"
+                };
+                (format!(" /{filter}{count}"), format!("{title}{hint}  "))
+            } else {
+                let right = match &app.message {
+                    Some(m) => format!("{m}  "),
+                    None => {
+                        let mut parts = Vec::new();
+                        if let Some(s) = app.project.chapter_summary(selected) {
+                            parts.push(s.to_string());
+                        }
+                        if let Some(p) = app.project.chapter_pov(selected) {
+                            parts.push(format!("POV: {p}"));
+                        }
+                        if let Some(st) = app.project.chapter_status(selected) {
+                            parts.push(st.label().to_string());
+                        }
+                        if parts.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{}  ", parts.join("  ·  "))
+                        }
                     }
-                    if let Some(p) = app.project.chapter_pov(selected) {
-                        parts.push(format!("POV: {p}"));
-                    }
-                    if let Some(st) = app.project.chapter_status(selected) {
-                        parts.push(st.label().to_string());
-                    }
-                    if parts.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{}  ", parts.join("  ·  "))
-                    }
-                }
-            };
-            (format!(" {title}"), right)
+                };
+                (format!(" {title}"), right)
+            }
         } else {
             // The chapter the cursor is in: in continuous view that's the segment
             // under the cursor (with a marker); otherwise the single active chapter.
