@@ -115,7 +115,7 @@ keystrokes that stay out of the way.
   [`docs/ai-features.md`](docs/ai-features.md).
 
 - **Assistant pane** — open a conversational assistant docked beside the prose
-  (**Ctrl-W a**) and ask in plain language: "save and export to Markdown",
+  (**Ctrl-W a**, or from the **Ctrl-K** menu) and ask in plain language: "save and export to Markdown",
   "open the progress report", "now check this for continuity", "ask the
   manuscript who the villain is". It carries out the request by running the
   editor's own actions — the analysis passes (continuity, characters, setting,

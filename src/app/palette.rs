@@ -100,6 +100,10 @@ impl App {
             Action::RefreshSeriesBible => self.ai.check_ready().err().map(|e| e.to_string()),
             // Describe-to-config needs the AI to propose the settings (#303).
             Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
+            // The assistant pane is a single-chapter-view feature, like the splits.
+            Action::Assistant if self.manuscript.is_some() => {
+                Some("leave the continuous view (Ctrl-l) first".into())
+            }
             _ => None,
         }
     }
@@ -174,6 +178,7 @@ impl App {
             Action::ReviewAnnotations => self.open_annotation_review(),
             Action::SwitchBackend => self.toggle_ai_backend(),
             Action::ManageModels => self.open_model_manager(),
+            Action::Assistant => self.open_assistant(),
         }
     }
 

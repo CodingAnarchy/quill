@@ -272,6 +272,42 @@ fn a_question_answer_comes_back_in_the_conversation() {
     assert_eq!(summary, "Lord Marrow is the villain.", "the answer itself comes back, not a generic note");
 }
 
+// --- Assistant as a registry action (#399) -------------------------------
+
+#[test]
+fn the_assistant_is_a_registry_action_that_opens_the_pane() {
+    use crate::mode::Action;
+    let (mut app, _dir) = two_chapter_app("assistant-action-open");
+    assert!(Action::from_name("assistant").is_some(), "resolvable by name for Ctrl-K / workflows");
+    assert!(app.split_view().is_none());
+    app.dispatch_action(Action::Assistant, false); // the run-action / workflow path
+    assert!(app.assistant_pane_focused(), "running the action opens the assistant pane");
+}
+
+#[test]
+fn the_assistant_action_is_not_offered_to_the_assistant() {
+    use crate::ai::tools::assistant_tools;
+    use crate::mode::Action;
+    // The recursion guard: opening the pane is a registry action, but the model is
+    // never given it as a tool, so it can't open panes recursively.
+    assert!(!Action::Assistant.assistant_runnable(), "the assistant can't run itself");
+    let tools = assistant_tools();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(!names.contains(&"assistant"), "the open-assistant action isn't in the tool catalog");
+}
+
+#[test]
+fn the_assistant_action_is_unavailable_in_the_continuous_view() {
+    use crate::mode::Action;
+    let (mut app, _dir) = three_chapter_app("assistant-action-continuous");
+    assert!(app.action_status(Action::Assistant).is_none(), "available in the single-chapter view");
+    app.on_key(ctrl('l')); // enter the continuous manuscript view
+    assert!(
+        app.action_status(Action::Assistant).is_some(),
+        "the run-action menu shows the assistant as unavailable in the continuous view",
+    );
+}
+
 // --- Multi-turn cost control (#309) --------------------------------------
 
 #[test]
