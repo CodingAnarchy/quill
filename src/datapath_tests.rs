@@ -296,3 +296,62 @@ fn an_interrupted_manifest_save_preserves_the_previous_version() {
     assert_eq!(fs::read_to_string(&manifest_path).unwrap(), before, "the previous manifest must survive");
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- Malformed-input edge cases (#408) -------------------------------------
+
+/// A chapter whose `---` block holds invalid YAML: the prose body loads intact,
+/// the block is preserved verbatim across a save, and the good keys still read
+/// while the broken lines are simply ignored — never a panic.
+#[test]
+fn malformed_front_matter_preserves_body_and_good_keys() {
+    use crate::frontmatter::Status;
+    let path = scratch("bad-fm", "ch.md");
+    let original = "---\nstatus: draft\nsummary: : not : valid : yaml\n[ not yaml at all\n---\nThe prose survives.\n";
+    fs::write(&path, original).unwrap();
+
+    let mut buf = Buffer::from_path(&path).expect("loads despite broken YAML");
+    assert_eq!(buf.text(), "The prose survives.\n", "body intact, front matter split off");
+    let fm = buf.front_matter().expect("the block is preserved, not dropped");
+    assert_eq!(fm.status(), Some(Status::Draft), "a valid key amid the broken lines still reads");
+    // Chosen behavior is permissive line-scan: a malformed value is *preserved*
+    // verbatim as a literal, not parsed-and-dropped — and never a panic.
+    assert_eq!(fm.summary().as_deref(), Some(": not : valid : yaml"), "the odd value is kept as-is");
+
+    buf.save().expect("saves");
+    assert_eq!(fs::read_to_string(&path).unwrap(), original, "the block round-trips verbatim");
+}
+
+/// An empty `chapters = []` or a missing chapters key opens with a starter
+/// chapter — the documented safe default — rather than erroring or crashing.
+#[test]
+fn a_manifest_with_no_chapters_opens_with_a_starter() {
+    for manifest in ["title = \"Book\"\nchapters = []\n", "title = \"Book\"\n"] {
+        let dir = scratch_dir("no-chapters");
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
+        let project = Project::open(&dir).expect("opens with a safe default");
+        assert_eq!(project.manifest.chapters.len(), 1, "a starter chapter is added: {manifest:?}");
+    }
+}
+
+/// An unparseable manifest is a reported error naming the file, not a crash.
+#[test]
+fn an_unparseable_manifest_is_reported() {
+    let dir = scratch_dir("bad-manifest");
+    fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters\nfile = \"a.md\"\n").unwrap();
+    let err = Project::open(&dir).err().expect("malformed TOML must error");
+    assert!(err.to_string().contains("book.toml"), "the error names the manifest: {err}");
+}
+
+/// A chapter entry with an empty `file` path is reported on open (#408), not
+/// silently opened as an empty buffer at a stray path.
+#[test]
+fn a_chapter_entry_with_an_empty_file_path_is_reported() {
+    let dir = scratch_dir("empty-file");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"X\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"\"\n",
+    )
+    .unwrap();
+    let err = Project::open(&dir).err().expect("an empty file path must be reported");
+    assert!(err.to_string().contains("empty file path"), "{err}");
+}

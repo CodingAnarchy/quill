@@ -333,6 +333,16 @@ impl Project {
         let value: toml::Value = toml::from_str(&text).map_err(invalid)?;
         let (manifest, books, active_book) = Manifest::from_toml_value(value).map_err(invalid)?;
 
+        // A chapter entry with an empty `file` is corruption (a half-written or
+        // hand-broken manifest): the path would resolve to the project dir, so we
+        // report it rather than silently opening an empty buffer at a stray path.
+        if manifest.chapters.iter().any(|c| c.file.trim().is_empty()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid {MANIFEST_NAME}: a chapter entry has an empty file path"),
+            ));
+        }
+
         let dictionary = load_dictionary(&root);
         let annotations = load_annotations(&root);
         let mut project = Self {
