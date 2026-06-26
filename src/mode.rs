@@ -560,6 +560,30 @@ impl Action {
             _ => true,
         }
     }
+
+    /// Whether the authorial assistant (#307) may run this action autonomously as
+    /// a tool: it must finish during the call with an observable result and need
+    /// no further interaction. The async AI passes (assistant-triggered passes are
+    /// a follow-up, gated on cost #82/#4 and local tool-use #389) and the
+    /// interactive/modal pickers (book switch, tree, project find, annotate,
+    /// model manager, the notes importers) aren't exposed yet, so the model is
+    /// only offered the mechanical actions it can actually complete.
+    pub(crate) fn assistant_runnable(self) -> bool {
+        matches!(
+            self,
+            Action::Save
+                | Action::Export(_)
+                | Action::ProgressReport
+                | Action::AnalysisReport
+                | Action::UserGuide
+                | Action::AcceptWord
+                | Action::NextMisspelling
+                | Action::PrevMisspelling
+                | Action::ToggleTypewriter
+                | Action::ToggleFocus
+                | Action::SwitchBackend
+        )
+    }
 }
 
 /// A manuscript export target (#7), chosen from the export palette.

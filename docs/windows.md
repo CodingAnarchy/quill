@@ -21,6 +21,8 @@ The second pane holds one of:
 - **Another editor** on a chapter or a project file, which you can read and edit.
 - **A docked surface**: a progress report, the analysis report, or an AI answer,
   which is read-only and scrollable.
+- **The assistant pane**: a conversation with the authorial assistant, where you
+  type a request and it runs editor actions to carry it out (#307).
 
 ## Opening a split
 
@@ -28,10 +30,17 @@ The second pane holds one of:
 | ----------- | ------------------------------------------------------------- |
 | `Ctrl-w s`  | Split stacked (top / bottom). Both panes start on the chapter you're in. |
 | `Ctrl-w v`  | Split side by side (left / right), the same way.              |
+| `Ctrl-w a`  | Open the assistant pane side by side (a conversation, not an editor). |
 
 `v` is the vertical-divider split (side by side, like Vim's `:vsplit`); `s` is
 the stacked split (one above the other, like Vim's `:split`). Navigate one pane
 elsewhere to compare two chapters.
+
+`Ctrl-w a` docks the **assistant pane** beside the editor. Type a request and
+press `Enter`; the assistant replies and runs editor actions on your behalf,
+keeping the conversation across turns. `Esc` cancels a run in flight (or, when
+idle, hands keys back to the editor); `Ctrl-w c` closes the pane. With AI off the
+pane says so rather than failing silently.
 
 With a report or AI answer already open full-screen, `Ctrl-w s` / `Ctrl-w v`
 **docks** it into a pane instead of splitting the editor, so the manuscript stays
@@ -53,7 +62,9 @@ Splits are a single-chapter-view feature. Leave the continuous manuscript view
 Focusing the other editor swaps it in so your keys edit it; the project's active
 chapter follows along, so save and chapter navigation track the pane you're in.
 Focusing a docked report instead hands it the scroll keys (`j`/`k`, `PageUp` /
-`PageDown`, `g`/`G`); `Esc` returns focus to the editor.
+`PageDown`, `g`/`G`); `Esc` returns focus to the editor. Focusing the assistant
+pane hands it your typing for the request line (`↑`/`↓`, `PageUp` / `PageDown`
+scroll the transcript); `Esc` returns focus to the editor.
 
 ## Resizing
 

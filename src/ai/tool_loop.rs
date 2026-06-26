@@ -108,19 +108,14 @@ pub fn run(
             Turn::Final(text) => return Ok(LoopOutcome { summary: text, actions }),
             Turn::ToolCalls(calls) => {
                 // Replay the model's tool_use turn, then answer with tool_results.
-                let tool_use: Vec<Value> = calls
-                    .iter()
-                    .map(|c| json!({ "type": "tool_use", "id": c.id, "name": c.name, "input": c.input }))
-                    .collect();
-                messages.push(json!({ "role": "assistant", "content": tool_use }));
-
+                messages.push(tool_use_message(&calls));
                 let mut results = Vec::with_capacity(calls.len());
                 for c in &calls {
                     let result = exec.run(&c.name, &c.input);
                     actions.push(c.name.clone());
-                    results.push(json!({ "type": "tool_result", "tool_use_id": c.id, "content": result }));
+                    results.push(tool_result_block(&c.id, &result));
                 }
-                messages.push(json!({ "role": "user", "content": results }));
+                messages.push(tool_result_message(results));
             }
         }
     }
@@ -129,8 +124,31 @@ pub fn run(
     Ok(LoopOutcome { summary: format!("Stopped after {max_turns} tool-use turns."), actions })
 }
 
+/// The `assistant` turn replaying the model's tool calls (the API requires the
+/// `tool_use` blocks be echoed back before their results). Shared by [`run`] and
+/// the assistant pane (#307) so both speak the protocol the same way.
+pub(crate) fn tool_use_message(calls: &[ToolCall]) -> Value {
+    let blocks: Vec<Value> = calls
+        .iter()
+        .map(|c| json!({ "type": "tool_use", "id": c.id, "name": c.name, "input": c.input }))
+        .collect();
+    json!({ "role": "assistant", "content": blocks })
+}
+
+/// One tool's result block, matched to its call by `tool_use_id`.
+pub(crate) fn tool_result_block(id: &str, content: &str) -> Value {
+    json!({ "type": "tool_result", "tool_use_id": id, "content": content })
+}
+
+/// The `user` turn carrying the tool results back to the model.
+pub(crate) fn tool_result_message(results: Vec<Value>) -> Value {
+    json!({ "role": "user", "content": results })
+}
+
 /// The Messages API body for one turn: model, the running messages, and the tools.
-fn build_body(model: &str, system: Option<&str>, messages: &[Value], tools: &[Value], max_tokens: u32) -> Value {
+/// Shared by [`run`] and the assistant pane's UI-thread turn machine (#307), so
+/// both build the request the same way.
+pub(crate) fn build_body(model: &str, system: Option<&str>, messages: &[Value], tools: &[Value], max_tokens: u32) -> Value {
     let mut body = json!({
         "model": model,
         "max_tokens": max_tokens,

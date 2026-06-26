@@ -9,10 +9,13 @@ use ratatui::{
     Frame,
 };
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::app::App;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
-use crate::app::{SplitContent, SplitDir};
+use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
+use crate::theme::Theme;
 use crate::manuscript::SegmentHeader;
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
 
@@ -185,11 +188,15 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
     // only the focused pane (#166). The split state survives, so widening the
     // terminal restores it; this mirrors how the outline pane yields when narrow.
     if too_cramped_to_split(view.dir, area) {
-        match (&view.content, app.surface_pane_focused()) {
-            // The only full-area surface case: a docked report with scroll focus.
-            (SplitContent::Surface(overlay), true) => {
+        match &view.content {
+            // A docked report with scroll focus takes the full area.
+            SplitContent::Surface(overlay) if app.surface_pane_focused() => {
                 app.surface_height.set(area.height);
                 draw_overlay(frame, area, &app.project.manifest.title, overlay);
+            }
+            // A focused assistant pane takes the full area (#307).
+            SplitContent::Assistant { conv, focused: true } => {
+                draw_assistant_pane(frame, area, app, conv, true);
             }
             // Otherwise the focused pane is always the editor (`App::buffer`).
             _ => Editor(app).render(frame, area),
@@ -218,7 +225,78 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
             app.surface_height.set(other_area.height);
             draw_overlay(frame, other_area, &app.project.manifest.title, overlay);
         }
+        SplitContent::Assistant { conv, focused } => draw_assistant_pane(frame, other_area, app, conv, focused),
     }
+}
+
+/// Render the authorial assistant pane (#307): the conversation transcript above a
+/// typed request line, in a bordered box that brightens when it has key focus. The
+/// transcript is pre-wrapped to the interior width so scrolling is line-exact.
+fn draw_assistant_pane(frame: &mut Frame, area: Rect, app: &App, conv: &Assistant, focused: bool) {
+    let theme = &app.theme;
+    let title = if conv.is_running() {
+        " Assistant — thinking… (Esc cancels) "
+    } else {
+        " Assistant "
+    };
+    let border = if focused { theme.heading } else { theme.dim };
+    let block = Block::default().borders(Borders::ALL).title(title).border_style(Style::default().fg(border));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    // The bottom interior row is the request line; the rest is the transcript.
+    let body_h = inner.height.saturating_sub(1) as usize;
+    let lines = wrap_entries(conv.entries(), inner.width as usize, theme);
+    let max_top = lines.len().saturating_sub(body_h);
+    app.assistant_scroll_max.set(max_top as u16);
+    let top = max_top.saturating_sub(conv.scroll_up() as usize);
+    let shown: Vec<Line> = lines.into_iter().skip(top).take(body_h).collect();
+    frame.render_widget(
+        Paragraph::new(shown),
+        Rect { x: inner.x, y: inner.y, width: inner.width, height: body_h as u16 },
+    );
+
+    // The request line, with the cursor placed at its end while focused and idle.
+    let input_y = inner.y + body_h as u16;
+    let prompt = if conv.is_running() { "… " } else { "> " };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(prompt, Style::default().fg(theme.dim)),
+            Span::styled(conv.input().to_string(), Style::default().fg(theme.heading)),
+        ])),
+        Rect { x: inner.x, y: input_y, width: inner.width, height: 1 },
+    );
+    if focused && !conv.is_running() {
+        let col = (prompt.width() + conv.input().width()) as u16;
+        let cx = inner.x + col.min(inner.width.saturating_sub(1));
+        frame.set_cursor_position((cx, input_y));
+    }
+}
+
+/// Lay the assistant transcript out as styled rows, each entry labelled by speaker
+/// and word-wrapped to `width`, with a blank row between entries for readability.
+fn wrap_entries(entries: &[crate::app::Entry], width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    for e in entries {
+        let (label, style) = match e.who {
+            Speaker::You => ("You: ", Style::default().fg(theme.heading).add_modifier(Modifier::BOLD)),
+            Speaker::Assistant => ("", Style::default()),
+            Speaker::Tool => ("• ", Style::default().fg(theme.dim)),
+            Speaker::System => ("", Style::default().fg(theme.muted).add_modifier(Modifier::ITALIC)),
+        };
+        let body = format!("{label}{}", e.text);
+        let starts = crate::wrap::row_starts(&body, width);
+        for r in 0..starts.len() {
+            let s = starts[r];
+            let end = starts.get(r + 1).copied().unwrap_or(body.len());
+            out.push(Line::from(Span::styled(body[s..end].trim_end().to_string(), style)));
+        }
+        out.push(Line::raw(""));
+    }
+    out
 }
 
 /// Whether a split along `dir` would leave panes too small to use in `area`.

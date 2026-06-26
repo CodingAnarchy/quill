@@ -114,6 +114,16 @@ keystrokes that stay out of the way.
   of in the cloud. Full design, model choices, and privacy model in
   [`docs/ai-features.md`](docs/ai-features.md).
 
+- **Assistant pane** — open a conversational assistant docked beside the prose
+  (**Ctrl-W a**) and ask in plain language: "save and export to Markdown",
+  "open the progress report", "jump to the next misspelling". It carries out the
+  request by running the editor's own actions and shows what it ran, and the
+  conversation persists across turns so a follow-up has the earlier context. It
+  runs off the editor thread — typing never freezes — and **Esc** cancels a run in
+  flight; **Ctrl-W c** closes the pane. Like the rest of Quill's AI it's an
+  assistant, not a co-writer (it won't draft or reword your prose), and with AI
+  off the pane explains that rather than failing silently.
+
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
   runs the one you pick through the same path its own shortcut uses. An action
@@ -266,7 +276,7 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | Ctrl-B         | browse projects: switch to a recently-opened project, or press `b` to browse the filesystem for any project (saves the current first) |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `o` open in a pane, `f` reference files) |
-| Ctrl-W then …  | window panes: `s`/`v` split, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
+| Ctrl-W then …  | window panes: `s`/`v` split, `a` assistant pane, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 ### Projects (switch without relaunching)

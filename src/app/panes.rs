@@ -30,6 +30,10 @@ pub(crate) enum OtherPane {
     /// A docked read-only surface — report / analysis / AI answer (#164).
     /// `focused` is true while it's taking scroll input instead of the editor.
     Surface { overlay: Overlay, focused: bool },
+    /// The authorial assistant pane (#307): its conversation and whether it has
+    /// key focus. Like [`Editor`](Self::Editor) and [`Surface`](Self::Surface), the
+    /// pane's state lives in the variant, so closing the split drops it.
+    Assistant { conv: Assistant, focused: bool },
 }
 
 pub(crate) struct Split {
@@ -59,6 +63,8 @@ pub(crate) enum SplitContent<'a> {
     Editor(&'a Buffer),
     /// A docked read-only surface — report / analysis / AI answer (#164).
     Surface(&'a Overlay),
+    /// The authorial assistant pane (#307): its conversation and whether focused.
+    Assistant { conv: &'a Assistant, focused: bool },
 }
 
 /// The starting (even) split, and the bounds resize keeps the first pane within
@@ -73,6 +79,7 @@ impl App {
         match code {
             KeyCode::Char('s') => self.split_or_dock(SplitDir::Stacked),
             KeyCode::Char('v') => self.split_or_dock(SplitDir::SideBySide),
+            KeyCode::Char('a') => self.open_assistant(),
             KeyCode::Char('w' | 'h' | 'j' | 'k' | 'l') => self.focus_other_pane(),
             KeyCode::Char('c' | 'q') => self.close_split(),
             // Resize the split (#166): grow or shrink the focused pane along the
@@ -160,17 +167,49 @@ impl App {
         self.message = Some("Docked — Ctrl-w w to scroll it, Ctrl-w c to close.".into());
     }
 
-    /// Move focus to the other pane: swap editors (#163), or hand scroll input to
-    /// a docked surface (#164).
+    /// Open the authorial assistant pane (#307), docked beside the editor. Already
+    /// open → just give it focus. Single-chapter view only, like the other panes.
+    fn open_assistant(&mut self) {
+        if self.manuscript.is_some() {
+            self.message = Some("Leave the continuous view (Ctrl-l) before opening the assistant.".into());
+            return;
+        }
+        if let Some(Split { other: OtherPane::Assistant { focused, .. }, .. }) = self.split.as_mut() {
+            *focused = true; // already open — just give it focus
+            self.message = Some("Assistant — type a request; Ctrl-w c closes it.".into());
+            return;
+        }
+        if self.flush_active().is_err() {
+            return;
+        }
+        self.close_split_if_any(); // two panes max — replace any existing split
+        let mut conv = Assistant::new();
+        // Open even with AI off so the pane can explain why it's unavailable (#307)
+        // rather than failing obscurely; the first request reports the same.
+        if let Err(e) = self.ai.ready_for(ai::BackendKind::Claude) {
+            conv.note(&format!("The assistant is unavailable: {e}"));
+        }
+        self.split = Some(Split {
+            other: OtherPane::Assistant { conv, focused: true },
+            dir: SplitDir::SideBySide,
+            focused_first: true,
+            first_ratio: EVEN_SPLIT,
+        });
+        self.message = Some("Assistant — type a request; Ctrl-w c closes it.".into());
+    }
+
+    /// Move focus to the other pane: swap editors (#163), hand scroll input to a
+    /// docked surface (#164), or focus the assistant pane (#307).
     fn focus_other_pane(&mut self) {
-        match self.split.as_ref().map(|s| matches!(s.other, OtherPane::Surface { .. })) {
-            None => {}
-            Some(true) => {
-                if let Some(Split { other: OtherPane::Surface { focused, .. }, .. }) = self.split.as_mut() {
-                    *focused = !*focused;
-                }
+        let is_editor = matches!(self.split.as_ref(), Some(Split { other: OtherPane::Editor(_), .. }));
+        if is_editor {
+            self.swap_editor_panes();
+        } else if let Some(s) = self.split.as_mut() {
+            // A docked surface or the assistant: toggle which pane keys go to.
+            match &mut s.other {
+                OtherPane::Surface { focused, .. } | OtherPane::Assistant { focused, .. } => *focused = !*focused,
+                OtherPane::Editor(_) => {}
             }
-            Some(false) => self.swap_editor_panes(),
         }
     }
 
@@ -232,6 +271,8 @@ impl App {
                     let _ = other.save(); // best effort; the focused pane is unaffected
                 }
             }
+            // A surface is read-only and the assistant's conversation lives in the
+            // variant, so both drop with the split — nothing else to clean up.
         }
     }
 
@@ -244,7 +285,7 @@ impl App {
         // A scroll-focused surface is the *second* pane; otherwise the focused
         // editor is the first pane when `focused_first`.
         let focused_is_first = match &split.other {
-            OtherPane::Surface { focused: true, .. } => !split.focused_first,
+            OtherPane::Surface { focused: true, .. } | OtherPane::Assistant { focused: true, .. } => !split.focused_first,
             _ => split.focused_first,
         };
         // Grow the focused pane → enlarge whichever side it's on (XNOR). The
@@ -267,12 +308,18 @@ impl App {
         matches!(&self.split, Some(Split { other: OtherPane::Surface { focused: true, .. }, .. }))
     }
 
+    /// Whether the assistant pane currently has key focus (#307) — keys go to it.
+    pub(crate) fn assistant_pane_focused(&self) -> bool {
+        matches!(&self.split, Some(Split { other: OtherPane::Assistant { focused: true, .. }, .. }))
+    }
+
     /// What the renderer needs to lay out the split (#163/#164). `None` when not split.
     pub(crate) fn split_view(&self) -> Option<SplitView<'_>> {
         let s = self.split.as_ref()?;
         let content = match &s.other {
             OtherPane::Editor(other) => SplitContent::Editor(other),
             OtherPane::Surface { overlay, .. } => SplitContent::Surface(overlay),
+            OtherPane::Assistant { conv, focused } => SplitContent::Assistant { conv, focused: *focused },
         };
         Some(SplitView { dir: s.dir, first_ratio: s.first_ratio, focused_first: s.focused_first, content })
     }

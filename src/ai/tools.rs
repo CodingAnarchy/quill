@@ -9,17 +9,28 @@
 //! schema is the empty object; per-action inputs (a question for Ask, a note for
 //! Annotate) are a documented follow-up (#390).
 //!
-//! Foundation for the assistant epic (#305): consumed by the tool-use loop once
-//! the next child wires the command, so it has no non-test caller yet.
-#![allow(dead_code)]
+//! Foundation for the assistant epic (#305): [`action_tools`] derives the full
+//! catalog (consumed off-thread by the tool-use loop's tests); the pane (#307)
+//! offers the author-facing [`assistant_tools`] — the actions it can actually run
+//! to completion.
 
 use serde_json::{json, Value};
 
 use crate::mode::Action;
 
-/// The Claude `tools` array for the assistant: one tool per registry action.
+/// The Claude `tools` array for one tool per registry action — the full catalog,
+/// including actions only some surfaces can run. No non-test caller today.
+#[allow(dead_code)]
 pub fn action_tools() -> Vec<Value> {
     Action::ALL.iter().map(|a| tool_for(*a)).collect()
+}
+
+/// The tools offered to the authorial assistant pane (#307): the registry
+/// actions it can run autonomously to completion (see [`Action::assistant_runnable`]).
+/// Still registry-derived — a new runnable action becomes a tool with no second
+/// list to maintain.
+pub fn assistant_tools() -> Vec<Value> {
+    Action::ALL.iter().filter(|a| a.assistant_runnable()).map(|a| tool_for(*a)).collect()
 }
 
 /// One action's tool definition (Messages API shape).
