@@ -35,7 +35,24 @@ pub struct ExportStyle {
     /// disk by the app, not persisted in the manifest.
     #[serde(skip)]
     pub fonts: Vec<EmbeddedFont>,
+    /// Chapter-heading alignment (#470): `left` / `center` / `right` / `justify`.
+    /// `None` → the default centered heading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_align: Option<String>,
+    /// Whether each chapter's first paragraph opens with a drop cap (#470).
+    #[serde(skip_serializing_if = "is_false")]
+    pub drop_cap: bool,
 }
+
+/// `skip_serializing_if` for a `bool` default — keeps `drop_cap = false` out of an
+/// unstyled manifest.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// The CSS `text-align` values a heading may use (#470) — an allowlist, since the
+/// value is interpolated into the stylesheet.
+const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
 
 /// Which text a [`EmbeddedFont`] styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +92,30 @@ impl ExportStyle {
     /// The resolved font for `role`, if one was configured and loaded.
     pub fn font(&self, role: FontRole) -> Option<&EmbeddedFont> {
         self.fonts.iter().find(|f| f.role == role)
+    }
+
+    /// The validated heading alignment (#470), or `None` for the default (centered)
+    /// — an out-of-allowlist value is ignored here and reported by
+    /// [`Self::style_warnings`].
+    pub fn heading_align(&self) -> Option<&str> {
+        self.heading_align
+            .as_deref()
+            .filter(|v| HEADING_ALIGNS.contains(v))
+    }
+
+    /// Warnings for non-fatal `[style]` config problems (#470) — e.g. an unknown
+    /// heading alignment. (Font-resolution warnings come from [`Self::resolve_fonts`].)
+    pub fn style_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        // A configured alignment that didn't survive `heading_align`'s allowlist.
+        if let Some(v) = &self.heading_align {
+            if self.heading_align().is_none() {
+                warnings.push(format!(
+                    "style: unknown heading_align '{v}' (use left/center/right/justify)"
+                ));
+            }
+        }
+        warnings
     }
 
     /// Resolve the configured font paths into [`EmbeddedFont`]s using `load`
@@ -130,15 +171,31 @@ fn font_media_type(path: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
-/// A CSS family name derived from a font file's stem (`Fonts/Georgia.ttf` →
-/// `Georgia`), falling back to a generic name.
+/// A CSS-safe family name derived from a font file's stem (`Fonts/Georgia.ttf` →
+/// `Georgia`). Restricted to letters, digits, spaces, hyphens, and underscores so
+/// it can't break out of the quoted `font-family` / `@font-face` string it's
+/// interpolated into (#470); falls back to a generic name.
 fn font_family(path: &str) -> String {
-    std::path::Path::new(path)
+    let stem = std::path::Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Embedded")
-        .to_string()
+        .unwrap_or("");
+    let safe: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let safe = safe.split_whitespace().collect::<Vec<_>>().join(" ");
+    if safe.is_empty() {
+        "Embedded".to_string()
+    } else {
+        safe
+    }
 }
 
 /// A project compiled for export: the book's metadata and its contents as a tree
@@ -616,6 +673,51 @@ mod tests {
         let warnings = style.resolve_fonts(|_| Err(std::io::Error::other("nope")));
         assert!(style.fonts.is_empty());
         assert!(warnings[0].contains("couldn't read"), "{warnings:?}");
+    }
+
+    #[test]
+    fn resolve_fonts_sanitizes_the_css_family_name() {
+        // A stem with CSS-breaking characters can't escape the quoted family string.
+        let mut style = ExportStyle {
+            body_font: Some("fonts/Ev\"il; }.otf".into()),
+            ..Default::default()
+        };
+        style.resolve_fonts(|_| Ok(b"OTTO".to_vec()));
+        let family = &style.font(FontRole::Body).unwrap().family;
+        assert!(
+            !family.contains(['"', ';', '{', '}', '\\']),
+            "css-safe family: {family:?}"
+        );
+    }
+
+    #[test]
+    fn heading_align_is_allowlisted_and_warns_on_an_unknown_value() {
+        let ok = ExportStyle {
+            heading_align: Some("left".into()),
+            ..Default::default()
+        };
+        assert_eq!(ok.heading_align(), Some("left"));
+        assert!(ok.style_warnings().is_empty());
+
+        // A bad value is ignored (default centered) and reported.
+        let bad = ExportStyle {
+            heading_align: Some("centre".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            bad.heading_align(),
+            None,
+            "unknown alignment falls back to default"
+        );
+        assert!(
+            bad.style_warnings()[0].contains("heading_align"),
+            "{:?}",
+            bad.style_warnings()
+        );
+
+        // No alignment → no warning, default centered.
+        assert!(ExportStyle::default().heading_align().is_none());
+        assert!(ExportStyle::default().style_warnings().is_empty());
     }
 
     #[test]

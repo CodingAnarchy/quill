@@ -303,6 +303,15 @@ fn stylesheet(style: &ExportStyle) -> String {
             f.family
         ));
     }
+    if let Some(align) = style.heading_align() {
+        css.push_str(&format!("h1, h2 {{ text-align: {align}; }}\n"));
+    }
+    if style.drop_cap {
+        // The first paragraph of each chapter (marked `opening`) gets a drop cap;
+        // its first line is flush so the initial sits in the margin.
+        css.push_str("p.opening { text-indent: 0; }\n");
+        css.push_str(".opening::first-letter { float: left; font-size: 3.2em; line-height: 0.72; padding-right: 0.06em; font-weight: bold; }\n");
+    }
     css
 }
 
@@ -330,29 +339,38 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
     if let Some(e) = &ch.epigraph {
         out.push_str(&epigraph_xhtml(e));
     }
+    // With drop caps on, the chapter's first prose paragraph is marked `opening`.
+    let mut opened = false;
     for block in ch.body.split("\n\n") {
-        if let Some(p) = prose_xhtml(block, style) {
-            out.push_str(&p);
-            out.push('\n');
-        }
+        let Some(prose) = classify_block(block) else {
+            continue;
+        };
+        let opening = style.drop_cap && !opened && matches!(prose, Prose::Paragraph(_));
+        opened |= opening;
+        out.push_str(&prose_xhtml(&prose, style, opening));
+        out.push('\n');
     }
     out
 }
 
-/// One body block → XHTML, or `None` for an empty block: a scene break becomes a
-/// centered divider (the styled glyph, default `#`), a heading line an `<h2>`,
-/// prose a `<p>` with `*`/`**` emphasis as `<em>`/`<strong>`.
-fn prose_xhtml(block: &str, style: &ExportStyle) -> Option<String> {
-    Some(match classify_block(block)? {
+/// One classified body block → XHTML: a scene break becomes a centered divider
+/// (the styled glyph, default `#`), a heading line an `<h2>`, prose a `<p>` with
+/// `*`/`**` emphasis as `<em>`/`<strong>`. The chapter's opening paragraph carries
+/// the `opening` class when drop caps are enabled.
+fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
+    match prose {
         Prose::SceneBreak => {
             format!(
                 "<p class=\"scene-break\">{}</p>",
                 xml_escape(style.scene_break())
             )
         }
-        Prose::Heading(h) => format!("<h2>{}</h2>", xml_escape(&h)),
-        Prose::Paragraph(text) => format!("<p>{}</p>", inline_xhtml(&text)),
-    })
+        Prose::Heading(h) => format!("<h2>{}</h2>", xml_escape(h)),
+        Prose::Paragraph(text) => {
+            let class = if opening { " class=\"opening\"" } else { "" };
+            format!("<p{class}>{}</p>", inline_xhtml(text))
+        }
+    }
 }
 
 /// An epigraph as a set-apart block: each line a `<p>`, the attribution on its
@@ -921,6 +939,52 @@ mod tests {
             "no fonts by default"
         );
         assert!(!part(&plain, "OEBPS/style.css").contains("@font-face"));
+    }
+
+    #[test]
+    fn heading_alignment_and_drop_cap_render_via_css() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("One", None, "First para.\n\nSecond para.")],
+            }],
+            back: vec![],
+        };
+        let style = ExportStyle {
+            heading_align: Some("left".into()),
+            drop_cap: true,
+            ..Default::default()
+        };
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+        let css = part(&bytes, "OEBPS/style.css");
+        assert!(
+            css.contains("h1, h2 { text-align: left; }"),
+            "alignment: {css}"
+        );
+        assert!(
+            css.contains(".opening::first-letter {"),
+            "drop-cap rule: {css}"
+        );
+        // Only the chapter's first paragraph carries the `opening` class.
+        let chap = part(&bytes, "OEBPS/chap0002.xhtml");
+        assert_eq!(chap.matches("class=\"opening\"").count(), 1, "{chap}");
+        assert!(
+            chap.contains("<p class=\"opening\">First para.</p>"),
+            "{chap}"
+        );
+        assert!(chap.contains("<p>Second para.</p>"), "{chap}");
+
+        // Default style → no alignment override, no drop cap, no opening class.
+        let plain = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+        assert!(!part(&plain, "OEBPS/style.css").contains("text-align: left"));
+        assert!(!part(&plain, "OEBPS/style.css").contains("first-letter"));
+        assert!(!part(&plain, "OEBPS/chap0002.xhtml").contains("opening"));
     }
 
     #[test]
