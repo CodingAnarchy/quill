@@ -49,26 +49,14 @@ than approximating it. Do not write or suggest any manuscript prose.";
 /// The JSON Schema for a reply: each change's `key` is constrained to the
 /// vocabulary; the `value` is a free string (validated by the caller).
 fn schema(keys: &[String]) -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "changes": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "key": { "enum": keys },
-                        "value": { "type": "string" }
-                    },
-                    "required": ["key", "value"],
-                    "additionalProperties": false
-                }
-            },
-            "unmapped": { "type": "array", "items": { "type": "string" } }
-        },
-        "required": ["changes", "unmapped"],
-        "additionalProperties": false
-    })
+    let change = super::object_schema(
+        vec![("key", json!({ "enum": keys })), ("value", super::string_field())],
+        &["key", "value"],
+    );
+    super::object_schema(
+        vec![("changes", super::array_of(change)), ("unmapped", super::string_array())],
+        &["changes", "unmapped"],
+    )
 }
 
 /// Build the generation request: the settings vocabulary as context, the author's

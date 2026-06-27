@@ -6,7 +6,7 @@
 //! style report (#70). See `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{AiError, Request};
 
@@ -41,27 +41,10 @@ the issue for the author to address.";
 
 /// The JSON Schema for a prose/style reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "type": "string" },
-                        "detail": { "type": "string" },
-                        "chapters": strings
-                    },
-                    "required": ["kind", "detail", "chapters"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["findings"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![("findings", super::array_of(super::chapters_finding("kind", "detail")))],
+        &["findings"],
+    )
 }
 
 /// Build the prose/style request: the manuscript as cached context, schema attached.

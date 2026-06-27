@@ -8,7 +8,7 @@
 //! `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{AiError, Request, MAX_OUTPUT_TOKENS};
 
@@ -49,28 +49,16 @@ author to fix.";
 
 /// The JSON Schema for a voice-analysis reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "type": "string" },
-                        "character": { "type": "string" },
-                        "detail": { "type": "string" },
-                        "chapters": strings
-                    },
-                    "required": ["kind", "character", "detail", "chapters"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["findings"],
-        "additionalProperties": false
-    })
+    let finding = super::object_schema(
+        vec![
+            ("kind", super::string_field()),
+            ("character", super::string_field()),
+            ("detail", super::string_field()),
+            ("chapters", super::string_array()),
+        ],
+        &["kind", "character", "detail", "chapters"],
+    );
+    super::object_schema(vec![("findings", super::array_of(finding))], &["findings"])
 }
 
 /// Build the voice-analysis request: the manuscript as cached context (the large,

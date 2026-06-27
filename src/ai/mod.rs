@@ -307,6 +307,43 @@ pub(crate) fn string_array() -> serde_json::Value {
     serde_json::json!({ "type": "array", "items": { "type": "string" } })
 }
 
+/// `{ "type": "string" }` — the most common schema leaf (#429).
+pub(crate) fn string_field() -> serde_json::Value {
+    serde_json::json!({ "type": "string" })
+}
+
+/// `{ "type": "array", "items": <item> }` — an array of `item` (#429).
+pub(crate) fn array_of(item: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "type": "array", "items": item })
+}
+
+/// The `{ "type": "object", "properties": …, "required": …, "additionalProperties":
+/// false }` envelope every feature schema shares (#429). `required` is omitted
+/// when empty, so an all-optional object matches a hand-written one that left the
+/// key out (constrained decoding is unchanged).
+pub(crate) fn object_schema(props: Vec<(&str, serde_json::Value)>, required: &[&str]) -> serde_json::Value {
+    let properties: serde_json::Map<String, serde_json::Value> =
+        props.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    let mut schema = serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": false,
+    });
+    if !required.is_empty() {
+        schema["required"] = serde_json::json!(required);
+    }
+    schema
+}
+
+/// The common "finding" item — two string fields plus the involved `chapters`
+/// (#429), e.g. `kind`/`detail` or `rule`/`violation`. All three keys required.
+pub(crate) fn chapters_finding(field_a: &str, field_b: &str) -> serde_json::Value {
+    object_schema(
+        vec![(field_a, string_field()), (field_b, string_field()), ("chapters", string_array())],
+        &[field_a, field_b, "chapters"],
+    )
+}
+
 /// Which provider the AI features run against (#87).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -478,6 +515,34 @@ pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_schema_builds_the_envelope() {
+        let s = object_schema(vec![("name", string_field()), ("tags", string_array())], &["name"]);
+        assert_eq!(s["type"], "object");
+        assert_eq!(s["additionalProperties"], false);
+        assert_eq!(s["required"], serde_json::json!(["name"]));
+        assert_eq!(s["properties"]["name"], serde_json::json!({ "type": "string" }));
+        assert_eq!(s["properties"]["tags"], serde_json::json!({ "type": "array", "items": { "type": "string" } }));
+    }
+
+    #[test]
+    fn object_schema_omits_required_when_empty() {
+        // Matches a hand-written all-optional object that left the key out, so
+        // constrained decoding is unchanged (#429).
+        let s = object_schema(vec![("note", string_field())], &[]);
+        assert!(s.get("required").is_none(), "no empty `required` key: {s}");
+    }
+
+    #[test]
+    fn chapters_finding_is_two_strings_plus_chapters() {
+        let f = chapters_finding("kind", "detail");
+        assert_eq!(f["required"], serde_json::json!(["kind", "detail", "chapters"]));
+        assert_eq!(f["properties"]["kind"], serde_json::json!({ "type": "string" }));
+        assert_eq!(f["properties"]["detail"], serde_json::json!({ "type": "string" }));
+        assert_eq!(f["properties"]["chapters"], serde_json::json!({ "type": "array", "items": { "type": "string" } }));
+        assert_eq!(f["additionalProperties"], false);
+    }
 
     #[test]
     fn settings_default_to_ai_off() {

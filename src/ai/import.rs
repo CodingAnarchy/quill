@@ -9,7 +9,7 @@
 //! them into the structured, mergeable bible files.
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::character::Character;
 use super::continuity::Continuity;
@@ -55,17 +55,15 @@ outline `gaps` empty.";
 /// matches their parsers: a character list, a setting bible, a timeline, and an
 /// outline.
 pub fn schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "characters": character::items_schema(),
-            "setting": setting::schema(),
-            "timeline": continuity::schema(),
-            "outline": scaffold::schema(),
-        },
-        "required": ["characters", "setting", "timeline", "outline"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![
+            ("characters", character::items_schema()),
+            ("setting", setting::schema()),
+            ("timeline", continuity::schema()),
+            ("outline", scaffold::schema()),
+        ],
+        &["characters", "setting", "timeline", "outline"],
+    )
 }
 
 /// Build the import request: the author's notes as cached context, the combined

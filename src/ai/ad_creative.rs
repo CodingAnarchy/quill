@@ -8,7 +8,7 @@
 //! or supplies their own. See `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
 
@@ -81,24 +81,19 @@ is marketing material, never part of the novel.";
 
 /// The JSON Schema for an ad-creative reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    let ad = json!({
-        "type": "object",
-        "properties": {
-            "headlines": strings,
-            "body": strings,
-            "targeting": strings,
-            "image_brief": { "type": "string" }
-        },
-        "required": ["headlines", "body", "targeting", "image_brief"],
-        "additionalProperties": false
-    });
-    json!({
-        "type": "object",
-        "properties": { "amazon": ad, "meta": ad, "x": ad },
-        "required": ["amazon", "meta", "x"],
-        "additionalProperties": false
-    })
+    let ad = super::object_schema(
+        vec![
+            ("headlines", super::string_array()),
+            ("body", super::string_array()),
+            ("targeting", super::string_array()),
+            ("image_brief", super::string_field()),
+        ],
+        &["headlines", "body", "targeting", "image_brief"],
+    );
+    super::object_schema(
+        vec![("amazon", ad.clone()), ("meta", ad.clone()), ("x", ad)],
+        &["amazon", "meta", "x"],
+    )
 }
 
 /// Build the ad-creative request: the manuscript as cached context, any existing

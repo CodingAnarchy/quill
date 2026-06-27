@@ -5,7 +5,7 @@
 //! the assistant-not-co-writer rule. See `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{AiError, Request};
 
@@ -37,16 +37,14 @@ materials, never part of the novel. Return each as plain prose.";
 
 /// The JSON Schema for a submission reply.
 pub fn schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "synopsis": { "type": "string" },
-            "blurb": { "type": "string" },
-            "query": { "type": "string" }
-        },
-        "required": ["synopsis", "blurb", "query"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![
+            ("synopsis", super::string_field()),
+            ("blurb", super::string_field()),
+            ("query", super::string_field()),
+        ],
+        &["synopsis", "blurb", "query"],
+    )
 }
 
 /// Build the submission request: the manuscript as cached context, schema attached.

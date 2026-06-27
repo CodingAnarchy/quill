@@ -6,7 +6,7 @@
 //! `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{numbered_sections, AiError, Request};
 
@@ -50,17 +50,14 @@ Return the posts per platform as plain text.";
 
 /// The JSON Schema for a social-posts reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "x": strings,
-            "facebook": strings,
-            "instagram": strings
-        },
-        "required": ["x", "facebook", "instagram"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![
+            ("x", super::string_array()),
+            ("facebook", super::string_array()),
+            ("instagram", super::string_array()),
+        ],
+        &["x", "facebook", "instagram"],
+    )
 }
 
 /// Build the social-posts request: the manuscript as cached context, schema

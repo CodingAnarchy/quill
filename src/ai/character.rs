@@ -99,12 +99,7 @@ chapters by their title.";
 /// The JSON Schema for a character-extraction reply (matches the model-provided
 /// fields of [`Character`], wrapped in a `characters` array).
 pub fn schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": { "characters": items_schema() },
-        "required": ["characters"],
-        "additionalProperties": false
-    })
+    super::object_schema(vec![("characters", items_schema())], &["characters"])
 }
 
 /// The array-of-character-profiles schema on its own, so other passes (the notes
