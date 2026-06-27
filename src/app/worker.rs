@@ -607,29 +607,14 @@ impl App {
         self.pump_wizard_drafts();
     }
 
-    /// Assemble the chapters for which `keep(i)` holds, each under its `# Title`
-    /// heading (active chapter live from its buffer, the rest from disk) — the one
-    /// serialization shared by the whole-manuscript and changed-chapter contexts.
-    fn render_chapters(&self, keep: impl Fn(usize) -> bool) -> String {
-        let mut out = String::new();
-        for i in 0..self.chapter_count() {
-            if !keep(i) {
-                continue;
-            }
-            if let Some(title) = self.project.chapter_title(i) {
-                out.push_str("# ");
-                out.push_str(title);
-                out.push_str("\n\n");
-            }
-            out.push_str(self.chapter_text(i).trim_end());
-            out.push_str("\n\n");
-        }
-        out
-    }
-
-    /// The whole manuscript as plain text for an AI request.
+    /// The whole manuscript as plain text for an AI request — the active book's
+    /// chapters under title headings. The same serializer the bible passes use
+    /// (#432): `book_render(active_book, None)` over `book_chapters(active_book)`
+    /// (the live, band-ordered manifest list) resolves each chapter's body through
+    /// `chapter_text`, so the active chapter's unsaved edits are included exactly
+    /// as before.
     pub(crate) fn manuscript_text(&self) -> String {
-        self.render_chapters(|_| true)
+        self.book_render(self.project.active_book(), None)
     }
 
     /// The known entity list for naming checks: the setting gazetteer plus the
