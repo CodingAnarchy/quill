@@ -365,17 +365,22 @@ Ctrl-K menu) creates a project and imports every Markdown file in the folder int
 its story bible in one step — preserving the originals.
 
 Already have a **manuscript**? **Import a manuscript → new project** (in the
-Ctrl-K menu) turns an existing **Markdown (`.md`)** or **Word (`.docx`)** file
-into a chaptered Quill project: point it at the file, give the new project a path,
-and Quill splits it into chapters and carries the chapter titles into the
-manifest. A Markdown file splits on headings — `##` when there's a single `#`
-title (Quill's own export shape), or `#` when each chapter is a top-level heading
-— with the book title / author from a YAML front-matter block or the title page. A
-Word file splits on **Heading 1** paragraphs (the level Quill's own Word/Vellum
-export uses for chapter titles), converts bold/italic runs to `**`/`*`, and reads
-the title / author from the document's properties or a title-block preamble.
-Emphasis is kept either way, and the original file is read from, never moved or
-changed. Scrivener `.scriv` import is planned next (see the issues).
+Ctrl-K menu) turns an existing **Markdown (`.md`)**, **Word (`.docx`)**, or
+**Scrivener (`.scriv`)** manuscript into a chaptered Quill project: point it at
+the file (or the `.scriv` bundle), give the new project a path, and Quill splits
+it into chapters and carries the chapter titles into the manifest. A Markdown file
+splits on headings — `##` when there's a single `#` title (Quill's own export
+shape), or `#` when each chapter is a top-level heading — with the book title /
+author from a YAML front-matter block or the title page. A Word file splits on
+**Heading 1** paragraphs (the level Quill's own Word/Vellum export uses for
+chapter titles), converts bold/italic runs to `**`/`*`, and reads the title /
+author from the document's properties or a title-block preamble. A Scrivener
+bundle follows its binder's reading order (each text document a chapter, its
+binder title the chapter title; folders flatten into their documents) and converts
+RTF bold/italic to `**`/`*`, with the title from the bundle name. Emphasis is kept
+in every case, and the original is only read from, never moved or changed — the
+inverse of Quill's Markdown, Word, and Scrivener *exports*, closing the round
+trip.
 
 When you create a project, a short setup wizard offers to scaffold it — writing
 goals, a starter cast and setting (with AI, when enabled), and a first note.

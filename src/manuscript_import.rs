@@ -25,10 +25,18 @@
 //! at), turn bold/italic runs into `**`/`*`, and read the title/author from the
 //! OOXML core properties (or, failing that, a title-block preamble). The OOXML is
 //! scanned directly — no XML-parser dependency, mirroring the hand-written XML on
-//! the export side. Scrivener `.scriv` is a separate ticket.
+//! the export side.
+//!
+//! Scrivener `.scriv` is supported too (#402) via [`parse_scriv`], the inverse of
+//! `export::scriv`: read the `.scrivx` binder for the Manuscript draft folder's
+//! order and titles (folders flatten into their text documents, since the chapter
+//! model is flat), and each text document's `Files/Data/<UUID>/content.rtf`,
+//! converting RTF bold/italic runs to `**`/`*`.
 
 use std::io::{Cursor, Read};
+use std::path::Path;
 
+use crate::export::SCENE_BREAK;
 use crate::frontmatter;
 
 /// A manuscript parsed into book metadata and chapters.
@@ -412,14 +420,22 @@ fn is_heading_one(inner: &str) -> bool {
         == Some("0")
 }
 
-/// One run's inner XML → Markdown: its text wrapped in `**`/`*`/`***` for
-/// bold/italic (whitespace kept outside the markers so emphasis stays tight).
+/// One run's inner XML → Markdown (its `<w:t>` text wrapped per its bold/italic
+/// run properties).
 fn run_markdown(run: &str) -> String {
-    let text = run_text(run);
-    let bold = run_toggle(run, "w:b");
-    let italic = run_toggle(run, "w:i");
+    wrap_emphasis(
+        &run_text(run),
+        run_toggle(run, "w:b"),
+        run_toggle(run, "w:i"),
+    )
+}
+
+/// Wrap `text` in `**`/`*`/`***` for bold/italic, keeping leading/trailing
+/// whitespace outside the markers so emphasis stays tight. Shared by the `.docx`
+/// run reader and the `.scriv` RTF reader.
+fn wrap_emphasis(text: &str, bold: bool, italic: bool) -> String {
     if text.trim().is_empty() || !(bold || italic) {
-        return text;
+        return text.to_string();
     }
     let marks = if bold && italic {
         "***"
@@ -587,6 +603,327 @@ fn decode_entity(entity: &str) -> Option<char> {
             char::from_u32(code)
         }
     }
+}
+
+// --- Scrivener (.scriv) import (#402) -------------------------------------
+
+/// Parse a Scrivener `.scriv` bundle directory: read its `.scrivx` binder for the
+/// Manuscript draft folder's reading order and titles, and each text document's
+/// `Files/Data/<UUID>/content.rtf`. The bundle is read only. Errors if there's no
+/// `.scrivx` binder (i.e. it isn't a Scrivener project).
+pub fn parse_scriv(bundle: &Path) -> std::io::Result<Imported> {
+    let scrivx_path = std::fs::read_dir(bundle)?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("scrivx"))
+        })
+        .ok_or_else(|| std::io::Error::other("not a Scrivener project (no .scrivx binder)"))?;
+    let scrivx = std::fs::read_to_string(&scrivx_path)?;
+    // Scrivener's project name is the bundle's name; it doesn't store a separate
+    // title/author in the binder Quill writes.
+    let title = bundle
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
+        .filter(|s| !s.is_empty());
+    let data = bundle.join("Files").join("Data");
+    Ok(parse_binder(&scrivx, title, |uuid| {
+        std::fs::read_to_string(data.join(uuid).join("content.rtf")).ok()
+    }))
+}
+
+/// The pure core of [`parse_scriv`]: walk the binder XML's Manuscript draft folder
+/// into ordered chapters, pulling each text document's body from `read_rtf(uuid)`.
+/// Folders are flattened into their text documents (the chapter model is flat);
+/// the Research and Trash folders are skipped (only the draft folder is walked).
+fn parse_binder(
+    scrivx: &str,
+    title: Option<String>,
+    read_rtf: impl Fn(&str) -> Option<String>,
+) -> Imported {
+    let mut chapters = Vec::new();
+    if let Some(draft) = draft_folder(scrivx).and_then(children_group) {
+        collect_items(draft, &read_rtf, &mut chapters);
+    }
+    if chapters.is_empty() {
+        let only = title.clone().unwrap_or_else(|| "Manuscript".into());
+        chapters.push(ImportedChapter {
+            title: only,
+            body: String::new(),
+        });
+    }
+    finalize_titles(&mut chapters);
+    Imported {
+        title,
+        author: None,
+        chapters,
+    }
+}
+
+/// The inner XML of the `DraftFolder` binder item (the "Manuscript" folder).
+fn draft_folder(scrivx: &str) -> Option<&str> {
+    let mut pos = 0;
+    while let Some((attrs_start, gt, _)) = find_open(scrivx, pos, "BinderItem") {
+        let attrs = scrivx[attrs_start..gt].trim_end_matches('/').trim();
+        let close = matching_close(scrivx, "BinderItem", gt + 1)?;
+        if attr_value(attrs, "Type").as_deref() == Some("DraftFolder") {
+            return Some(&scrivx[gt + 1..close]);
+        }
+        pos = close + "</BinderItem>".len();
+    }
+    None
+}
+
+/// Walk a binder item's direct children, in order: each `Text` document becomes a
+/// chapter (its `content.rtf` converted from RTF); a folder recurses (its title is
+/// dropped — the chapter list is flat). Nesting-aware so folders nest correctly.
+fn collect_items(
+    children: &str,
+    read_rtf: &impl Fn(&str) -> Option<String>,
+    out: &mut Vec<ImportedChapter>,
+) {
+    let mut pos = 0;
+    while let Some((attrs_start, gt, self_closing)) = find_open(children, pos, "BinderItem") {
+        let attrs = children[attrs_start..gt].trim_end_matches('/').trim();
+        if self_closing {
+            pos = gt + 1;
+            continue;
+        }
+        let Some(close) = matching_close(children, "BinderItem", gt + 1) else {
+            break;
+        };
+        let inner = &children[gt + 1..close];
+        if attr_value(attrs, "Type").as_deref() == Some("Text") {
+            let uuid = attr_value(attrs, "UUID").unwrap_or_default();
+            let body = read_rtf(&uuid)
+                .map(|rtf| rtf_to_markdown(&rtf))
+                .unwrap_or_default();
+            out.push(ImportedChapter {
+                title: element_text(inner, "Title").unwrap_or_default(),
+                body,
+            });
+        }
+        // Recurse into any children (a folder's documents, or a text item's own).
+        if let Some(grandchildren) = children_group(inner) {
+            collect_items(grandchildren, read_rtf, out);
+        }
+        pos = close + "</BinderItem>".len();
+    }
+}
+
+/// The inner XML of the first direct `<Children>` element, or `None`.
+fn children_group(item: &str) -> Option<&str> {
+    let (_, gt, _) = find_open(item, 0, "Children")?;
+    let close = matching_close(item, "Children", gt + 1)?;
+    Some(&item[gt + 1..close])
+}
+
+/// The byte index of the `</name>` that closes the element whose content starts at
+/// `inner_start`, accounting for nested same-named elements.
+fn matching_close(xml: &str, name: &str, inner_start: usize) -> Option<usize> {
+    let close = format!("</{name}>");
+    let mut depth = 1usize;
+    let mut pos = inner_start;
+    loop {
+        let next_open = find_open(xml, pos, name);
+        let next_close = xml[pos..].find(&close).map(|r| pos + r);
+        match (next_open, next_close) {
+            (Some((_, gt, self_closing)), Some(at)) if gt < at => {
+                if !self_closing {
+                    depth += 1;
+                }
+                pos = gt + 1;
+            }
+            (_, Some(at)) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at);
+                }
+                pos = at + close.len();
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Convert a document's RTF to Markdown: each `\par` paragraph becomes a line,
+/// bold/italic runs (`\b` / `\i`, including `{\i …}` groups) become `**`/`*`, and
+/// the centered scene-break glyph becomes a `---` thematic break. Best-effort: it
+/// skips font/colour/style tables and unknown control words, decodes `\uN`/`\'XX`,
+/// and otherwise emits text — enough for prose RTF (round-trips Quill's export).
+fn rtf_to_markdown(rtf: &str) -> String {
+    let chars: Vec<char> = rtf.chars().collect();
+    let mut paras: Vec<String> = Vec::new();
+    let mut runs: Vec<(String, bool, bool)> = Vec::new();
+    let mut cur = String::new();
+    let (mut bold, mut italic, mut skipping) = (false, false, false);
+    let mut stack: Vec<(bool, bool, bool)> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '{' => {
+                flush_run(&mut runs, &mut cur, bold, italic);
+                stack.push((bold, italic, skipping));
+                i += 1;
+            }
+            '}' => {
+                flush_run(&mut runs, &mut cur, bold, italic);
+                if let Some((b, it, sk)) = stack.pop() {
+                    (bold, italic, skipping) = (b, it, sk);
+                }
+                i += 1;
+            }
+            '\\' => {
+                i += 1;
+                let Some(&c) = chars.get(i) else { break };
+                if c.is_ascii_alphabetic() {
+                    let start = i;
+                    while chars.get(i).is_some_and(|c| c.is_ascii_alphabetic()) {
+                        i += 1;
+                    }
+                    let word: String = chars[start..i].iter().collect();
+                    let num_start = i;
+                    if chars.get(i).is_some_and(|&c| c == '-') {
+                        i += 1;
+                    }
+                    while chars.get(i).is_some_and(char::is_ascii_digit) {
+                        i += 1;
+                    }
+                    let param: Option<i64> =
+                        chars[num_start..i].iter().collect::<String>().parse().ok();
+                    if chars.get(i) == Some(&' ') {
+                        i += 1; // a single trailing space delimits a control word
+                    }
+                    match word.as_str() {
+                        "b" => {
+                            flush_run(&mut runs, &mut cur, bold, italic);
+                            bold = param != Some(0);
+                        }
+                        "i" => {
+                            flush_run(&mut runs, &mut cur, bold, italic);
+                            italic = param != Some(0);
+                        }
+                        "plain" => {
+                            flush_run(&mut runs, &mut cur, bold, italic);
+                            (bold, italic) = (false, false);
+                        }
+                        "par" => {
+                            flush_run(&mut runs, &mut cur, bold, italic);
+                            paras.push(runs_to_markdown(&runs));
+                            runs.clear();
+                        }
+                        "line" | "tab" => {
+                            if !skipping {
+                                cur.push(' ');
+                            }
+                        }
+                        "u" => {
+                            if let Some(ch) =
+                                param.and_then(|p| char::from_u32(p.rem_euclid(65536) as u32))
+                            {
+                                if !skipping {
+                                    cur.push(ch);
+                                }
+                            }
+                            // Skip the single substitution char that follows \uN.
+                            if chars
+                                .get(i)
+                                .is_some_and(|&c| c != '\\' && c != '{' && c != '}')
+                            {
+                                i += 1;
+                            }
+                        }
+                        w if is_skip_destination(w) => skipping = true,
+                        _ => {} // unknown control word — no text
+                    }
+                } else {
+                    match c {
+                        '\\' | '{' | '}' => {
+                            if !skipping {
+                                cur.push(c);
+                            }
+                            i += 1;
+                        }
+                        '*' => {
+                            skipping = true; // an ignorable destination group
+                            i += 1;
+                        }
+                        '\'' => {
+                            let hex: String =
+                                chars[i + 1..(i + 3).min(chars.len())].iter().collect();
+                            i += 3;
+                            if !skipping {
+                                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                                    cur.push(char::from(byte)); // ANSI byte (Latin-1)
+                                }
+                            }
+                        }
+                        _ => i += 1,
+                    }
+                }
+            }
+            '\n' | '\r' => i += 1, // raw newlines are not text in RTF
+            c => {
+                if !skipping {
+                    cur.push(c);
+                }
+                i += 1;
+            }
+        }
+    }
+    flush_run(&mut runs, &mut cur, bold, italic);
+    if !runs.is_empty() {
+        paras.push(runs_to_markdown(&runs));
+    }
+    // The centered scene-break glyph round-trips back to a thematic break.
+    for p in &mut paras {
+        if p.trim() == SCENE_BREAK {
+            *p = "---".to_string();
+        }
+    }
+    join_paragraphs(&paras)
+}
+
+/// Render parsed RTF runs to Markdown, each wrapped per its bold/italic flags.
+fn runs_to_markdown(runs: &[(String, bool, bool)]) -> String {
+    runs.iter()
+        .map(|(t, b, i)| wrap_emphasis(t, *b, *i))
+        .collect()
+}
+
+/// Flush the accumulated text as a run with the current bold/italic flags.
+fn flush_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
+    if !cur.is_empty() {
+        runs.push((std::mem::take(cur), bold, italic));
+    }
+}
+
+/// RTF destination groups whose text isn't document content (font/colour/style
+/// tables, metadata) — skipped wholesale.
+fn is_skip_destination(word: &str) -> bool {
+    matches!(
+        word,
+        "fonttbl"
+            | "colortbl"
+            | "stylesheet"
+            | "info"
+            | "header"
+            | "footer"
+            | "pict"
+            | "object"
+            | "pgdsctbl"
+            | "listtable"
+            | "listoverridetable"
+            | "rsidtbl"
+            | "generator"
+            | "themedata"
+            | "colorschememapping"
+            | "latentstyles"
+            | "datastore"
+    )
 }
 
 #[cfg(test)]
@@ -801,5 +1138,126 @@ mod tests {
     #[test]
     fn parse_docx_rejects_a_non_docx() {
         assert!(parse_docx(b"this is not a zip").is_err());
+    }
+
+    // --- .scriv import (#402) --------------------------------------------
+
+    /// A minimal RTF document body (one paragraph) like `export::scriv` writes.
+    fn rtf(body: &str) -> String {
+        format!("{{\\rtf1\\ansi\\deff0{{\\fonttbl{{\\f0\\froman Times New Roman;}}}}\n\\f0\\fs24\n\\pard\\sa180 {body}\\par\n}}")
+    }
+
+    #[test]
+    fn rtf_converts_emphasis_paragraphs_and_unicode() {
+        let body = "The locket {\\i gleamed} and felt {\\b heavy}. caf\\u233 ?";
+        let out = rtf_to_markdown(&rtf(body));
+        assert_eq!(out, "The locket *gleamed* and felt **heavy**. café\n");
+    }
+
+    #[test]
+    fn rtf_skips_the_font_table_and_decodes_escapes() {
+        // The fonttbl text ("Times New Roman;") must not leak into the body.
+        let out = rtf_to_markdown(&rtf("a \\{brace\\} and 5 \\\\ slash"));
+        assert_eq!(out, "a {brace} and 5 \\ slash\n");
+        assert!(
+            !out.contains("Times New Roman"),
+            "font table skipped: {out}"
+        );
+    }
+
+    #[test]
+    fn rtf_scene_break_glyph_becomes_a_thematic_break() {
+        let body = format!(
+            "{{\\rtf1\\ansi\\deff0\n\\pard\\sa180 Scene one.\\par\n\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n\\pard\\sa180 Scene two.\\par\n}}"
+        );
+        let out = rtf_to_markdown(&body);
+        assert_eq!(out, "Scene one.\n\n---\n\nScene two.\n");
+    }
+
+    #[test]
+    fn binder_flattens_folders_skips_research_and_trash_keeps_order() {
+        let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="u1" Type="Text"><Title>One</Title></BinderItem>
+<BinderItem UUID="f1" Type="Folder"><Title>Part One</Title><Children>
+<BinderItem UUID="u2" Type="Text"><Title>Two</Title></BinderItem>
+</Children></BinderItem>
+</Children></BinderItem>
+<BinderItem UUID="r" Type="ResearchFolder"><Title>Research</Title></BinderItem>
+<BinderItem UUID="t" Type="TrashFolder"><Title>Trash</Title></BinderItem>
+</Binder></ScrivenerProject>"#;
+        let out = parse_binder(scrivx, Some("My Novel".into()), |uuid| match uuid {
+            "u1" => Some(rtf("Alpha.")),
+            "u2" => Some(rtf("Beta.")),
+            _ => None,
+        });
+        assert_eq!(out.title.as_deref(), Some("My Novel"));
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        // The folder is flattened; its text doc follows the top-level one; Research
+        // and Trash are skipped.
+        assert_eq!(titles, vec!["One", "Two"]);
+        assert_eq!(out.chapters[0].body, "Alpha.\n");
+        assert_eq!(out.chapters[1].body, "Beta.\n");
+    }
+
+    #[test]
+    fn round_trips_a_quill_scriv_export() {
+        use crate::export::scriv::write_scriv;
+        use crate::export::{Chapter, Document, Part};
+        let doc = Document {
+            title: "Round Trip".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![Chapter {
+                title: "Prologue".into(),
+                epigraph: None,
+                body: "Before *it* all.".into(),
+            }],
+            parts: vec![Part {
+                name: Some("Part One".into()),
+                chapters: vec![Chapter {
+                    title: "The Find".into(),
+                    epigraph: None,
+                    body: "The locket **gleamed**.".into(),
+                }],
+            }],
+            back: vec![Chapter {
+                title: "Epilogue".into(),
+                epigraph: None,
+                body: "After.".into(),
+            }],
+        };
+        let dir =
+            crate::testutil::scratch_dir("scriv-import", "round-trip").join("Round Trip.scriv");
+        write_scriv(&doc, &dir).unwrap();
+        let out = parse_scriv(&dir).unwrap();
+
+        assert_eq!(
+            out.title.as_deref(),
+            Some("Round Trip"),
+            "title from the bundle name"
+        );
+        // Binder reading order, folder flattened (the part title isn't a chapter).
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["Prologue", "The Find", "Epilogue"]);
+        assert_eq!(
+            out.chapters[0].body, "Before *it* all.\n",
+            "italic round-trips"
+        );
+        assert_eq!(
+            out.chapters[1].body, "The locket **gleamed**.\n",
+            "bold round-trips"
+        );
+    }
+
+    #[test]
+    fn parse_scriv_rejects_a_dir_without_a_binder() {
+        let dir = crate::testutil::scratch_dir("scriv-import", "no-binder");
+        assert!(
+            parse_scriv(&dir).is_err(),
+            "a directory with no .scrivx is rejected"
+        );
     }
 }
