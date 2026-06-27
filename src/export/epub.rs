@@ -12,7 +12,10 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use super::{classify_block, inline_runs, xml_escape, Chapter, Document, ExportStyle, Prose};
+use super::{
+    classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedFont, ExportStyle,
+    FontRole, Prose,
+};
 use crate::frontmatter::Epigraph;
 
 const CONTAINER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -227,7 +230,15 @@ impl Builder {
         nav: Vec<Nav>,
     ) -> std::io::Result<Vec<u8>> {
         let id = identifier(title, series);
-        let opf = build_opf(&id, title, subtitle, author, series, modified, &self.items);
+        let meta = OpfMeta {
+            id: &id,
+            title,
+            subtitle,
+            author,
+            series,
+            modified,
+        };
+        let opf = build_opf(&meta, &self.items, &self.style.fonts);
         let nav_doc = build_nav(&nav);
         let ncx = build_ncx(&id, title, &nav);
 
@@ -239,8 +250,16 @@ impl Builder {
             ("OEBPS/content.opf".into(), opf.into_bytes()),
             ("OEBPS/nav.xhtml".into(), nav_doc.into_bytes()),
             ("OEBPS/toc.ncx".into(), ncx.into_bytes()),
-            ("OEBPS/style.css".into(), STYLE_CSS.as_bytes().to_vec()),
+            (
+                "OEBPS/style.css".into(),
+                stylesheet(&self.style).into_bytes(),
+            ),
         ];
+        // Embedded fonts (#469), referenced by the stylesheet's `@font-face` rules.
+        // `finish` owns `self`, so the (potentially large) font bytes move, not copy.
+        for font in self.style.fonts {
+            parts.push((format!("OEBPS/{}", font.href), font.bytes));
+        }
         for item in self.items {
             parts.push((format!("OEBPS/{}", item.href), item.xhtml.into_bytes()));
         }
@@ -259,6 +278,32 @@ impl Builder {
         }
         Ok(zip.finish().map_err(std::io::Error::other)?.into_inner())
     }
+}
+
+/// The package stylesheet: the base rules plus any embedded-font `@font-face`
+/// declarations and the body/heading `font-family` overrides (#469). With no
+/// fonts configured this is exactly [`STYLE_CSS`].
+fn stylesheet(style: &ExportStyle) -> String {
+    let mut css = String::from(STYLE_CSS);
+    for font in &style.fonts {
+        css.push_str(&format!(
+            "@font-face {{ font-family: \"{}\"; src: url(\"{}\"); }}\n",
+            font.family, font.href
+        ));
+    }
+    if let Some(f) = style.font(FontRole::Body) {
+        css.push_str(&format!(
+            "body {{ font-family: \"{}\", serif; }}\n",
+            f.family
+        ));
+    }
+    if let Some(f) = style.font(FontRole::Heading) {
+        css.push_str(&format!(
+            "h1, h2 {{ font-family: \"{}\", serif; }}\n",
+            f.family
+        ));
+    }
+    css
 }
 
 /// Wrap an XHTML `body` in the document shell (XHTML namespace, the shared
@@ -377,26 +422,29 @@ fn identifier(title: &str, series: Option<&str>) -> String {
 /// The OPF package: metadata (identifier, title + optional subtitle, language,
 /// author, series collection, modified time), the manifest (nav, NCX, CSS, and
 /// every content doc), and the spine in reading order.
-fn build_opf(
-    id: &str,
-    title: &str,
-    subtitle: Option<&str>,
-    author: Option<&str>,
-    series: Option<&str>,
-    modified: &str,
-    items: &[Item],
-) -> String {
+/// The OPF metadata for one package — grouped so [`build_opf`] stays within a
+/// sane argument count.
+struct OpfMeta<'a> {
+    id: &'a str,
+    title: &'a str,
+    subtitle: Option<&'a str>,
+    author: Option<&'a str>,
+    series: Option<&'a str>,
+    modified: &'a str,
+}
+
+fn build_opf(book: &OpfMeta, items: &[Item], fonts: &[EmbeddedFont]) -> String {
     let mut meta = String::new();
     meta.push_str(&format!(
         "<dc:identifier id=\"bookid\">{}</dc:identifier>",
-        xml_escape(id)
+        xml_escape(book.id)
     ));
     meta.push_str(&format!(
         "<dc:title id=\"title\">{}</dc:title>",
-        xml_escape(title)
+        xml_escape(book.title)
     ));
     meta.push_str("<meta refines=\"#title\" property=\"title-type\">main</meta>");
-    if let Some(s) = subtitle {
+    if let Some(s) = book.subtitle {
         meta.push_str(&format!(
             "<dc:title id=\"subtitle\">{}</dc:title>",
             xml_escape(s)
@@ -404,10 +452,10 @@ fn build_opf(
         meta.push_str("<meta refines=\"#subtitle\" property=\"title-type\">subtitle</meta>");
     }
     meta.push_str("<dc:language>en</dc:language>");
-    if let Some(a) = author {
+    if let Some(a) = book.author {
         meta.push_str(&format!("<dc:creator>{}</dc:creator>", xml_escape(a)));
     }
-    if let Some(s) = series {
+    if let Some(s) = book.series {
         meta.push_str(&format!(
             "<meta property=\"belongs-to-collection\" id=\"series\">{}</meta>",
             xml_escape(s)
@@ -415,7 +463,8 @@ fn build_opf(
         meta.push_str("<meta refines=\"#series\" property=\"collection-type\">series</meta>");
     }
     meta.push_str(&format!(
-        "<meta property=\"dcterms:modified\">{modified}</meta>"
+        "<meta property=\"dcterms:modified\">{}</meta>",
+        book.modified
     ));
 
     let mut manifest = String::from(concat!(
@@ -423,6 +472,12 @@ fn build_opf(
         "<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>",
         "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>"
     ));
+    for (i, font) in fonts.iter().enumerate() {
+        manifest.push_str(&format!(
+            "<item id=\"font{i}\" href=\"{}\" media-type=\"{}\"/>",
+            font.href, font.media_type
+        ));
+    }
     let mut spine = String::new();
     for it in items {
         manifest.push_str(&format!(
@@ -789,6 +844,7 @@ mod tests {
         // A configured glyph replaces it (and is XML-escaped).
         let style = ExportStyle {
             scene_break: Some("* * &".into()),
+            ..Default::default()
         };
         let styled = part(
             &to_epub(&d, MODIFIED, &style).unwrap(),
@@ -799,6 +855,72 @@ mod tests {
             "styled+escaped: {styled}"
         );
         assert!(!styled.contains(">#</p>"), "default glyph replaced");
+    }
+
+    #[test]
+    fn fonts_are_embedded_and_applied_via_the_stylesheet() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("C", None, "Body.")],
+            }],
+            back: vec![],
+        };
+        let mut style = ExportStyle {
+            body_font: Some("b.otf".into()),
+            heading_font: Some("h.ttf".into()),
+            ..Default::default()
+        };
+        style.resolve_fonts(|p| Ok(format!("font:{p}").into_bytes()));
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+
+        // The font files are embedded under OEBPS/fonts/, named by role.
+        assert!(
+            names(&bytes).iter().any(|n| n == "OEBPS/fonts/body.otf"),
+            "body font file"
+        );
+        assert!(
+            names(&bytes).iter().any(|n| n == "OEBPS/fonts/heading.ttf"),
+            "heading font file"
+        );
+        // The OPF manifest declares them with their media types.
+        let opf = part(&bytes, "OEBPS/content.opf");
+        assert!(
+            opf.contains("href=\"fonts/body.otf\" media-type=\"font/otf\""),
+            "{opf}"
+        );
+        assert!(
+            opf.contains("href=\"fonts/heading.ttf\" media-type=\"font/ttf\""),
+            "{opf}"
+        );
+        // The stylesheet declares @font-face and applies the families.
+        let css = part(&bytes, "OEBPS/style.css");
+        assert!(
+            css.contains("@font-face") && css.contains("url(\"fonts/body.otf\")"),
+            "{css}"
+        );
+        assert!(
+            css.contains("body { font-family: \"b\""),
+            "body family: {css}"
+        );
+        assert!(
+            css.contains("h1, h2 { font-family: \"h\""),
+            "heading family: {css}"
+        );
+
+        // Default style → no fonts embedded, no @font-face.
+        let plain = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+        assert!(
+            !names(&plain).iter().any(|n| n.starts_with("OEBPS/fonts/")),
+            "no fonts by default"
+        );
+        assert!(!part(&plain, "OEBPS/style.css").contains("@font-face"));
     }
 
     #[test]
