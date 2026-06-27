@@ -17,7 +17,17 @@
 //! Markdown, so it's preserved verbatim. A leading YAML front-matter block
 //! (`---`-fenced) populates the title/author; a Quill-export title page ("by
 //! Author") is mined for the author too. With no headings at all, the whole file
-//! becomes one chapter. Other formats (`.docx`, `.scriv`) are separate tickets.
+//! becomes one chapter.
+//!
+//! Word `.docx` is also supported (#401) via [`parse_docx`]: a `.docx` is a zip
+//! of XML, so we read `word/document.xml`, split chapters on Heading 1
+//! paragraphs (the level Quill's own Word/Vellum export writes chapter titles
+//! at), turn bold/italic runs into `**`/`*`, and read the title/author from the
+//! OOXML core properties (or, failing that, a title-block preamble). The OOXML is
+//! scanned directly — no XML-parser dependency, mirroring the hand-written XML on
+//! the export side. Scrivener `.scriv` is a separate ticket.
+
+use std::io::{Cursor, Read};
 
 use crate::frontmatter;
 
@@ -96,14 +106,7 @@ pub fn parse_markdown(source: &str) -> Imported {
         chapters.push(ImportedChapter { title: only, body });
     }
 
-    // A bare or blank heading still gets a usable chapter title.
-    for (i, c) in chapters.iter_mut().enumerate() {
-        if c.title.trim().is_empty() {
-            c.title = format!("Chapter {}", i + 1);
-        } else {
-            c.title = c.title.trim().to_string();
-        }
-    }
+    finalize_titles(&mut chapters);
 
     Imported {
         title,
@@ -161,6 +164,18 @@ fn is_fence(line: &str) -> bool {
     t.starts_with("```") || t.starts_with("~~~")
 }
 
+/// Give every chapter a usable, trimmed title — a bare or blank heading falls
+/// back to `Chapter N`. Shared final step of both the Markdown and `.docx` parses.
+fn finalize_titles(chapters: &mut [ImportedChapter]) {
+    for (i, c) in chapters.iter_mut().enumerate() {
+        c.title = if c.title.trim().is_empty() {
+            format!("Chapter {}", i + 1)
+        } else {
+            c.title.trim().to_string()
+        };
+    }
+}
+
 /// Join body lines, trimming surrounding blank lines; a non-empty body ends in a
 /// single newline (the chapter-file convention).
 fn clean(lines: &[&str]) -> String {
@@ -211,6 +226,367 @@ fn yaml_field(front: Option<&str>, key: &str) -> Option<String> {
         let v = rest.trim_matches(['"', '\'']).trim();
         (!v.is_empty()).then(|| v.to_string())
     })
+}
+
+// --- Word (.docx) import (#401) -------------------------------------------
+
+/// Parse a Word `.docx` manuscript: read `word/document.xml` (and the core
+/// properties) out of the zip and split it into chapters. The bytes are read
+/// only — the caller never alters the source. Errors if the zip is unreadable or
+/// has no `word/document.xml` (i.e. it isn't a Word document).
+pub fn parse_docx(bytes: &[u8]) -> std::io::Result<Imported> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(std::io::Error::other)?;
+    let document = zip_entry(&mut zip, "word/document.xml")?
+        .ok_or_else(|| std::io::Error::other("not a Word document (no word/document.xml)"))?;
+    let core = zip_entry(&mut zip, "docProps/core.xml")?;
+    Ok(parse_document_xml(&document, core.as_deref()))
+}
+
+/// Read one entry of a `.docx` zip to a string, or `None` if it's absent.
+fn zip_entry(
+    zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    name: &str,
+) -> std::io::Result<Option<String>> {
+    match zip.by_name(name) {
+        Ok(mut f) => {
+            let mut s = String::new();
+            f.read_to_string(&mut s)?;
+            Ok(Some(s))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(e) => Err(std::io::Error::other(e)),
+    }
+}
+
+/// One Word paragraph: whether it's a Heading 1 (a chapter break) and its text
+/// (with `*`/`**` emphasis for a body paragraph, plain for a heading title).
+struct Para {
+    heading: bool,
+    text: String,
+}
+
+/// The pure core of [`parse_docx`]: turn the body XML (and optional core-property
+/// XML) into the same [`Imported`] shape the Markdown importer produces. Splits
+/// on Heading 1 paragraphs; the preamble before the first heading is a title page
+/// (mined for title/author only when the core properties don't supply them).
+fn parse_document_xml(document: &str, core: Option<&str>) -> Imported {
+    let mut title = core.and_then(|c| element_text(c, "dc:title"));
+    let mut author = core.and_then(|c| element_text(c, "dc:creator"));
+
+    let mut chapters: Vec<ImportedChapter> = Vec::new();
+    let mut preamble: Vec<String> = Vec::new();
+    let mut cur_title: Option<String> = None;
+    let mut cur_body: Vec<String> = Vec::new();
+    for para in paragraphs(document) {
+        if para.heading {
+            match cur_title.take() {
+                Some(t) => chapters.push(ImportedChapter {
+                    title: t,
+                    body: join_paragraphs(&cur_body),
+                }),
+                None => preamble = std::mem::take(&mut cur_body),
+            }
+            cur_body.clear();
+            cur_title = Some(para.text);
+        } else {
+            cur_body.push(para.text);
+        }
+    }
+    match cur_title {
+        Some(t) => chapters.push(ImportedChapter {
+            title: t,
+            body: join_paragraphs(&cur_body),
+        }),
+        None => preamble = cur_body,
+    }
+
+    // A title page (the preamble before the first heading) fills in anything the
+    // core properties didn't — the first non-empty line as the title, a "by …"
+    // line as the author. Only when there are real chapters, so a heading-less
+    // document keeps its whole text as the one chapter's body.
+    if !chapters.is_empty() {
+        if title.is_none() {
+            title = preamble
+                .iter()
+                .map(|l| l.trim())
+                .find(|l| !l.is_empty())
+                .map(str::to_string);
+        }
+        if author.is_none() {
+            let refs: Vec<&str> = preamble.iter().map(String::as_str).collect();
+            author = preamble_author(&refs);
+        }
+    }
+
+    if chapters.is_empty() {
+        let only = title.clone().unwrap_or_else(|| "Manuscript".into());
+        chapters.push(ImportedChapter {
+            title: only,
+            body: join_paragraphs(&preamble),
+        });
+    }
+    finalize_titles(&mut chapters);
+
+    Imported {
+        title,
+        author,
+        chapters,
+    }
+}
+
+/// Join paragraph texts into a chapter body: one blank line between paragraphs
+/// (empty/spacing paragraphs dropped), a single trailing newline like the
+/// Markdown path's `clean`.
+fn join_paragraphs(paras: &[String]) -> String {
+    let kept: Vec<&str> = paras
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let joined = kept.join("\n\n");
+    if joined.is_empty() {
+        String::new()
+    } else {
+        format!("{joined}\n")
+    }
+}
+
+/// Walk the `<w:p>` paragraphs of `word/document.xml`, in order.
+fn paragraphs(document: &str) -> Vec<Para> {
+    let mut out = Vec::new();
+    for_each_element(document, "w:p", |inner| {
+        out.push(match inner {
+            Some(p) => parse_paragraph(p),
+            None => Para {
+                heading: false,
+                text: String::new(),
+            },
+        });
+    });
+    out
+}
+
+/// One paragraph's inner XML → a [`Para`]. A Heading 1 paragraph is a chapter
+/// title (plain text); any other is a body paragraph with bold/italic runs
+/// converted to `**`/`*`.
+fn parse_paragraph(inner: &str) -> Para {
+    if is_heading_one(inner) {
+        return Para {
+            heading: true,
+            text: run_text(inner),
+        };
+    }
+    let mut text = String::new();
+    for_each_element(inner, "w:r", |run| {
+        if let Some(run) = run {
+            text.push_str(&run_markdown(run));
+        }
+    });
+    Para {
+        heading: false,
+        text,
+    }
+}
+
+/// Whether a paragraph is styled Heading 1 — by its paragraph-style id
+/// (`Heading1`, case/space-insensitive; the id is stable across Word's
+/// display-name localization, and is what Quill's export writes) or an explicit
+/// outline level 0. A heading styled only by inheritance in `styles.xml` (which we
+/// don't read) isn't detected — it folds into the previous chapter's body rather
+/// than corrupting output.
+fn is_heading_one(inner: &str) -> bool {
+    let norm = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    if let Some(style) = tag_attrs(inner, "w:pStyle").and_then(|a| attr_value(a, "w:val")) {
+        if norm(&style) == "heading1" {
+            return true;
+        }
+    }
+    tag_attrs(inner, "w:outlineLvl")
+        .and_then(|a| attr_value(a, "w:val"))
+        .as_deref()
+        == Some("0")
+}
+
+/// One run's inner XML → Markdown: its text wrapped in `**`/`*`/`***` for
+/// bold/italic (whitespace kept outside the markers so emphasis stays tight).
+fn run_markdown(run: &str) -> String {
+    let text = run_text(run);
+    let bold = run_toggle(run, "w:b");
+    let italic = run_toggle(run, "w:i");
+    if text.trim().is_empty() || !(bold || italic) {
+        return text;
+    }
+    let marks = if bold && italic {
+        "***"
+    } else if bold {
+        "**"
+    } else {
+        "*"
+    };
+    let lead = &text[..text.len() - text.trim_start().len()];
+    let trail = &text[text.trim_end().len()..];
+    format!("{lead}{marks}{}{marks}{trail}", text.trim())
+}
+
+/// All `<w:t>` text within `xml`, concatenated and entity-decoded.
+fn run_text(xml: &str) -> String {
+    let mut out = String::new();
+    for_each_element(xml, "w:t", |t| {
+        if let Some(t) = t {
+            out.push_str(&decode_entities(t));
+        }
+    });
+    out
+}
+
+/// Whether a run-property toggle (`w:b` / `w:i`) is on: present and not turned
+/// off by `w:val="false|0|none|off"`.
+fn run_toggle(run: &str, name: &str) -> bool {
+    match tag_attrs(run, name) {
+        None => false,
+        Some(attrs) => match attr_value(attrs, "w:val") {
+            Some(v) => !matches!(v.as_str(), "false" | "0" | "none" | "off"),
+            None => true,
+        },
+    }
+}
+
+/// Where an opening tag ends: the byte index just past its `>`, and whether it
+/// self-closes (`…/>`).
+struct ElementOpen {
+    after: usize,
+    self_closing: bool,
+}
+
+/// The span of the next `<name …>` / `<name/>` opening tag at or after `from`:
+/// `(start of attributes, index of the closing '>', self-closing?)`. Skips longer
+/// names that merely share the prefix (`<w:p>` matches, `<w:pPr>` doesn't). The
+/// single source of truth for the tricky prefix disambiguation; [`next_element`]
+/// and [`tag_attrs`] are thin projections of it.
+fn find_open(xml: &str, from: usize, name: &str) -> Option<(usize, usize, bool)> {
+    let pat = format!("<{name}");
+    let mut search = from;
+    loop {
+        let at = search + xml[search..].find(&pat)?;
+        let after_name = at + pat.len();
+        match xml[after_name..].chars().next()? {
+            c if c == '>' || c == '/' || c.is_whitespace() => {
+                let gt = after_name + xml[after_name..].find('>')?;
+                return Some((after_name, gt, xml[..gt].ends_with('/')));
+            }
+            _ => search = after_name, // a longer name sharing the prefix; keep looking
+        }
+    }
+}
+
+/// Find the next `<name …>` / `<name/>` element at or after `from`.
+fn next_element(xml: &str, from: usize, name: &str) -> Option<ElementOpen> {
+    find_open(xml, from, name).map(|(_, gt, self_closing)| ElementOpen {
+        after: gt + 1,
+        self_closing,
+    })
+}
+
+/// The attribute substring of the first `<name …>` element in `xml` (the text
+/// between the name and the closing `>`), or `None` if absent.
+fn tag_attrs<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+    find_open(xml, 0, name).map(|(start, gt, _)| xml[start..gt].trim_end_matches('/').trim())
+}
+
+/// Invoke `f` for each `<name>…</name>` element in `xml`, in order, with its
+/// inner XML — or `f(None)` for a self-closing `<name/>`. Centralizes the
+/// open/find-close/advance bookkeeping the paragraph, run, and text scans share.
+fn for_each_element(xml: &str, name: &str, mut f: impl FnMut(Option<&str>)) {
+    let close = format!("</{name}>");
+    let mut i = 0;
+    while let Some(open) = next_element(xml, i, name) {
+        if open.self_closing {
+            f(None);
+            i = open.after;
+            continue;
+        }
+        let Some(rel) = xml[open.after..].find(&close) else {
+            return;
+        };
+        f(Some(&xml[open.after..open.after + rel]));
+        i = open.after + rel + close.len();
+    }
+}
+
+/// The value of attribute `key` (`key="value"`) in an attribute string,
+/// entity-decoded.
+fn attr_value(attrs: &str, key: &str) -> Option<String> {
+    let pat = format!("{key}=\"");
+    let at = attrs.find(&pat)? + pat.len();
+    let end = attrs[at..].find('"')?;
+    Some(decode_entities(&attrs[at..at + end]))
+}
+
+/// The text of the first `<name>…</name>` element, trimmed and entity-decoded;
+/// `None` when absent, self-closing, or empty. For the core properties.
+fn element_text(xml: &str, name: &str) -> Option<String> {
+    let open = next_element(xml, 0, name)?;
+    if open.self_closing {
+        return None;
+    }
+    let rel = xml[open.after..].find(&format!("</{name}>"))?;
+    let text = decode_entities(xml[open.after..open.after + rel].trim());
+    (!text.is_empty()).then_some(text)
+}
+
+/// Decode the XML entities that appear in OOXML text: the five named ones and
+/// numeric (`&#NN;` / `&#xHH;`); an unrecognized `&…` is left as-is.
+fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after = &rest[amp..];
+        match after.find(';').map(|semi| (&after[1..semi], semi)) {
+            Some((entity, semi)) => match decode_entity(entity) {
+                Some(c) => {
+                    out.push(c);
+                    rest = &after[semi + 1..];
+                }
+                None => {
+                    out.push('&');
+                    rest = &after[1..];
+                }
+            },
+            None => {
+                out.push('&');
+                rest = &after[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_entity(entity: &str) -> Option<char> {
+    match entity {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        _ => {
+            let num = entity.strip_prefix('#')?;
+            let code = match num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                None => num.parse().ok()?,
+            };
+            char::from_u32(code)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -294,5 +670,136 @@ mod tests {
         let out = parse_markdown(src);
         assert_eq!(out.chapters.len(), 1);
         assert_eq!(out.chapters[0].title, "Chapter 1");
+    }
+
+    // --- .docx import (#401) ---------------------------------------------
+
+    /// Wrap paragraph XML in a `word/document.xml` shell.
+    fn document(body: &str) -> String {
+        format!("<w:document><w:body>{body}</w:body></w:document>")
+    }
+
+    /// A Heading 1 chapter-title paragraph.
+    fn heading(title: &str) -> String {
+        format!(
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>{title}</w:t></w:r></w:p>"
+        )
+    }
+
+    #[test]
+    fn docx_splits_on_heading_one_and_converts_emphasis() {
+        let body = format!(
+            "{}{}{}",
+            heading("One"),
+            // "The sea was *grey* and it **ended**." across three runs.
+            "<w:p><w:r><w:t xml:space=\"preserve\">The sea was </w:t></w:r>\
+             <w:r><w:rPr><w:i/></w:rPr><w:t>grey</w:t></w:r>\
+             <w:r><w:t xml:space=\"preserve\"> and it </w:t></w:r>\
+             <w:r><w:rPr><w:b/></w:rPr><w:t>ended</w:t></w:r>\
+             <w:r><w:t>.</w:t></w:r></w:p>",
+            heading("Two"),
+        );
+        let out = parse_document_xml(&document(&body), None);
+        assert_eq!(out.chapters.len(), 2);
+        assert_eq!(out.chapters[0].title, "One");
+        assert_eq!(
+            out.chapters[0].body,
+            "The sea was *grey* and it **ended**.\n"
+        );
+        assert_eq!(out.chapters[1].title, "Two");
+    }
+
+    #[test]
+    fn docx_reads_title_and_author_from_core_properties() {
+        let core = "<cp:coreProperties><dc:title>Salt and Iron</dc:title>\
+                    <dc:creator>J. Reader</dc:creator></cp:coreProperties>";
+        let out = parse_document_xml(&document(&heading("One")), Some(core));
+        assert_eq!(out.title.as_deref(), Some("Salt and Iron"));
+        assert_eq!(out.author.as_deref(), Some("J. Reader"));
+    }
+
+    #[test]
+    fn docx_mines_a_title_block_when_core_props_are_absent() {
+        // A Word title page: plain paragraphs before the first heading.
+        let body = format!(
+            "{}{}{}",
+            "<w:p><w:r><w:t>Salt and Iron</w:t></w:r></w:p>",
+            "<w:p><w:r><w:t>by J. Reader</w:t></w:r></w:p>",
+            heading("One"),
+        );
+        let out = parse_document_xml(&document(&body), None);
+        assert_eq!(
+            out.title.as_deref(),
+            Some("Salt and Iron"),
+            "first preamble line"
+        );
+        assert_eq!(out.author.as_deref(), Some("J. Reader"), "the by-line");
+        // The title page is not itself a chapter.
+        assert_eq!(out.chapters.len(), 1);
+        assert_eq!(out.chapters[0].title, "One");
+    }
+
+    #[test]
+    fn docx_with_no_headings_is_one_chapter() {
+        let body = "<w:p><w:r><w:t>Just prose, no headings.</w:t></w:r></w:p>";
+        let out = parse_document_xml(&document(body), None);
+        assert_eq!(out.chapters.len(), 1);
+        assert_eq!(out.chapters[0].title, "Manuscript");
+        assert_eq!(out.chapters[0].body, "Just prose, no headings.\n");
+    }
+
+    #[test]
+    fn docx_decodes_xml_entities_and_ignores_bold_off() {
+        let body = "<w:p><w:r><w:rPr><w:b w:val=\"false\"/></w:rPr>\
+                    <w:t>5 &lt; 6 &amp; 7 &#62; 4</w:t></w:r></w:p>";
+        let out = parse_document_xml(&document(body), None);
+        // Entities decoded; w:val="false" means the run isn't actually bold.
+        assert_eq!(out.chapters[0].body, "5 < 6 & 7 > 4\n");
+        assert!(!out.chapters[0].body.contains('*'));
+    }
+
+    #[test]
+    fn round_trips_a_quill_docx_export() {
+        use crate::export::docx::{to_docx, Profile};
+        use crate::export::{Chapter, Document, Part};
+        let doc = Document {
+            title: "Round Trip".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![
+                    Chapter {
+                        title: "One".into(),
+                        epigraph: None,
+                        body: "The night was *dark*.".into(),
+                    },
+                    Chapter {
+                        title: "Two".into(),
+                        epigraph: None,
+                        body: "The **end**.".into(),
+                    },
+                ],
+            }],
+            back: vec![],
+        };
+        // The Vellum profile tags chapter titles as Heading 1 — what the importer splits on.
+        let bytes = to_docx(&doc, Profile::Vellum).unwrap();
+        let out = parse_docx(&bytes).unwrap();
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["One", "Two"], "chapters round-trip");
+        assert_eq!(
+            out.chapters[0].body, "The night was *dark*.\n",
+            "italic preserved"
+        );
+        assert_eq!(out.chapters[1].body, "The **end**.\n", "bold preserved");
+    }
+
+    #[test]
+    fn parse_docx_rejects_a_non_docx() {
+        assert!(parse_docx(b"this is not a zip").is_err());
     }
 }

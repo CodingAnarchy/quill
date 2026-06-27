@@ -907,6 +907,77 @@ fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
 }
 
 #[test]
+fn importing_a_docx_manuscript_creates_a_chaptered_project() {
+    use crate::export::docx::{to_docx, Profile};
+    use crate::export::{Chapter, Document, Part};
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-docx");
+    let cur = make_project("import-docx-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // Build a real .docx (Vellum profile → chapter titles as Heading 1).
+    let doc = Document {
+        title: "Salt and Iron".into(),
+        subtitle: None,
+        author: None,
+        series: None,
+        epigraph: None,
+        front: vec![],
+        parts: vec![Part {
+            name: None,
+            chapters: vec![
+                Chapter {
+                    title: "One".into(),
+                    epigraph: None,
+                    body: "The sea was *grey*.".into(),
+                },
+                Chapter {
+                    title: "Two".into(),
+                    epigraph: None,
+                    body: "And it **ended**.".into(),
+                },
+            ],
+        }],
+        back: vec![],
+    };
+    let source = std::env::temp_dir().join(format!("quill-ms-{}.docx", std::process::id()));
+    fs::write(&source, to_docx(&doc, Profile::Vellum).unwrap()).unwrap();
+    let original = fs::read(&source).unwrap();
+    let dest = books_dir("import-docx-dest").join("Salt and Iron");
+
+    app.begin_import_manuscript(source.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest)),
+        "a .docx is accepted"
+    );
+    app.finish_import_manuscript(dest.to_str().unwrap());
+
+    assert_eq!(app.project.root, dest);
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["One", "Two"],
+        "split on Heading 1, titles carried over"
+    );
+    let ch1 = fs::read_to_string(dest.join(&app.project.manifest.chapters[0].file)).unwrap();
+    assert_eq!(ch1, "The sea was *grey*.\n", "emphasis converted from runs");
+
+    // The original .docx is read-only.
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        original,
+        "the source is left untouched"
+    );
+    let _ = fs::remove_file(&source);
+}
+
+#[test]
 fn importing_rejects_a_non_markdown_file() {
     let _g = ENV_LOCK.lock().unwrap();
     isolate("import-ms-bad");

@@ -365,15 +365,17 @@ Ctrl-K menu) creates a project and imports every Markdown file in the folder int
 its story bible in one step — preserving the originals.
 
 Already have a **manuscript**? **Import a manuscript → new project** (in the
-Ctrl-K menu) turns an existing Markdown file into a chaptered Quill project: point
-it at the `.md`, give the new project a path, and Quill splits the file into one
-chapter per heading — on `##` when there's a single `#` title (Quill's own export
-shape), or on `#` when each chapter is a top-level heading — carrying the chapter
-titles into the manifest and the book title / author from a YAML front-matter
-block or the title page. Emphasis (`*`/`**`) is kept as-is, and the original file
-is copied from, never moved or changed. Word `.docx` and Scrivener `.scriv`
-sources are planned next (see the issues); today's importer is single-file
-Markdown.
+Ctrl-K menu) turns an existing **Markdown (`.md`)** or **Word (`.docx`)** file
+into a chaptered Quill project: point it at the file, give the new project a path,
+and Quill splits it into chapters and carries the chapter titles into the
+manifest. A Markdown file splits on headings — `##` when there's a single `#`
+title (Quill's own export shape), or `#` when each chapter is a top-level heading
+— with the book title / author from a YAML front-matter block or the title page. A
+Word file splits on **Heading 1** paragraphs (the level Quill's own Word/Vellum
+export uses for chapter titles), converts bold/italic runs to `**`/`*`, and reads
+the title / author from the document's properties or a title-block preamble.
+Emphasis is kept either way, and the original file is read from, never moved or
+changed. Scrivener `.scriv` import is planned next (see the issues).
 
 When you create a project, a short setup wizard offers to scaffold it — writing
 goals, a starter cast and setting (with AI, when enabled), and a first note.

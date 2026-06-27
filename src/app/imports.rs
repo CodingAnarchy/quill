@@ -68,27 +68,28 @@ impl App {
 
     // --- New project from an existing manuscript (#298) -------------------
 
-    /// Prompt for a Markdown manuscript file to import as a new project.
+    /// Prompt for a manuscript file (Markdown or Word) to import as a new project.
     pub(crate) fn start_import_manuscript(&mut self) {
         self.open_prompt(
             Pending::ImportManuscriptSource,
-            "Import manuscript — Markdown file:",
+            "Import manuscript — Markdown (.md) or Word (.docx) file:",
             "",
             None,
         );
     }
 
-    /// Validate the chosen file is a Markdown manuscript, then ask where to create
-    /// the new project. Shared by the file prompt and the run-action entry point.
+    /// Validate the chosen file is an importable manuscript (`.md` or `.docx`),
+    /// then ask where to create the new project. Shared by the file prompt and the
+    /// run-action entry point.
     pub(crate) fn begin_import_manuscript(&mut self, file: &str) {
         let path = std::path::Path::new(file.trim());
-        let is_md = path
+        let importable = path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-        if !(path.is_file() && is_md) {
+            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("docx"));
+        if !(path.is_file() && importable) {
             self.message = Some(format!(
-                "Not a Markdown (.md) manuscript: {}",
+                "Not a Markdown (.md) or Word (.docx) manuscript: {}",
                 path.display()
             ));
             self.mode = self.editing_mode();
@@ -118,15 +119,14 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
-        let text = match std::fs::read_to_string(&source) {
-            Ok(t) => t,
+        let parsed = match read_manuscript(&source) {
+            Ok(p) => p,
             Err(e) => {
                 self.message = Some(format!("Couldn't read {}: {e}", source.display()));
                 self.mode = self.editing_mode();
                 return;
             }
         };
-        let parsed = crate::manuscript_import::parse_markdown(&text);
         let chapters: Vec<(String, String)> = parsed
             .chapters
             .into_iter()
@@ -313,6 +313,23 @@ impl App {
                 "Imported {source}: wrote {written} · {pending} need review"
             ));
         }
+    }
+}
+
+/// Read a manuscript file into the shared parsed form, dispatching on extension
+/// (#401): a `.docx` is parsed from its bytes, anything else (a `.md`) as text.
+/// The source is read only — never altered.
+fn read_manuscript(path: &std::path::Path) -> std::io::Result<crate::manuscript_import::Imported> {
+    let is_docx = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("docx"));
+    if is_docx {
+        crate::manuscript_import::parse_docx(&std::fs::read(path)?)
+    } else {
+        Ok(crate::manuscript_import::parse_markdown(
+            &std::fs::read_to_string(path)?,
+        ))
     }
 }
 
