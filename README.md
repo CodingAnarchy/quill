@@ -345,6 +345,15 @@ home = "~/Writing"
 Every project under that folder then appears in the browser, ready to open —
 no need to have opened it before. Without it, the browser just shows recents.
 
+Renamed your book or series and want the folder to match? **Rename project
+folder** (in the Ctrl-K menu) moves the open project's directory without
+quitting: it's prefilled with the book title, so accepting it makes the folder
+match the title in one keystroke (or type a different name). The project stays
+open and keeps saving to the new location, and the recent-projects list follows.
+It refuses if a folder of that name already exists, and leaves everything in
+place. Renaming the folder is separate from the book **title** (set with **t** in
+the chapter browser) — moving the folder never changes the title, and vice versa.
+
 Already have a folder of notes? **New project from a folder of notes** (in the
 Ctrl-K menu) creates a project and imports every Markdown file in the folder into
 its story bible in one step — preserving the originals.

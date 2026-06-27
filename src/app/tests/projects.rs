@@ -739,3 +739,84 @@ fn import_manuscript_action_opens_the_file_prompt() {
     app.run_action(crate::mode::Action::ImportManuscript, false);
     assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptSource)));
 }
+
+#[test]
+fn renaming_moves_the_folder_and_keeps_unsaved_work() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("rename");
+    let dir = make_project("rename-src", "Working Title", "the opening line\n");
+    let mut app = open_app(&dir);
+
+    // An unsaved edit, to prove nothing is lost across the move.
+    app.edit_buffer_mut().insert_char('Z');
+    assert!(app.edit_dirty());
+
+    let new_root = dir.parent().unwrap().join("Final Title");
+    let _ = fs::remove_dir_all(&new_root); // a stale run mustn't trip the collision guard
+    app.rename_project("Final Title");
+
+    assert_eq!(app.project.root.canonicalize().unwrap(), new_root.canonicalize().unwrap());
+    assert!(!dir.exists(), "the old folder was moved away");
+    // The unsaved edit was flushed before the move and lives at the new path.
+    assert!(fs::read_to_string(new_root.join("one.md")).unwrap().starts_with('Z'));
+
+    // Saving from here lands in the new location.
+    app.edit_buffer_mut().insert_char('Q');
+    app.save_edit();
+    assert!(fs::read_to_string(new_root.join("one.md")).unwrap().starts_with("QZ"));
+
+    fs::remove_dir_all(&new_root).ok();
+}
+
+#[test]
+fn renaming_refuses_to_clobber_an_existing_folder() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("rename-collide");
+    let dir = make_project("rename-collide", "Book", "body\n");
+    let mut app = open_app(&dir);
+    let taken = dir.parent().unwrap().join("Taken Name");
+    fs::create_dir_all(&taken).unwrap();
+
+    let before = app.project.root.clone();
+    app.rename_project("Taken Name");
+
+    assert_eq!(app.project.root, before, "the project is untouched on a collision");
+    assert!(dir.exists(), "the original folder is intact");
+    assert!(app.message.as_deref().unwrap_or("").contains("already exists"), "{:?}", app.message);
+
+    fs::remove_dir_all(&taken).ok();
+}
+
+#[test]
+fn renaming_rejects_an_empty_name() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("rename-empty");
+    let dir = make_project("rename-empty", "Book", "body\n");
+    let mut app = open_app(&dir);
+    let before = app.project.root.clone();
+
+    app.rename_project("   ");
+
+    assert_eq!(app.project.root, before, "no move on an empty name");
+    assert!(app.message.as_deref().unwrap_or("").contains("Enter a folder name"));
+}
+
+#[test]
+fn renaming_updates_recents_to_the_new_path() {
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("rename-recent");
+    let dir = make_project("rename-recent", "Book", "body\n");
+    recent::record(&dir, "Book"); // the pre-rename entry
+    let mut app = open_app(&dir);
+
+    let new_root = dir.parent().unwrap().join("Renamed Book");
+    let _ = fs::remove_dir_all(&new_root);
+    app.rename_project("Renamed Book");
+
+    let paths: Vec<PathBuf> = recent::list().into_iter().map(|r| r.path).collect();
+    let new_canon = new_root.canonicalize().unwrap();
+    assert!(paths.contains(&new_canon), "the new path is recorded: {paths:?}");
+    assert!(!paths.contains(&dir), "the old path self-prunes (its folder is gone): {paths:?}");
+
+    fs::remove_dir_all(&new_root).ok();
+}

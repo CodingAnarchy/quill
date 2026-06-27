@@ -170,6 +170,7 @@ impl App {
             Action::StopSprint => self.stop_sprint(),
             Action::SwitchBook => self.open_book_switcher(),
             Action::SeriesTree => self.open_tree(),
+            Action::RenameProject => self.prompt_rename_project(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),

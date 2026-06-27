@@ -61,6 +61,11 @@ also where a bare `quill` launch (no path) puts a new book: from a folder that
 isn't already a project, Quill asks for a name and creates the project in your
 projects home rather than in the current directory.
 
+To make the project's folder match its title, run "Rename project folder" from
+the Ctrl-K menu: it's prefilled with the book title, the folder moves without
+quitting, and the project keeps saving to the new location. Renaming the folder
+is separate from the title (set with "t" in the chapter browser).
+
 A project can hold a series of books. When it does, Quill opens the first book;
 run "Switch book" from the run-action menu (Ctrl-K) to move to another — the
 editor, chapter list, and reports follow the book you pick, and the chapter
