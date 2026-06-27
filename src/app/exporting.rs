@@ -147,7 +147,8 @@ impl App {
     fn epub_style(&self) -> (ExportStyle, Vec<String>) {
         let mut style = self.project.manifest.style.clone().unwrap_or_default();
         let root = self.project.root.clone();
-        let warnings = style.resolve_fonts(|path| std::fs::read(root.join(path)));
+        let mut warnings = style.resolve_fonts(|path| std::fs::read(root.join(path)));
+        warnings.extend(style.style_warnings());
         (style, warnings)
     }
 
