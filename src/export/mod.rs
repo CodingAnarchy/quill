@@ -48,6 +48,20 @@ pub struct ExportStyle {
     /// A decorative glyph centered on each part-divider page (#471). `None` → none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub part_ornament: Option<String>,
+    /// Path (relative to the project) to an image embedded as the scene-break
+    /// ornament (#472), overriding [`Self::scene_break`]. `None` → the glyph.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_break_image: Option<String>,
+    /// Path to an image embedded above each chapter's title (#472). `None` → none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_heading_image: Option<String>,
+    /// Path to an image embedded atop the title page (#472). `None` → none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_image: Option<String>,
+    /// The images resolved from the paths above at export time (#472) — read from
+    /// disk by the app, not persisted in the manifest.
+    #[serde(skip)]
+    pub images: Vec<EmbeddedImage>,
 }
 
 /// `skip_serializing_if` for a `bool` default — keeps `drop_cap = false` out of an
@@ -89,6 +103,55 @@ pub struct EmbeddedFont {
     pub bytes: Vec<u8>,
 }
 
+/// Where an [`EmbeddedImage`] is placed in a designed export (#472).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageRole {
+    SceneBreak,
+    ChapterHeading,
+    Title,
+}
+
+impl ImageRole {
+    /// The in-package file slug for this role (`images/<slug>.<ext>`).
+    fn slug(self) -> &'static str {
+        match self {
+            ImageRole::SceneBreak => "scene-break",
+            ImageRole::ChapterHeading => "chapter-heading",
+            ImageRole::Title => "title",
+        }
+    }
+}
+
+/// An image file embedded into a designed export (#472): its in-package href, the
+/// OPF manifest media type, and the bytes (embedded verbatim — no decode/re-encode,
+/// so no image-codec dependency). Resolved by the app from the `[style]` paths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedImage {
+    pub role: ImageRole,
+    pub href: String,
+    pub media_type: &'static str,
+    pub bytes: Vec<u8>,
+}
+
+/// Why a styling asset (font or image) couldn't be loaded.
+enum AssetError {
+    Unsupported,
+    Read(std::io::Error),
+}
+
+/// Load one styling-asset file: look up its (media type, extension) via `media`,
+/// then read its bytes via `load`. Shared by font (#469) and image (#472)
+/// resolution; the caller maps the error to a domain-specific warning.
+fn load_asset(
+    path: &str,
+    media: impl Fn(&str) -> Option<(&'static str, &'static str)>,
+    load: &mut impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+) -> Result<(&'static str, &'static str, Vec<u8>), AssetError> {
+    let (media_type, ext) = media(path).ok_or(AssetError::Unsupported)?;
+    let bytes = load(path).map_err(AssetError::Read)?;
+    Ok((media_type, ext, bytes))
+}
+
 impl ExportStyle {
     /// The scene-break glyph to render: the configured one, or the default `#`.
     pub fn scene_break(&self) -> &str {
@@ -98,6 +161,11 @@ impl ExportStyle {
     /// The resolved font for `role`, if one was configured and loaded.
     pub fn font(&self, role: FontRole) -> Option<&EmbeddedFont> {
         self.fonts.iter().find(|f| f.role == role)
+    }
+
+    /// The resolved image for `role`, if one was configured and loaded.
+    pub fn image(&self, role: ImageRole) -> Option<&EmbeddedImage> {
+        self.images.iter().find(|i| i.role == role)
     }
 
     /// The validated heading alignment (#470), or `None` for the default (centered)
@@ -140,21 +208,58 @@ impl ExportStyle {
         ];
         for (role, path) in targets {
             let Some(path) = path else { continue };
-            let Some((media_type, ext)) = font_media_type(&path) else {
-                warnings.push(format!(
-                    "style: unsupported font '{path}' (use .ttf/.otf/.woff/.woff2)"
-                ));
-                continue;
-            };
-            match load(&path) {
-                Ok(bytes) => self.fonts.push(EmbeddedFont {
+            match load_asset(&path, font_media_type, &mut load) {
+                Ok((media_type, ext, bytes)) => self.fonts.push(EmbeddedFont {
                     role,
                     family: font_family(&path),
                     href: format!("fonts/{}.{ext}", role.slug()),
                     media_type,
                     bytes,
                 }),
-                Err(e) => warnings.push(format!("style: couldn't read font '{path}': {e}")),
+                Err(AssetError::Unsupported) => warnings.push(format!(
+                    "style: unsupported font '{path}' (use .ttf/.otf/.woff/.woff2)"
+                )),
+                Err(AssetError::Read(e)) => {
+                    warnings.push(format!("style: couldn't read font '{path}': {e}"))
+                }
+            }
+        }
+        warnings
+    }
+
+    /// Resolve the configured image paths into [`EmbeddedImage`]s using `load`,
+    /// filling [`Self::images`] (#472). Images are embedded verbatim (bytes only,
+    /// media type from the extension — no decode). Returns a warning per image that
+    /// can't be read or has an unsupported type. Mirrors [`Self::resolve_fonts`].
+    pub fn resolve_images(
+        &mut self,
+        mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+    ) -> Vec<String> {
+        self.images.clear();
+        let mut warnings = Vec::new();
+        let targets = [
+            (ImageRole::SceneBreak, self.scene_break_image.clone()),
+            (
+                ImageRole::ChapterHeading,
+                self.chapter_heading_image.clone(),
+            ),
+            (ImageRole::Title, self.title_image.clone()),
+        ];
+        for (role, path) in targets {
+            let Some(path) = path else { continue };
+            match load_asset(&path, image_media_type, &mut load) {
+                Ok((media_type, ext, bytes)) => self.images.push(EmbeddedImage {
+                    role,
+                    href: format!("images/{}.{ext}", role.slug()),
+                    media_type,
+                    bytes,
+                }),
+                Err(AssetError::Unsupported) => warnings.push(format!(
+                    "style: unsupported image '{path}' (use .png/.jpg/.jpeg/.gif/.svg/.webp)"
+                )),
+                Err(AssetError::Read(e)) => {
+                    warnings.push(format!("style: couldn't read image '{path}': {e}"))
+                }
             }
         }
         warnings
@@ -173,6 +278,24 @@ fn font_media_type(path: &str) -> Option<(&'static str, &'static str)> {
         "otf" => ("font/otf", "otf"),
         "woff" => ("font/woff", "woff"),
         "woff2" => ("font/woff2", "woff2"),
+        _ => return None,
+    })
+}
+
+/// The OPF media type and extension for an image path, or `None` for an
+/// unsupported type. The EPUB-core raster/vector image formats.
+fn image_media_type(path: &str) -> Option<(&'static str, &'static str)> {
+    let ext = std::path::Path::new(path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => ("image/png", "png"),
+        "jpg" => ("image/jpeg", "jpg"),
+        "jpeg" => ("image/jpeg", "jpeg"),
+        "gif" => ("image/gif", "gif"),
+        "svg" => ("image/svg+xml", "svg"),
+        "webp" => ("image/webp", "webp"),
         _ => return None,
     })
 }
@@ -694,6 +817,36 @@ mod tests {
             !family.contains(['"', ';', '{', '}', '\\']),
             "css-safe family: {family:?}"
         );
+    }
+
+    #[test]
+    fn resolve_images_loads_supported_files_and_warns_on_the_rest() {
+        let mut style = ExportStyle {
+            scene_break_image: Some("art/break.png".into()),
+            chapter_heading_image: Some("art/banner.jpg".into()),
+            title_image: Some("art/title.bmp".into()),
+            ..Default::default()
+        };
+        let warnings = style.resolve_images(|path| match path {
+            "art/break.png" => Ok(vec![0x89, b'P', b'N', b'G']),
+            "art/banner.jpg" => Ok(vec![0xff, 0xd8]),
+            other => Err(std::io::Error::other(format!("no {other}"))),
+        });
+        // Supported images resolve: role-named href + media type from the extension.
+        let brk = style
+            .image(ImageRole::SceneBreak)
+            .expect("scene-break image");
+        assert_eq!(brk.href, "images/scene-break.png");
+        assert_eq!(brk.media_type, "image/png");
+        let banner = style
+            .image(ImageRole::ChapterHeading)
+            .expect("chapter image");
+        assert_eq!(banner.href, "images/chapter-heading.jpg");
+        assert_eq!(banner.media_type, "image/jpeg");
+        // The unsupported `.bmp` title image is skipped with a warning.
+        assert!(style.image(ImageRole::Title).is_none());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unsupported image"), "{warnings:?}");
     }
 
     #[test]

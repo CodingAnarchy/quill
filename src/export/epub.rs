@@ -13,8 +13,8 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use super::{
-    classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedFont, ExportStyle,
-    FontRole, Prose,
+    classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedFont, EmbeddedImage,
+    ExportStyle, FontRole, ImageRole, Prose,
 };
 use crate::frontmatter::Epigraph;
 
@@ -146,6 +146,9 @@ impl Builder {
         epigraph: Option<&Epigraph>,
     ) {
         let mut body = String::from("<div class=\"title-page\">\n");
+        if let Some(img) = self.style.image(ImageRole::Title) {
+            push_img(&mut body, "title-image", img);
+        }
         if let Some(s) = series {
             push_p(&mut body, "series", s);
         }
@@ -244,7 +247,7 @@ impl Builder {
             series,
             modified,
         };
-        let opf = build_opf(&meta, &self.items, &self.style.fonts);
+        let opf = build_opf(&meta, &self.items, &self.style.fonts, &self.style.images);
         let nav_doc = build_nav(&nav);
         let ncx = build_ncx(&id, title, &nav);
 
@@ -261,10 +264,14 @@ impl Builder {
                 stylesheet(&self.style).into_bytes(),
             ),
         ];
-        // Embedded fonts (#469), referenced by the stylesheet's `@font-face` rules.
-        // `finish` owns `self`, so the (potentially large) font bytes move, not copy.
+        // Embedded fonts (#469) and images (#472), referenced by the stylesheet /
+        // the `<img>` tags. `finish` owns `self`, so the (potentially large) bytes
+        // move, not copy.
         for font in self.style.fonts {
             parts.push((format!("OEBPS/{}", font.href), font.bytes));
+        }
+        for image in self.style.images {
+            parts.push((format!("OEBPS/{}", image.href), image.bytes));
         }
         for item in self.items {
             parts.push((format!("OEBPS/{}", item.href), item.xhtml.into_bytes()));
@@ -321,6 +328,14 @@ fn stylesheet(style: &ExportStyle) -> String {
     if style.title_ornament.is_some() || style.part_ornament.is_some() {
         css.push_str(".ornament { text-align: center; text-indent: 0; margin: 1.5em 0; font-size: 1.5em; }\n");
     }
+    if !style.images.is_empty() {
+        // Centered, never wider than the page; the scene-break image reuses the
+        // scene-break paragraph's centering.
+        css.push_str(
+            ".chapter-image, .title-image { text-align: center; text-indent: 0; margin: 1em 0; }\n",
+        );
+        css.push_str(".scene-break img, .chapter-image img, .title-image img { max-width: 100%; height: auto; }\n");
+    }
     css
 }
 
@@ -341,10 +356,15 @@ fn xhtml_doc(title: &str, body: &str) -> String {
     )
 }
 
-/// A chapter's XHTML: its title as `<h1>`, the epigraph set apart, then the prose
-/// blocks (scene breaks, inner headings, and emphasis-bearing paragraphs).
+/// A chapter's XHTML: an optional chapter-heading image (#472), its title as
+/// `<h1>`, the epigraph set apart, then the prose blocks (scene breaks, inner
+/// headings, and emphasis-bearing paragraphs).
 fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
-    let mut out = format!("<h1>{}</h1>\n", xml_escape(&ch.title));
+    let mut out = String::new();
+    if let Some(img) = style.image(ImageRole::ChapterHeading) {
+        push_img(&mut out, "chapter-image", img);
+    }
+    out.push_str(&format!("<h1>{}</h1>\n", xml_escape(&ch.title)));
     if let Some(e) = &ch.epigraph {
         out.push_str(&epigraph_xhtml(e));
     }
@@ -368,7 +388,10 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
 /// the `opening` class when drop caps are enabled.
 fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
     match prose {
-        Prose::SceneBreak => p_class("scene-break", style.scene_break()),
+        Prose::SceneBreak => match style.image(ImageRole::SceneBreak) {
+            Some(img) => img_p("scene-break", img),
+            None => p_class("scene-break", style.scene_break()),
+        },
         Prose::Heading(h) => format!("<h2>{}</h2>", xml_escape(h)),
         Prose::Paragraph(text) => {
             let class = if opening { " class=\"opening\"" } else { "" };
@@ -397,6 +420,22 @@ fn epigraph_xhtml(e: &Epigraph) -> String {
 /// designed pages share (title, ornaments, scene break, …).
 fn p_class(class: &str, text: &str) -> String {
     format!("<p class=\"{class}\">{}</p>", xml_escape(text))
+}
+
+/// A placed ornament image (#472): a centered `<p>` wrapping a decorative `<img>`
+/// (empty `alt`). The href is package-internal, so it isn't escaped.
+fn img_p(class: &str, img: &EmbeddedImage) -> String {
+    format!(
+        "<p class=\"{class}\"><img src=\"{}\" alt=\"\"/></p>",
+        img.href
+    )
+}
+
+/// Append an [`img_p`] paragraph and a trailing newline to `body` — the
+/// title-page / chapter builders' convention (parallel to [`push_p`]).
+fn push_img(body: &mut String, class: &str, img: &EmbeddedImage) {
+    body.push_str(&img_p(class, img));
+    body.push('\n');
 }
 
 /// Append a [`p_class`] paragraph and a trailing newline to `body` — the
@@ -466,7 +505,12 @@ struct OpfMeta<'a> {
     modified: &'a str,
 }
 
-fn build_opf(book: &OpfMeta, items: &[Item], fonts: &[EmbeddedFont]) -> String {
+fn build_opf(
+    book: &OpfMeta,
+    items: &[Item],
+    fonts: &[EmbeddedFont],
+    images: &[EmbeddedImage],
+) -> String {
     let mut meta = String::new();
     meta.push_str(&format!(
         "<dc:identifier id=\"bookid\">{}</dc:identifier>",
@@ -509,6 +553,12 @@ fn build_opf(book: &OpfMeta, items: &[Item], fonts: &[EmbeddedFont]) -> String {
         manifest.push_str(&format!(
             "<item id=\"font{i}\" href=\"{}\" media-type=\"{}\"/>",
             font.href, font.media_type
+        ));
+    }
+    for (i, image) in images.iter().enumerate() {
+        manifest.push_str(&format!(
+            "<item id=\"img{i}\" href=\"{}\" media-type=\"{}\"/>",
+            image.href, image.media_type
         ));
     }
     let mut spine = String::new();
@@ -1030,6 +1080,63 @@ mod tests {
     }
 
     #[test]
+    fn images_are_embedded_and_placed_and_override_the_scene_glyph() {
+        // doc(): title page (with author), a named part, a chapter ("The Find")
+        // whose body has a `---` scene break.
+        let mut style = ExportStyle {
+            scene_break_image: Some("art/break.png".into()),
+            chapter_heading_image: Some("art/banner.jpg".into()),
+            title_image: Some("art/title.svg".into()),
+            ..Default::default()
+        };
+        style.resolve_images(|_| Ok(vec![1, 2, 3]));
+        let bytes = to_epub(&doc(), MODIFIED, &style).unwrap();
+
+        // Files embedded under OEBPS/images/, named by role.
+        for f in [
+            "OEBPS/images/scene-break.png",
+            "OEBPS/images/chapter-heading.jpg",
+            "OEBPS/images/title.svg",
+        ] {
+            assert!(names(&bytes).iter().any(|n| n == f), "{f} embedded");
+        }
+        // OPF manifest declares them with media types.
+        let opf = part(&bytes, "OEBPS/content.opf");
+        assert!(
+            opf.contains("href=\"images/scene-break.png\" media-type=\"image/png\""),
+            "{opf}"
+        );
+        assert!(
+            opf.contains("href=\"images/title.svg\" media-type=\"image/svg+xml\""),
+            "{opf}"
+        );
+        // CSS for the image placements.
+        assert!(
+            part(&bytes, "OEBPS/style.css").contains(".chapter-image"),
+            "image css"
+        );
+        // Title image on the title page.
+        assert!(part(&bytes, "OEBPS/title0001.xhtml")
+            .contains("<img src=\"images/title.svg\" alt=\"\"/>"));
+        // Chapter-heading image above the title; scene break renders the image, not `#`.
+        let chap = part(&bytes, "OEBPS/chap0004.xhtml");
+        assert!(
+            chap.contains("<p class=\"chapter-image\"><img src=\"images/chapter-heading.jpg\""),
+            "{chap}"
+        );
+        assert!(
+            chap.contains("<p class=\"scene-break\"><img src=\"images/scene-break.png\""),
+            "{chap}"
+        );
+        assert!(!chap.contains("scene-break\">#"), "glyph replaced by image");
+
+        // Default style → no image files, no <img>.
+        let plain = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
+        assert!(!names(&plain).iter().any(|n| n.starts_with("OEBPS/images/")));
+        assert!(!part(&plain, "OEBPS/chap0004.xhtml").contains("<img"));
+    }
+
+    #[test]
     fn a_stable_identifier_is_derived_from_the_title() {
         let opf = part(
             &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
@@ -1078,3 +1185,5 @@ mod tests {
         assert!(part(&bytes, "OEBPS/chap0003.xhtml").contains("alpha"));
     }
 }
+
+
