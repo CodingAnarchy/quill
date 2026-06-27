@@ -6,7 +6,7 @@
 //! Haiku-tier model by design. See `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::Request;
 use super::AiError;
@@ -46,27 +46,15 @@ suggest prose.";
 
 /// The JSON Schema for a naming reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" },
-                        "variants": strings,
-                        "chapters": strings
-                    },
-                    "required": ["name", "variants", "chapters"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["findings"],
-        "additionalProperties": false
-    })
+    let finding = super::object_schema(
+        vec![
+            ("name", super::string_field()),
+            ("variants", super::string_array()),
+            ("chapters", super::string_array()),
+        ],
+        &["name", "variants", "chapters"],
+    );
+    super::object_schema(vec![("findings", super::array_of(finding))], &["findings"])
 }
 
 /// Build the naming request: the manuscript as cached context, the known entity

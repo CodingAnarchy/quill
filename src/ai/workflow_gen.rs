@@ -36,16 +36,14 @@ author described. Do not write or suggest any manuscript prose.";
 
 /// The JSON Schema for a reply: `steps` is constrained to the vocabulary tokens.
 fn schema(tokens: &[String]) -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "name": { "type": "string" },
-            "steps": { "type": "array", "items": { "enum": tokens } },
-            "unmapped": { "type": "array", "items": { "type": "string" } }
-        },
-        "required": ["name", "steps", "unmapped"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![
+            ("name", super::string_field()),
+            ("steps", super::array_of(json!({ "enum": tokens }))),
+            ("unmapped", super::string_array()),
+        ],
+        &["name", "steps", "unmapped"],
+    )
 }
 
 /// Build the generation request: the vocabulary as context, the author's

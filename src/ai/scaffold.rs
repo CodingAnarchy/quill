@@ -6,7 +6,7 @@
 //! drafts or suggests prose — only structure and notes. See `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{bible, AiError, Request};
 
@@ -44,38 +44,18 @@ only structural notes. Reference chapters by title.";
 
 /// The JSON Schema for a scaffolding reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "outline": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "chapter": { "type": "string" },
-                        "beats": strings
-                    },
-                    "required": ["chapter", "beats"],
-                    "additionalProperties": false
-                }
-            },
-            "gaps": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "detail": { "type": "string" },
-                        "chapter": { "type": "string" }
-                    },
-                    "required": ["detail", "chapter"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["outline", "gaps"],
-        "additionalProperties": false
-    })
+    let outline_item = super::object_schema(
+        vec![("chapter", super::string_field()), ("beats", super::string_array())],
+        &["chapter", "beats"],
+    );
+    let gap = super::object_schema(
+        vec![("detail", super::string_field()), ("chapter", super::string_field())],
+        &["detail", "chapter"],
+    );
+    super::object_schema(
+        vec![("outline", super::array_of(outline_item)), ("gaps", super::array_of(gap))],
+        &["outline", "gaps"],
+    )
 }
 
 /// Build the scaffolding request: the manuscript as cached context, schema attached.

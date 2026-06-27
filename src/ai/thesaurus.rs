@@ -51,29 +51,18 @@ the requested word/phrase itself.";
 
 /// The JSON schema for a word-search reply.
 pub fn schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "words": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "text": { "type": "string" },
-                        "definition": { "type": "string" },
-                        "syllables": { "type": "integer" },
-                        "origin": { "type": "string" },
-                        "rarity": { "type": "string" },
-                        "note": { "type": "string" }
-                    },
-                    "required": ["text", "definition"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["words"],
-        "additionalProperties": false
-    })
+    let word = super::object_schema(
+        vec![
+            ("text", super::string_field()),
+            ("definition", super::string_field()),
+            ("syllables", json!({ "type": "integer" })),
+            ("origin", super::string_field()),
+            ("rarity", super::string_field()),
+            ("note", super::string_field()),
+        ],
+        &["text", "definition"],
+    );
+    super::object_schema(vec![("words", super::array_of(word))], &["words"])
 }
 
 /// Build the word-search request: the author's word/phrase + constraints, and the

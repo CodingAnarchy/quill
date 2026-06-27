@@ -6,7 +6,7 @@
 //! triageable findings. See `docs/ai-features.md` §4.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
@@ -61,51 +61,22 @@ title.";
 
 /// The JSON Schema for a setting reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "categories": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" },
-                        "entries": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "name": { "type": "string" },
-                                    "detail": { "type": "string" }
-                                },
-                                "required": ["name", "detail"],
-                                "additionalProperties": false
-                            }
-                        }
-                    },
-                    "required": ["name", "entries"],
-                    "additionalProperties": false
-                }
-            },
-            "gazetteer": strings,
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "rule": { "type": "string" },
-                        "violation": { "type": "string" },
-                        "chapters": strings
-                    },
-                    "required": ["rule", "violation", "chapters"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["categories", "gazetteer", "findings"],
-        "additionalProperties": false
-    })
+    let entry = super::object_schema(
+        vec![("name", super::string_field()), ("detail", super::string_field())],
+        &["name", "detail"],
+    );
+    let category = super::object_schema(
+        vec![("name", super::string_field()), ("entries", super::array_of(entry))],
+        &["name", "entries"],
+    );
+    super::object_schema(
+        vec![
+            ("categories", super::array_of(category)),
+            ("gazetteer", super::string_array()),
+            ("findings", super::array_of(super::chapters_finding("rule", "violation"))),
+        ],
+        &["categories", "gazetteer", "findings"],
+    )
 }
 
 /// Build the setting request: the manuscript as cached context, schema attached.

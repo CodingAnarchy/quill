@@ -54,40 +54,21 @@ by title.";
 
 /// The JSON Schema for a continuity reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "events": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "description": { "type": "string" },
-                        "chapter": { "type": "string" },
-                        "story_order": { "type": "integer" }
-                    },
-                    "required": ["description", "chapter", "story_order"],
-                    "additionalProperties": false
-                }
-            },
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "type": "string" },
-                        "detail": { "type": "string" },
-                        "chapters": strings
-                    },
-                    "required": ["kind", "detail", "chapters"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["events", "findings"],
-        "additionalProperties": false
-    })
+    let event = super::object_schema(
+        vec![
+            ("description", super::string_field()),
+            ("chapter", super::string_field()),
+            ("story_order", json!({ "type": "integer" })),
+        ],
+        &["description", "chapter", "story_order"],
+    );
+    super::object_schema(
+        vec![
+            ("events", super::array_of(event)),
+            ("findings", super::array_of(super::chapters_finding("kind", "detail"))),
+        ],
+        &["events", "findings"],
+    )
 }
 
 /// Build the continuity request: the manuscript as cached context, schema attached.

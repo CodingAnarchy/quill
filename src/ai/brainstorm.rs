@@ -5,7 +5,7 @@
 //! it stays within the assistant-not-co-writer rule. See `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{bible, AiError, Request};
 
@@ -31,18 +31,15 @@ NOT a draft of the novel. Keep each a short, concrete note.";
 
 /// The JSON Schema for a brainstorm reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "premises": strings,
-            "what_ifs": strings,
-            "themes": strings,
-            "conflicts": strings
-        },
-        "required": ["premises", "what_ifs", "themes", "conflicts"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![
+            ("premises", super::string_array()),
+            ("what_ifs", super::string_array()),
+            ("themes", super::string_array()),
+            ("conflicts", super::string_array()),
+        ],
+        &["premises", "what_ifs", "themes", "conflicts"],
+    )
 }
 
 /// Build the brainstorm request: the premise as context, schema attached. No

@@ -6,7 +6,7 @@
 //! `docs/ai-features.md`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::{numbered_sections, AiError, Request};
 
@@ -43,16 +43,10 @@ rewrite of the author's prose. Return the blurbs and taglines as plain text.";
 
 /// The JSON Schema for a marketing-copy reply.
 pub fn schema() -> Value {
-    let strings = super::string_array();
-    json!({
-        "type": "object",
-        "properties": {
-            "blurbs": strings,
-            "taglines": strings
-        },
-        "required": ["blurbs", "taglines"],
-        "additionalProperties": false
-    })
+    super::object_schema(
+        vec![("blurbs", super::string_array()), ("taglines", super::string_array())],
+        &["blurbs", "taglines"],
+    )
 }
 
 /// Build the marketing-copy request: the manuscript as cached context, schema

@@ -49,27 +49,16 @@ Reference chapters by title.";
 
 /// The JSON schema for an editorial reply.
 pub fn schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "notes": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "focus": { "type": "string", "enum": ["structural", "continuity", "line"] },
-                        "chapters": { "type": "array", "items": { "type": "string" } },
-                        "location": { "type": "string" },
-                        "concern": { "type": "string" }
-                    },
-                    "required": ["focus", "concern"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["notes"],
-        "additionalProperties": false
-    })
+    let note = super::object_schema(
+        vec![
+            ("focus", json!({ "type": "string", "enum": ["structural", "continuity", "line"] })),
+            ("chapters", super::string_array()),
+            ("location", super::string_field()),
+            ("concern", super::string_field()),
+        ],
+        &["focus", "concern"],
+    );
+    super::object_schema(vec![("notes", super::array_of(note))], &["notes"])
 }
 
 /// Build the editorial request: the manuscript as cached context, schema attached.
