@@ -249,6 +249,7 @@ impl App {
             | Pending::DraftCharacters
             | Pending::DraftSetting
             | Pending::NewProject
+            | Pending::RenameProject
             | Pending::Wizard(_)
             | Pending::ImportNotes
             | Pending::NewFromNotesSource
@@ -358,6 +359,11 @@ impl App {
                                 } else {
                                     self.create_project_at(PathBuf::from(text));
                                 }
+                            }
+                            Pending::RenameProject => {
+                                // rename_project restores the editing mode and
+                                // reports; a blank name is rejected there (#424).
+                                self.rename_project(text);
                             }
                             Pending::Wizard(step) => {
                                 // Apply this step (blank = skip), then move to the

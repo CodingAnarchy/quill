@@ -287,12 +287,29 @@ impl App {
     /// over. A save failure aborts the switch (the current project stays put);
     /// an open failure leaves the current project open with a message.
     pub(super) fn switch_to(&mut self, target: PathBuf) {
-        self.leave_continuous(); // flush the continuous window back to its chapters
-        if self.flush_active().is_err() {
+        if self.finalize_current_project().is_err() {
             return; // save failed — message set; don't risk the unsaved work
         }
-        self.clear_recovery(); // work is saved; finalize this project's recovery sidecar
+        self.open_in_place(target);
+    }
 
+    /// Save and finalize the current project before adopting another in its place:
+    /// flush the continuous window back to its chapters and the active chapter to
+    /// disk, then drop the recovery sidecar. Returns `Err` (with a message set) if
+    /// the save fails, so the caller aborts rather than risk unsaved work. Shared
+    /// by switching projects (#270) and renaming the open one (#424).
+    fn finalize_current_project(&mut self) -> Result<(), ()> {
+        self.leave_continuous();
+        self.flush_active()?;
+        self.clear_recovery();
+        Ok(())
+    }
+
+    /// Adopt the project at `target` wholesale — a fresh [`App`] with no state
+    /// carried over — assuming the current project's work is already saved and
+    /// finalized. Shared by switching projects (#270) and renaming the open one
+    /// (#424), which both save first and then repoint here.
+    fn open_in_place(&mut self, target: PathBuf) {
         let opened = Project::open(&target).and_then(|project| {
             let buffer = Buffer::from_path(project.active_path())?;
             Ok((project, buffer))
@@ -313,6 +330,68 @@ impl App {
                 self.message = Some(format!("Couldn't open project: {e}"));
                 self.mode = self.editing_mode();
             }
+        }
+    }
+
+    /// Prompt for the open project's new folder name (#424), prefilled with the
+    /// book title so matching the folder to the title is a single Enter. Renaming
+    /// moves only the directory, not the title (they're edited separately).
+    pub(crate) fn prompt_rename_project(&mut self) {
+        let prefill = self.project.manifest.title.clone();
+        self.open_prompt(
+            Pending::RenameProject,
+            "Rename project folder (matches the book title): ",
+            &prefill,
+            None,
+        );
+    }
+
+    /// Rename the open project's directory to `new_name`, in place: save the
+    /// current work, move the folder, and reopen the project at the new path so
+    /// every save from here lands there (#424). Refuses to clobber an existing
+    /// folder, and leaves the project untouched on any failure (no half-move).
+    pub(crate) fn rename_project(&mut self, new_name: &str) {
+        let name = crate::project::sanitize_dir_name(new_name);
+        if name.is_empty() {
+            self.message = Some("Enter a folder name.".into());
+            self.mode = self.editing_mode();
+            return;
+        }
+        // Resolve against the real location so the parent is correct even when the
+        // project was opened by a relative path.
+        let old_root = self.project.root.canonicalize().unwrap_or_else(|_| self.project.root.clone());
+        let Some(new_root) = old_root.parent().map(|p| p.join(&name)) else {
+            self.message = Some("Can't rename the filesystem root.".into());
+            self.mode = self.editing_mode();
+            return;
+        };
+        if new_root == old_root {
+            self.message = Some(format!("Project is already named \u{201c}{name}\u{201d}."));
+            self.mode = self.editing_mode();
+            return;
+        }
+        if new_root.exists() {
+            self.message = Some(format!("A folder named \u{201c}{name}\u{201d} already exists here."));
+            self.mode = self.editing_mode();
+            return;
+        }
+        // Save and finalize the current project at the OLD location before moving,
+        // so nothing writes back to a path that's about to disappear.
+        if self.finalize_current_project().is_err() {
+            return; // save failed — message set; don't risk the move
+        }
+        if let Err(e) = std::fs::rename(&old_root, &new_root) {
+            // The project is still intact at the old location; just report.
+            self.message = Some(format!("Couldn't rename project: {e}"));
+            self.mode = self.editing_mode();
+            return;
+        }
+        // Reopen at the new path (the old recents entry self-prunes — its folder is
+        // gone). open_in_place sets an "Opened …" message; replace it with the
+        // rename confirmation.
+        self.open_in_place(new_root.clone());
+        if self.project.root == new_root {
+            self.message = Some(format!("Renamed project folder to \u{201c}{name}\u{201d}."));
         }
     }
 }

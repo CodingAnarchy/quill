@@ -382,6 +382,8 @@ pub(crate) enum Action {
     SwitchBook,
     /// Open the series tree navigator (#330).
     SeriesTree,
+    /// Rename the open project's folder, matching it to the book title (#424).
+    RenameProject,
     /// Refresh the whole series' story bible, book by book (#340).
     RefreshSeriesBible,
     /// Find & replace across every chapter in the project (#295).
@@ -448,6 +450,7 @@ impl Action {
         Action::ImportManuscript,
         Action::SwitchBook,
         Action::SeriesTree,
+        Action::RenameProject,
         Action::RefreshSeriesBible,
         Action::ProjectFind,
         Action::DescribeConfig,
@@ -505,6 +508,7 @@ impl Action {
             Action::StopSprint => "sprint:stop",
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
+            Action::RenameProject => "project:rename",
             Action::RefreshSeriesBible => "bible:series",
             Action::ProjectFind => "find:project",
             Action::DescribeConfig => "config:describe",
@@ -560,6 +564,7 @@ impl Action {
             Action::StopSprint => "Stop the writing sprint",
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
+            Action::RenameProject => "Rename project folder",
             Action::RefreshSeriesBible => "Refresh series bible",
             Action::ProjectFind => "Find across manuscript",
             Action::DescribeConfig => "Configure by description",
@@ -769,6 +774,9 @@ pub(crate) enum Pending {
     /// Text input: the path (location + name) for a new project to create from
     /// the project browser (#273). Created and opened on Enter.
     NewProject,
+    /// Text input: the new folder name for the open project (#424). On Enter the
+    /// project directory is renamed and reopened at the new path.
+    RenameProject,
     /// y/N: offer the new-project setup wizard (#282). `y` starts it at the first
     /// step; anything else lands in the editor.
     WizardStart,

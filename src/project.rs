@@ -277,6 +277,33 @@ pub(crate) fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<u
     parts.iter().position(|p| p.chapters[0] <= body_pos && body_pos <= p.chapters[1])
 }
 
+/// A filesystem-safe single folder name from an author-typed project name —
+/// trimmed, with path separators replaced and leading/trailing dots stripped, so
+/// the name stays one folder (no `..`, no nesting). Shared by the no-path startup
+/// (#423) and renaming the open project (#424). The trailing trim runs last
+/// because stripping an outer dot can expose a space (`"book . "` → `"book"`).
+pub(crate) fn sanitize_dir_name(input: &str) -> String {
+    let flattened = input.trim().replace(['/', '\\'], "-");
+    flattened.trim_matches('.').trim().to_string()
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize_dir_name;
+
+    #[test]
+    fn trims_and_flattens_path_separators() {
+        assert_eq!(sanitize_dir_name("  The Silmarillion \n"), "The Silmarillion");
+        assert_eq!(sanitize_dir_name("Vol/1"), "Vol-1");
+        // Leading/trailing dots can't smuggle in `..` or a hidden folder.
+        assert_eq!(sanitize_dir_name("../escape"), "-escape");
+        assert_eq!(sanitize_dir_name("."), "");
+        assert_eq!(sanitize_dir_name("   "), "");
+        // Stripping a trailing dot must not leave a dangling space.
+        assert_eq!(sanitize_dir_name("Book . "), "Book");
+    }
+}
+
 /// A loaded project: where it lives, its manifest (structure + cached word
 /// counts), and which chapter is active. The active chapter's text is edited
 /// through a separate [`Buffer`]; this type holds no chapter text.

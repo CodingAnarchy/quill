@@ -179,21 +179,11 @@ fn prompt_project_name() -> io::Result<String> {
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    let name = sanitize_project_name(&input);
+    let name = crate::project::sanitize_dir_name(&input);
     if name.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "no project name entered"));
     }
     Ok(name)
-}
-
-/// A filesystem-safe folder name from the author's typed project name (#423):
-/// trimmed, with path separators replaced and leading/trailing dots stripped so
-/// the name stays a single folder inside the projects home (no `..`, no nesting).
-/// The trailing trim runs last because stripping an outer dot can expose a space
-/// (`"book . "` → `"book "`).
-fn sanitize_project_name(input: &str) -> String {
-    let flattened = input.trim().replace(['/', '\\'], "-");
-    flattened.trim_matches('.').trim().to_string()
 }
 
 /// Undo the terminal setup from [`Tui::new`]: leave raw mode and the alternate
@@ -349,18 +339,6 @@ mod tests {
         let (base, fallback) = new_project_base(None, None, Path::new("/tmp/cwd"));
         assert_eq!(base, PathBuf::from("/tmp/cwd"));
         assert!(fallback);
-    }
-
-    #[test]
-    fn sanitize_project_name_trims_and_flattens_path_separators() {
-        assert_eq!(sanitize_project_name("  The Silmarillion \n"), "The Silmarillion");
-        assert_eq!(sanitize_project_name("Vol/1"), "Vol-1");
-        // Leading/trailing dots can't smuggle in `..` or a hidden folder.
-        assert_eq!(sanitize_project_name("../escape"), "-escape");
-        assert_eq!(sanitize_project_name("."), "");
-        assert_eq!(sanitize_project_name("   "), "");
-        // Stripping a trailing dot must not leave a dangling space.
-        assert_eq!(sanitize_project_name("Book . "), "Book");
     }
 
     #[test]
