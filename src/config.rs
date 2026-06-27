@@ -35,7 +35,7 @@ pub fn config_path() -> Option<PathBuf> {
 pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<PathBuf> {
     let path = config_path().ok_or_else(|| io::Error::other("no config directory"))?;
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let updated = insert_workflow(&existing, name, steps);
+    let updated = upsert_workflow(&existing, name, steps);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -43,43 +43,26 @@ pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// Splice a workflow entry into a config file's text: under an existing
-/// `[workflows]` header if there is one, else in a new `[workflows]` section
-/// appended at the end. Everything already in the file is left untouched.
-fn insert_workflow(existing: &str, name: &str, steps: &[String]) -> String {
-    let entry = workflow_entry(name, steps);
-
-    if let Some(header) = existing.lines().position(|l| l.trim() == "[workflows]") {
-        let mut lines: Vec<String> = existing.lines().map(String::from).collect();
-        lines.insert(header + 1, entry);
-        let mut out = lines.join("\n");
-        if existing.ends_with('\n') {
-            out.push('\n');
-        }
-        out
-    } else {
-        let mut out = existing.to_string();
-        if !out.is_empty() && !out.ends_with('\n') {
-            out.push('\n');
-        }
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str("[workflows]\n");
-        out.push_str(&entry);
-        out.push('\n');
-        out
-    }
+/// Splice a `name = ["step", …]` workflow entry into config text under
+/// `[workflows]`, replacing an entry of the same name in place rather than
+/// duplicating it. The section-finding and newline handling is the shared
+/// `set_value` splicer (#436); only the workflow-specific key/array encoding
+/// lives here, via the `toml` serializer so it matches what the loader parses.
+fn upsert_workflow(existing: &str, name: &str, steps: &[String]) -> String {
+    let array: Vec<toml::Value> = steps.iter().cloned().map(toml::Value::String).collect();
+    let value = toml::Value::Array(array).to_string();
+    set_value(existing, "workflows", &toml_key(name), &value)
 }
 
-/// Render one `name = ["step", …]` entry, delegating key quoting and string
-/// escaping to the `toml` serializer (a one-key table serializes to exactly this
-/// line) so they always match the format the loader parses.
-fn workflow_entry(name: &str, steps: &[String]) -> String {
-    let array = steps.iter().cloned().map(toml::Value::String).collect();
-    let mut table = toml::Table::new();
-    table.insert(name.to_string(), toml::Value::Array(array));
-    toml::to_string(&table).unwrap_or_default().trim_end().to_string()
+/// The TOML-encoded form of a key — bare for an identifier-like name, otherwise
+/// a quoted, escaped basic string — matching how the `toml` serializer would
+/// write it, so a spliced workflow name round-trips through the loader.
+fn toml_key(name: &str) -> String {
+    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        name.to_string()
+    } else {
+        toml::Value::String(name.to_string()).to_string()
+    }
 }
 
 /// Write a batch of `key = value` settings into the config file (#303), each
@@ -102,6 +85,10 @@ pub fn set_values(changes: &[(String, String, String)]) -> io::Result<PathBuf> {
 /// Set `key = value` under `[section]` in `existing`, replacing the key in place
 /// if present, inserting it under the header if the section exists, or appending
 /// a new section otherwise. Everything else is left byte-for-byte.
+///
+/// The line is spliced verbatim, so both sides must already be TOML-encoded:
+/// `value` a ready-to-write literal (e.g. `true`, `"#1e1e24"`), and `key` either
+/// a constant bare key or, for a user-supplied name, run through [`toml_key`].
 fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
     let entry = format!("{key} = {value}");
     let header = format!("[{section}]");
@@ -403,9 +390,9 @@ mod tests {
     #[test]
     fn inserts_under_an_existing_workflows_section() {
         let existing = "[editor]\nvim = true\n\n[workflows]\nfinish = [\"save\"]\n";
-        let out = insert_workflow(existing, "revise", &steps(&["save", "ai:continuity"]));
+        let out = upsert_workflow(existing, "revise", &steps(&["save", "ai:continuity"]));
         // The new entry is under the header, and the existing content is intact.
-        assert!(out.contains("[workflows]\nrevise = [\"save\", \"ai:continuity\"]\n"));
+        assert!(out.contains("[workflows]\nrevise = [\"save\", \"ai:continuity\"]\n"), "{out}");
         assert!(out.contains("finish = [\"save\"]"));
         assert!(out.contains("[editor]\nvim = true"));
     }
@@ -413,20 +400,28 @@ mod tests {
     #[test]
     fn appends_a_new_section_when_none_exists() {
         let existing = "[editor]\nvim = true\n";
-        let out = insert_workflow(existing, "revise", &steps(&["save"]));
+        let out = upsert_workflow(existing, "revise", &steps(&["save"]));
         assert!(out.contains("[editor]\nvim = true"), "existing kept: {out}");
         assert!(out.ends_with("[workflows]\nrevise = [\"save\"]\n"), "appended: {out}");
     }
 
     #[test]
     fn writes_a_fresh_file_when_empty() {
-        let out = insert_workflow("", "x", &steps(&["save"]));
+        let out = upsert_workflow("", "x", &steps(&["save"]));
         assert_eq!(out, "[workflows]\nx = [\"save\"]\n");
     }
 
     #[test]
     fn a_name_needing_quotes_is_quoted() {
-        let out = insert_workflow("", "my pass", &steps(&["save"]));
+        let out = upsert_workflow("", "my pass", &steps(&["save"]));
         assert!(out.contains("\"my pass\" = [\"save\"]"), "{out}");
+    }
+
+    #[test]
+    fn re_adding_a_workflow_replaces_it_in_place() {
+        let existing = "[workflows]\nrevise = [\"save\"]\n";
+        let out = upsert_workflow(existing, "revise", &steps(&["save", "ai:continuity"]));
+        assert!(out.contains("revise = [\"save\", \"ai:continuity\"]"), "replaced: {out}");
+        assert_eq!(out.matches("revise =").count(), 1, "no duplicate entry: {out}");
     }
 }
