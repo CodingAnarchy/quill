@@ -35,7 +35,9 @@ pub struct RecentProject {
 /// The recent projects, newest first, with any whose project no longer exists
 /// pruned out.
 pub fn list() -> Vec<RecentProject> {
-    config::config_dir().map(|d| list_in(&d)).unwrap_or_default()
+    config::config_dir()
+        .map(|d| list_in(&d))
+        .unwrap_or_default()
 }
 
 /// Record `root` (with display `title`) as the most-recently-opened project:
@@ -96,7 +98,10 @@ fn record_in(config_dir: &Path, root: &Path, title: &str) {
     // Canonicalize so the same project reached by different paths (".", a
     // relative dir, a symlink) is recognized as one entry.
     let path = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let entry = RecentProject { path, title: title.to_string() };
+    let entry = RecentProject {
+        path,
+        title: title.to_string(),
+    };
     let updated = promote(list_in(config_dir), entry);
 
     let _ = std::fs::create_dir_all(config_dir);
@@ -119,14 +124,22 @@ mod tests {
     use super::*;
 
     fn rp(path: &str, title: &str) -> RecentProject {
-        RecentProject { path: PathBuf::from(path), title: title.to_string() }
+        RecentProject {
+            path: PathBuf::from(path),
+            title: title.to_string(),
+        }
     }
 
     #[test]
     fn promote_moves_a_repeat_to_the_front_without_duplicating() {
         let items = vec![rp("/a", "A"), rp("/b", "B"), rp("/c", "C")];
         let out = promote(items, rp("/b", "B2"));
-        assert_eq!(out.iter().map(|r| r.path.to_str().unwrap()).collect::<Vec<_>>(), ["/b", "/a", "/c"]);
+        assert_eq!(
+            out.iter()
+                .map(|r| r.path.to_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["/b", "/a", "/c"]
+        );
         assert_eq!(out[0].title, "B2", "the title refreshes to the latest open");
     }
 
@@ -140,7 +153,10 @@ mod tests {
         assert_eq!(out.len(), MAX);
         assert_eq!(out[0].path.as_path(), Path::new("/new"));
         let oldest = format!("/p{}", MAX - 1);
-        assert!(!out.iter().any(|r| r.path.as_path() == Path::new(&oldest)), "the oldest fell off");
+        assert!(
+            !out.iter().any(|r| r.path.as_path() == Path::new(&oldest)),
+            "the oldest fell off"
+        );
     }
 
     #[test]
@@ -166,7 +182,10 @@ mod tests {
         let json = serde_json::to_string(&vec![rp("/nowhere/ghost", "Ghost")]).unwrap();
         std::fs::write(store_path(&dir), json).unwrap();
 
-        assert!(list_in(&dir).is_empty(), "a vanished project is pruned from the list");
+        assert!(
+            list_in(&dir).is_empty(),
+            "a vanished project is pruned from the list"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -177,14 +196,30 @@ mod tests {
         Project::create(home.join("beta")).unwrap();
         std::fs::create_dir_all(home.join("not-a-project")).unwrap();
         // Give beta a real title so the manifest title (not the folder name) is used.
-        std::fs::write(Project::manifest_path(&home.join("beta")), "title = \"Zebra\"\n").unwrap();
+        std::fs::write(
+            Project::manifest_path(&home.join("beta")),
+            "title = \"Zebra\"\n",
+        )
+        .unwrap();
 
         let found = scan(&home);
         let titles: Vec<_> = found.iter().map(|r| r.title.as_str()).collect();
         // Sorted by title: "Chapter…"? alpha keeps its created title; check membership + sort.
-        assert_eq!(found.len(), 2, "only the two projects, not the plain folder: {titles:?}");
-        assert!(titles.contains(&"Zebra"), "title comes from the manifest: {titles:?}");
-        assert!(titles.windows(2).all(|w| w[0].to_lowercase() <= w[1].to_lowercase()), "sorted by title");
+        assert_eq!(
+            found.len(),
+            2,
+            "only the two projects, not the plain folder: {titles:?}"
+        );
+        assert!(
+            titles.contains(&"Zebra"),
+            "title comes from the manifest: {titles:?}"
+        );
+        assert!(
+            titles
+                .windows(2)
+                .all(|w| w[0].to_lowercase() <= w[1].to_lowercase()),
+            "sorted by title"
+        );
 
         std::fs::remove_dir_all(&home).ok();
     }
@@ -193,7 +228,8 @@ mod tests {
     fn scan_of_a_missing_dir_is_empty() {
         // Deliberately a path that does NOT exist — not `scratch_dir`, which would
         // create it and turn this into the empty-dir case instead of the missing one.
-        let missing = std::env::temp_dir().join(format!("quill-home-{}-missing", std::process::id()));
+        let missing =
+            std::env::temp_dir().join(format!("quill-home-{}-missing", std::process::id()));
         let _ = std::fs::remove_dir_all(&missing);
         assert!(scan(&missing).is_empty());
     }

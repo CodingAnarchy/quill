@@ -19,8 +19,14 @@ fn continuous_view_edits_persist_to_the_right_chapter() {
     assert!(app.manuscript.is_none());
 
     // The edit landed in chapter two's file; chapter one is untouched.
-    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second chapterZ\n");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "second chapterZ\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "first chapter\n"
+    );
     // Back in single-chapter view at the chapter the cursor was in.
     assert_eq!(app.project.active_index(), 1);
     assert!(app.buffer.line(0).contains("second"));
@@ -34,7 +40,9 @@ fn entering_continuous_flushes_the_single_chapter() {
     assert!(app.buffer.dirty);
 
     app.on_key(ctrl('l')); // entering must flush the dirty single chapter
-    assert!(fs::read_to_string(dir.join("one.md")).unwrap().starts_with('X'));
+    assert!(fs::read_to_string(dir.join("one.md"))
+        .unwrap()
+        .starts_with('X'));
 }
 
 #[test]
@@ -51,12 +59,25 @@ fn ctrl_r_opens_the_report_and_any_key_closes_it() {
     app.on_key(ctrl('r'));
     let report = app.overlay_lines().expect("report should be open");
     // It rendered the story line against the goals (styled rows → span text).
-    let line_text = |l: &Line| l.spans.iter().map(|s| s.content.to_string()).collect::<String>();
-    assert!(report.iter().any(|l| line_text(l).contains("/ 150,000  words")), "no story line");
+    let line_text = |l: &Line| {
+        l.spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>()
+    };
+    assert!(
+        report
+            .iter()
+            .any(|l| line_text(l).contains("/ 150,000  words")),
+        "no story line"
+    );
 
     app.on_key(key(KeyCode::Char('x'))); // any key closes it (no edit)
     assert!(app.overlay.is_none());
-    assert!(!app.buffer.line(0).contains('x'), "the dismissing key must not edit");
+    assert!(
+        !app.buffer.line(0).contains('x'),
+        "the dismissing key must not edit"
+    );
 }
 
 #[test]
@@ -85,7 +106,10 @@ fn an_edited_chapter_is_tallied_even_after_navigating_away() {
     app.on_key(ctrl('n')); // switch to ch1 (flushes ch0, recording its new count)
     assert_eq!(app.project.active_index(), 1);
     app.on_idle();
-    assert_eq!(app.added, 2, "ch0's edit was booked though it's no longer active");
+    assert_eq!(
+        app.added, 2,
+        "ch0's edit was booked though it's no longer active"
+    );
     assert_eq!(app.removed, 0);
 }
 

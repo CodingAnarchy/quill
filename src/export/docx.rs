@@ -64,10 +64,16 @@ pub fn to_docx_series(
     // leading text would import as junk).
     if profile == Profile::Manuscript {
         if let Some(series) = series {
-            body.push_str(&para(r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#, run(series, true, false, Some(40))));
+            body.push_str(&para(
+                r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
+                run(series, true, false, Some(40)),
+            ));
         }
         if let Some(author) = author {
-            body.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
+            body.push_str(&para(
+                r#"<w:jc w:val="center"/>"#,
+                run(&format!("by {author}"), false, false, None),
+            ));
         }
     }
     for book in books {
@@ -118,17 +124,26 @@ fn document_xml(doc: &Document, profile: Profile) -> String {
 fn title_page(doc: &Document) -> String {
     let mut out = String::new();
     if let Some(series) = &doc.series {
-        out.push_str(&para(r#"<w:jc w:val="center"/>"#, run(series, false, false, None)));
+        out.push_str(&para(
+            r#"<w:jc w:val="center"/>"#,
+            run(series, false, false, None),
+        ));
     }
     out.push_str(&para(
         r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
         run(&doc.title, true, false, Some(36)),
     ));
     if let Some(subtitle) = &doc.subtitle {
-        out.push_str(&para(r#"<w:jc w:val="center"/>"#, run(subtitle, false, true, None)));
+        out.push_str(&para(
+            r#"<w:jc w:val="center"/>"#,
+            run(subtitle, false, true, None),
+        ));
     }
     if let Some(author) = &doc.author {
-        out.push_str(&para(r#"<w:jc w:val="center"/>"#, run(&format!("by {author}"), false, false, None)));
+        out.push_str(&para(
+            r#"<w:jc w:val="center"/>"#,
+            run(&format!("by {author}"), false, false, None),
+        ));
     }
     if let Some(epigraph) = &doc.epigraph {
         out.push_str(&epigraph_paras(epigraph));
@@ -167,7 +182,10 @@ fn book_heading(title: &str, profile: Profile) -> String {
             r#"<w:pageBreakBefore/><w:spacing w:before="360" w:after="360" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
             run(title, true, false, Some(32)),
         ),
-        Profile::Vellum => para(r#"<w:pStyle w:val="Heading1"/>"#, run(title, false, false, None)),
+        Profile::Vellum => para(
+            r#"<w:pStyle w:val="Heading1"/>"#,
+            run(title, false, false, None),
+        ),
     }
 }
 
@@ -194,7 +212,10 @@ fn heading(title: &str, profile: Profile) -> String {
             r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
             run(title, true, false, Some(28)),
         ),
-        Profile::Vellum => para(r#"<w:pStyle w:val="Heading1"/>"#, run(title, false, false, None)),
+        Profile::Vellum => para(
+            r#"<w:pStyle w:val="Heading1"/>"#,
+            run(title, false, false, None),
+        ),
     }
 }
 
@@ -231,14 +252,21 @@ fn epigraph_paras(epigraph: &Epigraph) -> String {
         out.push_str(&para(ppr, run(line, false, true, None)));
     }
     if let Some(attribution) = &epigraph.attribution {
-        out.push_str(&para(ppr, run(&format!("— {attribution}"), false, true, None)));
+        out.push_str(&para(
+            ppr,
+            run(&format!("— {attribution}"), false, true, None),
+        ));
     }
     out
 }
 
 /// A `<w:p>` with the given paragraph properties (omitted when empty) and runs.
 fn para(ppr: &str, runs: String) -> String {
-    let ppr = if ppr.is_empty() { String::new() } else { format!("<w:pPr>{ppr}</w:pPr>") };
+    let ppr = if ppr.is_empty() {
+        String::new()
+    } else {
+        format!("<w:pPr>{ppr}</w:pPr>")
+    };
     format!("<w:p>{ppr}{runs}</w:p>")
 }
 
@@ -254,8 +282,15 @@ fn run(text: &str, bold: bool, italic: bool, size: Option<u32>) -> String {
     if let Some(sz) = size {
         rpr.push_str(&format!("<w:sz w:val=\"{sz}\"/>"));
     }
-    let rpr = if rpr.is_empty() { String::new() } else { format!("<w:rPr>{rpr}</w:rPr>") };
-    format!("<w:r>{rpr}<w:t xml:space=\"preserve\">{}</w:t></w:r>", xml_escape(text))
+    let rpr = if rpr.is_empty() {
+        String::new()
+    } else {
+        format!("<w:rPr>{rpr}</w:rPr>")
+    };
+    format!(
+        "<w:r>{rpr}<w:t xml:space=\"preserve\">{}</w:t></w:r>",
+        xml_escape(text)
+    )
 }
 
 #[cfg(test)]
@@ -264,7 +299,10 @@ mod tests {
     use std::io::Read;
 
     fn epigraph(text: &str, by: Option<&str>) -> Epigraph {
-        Epigraph { text: text.to_string(), attribution: by.map(str::to_string) }
+        Epigraph {
+            text: text.to_string(),
+            attribution: by.map(str::to_string),
+        }
     }
 
     fn doc() -> Document {
@@ -317,7 +355,10 @@ mod tests {
         };
         let bytes = to_docx(&d, Profile::Manuscript).unwrap();
         let xml = part(&bytes, "word/document.xml");
-        assert!(xml.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"), "curly glyphs reach the docx body");
+        assert!(
+            xml.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
+            "curly glyphs reach the docx body"
+        );
     }
 
     #[test]
@@ -331,15 +372,26 @@ mod tests {
             front: vec![],
             parts: vec![crate::export::Part {
                 name: None,
-                chapters: vec![crate::export::Chapter { title: "Ch".into(), epigraph: None, body: "prose".into() }],
+                chapters: vec![crate::export::Chapter {
+                    title: "Ch".into(),
+                    epigraph: None,
+                    body: "prose".into(),
+                }],
             }],
             back: vec![],
         };
-        let bytes =
-            to_docx_series(&[book("Book One"), book("Book Two")], Some("The Saga"), Some("A. Writer"), Profile::Manuscript)
-                .unwrap();
+        let bytes = to_docx_series(
+            &[book("Book One"), book("Book Two")],
+            Some("The Saga"),
+            Some("A. Writer"),
+            Profile::Manuscript,
+        )
+        .unwrap();
         let xml = part(&bytes, "word/document.xml");
-        assert!(xml.contains("The Saga") && xml.contains("by A. Writer"), "series title page");
+        assert!(
+            xml.contains("The Saga") && xml.contains("by A. Writer"),
+            "series title page"
+        );
         let one = xml.find("Book One").expect("book one");
         let two = xml.find("Book Two").expect("book two");
         assert!(one < two, "books in order");
@@ -349,22 +401,41 @@ mod tests {
     fn produces_a_zip_with_the_required_parts() {
         let bytes = to_docx(&doc(), Profile::Manuscript).unwrap();
         assert_eq!(&bytes[..2], b"PK", "a zip container");
-        for name in ["[Content_Types].xml", "_rels/.rels", "word/styles.xml", "word/document.xml"] {
+        for name in [
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "word/styles.xml",
+            "word/document.xml",
+        ] {
             assert!(!part(&bytes, name).is_empty(), "{name} present");
         }
         // styles.xml is closed once, whichever profile.
-        assert_eq!(part(&bytes, "word/styles.xml").matches("</w:styles>").count(), 1);
+        assert_eq!(
+            part(&bytes, "word/styles.xml")
+                .matches("</w:styles>")
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn document_carries_structure_and_emphasis() {
-        let xml = part(&to_docx(&doc(), Profile::Manuscript).unwrap(), "word/document.xml");
+        let xml = part(
+            &to_docx(&doc(), Profile::Manuscript).unwrap(),
+            "word/document.xml",
+        );
         assert!(xml.contains("by A. Writer"));
-        assert!(xml.contains("Part One") && xml.contains("The Find"), "headings present");
+        assert!(
+            xml.contains("Part One") && xml.contains("The Find"),
+            "headings present"
+        );
         // Each chapter starts on a new page.
         assert!(xml.contains("<w:pageBreakBefore/>"), "chapter page break");
         // Markdown emphasis became real runs, not literal markup.
-        assert!(xml.contains("<w:b/>") && xml.contains("<w:i/>"), "bold + italic runs");
+        assert!(
+            xml.contains("<w:b/>") && xml.contains("<w:i/>"),
+            "bold + italic runs"
+        );
         assert!(!xml.contains('*'), "no literal asterisks: {xml}");
         // XML special characters in the title are escaped.
         assert!(xml.contains("Red &lt;State&gt; Earth"), "title escaped");
@@ -389,11 +460,16 @@ mod tests {
             }],
             back: vec![],
         };
-        let xml = part(&to_docx(&d, Profile::Manuscript).unwrap(), "word/document.xml");
+        let xml = part(
+            &to_docx(&d, Profile::Manuscript).unwrap(),
+            "word/document.xml",
+        );
         assert!(!xml.contains("---"), "no literal rule: {xml}");
         // A centered `#` divider sits between the two scenes.
         let one = xml.find("Scene one.").unwrap();
-        let hash = xml.find(r#"<w:t xml:space="preserve">#</w:t>"#).expect("# divider");
+        let hash = xml
+            .find(r#"<w:t xml:space="preserve">#</w:t>"#)
+            .expect("# divider");
         let two = xml.find("Scene two.").unwrap();
         assert!(one < hash && hash < two, "divider between scenes: {xml}");
     }
@@ -403,11 +479,20 @@ mod tests {
         let bytes = to_docx(&doc(), Profile::Vellum).unwrap();
         let styles = part(&bytes, "word/styles.xml");
         // The Heading 1 style Vellum splits chapters on is defined.
-        assert!(styles.contains(r#"w:styleId="Heading1""#), "Heading1 style: {styles}");
-        assert!(styles.contains(r#"w:val="heading 1""#), "built-in heading 1 name");
+        assert!(
+            styles.contains(r#"w:styleId="Heading1""#),
+            "Heading1 style: {styles}"
+        );
+        assert!(
+            styles.contains(r#"w:val="heading 1""#),
+            "built-in heading 1 name"
+        );
         let xml = part(&bytes, "word/document.xml");
         // Chapter and part titles are tagged Heading 1, in reading order.
-        assert!(xml.contains(r#"<w:pStyle w:val="Heading1"/>"#), "headings styled: {xml}");
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="Heading1"/>"#),
+            "headings styled: {xml}"
+        );
         let part_at = xml.find("Part One").unwrap();
         let chapter_at = xml.find("The Find").unwrap();
         assert!(part_at < chapter_at, "reading order");
@@ -416,7 +501,10 @@ mod tests {
         assert!(!xml.contains("by A. Writer"), "no title page: {xml}");
         assert!(!xml.contains("<w:pageBreakBefore/>"), "no page breaks");
         // Emphasis still carries through as real runs.
-        assert!(xml.contains("<w:b/>") && xml.contains("<w:i/>"), "bold + italic runs");
+        assert!(
+            xml.contains("<w:b/>") && xml.contains("<w:i/>"),
+            "bold + italic runs"
+        );
         assert!(!xml.contains('*'), "no literal asterisks");
     }
 }

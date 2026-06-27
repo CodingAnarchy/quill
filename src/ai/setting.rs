@@ -62,18 +62,27 @@ title.";
 /// The JSON Schema for a setting reply.
 pub fn schema() -> Value {
     let entry = super::object_schema(
-        vec![("name", super::string_field()), ("detail", super::string_field())],
+        vec![
+            ("name", super::string_field()),
+            ("detail", super::string_field()),
+        ],
         &["name", "detail"],
     );
     let category = super::object_schema(
-        vec![("name", super::string_field()), ("entries", super::array_of(entry))],
+        vec![
+            ("name", super::string_field()),
+            ("entries", super::array_of(entry)),
+        ],
         &["name", "entries"],
     );
     super::object_schema(
         vec![
             ("categories", super::array_of(category)),
             ("gazetteer", super::string_array()),
-            ("findings", super::array_of(super::chapters_finding("rule", "violation"))),
+            (
+                "findings",
+                super::array_of(super::chapters_finding("rule", "violation")),
+            ),
         ],
         &["categories", "gazetteer", "findings"],
     )
@@ -81,7 +90,13 @@ pub fn schema() -> Value {
 
 /// Build the setting request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Extract the setting bible, gazetteer, and rule findings as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Extract the setting bible, gazetteer, and rule findings as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 const CONCEPT_SYSTEM: &str = "You are a worldbuilding editor helping an author \
@@ -97,7 +112,13 @@ scenes. Leave `findings` empty — there's no manuscript to check rules against.
 /// concept / premise (no manuscript), into the same schema the extractive pass
 /// returns.
 pub fn build_concept_request(concept: &str, model: &str) -> Request {
-    super::manuscript_request(CONCEPT_SYSTEM, "Draft the starter setting bible and gazetteer as specified.", format!("Concept / premise:\n{concept}"), model, schema())
+    super::manuscript_request(
+        CONCEPT_SYSTEM,
+        "Draft the starter setting bible and gazetteer as specified.",
+        format!("Concept / premise:\n{concept}"),
+        model,
+        schema(),
+    )
 }
 
 const REVISE_SYSTEM: &str = "You are a worldbuilding editor maintaining an \
@@ -116,8 +137,19 @@ findings.";
 
 /// Build an incremental revision request (#90): revise the existing setting bible
 /// from only the changed chapters.
-pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, model: &str) -> Request {
-    incremental::revise_request(REVISE_SYSTEM, schema(), MAX_OUTPUT_TOKENS, prior_bible, changed_chapters, model)
+pub fn build_incremental_request(
+    prior_bible: &str,
+    changed_chapters: &str,
+    model: &str,
+) -> Request {
+    incremental::revise_request(
+        REVISE_SYSTEM,
+        schema(),
+        MAX_OUTPUT_TOKENS,
+        prior_bible,
+        changed_chapters,
+        model,
+    )
 }
 
 /// Parse a structured setting reply.
@@ -188,8 +220,14 @@ mod tests {
     fn concept_request_carries_the_concept_not_a_manuscript() {
         let req = build_concept_request("a city built inside a dormant volcano", "claude-opus-4-8");
         assert!(req.cached_context.contains("dormant volcano"));
-        assert!(req.system.as_deref().unwrap().contains("INVENT"), "asks to invent, not extract");
-        assert!(req.json_schema.is_some(), "same schema as the extractive pass");
+        assert!(
+            req.system.as_deref().unwrap().contains("INVENT"),
+            "asks to invent, not extract"
+        );
+        assert!(
+            req.json_schema.is_some(),
+            "same schema as the extractive pass"
+        );
     }
 
     #[test]

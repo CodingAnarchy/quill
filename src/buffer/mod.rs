@@ -29,7 +29,6 @@ pub struct Cursor {
     pub col: usize,
 }
 
-
 /// An in-memory document plus the path it was loaded from / will save to.
 pub struct Buffer {
     rope: Rope,
@@ -235,7 +234,10 @@ impl Buffer {
         let line_start_byte = self.rope.line_to_byte(line);
         let line_text = self.line(line);
         let within = (byte - line_start_byte).min(line_text.len());
-        Cursor { line, col: byte_to_col(&line_text, within) }
+        Cursor {
+            line,
+            col: byte_to_col(&line_text, within),
+        }
     }
 
     /// Replace the byte range `[start, end)` with `text`, then put the cursor just
@@ -253,13 +255,16 @@ impl Buffer {
 
     /// Convert the cursor's (line, col) into an absolute char offset in the rope.
     fn cursor_char_idx(&self) -> usize {
-        let line_start = self.rope.line_to_char(self.cursor.line.min(self.rope.len_lines().saturating_sub(1)));
+        let line_start = self.rope.line_to_char(
+            self.cursor
+                .line
+                .min(self.rope.len_lines().saturating_sub(1)),
+        );
         let line = self.line(self.cursor.line);
         let byte = col_to_byte(&line, self.cursor.col);
         // Translate the byte offset within the line to a char offset.
         line_start + line[..byte].chars().count()
     }
-
 
     // --- Editing -----------------------------------------------------------
 
@@ -283,7 +288,8 @@ impl Buffer {
             new_end_position: point_at_byte(&self.rope, new_end_byte),
         };
         self.syntax.record_edit(&edit);
-        self.anchor_edits.push((start_byte, start_byte, new_end_byte));
+        self.anchor_edits
+            .push((start_byte, start_byte, new_end_byte));
         self.syntax_dirty = true;
     }
 
@@ -308,7 +314,8 @@ impl Buffer {
             new_end_position: point_at_byte(&self.rope, start_byte),
         };
         self.syntax.record_edit(&edit);
-        self.anchor_edits.push((start_byte, old_end_byte, start_byte));
+        self.anchor_edits
+            .push((start_byte, old_end_byte, start_byte));
         self.syntax_dirty = true;
     }
 
@@ -506,7 +513,10 @@ impl Buffer {
     /// `^`. Falls back to the line start for an all-blank line.
     pub fn move_first_non_blank(&mut self) {
         let line = self.line(self.cursor.line);
-        let blank = line.graphemes(true).take_while(|g| g.chars().all(char::is_whitespace)).count();
+        let blank = line
+            .graphemes(true)
+            .take_while(|g| g.chars().all(char::is_whitespace))
+            .count();
         self.cursor.col = blank.min(self.line_graphemes(self.cursor.line));
         self.goal_x = None;
     }
@@ -608,7 +618,10 @@ impl Buffer {
 /// Byte offset of grapheme column `col` within a single line's `text` (the line
 /// end if `col` is past the last grapheme).
 fn col_to_byte(text: &str, col: usize) -> usize {
-    text.grapheme_indices(true).nth(col).map(|(b, _)| b).unwrap_or(text.len())
+    text.grapheme_indices(true)
+        .nth(col)
+        .map(|(b, _)| b)
+        .unwrap_or(text.len())
 }
 
 /// Grapheme column of byte offset `byte` within a single line's `text`.

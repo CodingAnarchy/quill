@@ -19,8 +19,8 @@ use crate::buffer::count_words;
 /// the segmenter falls back to the structural rule (a boundary needs whitespace
 /// then a capital) for everything else, so this list need not be exhaustive.
 const ABBREVIATIONS: &[&str] = &[
-    "mr", "mrs", "ms", "dr", "prof", "st", "sr", "jr", "vs", "etc", "rev", "hon",
-    "gen", "col", "sgt", "lt", "capt", "messrs", "mt", "no", "vol", "fig",
+    "mr", "mrs", "ms", "dr", "prof", "st", "sr", "jr", "vs", "etc", "rev", "hon", "gen", "col",
+    "sgt", "lt", "capt", "messrs", "mt", "no", "vol", "fig",
 ];
 
 /// Raw text statistics for a span of prose — the basis for every readability
@@ -90,7 +90,10 @@ fn is_heading(line: &str) -> bool {
 /// (`*`, `_`, …) are punctuation to the segmenter, so they never count as words.
 /// Pass [`prose`] so heading lines don't inflate the counts.
 pub fn stats(text: &str) -> Stats {
-    let mut s = Stats { sentences: count_sentences(text), ..Stats::default() };
+    let mut s = Stats {
+        sentences: count_sentences(text),
+        ..Stats::default()
+    };
     for word in text.unicode_words() {
         let syl = syllables(word);
         s.words += 1;
@@ -170,7 +173,10 @@ pub fn count_sentences(text: &str) -> usize {
 /// The sentences in `text`, each trimmed of surrounding whitespace, in order.
 /// Empty for empty prose. The basis for sentence-length statistics (#68).
 pub fn sentences(text: &str) -> Vec<&str> {
-    sentence_spans(text).into_iter().map(|(s, e)| text[s..e].trim()).collect()
+    sentence_spans(text)
+        .into_iter()
+        .map(|(s, e)| text[s..e].trim())
+        .collect()
 }
 
 /// Byte spans `(start, end)` of each sentence in `text`. A run of terminators
@@ -229,7 +235,9 @@ fn is_boundary(chars: &[(usize, char)], start: usize, end: usize) -> bool {
     if end - start == 1 && chars[start].1 == '.' {
         let prev = start.checked_sub(1).map(|j| chars[j].1);
         let next = chars.get(end).map(|x| x.1);
-        if matches!(prev, Some(p) if p.is_ascii_digit()) && matches!(next, Some(x) if x.is_ascii_digit()) {
+        if matches!(prev, Some(p) if p.is_ascii_digit())
+            && matches!(next, Some(x) if x.is_ascii_digit())
+        {
             return false;
         }
         if preceding_is_abbreviation(chars, start) {
@@ -264,7 +272,10 @@ fn preceding_is_abbreviation(chars: &[(usize, char)], dot: usize) -> bool {
     if start == dot {
         return false;
     }
-    let word: String = chars[start..dot].iter().flat_map(|(_, c)| c.to_lowercase()).collect();
+    let word: String = chars[start..dot]
+        .iter()
+        .flat_map(|(_, c)| c.to_lowercase())
+        .collect();
     ABBREVIATIONS.contains(&word.as_str())
 }
 
@@ -382,7 +393,16 @@ pub struct LengthStats {
 
 impl Default for LengthStats {
     fn default() -> Self {
-        Self { count: 0, mean: 0.0, median: 0.0, std_dev: 0.0, min: 0, max: 0, low_fence: f64::MIN, high_fence: f64::MAX }
+        Self {
+            count: 0,
+            mean: 0.0,
+            median: 0.0,
+            std_dev: 0.0,
+            min: 0,
+            max: 0,
+            low_fence: f64::MIN,
+            high_fence: f64::MAX,
+        }
     }
 }
 
@@ -393,11 +413,18 @@ pub fn length_stats(words: &[usize]) -> LengthStats {
     if s.count == 0 {
         return LengthStats::default(); // keeps the ±∞ fences (nothing to flag)
     }
-    let variance = words.iter().map(|&w| (w as f64 - s.mean).powi(2)).sum::<f64>() / s.count as f64;
+    let variance = words
+        .iter()
+        .map(|&w| (w as f64 - s.mean).powi(2))
+        .sum::<f64>()
+        / s.count as f64;
     // Need a few chapters before "unusually short/long relative to the rest"
     // means anything; below that, flag nothing.
-    let (low_fence, high_fence) =
-        if s.count < 4 { (f64::MIN, f64::MAX) } else { (s.median * 0.5, s.median * 2.0) };
+    let (low_fence, high_fence) = if s.count < 4 {
+        (f64::MIN, f64::MAX)
+    } else {
+        (s.median * 0.5, s.median * 2.0)
+    };
     LengthStats {
         count: s.count,
         mean: s.mean,
@@ -434,35 +461,83 @@ const TO_BE: &[&str] = &["am", "is", "are", "was", "were", "be", "been", "being"
 
 /// Filtering verbs that distance the reader ("she *saw* the door" → "the door").
 const FILTER_WORDS: &[&str] = &[
-    "see", "saw", "seen", "look", "looked", "watch", "watched", "hear", "heard",
-    "feel", "felt", "notice", "noticed", "wonder", "wondered", "realize", "realized",
-    "think", "thought", "know", "knew", "seem", "seemed", "decide", "decided",
-    "remember", "remembered", "believe", "believed", "sense", "sensed",
+    "see",
+    "saw",
+    "seen",
+    "look",
+    "looked",
+    "watch",
+    "watched",
+    "hear",
+    "heard",
+    "feel",
+    "felt",
+    "notice",
+    "noticed",
+    "wonder",
+    "wondered",
+    "realize",
+    "realized",
+    "think",
+    "thought",
+    "know",
+    "knew",
+    "seem",
+    "seemed",
+    "decide",
+    "decided",
+    "remember",
+    "remembered",
+    "believe",
+    "believed",
+    "sense",
+    "sensed",
 ];
 
 /// Common `-ly` words that aren't manner adverbs, so they don't inflate the
 /// adverb density.
 const NON_ADVERB_LY: &[&str] = &[
-    "only", "family", "reply", "apply", "supply", "comply", "imply", "rely",
-    "multiply", "ally", "bully", "rally", "jelly", "belly", "folly", "lily",
-    "fly", "ugly", "early", "holy", "italy", "july", "assembly", "anomaly",
-    "melancholy", "fully",
+    "only",
+    "family",
+    "reply",
+    "apply",
+    "supply",
+    "comply",
+    "imply",
+    "rely",
+    "multiply",
+    "ally",
+    "bully",
+    "rally",
+    "jelly",
+    "belly",
+    "folly",
+    "lily",
+    "fly",
+    "ugly",
+    "early",
+    "holy",
+    "italy",
+    "july",
+    "assembly",
+    "anomaly",
+    "melancholy",
+    "fully",
 ];
 
 /// Frequent function words excluded from the "most-used words" list (so the list
 /// surfaces an author's content tics, not "the"/"and"). Defaults baked in for
 /// now; a per-project override could join `run_on_threshold` later.
 const STOPWORDS: &[&str] = &[
-    "the", "a", "an", "and", "or", "but", "if", "of", "at", "by", "for", "with",
-    "about", "to", "from", "in", "on", "into", "over", "after", "before", "as",
-    "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did",
-    "have", "has", "had", "having", "i", "you", "he", "she", "it", "we", "they",
-    "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
-    "this", "that", "these", "those", "there", "here", "then", "than", "so", "not",
-    "no", "yes", "up", "down", "out", "off", "all", "any", "some", "what",
-    "which", "who", "whom", "when", "where", "why", "how", "would", "could",
-    "should", "will", "can", "may", "might", "must", "shall", "just", "very",
-    "too", "more", "most", "now", "back", "got", "get", "one", "like", "said",
+    "the", "a", "an", "and", "or", "but", "if", "of", "at", "by", "for", "with", "about", "to",
+    "from", "in", "on", "into", "over", "after", "before", "as", "is", "are", "was", "were", "be",
+    "been", "being", "am", "do", "does", "did", "have", "has", "had", "having", "i", "you", "he",
+    "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our",
+    "their", "this", "that", "these", "those", "there", "here", "then", "than", "so", "not", "no",
+    "yes", "up", "down", "out", "off", "all", "any", "some", "what", "which", "who", "whom",
+    "when", "where", "why", "how", "would", "could", "should", "will", "can", "may", "might",
+    "must", "shall", "just", "very", "too", "more", "most", "now", "back", "got", "get", "one",
+    "like", "said",
 ];
 
 /// The effective frequency word lists for a report (#119): the built-in
@@ -606,8 +681,11 @@ pub fn tally_phrases(text: &str, counts: &mut HashMap<String, usize>, lists: &Wo
 /// The `n` highest-count entries with count `>= min`, ties broken alphabetically
 /// for a deterministic, stable order.
 pub fn top_counts(counts: &HashMap<String, usize>, n: usize, min: usize) -> Vec<(String, usize)> {
-    let mut items: Vec<(String, usize)> =
-        counts.iter().filter(|&(_, &c)| c >= min).map(|(k, &c)| (k.clone(), c)).collect();
+    let mut items: Vec<(String, usize)> = counts
+        .iter()
+        .filter(|&(_, &c)| c >= min)
+        .map(|(k, &c)| (k.clone(), c))
+        .collect();
     items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     items.truncate(n);
     items
@@ -635,7 +713,11 @@ impl Dialogue {
     /// Share of words that are dialogue, as a percent (0 when there are none).
     pub fn dialogue_pct(&self) -> f64 {
         let total = self.dialogue_words + self.narration_words;
-        if total == 0 { 0.0 } else { self.dialogue_words as f64 * 100.0 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            self.dialogue_words as f64 * 100.0 / total as f64
+        }
     }
 }
 
@@ -691,7 +773,6 @@ pub fn paragraph_lengths(text: &str) -> Vec<usize> {
     lengths
 }
 
-
 // --- Vocabulary richness (#72) ----------------------------------------------
 
 /// The window, in words, for the moving-average type–token ratio.
@@ -720,7 +801,11 @@ fn mattr(tokens: &[String], window: usize) -> f64 {
         return 0.0;
     }
     if n <= window {
-        let distinct = tokens.iter().map(String::as_str).collect::<HashSet<_>>().len();
+        let distinct = tokens
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>()
+            .len();
         return distinct as f64 / n as f64;
     }
     // Slide a fixed window across the tokens, tracking the distinct count
@@ -739,7 +824,9 @@ fn mattr(tokens: &[String], window: usize) -> f64 {
         let leaving = tokens[i - window].as_str();
         // Every token that enters the window was counted in, so one leaving it is
         // always present in the map.
-        let c = counts.get_mut(leaving).expect("a token leaving the window was counted in");
+        let c = counts
+            .get_mut(leaving)
+            .expect("a token leaving the window was counted in");
         *c -= 1;
         if *c == 0 {
             distinct -= 1;
@@ -754,8 +841,6 @@ fn mattr(tokens: &[String], window: usize) -> f64 {
     // Mean of each window's (distinct / window) ratio.
     sum / ((n - window + 1) * window) as f64
 }
-
-
 
 mod render;
 pub use render::*;

@@ -4,9 +4,9 @@
 
 use super::*;
 
+use super::assist::list_move;
 use crate::ai::{self, cost, naming, router, BackendKind};
 use crate::mode::{Action, AiAction, ExportScope};
-use super::assist::list_move;
 
 /// The routing decision for starting an AI action (#82/#372): run it now on a
 /// chosen backend, or confirm first (the estimate is over the threshold) — the
@@ -20,30 +20,118 @@ impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
-        let ai = |label: &str, desc: &str, a| PaletteItem { label: label.into(), desc: desc.into(), command: Command::Ai(a) };
+        let ai = |label: &str, desc: &str, a| PaletteItem {
+            label: label.into(),
+            desc: desc.into(),
+            command: Command::Ai(a),
+        };
         let items = vec![
-            ai("Ask the manuscript", "Answer a question grounded in the draft", AiAction::Ask),
-            ai("Character bible", "Profiles, arcs, and drift flags", AiAction::Characters),
-            ai("Timeline & continuity", "Ordered timeline + contradiction findings", AiAction::Continuity),
-            ai("Setting & worldbuilding", "Setting bible + rule-violation findings", AiAction::Setting),
-            ai("Scaffold / outline", "Beat outline + structural gaps", AiAction::Scaffold),
-            ai("Name & term consistency", "Spelling variants (cheap pass)", AiAction::Naming),
-            ai("Prose & style", "POV / tense / voice findings (analysis only)", AiAction::Style),
-            ai("Brainstorm ideas", "Premises, themes & conflicts from a spark (off-manuscript)", AiAction::Brainstorm),
-            ai("Draft characters", "Starter cast from a concept (no manuscript needed)", AiAction::DraftCharacters),
-            ai("Draft setting", "Starter worldbuilding bible from a concept", AiAction::DraftSetting),
-            ai("Character voice", "Dialogue & POV voice vs. the character bible", AiAction::Voice),
-            ai("Submission material", "Synopsis, blurb & query letter (off-manuscript)", AiAction::Submission),
-            ai("Marketing copy", "Blurb variants & taglines (off-manuscript)", AiAction::Marketing),
-            ai("Social posts", "X / Facebook / Instagram copy (off-manuscript)", AiAction::Social),
-            ai("Ad creative", "Amazon / Meta / X ad copy & targeting (off-manuscript)", AiAction::AdCreative),
-            ai("Character portraits", "Portrait images from the character bible (fal.ai)", AiAction::Portrait),
-            ai("Scene illustration", "Illustrate the active chapter (fal.ai)", AiAction::Scene),
-            ai("Revision triage", "All findings so far, in one list (local)", AiAction::Triage),
-            ai("Word search", "In-context thesaurus for a word or phrase (reference only)", AiAction::Thesaurus),
-            ai("Editorial read", "Flag structural / continuity / line issues — no fixes", AiAction::Editorial),
+            ai(
+                "Ask the manuscript",
+                "Answer a question grounded in the draft",
+                AiAction::Ask,
+            ),
+            ai(
+                "Character bible",
+                "Profiles, arcs, and drift flags",
+                AiAction::Characters,
+            ),
+            ai(
+                "Timeline & continuity",
+                "Ordered timeline + contradiction findings",
+                AiAction::Continuity,
+            ),
+            ai(
+                "Setting & worldbuilding",
+                "Setting bible + rule-violation findings",
+                AiAction::Setting,
+            ),
+            ai(
+                "Scaffold / outline",
+                "Beat outline + structural gaps",
+                AiAction::Scaffold,
+            ),
+            ai(
+                "Name & term consistency",
+                "Spelling variants (cheap pass)",
+                AiAction::Naming,
+            ),
+            ai(
+                "Prose & style",
+                "POV / tense / voice findings (analysis only)",
+                AiAction::Style,
+            ),
+            ai(
+                "Brainstorm ideas",
+                "Premises, themes & conflicts from a spark (off-manuscript)",
+                AiAction::Brainstorm,
+            ),
+            ai(
+                "Draft characters",
+                "Starter cast from a concept (no manuscript needed)",
+                AiAction::DraftCharacters,
+            ),
+            ai(
+                "Draft setting",
+                "Starter worldbuilding bible from a concept",
+                AiAction::DraftSetting,
+            ),
+            ai(
+                "Character voice",
+                "Dialogue & POV voice vs. the character bible",
+                AiAction::Voice,
+            ),
+            ai(
+                "Submission material",
+                "Synopsis, blurb & query letter (off-manuscript)",
+                AiAction::Submission,
+            ),
+            ai(
+                "Marketing copy",
+                "Blurb variants & taglines (off-manuscript)",
+                AiAction::Marketing,
+            ),
+            ai(
+                "Social posts",
+                "X / Facebook / Instagram copy (off-manuscript)",
+                AiAction::Social,
+            ),
+            ai(
+                "Ad creative",
+                "Amazon / Meta / X ad copy & targeting (off-manuscript)",
+                AiAction::AdCreative,
+            ),
+            ai(
+                "Character portraits",
+                "Portrait images from the character bible (fal.ai)",
+                AiAction::Portrait,
+            ),
+            ai(
+                "Scene illustration",
+                "Illustrate the active chapter (fal.ai)",
+                AiAction::Scene,
+            ),
+            ai(
+                "Revision triage",
+                "All findings so far, in one list (local)",
+                AiAction::Triage,
+            ),
+            ai(
+                "Word search",
+                "In-context thesaurus for a word or phrase (reference only)",
+                AiAction::Thesaurus,
+            ),
+            ai(
+                "Editorial read",
+                "Flag structural / continuity / line issues — no fixes",
+                AiAction::Editorial,
+            ),
         ];
-        self.mode = Mode::Palette(Box::new(Palette { title: "AI", items, selected: 0 }));
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "AI",
+            items,
+            selected: 0,
+        }));
     }
 
     /// Open the unified run-action menu (#225): every registry [`Action`], run by
@@ -62,10 +150,18 @@ impl App {
                     }
                     None => a.name().to_string(),
                 };
-                PaletteItem { label: a.label().into(), desc, command: Command::Run(a) }
+                PaletteItem {
+                    label: a.label().into(),
+                    desc,
+                    command: Command::Run(a),
+                }
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette { title: "Run action", items, selected: 0 }));
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Run action",
+            items,
+            selected: 0,
+        }));
     }
 
     /// Why `action` can't run right now, or `None` if it can — the one
@@ -105,7 +201,9 @@ impl App {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
             // Sprint controls reflect whether one is running (#299).
-            Action::StartSprint if self.sprint.is_some() => Some("a sprint is already running".into()),
+            Action::StartSprint if self.sprint.is_some() => {
+                Some("a sprint is already running".into())
+            }
             Action::StopSprint if self.sprint.is_none() => Some("no sprint is running".into()),
             // Snippets need a `[snippets]` table to insert from (#411).
             Action::InsertSnippet if self.snippets.is_empty() => {
@@ -134,7 +232,10 @@ impl App {
         // with the usual message.)
         let local_fallback = cfg!(feature = "local")
             && self.ai.enabled
-            && matches!(self.ai.routing, router::Policy::PreferLocal | router::Policy::CostCeiling | router::Policy::Ask);
+            && matches!(
+                self.ai.routing,
+                router::Policy::PreferLocal | router::Policy::CostCeiling | router::Policy::Ask
+            );
         if local_fallback {
             return None;
         }
@@ -200,7 +301,8 @@ impl App {
     /// are defined, so this normally has at least one entry.
     pub(crate) fn open_snippet_picker(&mut self) {
         if self.snippets.is_empty() {
-            self.message = Some("No snippets defined — add a [snippets] table to your config.".into());
+            self.message =
+                Some("No snippets defined — add a [snippets] table to your config.".into());
             return;
         }
         let items = self
@@ -213,7 +315,11 @@ impl App {
                 command: Command::InsertSnippet(i),
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette { title: "Insert snippet", items, selected: 0 }));
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Insert snippet",
+            items,
+            selected: 0,
+        }));
     }
 
     /// Insert the author-defined snippet's literal text at the cursor (#411),
@@ -276,9 +382,16 @@ impl App {
                 self.route_request(backend, action, force);
                 self.run_ai_action(action, force);
             }
-            AiStart::Confirm { label, offer_local } => {
-                self.open_prompt(Pending::ConfirmAi { action, force, offer_local }, label, "", None)
-            }
+            AiStart::Confirm { label, offer_local } => self.open_prompt(
+                Pending::ConfirmAi {
+                    action,
+                    force,
+                    offer_local,
+                },
+                label,
+                "",
+                None,
+            ),
         }
     }
 
@@ -296,7 +409,11 @@ impl App {
     /// author's downloaded set (`[ai] local_models`) by the pass's size. `None`
     /// when no set is configured — the backend then loads the single recommended
     /// model, as before.
-    fn pick_local_model(&self, action: AiAction, force: bool) -> Option<&'static ai::model_select::Model> {
+    fn pick_local_model(
+        &self,
+        action: AiAction,
+        force: bool,
+    ) -> Option<&'static ai::model_select::Model> {
         let available = ai::model_select::available(&self.ai.local_models);
         if available.is_empty() {
             return None;
@@ -311,7 +428,8 @@ impl App {
     /// the bound; otherwise it's the largest window among the configured set, so a
     /// long-context model lets a whole-manuscript pass run locally.
     fn local_fits(&self, input_tokens: u32) -> bool {
-        cfg!(feature = "local") && input_tokens <= ai::model_select::local_window(&self.ai.local_models)
+        cfg!(feature = "local")
+            && input_tokens <= ai::model_select::local_window(&self.ai.local_models)
     }
 
     /// The cost decision for a network AI action (#82): run it now, or confirm
@@ -339,7 +457,10 @@ impl App {
         match route.confirm {
             None => AiStart::Run(route.backend),
             Some(c) if c.offer_local => AiStart::Confirm {
-                label: format!("{} — y Claude · l local · N cancel", cost::compare_label(&est, model)),
+                label: format!(
+                    "{} — y Claude · l local · N cancel",
+                    cost::compare_label(&est, model)
+                ),
                 offer_local: true,
             },
             Some(_) => AiStart::Confirm {

@@ -52,7 +52,10 @@ pub struct Live {
 /// (the note is then dropped). An insertion inside the range extends it; a
 /// deletion inside it shrinks it; an edit wholly before it slides it; one wholly
 /// after it leaves it untouched.
-pub fn remap((rs, re): (usize, usize), (start, old_end, new_end): (usize, usize, usize)) -> Option<(usize, usize)> {
+pub fn remap(
+    (rs, re): (usize, usize),
+    (start, old_end, new_end): (usize, usize, usize),
+) -> Option<(usize, usize)> {
     let shift = |p: usize| -> usize {
         if p <= start {
             p

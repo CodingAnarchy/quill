@@ -51,7 +51,10 @@ Reference chapters by title.";
 pub fn schema() -> Value {
     let note = super::object_schema(
         vec![
-            ("focus", json!({ "type": "string", "enum": ["structural", "continuity", "line"] })),
+            (
+                "focus",
+                json!({ "type": "string", "enum": ["structural", "continuity", "line"] }),
+            ),
             ("chapters", super::string_array()),
             ("location", super::string_field()),
             ("concern", super::string_field()),
@@ -72,8 +75,7 @@ pub fn parse(text: &str) -> Result<Vec<Note>, AiError> {
     struct Reply {
         notes: Vec<Note>,
     }
-    let reply: Reply =
-        super::parse_json(text, "editorial")?;
+    let reply: Reply = super::parse_json(text, "editorial")?;
     Ok(reply.notes)
 }
 
@@ -107,6 +109,9 @@ mod tests {
         assert!(req.json_schema.is_some());
         // The constrained lens set is in the schema.
         let s = schema();
-        assert_eq!(s["properties"]["notes"]["items"]["properties"]["focus"]["enum"][0], "structural");
+        assert_eq!(
+            s["properties"]["notes"]["items"]["properties"]["focus"]["enum"][0],
+            "structural"
+        );
     }
 }

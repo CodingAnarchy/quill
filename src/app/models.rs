@@ -67,8 +67,11 @@ impl App {
     /// Re-probe which catalog models are on disk (#382) and cache the result.
     /// Cheap I/O, run on open and after a download / remove — never per frame.
     fn refresh_downloaded_models(&mut self) {
-        self.downloaded_models =
-            MODELS.iter().filter(|m| worker::model_downloaded(m)).map(|m| m.id().to_string()).collect();
+        self.downloaded_models = MODELS
+            .iter()
+            .filter(|m| worker::model_downloaded(m))
+            .map(|m| m.id().to_string())
+            .collect();
     }
 
     /// Start downloading model `id` on a worker thread (#382): the editor stays
@@ -76,7 +79,9 @@ impl App {
     /// result. Refuses without the `local` feature, or when already downloaded /
     /// a download is in flight.
     fn start_model_download(&mut self, id: &str) {
-        let Some(model) = model_select::by_id(id) else { return };
+        let Some(model) = model_select::by_id(id) else {
+            return;
+        };
         if cfg!(not(feature = "local")) {
             self.message = Some(worker::LOCAL_UNAVAILABLE.to_string());
             return;
@@ -90,8 +95,13 @@ impl App {
             return;
         }
         let id = id.to_string();
-        self.download_task.spawn(move || (id, worker::download_model(model)));
-        self.message = Some(format!("Downloading Qwen2.5-{}… (~{:.1} GB)", model.id(), model.size_gb));
+        self.download_task
+            .spawn(move || (id, worker::download_model(model)));
+        self.message = Some(format!(
+            "Downloading Qwen2.5-{}… (~{:.1} GB)",
+            model.id(),
+            model.size_gb
+        ));
     }
 
     /// Surface a finished download (#382): refresh on-disk status and report.
@@ -102,7 +112,9 @@ impl App {
                 self.refresh_downloaded_models();
                 self.message = Some(format!("Downloaded Qwen2.5-{id}."));
             }
-            Poll::Ready((id, Err(e))) => self.message = Some(format!("Download of Qwen2.5-{id} failed: {e}")),
+            Poll::Ready((id, Err(e))) => {
+                self.message = Some(format!("Download of Qwen2.5-{id} failed: {e}"))
+            }
             Poll::Pending => {}
             Poll::Died => self.message = Some("Model download failed.".into()),
         }
@@ -125,7 +137,9 @@ impl App {
     /// Delete a downloaded model's files (#382), drop any cached loaded instance,
     /// and refresh status. Confirmed via [`Pending::ConfirmRemoveModel`].
     pub(crate) fn remove_model(&mut self, id: &str) {
-        let Some(model) = model_select::by_id(id) else { return };
+        let Some(model) = model_select::by_id(id) else {
+            return;
+        };
         match worker::remove_model_files(model) {
             Ok(()) => {
                 if let Ok(mut cache) = self.local_backend.lock() {
@@ -155,7 +169,8 @@ impl App {
     /// generators use).
     fn persist_local_models(&mut self) {
         let value = local_models_toml(&self.ai.local_models);
-        if let Err(e) = config::set_values(&[("ai".to_string(), "local_models".to_string(), value)]) {
+        if let Err(e) = config::set_values(&[("ai".to_string(), "local_models".to_string(), value)])
+        {
             self.message = Some(format!("Couldn't save the model set: {e}"));
         }
     }
@@ -193,7 +208,10 @@ mod tests {
         let empty: Vec<String> = vec![];
         let added = toggled(&empty, "7B");
         assert_eq!(added, vec!["7B".to_string()]);
-        assert!(toggled(&added, "7B").is_empty(), "toggling again removes it");
+        assert!(
+            toggled(&added, "7B").is_empty(),
+            "toggling again removes it"
+        );
     }
 
     #[test]

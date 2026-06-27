@@ -5,11 +5,10 @@
 //! editor state and key dispatch (a child module, so it keeps access to `App`'s
 //! private fields). See `docs/ai-features.md`.
 
-use super::*;
-use crate::theme;
 use super::bible_review::Staged;
 use super::worker::bible_tracker;
-
+use super::*;
+use crate::theme;
 
 use crate::ai::ad_creative::{self, AdCreative};
 use crate::ai::brainstorm::{self, Brainstorm};
@@ -23,7 +22,6 @@ use crate::ai::voice;
 use crate::ai::workflow_gen::{self, GeneratedWorkflow};
 use crate::mode::AiAction;
 use crate::text::count_matches;
-
 
 /// A one-line status message for one or more failed writes (#153).
 pub(super) fn write_failure_message(failures: &[String]) -> String {
@@ -47,15 +45,16 @@ fn findings_from<T>(
         .iter()
         .map(|it| {
             let (summary, chapters) = describe(it);
-            Finding { summary, chapters, book }
+            Finding {
+                summary,
+                chapters,
+                book,
+            }
         })
         .collect()
 }
 
-
 impl App {
-
-
     /// Begin building a workflow from a description (#232): only when AI is ready,
     /// then open the description prompt. The estimate is trivial (no manuscript is
     /// sent), so there's no cost confirm.
@@ -79,7 +78,11 @@ impl App {
         let model = self.ai.model.clone();
         self.spawn_outcome("⟳ Building a workflow…", move |backend| {
             let req = workflow_gen::build_request(&description, &vocab, &model);
-            Outcome::Workflow(backend.complete(&req).and_then(|r| workflow_gen::parse(&r.text)))
+            Outcome::Workflow(
+                backend
+                    .complete(&req)
+                    .and_then(|r| workflow_gen::parse(&r.text)),
+            )
         });
     }
 
@@ -87,7 +90,10 @@ impl App {
     /// to, validate the proposal against the registry, then stash the steps and
     /// open the name-confirm prompt (prefilled with the proposed name) so the
     /// author confirms, renames, or cancels before anything is written.
-    pub(crate) fn apply_generated_workflow(&mut self, result: Result<GeneratedWorkflow, ai::AiError>) {
+    pub(crate) fn apply_generated_workflow(
+        &mut self,
+        result: Result<GeneratedWorkflow, ai::AiError>,
+    ) {
         let Some(gen) = self.ok_or_report(result) else {
             return;
         };
@@ -103,7 +109,10 @@ impl App {
         // cycle before offering to save (resolve treats the proposal as a new
         // workflow alongside the existing ones).
         let mut candidate = self.workflows.clone();
-        candidate.push(crate::workflow::Workflow { name: gen.name.clone(), steps: gen.steps.clone() });
+        candidate.push(crate::workflow::Workflow {
+            name: gen.name.clone(),
+            steps: gen.steps.clone(),
+        });
         if let Err(e) = crate::workflow::resolve(&candidate, &gen.name) {
             self.message = Some(format!("Proposed workflow is invalid: {e}"));
             return;
@@ -142,7 +151,6 @@ impl App {
     }
     // --- AI: "Ask the manuscript" -----------------------------------------
 
-
     /// Start an "Ask the manuscript" request on a worker thread. The manuscript
     /// is assembled here (on the main thread) and moved into the thread with the
     /// question and a backend; the result returns via `ai_rx`, polled each tick.
@@ -153,9 +161,14 @@ impl App {
         if question.is_empty() {
             return;
         }
-        self.spawn_ai("⟳ Sending to Claude…", move |backend, manuscript, model| {
-            Outcome::Answer(backend.complete(&ai::build_qa_request(manuscript, &question, &model)))
-        });
+        self.spawn_ai(
+            "⟳ Sending to Claude…",
+            move |backend, manuscript, model| {
+                Outcome::Answer(
+                    backend.complete(&ai::build_qa_request(manuscript, &question, &model)),
+                )
+            },
+        );
     }
 
     /// Start a character-extraction pass — incremental from the changed chapters
@@ -181,17 +194,34 @@ impl App {
     /// active-book passes call it with the active book; the series-bible refresh
     /// (#340) drives it per book. Routes to each tracker's request builders.
     pub(crate) fn run_book_bible_pass(&mut self, action: AiAction, book: usize, force: bool) {
-        let Some(t) = bible_tracker(action) else { return };
+        let Some(t) = bible_tracker(action) else {
+            return;
+        };
         match action {
-            AiAction::Characters => self.run_bible_tracker(t, book, force, character::build_request, character::build_incremental_request, |r| {
-                Outcome::Characters(r.and_then(|resp| character::parse(&resp.text)))
-            }),
-            AiAction::Continuity => self.run_bible_tracker(t, book, force, continuity::build_request, continuity::build_incremental_request, |r| {
-                Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text)))
-            }),
-            AiAction::Setting => self.run_bible_tracker(t, book, force, setting::build_request, setting::build_incremental_request, |r| {
-                Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text)))
-            }),
+            AiAction::Characters => self.run_bible_tracker(
+                t,
+                book,
+                force,
+                character::build_request,
+                character::build_incremental_request,
+                |r| Outcome::Characters(r.and_then(|resp| character::parse(&resp.text))),
+            ),
+            AiAction::Continuity => self.run_bible_tracker(
+                t,
+                book,
+                force,
+                continuity::build_request,
+                continuity::build_incremental_request,
+                |r| Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text))),
+            ),
+            AiAction::Setting => self.run_bible_tracker(
+                t,
+                book,
+                force,
+                setting::build_request,
+                setting::build_incremental_request,
+                |r| Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text))),
+            ),
             // `bible_tracker` returned `Some`, so `action` is one of the three above.
             _ => unreachable!("run_book_bible_pass: non-bible action passed the tracker gate"),
         }
@@ -200,7 +230,12 @@ impl App {
     /// Start a scaffolding pass; the beat outline + gap findings are applied by
     /// [`App::poll_ai`].
     pub(crate) fn analyze_scaffold(&mut self) {
-        self.spawn_manuscript_pass("⟳ Outlining…", scaffold::build_request, scaffold::parse, Outcome::Scaffold);
+        self.spawn_manuscript_pass(
+            "⟳ Outlining…",
+            scaffold::build_request,
+            scaffold::parse,
+            Outcome::Scaffold,
+        );
     }
 
     /// Start a naming-consistency pass; variant findings are applied by
@@ -219,7 +254,12 @@ impl App {
     /// Start a prose & style pass (POV/tense/voice — semantic, analysis only);
     /// findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_style(&mut self) {
-        self.spawn_manuscript_pass("⟳ Reviewing prose & style…", style::build_request, style::parse, Outcome::Style);
+        self.spawn_manuscript_pass(
+            "⟳ Reviewing prose & style…",
+            style::build_request,
+            style::parse,
+            Outcome::Style,
+        );
     }
 
     /// Start an editorial read (#293): flag structural / continuity / line issues
@@ -270,32 +310,51 @@ impl App {
     /// Sends only the premise (no manuscript), so it works on an empty project;
     /// the ideas are written to `bible/brainstorm.md` by [`App::poll_ai`].
     pub(crate) fn brainstorm(&mut self, premise: &str) {
-        self.spawn_generative(premise, "⟳ Brainstorming…", |backend, premise, model| {
-            let req = brainstorm::build_request(premise, &model);
-            Outcome::Brainstorm(backend.complete(&req).and_then(|r| brainstorm::parse(&r.text)))
-        });
+        self.spawn_generative(
+            premise,
+            "⟳ Brainstorming…",
+            |backend, premise, model| {
+                let req = brainstorm::build_request(premise, &model);
+                Outcome::Brainstorm(
+                    backend
+                        .complete(&req)
+                        .and_then(|r| brainstorm::parse(&r.text)),
+                )
+            },
+        );
     }
 
     /// Draft a starter character cast from a concept (#256) — generative, no
     /// manuscript. Reuses the extractive pass's `Outcome::Characters` so the
     /// profiles are written to `bible/characters/` by [`apply_characters`].
     pub(crate) fn draft_characters(&mut self, concept: &str) {
-        self.spawn_generative(concept, "⟳ Drafting characters…", |backend, concept, model| {
-            let req = character::build_concept_request(concept, &model);
-            Outcome::Characters(backend.complete(&req).and_then(|r| character::parse(&r.text)))
-        });
+        self.spawn_generative(
+            concept,
+            "⟳ Drafting characters…",
+            |backend, concept, model| {
+                let req = character::build_concept_request(concept, &model);
+                Outcome::Characters(
+                    backend
+                        .complete(&req)
+                        .and_then(|r| character::parse(&r.text)),
+                )
+            },
+        );
     }
 
     /// Draft a starter setting bible from a concept (#257) — generative, no
     /// manuscript. Reuses the extractive pass's `Outcome::Setting` so the bible is
     /// written to `bible/setting.md` by [`apply_setting`].
     pub(crate) fn draft_setting(&mut self, concept: &str) {
-        self.spawn_generative(concept, "⟳ Drafting setting…", |backend, concept, model| {
-            let req = setting::build_concept_request(concept, &model);
-            Outcome::Setting(backend.complete(&req).and_then(|r| setting::parse(&r.text)))
-        });
+        self.spawn_generative(
+            concept,
+            "⟳ Drafting setting…",
+            |backend, concept, model| {
+                let req = setting::build_concept_request(concept, &model);
+                Outcome::Setting(backend.complete(&req).and_then(|r| setting::parse(&r.text)))
+            },
+        );
     }
-
 
     /// Apply a brainstorm pass (#255): write the idea notes to `bible/brainstorm.md`,
     /// conflict-reviewed and off-manuscript (never a chapter file, never prose).
@@ -306,7 +365,12 @@ impl App {
         };
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("brainstorm.md");
-        self.apply_bible_with_findings(path, "brainstorm", |notes| brainstorm::render(&ideas, notes, &today), Vec::new());
+        self.apply_bible_with_findings(
+            path,
+            "brainstorm",
+            |notes| brainstorm::render(&ideas, notes, &today),
+            Vec::new(),
+        );
     }
 
     /// Generate marketing copy (#236) — blurb variants & taglines; written to
@@ -323,7 +387,12 @@ impl App {
     /// Generate social posts (#237) — per-platform promo copy; written to
     /// `marketing/social/` by [`App::poll_ai`].
     pub(crate) fn analyze_social(&mut self) {
-        self.spawn_manuscript_pass("⟳ Drafting social posts…", social::build_request, social::parse, Outcome::Social);
+        self.spawn_manuscript_pass(
+            "⟳ Drafting social posts…",
+            social::build_request,
+            social::parse,
+            Outcome::Social,
+        );
     }
 
     /// Generate ad creative & copy (#251) — per-platform ad fields written to
@@ -344,7 +413,13 @@ impl App {
     /// only (front matter stripped). Empty when none exist yet.
     pub(crate) fn marketing_copy_context(&self) -> String {
         let root = self.project.root.join("marketing");
-        let files = ["blurbs.md", "taglines.md", "social/x.md", "social/facebook.md", "social/instagram.md"];
+        let files = [
+            "blurbs.md",
+            "taglines.md",
+            "social/x.md",
+            "social/facebook.md",
+            "social/instagram.md",
+        ];
         let mut out = String::new();
         for file in files {
             if let Ok(text) = std::fs::read_to_string(root.join(file)) {
@@ -362,7 +437,6 @@ impl App {
             self.write_off_manuscript("Ad creative", "marketing/ads", creative.artifacts());
         }
     }
-
 
     /// Show an AI result — a Q&A answer or a pass summary — as the full-screen
     /// overlay, scrolled to the top. The single place an AI result becomes an
@@ -419,7 +493,9 @@ impl App {
         for c in &chars {
             drift += c.drift.len();
             let path = dir.join(format!("{}.md", bible::slug(&c.name)));
-            match self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)) {
+            match self.stage_bible(path, &c.name, |notes| {
+                character::render_profile(c, notes, &today)
+            }) {
                 Staged::Wrote => written += 1,
                 Staged::Conflict(conflict) => conflicts.push(conflict),
                 Staged::Failed(msg) => failures.push(msg),
@@ -433,11 +509,13 @@ impl App {
             self.show_ai(character_summary_lines(chars.len(), written, drift));
         } else {
             let pending = conflicts.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
+            self.mode = Mode::BibleReview(Box::new(BibleReview {
+                conflicts,
+                editing: None,
+            }));
             self.message = Some(format!("Wrote {written} · {pending} need review"));
         }
     }
-
 
     /// Count a character's name/alias mentions across the manuscript and record
     /// the last chapter it appears in — local "screen time" / "last seen", free.
@@ -469,12 +547,17 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = findings_from(&cont.findings, book, |f| (format!("{}: {}", f.kind, f.detail), f.chapters.clone()));
+        let findings = findings_from(&cont.findings, book, |f| {
+            (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
+        });
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("timeline.md");
-        self.apply_bible_with_findings(path, "timeline", |notes| {
-            continuity::render_timeline(&cont, notes, &today)
-        }, findings);
+        self.apply_bible_with_findings(
+            path,
+            "timeline",
+            |notes| continuity::render_timeline(&cont, notes, &today),
+            findings,
+        );
     }
 
     /// Apply a setting pass: write `bible/setting.md` and surface rule-violation
@@ -484,12 +567,17 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = findings_from(&setting.findings, book, |f| (format!("{}: {}", f.rule, f.violation), f.chapters.clone()));
+        let findings = findings_from(&setting.findings, book, |f| {
+            (format!("{}: {}", f.rule, f.violation), f.chapters.clone())
+        });
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("setting.md");
-        self.apply_bible_with_findings(path, "setting", |notes| {
-            setting::render(&setting, notes, &today)
-        }, findings);
+        self.apply_bible_with_findings(
+            path,
+            "setting",
+            |notes| setting::render(&setting, notes, &today),
+            findings,
+        );
     }
 
     // --- In-context thesaurus / word search (#290) ------------------------
@@ -525,12 +613,19 @@ impl App {
         let model = self.ai.model.clone();
         self.spawn_outcome("\u{27f3} Searching words\u{2026}", move |backend| {
             let req = ai::thesaurus::build_request(&request, &context, &model);
-            Outcome::Thesaurus(backend.complete(&req).and_then(|r| ai::thesaurus::parse(&r.text)))
+            Outcome::Thesaurus(
+                backend
+                    .complete(&req)
+                    .and_then(|r| ai::thesaurus::parse(&r.text)),
+            )
         });
     }
 
     /// Show the word-search results in the AI overlay.
-    pub(crate) fn apply_thesaurus(&mut self, result: Result<Vec<ai::thesaurus::Word>, ai::AiError>) {
+    pub(crate) fn apply_thesaurus(
+        &mut self,
+        result: Result<Vec<ai::thesaurus::Word>, ai::AiError>,
+    ) {
         if let Some(words) = self.ok_or_report(result) {
             self.show_ai(thesaurus_lines(&words));
         }
@@ -542,12 +637,17 @@ impl App {
         let Some(scaffold) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&scaffold.gaps, None, |g| (format!("gap: {}", g.detail), vec![g.chapter.clone()]));
+        let findings = findings_from(&scaffold.gaps, None, |g| {
+            (format!("gap: {}", g.detail), vec![g.chapter.clone()])
+        });
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("outline.md");
-        self.apply_bible_with_findings(path, "outline", |notes| {
-            scaffold::render_outline(&scaffold, notes, &today)
-        }, findings);
+        self.apply_bible_with_findings(
+            path,
+            "outline",
+            |notes| scaffold::render_outline(&scaffold, notes, &today),
+            findings,
+        );
     }
 
     /// Apply a naming pass: surface the variant clusters as findings. Pure
@@ -573,14 +673,19 @@ impl App {
         let Some(style) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&style.findings, None, |f| (format!("{}: {}", f.kind, f.detail), f.chapters.clone()));
+        let findings = findings_from(&style.findings, None, |f| {
+            (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
+        });
         self.show_findings(findings);
     }
 
     /// Apply an editorial read (#293): turn each fix-free note into a triage
     /// finding (`focus: concern`, plus a quoted span for line-level issues) and
     /// surface them in the findings list.
-    pub(crate) fn apply_editorial(&mut self, result: Result<Vec<ai::editorial::Note>, ai::AiError>) {
+    pub(crate) fn apply_editorial(
+        &mut self,
+        result: Result<Vec<ai::editorial::Note>, ai::AiError>,
+    ) {
         let Some(notes) = self.ok_or_report(result) else {
             return;
         };
@@ -591,7 +696,10 @@ impl App {
                 .filter(|s| !s.is_empty())
                 .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
                 .unwrap_or_default();
-            (format!("{}: {}{at}", n.focus, n.concern), n.chapters.clone())
+            (
+                format!("{}: {}{at}", n.focus, n.concern),
+                n.chapters.clone(),
+            )
         });
         self.show_findings(findings);
     }
@@ -617,7 +725,11 @@ impl App {
     /// `submission/` (conflict-reviewed like any generated file) and summarize.
     pub(crate) fn apply_submission(&mut self, result: Result<Submission, ai::AiError>) {
         if let Some(sub) = self.ok_or_report(result) {
-            let artifacts = sub.artifacts().into_iter().map(|(k, f, t)| (k, f, t.to_string())).collect();
+            let artifacts = sub
+                .artifacts()
+                .into_iter()
+                .map(|(k, f, t)| (k, f, t.to_string()))
+                .collect();
             self.write_off_manuscript("Submission material", "submission", artifacts);
         }
     }
@@ -658,7 +770,9 @@ impl App {
         for (kind, file, text) in artifacts {
             let path = self.project.root.join(subdir).join(file);
             let title = format!("title: {kind}\n");
-            match self.stage_bible(path, kind, |notes| bible::render(&title, &text, notes, &today)) {
+            match self.stage_bible(path, kind, |notes| {
+                bible::render(&title, &text, notes, &today)
+            }) {
                 Staged::Wrote => written.push(format!("{subdir}/{file}")),
                 Staged::Conflict(c) => conflicts.push(c),
                 Staged::Failed(msg) => failures.push(msg),
@@ -673,16 +787,20 @@ impl App {
             let mut lines = vec![Line::raw(format!("{label} written:")), Line::raw("")];
             lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
             lines.push(Line::raw(""));
-            lines.push(Line::raw("Off-manuscript drafts — edit freely; never part of the novel."));
+            lines.push(Line::raw(
+                "Off-manuscript drafts — edit freely; never part of the novel.",
+            ));
             self.show_ai(lines);
         } else {
             let pending = conflicts.len();
             let n = written.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
+            self.mode = Mode::BibleReview(Box::new(BibleReview {
+                conflicts,
+                editing: None,
+            }));
             self.message = Some(format!("Wrote {n} · {pending} need review"));
         }
     }
-
 
     /// Whether an AI request is currently in flight (for the status indicator).
     pub fn ai_busy(&self) -> bool {
@@ -690,8 +808,6 @@ impl App {
     }
 
     // --- Story-bible conflict review --------------------------------------
-
-
 }
 
 /// The new selection for a navigable list given a key, or `None` if the key
@@ -712,7 +828,10 @@ fn thesaurus_lines(words: &[ai::thesaurus::Word]) -> Vec<Line<'static>> {
     if words.is_empty() {
         return vec![Line::raw("No matches — try loosening the constraints.")];
     }
-    let mut lines = vec![Line::raw(format!("{} candidates:", words.len())), Line::raw("")];
+    let mut lines = vec![
+        Line::raw(format!("{} candidates:", words.len())),
+        Line::raw(""),
+    ];
     for w in words {
         let mut tags: Vec<String> = Vec::new();
         if let Some(s) = w.syllables {
@@ -724,8 +843,15 @@ fn thesaurus_lines(words: &[ai::thesaurus::Word]) -> Vec<Line<'static>> {
         if let Some(r) = w.rarity.as_deref().filter(|s| !s.is_empty()) {
             tags.push(r.to_string());
         }
-        let tail = if tags.is_empty() { String::new() } else { format!("  ({})", tags.join(" \u{b7} ")) };
-        lines.push(Line::raw(format!("{} \u{2014} {}{tail}", w.text, w.definition)));
+        let tail = if tags.is_empty() {
+            String::new()
+        } else {
+            format!("  ({})", tags.join(" \u{b7} "))
+        };
+        lines.push(Line::raw(format!(
+            "{} \u{2014} {}{tail}",
+            w.text, w.definition
+        )));
         if let Some(note) = w.note.as_deref().filter(|s| !s.is_empty()) {
             let dim = ratatui::style::Style::default().fg(theme::current().dim);
             lines.push(Line::from(Span::styled(format!("    {note}"), dim)));
@@ -740,7 +866,9 @@ fn character_summary_lines(total: usize, written: usize, drift: usize) -> Vec<Li
         Line::raw("Character analysis complete."),
         Line::raw(""),
         Line::raw(format!("Characters analyzed: {total}")),
-        Line::raw(format!("Profiles written:    {written}  (bible/characters/)")),
+        Line::raw(format!(
+            "Profiles written:    {written}  (bible/characters/)"
+        )),
         Line::raw(format!("Drift flags:         {drift}")),
         Line::raw(""),
         Line::raw("Open the bible files to review; the Notes section is yours to edit."),

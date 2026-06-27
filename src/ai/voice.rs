@@ -103,8 +103,14 @@ mod tests {
     #[test]
     fn request_carries_the_voice_notes_and_caches_the_manuscript() {
         let req = build_request("MANUSCRIPT".into(), "Mara: clipped, dry", "claude-opus-4-8");
-        assert_eq!(req.cached_context, "MANUSCRIPT", "manuscript stays the cacheable part");
-        assert!(req.user.contains("Mara: clipped, dry"), "voice notes travel in the prompt");
+        assert_eq!(
+            req.cached_context, "MANUSCRIPT",
+            "manuscript stays the cacheable part"
+        );
+        assert!(
+            req.user.contains("Mara: clipped, dry"),
+            "voice notes travel in the prompt"
+        );
         assert!(req.json_schema.is_some());
     }
 }

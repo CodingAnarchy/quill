@@ -41,7 +41,10 @@ fn downloading_without_the_local_feature_explains_how() {
     app.on_key(key(KeyCode::Char('d'))); // download the selected (first) model
     let msg = app.message.as_deref().unwrap_or("");
     assert!(msg.contains("--features local"), "{msg}");
-    assert!(!app.ai_task.is_busy(), "nothing is spawned when local isn't compiled in");
+    assert!(
+        !app.ai_task.is_busy(),
+        "nothing is spawned when local isn't compiled in"
+    );
 }
 
 #[test]
@@ -51,7 +54,17 @@ fn removing_a_model_thats_not_downloaded_is_a_noticed_no_op() {
     let (mut app, _dir) = two_chapter_app("models-remove");
     app.open_model_manager();
     app.on_key(key(KeyCode::Char('x'))); // remove the selected model
-    assert!(app.message.as_deref().unwrap_or("").contains("isn't downloaded"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("isn't downloaded"),
+        "{:?}",
+        app.message
+    );
     // No confirm opens for a model that isn't on disk.
-    assert!(matches!(app.mode, Mode::ModelManager { .. }), "stays in the manager");
+    assert!(
+        matches!(app.mode, Mode::ModelManager { .. }),
+        "stays in the manager"
+    );
 }

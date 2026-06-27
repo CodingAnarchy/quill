@@ -10,7 +10,12 @@ fn idle_flags_misspellings_and_skips_the_marker() {
     app.buffer = Buffer::from_text("The quikc xxx fox");
     app.on_idle();
 
-    assert_eq!(app.spell_flags.len(), 1, "only the misspelling: {:?}", app.spell_flags);
+    assert_eq!(
+        app.spell_flags.len(),
+        1,
+        "only the misspelling: {:?}",
+        app.spell_flags
+    );
     let (s, e) = app.spell_flags[0];
     assert_eq!(&app.buffer.text()[s..e], "quikc");
 }
@@ -36,7 +41,11 @@ fn accepting_a_flagged_word_clears_it_and_persists() {
     app.accept_word_at_cursor();
 
     assert!(app.spell_flags.is_empty(), "flag cleared after accepting");
-    assert!(app.message.as_deref().unwrap_or("").contains("Added"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Added"),
+        "{:?}",
+        app.message
+    );
     let file = fs::read_to_string(dir.join("dictionary.txt")).unwrap();
     assert!(file.contains("Vashti"), "persisted: {file}");
 }
@@ -48,7 +57,14 @@ fn accepting_with_no_flag_at_the_cursor_says_so() {
     app.on_idle();
     app.buffer.cursor = app.buffer.cursor_at_byte(0);
     app.accept_word_at_cursor();
-    assert!(app.message.as_deref().unwrap_or("").contains("No flagged word"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No flagged word"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -79,7 +95,14 @@ fn navigation_reports_when_none_remain() {
     app.buffer = Buffer::from_text("alpha beta gamma");
     app.on_idle();
     app.navigate_spell_flag(1);
-    assert!(app.message.as_deref().unwrap_or("").contains("No spelling flags"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No spelling flags"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -91,5 +114,12 @@ fn navigation_skips_a_word_thats_since_been_fixed() {
     // Fix the word without an idle pass; navigation refreshes and finds none.
     app.buffer = Buffer::from_text("quick here");
     app.navigate_spell_flag(1);
-    assert!(app.message.as_deref().unwrap_or("").contains("No spelling flags"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No spelling flags"),
+        "{:?}",
+        app.message
+    );
 }

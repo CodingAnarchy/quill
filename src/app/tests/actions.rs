@@ -38,7 +38,10 @@ fn action_palette_lists_every_registry_action() {
 fn ctrl_k_opens_the_action_palette() {
     let (mut app, _dir) = two_chapter_app("action-ctrl-k");
     app.on_key(ctrl('k'));
-    assert!(matches!(app.mode, Mode::Palette(_)), "Ctrl-k opens the run-action menu");
+    assert!(
+        matches!(app.mode, Mode::Palette(_)),
+        "Ctrl-k opens the run-action menu"
+    );
 }
 
 #[test]
@@ -63,8 +66,15 @@ fn run_progress_report_action_opens_the_overlay() {
 fn run_export_action_compiles_the_manuscript() {
     let (mut app, dir) = two_chapter_app("action-export");
     app.run_action(Action::Export(ExportFormat::Markdown), false);
-    assert!(app.message.as_deref().unwrap_or("").contains("Exported to"), "{:?}", app.message);
-    assert!(dir.join("export").join("book.md").exists(), "export written");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Exported to"),
+        "{:?}",
+        app.message
+    );
+    assert!(
+        dir.join("export").join("book.md").exists(),
+        "export written"
+    );
 }
 
 /// Export needs the per-chapter files; in the continuous view the window is
@@ -80,7 +90,10 @@ fn export_action_unavailable_in_the_continuous_view() {
         "explains the continuous-view guard, got: {:?}",
         app.message
     );
-    assert!(!dir.join("export").join("book.md").exists(), "nothing exported");
+    assert!(
+        !dir.join("export").join("book.md").exists(),
+        "nothing exported"
+    );
 }
 
 /// A network AI action with the backend off reports how to enable it (the same
@@ -91,7 +104,11 @@ fn ai_action_unavailable_when_ai_is_off() {
     app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
     app.run_action(Action::Ai(AiAction::Characters), false);
     assert!(!app.ai_task.is_busy(), "nothing sent when AI is off");
-    assert!(app.message.is_some(), "the reason is surfaced: {:?}", app.message);
+    assert!(
+        app.message.is_some(),
+        "the reason is surfaced: {:?}",
+        app.message
+    );
 }
 
 /// Triage is local aggregation, so it stays available with the AI backend off —

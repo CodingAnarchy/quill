@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::Request;
 use super::AiError;
+use super::Request;
 
 /// The model for this pass — cheap and high-volume by design.
 pub const MODEL: &str = "claude-haiku-4-5";
@@ -104,7 +104,10 @@ mod tests {
 
     #[test]
     fn request_uses_haiku_and_lists_known_entities() {
-        let req = build_request("the manuscript".into(), &["Mara".into(), "Aldermoor".into()]);
+        let req = build_request(
+            "the manuscript".into(),
+            &["Mara".into(), "Aldermoor".into()],
+        );
         assert_eq!(req.model, "claude-haiku-4-5");
         assert!(req.user.contains("Mara, Aldermoor"));
         assert!(req.json_schema.is_some());

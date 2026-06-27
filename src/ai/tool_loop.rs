@@ -92,7 +92,11 @@ pub(crate) const RESPOND: &str = "respond";
 pub(crate) fn tool_names(body: &Value) -> Vec<String> {
     body.get("tools")
         .and_then(Value::as_array)
-        .map(|ts| ts.iter().filter_map(|t| t["name"].as_str().map(str::to_string)).collect())
+        .map(|ts| {
+            ts.iter()
+                .filter_map(|t| t["name"].as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -134,10 +138,16 @@ pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
                             out.push('\n');
                         }
                         Some("tool_use") => {
-                            out.push_str(&format!("(ran the tool: {})\n", b["name"].as_str().unwrap_or("")));
+                            out.push_str(&format!(
+                                "(ran the tool: {})\n",
+                                b["name"].as_str().unwrap_or("")
+                            ));
                         }
                         Some("tool_result") => {
-                            out.push_str(&format!("(tool result: {})\n", b["content"].as_str().unwrap_or("")));
+                            out.push_str(&format!(
+                                "(tool result: {})\n",
+                                b["content"].as_str().unwrap_or("")
+                            ));
                         }
                         _ => {}
                     }
@@ -160,8 +170,8 @@ pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
 /// it to the action's named parameter, #390).
 #[cfg(any(feature = "local", test))]
 pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
-    let v: Value =
-        serde_json::from_str(text).map_err(|e| AiError::ApiMalformed(format!("tool-use choice: {e}")))?;
+    let v: Value = serde_json::from_str(text)
+        .map_err(|e| AiError::ApiMalformed(format!("tool-use choice: {e}")))?;
     let message = v["message"].as_str().unwrap_or("").to_string();
     match v["action"].as_str() {
         Some(a) if a != RESPOND && !a.is_empty() => {
@@ -169,7 +179,11 @@ pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
                 Some(arg) if !arg.is_empty() => json!({ "argument": arg }),
                 _ => json!({}),
             };
-            Ok(Turn::ToolCalls(vec![ToolCall { id: format!("local-{a}"), name: a.to_string(), input }]))
+            Ok(Turn::ToolCalls(vec![ToolCall {
+                id: format!("local-{a}"),
+                name: a.to_string(),
+                input,
+            }]))
         }
         _ => Ok(Turn::Final(message)),
     }
@@ -178,7 +192,13 @@ pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
 /// The Messages API body for one turn: model, the running messages, and the tools.
 /// Used by the assistant pane's UI-thread turn machine (#307) and the local
 /// backend's `respond` (#310), so both build the request the same way.
-pub(crate) fn build_body(model: &str, system: Option<&str>, messages: &[Value], tools: &[Value], max_tokens: u32) -> Value {
+pub(crate) fn build_body(
+    model: &str,
+    system: Option<&str>,
+    messages: &[Value],
+    tools: &[Value],
+    max_tokens: u32,
+) -> Value {
     let mut body = json!({
         "model": model,
         "max_tokens": max_tokens,
@@ -205,16 +225,24 @@ mod tests {
         let got: Vec<&str> = actions.iter().map(|a| a.as_str().unwrap()).collect();
         assert_eq!(got, vec!["save", "ai:continuity", RESPOND]);
         assert_eq!(schema["required"], json!(["action", "message"]));
-        assert_eq!(schema["properties"]["argument"]["type"], "string", "an action's text input (#390)");
+        assert_eq!(
+            schema["properties"]["argument"]["type"], "string",
+            "an action's text input (#390)"
+        );
     }
 
     #[test]
     fn a_tool_choice_carries_its_argument() {
-        let turn = parse_choice_turn(r#"{"action":"ai:ask","argument":"Who dies?","message":""}"#).unwrap();
+        let turn = parse_choice_turn(r#"{"action":"ai:ask","argument":"Who dies?","message":""}"#)
+            .unwrap();
         match turn {
             Turn::ToolCalls(calls) => {
                 assert_eq!(calls[0].name, "ai:ask");
-                assert_eq!(calls[0].input, json!({ "argument": "Who dies?" }), "the argument rides as a generic key");
+                assert_eq!(
+                    calls[0].input,
+                    json!({ "argument": "Who dies?" }),
+                    "the argument rides as a generic key"
+                );
             }
             Turn::Final(_) => panic!("a tool action should be a call"),
         }
@@ -223,7 +251,10 @@ mod tests {
     #[test]
     fn tool_names_reads_the_body_catalog() {
         let body = json!({ "tools": [{ "name": "save" }, { "name": "report:progress" }] });
-        assert_eq!(tool_names(&body), vec!["save".to_string(), "report:progress".to_string()]);
+        assert_eq!(
+            tool_names(&body),
+            vec!["save".to_string(), "report:progress".to_string()]
+        );
         assert!(tool_names(&json!({})).is_empty());
     }
 

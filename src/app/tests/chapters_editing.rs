@@ -56,7 +56,10 @@ fn switching_chapters_saves_pending_edits() {
 
     // Chapter one was persisted on the way out.
     let saved = fs::read_to_string(dir.join("one.md")).unwrap();
-    assert!(saved.starts_with('X'), "expected edit saved, got: {saved:?}");
+    assert!(
+        saved.starts_with('X'),
+        "expected edit saved, got: {saved:?}"
+    );
 }
 
 #[test]
@@ -216,7 +219,7 @@ fn clearing_an_optional_book_field_removes_it() {
     app.project.manifest.subtitle = Some("placeholder".into());
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('b'))); // subtitle prompt (prefilled)
-    // Clear the prefilled text, then confirm empty.
+                                         // Clear the prefilled text, then confirm empty.
     for _ in 0.."placeholder".len() {
         app.on_key(key(KeyCode::Backspace));
     }
@@ -233,14 +236,17 @@ fn setting_a_chapter_epigraph_edits_in_the_editor_then_chains_attribution() {
     assert!(matches!(app.mode, Mode::EditMeta(_)));
     type_str(&mut app, "Call me Ishmael.");
     app.on_key(ctrl('s')); // commit
-    // Commit chains into the single-line attribution prompt.
+                           // Commit chains into the single-line attribution prompt.
     assert!(matches!(app.mode, Mode::Prompt(_)));
     type_str(&mut app, "Melville");
     app.on_key(key(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::Nav { .. }));
 
     let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
-    assert!(on_disk.contains("epigraph: Call me Ishmael."), "got:\n{on_disk}");
+    assert!(
+        on_disk.contains("epigraph: Call me Ishmael."),
+        "got:\n{on_disk}"
+    );
     assert!(on_disk.contains("epigraph_by: Melville"), "got:\n{on_disk}");
     assert!(on_disk.contains("second chapter"));
 }
@@ -266,7 +272,10 @@ fn a_multiline_chapter_epigraph_is_stored_as_a_block() {
     let reopened = Project::open(&dir).unwrap();
     let buf = Buffer::from_path(reopened.chapter_path(1)).unwrap();
     assert_eq!(
-        buf.front_matter().and_then(crate::frontmatter::FrontMatter::epigraph).unwrap().text,
+        buf.front_matter()
+            .and_then(crate::frontmatter::FrontMatter::epigraph)
+            .unwrap()
+            .text,
         "Roses are red\nViolets are blue"
     );
 }
@@ -286,7 +295,10 @@ fn setting_a_book_epigraph_persists_to_the_manifest() {
     assert_eq!(ep.attribution.as_deref(), Some("The King"));
     // Persisted to the manifest.
     let reopened = Project::open(&dir).unwrap();
-    assert_eq!(reopened.manifest.epigraph().unwrap().attribution.as_deref(), Some("The King"));
+    assert_eq!(
+        reopened.manifest.epigraph().unwrap().attribution.as_deref(),
+        Some("The King")
+    );
 }
 
 #[test]
@@ -294,15 +306,24 @@ fn cycling_status_on_the_active_chapter_persists_to_front_matter() {
     let (mut app, dir) = two_chapter_app("status-active");
     app.on_key(ctrl('g')); // Nav, selection on chapter 0 (the active one)
     app.on_key(key(KeyCode::Char('s'))); // none → Draft
-    assert_eq!(app.project.chapter_status(0), Some(crate::frontmatter::Status::Draft));
+    assert_eq!(
+        app.project.chapter_status(0),
+        Some(crate::frontmatter::Status::Draft)
+    );
     app.on_key(key(KeyCode::Char('s'))); // Draft → Revised
-    assert_eq!(app.project.chapter_status(0), Some(crate::frontmatter::Status::Revised));
+    assert_eq!(
+        app.project.chapter_status(0),
+        Some(crate::frontmatter::Status::Revised)
+    );
 
     // Active-chapter metadata persists on save (like prose).
     app.on_key(key(KeyCode::Enter)); // open the selected chapter (back to Insert)
     app.on_key(ctrl('s'));
     let on_disk = fs::read_to_string(dir.join("one.md")).unwrap();
-    assert!(on_disk.starts_with("---\nstatus: revised\n---\n"), "got:\n{on_disk}");
+    assert!(
+        on_disk.starts_with("---\nstatus: revised\n---\n"),
+        "got:\n{on_disk}"
+    );
     assert!(on_disk.contains("first chapter"));
 }
 
@@ -317,9 +338,15 @@ fn editing_a_non_active_chapters_summary_writes_immediately() {
 
     // Non-active edits hit disk right away, with quoting, prose untouched.
     let on_disk = fs::read_to_string(dir.join("two.md")).unwrap();
-    assert!(on_disk.starts_with("---\nsummary: \"The reckoning: part one\"\n---\n"), "got:\n{on_disk}");
+    assert!(
+        on_disk.starts_with("---\nsummary: \"The reckoning: part one\"\n---\n"),
+        "got:\n{on_disk}"
+    );
     assert!(on_disk.contains("second chapter"));
-    assert_eq!(app.project.chapter_summary(1), Some("The reckoning: part one"));
+    assert_eq!(
+        app.project.chapter_summary(1),
+        Some("The reckoning: part one")
+    );
 }
 
 #[test]
@@ -332,7 +359,9 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(app.project.chapter_goal(1), Some(2500));
-    assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("goal: 2500"));
+    assert!(fs::read_to_string(dir.join("two.md"))
+        .unwrap()
+        .contains("goal: 2500"));
     // Survives a reopen (read back from front matter).
     assert_eq!(Project::open(&dir).unwrap().chapter_goal(1), Some(2500));
 
@@ -343,7 +372,9 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
     }
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.project.chapter_goal(1), None, "blank clears the goal");
-    assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("goal:"));
+    assert!(!fs::read_to_string(dir.join("two.md"))
+        .unwrap()
+        .contains("goal:"));
 }
 
 #[test]
@@ -358,10 +389,16 @@ fn setting_a_section_role_persists_clears_and_survives_reopen() {
 
     // "Two" became a prologue → it re-sorts ahead of the body (#180), and the
     // browser selection follows it to index 0.
-    assert_eq!(app.project.index_of_file("two.md"), Some(0), "front matter sorts first");
+    assert_eq!(
+        app.project.index_of_file("two.md"),
+        Some(0),
+        "front matter sorts first"
+    );
     assert_eq!(app.project.chapter_role(0), Some(Role::Prologue));
     assert_eq!(nav_sel(&app), 0, "the selection follows the moved chapter");
-    assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("role: prologue"));
+    assert!(fs::read_to_string(dir.join("two.md"))
+        .unwrap()
+        .contains("role: prologue"));
     // Read back from front matter on reopen (and re-sorted the same way).
     let reopened = Project::open(&dir).unwrap();
     assert_eq!(reopened.index_of_file("two.md"), Some(0));
@@ -373,8 +410,14 @@ fn setting_a_section_role_persists_clears_and_survives_reopen() {
         app.on_key(key(KeyCode::Backspace)); // clear the prefilled "prologue"
     }
     app.on_key(key(KeyCode::Enter));
-    assert_eq!(app.project.chapter_role(app.project.index_of_file("two.md").unwrap()), None);
-    assert!(!fs::read_to_string(dir.join("two.md")).unwrap().contains("role:"));
+    assert_eq!(
+        app.project
+            .chapter_role(app.project.index_of_file("two.md").unwrap()),
+        None
+    );
+    assert!(!fs::read_to_string(dir.join("two.md"))
+        .unwrap()
+        .contains("role:"));
 }
 
 #[test]
@@ -385,6 +428,17 @@ fn an_unknown_section_role_is_rejected_without_changing_it() {
     app.on_key(key(KeyCode::Char('S')));
     type_str(&mut app, "chapterish");
     app.on_key(key(KeyCode::Enter));
-    assert!(app.message.as_deref().unwrap_or("").contains("Unknown section role"), "{:?}", app.message);
-    assert_eq!(app.project.chapter_role(1), None, "an unknown role leaves it a body chapter");
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Unknown section role"),
+        "{:?}",
+        app.message
+    );
+    assert_eq!(
+        app.project.chapter_role(1),
+        None,
+        "an unknown role leaves it a body chapter"
+    );
 }

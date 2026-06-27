@@ -67,11 +67,17 @@ enum StructKey {
 /// manifest metadata — no file reads, so it stays off the draw path's budget.
 fn structure_of(project: &Project, index: usize) -> Option<Structure> {
     if let Some(role) = project.chapter_role(index) {
-        return Some(Structure { label: role.label().to_string(), key: StructKey::Section(role) });
+        return Some(Structure {
+            label: role.label().to_string(),
+            key: StructKey::Section(role),
+        });
     }
     let pi = project.manifest.part_of(index)?;
     let label = project.book_part_display_name(project.active_book(), pi);
-    Some(Structure { label, key: StructKey::Part(pi) })
+    Some(Structure {
+        label,
+        key: StructKey::Part(pi),
+    })
 }
 
 pub struct Manuscript {
@@ -409,7 +415,9 @@ mod tests {
         let mut manifest = String::from("title = \"Book\"\n\n");
         for (i, body) in chapters.iter().enumerate() {
             let file = format!("ch{i}.md");
-            manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+            manifest.push_str(&format!(
+                "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+            ));
             fs::write(dir.join(&file), body).unwrap();
         }
         fs::write(Project::manifest_path(&dir), manifest).unwrap();
@@ -447,17 +455,17 @@ mod tests {
     fn front_matter_stays_out_of_the_flow_and_is_re_attached_on_save() {
         let (mut project, dir) = project_with(
             "frontmatter",
-            &[
-                "---\nstatus: draft\n---\nAlpha prose.\n",
-                "Beta prose.\n",
-            ],
+            &["---\nstatus: draft\n---\nAlpha prose.\n", "Beta prose.\n"],
         );
         let mut m = Manuscript::open(&project).unwrap();
 
         // The concatenated buffer holds only prose — no YAML in the flow.
         let flow = m.buffer.line_range_text(0, m.buffer.line_count());
         assert!(flow.contains("Alpha prose."), "flow:\n{flow}");
-        assert!(!flow.contains("status:"), "front matter leaked into flow:\n{flow}");
+        assert!(
+            !flow.contains("status:"),
+            "front matter leaked into flow:\n{flow}"
+        );
 
         // Edit chapter 0 and save; its front matter is re-attached untouched.
         m.insert_char('X');
@@ -467,7 +475,10 @@ mod tests {
             "---\nstatus: draft\n---\nXAlpha prose.\n"
         );
         // Chapter 1 (no front matter) is untouched.
-        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "Beta prose.\n");
+        assert_eq!(
+            fs::read_to_string(dir.join("ch1.md")).unwrap(),
+            "Beta prose.\n"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -495,7 +506,11 @@ mod tests {
         let (mut project, dir) = project_with_parts("part-headers");
         project.set_active(2); // window loads chapters 1, 2, 3 (WINDOW = 3)
         let m = Manuscript::open(&project).unwrap();
-        let structures: Vec<_> = m.segment_headers().into_iter().map(|h| h.structure).collect();
+        let structures: Vec<_> = m
+            .segment_headers()
+            .into_iter()
+            .map(|h| h.structure)
+            .collect();
         assert_eq!(
             structures,
             vec![
@@ -517,7 +532,10 @@ mod tests {
         // chapters 1 (Part One), 2 & 3 (Part Two): first header names the part it
         // opens in regardless of whether a boundary is in view.
         let first = &m.segment_headers()[0];
-        assert!(first.structure.is_some(), "the first loaded chapter names its part");
+        assert!(
+            first.structure.is_some(),
+            "the first loaded chapter names its part"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -540,7 +558,11 @@ mod tests {
     fn section_headers_name_front_matter_and_body_chapters_show_nothing() {
         let (project, dir) = project_with_section("section-header");
         let m = Manuscript::open(&project).unwrap(); // active is chapter 0
-        let structures: Vec<_> = m.segment_headers().into_iter().map(|h| h.structure).collect();
+        let structures: Vec<_> = m
+            .segment_headers()
+            .into_iter()
+            .map(|h| h.structure)
+            .collect();
         assert_eq!(
             structures,
             vec![
@@ -638,7 +660,10 @@ mod tests {
         // the cursor into chapter 2 and reslide.
         fs::remove_file(dir.join("ch3.md")).unwrap();
         m.buffer.cursor = Cursor { line: 2, col: 0 };
-        assert!(m.reslide(&mut project).is_err(), "the failed read is surfaced");
+        assert!(
+            m.reslide(&mut project).is_err(),
+            "the failed read is surfaced"
+        );
         // The window is unchanged — the old chapters are still loaded, not blanked.
         assert_eq!((m.window_lo(), m.window_hi()), (0, 3));
         assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "a\n");
@@ -647,8 +672,7 @@ mod tests {
 
     #[test]
     fn scrolling_pages_chapters_in_and_out_and_saves_dropped_edits() {
-        let (mut project, dir) =
-            project_with("slide", &["a\n", "b\n", "c\n", "d\n", "e\n"]);
+        let (mut project, dir) = project_with("slide", &["a\n", "b\n", "c\n", "d\n", "e\n"]);
         let mut m = Manuscript::open(&project).unwrap(); // window [0,3)
         assert_eq!((m.window_lo(), m.window_hi()), (0, 3));
 

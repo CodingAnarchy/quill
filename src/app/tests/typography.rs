@@ -17,7 +17,10 @@ fn smart_app(name: &str) -> (App, TempProject) {
 fn quotes_orient_from_context() {
     let (mut app, _dir) = smart_app("typo-quotes");
     type_str(&mut app, "\"Wait,\" she said. \"Don't.\"");
-    assert_eq!(app.buffer.text(), "\u{201C}Wait,\u{201D} she said. \u{201C}Don\u{2019}t.\u{201D}");
+    assert_eq!(
+        app.buffer.text(),
+        "\u{201C}Wait,\u{201D} she said. \u{201C}Don\u{2019}t.\u{201D}"
+    );
 }
 
 #[test]
@@ -51,11 +54,16 @@ fn substitutions_persist_to_disk_and_reload() {
     app.on_key(ctrl('s'));
 
     let saved = fs::read_to_string(dir.join("one.md")).unwrap();
-    assert!(saved.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"), "curly punctuation persisted: {saved:?}");
+    assert!(
+        saved.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
+        "curly punctuation persisted: {saved:?}"
+    );
 
     // And it reloads byte-for-byte (the substituted glyphs survive a round-trip).
     let reloaded = Buffer::from_path(dir.join("one.md")).unwrap();
-    assert!(reloaded.text().contains("\u{201C}hi\u{2014}bye\u{2026}\u{201D}"));
+    assert!(reloaded
+        .text()
+        .contains("\u{201C}hi\u{2014}bye\u{2026}\u{201D}"));
 }
 
 #[test]
@@ -65,5 +73,9 @@ fn substitution_is_one_undo_with_the_typing_burst() {
     assert_eq!(app.buffer.text(), "a\u{2014}b");
     app.buffer.seal_undo_group();
     assert!(app.buffer.undo());
-    assert_eq!(app.buffer.text(), "", "undo reverts the whole burst, em-dash included");
+    assert_eq!(
+        app.buffer.text(),
+        "",
+        "undo reverts the whole burst, em-dash included"
+    );
 }

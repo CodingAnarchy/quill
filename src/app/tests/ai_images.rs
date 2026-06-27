@@ -6,13 +6,21 @@ use std::fs;
 // --- #238: character portraits ----------------------------------------------
 
 fn image_on(app: &mut App) {
-    app.image = ai::image::ImageSettings { enabled: true, api_key: Some("k".into()), ..Default::default() };
+    app.image = ai::image::ImageSettings {
+        enabled: true,
+        api_key: Some("k".into()),
+        ..Default::default()
+    };
 }
 
 fn write_character(dir: &std::path::Path, slug: &str, name: &str) {
     let chars = dir.join("bible").join("characters");
     fs::create_dir_all(&chars).unwrap();
-    fs::write(chars.join(format!("{slug}.md")), format!("---\nname: {name}\n---\n\n## Physical\n- green eyes\n")).unwrap();
+    fs::write(
+        chars.join(format!("{slug}.md")),
+        format!("---\nname: {name}\n---\n\n## Physical\n- green eyes\n"),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -21,9 +29,15 @@ fn portrait_pass_needs_image_generation_enabled() {
     app.image = ai::image::ImageSettings::default(); // off
     write_character(&dir, "mara", "Mara");
     app.start_portrait();
-    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm when image gen is off");
     assert!(
-        app.message.as_deref().unwrap_or("").contains("Image generation is off"),
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no confirm when image gen is off"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Image generation is off"),
         "{:?}",
         app.message
     );
@@ -35,7 +49,14 @@ fn portrait_pass_needs_the_character_bible() {
     image_on(&mut app);
     app.start_portrait(); // no bible/characters yet
     assert!(!matches!(app.mode, Mode::Prompt(_)));
-    assert!(app.message.as_deref().unwrap_or("").contains("character pass first"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("character pass first"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -50,7 +71,11 @@ fn portrait_pass_opens_a_character_picker() {
         Mode::Palette(p) => {
             assert_eq!(p.title, "Character portrait");
             assert_eq!(p.items.len(), 3);
-            assert!(p.items[0].label.contains("All characters (2)"), "{}", p.items[0].label);
+            assert!(
+                p.items[0].label.contains("All characters (2)"),
+                "{}",
+                p.items[0].label
+            );
         }
         _ => panic!("expected the character picker"),
     }
@@ -82,7 +107,10 @@ fn picking_one_confirms_and_generates_only_that_character() {
         _ => panic!("expected the cost confirm"),
     }
     // Only the one picked target is staged, so generation won't touch the others.
-    let pending = app.pending_portraits.as_ref().expect("a selection is staged");
+    let pending = app
+        .pending_portraits
+        .as_ref()
+        .expect("a selection is staged");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].0, "tomas", "the picked slug");
 }
@@ -95,7 +123,10 @@ fn cancelling_the_portrait_confirm_discards_the_selection() {
     app.confirm_portraits(crate::mode::PortraitChoice::All);
     assert!(app.pending_portraits.is_some());
     app.on_key(key(KeyCode::Esc)); // decline the confirm
-    assert!(app.pending_portraits.is_none(), "the staged selection is dropped");
+    assert!(
+        app.pending_portraits.is_none(),
+        "the staged selection is dropped"
+    );
 }
 
 #[test]
@@ -119,9 +150,15 @@ fn image_pass_reports_when_the_local_backend_isnt_compiled() {
     };
     write_character(&dir, "mara", "Mara");
     app.start_portrait();
-    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm; local model isn't built in");
     assert!(
-        app.message.as_deref().unwrap_or("").contains("--features local"),
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no confirm; local model isn't built in"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("--features local"),
         "explains how to enable: {:?}",
         app.message
     );
@@ -132,8 +169,18 @@ fn scene_pass_needs_image_generation_enabled() {
     let (mut app, _dir) = two_chapter_app("scene-off");
     app.image = ai::image::ImageSettings::default(); // off
     app.start_scene();
-    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm when image gen is off");
-    assert!(app.message.as_deref().unwrap_or("").contains("Image generation is off"), "{:?}", app.message);
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no confirm when image gen is off"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Image generation is off"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -144,8 +191,16 @@ fn scene_pass_confirms_for_the_active_chapter() {
     app.start_scene();
     match &app.mode {
         Mode::Prompt(p) => {
-            assert!(p.label.contains("One"), "names the active chapter: {}", p.label);
-            assert!(p.label.contains("fal.ai") && p.label.contains("billed"), "{}", p.label);
+            assert!(
+                p.label.contains("One"),
+                "names the active chapter: {}",
+                p.label
+            );
+            assert!(
+                p.label.contains("fal.ai") && p.label.contains("billed"),
+                "{}",
+                p.label
+            );
         }
         _ => panic!("expected the scene cost confirm"),
     }
@@ -159,6 +214,12 @@ fn scene_pass_needs_chapter_text() {
     app.buffer = crate::buffer::Buffer::from_text("");
     app.start_scene();
     assert!(!matches!(app.mode, Mode::Prompt(_)));
-    assert!(app.message.as_deref().unwrap_or("").contains("no text to illustrate"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("no text to illustrate"),
+        "{:?}",
+        app.message
+    );
 }
-

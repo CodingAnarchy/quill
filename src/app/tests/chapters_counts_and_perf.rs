@@ -42,7 +42,11 @@ fn the_report_counts_body_words_not_section_words() {
     )
     .unwrap();
     fs::write(dir.join("b.md"), "one two three four five\n").unwrap(); // 5 body words
-    fs::write(dir.join("a.md"), "---\nrole: appendix\n---\nalpha beta gamma\n").unwrap(); // 3 section words
+    fs::write(
+        dir.join("a.md"),
+        "---\nrole: appendix\n---\nalpha beta gamma\n",
+    )
+    .unwrap(); // 3 section words
 
     let project = Project::open(&dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
@@ -54,11 +58,22 @@ fn the_report_counts_body_words_not_section_words() {
     let report: String = app
         .report_lines()
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(report.contains("5 / 100  words"), "the goal measures body words only:\n{report}");
-    assert!(report.contains("(+3 words in front/back matter, not counted)"), "{report}");
+    assert!(
+        report.contains("5 / 100  words"),
+        "the goal measures body words only:\n{report}"
+    );
+    assert!(
+        report.contains("(+3 words in front/back matter, not counted)"),
+        "{report}"
+    );
 }
 
 #[test]
@@ -79,7 +94,6 @@ fn word_count_cache_tracks_add_and_delete() {
     assert_eq!(app.project_word_count(), 4);
 }
 
-
 #[test]
 fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
     let (mut app, dir) = two_chapter_app("cont-unreadable");
@@ -87,12 +101,14 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
     app.on_key(ctrl('l')); // try to enter the continuous view
     assert!(app.manuscript.is_none(), "stays in the single-chapter view");
     assert!(
-        app.message.as_deref().unwrap_or("").contains("Couldn't open continuous view"),
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Couldn't open continuous view"),
         "the failure is surfaced: {:?}",
         app.message
     );
 }
-
 
 /// Performance guard (`cargo perf`). Switching chapters in a series-sized
 /// project must stay instant: only a window is ever loaded, so a switch
@@ -111,7 +127,9 @@ fn navigation_is_fast_in_a_series_sized_project() {
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+        manifest.push_str(&format!(
+            "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+        ));
         let mut body = String::from("# Chapter\n\n");
         for _ in 0..40 {
             body.push_str("The night was dark and the road was very long indeed.\n");
@@ -153,7 +171,9 @@ fn tally_is_independent_of_project_size() {
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+        manifest.push_str(&format!(
+            "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+        ));
         fs::write(dir.join(&file), "Some prose in this chapter.\n").unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

@@ -60,7 +60,10 @@ pub fn parse_markdown(source: &str) -> Imported {
             in_fence = !in_fence;
         } else if !in_fence && heading_level(line) == Some(level) {
             match cur_title.take() {
-                Some(t) => chapters.push(ImportedChapter { title: t.into(), body: clean(&cur_body) }),
+                Some(t) => chapters.push(ImportedChapter {
+                    title: t.into(),
+                    body: clean(&cur_body),
+                }),
                 None => preamble = std::mem::take(&mut cur_body),
             }
             cur_body.clear();
@@ -70,7 +73,10 @@ pub fn parse_markdown(source: &str) -> Imported {
         cur_body.push(line);
     }
     match cur_title {
-        Some(t) => chapters.push(ImportedChapter { title: t.into(), body: clean(&cur_body) }),
+        Some(t) => chapters.push(ImportedChapter {
+            title: t.into(),
+            body: clean(&cur_body),
+        }),
         // No chapter heading was ever seen — the whole body is the preamble.
         None => preamble = cur_body,
     }
@@ -99,7 +105,11 @@ pub fn parse_markdown(source: &str) -> Imported {
         }
     }
 
-    Imported { title, author, chapters }
+    Imported {
+        title,
+        author,
+        chapters,
+    }
 }
 
 /// The heading level chapters break on: level 2 when there's a lone title `#`
@@ -167,7 +177,10 @@ fn preamble_title(preamble: &[&str], level: usize) -> Option<String> {
     if level != 2 {
         return None;
     }
-    preamble.iter().find(|l| heading_level(l) == Some(1)).map(|l| heading_text(l).to_string())
+    preamble
+        .iter()
+        .find(|l| heading_level(l) == Some(1))
+        .map(|l| heading_text(l).to_string())
 }
 
 /// A "by …" attribution line on the title page (Quill's export writes one),
@@ -189,7 +202,12 @@ fn preamble_author(preamble: &[&str]) -> Option<String> {
 /// stripped), if present and non-empty.
 fn yaml_field(front: Option<&str>, key: &str) -> Option<String> {
     front?.lines().find_map(|l| {
-        let rest = l.trim().strip_prefix(key)?.trim_start().strip_prefix(':')?.trim();
+        let rest = l
+            .trim()
+            .strip_prefix(key)?
+            .trim_start()
+            .strip_prefix(':')?
+            .trim();
         let v = rest.trim_matches(['"', '\'']).trim();
         (!v.is_empty()).then(|| v.to_string())
     })
@@ -208,7 +226,10 @@ mod tests {
         assert_eq!(out.author.as_deref(), Some("A. Writer"));
         assert_eq!(out.chapters.len(), 2);
         assert_eq!(out.chapters[0].title, "One");
-        assert_eq!(out.chapters[0].body, "The night was *dark*.\n", "emphasis preserved verbatim");
+        assert_eq!(
+            out.chapters[0].body, "The night was *dark*.\n",
+            "emphasis preserved verbatim"
+        );
         assert_eq!(out.chapters[1].title, "Two");
         assert_eq!(out.chapters[1].body, "The **end**.\n");
     }
@@ -226,7 +247,8 @@ mod tests {
 
     #[test]
     fn yaml_front_matter_sets_title_and_author() {
-        let src = "---\ntitle: \"My Book\"\nauthor: Jane Doe\n---\n\n# One\n\nText.\n# Two\n\nMore.\n";
+        let src =
+            "---\ntitle: \"My Book\"\nauthor: Jane Doe\n---\n\n# One\n\nText.\n# Two\n\nMore.\n";
         let out = parse_markdown(src);
         assert_eq!(out.title.as_deref(), Some("My Book"));
         assert_eq!(out.author.as_deref(), Some("Jane Doe"));
@@ -248,7 +270,10 @@ mod tests {
         let out = parse_markdown(src);
         // h1==2 → split on level 1; the fenced `##` stays inside chapter one.
         assert_eq!(out.chapters.len(), 2);
-        assert!(out.chapters[0].body.contains("## not a chapter"), "fenced heading kept in the body");
+        assert!(
+            out.chapters[0].body.contains("## not a chapter"),
+            "fenced heading kept in the body"
+        );
     }
 
     #[test]
@@ -257,7 +282,10 @@ mod tests {
         let out = parse_markdown(src);
         assert_eq!(out.title.as_deref(), Some("Book"));
         assert_eq!(out.chapters.len(), 1);
-        assert!(out.chapters[0].body.contains("### A scene"), "sub-headings are part of the prose");
+        assert!(
+            out.chapters[0].body.contains("### A scene"),
+            "sub-headings are part of the prose"
+        );
     }
 
     #[test]

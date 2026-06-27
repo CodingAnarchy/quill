@@ -50,11 +50,17 @@ than approximating it. Do not write or suggest any manuscript prose.";
 /// vocabulary; the `value` is a free string (validated by the caller).
 fn schema(keys: &[String]) -> Value {
     let change = super::object_schema(
-        vec![("key", json!({ "enum": keys })), ("value", super::string_field())],
+        vec![
+            ("key", json!({ "enum": keys })),
+            ("value", super::string_field()),
+        ],
         &["key", "value"],
     );
     super::object_schema(
-        vec![("changes", super::array_of(change)), ("unmapped", super::string_array())],
+        vec![
+            ("changes", super::array_of(change)),
+            ("unmapped", super::string_array()),
+        ],
         &["changes", "unmapped"],
     )
 }
@@ -65,7 +71,10 @@ pub fn build_request(description: &str, vocab: &[(String, String)], model: &str)
     let keys: Vec<String> = vocab.iter().map(|(k, _)| k.clone()).collect();
     Request {
         system: Some(SYSTEM.to_string()),
-        cached_context: super::vocab_context("Available settings (use the exact key on the left):", vocab),
+        cached_context: super::vocab_context(
+            "Available settings (use the exact key on the left):",
+            vocab,
+        ),
         user: format!("Describe-to-config request:\n{description}"),
         model: model.to_string(),
         max_tokens: MAX_TOKENS,
@@ -105,7 +114,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(g.changes.len(), 2);
-        assert_eq!(g.changes[0], ConfigChange { key: "editor.vim".into(), value: "true".into() });
+        assert_eq!(
+            g.changes[0],
+            ConfigChange {
+                key: "editor.vim".into(),
+                value: "true".into()
+            }
+        );
         assert_eq!(g.unmapped, ["bigger font"]);
     }
 

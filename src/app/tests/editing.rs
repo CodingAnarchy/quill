@@ -11,7 +11,11 @@ fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
     assert!(app.buffer.text().contains("ZZZ"), "the edit landed");
 
     app.on_key(ctrl('z'));
-    assert_eq!(app.buffer.text(), original, "undo restores the original text");
+    assert_eq!(
+        app.buffer.text(),
+        original,
+        "undo restores the original text"
+    );
     app.on_key(ctrl('y'));
     assert!(app.buffer.text().contains("ZZZ"), "redo reapplies the edit");
 }
@@ -23,7 +27,10 @@ fn undo_is_guarded_in_the_continuous_view() {
     assert!(app.manuscript.is_some());
     app.on_key(ctrl('z'));
     assert!(
-        app.message.as_deref().unwrap_or("").contains("continuous view"),
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("continuous view"),
         "{:?}",
         app.message
     );
@@ -73,7 +80,11 @@ fn find_then_replace_all() {
 
     assert!(matches!(app.mode, Mode::Insert));
     assert_eq!(app.buffer.text(), "first section\n");
-    assert!(app.message.as_deref().unwrap_or("").contains("Replaced 1"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Replaced 1"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -89,8 +100,16 @@ fn replace_current_match_only_with_y() {
     app.on_key(key(KeyCode::Char('y'))); // replace this one, advance
     app.on_key(key(KeyCode::Esc)); // done
 
-    assert_eq!(app.buffer.text(), "fiRst chapter\n", "only the first match was replaced");
-    assert!(app.message.as_deref().unwrap_or("").contains("Replaced 1"), "{:?}", app.message);
+    assert_eq!(
+        app.buffer.text(),
+        "fiRst chapter\n",
+        "only the first match was replaced"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Replaced 1"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -106,5 +125,9 @@ fn replace_is_undoable() {
     assert_eq!(app.buffer.text(), "first section\n");
     // The replace went through the normal edit path, so undo reverses it (#145).
     app.on_key(ctrl('z'));
-    assert_eq!(app.buffer.text(), "first chapter\n", "undo restores the pre-replace text");
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter\n",
+        "undo restores the pre-replace text"
+    );
 }

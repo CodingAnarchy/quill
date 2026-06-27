@@ -18,7 +18,12 @@ impl App {
     /// the description prompt. Sends no manuscript, so there's no cost confirm.
     pub(crate) fn start_describe_config(&mut self) {
         match self.ai.check_ready() {
-            Ok(_) => self.open_prompt(Pending::DescribeConfig, "Describe a settings change: ", "", None),
+            Ok(_) => self.open_prompt(
+                Pending::DescribeConfig,
+                "Describe a settings change: ",
+                "",
+                None,
+            ),
             Err(e) => self.message = Some(e.to_string()),
         }
     }
@@ -34,7 +39,11 @@ impl App {
         let model = self.ai.model.clone();
         self.spawn_outcome("⟳ Proposing settings…", move |backend| {
             let req = config_gen::build_request(&description, &vocab, &model);
-            Outcome::Config(backend.complete(&req).and_then(|r| config_gen::parse(&r.text)))
+            Outcome::Config(
+                backend
+                    .complete(&req)
+                    .and_then(|r| config_gen::parse(&r.text)),
+            )
         });
     }
 
@@ -42,7 +51,10 @@ impl App {
     /// against the real settings, report what couldn't be mapped or parsed, then
     /// stash the valid changes and open the y/N confirm — nothing is written until
     /// the author confirms.
-    pub(crate) fn apply_generated_config(&mut self, result: Result<GeneratedConfig, crate::ai::AiError>) {
+    pub(crate) fn apply_generated_config(
+        &mut self,
+        result: Result<GeneratedConfig, crate::ai::AiError>,
+    ) {
         let Some(gen) = self.ok_or_report(result) else {
             return;
         };
@@ -69,7 +81,11 @@ impl App {
             return;
         }
         let summary: Vec<String> = valid.iter().map(|(k, v)| format!("{k} = {v}")).collect();
-        let label = format!("{note}Apply {}? (y/N) — {}", count(valid.len()), summary.join(", "));
+        let label = format!(
+            "{note}Apply {}? (y/N) — {}",
+            count(valid.len()),
+            summary.join(", ")
+        );
         self.pending_config = Some(valid);
         self.open_prompt(Pending::ConfirmConfig, label, "", None);
     }
@@ -118,7 +134,11 @@ impl App {
         self.message = Some(if errors.is_empty() {
             format!("Applied {}.", count(applied))
         } else {
-            format!("Applied {}; couldn't write {}", count(applied), errors.join("; "))
+            format!(
+                "Applied {}; couldn't write {}",
+                count(applied),
+                errors.join("; ")
+            )
         });
     }
 
@@ -158,7 +178,10 @@ fn settings_vocab() -> Vec<(String, String)> {
     for &field in theme::COLOR_FIELDS {
         v.push((
             format!("theme.{field}"),
-            format!("Color of {} — an ANSI name, #hex, r,g,b, or 0–255 index", theme::color_role(field)),
+            format!(
+                "Color of {} — an ANSI name, #hex, r,g,b, or 0–255 index",
+                theme::color_role(field)
+            ),
         ));
     }
     v.push((

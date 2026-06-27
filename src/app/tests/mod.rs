@@ -146,7 +146,9 @@ fn three_chapter_app(name: &str) -> (App, TempProject) {
     let dir = app_scratch_dir(name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, body) in ["alpha\n", "beta\n", "gamma\n"].iter().enumerate() {
-        manifest.push_str(&format!("[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"));
+        manifest.push_str(&format!(
+            "[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"
+        ));
         fs::write(dir.join(format!("c{i}.md")), body).unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

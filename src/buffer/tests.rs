@@ -33,7 +33,10 @@ fn from_path_surfaces_a_read_error_rather_than_panicking() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let result = Buffer::from_path(&dir);
-    assert!(result.is_err(), "opening a directory as a file should error");
+    assert!(
+        result.is_err(),
+        "opening a directory as a file should error"
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -55,7 +58,8 @@ fn a_failed_save_keeps_the_buffer_dirty_and_re_savable() {
     // Re-savable to a real file, with the content intact.
     let good = temp_path("save-onto-a-dir-good.md");
     b.path = Some(good.clone());
-    b.save().expect("the buffer should still save to a valid path");
+    b.save()
+        .expect("the buffer should still save to a valid path");
     assert_eq!(read(&good), "precious unsaved words\n");
 
     fs::remove_dir_all(&dir).ok();
@@ -103,7 +107,10 @@ fn line_and_document_motions() {
     assert_eq!(b.cursor.line, 1);
     // G targets the last line with content, not the empty trailing line.
     b.move_to_line(b.last_line_index());
-    assert_eq!(b.cursor.line, 2, "G skips the trailing newline's empty line");
+    assert_eq!(
+        b.cursor.line, 2,
+        "G skips the trailing newline's empty line"
+    );
 }
 
 #[test]
@@ -133,19 +140,39 @@ fn text_objects_cover_words_quotes_and_pairs() {
     let mut b = Buffer::from_text("the quick fox");
     b.cursor = Cursor { line: 0, col: 5 }; // inside "quick"
     assert_eq!(b.text_object(TextObject::Word, false), Some((4, 9)));
-    assert_eq!(b.text_object(TextObject::Word, true), Some((4, 10)), "aw takes the trailing space");
+    assert_eq!(
+        b.text_object(TextObject::Word, true),
+        Some((4, 10)),
+        "aw takes the trailing space"
+    );
 
     // Quote object on the line.
     let mut b = Buffer::from_text("say \"hello\" now");
     b.cursor = Cursor { line: 0, col: 6 }; // inside the quotes
-    assert_eq!(b.text_object(TextObject::Quote('"'), false), Some((5, 10)), "i\" is the inside");
-    assert_eq!(b.text_object(TextObject::Quote('"'), true), Some((4, 11)), "a\" includes the quotes");
+    assert_eq!(
+        b.text_object(TextObject::Quote('"'), false),
+        Some((5, 10)),
+        "i\" is the inside"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Quote('"'), true),
+        Some((4, 11)),
+        "a\" includes the quotes"
+    );
 
     // Bracket pair with nesting.
     let mut b = Buffer::from_text("f(a, g(b), c)");
     b.cursor = Cursor { line: 0, col: 3 }; // inside the outer parens
-    assert_eq!(b.text_object(TextObject::Pair('(', ')'), false), Some((2, 12)), "i( spans to the matching close");
-    assert_eq!(b.text_object(TextObject::Pair('(', ')'), true), Some((1, 13)), "a( includes the parens");
+    assert_eq!(
+        b.text_object(TextObject::Pair('(', ')'), false),
+        Some((2, 12)),
+        "i( spans to the matching close"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Pair('(', ')'), true),
+        Some((1, 13)),
+        "a( includes the parens"
+    );
 }
 
 #[test]
@@ -183,7 +210,10 @@ fn front_matter_is_kept_off_the_prose_and_re_attached_on_save() {
     assert_eq!(buf.line(0), "# Chapter One");
     assert!(buf.front_matter().is_some());
     // Word count covers the body, not the front matter keys.
-    assert_eq!(buf.word_count(), count_words("# Chapter One\n\nThe body.\n"));
+    assert_eq!(
+        buf.word_count(),
+        count_words("# Chapter One\n\nThe body.\n")
+    );
 
     // Saving re-attaches the front matter untouched: byte-for-byte round-trip.
     buf.save().unwrap();
@@ -264,7 +294,7 @@ fn count_words_uses_unicode_segmentation() {
     assert_eq!(count_words("one two three"), 3);
     assert_eq!(count_words("hello, world!"), 2);
     assert_eq!(count_words("it's a tidy plan"), 4); // contraction stays one word
-    // Unicode segmentation splits hyphenated compounds.
+                                                    // Unicode segmentation splits hyphenated compounds.
     assert_eq!(count_words("well-made"), 2);
 }
 
@@ -336,7 +366,6 @@ fn typing_a_heading_updates_highlights_incrementally() {
 #[test]
 #[ignore]
 fn keystroke_is_decoupled_from_document_size() {
-
     // A keystroke only *records* the edit; the reparse is deferred. So it
     // must be cheap regardless of buffer size. Stress it far past the real
     // ~3-chapter cap to prove the cost is in the edit, not the document.
@@ -370,7 +399,6 @@ fn keystroke_is_decoupled_from_document_size() {
 #[test]
 #[ignore]
 fn reparse_is_fast_at_window_size() {
-
     // Realistic worst case: ~3 long chapters live at once (continuous view).
     let mut text = String::new();
     for ch in 0..3 {
@@ -491,7 +519,10 @@ fn undo_restores_the_cursor_and_reparses() {
     }
     assert!(buf.undo());
     assert_eq!(buf.text(), "# Title\n");
-    assert_eq!(buf.cursor, cursor_before, "cursor returns to where the edit began");
+    assert_eq!(
+        buf.cursor, cursor_before,
+        "cursor returns to where the edit began"
+    );
     // Highlights are rebuilt immediately on undo, not deferred to idle.
     assert!(kinds(&buf).contains(&HighlightKind::Heading));
 }
@@ -512,7 +543,10 @@ fn move_down_steps_through_wrapped_visual_rows() {
     buf.cursor = Cursor { line: 0, col: 0 };
     buf.move_down(10); // down one visual row — still the same logical line
     assert_eq!(buf.cursor.line, 0, "stayed on the wrapped logical line");
-    assert_eq!(buf.cursor.col, 10, "landed at the start of the second visual row");
+    assert_eq!(
+        buf.cursor.col, 10,
+        "landed at the start of the second visual row"
+    );
     buf.move_up(10); // back up to the first visual row at the same column
     assert_eq!(buf.cursor, Cursor { line: 0, col: 0 });
 }
@@ -532,7 +566,11 @@ fn vertical_move_without_wrapping_still_works() {
     let mut buf = Buffer::from_text("first\nsecond\n");
     buf.cursor = Cursor { line: 0, col: 3 };
     buf.move_down(80); // wide enough that nothing wraps
-    assert_eq!(buf.cursor, Cursor { line: 1, col: 3 }, "moves to the next logical line");
+    assert_eq!(
+        buf.cursor,
+        Cursor { line: 1, col: 3 },
+        "moves to the next logical line"
+    );
 }
 
 #[test]

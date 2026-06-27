@@ -79,7 +79,11 @@ pub struct Confirm {
 
 impl Route {
     fn run(backend: BackendKind, reason: impl Into<String>) -> Self {
-        Route { backend, confirm: None, reason: reason.into() }
+        Route {
+            backend,
+            confirm: None,
+            reason: reason.into(),
+        }
     }
 }
 
@@ -116,9 +120,15 @@ pub fn route(i: &Inputs) -> Route {
         // Spend on the cloud only up to the ceiling; past it, drop to local.
         Policy::CostCeiling => {
             if over && local_fits {
-                Route::run(BackendKind::Local, "over the cost ceiling — routed on-device")
+                Route::run(
+                    BackendKind::Local,
+                    "over the cost ceiling — routed on-device",
+                )
             } else if over && too_big {
-                cloudish_reason(over, "over the ceiling but too large for local — using Claude")
+                cloudish_reason(
+                    over,
+                    "over the ceiling but too large for local — using Claude",
+                )
             } else {
                 // Under the ceiling (or no local): cloud, no confirm needed.
                 Route::run(BackendKind::Claude, "under the cost ceiling — using Claude")
@@ -130,7 +140,9 @@ pub fn route(i: &Inputs) -> Route {
             if over {
                 Route {
                     backend: BackendKind::Claude,
-                    confirm: Some(Confirm { offer_local: local_fits }),
+                    confirm: Some(Confirm {
+                        offer_local: local_fits,
+                    }),
                     reason: "over the threshold — choose a backend".into(),
                 }
             } else {
@@ -156,7 +168,11 @@ fn cloudish(backend: BackendKind, over: bool) -> Route {
 /// run, so the confirm reflects only cost intent — as it always has.
 fn cloudish_reason(over: bool, reason: &str) -> Route {
     if over {
-        Route { backend: BackendKind::Claude, confirm: Some(Confirm { offer_local: false }), reason: reason.into() }
+        Route {
+            backend: BackendKind::Claude,
+            confirm: Some(Confirm { offer_local: false }),
+            reason: reason.into(),
+        }
     } else {
         Route::run(BackendKind::Claude, reason)
     }
@@ -184,7 +200,12 @@ mod tests {
 
     #[test]
     fn offline_pins_local_regardless_of_policy() {
-        for policy in [Policy::Configured, Policy::PreferCloud, Policy::Ask, Policy::CostCeiling] {
+        for policy in [
+            Policy::Configured,
+            Policy::PreferCloud,
+            Policy::Ask,
+            Policy::CostCeiling,
+        ] {
             let mut i = inputs(policy, est(99.0, 1000));
             i.offline = true;
             assert_eq!(route(&i).backend, BackendKind::Local, "{policy:?}");
@@ -204,7 +225,10 @@ mod tests {
         // A local session backend just runs (free).
         let mut local = inputs(Policy::Configured, est(99.0, 1000));
         local.configured = BackendKind::Local;
-        assert_eq!(route(&local), Route::run(BackendKind::Local, "local backend — free, on-device"));
+        assert_eq!(
+            route(&local),
+            Route::run(BackendKind::Local, "local backend — free, on-device")
+        );
     }
 
     #[test]

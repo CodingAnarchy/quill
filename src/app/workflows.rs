@@ -6,7 +6,7 @@
 //! one at a time.
 
 use super::palette::AiStart;
-use super::sequenced::{plural, SequencedRun, Sequenced};
+use super::sequenced::{plural, Sequenced, SequencedRun};
 use super::*;
 
 use crate::mode::{Action, AiAction};
@@ -26,7 +26,11 @@ pub(crate) struct WorkflowRun {
 
 impl WorkflowRun {
     fn new(name: String, actions: Vec<Action>) -> Self {
-        Self { name, actions, seq: SequencedRun::new() }
+        Self {
+            name,
+            actions,
+            seq: SequencedRun::new(),
+        }
     }
 }
 
@@ -54,7 +58,11 @@ impl Sequenced for WorkflowDriver {
         }
     }
     fn cancelling_message(app: &App) -> String {
-        let name = app.workflow_run.as_ref().map(|r| r.name.as_str()).unwrap_or("");
+        let name = app
+            .workflow_run
+            .as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("");
         format!("Workflow '{name}': cancelling after this step…")
     }
 }
@@ -76,9 +84,17 @@ impl App {
                 Ok(actions) => format!("{} steps: {}", actions.len(), wf.steps.join(" → ")),
                 Err(e) => format!("⚠ {e}"),
             };
-            PaletteItem { label: wf.name.clone(), desc, command: Command::RunWorkflow(i) }
+            PaletteItem {
+                label: wf.name.clone(),
+                desc,
+                command: Command::RunWorkflow(i),
+            }
         }));
-        self.mode = Mode::Palette(Box::new(Palette { title: "Workflows", items, selected: 0 }));
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Workflows",
+            items,
+            selected: 0,
+        }));
     }
 
     /// The vocabulary an AI workflow draft (#232) may choose steps from: every
@@ -120,7 +136,10 @@ impl App {
         }
         match crate::config::add_workflow(&name, &steps) {
             Ok(path) => {
-                self.workflows.push(workflow::Workflow { name: name.clone(), steps });
+                self.workflows.push(workflow::Workflow {
+                    name: name.clone(),
+                    steps,
+                });
                 self.workflows.sort_by(|a, b| a.name.cmp(&b.name));
                 self.message = Some(format!("Saved workflow '{name}' to {}", path.display()));
             }
@@ -188,8 +207,15 @@ impl App {
             if run.seq.index >= run.actions.len() {
                 let (name, ran, skipped) = (run.name.clone(), run.seq.ran, run.seq.skipped);
                 self.workflow_run = None;
-                let tail = if skipped > 0 { format!(" ({skipped} skipped)") } else { String::new() };
-                self.message = Some(format!("Ran workflow '{name}' — {ran} {}{tail}", plural(ran, "step", "steps")));
+                let tail = if skipped > 0 {
+                    format!(" ({skipped} skipped)")
+                } else {
+                    String::new()
+                };
+                self.message = Some(format!(
+                    "Ran workflow '{name}' — {ran} {}{tail}",
+                    plural(ran, "step", "steps")
+                ));
                 return;
             }
             let action = run.actions[run.seq.index];
@@ -227,7 +253,11 @@ impl App {
                 AiStart::Confirm { label, offer_local } => {
                     // Suspend at the cost confirm; the handler resumes or cancels.
                     self.open_prompt(
-                        Pending::ConfirmAi { action: ai_action, force: false, offer_local },
+                        Pending::ConfirmAi {
+                            action: ai_action,
+                            force: false,
+                            offer_local,
+                        },
                         label,
                         "",
                         None,
@@ -259,7 +289,10 @@ impl App {
         if !self.ai_task.is_busy() {
             // The spawn failed (e.g. the backend couldn't be built); the action's
             // own message says why. Frame it as the step failure and stop.
-            let why = self.message.clone().unwrap_or_else(|| "couldn't start".into());
+            let why = self
+                .message
+                .clone()
+                .unwrap_or_else(|| "couldn't start".into());
             self.stop_run(&why);
             return;
         }
@@ -297,7 +330,10 @@ impl App {
     /// after-step cancel and the declined-confirm cancel.
     fn finish_cancelled(&mut self, name: &str, ran: usize) {
         self.workflow_run = None;
-        self.message = Some(format!("Workflow '{name}' cancelled — {ran} {} ran", plural(ran, "step", "steps")));
+        self.message = Some(format!(
+            "Workflow '{name}' cancelled — {ran} {} ran",
+            plural(ran, "step", "steps")
+        ));
     }
 
     /// Test seam: put a run in progress at its first step, so the async-step state
@@ -313,7 +349,9 @@ impl App {
         use super::sequenced::STEP_TIMEOUT;
         use std::time::Instant;
         if let Some(run) = self.workflow_run.as_mut() {
-            run.seq.started_at = Instant::now().checked_sub(STEP_TIMEOUT * 2).unwrap_or_else(Instant::now);
+            run.seq.started_at = Instant::now()
+                .checked_sub(STEP_TIMEOUT * 2)
+                .unwrap_or_else(Instant::now);
         }
     }
 }

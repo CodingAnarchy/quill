@@ -27,7 +27,11 @@ fn no_matches_reports_and_closes() {
     app.on_key(key(KeyCode::Enter));
 
     assert!(!matches!(app.mode, Mode::ProjectSearch(_)), "closed");
-    assert!(app.message.as_deref().unwrap_or("").contains("No matches"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("No matches"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -40,8 +44,15 @@ fn jumping_to_a_match_opens_its_chapter() {
     app.on_key(key(KeyCode::Enter)); // Results
     app.on_key(key(KeyCode::Enter)); // jump to the selected match
 
-    assert_eq!(app.project.active_index(), 1, "switched to the match's chapter");
-    assert!(app.buffer.text().contains("second chapter"), "opened the right chapter");
+    assert_eq!(
+        app.project.active_index(),
+        1,
+        "switched to the match's chapter"
+    );
+    assert!(
+        app.buffer.text().contains("second chapter"),
+        "opened the right chapter"
+    );
 }
 
 #[test]
@@ -56,10 +67,20 @@ fn replace_all_rewrites_every_chapter_on_disk() {
     app.on_key(key(KeyCode::Char('a'))); // → Confirm
     app.on_key(key(KeyCode::Char('y'))); // replace all
 
-    assert!(app.message.as_deref().unwrap_or("").contains("2 chapters"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("2 chapters"),
+        "{:?}",
+        app.message
+    );
     // The active chapter (one.md) is flushed; the other is written directly.
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "first section\n");
-    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second section\n");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "first section\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "second section\n"
+    );
 }
 
 #[test]
@@ -74,9 +95,15 @@ fn replace_all_needs_confirmation() {
     app.on_key(key(KeyCode::Char('a'))); // Confirm prompt
     app.on_key(key(KeyCode::Esc)); // decline — backs out to stepping
 
-    assert!(matches!(app.mode, Mode::ProjectSearch(_)), "still open, nothing replaced");
+    assert!(
+        matches!(app.mode, Mode::ProjectSearch(_)),
+        "still open, nothing replaced"
+    );
     // Files untouched (the non-active one is the unambiguous on-disk check).
-    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second chapter\n");
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "second chapter\n"
+    );
 }
 
 #[test]
@@ -92,8 +119,15 @@ fn replacing_one_match_leaves_the_others() {
     app.on_key(key(KeyCode::Enter)); // done
 
     // Only chapter two's match remains untouched on disk.
-    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "second chapter\n");
-    assert!(app.message.as_deref().unwrap_or("").contains("Replaced 1"), "{:?}", app.message);
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "second chapter\n"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Replaced 1"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -119,7 +153,11 @@ fn replace_refreshes_cached_word_counts() {
 fn front_matter_is_not_searched_or_replaced() {
     let (mut app, dir) = two_chapter_app("psearch-frontmatter");
     // Chapter two's front matter mentions the query term; its body mentions it once.
-    fs::write(dir.join("two.md"), "---\npov: chapter\n---\nsecond chapter\n").unwrap();
+    fs::write(
+        dir.join("two.md"),
+        "---\npov: chapter\n---\nsecond chapter\n",
+    )
+    .unwrap();
 
     app.open_project_find();
     type_str(&mut app, "chapter");
@@ -134,6 +172,9 @@ fn front_matter_is_not_searched_or_replaced() {
     app.on_key(key(KeyCode::Char('y'))); // replace all
 
     let two = fs::read_to_string(dir.join("two.md")).unwrap();
-    assert!(two.contains("pov: chapter"), "front matter preserved: {two}");
+    assert!(
+        two.contains("pov: chapter"),
+        "front matter preserved: {two}"
+    );
     assert!(two.contains("second scene"), "body replaced: {two}");
 }

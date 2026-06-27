@@ -72,7 +72,9 @@ impl Buffer {
     pub fn move_word_forward(&mut self) {
         let items = self.classes();
         let mut i = self.grapheme_index(&items);
-        let Some(&(_, start)) = items.get(i) else { return };
+        let Some(&(_, start)) = items.get(i) else {
+            return;
+        };
         if start != CharClass::Space {
             while items.get(i).is_some_and(|&(_, c)| c == start) {
                 i += 1;
@@ -81,7 +83,9 @@ impl Buffer {
         while items.get(i).is_some_and(|&(_, c)| c == CharClass::Space) {
             i += 1;
         }
-        let target = items.get(i).map_or_else(|| self.rope.len_bytes(), |&(b, _)| b);
+        let target = items
+            .get(i)
+            .map_or_else(|| self.rope.len_bytes(), |&(b, _)| b);
         self.cursor = self.cursor_at_byte(target);
         self.goal_x = None;
     }
@@ -117,7 +121,9 @@ impl Buffer {
         while items.get(i).is_some_and(|&(_, c)| c == CharClass::Space) {
             i += 1;
         }
-        let Some(&(_, class)) = items.get(i) else { return };
+        let Some(&(_, class)) = items.get(i) else {
+            return;
+        };
         while items.get(i + 1).is_some_and(|&(_, c)| c == class) {
             i += 1;
         }
@@ -139,8 +145,12 @@ impl Buffer {
         let cur = self.cursor.col;
         let nth = count.saturating_sub(1);
         let found = match kind {
-            FindKind::FindFwd | FindKind::TillFwd => hits.iter().filter(|&&c| c > cur).nth(nth).copied(),
-            FindKind::FindBack | FindKind::TillBack => hits.iter().rev().filter(|&&c| c < cur).nth(nth).copied(),
+            FindKind::FindFwd | FindKind::TillFwd => {
+                hits.iter().filter(|&&c| c > cur).nth(nth).copied()
+            }
+            FindKind::FindBack | FindKind::TillBack => {
+                hits.iter().rev().filter(|&&c| c < cur).nth(nth).copied()
+            }
         };
         if let Some(col) = found {
             self.cursor.col = match kind {
@@ -156,14 +166,19 @@ impl Buffer {
     /// scan the word motions walk.
     fn classes(&self) -> Vec<(usize, CharClass)> {
         let text = self.rope.to_string();
-        text.grapheme_indices(true).map(|(b, g)| (b, CharClass::of(g))).collect()
+        text.grapheme_indices(true)
+            .map(|(b, g)| (b, CharClass::of(g)))
+            .collect()
     }
 
     /// Index into [`classes`](Self::classes) of the grapheme at the cursor (the
     /// length when the cursor is at the very end).
     fn grapheme_index(&self, items: &[(usize, CharClass)]) -> usize {
         let byte = self.cursor_byte();
-        items.iter().position(|&(b, _)| b >= byte).unwrap_or(items.len())
+        items
+            .iter()
+            .position(|&(b, _)| b >= byte)
+            .unwrap_or(items.len())
     }
 
     /// The byte range of a text object around the cursor (#203) — `inner` is the
@@ -195,7 +210,9 @@ impl Buffer {
             end += 1;
         }
         let mut start_b = items[start].0;
-        let mut end_b = items.get(end + 1).map_or_else(|| self.len_bytes(), |&(b, _)| b);
+        let mut end_b = items
+            .get(end + 1)
+            .map_or_else(|| self.len_bytes(), |&(b, _)| b);
         if around {
             let mut e = end + 1;
             if items.get(e).is_some_and(|&(_, c)| c == CharClass::Space) {
@@ -245,7 +262,10 @@ impl Buffer {
         // Walk back to the unmatched open bracket enclosing the cursor.
         let mut depth = 0usize;
         let mut open_b = None;
-        for (b, ch) in text[..=cur.min(text.len().saturating_sub(1))].char_indices().rev() {
+        for (b, ch) in text[..=cur.min(text.len().saturating_sub(1))]
+            .char_indices()
+            .rev()
+        {
             if ch == close && b != cur {
                 depth += 1;
             } else if ch == open {

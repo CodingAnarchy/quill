@@ -176,7 +176,10 @@ impl Theme {
     /// plus any warnings (an unknown theme name, an unknown field, or an
     /// unparseable color) so the caller can surface them — a bad value falls back
     /// to the default for that field rather than failing the whole load.
-    pub fn from_config(name: Option<&str>, overrides: &HashMap<String, String>) -> (Self, Vec<String>) {
+    pub fn from_config(
+        name: Option<&str>,
+        overrides: &HashMap<String, String>,
+    ) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
         let mut theme = match name {
             Some(n) => Self::builtin(n).unwrap_or_else(|| {
@@ -226,7 +229,11 @@ fn parse_color(s: &str) -> Option<Color> {
     if s.contains(',') {
         let parts: Vec<&str> = s.split(',').map(str::trim).collect();
         if let [r, g, b] = parts[..] {
-            return Some(Color::Rgb(r.parse().ok()?, g.parse().ok()?, b.parse().ok()?));
+            return Some(Color::Rgb(
+                r.parse().ok()?,
+                g.parse().ok()?,
+                b.parse().ok()?,
+            ));
         }
         return None;
     }
@@ -305,7 +312,10 @@ mod tests {
         // they can't drift; this still exercises that every key is settable.
         let mut t = Theme::dark();
         for &field in COLOR_FIELDS {
-            assert!(t.set_field(field, Color::Red), "{field} should be a settable color field");
+            assert!(
+                t.set_field(field, Color::Red),
+                "{field} should be a settable color field"
+            );
         }
     }
 

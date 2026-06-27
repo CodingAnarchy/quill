@@ -19,7 +19,10 @@ impl App {
 
     /// Open the built-in user's guide overlay (F1, and the run-action menu) (#281).
     pub(crate) fn open_guide(&mut self) {
-        let lines = crate::guide::TEXT.lines().map(|l| Line::raw(l.to_string())).collect();
+        let lines = crate::guide::TEXT
+            .lines()
+            .map(|l| Line::raw(l.to_string()))
+            .collect();
         self.overlay = Some(Overlay::guide(lines));
     }
 
@@ -38,7 +41,7 @@ impl App {
         });
         report::lines(
             &self.project.manifest,
-            self.body_word_count(),    // the goal & projection track the novel (#182)
+            self.body_word_count(), // the goal & projection track the novel (#182)
             self.section_word_count(), // front/back matter, shown but not counted
             self.project.body_chapter_count(), // front/back matter aren't chapters (#180)
             self.count_todo(),
@@ -64,7 +67,9 @@ impl App {
     /// last line into view, zero when it already fits (or none is open). Shares
     /// the bound formula with the renderer ([`crate::ui::max_scroll`]).
     fn overlay_max_scroll(&self) -> u16 {
-        self.overlay.as_ref().map_or(0, |o| crate::ui::max_scroll(o.lines.len(), self.viewport_height))
+        self.overlay.as_ref().map_or(0, |o| {
+            crate::ui::max_scroll(o.lines.len(), self.viewport_height)
+        })
     }
 
     /// Handle a key while a full-screen overlay is open: scroll on the navigation
@@ -103,7 +108,11 @@ impl App {
         let mut phrase_counts = HashMap::new();
         let mut tokens = Vec::new();
         for i in 0..self.chapter_count() {
-            let title = self.project.chapter_title(i).unwrap_or("Untitled").to_string();
+            let title = self
+                .project
+                .chapter_title(i)
+                .unwrap_or("Untitled")
+                .to_string();
             // Measure prose only — drop heading lines so a chapter/scene title
             // doesn't glue onto its first sentence or skew readability.
             let text = analysis::prose(&self.chapter_text(i));
@@ -203,6 +212,4 @@ impl App {
             .map(|i| count_matches(&self.chapter_text(i), marker))
             .sum()
     }
-
-
 }

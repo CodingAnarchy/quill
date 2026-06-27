@@ -171,7 +171,9 @@ pub fn list_items(text: &str, heading: &str) -> Vec<String> {
 /// The place/term gazetteer from `bible/setting.md` (empty when absent).
 pub fn gazetteer(root: &Path) -> Vec<String> {
     let path = root.join("bible").join("setting.md");
-    std::fs::read_to_string(path).map(|t| list_items(&t, "Gazetteer")).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .map(|t| list_items(&t, "Gazetteer"))
+        .unwrap_or_default()
 }
 
 /// The character names from `bible/characters/*.md` front matter (empty when
@@ -197,7 +199,10 @@ mod tests {
     #[test]
     fn list_items_reads_a_section_and_stops_at_the_next() {
         let text = "## Gazetteer\n- Aldermoor\n- lightsteel\n\n## Other\n- nope\n";
-        assert_eq!(list_items(text, "Gazetteer"), vec!["Aldermoor", "lightsteel"]);
+        assert_eq!(
+            list_items(text, "Gazetteer"),
+            vec!["Aldermoor", "lightsteel"]
+        );
         assert_eq!(list_items(text, "Other"), vec!["nope"]);
         assert!(list_items(text, "Missing").is_empty());
     }
@@ -222,7 +227,12 @@ mod tests {
         let chars = root.join("bible").join("characters");
         std::fs::create_dir_all(&chars).unwrap();
         // A setting file rendered the same way the writer does.
-        let setting = render("title: Setting\n", "## Gazetteer\n- Aldermoor\n- lightsteel\n", "## Notes\n", "2026-06-19");
+        let setting = render(
+            "title: Setting\n",
+            "## Gazetteer\n- Aldermoor\n- lightsteel\n",
+            "## Notes\n",
+            "2026-06-19",
+        );
         std::fs::write(root.join("bible").join("setting.md"), setting).unwrap();
         std::fs::write(chars.join("mara.md"), "---\nname: Mara Vance\n---\n").unwrap();
 
@@ -255,7 +265,12 @@ mod tests {
     #[test]
     fn render_preserves_notes_and_round_trips() {
         let notes = "## Notes\n\nKeep me.\n";
-        let file = render("name: Mara\n", "## Physical\n- green eyes\n", notes, "2026-06-19");
+        let file = render(
+            "name: Mara\n",
+            "## Physical\n- green eyes\n",
+            notes,
+            "2026-06-19",
+        );
         assert!(file.contains("name: Mara"));
         assert!(file.contains("green eyes"));
         assert_eq!(extract_notes(&file).trim(), notes.trim());
@@ -264,9 +279,16 @@ mod tests {
 
     #[test]
     fn edited_generated_block_is_detected_not_notes() {
-        let file = render("name: Mara\n", "## Physical\n- green eyes\n", NOTES_PLACEHOLDER, "2026-06-19");
+        let file = render(
+            "name: Mara\n",
+            "## Physical\n- green eyes\n",
+            NOTES_PLACEHOLDER,
+            "2026-06-19",
+        );
         assert!(is_hand_edited(&file.replace("green eyes", "blue eyes")));
-        assert!(!is_hand_edited(&file.replace("preserved across regeneration", "MY EDIT")));
+        assert!(!is_hand_edited(
+            &file.replace("preserved across regeneration", "MY EDIT")
+        ));
     }
 
     #[test]

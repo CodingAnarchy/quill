@@ -41,7 +41,12 @@ impl Pane for Editor<'_> {
 pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // The prose column, with a blank top row (the EditMeta banner draws there).
     let column = centered_column(
-        Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height.saturating_sub(1) },
+        Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        },
         app.focus_width,
     );
 
@@ -69,8 +74,10 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     let annotations = app.annotation_ranges();
     // No cursor while a docked surface pane has scroll focus (#164). Vim Normal /
     // Visual mode still shows the cursor — that's the selection's active end.
-    let editing = matches!(app.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_))
-        && !app.surface_pane_focused()
+    let editing = matches!(
+        app.mode,
+        Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_)
+    ) && !app.surface_pane_focused()
         && !app.assistant_pane_focused();
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
     let focus = app.focus_mode.then(|| focus_paragraph(buffer));
@@ -82,7 +89,15 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         annotations: &annotations,
         focus,
     };
-    render_body(frame, column, buffer, &inserts, &highlights, app.typewriter, editing);
+    render_body(
+        frame,
+        column,
+        buffer,
+        &inserts,
+        &highlights,
+        app.typewriter,
+        editing,
+    );
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
     if let Mode::EditMeta(meta) = &app.mode {
@@ -90,9 +105,16 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 banner,
-                Style::default().fg(app.theme.on_accent).bg(app.theme.heading),
+                Style::default()
+                    .fg(app.theme.on_accent)
+                    .bg(app.theme.heading),
             ))),
-            Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+            Rect {
+                x: area.x,
+                y: area.y,
+                width: area.width,
+                height: 1,
+            },
         );
     }
 }
@@ -104,11 +126,23 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!(" {title}"),
-            Style::default().fg(app.theme.dim).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.dim)
+                .add_modifier(Modifier::BOLD),
         ))),
-        Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
     );
-    let body = Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height.saturating_sub(1) };
+    let body = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
     let column = centered_column(body, app.focus_width);
     // No cursor in a reference pane, so conceal every emphasis marker uniformly.
     let conceal = buffer.syntax().conceal_ranges(None);
@@ -138,7 +172,12 @@ fn render_body(
 ) {
     let height = column.height as usize;
     let wrap = column.width as usize;
-    let header_rows = |line: usize| inserts.iter().find(|(at, _)| *at == line).map_or(0, |(_, b)| b.len());
+    let header_rows = |line: usize| {
+        inserts
+            .iter()
+            .find(|(at, _)| *at == line)
+            .map_or(0, |(_, b)| b.len())
+    };
     let body_rows = |line: usize| crate::wrap::row_starts(&buffer.line(line), wrap).len();
 
     let total = buffer.line_count();
@@ -199,7 +238,13 @@ fn render_body(
                 }
             }
         }
-        let body = styled_line(buffer.syntax(), buffer.line_start_byte(ll), &buffer.line(ll), hl, wrap);
+        let body = styled_line(
+            buffer.syntax(),
+            buffer.line_start_byte(ll),
+            &buffer.line(ll),
+            hl,
+            wrap,
+        );
         for (sub, line) in body.into_iter().enumerate() {
             if to_skip > 0 {
                 to_skip -= 1;
@@ -224,7 +269,12 @@ fn render_body(
         if let Some(row) = cursor_row {
             let screen_y = column.y + row;
             let row_start = cstarts[cursor_subrow];
-            let col_width = visible_width_before(&cline[row_start..], cline_start + row_start, cursor_byte, hl.conceal);
+            let col_width = visible_width_before(
+                &cline[row_start..],
+                cline_start + row_start,
+                cursor_byte,
+                hl.conceal,
+            );
             let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
             frame.set_cursor_position((screen_x, screen_y));
         }
@@ -289,7 +339,9 @@ fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
     for line in epigraph.text.lines() {
         lines.push(Line::from(Span::styled(
             format!("{indent}{line}"),
-            Style::default().fg(theme.muted).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(theme.muted)
+                .add_modifier(Modifier::ITALIC),
         )));
     }
     if let Some(attribution) = &epigraph.attribution {
@@ -357,7 +409,14 @@ fn styled_line(
 
 /// Style one visual row — the byte sub-range `[rs, re)` of `text` — into runs of
 /// equal style, dropping concealed (hidden-marker) characters.
-fn styled_row(syntax: &Syntax, line_start: usize, text: &str, rs: usize, re: usize, hl: &SpanHighlights) -> Line<'static> {
+fn styled_row(
+    syntax: &Syntax,
+    line_start: usize,
+    text: &str,
+    rs: usize,
+    re: usize,
+    hl: &SpanHighlights,
+) -> Line<'static> {
     let seg = &text[rs..re];
     if seg.is_empty() {
         return Line::raw("");
@@ -365,19 +424,36 @@ fn styled_row(syntax: &Syntax, line_start: usize, text: &str, rs: usize, re: usi
     let seg_start = line_start + rs;
     let seg_end = line_start + re;
     let theme = theme::current(); // once per row, not per character
-    // Focus mode (#301): the row is entirely outside the focused paragraph, so it
-    // dims as a whole — caught here before any per-character styling work.
-    if hl.focus.is_some_and(|(s, e)| seg_start >= e || seg_end <= s) {
-        return Line::from(Span::styled(seg.to_string(), Style::default().fg(theme.dim)));
+                                  // Focus mode (#301): the row is entirely outside the focused paragraph, so it
+                                  // dims as a whole — caught here before any per-character styling work.
+    if hl
+        .focus
+        .is_some_and(|(s, e)| seg_start >= e || seg_end <= s)
+    {
+        return Line::from(Span::styled(
+            seg.to_string(),
+            Style::default().fg(theme.dim),
+        ));
     }
     let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
-    let concealed_here = hl.conceal.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    let match_here = hl.matches.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let concealed_here = hl
+        .conceal
+        .iter()
+        .any(|&(s, e)| s < seg_end && e > seg_start);
+    let match_here = hl
+        .matches
+        .iter()
+        .any(|&(s, e)| s < seg_end && e > seg_start);
     // `current` (the search current match, or the Visual selection #205) can be
     // set without any entry in `matches`, so check it too before skipping styling.
-    let current_here = hl.current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
+    let current_here = hl
+        .current
+        .is_some_and(|(s, e)| s < seg_end && e > seg_start);
     let spell_here = hl.spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    let annotated_here = hl.annotations.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let annotated_here = hl
+        .annotations
+        .iter()
+        .any(|&(s, e)| s < seg_end && e > seg_start);
     // A row fully inside the focused span (or focus off) needs no per-char dimming.
     let focus_covers_row = hl.focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
     if hls.is_empty()
@@ -401,7 +477,13 @@ fn styled_row(syntax: &Syntax, line_start: usize, text: &str, rs: usize, re: usi
         if is_concealed(abs, hl.conceal) {
             continue;
         }
-        let mut style = search_style(style_at(&hls, abs, theme), abs, hl.matches, hl.current, theme);
+        let mut style = search_style(
+            style_at(&hls, abs, theme),
+            abs,
+            hl.matches,
+            hl.current,
+            theme,
+        );
         // Misspelled words (#357) get an underline, layered on whatever else.
         if hl.spell.iter().any(|&(s, e)| abs >= s && abs < e) {
             style = style.add_modifier(Modifier::UNDERLINED);
@@ -469,7 +551,10 @@ fn focus_paragraph(buffer: &Buffer) -> ByteRange {
     while last + 1 < buffer.line_count() && !blank(last + 1) {
         last += 1;
     }
-    (buffer.line_start_byte(first), buffer.line_start_byte(last) + buffer.line(last).len())
+    (
+        buffer.line_start_byte(first),
+        buffer.line_start_byte(last) + buffer.line(last).len(),
+    )
 }
 
 /// A `focus_width`-wide prose column centered horizontally in `area` (full width
@@ -477,7 +562,12 @@ fn focus_paragraph(buffer: &Buffer) -> ByteRange {
 fn centered_column(area: Rect, focus_width: u16) -> Rect {
     let width = focus_width.min(area.width.saturating_sub(2));
     let left_pad = area.width.saturating_sub(width) / 2;
-    Rect { x: area.x + left_pad, y: area.y, width, height: area.height }
+    Rect {
+        x: area.x + left_pad,
+        y: area.y,
+        width,
+        height: area.height,
+    }
 }
 
 /// Layer search highlighting onto a character's base style: the current match

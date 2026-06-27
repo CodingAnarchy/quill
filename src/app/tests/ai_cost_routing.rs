@@ -1,10 +1,10 @@
 //! AI cost confirmation, revision triage, incremental pass scoping, the backend switch, and hybrid routing.
 
 use super::*;
-use std::fs;
 use crate::ai::router::Policy;
 use crate::app::palette::AiStart;
 use crate::mode::AiAction;
+use std::fs;
 
 // --- AI: cost confirm & revision triage -------------------------------------
 
@@ -22,7 +22,10 @@ fn an_expensive_pass_asks_for_confirmation_first() {
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     match &app.mode {
         Mode::Prompt(s) => {
-            assert!(matches!(s.pending, Pending::ConfirmAi { .. }), "cost confirm opens");
+            assert!(
+                matches!(s.pending, Pending::ConfirmAi { .. }),
+                "cost confirm opens"
+            );
             assert!(s.label.contains("run?"), "{}", s.label);
         }
         _ => panic!("expected the cost confirm prompt"),
@@ -36,7 +39,10 @@ fn a_cheap_pass_runs_without_confirmation() {
     app.start_ai_action(crate::mode::AiAction::Style, false);
     // It dispatched straight through (no key configured → a status message),
     // never stopping at a confirm prompt.
-    assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm for a cheap pass");
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no confirm for a cheap pass"
+    );
 }
 
 #[test]
@@ -46,7 +52,10 @@ fn confirming_an_expensive_pass_dispatches_it() {
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     assert!(matches!(app.mode, Mode::Prompt(_)));
     app.on_key(key(KeyCode::Char('y'))); // confirm → dispatch (no key → message)
-    assert!(!matches!(app.mode, Mode::Prompt(_)), "confirm closes the prompt");
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "confirm closes the prompt"
+    );
 }
 
 #[test]
@@ -55,7 +64,10 @@ fn declining_an_expensive_pass_cancels_it() {
     app.ai.cost_threshold = 0.0;
     app.start_ai_action(crate::mode::AiAction::Continuity, false);
     app.on_key(key(KeyCode::Char('n')));
-    assert!(matches!(app.mode, Mode::Insert), "declining returns to editing");
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "declining returns to editing"
+    );
     assert!(!app.ai_task.is_busy(), "nothing was sent");
 }
 
@@ -89,7 +101,11 @@ fn triage_with_no_findings_shows_a_message() {
     let (mut app, _dir) = two_chapter_app("triage-empty");
     app.open_triage();
     assert!(!matches!(app.mode, Mode::Findings(_)));
-    assert!(app.message.as_deref().unwrap_or("").contains("No findings"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("No findings"),
+        "{:?}",
+        app.message
+    );
 }
 
 // --- Incremental pass scoping (#90) ----------------------------------------
@@ -99,7 +115,11 @@ fn triage_with_no_findings_shows_a_message() {
 fn write_character_bible(dir: &std::path::Path) {
     let chars = dir.join("bible").join("characters");
     fs::create_dir_all(&chars).unwrap();
-    fs::write(chars.join("mara.md"), "---\nname: Mara\n---\n\n<!-- generated:start -->\nprofile\n<!-- generated:end -->\n").unwrap();
+    fs::write(
+        chars.join("mara.md"),
+        "---\nname: Mara\n---\n\n<!-- generated:start -->\nprofile\n<!-- generated:end -->\n",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -107,19 +127,29 @@ fn an_up_to_date_bible_pass_makes_no_request() {
     let (mut app, dir) = two_chapter_app("incr-uptodate");
     // A bible exists and its recorded state matches the manuscript → nothing to do.
     write_character_bible(&dir);
-    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
     app.analyze_characters(false);
     assert!(!app.ai_busy(), "an up-to-date bible spawns no request");
-    assert!(app.message.as_deref().unwrap_or("").contains("current"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("current"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
 fn forcing_a_rebuild_overrides_an_up_to_date_bible() {
     let (app, dir) = two_chapter_app("incr-force");
     write_character_bible(&dir);
-    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
     let action = crate::mode::AiAction::Characters;
-    assert_eq!(app.pass_context_len(action, false), 0, "up to date by default");
+    assert_eq!(
+        app.pass_context_len(action, false),
+        0,
+        "up to date by default"
+    );
     assert_eq!(
         app.pass_context_len(action, true),
         app.manuscript_text().len(),
@@ -132,7 +162,8 @@ fn a_hand_deleted_bible_rebuilds_even_when_state_says_current() {
     let (app, dir) = two_chapter_app("incr-drift");
     // The state claims the bible is built from the current manuscript, but no
     // bible file exists on disk (deleted by hand) — rebuild rather than skip.
-    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
     assert_eq!(
         app.pass_context_len(crate::mode::AiAction::Characters, false),
         app.manuscript_text().len(),
@@ -143,7 +174,8 @@ fn a_hand_deleted_bible_rebuilds_even_when_state_says_current() {
 #[test]
 fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
     let (mut app, dir) = two_chapter_app("incr-scope");
-    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
     // Edit chapter Two and save; only it is now part of the delta.
     app.on_key(ctrl('n')); // active → Two
     type_str(&mut app, "NEWWORD");
@@ -151,20 +183,35 @@ fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
 
     let state = ai::incremental::State::load(&dir);
     let scope = ai::incremental::decide(state.built_from("characters"), &app.chapter_digests(), 5);
-    assert_eq!(scope, ai::incremental::Scope::Incremental(vec!["two.md".into()]));
+    assert_eq!(
+        scope,
+        ai::incremental::Scope::Incremental(vec!["two.md".into()])
+    );
     // The incremental context is only the changed chapter, not the whole book.
     let changed = app.chapters_text(&["two.md".to_string()]);
-    assert!(changed.contains("NEWWORD") && !changed.contains("first chapter"), "{changed}");
+    assert!(
+        changed.contains("NEWWORD") && !changed.contains("first chapter"),
+        "{changed}"
+    );
 }
 
 #[test]
 fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
     let (app, dir) = two_chapter_app("incr-cost");
     let action = crate::mode::AiAction::Characters;
-    assert_eq!(app.pass_context_len(action, false), app.manuscript_text().len(), "first run estimates the full manuscript");
+    assert_eq!(
+        app.pass_context_len(action, false),
+        app.manuscript_text().len(),
+        "first run estimates the full manuscript"
+    );
     write_character_bible(&dir);
-    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests()).unwrap();
-    assert_eq!(app.pass_context_len(action, false), 0, "an up-to-date bible costs nothing to confirm");
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
+    assert_eq!(
+        app.pass_context_len(action, false),
+        0,
+        "an up-to-date bible costs nothing to confirm"
+    );
 }
 
 #[test]
@@ -173,9 +220,16 @@ fn a_clean_bible_pass_records_what_it_built_from() {
     let built = app.chapter_digests();
     // Stand in for what analyze_characters sets just before spawning the request.
     app.pending_pass = Some(("characters".to_string(), built.clone(), false));
-    app.apply_characters(Ok(vec![Character { name: "Mara".into(), ..Default::default() }]));
+    app.apply_characters(Ok(vec![Character {
+        name: "Mara".into(),
+        ..Default::default()
+    }]));
     let state = ai::incremental::State::load(&dir);
-    assert_eq!(state.built_from("characters"), Some(&built), "the pass recorded its manuscript state");
+    assert_eq!(
+        state.built_from("characters"),
+        Some(&built),
+        "the pass recorded its manuscript state"
+    );
     assert!(app.pending_pass.is_none(), "the snapshot was consumed");
 }
 
@@ -188,8 +242,18 @@ fn offline_pin_blocks_the_backend_switch() {
     app.ai.offline = true;
     let before = app.ai.backend;
     app.toggle_ai_backend();
-    assert_eq!(app.ai.backend, before, "the offline pin leaves the configured backend untouched");
-    assert!(app.message.as_deref().unwrap_or("").contains("Offline mode pins"), "{:?}", app.message);
+    assert_eq!(
+        app.ai.backend, before,
+        "the offline pin leaves the configured backend untouched"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Offline mode pins"),
+        "{:?}",
+        app.message
+    );
     assert_eq!(app.ai_backend_label(), "local (offline pinned)");
 }
 
@@ -200,7 +264,11 @@ fn switching_to_local_without_the_feature_explains_how() {
     app.ai.enabled = true;
     app.ai.backend = ai::BackendKind::Claude;
     app.toggle_ai_backend(); // would flip to local, but it isn't compiled in
-    assert_eq!(app.ai.backend, ai::BackendKind::Claude, "stays on Claude rather than pretending to switch");
+    assert_eq!(
+        app.ai.backend,
+        ai::BackendKind::Claude,
+        "stays on Claude rather than pretending to switch"
+    );
     let msg = app.message.as_deref().unwrap_or("");
     assert!(msg.contains("--features local"), "{msg}");
 }
@@ -229,7 +297,10 @@ fn offline_routes_costed_actions_on_device() {
     app.ai.enabled = true;
     app.ai.offline = true; // the hard pin
     assert!(
-        matches!(app.ai_action_start(AiAction::Continuity, false), AiStart::Run(ai::BackendKind::Local)),
+        matches!(
+            app.ai_action_start(AiAction::Continuity, false),
+            AiStart::Run(ai::BackendKind::Local)
+        ),
         "offline pins every pass on-device",
     );
 }
@@ -241,7 +312,10 @@ fn ask_policy_confirms_when_over_the_threshold() {
     app.ai.routing = Policy::Ask;
     app.ai.cost_threshold = 0.0; // any non-empty manuscript is "over"
     assert!(
-        matches!(app.ai_action_start(AiAction::Continuity, false), AiStart::Confirm { .. }),
+        matches!(
+            app.ai_action_start(AiAction::Continuity, false),
+            AiStart::Confirm { .. }
+        ),
         "the ask policy surfaces the choice over the threshold",
     );
 }
@@ -253,7 +327,10 @@ fn the_default_policy_keeps_the_plain_cost_confirm() {
     app.ai.cost_threshold = 0.0;
     match app.ai_action_start(AiAction::Continuity, false) {
         AiStart::Confirm { offer_local, label } => {
-            assert!(!offer_local, "the default policy doesn't offer a local detour");
+            assert!(
+                !offer_local,
+                "the default policy doesn't offer a local detour"
+            );
             assert!(label.contains("run?"), "{label}");
         }
         _ => panic!("expected the historical cost confirm"),
@@ -267,7 +344,10 @@ fn prefer_local_runs_a_fitting_pass_on_device() {
     app.ai.enabled = true;
     app.ai.routing = Policy::PreferLocal;
     assert!(
-        matches!(app.ai_action_start(AiAction::Continuity, false), AiStart::Run(ai::BackendKind::Local)),
+        matches!(
+            app.ai_action_start(AiAction::Continuity, false),
+            AiStart::Run(ai::BackendKind::Local)
+        ),
         "prefer-local keeps a small pass on-device",
     );
 }

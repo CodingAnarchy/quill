@@ -10,10 +10,10 @@ use crate::ai::fal::FalBackend;
 use crate::ai::image::{self, ImageBackend, ImageReport, ImageRequest};
 use crate::ai::scene_brief;
 use crate::ai::{self, bible, Outcome};
-use crate::mode::{Command, Mode, Palette, PaletteItem, PortraitChoice, Pending};
+use crate::mode::{Command, Mode, Palette, PaletteItem, Pending, PortraitChoice};
 
-use super::App;
 use super::worker::BackendSpec;
+use super::App;
 
 /// Condense prose for an image prompt (#239): drop markdown heading lines,
 /// collapse runs of whitespace, and cap at `max_chars` (on a char boundary), so a
@@ -42,7 +42,12 @@ pub(super) struct SceneInput {
 /// backend when one is available, else use the prose-excerpt fallback. Runs on the
 /// worker thread, so any distill failure (or no text backend) degrades quietly to
 /// the fallback — the verified #239 behavior.
-pub(super) fn scene_prompt_for(text_spec: Option<BackendSpec>, scene: &SceneInput, book: &str, model: &str) -> String {
+pub(super) fn scene_prompt_for(
+    text_spec: Option<BackendSpec>,
+    scene: &SceneInput,
+    book: &str,
+    model: &str,
+) -> String {
     if let Some(spec) = text_spec {
         if let Ok(backend) = spec.build() {
             let req = scene_brief::build_request(scene.text.clone(), model);
@@ -105,7 +110,9 @@ impl ImageBackendSpec {
 pub(super) fn build_local_image(
     slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
 ) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
-    let mut guard = slot.lock().map_err(|_| ai::AiError::Internal("image model lock poisoned".into()))?;
+    let mut guard = slot
+        .lock()
+        .map_err(|_| ai::AiError::Internal("image model lock poisoned".into()))?;
     if let Some(backend) = guard.as_ref() {
         return Ok(backend.clone());
     }
@@ -142,12 +149,21 @@ impl App {
             desc: "a portrait for every character".into(),
             command: Command::Portrait(PortraitChoice::All),
         }];
-        items.extend(targets.iter().enumerate().map(|(i, (_, name, _))| PaletteItem {
-            label: name.clone(),
-            desc: "a portrait for this character".into(),
-            command: Command::Portrait(PortraitChoice::One(i)),
+        items.extend(
+            targets
+                .iter()
+                .enumerate()
+                .map(|(i, (_, name, _))| PaletteItem {
+                    label: name.clone(),
+                    desc: "a portrait for this character".into(),
+                    command: Command::Portrait(PortraitChoice::One(i)),
+                }),
+        );
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Character portrait",
+            items,
+            selected: 0,
         }));
-        self.mode = Mode::Palette(Box::new(Palette { title: "Character portrait", items, selected: 0 }));
     }
 
     /// Confirm the picked portrait selection (#244) before spending: stash the
@@ -156,7 +172,11 @@ impl App {
         let targets = self.character_portrait_targets();
         let selected = match choice {
             PortraitChoice::All => targets,
-            PortraitChoice::One(i) => targets.into_iter().nth(i).map(|t| vec![t]).unwrap_or_default(),
+            PortraitChoice::One(i) => targets
+                .into_iter()
+                .nth(i)
+                .map(|t| vec![t])
+                .unwrap_or_default(),
         };
         if selected.is_empty() {
             return;
@@ -176,7 +196,11 @@ impl App {
     /// [`poll_ai`](App::poll_ai). A no-op if the selection was cleared.
     pub(crate) fn generate_portraits(&mut self) {
         if let Some(targets) = self.pending_portraits.take() {
-            self.spawn_image_job("marketing/images/characters", "⟳ Generating portraits…", targets);
+            self.spawn_image_job(
+                "marketing/images/characters",
+                "⟳ Generating portraits…",
+                targets,
+            );
         }
     }
 
@@ -185,7 +209,12 @@ impl App {
     /// `<subdir>/<slug>.<ext>`, reporting saved files and per-target failures. The
     /// shared worker behind the portrait and scene passes. A no-op for no targets;
     /// the busy/key guards mirror the text spawn path.
-    pub(super) fn spawn_image_job(&mut self, subdir: &'static str, message: &str, targets: Vec<(String, String, String)>) {
+    pub(super) fn spawn_image_job(
+        &mut self,
+        subdir: &'static str,
+        message: &str,
+        targets: Vec<(String, String, String)>,
+    ) {
         if targets.is_empty() {
             return;
         }
@@ -211,7 +240,10 @@ impl App {
             };
             let mut report = ImageReport::default();
             for (slug, label, prompt) in targets {
-                match backend.generate(&ImageRequest { prompt, model: model.clone() }) {
+                match backend.generate(&ImageRequest {
+                    prompt,
+                    model: model.clone(),
+                }) {
                     Ok(img) => {
                         let file = format!("{slug}.{}", img.ext);
                         match save_image(&dir.join(&file), &img.bytes) {
@@ -267,12 +299,20 @@ impl App {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("character").to_string();
+            let slug = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("character")
+                .to_string();
             let name = bible::front_field(&text, "name")
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| slug.clone());
             let description = crate::frontmatter::split(&text).1;
-            out.push((slug, name.clone(), image::portrait_prompt(&name, description)));
+            out.push((
+                slug,
+                name.clone(),
+                image::portrait_prompt(&name, description),
+            ));
         }
         out
     }
@@ -330,7 +370,10 @@ impl App {
             };
             let prompt = scene_prompt_for(text_spec, &scene, &book, &text_model);
             let mut report = ImageReport::default();
-            match backend.generate(&ImageRequest { prompt, model: image_model }) {
+            match backend.generate(&ImageRequest {
+                prompt,
+                model: image_model,
+            }) {
                 Ok(img) => {
                     let file = format!("{}.{}", scene.slug, img.ext);
                     match save_image(&dir.join(&file), &img.bytes) {
@@ -355,15 +398,29 @@ impl App {
         if excerpt.is_empty() {
             return None;
         }
-        let title = self.project.chapter_title(idx).unwrap_or("Scene").to_string();
+        let title = self
+            .project
+            .chapter_title(idx)
+            .unwrap_or("Scene")
+            .to_string();
         let slug = std::path::Path::new(self.project.chapter_file(idx))
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("scene")
             .to_string();
-        let setting = condense(crate::frontmatter::split(&bible::raw_file(&self.project.root, "setting.md")).1, 400);
-        let fallback_prompt = image::scene_prompt(&self.project.manifest.title, &title, &excerpt, &setting);
-        Some(SceneInput { slug, title, text, setting, fallback_prompt })
+        let setting = condense(
+            crate::frontmatter::split(&bible::raw_file(&self.project.root, "setting.md")).1,
+            400,
+        );
+        let fallback_prompt =
+            image::scene_prompt(&self.project.manifest.title, &title, &excerpt, &setting);
+        Some(SceneInput {
+            slug,
+            title,
+            text,
+            setting,
+            fallback_prompt,
+        })
     }
 
     /// Apply an image pass (#238/#239): summarize the saved images and any
@@ -387,7 +444,9 @@ impl App {
             lines.push(Line::raw(""));
             lines.extend(report.saved.iter().map(|s| Line::raw(format!("  {s}"))));
             lines.push(Line::raw(""));
-            lines.push(Line::raw("Off-manuscript image files — yours to use and regenerate."));
+            lines.push(Line::raw(
+                "Off-manuscript image files — yours to use and regenerate.",
+            ));
         }
         if !report.failed.is_empty() {
             lines.push(Line::raw(""));

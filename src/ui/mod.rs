@@ -12,18 +12,18 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
-use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
-use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
 use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
-use crate::theme::{self, Theme};
+use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::SegmentHeader;
+use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
 use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
+use crate::theme::{self, Theme};
 
 mod editor;
 mod list_overlay;
 use list_overlay::{
-    draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_model_manager, draw_palette,
-    draw_project_browser, draw_project_search, list_row, marker, row_style,
+    draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_model_manager,
+    draw_palette, draw_project_browser, draw_project_search, list_row, marker, row_style,
 };
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
@@ -64,15 +64,21 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // a prompt lives on the status line, so it only dims the editor behind it.
     match &app.mode {
         Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
-        Mode::Findings(findings) => modal(frame, area, |f, r| draw_findings(f, r, findings, &app.project)),
-        Mode::Annotations { selected } => modal(frame, area, |f, r| draw_annotations(f, r, app, *selected)),
-        Mode::ModelManager { selected } => modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected)),
+        Mode::Findings(findings) => modal(frame, area, |f, r| {
+            draw_findings(f, r, findings, &app.project)
+        }),
+        Mode::Annotations { selected } => {
+            modal(frame, area, |f, r| draw_annotations(f, r, app, *selected))
+        }
+        Mode::ModelManager { selected } => {
+            modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected))
+        }
         Mode::ProjectSearch(ps) => modal(frame, area, |f, r| draw_project_search(f, r, ps)),
         Mode::Palette(palette) => modal(frame, area, |f, r| draw_palette(f, r, palette)),
         Mode::Tree(tree) => modal(frame, area, |f, r| draw_tree(f, r, app, tree)),
-        Mode::ProjectBrowser(browser) => {
-            modal(frame, area, |f, r| draw_project_browser(f, r, browser, &app.project.root))
-        }
+        Mode::ProjectBrowser(browser) => modal(frame, area, |f, r| {
+            draw_project_browser(f, r, browser, &app.project.root)
+        }),
         Mode::DirBrowser(browser) => modal(frame, area, |f, r| draw_dir_browser(f, r, browser)),
         Mode::Prompt(_) => dim_backdrop(frame, area),
         _ => {}
@@ -195,7 +201,10 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
                 draw_overlay(frame, area, &app.project.manifest.title, overlay);
             }
             // A focused assistant pane takes the full area (#307).
-            SplitContent::Assistant { conv, focused: true } => {
+            SplitContent::Assistant {
+                conv,
+                focused: true,
+            } => {
                 draw_assistant_pane(frame, area, app, conv, true);
             }
             // Otherwise the focused pane is always the editor (`App::buffer`).
@@ -210,10 +219,16 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
     };
     let halves = Layout::default()
         .direction(direction)
-        .constraints([Constraint::Percentage(view.first_ratio), Constraint::Percentage(100 - view.first_ratio)])
+        .constraints([
+            Constraint::Percentage(view.first_ratio),
+            Constraint::Percentage(100 - view.first_ratio),
+        ])
         .split(area);
-    let (focused_area, other_area) =
-        if view.focused_first { (halves[0], halves[1]) } else { (halves[1], halves[0]) };
+    let (focused_area, other_area) = if view.focused_first {
+        (halves[0], halves[1])
+    } else {
+        (halves[1], halves[0])
+    };
 
     // The focused editor (`App::buffer`) always draws in `focused_area`; the other
     // pane shows a second editor or a docked surface.
@@ -225,7 +240,9 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
             app.surface_height.set(other_area.height);
             draw_overlay(frame, other_area, &app.project.manifest.title, overlay);
         }
-        SplitContent::Assistant { conv, focused } => draw_assistant_pane(frame, other_area, app, conv, focused),
+        SplitContent::Assistant { conv, focused } => {
+            draw_assistant_pane(frame, other_area, app, conv, focused)
+        }
     }
 }
 
@@ -248,7 +265,10 @@ fn draw_assistant_pane(frame: &mut Frame, area: Rect, app: &App, conv: &Assistan
         format!(" Assistant — {} ", parts.join(" · "))
     };
     let border = if focused { theme.heading } else { theme.dim };
-    let block = Block::default().borders(Borders::ALL).title(title).border_style(Style::default().fg(border));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(border));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -264,7 +284,12 @@ fn draw_assistant_pane(frame: &mut Frame, area: Rect, app: &App, conv: &Assistan
     let shown: Vec<Line> = lines.into_iter().skip(top).take(body_h).collect();
     frame.render_widget(
         Paragraph::new(shown),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: body_h as u16 },
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: body_h as u16,
+        },
     );
 
     // The request line, with the cursor placed at its end while focused and idle.
@@ -275,7 +300,12 @@ fn draw_assistant_pane(frame: &mut Frame, area: Rect, app: &App, conv: &Assistan
             Span::styled(prompt, Style::default().fg(theme.dim)),
             Span::styled(conv.input().to_string(), Style::default().fg(theme.heading)),
         ])),
-        Rect { x: inner.x, y: input_y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: input_y,
+            width: inner.width,
+            height: 1,
+        },
     );
     if focused && !conv.is_running() {
         let col = (prompt.width() + conv.input().width()) as u16;
@@ -290,17 +320,30 @@ fn wrap_entries(entries: &[crate::app::Entry], width: usize, theme: &Theme) -> V
     let mut out = Vec::new();
     for e in entries {
         let (label, style) = match e.who {
-            Speaker::You => ("You: ", Style::default().fg(theme.heading).add_modifier(Modifier::BOLD)),
+            Speaker::You => (
+                "You: ",
+                Style::default()
+                    .fg(theme.heading)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Speaker::Assistant => ("", Style::default()),
             Speaker::Tool => ("• ", Style::default().fg(theme.dim)),
-            Speaker::System => ("", Style::default().fg(theme.muted).add_modifier(Modifier::ITALIC)),
+            Speaker::System => (
+                "",
+                Style::default()
+                    .fg(theme.muted)
+                    .add_modifier(Modifier::ITALIC),
+            ),
         };
         let body = format!("{label}{}", e.text);
         let starts = crate::wrap::row_starts(&body, width);
         for r in 0..starts.len() {
             let s = starts[r];
             let end = starts.get(r + 1).copied().unwrap_or(body.len());
-            out.push(Line::from(Span::styled(body[s..end].trim_end().to_string(), style)));
+            out.push(Line::from(Span::styled(
+                body[s..end].trim_end().to_string(),
+                style,
+            )));
         }
         out.push(Line::raw(""));
     }
@@ -331,7 +374,9 @@ fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &Overlay) {
         OverlayKind::Guide => (format!(" Quill — user's guide ({hint}) "), false),
     };
     let block = Block::default().borders(Borders::ALL).title(title);
-    let mut paragraph = Paragraph::new(lines.clone()).block(block).scroll((scroll, 0));
+    let mut paragraph = Paragraph::new(lines.clone())
+        .block(block)
+        .scroll((scroll, 0));
     if wrap {
         paragraph = paragraph.wrap(Wrap { trim: false });
     }
@@ -373,7 +418,9 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         let text = buf.text();
         let lines: Vec<Line> = text.lines().map(|l| Line::raw(l.to_string())).collect();
         frame.render_widget(
-            Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+            Paragraph::new(lines)
+                .block(block)
+                .wrap(Wrap { trim: false }),
             area,
         );
         return;
@@ -394,7 +441,10 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
             Some('+') => theme.added,
             _ => theme.dim,
         };
-        lines.push(Line::from(Span::styled(change.clone(), Style::default().fg(color))));
+        lines.push(Line::from(Span::styled(
+            change.clone(),
+            Style::default().fg(color),
+        )));
     }
 
     let block = Block::default().borders(Borders::ALL).title(format!(
@@ -402,7 +452,9 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
         front.name
     ));
     frame.render_widget(
-        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -418,7 +470,12 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App, tree: &Tree) {
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let text = format!("{}{}{}", marker(i == sel), "  ".repeat(r.indent as usize), r.label);
+            let text = format!(
+                "{}{}{}",
+                marker(i == sel),
+                "  ".repeat(r.indent as usize),
+                r.label
+            );
             let style = if i == sel {
                 row_style(true)
             } else if r.active {
@@ -447,7 +504,9 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
 
 /// The accent style for the active/current item in the nav pane.
 fn active_style() -> Style {
-    Style::default().fg(theme::current().heading).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(theme::current().heading)
+        .add_modifier(Modifier::BOLD)
 }
 
 /// Accent color for a chapter's revision status badge.
@@ -474,7 +533,11 @@ fn chapter_line(
     is_active: bool,
     is_selected: bool,
 ) -> Line<'static> {
-    let mut style = if is_active { active_style() } else { Style::default() };
+    let mut style = if is_active {
+        active_style()
+    } else {
+        Style::default()
+    };
     if is_selected {
         style = style.add_modifier(Modifier::REVERSED);
     }
@@ -490,15 +553,26 @@ fn chapter_line(
         None => words.to_string(),
     };
     // The selection highlight reverses every span on the row.
-    let sel = |s: Style| if is_selected { s.add_modifier(Modifier::REVERSED) } else { s };
+    let sel = |s: Style| {
+        if is_selected {
+            s.add_modifier(Modifier::REVERSED)
+        } else {
+            s
+        }
+    };
     let mut spans = vec![Span::styled(format!("{label}  {count}"), style)];
     // A front/back-matter section shows its role (#179) as a dim italic tag.
     if let Some(role) = role {
-        let tag = Style::default().fg(theme::current().dim).add_modifier(Modifier::ITALIC);
+        let tag = Style::default()
+            .fg(theme::current().dim)
+            .add_modifier(Modifier::ITALIC);
         spans.push(Span::styled(format!(" · {}", role.label()), sel(tag)));
     }
     if let Some(status) = status {
-        spans.push(Span::styled(format!(" {}", status.badge()), sel(status_style(status))));
+        spans.push(Span::styled(
+            format!(" {}", status.badge()),
+            sel(status_style(status)),
+        ));
     }
     Line::from(spans)
 }
@@ -519,7 +593,10 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
         Line::raw(""),
     ];
     for (i, path) in state.files.iter().enumerate() {
-        let label = path.strip_prefix(&app.project.root).unwrap_or(path).to_string_lossy();
+        let label = path
+            .strip_prefix(&app.project.root)
+            .unwrap_or(path)
+            .to_string_lossy();
         lines.push(list_row(i == state.selected, label.to_string(), None));
     }
     lines
@@ -577,7 +654,9 @@ fn project_header(manifest: &crate::project::Manifest) -> Vec<Line<'static>> {
     if let Some(subtitle) = &manifest.subtitle {
         lines.push(Line::from(Span::styled(
             subtitle.clone(),
-            Style::default().fg(theme.muted).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(theme.muted)
+                .add_modifier(Modifier::ITALIC),
         )));
     }
     if let Some(author) = &manifest.author {
@@ -601,7 +680,9 @@ fn band_header(band: Band) -> Line<'static> {
     };
     Line::from(Span::styled(
         label.to_string(),
-        Style::default().fg(theme::current().dim).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::current().dim)
+            .add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -646,7 +727,9 @@ impl Pane for NavPane<'_> {
             .map(|i| app.chapter_word_count(i))
             .collect();
         // Resolve each chapter's band once, like the counts above.
-        let bands: Vec<Band> = (0..counts.len()).map(|i| app.project.chapter_band(i)).collect();
+        let bands: Vec<Band> = (0..counts.len())
+            .map(|i| app.project.chapter_band(i))
+            .collect();
 
         // Group by band (#181) only when the project actually has sections, so an
         // all-body project keeps the flat, un-numbered "CHAPTERS" list it had.
@@ -682,7 +765,16 @@ impl Pane for NavPane<'_> {
             let status = app.project.chapter_status(i);
             let goal = app.project.chapter_goal(i);
             let role = app.project.chapter_role(i);
-            lines.push(chapter_line(&chapter.title, number, counts[i], goal, status, role, is_active, is_selected));
+            lines.push(chapter_line(
+                &chapter.title,
+                number,
+                counts[i],
+                goal,
+                status,
+                role,
+                is_active,
+                is_selected,
+            ));
             if is_active {
                 let skip = redundant_title_heading(headings, &chapter.title);
                 lines.extend(heading_outline_lines(headings, current_heading, skip));
@@ -704,27 +796,38 @@ impl Pane for NavPane<'_> {
             format!("{total} words")
         };
         lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(total_line, Style::default().fg(theme::current().dim))));
+        lines.push(Line::from(Span::styled(
+            total_line,
+            Style::default().fg(theme::current().dim),
+        )));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
 
-
 /// The status-bar line for the find/replace mode (#144): the query, a match
 /// count, and the keys available at the current step.
 fn search_status(s: &Search) -> String {
     let count = if s.matches.is_empty() {
-        if s.query.is_empty() { String::new() } else { "  no matches".to_string() }
+        if s.query.is_empty() {
+            String::new()
+        } else {
+            "  no matches".to_string()
+        }
     } else {
         format!("  {}/{}", s.current + 1, s.matches.len())
     };
     match s.stage {
         // Vim search (#206) shows its `/` / `?` prompt; the Ctrl-F find labels itself.
-        SearchStage::Query if s.from_vim => format!(" {}{}{count}", if s.backward { '?' } else { '/' }, s.query),
+        SearchStage::Query if s.from_vim => {
+            format!(" {}{}{count}", if s.backward { '?' } else { '/' }, s.query)
+        }
         SearchStage::Query => format!(" Find: {}{count}", s.query),
         SearchStage::Navigate => {
-            format!(" Find: {}{count}  · n next · N prev · r replace · Esc done", s.query)
+            format!(
+                " Find: {}{count}  · n next · N prev · r replace · Esc done",
+                s.query
+            )
         }
         SearchStage::Replacement => format!(" Replace '{}' with: {}", s.query, s.replacement),
         SearchStage::Step => format!(
@@ -733,7 +836,6 @@ fn search_status(s: &Search) -> String {
         ),
     }
 }
-
 
 impl Pane for StatusBar<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
@@ -764,7 +866,12 @@ impl Pane for StatusBar<'_> {
 
         // While browsing, the bar describes the *selected* chapter: its title,
         // and (unless a transient message is up) its summary / POV / status.
-        let (left, right) = if let Mode::Nav { selected, filter, typing } = &app.mode {
+        let (left, right) = if let Mode::Nav {
+            selected,
+            filter,
+            typing,
+        } = &app.mode
+        {
             let selected = *selected;
             let title = app.project.chapter_title(selected).unwrap_or("[untitled]");
             // A quick-jump filter (#410) takes over the bar: the live query and a
@@ -840,7 +947,13 @@ impl Pane for StatusBar<'_> {
             // A running writing sprint (#299): live countdown + net words written,
             // always visible (independent of the transient message on the right).
             let sprint_tag = match &app.sprint {
-                Some(s) => format!(" · {}", crate::app::sprint::status_segment(s.remaining(), s.words(app.project_word_count()))),
+                Some(s) => format!(
+                    " · {}",
+                    crate::app::sprint::status_segment(
+                        s.remaining(),
+                        s.words(app.project_word_count())
+                    )
+                ),
                 None => String::new(),
             };
             let right = match &app.message {
@@ -860,7 +973,9 @@ impl Pane for StatusBar<'_> {
         let mode_chip = match app.mode {
             _ if !app.vim => None, // Vim mode off: no chip
             Mode::Insert => Some(("INSERT", theme.mode_insert)),
-            Mode::Visual { linewise: false, .. } => Some(("VISUAL", theme.mode_visual)),
+            Mode::Visual {
+                linewise: false, ..
+            } => Some(("VISUAL", theme.mode_visual)),
             Mode::Visual { linewise: true, .. } => Some(("VISUAL LINE", theme.mode_visual)),
             Mode::Normal => Some(("NORMAL", theme.mode_normal)),
             _ => None, // not in the editor (browsing, prompt, …)
@@ -868,7 +983,10 @@ impl Pane for StatusBar<'_> {
         .map(|(label, bg)| {
             Span::styled(
                 format!(" {label} "),
-                Style::default().fg(theme.on_accent).bg(bg).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.on_accent)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
             )
         });
         let chip_w = mode_chip.as_ref().map_or(0, |s| s.content.chars().count());
@@ -878,7 +996,10 @@ impl Pane for StatusBar<'_> {
             .max(1);
         let mut spans = Vec::new();
         spans.extend(mode_chip);
-        spans.push(Span::styled(left, Style::default().add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            left,
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::raw(" ".repeat(pad)));
         spans.push(Span::styled(right, Style::default().fg(theme.dim)));
         let line = Line::from(spans);

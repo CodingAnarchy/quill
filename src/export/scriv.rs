@@ -82,7 +82,10 @@ fn write_bundle(
         id = uuid("project"),
         binder = binder,
     );
-    let name = bundle.file_stem().and_then(|s| s.to_str()).unwrap_or("Manuscript");
+    let name = bundle
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Manuscript");
     std::fs::write(bundle.join(format!("{name}.scrivx")), scrivx)
 }
 
@@ -157,8 +160,12 @@ fn to_rtf(chapter: &Chapter) -> String {
         match classify_block(block) {
             None => {}
             // A centered scene divider, the conventional Scrivener separator.
-            Some(Prose::SceneBreak) => body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n")),
-            Some(Prose::Heading(heading)) => body.push_str(&rtf_paragraph(&[(heading, true, false)])),
+            Some(Prose::SceneBreak) => {
+                body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n"))
+            }
+            Some(Prose::Heading(heading)) => {
+                body.push_str(&rtf_paragraph(&[(heading, true, false)]))
+            }
             Some(Prose::Paragraph(text)) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
         }
     }
@@ -239,11 +246,18 @@ mod tests {
     use crate::frontmatter::Epigraph;
 
     fn epigraph(text: &str, by: Option<&str>) -> Epigraph {
-        Epigraph { text: text.to_string(), attribution: by.map(str::to_string) }
+        Epigraph {
+            text: text.to_string(),
+            attribution: by.map(str::to_string),
+        }
     }
 
     fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
-        Chapter { title: title.to_string(), epigraph, body: body.to_string() }
+        Chapter {
+            title: title.to_string(),
+            epigraph,
+            body: body.to_string(),
+        }
     }
 
     fn doc() -> Document {
@@ -268,11 +282,16 @@ mod tests {
 
     #[test]
     fn writes_a_bundle_with_binder_version_and_rtf() {
-        let dir = std::env::temp_dir().join("quill-scriv-test").join("Book.scriv");
+        let dir = std::env::temp_dir()
+            .join("quill-scriv-test")
+            .join("Book.scriv");
         write_scriv(&doc(), &dir).unwrap();
 
         // version marker + the .scrivx binder named after the bundle.
-        assert_eq!(std::fs::read_to_string(dir.join("Files/version.txt")).unwrap(), "23");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("Files/version.txt")).unwrap(),
+            "23"
+        );
         let scrivx = std::fs::read_to_string(dir.join("Book.scrivx")).unwrap();
 
         // Manuscript draft folder; the part is a folder, chapters are text docs,
@@ -282,8 +301,14 @@ mod tests {
         let part = scrivx.find("<Title>Part One</Title>").unwrap();
         let find = scrivx.find("<Title>The Find</Title>").unwrap();
         let epilogue = scrivx.find("<Title>Epilogue</Title>").unwrap();
-        assert!(prologue < part && part < find && find < epilogue, "reading order:\n{scrivx}");
-        assert!(scrivx.contains("Type=\"Folder\""), "part is a folder:\n{scrivx}");
+        assert!(
+            prologue < part && part < find && find < epilogue,
+            "reading order:\n{scrivx}"
+        );
+        assert!(
+            scrivx.contains("Type=\"Folder\""),
+            "part is a folder:\n{scrivx}"
+        );
 
         // One content.rtf per document; emphasis carried through, stray * literal.
         let mut rtfs = Vec::new();
@@ -295,11 +320,23 @@ mod tests {
         }
         assert_eq!(rtfs.len(), 3, "front + chapter + back");
         let find_rtf = rtfs.iter().find(|r| r.contains("gleamed")).unwrap();
-        assert!(find_rtf.starts_with("{\\rtf1"), "valid RTF header:\n{find_rtf}");
-        assert!(find_rtf.contains("{\\i gleamed}"), "italic run:\n{find_rtf}");
+        assert!(
+            find_rtf.starts_with("{\\rtf1"),
+            "valid RTF header:\n{find_rtf}"
+        );
+        assert!(
+            find_rtf.contains("{\\i gleamed}"),
+            "italic run:\n{find_rtf}"
+        );
         assert!(find_rtf.contains("{\\b heavy}"), "bold run:\n{find_rtf}");
-        assert!(find_rtf.contains("{\\i A line.}"), "epigraph italic:\n{find_rtf}");
-        assert!(find_rtf.contains("5 * 3 stays literal"), "stray * verbatim:\n{find_rtf}");
+        assert!(
+            find_rtf.contains("{\\i A line.}"),
+            "epigraph italic:\n{find_rtf}"
+        );
+        assert!(
+            find_rtf.contains("5 * 3 stays literal"),
+            "stray * verbatim:\n{find_rtf}"
+        );
 
         std::fs::remove_dir_all(dir.parent().unwrap()).ok();
     }
@@ -313,17 +350,26 @@ mod tests {
             series: None,
             epigraph: None,
             front: vec![],
-            parts: vec![Part { name: None, chapters: vec![chapter("Ch", None, prose)] }],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("Ch", None, prose)],
+            }],
             back: vec![],
         };
-        let dir = std::env::temp_dir().join("quill-scriv-series-test").join("Saga.scriv");
+        let dir = std::env::temp_dir()
+            .join("quill-scriv-series-test")
+            .join("Saga.scriv");
         write_scriv_series(&[book("Book One", "alpha"), book("Book Two", "beta")], &dir).unwrap();
 
         let scrivx = std::fs::read_to_string(dir.join("Saga.scrivx")).unwrap();
         // Each book is a folder under the Manuscript draft folder, in order.
         assert!(scrivx.contains("Type=\"DraftFolder\""), "{scrivx}");
-        let one = scrivx.find("<Title>Book One</Title>").expect("book one folder");
-        let two = scrivx.find("<Title>Book Two</Title>").expect("book two folder");
+        let one = scrivx
+            .find("<Title>Book One</Title>")
+            .expect("book one folder");
+        let two = scrivx
+            .find("<Title>Book Two</Title>")
+            .expect("book two folder");
         assert!(one < two, "books in order:\n{scrivx}");
         // Both books' chapters wrote their RTF (front + 2 books × 1 chapter = 2).
         let rtfs = std::fs::read_dir(dir.join("Files/Data"))
@@ -340,7 +386,10 @@ mod tests {
         let rtf = to_rtf(&chapter("One", None, "Scene one.\n\n---\n\nScene two."));
         assert!(!rtf.contains("---"), "no literal rule: {rtf}");
         // A centered `#` divider between the scenes.
-        assert!(rtf.contains("\\pard\\qc\\sa180 #\\par"), "centered divider: {rtf}");
+        assert!(
+            rtf.contains("\\pard\\qc\\sa180 #\\par"),
+            "centered divider: {rtf}"
+        );
         let one = rtf.find("Scene one.").unwrap();
         let hash = rtf.find("\\qc\\sa180 #").unwrap();
         let two = rtf.find("Scene two.").unwrap();
@@ -367,13 +416,21 @@ mod tests {
             series: None,
             epigraph: None,
             front: vec![],
-            parts: vec![Part { name: None, chapters: vec![chapter("One", None, "Body.")] }],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("One", None, "Body.")],
+            }],
             back: vec![],
         };
-        let dir = std::env::temp_dir().join("quill-scriv-unnamed").join("T.scriv");
+        let dir = std::env::temp_dir()
+            .join("quill-scriv-unnamed")
+            .join("T.scriv");
         write_scriv(&d, &dir).unwrap();
         let scrivx = std::fs::read_to_string(dir.join("T.scrivx")).unwrap();
-        assert!(!scrivx.contains("Type=\"Folder\""), "no part folder:\n{scrivx}");
+        assert!(
+            !scrivx.contains("Type=\"Folder\""),
+            "no part folder:\n{scrivx}"
+        );
         assert!(scrivx.contains("<Title>One</Title>"));
         std::fs::remove_dir_all(dir.parent().unwrap()).ok();
     }

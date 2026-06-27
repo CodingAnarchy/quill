@@ -35,7 +35,7 @@ fn count_sentences_ignores_decimals_abbreviations_and_ellipses() {
     assert_eq!(count_sentences("It cost 3.14 dollars and rose."), 1);
     assert_eq!(count_sentences("Dr. Vance arrived late."), 1);
     assert_eq!(count_sentences("I... think so."), 1); // mid-sentence ellipsis
-    // Dialogue: the inner '!' is not a boundary, the trailing '.' is.
+                                                      // Dialogue: the inner '!' is not a boundary, the trailing '.' is.
     assert_eq!(count_sentences("\"Stop!\" she said."), 1);
 }
 
@@ -54,7 +54,10 @@ fn stats_measure_prose_without_headings() {
     let text = "# Title\n\nThe night was dark. It was very long.";
     let s = stats(&prose(text));
     // Heading words are gone; only the two prose sentences are measured.
-    assert_eq!(s.words, crate::buffer::count_words("The night was dark. It was very long."));
+    assert_eq!(
+        s.words,
+        crate::buffer::count_words("The night was dark. It was very long.")
+    );
     assert_eq!(s.sentences, 2);
     assert!(s.syllables >= s.words); // at least one syllable per word
 }
@@ -63,15 +66,29 @@ fn stats_measure_prose_without_headings() {
 fn readability_is_zero_for_empty_prose() {
     assert_eq!(readability(Stats::default()), Readability::default());
     // No sentences → no score (avoids divide-by-zero).
-    assert_eq!(readability(Stats { words: 5, ..Stats::default() }), Readability::default());
+    assert_eq!(
+        readability(Stats {
+            words: 5,
+            ..Stats::default()
+        }),
+        Readability::default()
+    );
 }
 
 #[test]
 fn readability_scores_a_simple_passage() {
     // One sentence, all short words → very easy.
     let r = readability(stats("The cat sat on the mat and ran to the man."));
-    assert!(r.flesch_reading_ease > 90.0, "ease {}", r.flesch_reading_ease);
-    assert!(r.flesch_kincaid_grade < 4.0, "grade {}", r.flesch_kincaid_grade);
+    assert!(
+        r.flesch_reading_ease > 90.0,
+        "ease {}",
+        r.flesch_reading_ease
+    );
+    assert!(
+        r.flesch_kincaid_grade < 4.0,
+        "grade {}",
+        r.flesch_kincaid_grade
+    );
 }
 
 #[test]
@@ -156,7 +173,10 @@ fn style_flags_count_adverbs_filters_and_weak_verbs() {
     // "slowly" / "quietly" = -ly adverbs; "only" is excluded. "saw"/"felt" are
     // filter words. "was" is a to-be form; "was locked" (to-be + -ed) is a
     // passive estimate.
-    let f = style_flags("She slowly saw the only door and felt it was locked quietly.", &WordLists::new());
+    let f = style_flags(
+        "She slowly saw the only door and felt it was locked quietly.",
+        &WordLists::new(),
+    );
     assert_eq!(f.adverbs_ly, 2, "slowly + quietly, not only");
     assert_eq!(f.filter_words, 2, "saw + felt");
     assert_eq!(f.weak_verbs, 1, "was");
@@ -166,7 +186,11 @@ fn style_flags_count_adverbs_filters_and_weak_verbs() {
 #[test]
 fn content_words_skip_stopwords_and_short_words() {
     let mut counts = HashMap::new();
-    tally_content_words("The locket and the locket on it", &mut counts, &WordLists::new());
+    tally_content_words(
+        "The locket and the locket on it",
+        &mut counts,
+        &WordLists::new(),
+    );
     assert_eq!(counts.get("locket"), Some(&2));
     assert_eq!(counts.get("the"), None, "stopword excluded");
     assert_eq!(counts.get("on"), None, "short/stopword excluded");
@@ -178,7 +202,11 @@ fn phrases_tally_trigrams_and_skip_all_stopword_runs() {
     let text = "the locket gleamed. the locket gleamed again out of the box.";
     tally_phrases(text, &mut counts, &WordLists::new());
     assert_eq!(counts.get("the locket gleamed"), Some(&2));
-    assert_eq!(counts.get("out of the"), None, "all-stopword trigram skipped");
+    assert_eq!(
+        counts.get("out of the"),
+        None,
+        "all-stopword trigram skipped"
+    );
 }
 
 #[test]
@@ -188,7 +216,11 @@ fn stopword_overrides_extend_and_drop_defaults() {
     lists.override_stopwords(&["locket".to_string()], &["Said".to_string()]); // remove is case-insensitive
     let mut counts = HashMap::new();
     tally_content_words("said said locket locket gleamed", &mut counts, &lists);
-    assert_eq!(counts.get("said"), Some(&2), "removed from stopwords → now counted");
+    assert_eq!(
+        counts.get("said"),
+        Some(&2),
+        "removed from stopwords → now counted"
+    );
     assert_eq!(counts.get("locket"), None, "added to stopwords → excluded");
     assert_eq!(counts.get("gleamed"), Some(&1));
 }
@@ -210,7 +242,11 @@ fn no_overrides_match_the_built_in_defaults() {
     tally_content_words(text, &mut a, &WordLists::new());
     tally_content_words(text, &mut b, &WordLists::default());
     assert_eq!(a, b);
-    assert_eq!(a.get("the"), None, "built-in stopword still excluded by default");
+    assert_eq!(
+        a.get("the"),
+        None,
+        "built-in stopword still excluded by default"
+    );
 }
 
 #[test]
@@ -221,7 +257,10 @@ fn top_counts_orders_by_count_then_name() {
         ("rare".to_string(), 1),
     ]);
     // count desc, ties alphabetical; min filters out the single occurrence.
-    assert_eq!(top_counts(&counts, 10, 2), vec![("alpha".to_string(), 3), ("beta".to_string(), 3)]);
+    assert_eq!(
+        top_counts(&counts, 10, 2),
+        vec![("alpha".to_string(), 3), ("beta".to_string(), 3)]
+    );
 }
 
 #[test]
@@ -238,7 +277,13 @@ fn dialogue_split_handles_curly_quotes() {
     let d = dialogue_split("\u{201C}Hello there\u{201D} he replied.");
     assert_eq!(d.dialogue_words, 2); // Hello there
     assert_eq!(d.narration_words, 2); // he replied
-    assert_eq!(dialogue_split("plain narration only"), Dialogue { dialogue_words: 0, narration_words: 3 });
+    assert_eq!(
+        dialogue_split("plain narration only"),
+        Dialogue {
+            dialogue_words: 0,
+            narration_words: 3
+        }
+    );
 }
 
 #[test]
@@ -251,7 +296,10 @@ fn paragraph_lengths_split_on_blank_lines() {
 #[test]
 fn spread_reports_count_mean_median_extremes() {
     let s = spread(&[10, 20, 30, 100]);
-    assert_eq!((s.count, s.mean, s.median, s.min, s.max), (4, 40.0, 25.0, 10, 100));
+    assert_eq!(
+        (s.count, s.mean, s.median, s.min, s.max),
+        (4, 40.0, 25.0, 10, 100)
+    );
     assert_eq!(spread(&[]), Spread::default());
 }
 
@@ -283,4 +331,3 @@ fn mattr_is_length_independent_and_rewards_variety() {
     assert!((mattr(&short, 100) - mattr(&long, 100)).abs() < 1e-9);
     assert!(mattr(&short, 100) < 0.7);
 }
-

@@ -145,7 +145,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn failed_write_preserves_previous_version() {
-
         let parent = tmpdir("readonly").join("ro");
         fs::create_dir_all(&parent).unwrap();
         let path = parent.join("chapter.md");

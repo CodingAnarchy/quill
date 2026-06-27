@@ -114,10 +114,11 @@ impl Syntax {
             let (chunk, chunk_start, _, _) = rope.chunk_at_byte(byte);
             &chunk.as_bytes()[byte - chunk_start..]
         };
-        if let Some(tree) =
-            self.parser
-                .parse_with_options(&mut read, Some(&self.tree), MarkdownParseOptions::default())
-        {
+        if let Some(tree) = self.parser.parse_with_options(
+            &mut read,
+            Some(&self.tree),
+            MarkdownParseOptions::default(),
+        ) {
             self.tree = tree;
             let (highlights, markers, headings) =
                 collect(&self.tree, |s, e| rope.byte_slice(s..e).to_string());
@@ -132,7 +133,9 @@ impl Syntax {
     /// after `end` rather than scanning the whole list per rendered line (#218).
     pub fn highlights_in(&self, start: usize, end: usize) -> impl Iterator<Item = &Highlight> {
         let upper = self.highlights.partition_point(|h| h.start < end);
-        self.highlights[..upper].iter().filter(move |h| h.end > start)
+        self.highlights[..upper]
+            .iter()
+            .filter(move |h| h.end > start)
     }
 
     /// Emphasis-delimiter byte ranges to hide when rendering. A delimiter is
@@ -231,7 +234,11 @@ fn heading_info(node: &Node, read: &impl Fn(usize, usize) -> String) -> Heading 
         let mut lines = raw.lines();
         let title = lines.next().unwrap_or("").trim().to_string();
         let underline = lines.next().unwrap_or("");
-        let level = if underline.trim_start().starts_with('=') { 1 } else { 2 };
+        let level = if underline.trim_start().starts_with('=') {
+            1
+        } else {
+            2
+        };
         Heading {
             level,
             title,
@@ -242,7 +249,11 @@ fn heading_info(node: &Node, read: &impl Fn(usize, usize) -> String) -> Heading 
         let line = raw.lines().next().unwrap_or("").trim();
         let hashes = line.chars().take_while(|&c| c == '#').count();
         let level = hashes.clamp(1, 6) as u8;
-        let title = line[hashes..].trim().trim_end_matches('#').trim().to_string();
+        let title = line[hashes..]
+            .trim()
+            .trim_end_matches('#')
+            .trim()
+            .to_string();
         Heading {
             level,
             title,
@@ -377,10 +388,7 @@ mod tests {
             .iter()
             .map(|h| (h.level, h.title.as_str()))
             .collect();
-        assert_eq!(
-            got,
-            vec![(1, "Book One"), (2, "Scene A"), (3, "Beat")]
-        );
+        assert_eq!(got, vec![(1, "Book One"), (2, "Scene A"), (3, "Beat")]);
     }
 
     #[test]
@@ -397,7 +405,9 @@ mod tests {
 
     #[test]
     fn headings_are_in_document_order_and_empty_when_none() {
-        assert!(Syntax::new("Just prose, no headings.\n").headings().is_empty());
+        assert!(Syntax::new("Just prose, no headings.\n")
+            .headings()
+            .is_empty());
 
         let text = "## Second-level first\n\n# Top level after\n";
         let s = Syntax::new(text);

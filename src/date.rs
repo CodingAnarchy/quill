@@ -51,7 +51,10 @@ mod tests {
     fn parses_and_formats() {
         let d = parse("2026-01-11").unwrap();
         assert_eq!(iso(d), "2026-01-11");
-        assert_eq!(parse("  2026-06-16 ").map(iso).as_deref(), Some("2026-06-16"));
+        assert_eq!(
+            parse("  2026-06-16 ").map(iso).as_deref(),
+            Some("2026-06-16")
+        );
         assert_eq!(parse("not-a-date"), None);
     }
 

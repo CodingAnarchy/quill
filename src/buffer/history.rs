@@ -28,7 +28,10 @@ impl Buffer {
         if self.group_open {
             return;
         }
-        self.undo_stack.push_back(Snapshot { rope: self.rope.clone(), cursor: self.cursor });
+        self.undo_stack.push_back(Snapshot {
+            rope: self.rope.clone(),
+            cursor: self.cursor,
+        });
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.pop_front();
         }
@@ -70,8 +73,15 @@ impl Buffer {
     /// restore. `undo` true pops the undo stack (pushing the current state for
     /// redo); false does the reverse. The two are exact mirrors.
     fn step(&mut self, undo: bool) -> bool {
-        let current = Snapshot { rope: self.rope.clone(), cursor: self.cursor };
-        let snap = if undo { self.undo_stack.pop_back() } else { self.redo_stack.pop_back() };
+        let current = Snapshot {
+            rope: self.rope.clone(),
+            cursor: self.cursor,
+        };
+        let snap = if undo {
+            self.undo_stack.pop_back()
+        } else {
+            self.redo_stack.pop_back()
+        };
         let Some(snap) = snap else { return false };
         if undo {
             self.redo_stack.push_back(current);

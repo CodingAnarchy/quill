@@ -5,7 +5,6 @@
 use super::*;
 
 impl App {
-
     /// Cycle the selected chapter's status (none → Draft → Revised → Final → …).
     pub(crate) fn cycle_status(&mut self, index: usize) {
         let next = match self.project.chapter_status(index) {
@@ -30,8 +29,9 @@ impl App {
         } else if let Some(r) = Role::from_key(trimmed) {
             Some(r)
         } else {
-            self.message =
-                Some(format!("Unknown section role '{trimmed}' — e.g. prologue, epilogue, appendix"));
+            self.message = Some(format!(
+                "Unknown section role '{trimmed}' — e.g. prologue, epilogue, appendix"
+            ));
             return None;
         };
         let file = self.project.chapter_file(index).to_string();
@@ -46,7 +46,9 @@ impl App {
             }
         }
         let moved = self.project.index_of_file(&file);
-        let title = moved.and_then(|i| self.project.chapter_title(i)).unwrap_or("Chapter");
+        let title = moved
+            .and_then(|i| self.project.chapter_title(i))
+            .unwrap_or("Chapter");
         self.message = Some(match role {
             Some(r) => format!("{title}: {}", r.label()),
             None => format!("{title}: body chapter"),
@@ -70,7 +72,8 @@ impl App {
         if index == self.project.active_index() {
             f(self.buffer.front_matter_mut());
             self.buffer.dirty = true;
-            self.project.cache_chapter_meta(index, self.buffer.front_matter());
+            self.project
+                .cache_chapter_meta(index, self.buffer.front_matter());
             true
         } else {
             match self.project.edit_chapter_front_matter(index, f) {
@@ -228,7 +231,10 @@ impl App {
         }
         match target {
             MetaField::ChapterEpigraph { at } => {
-                let by = self.chapter_epigraph(at).and_then(|e| e.attribution).unwrap_or_default();
+                let by = self
+                    .chapter_epigraph(at)
+                    .and_then(|e| e.attribution)
+                    .unwrap_or_default();
                 self.open_prompt(
                     Pending::SetMeta(MetaField::ChapterEpigraphBy { at }),
                     "Epigraph by: ",
@@ -237,7 +243,12 @@ impl App {
                 );
             }
             MetaField::BookEpigraph => {
-                let by = self.project.manifest.epigraph_by.clone().unwrap_or_default();
+                let by = self
+                    .project
+                    .manifest
+                    .epigraph_by
+                    .clone()
+                    .unwrap_or_default();
                 self.open_prompt(
                     Pending::SetMeta(MetaField::BookEpigraphBy),
                     "Epigraph by: ",

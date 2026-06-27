@@ -169,7 +169,12 @@ fn new_project_base(
 ) -> (PathBuf, bool) {
     match projects_home {
         Some(home) => (home, false),
-        None => (os_home.map(|h| h.join("Quill")).unwrap_or_else(|| cwd.to_path_buf()), true),
+        None => (
+            os_home
+                .map(|h| h.join("Quill"))
+                .unwrap_or_else(|| cwd.to_path_buf()),
+            true,
+        ),
     }
 }
 
@@ -183,7 +188,10 @@ fn prompt_project_name() -> io::Result<String> {
     io::stdin().read_line(&mut input)?;
     let name = crate::project::sanitize_dir_name(&input);
     if name.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no project name entered"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "no project name entered",
+        ));
     }
     Ok(name)
 }
@@ -237,7 +245,11 @@ impl Tui {
         // press-only handling is unchanged. Terminals without support are left
         // exactly as before; the query and push are best-effort.
         if supports_keyboard_enhancement().unwrap_or(false)
-            && execute!(stdout, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)).is_ok()
+            && execute!(
+                stdout,
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )
+            .is_ok()
         {
             KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         }
@@ -304,7 +316,9 @@ mod tests {
         let dir = tmpdir("bad-manifest");
         // A manifest that exists but is broken TOML: opened, not re-created.
         std::fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters]\n").unwrap();
-        let err = load_project(&dir).err().expect("a malformed manifest should be an error");
+        let err = load_project(&dir)
+            .err()
+            .expect("a malformed manifest should be an error");
         assert!(
             err.to_string().contains(crate::project::MANIFEST_NAME),
             "the message should name the manifest: {err}"
@@ -316,8 +330,11 @@ mod tests {
     fn new_project_base_prefers_the_configured_projects_home() {
         // A configured projects home is used as-is, no fallback note (#423).
         let home = PathBuf::from("/books");
-        let (base, fallback) =
-            new_project_base(Some(home.clone()), Some(PathBuf::from("/home/me")), Path::new("/tmp/cwd"));
+        let (base, fallback) = new_project_base(
+            Some(home.clone()),
+            Some(PathBuf::from("/home/me")),
+            Path::new("/tmp/cwd"),
+        );
         assert_eq!(base, home);
         assert!(!fallback);
     }
@@ -361,22 +378,37 @@ mod tests {
         let seq = String::from_utf8(out).unwrap();
         // The user-visible halves of teardown: back to the main screen, cursor
         // shown. If these regress, a crash leaves the shell unusable.
-        assert!(seq.contains("\x1b[?1049l"), "should leave alt screen: {seq:?}");
+        assert!(
+            seq.contains("\x1b[?1049l"),
+            "should leave alt screen: {seq:?}"
+        );
         assert!(seq.contains("\x1b[?25h"), "should show the cursor: {seq:?}");
         // With the enhanced keyboard protocol never pushed, teardown must not emit
         // its pop sequence — no stray escape on a terminal that didn't enable it.
-        assert!(!seq.contains("\x1b[<1u"), "no keyboard-enhancement pop when unpushed: {seq:?}");
+        assert!(
+            !seq.contains("\x1b[<1u"),
+            "no keyboard-enhancement pop when unpushed: {seq:?}"
+        );
 
         // A session that enabled the enhanced protocol (#348) pops it on teardown.
         KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         let mut out: Vec<u8> = Vec::new();
         restore_terminal(&mut out);
-        assert!(String::from_utf8(out).unwrap().contains("\x1b[<1u"), "should pop the enhancement");
+        assert!(
+            String::from_utf8(out).unwrap().contains("\x1b[<1u"),
+            "should pop the enhancement"
+        );
         // The flag is cleared, so the second teardown path (panic hook after the
         // drop guard) is a no-op — no double-pop.
-        assert!(!KEYBOARD_ENHANCED.load(Ordering::SeqCst), "flag cleared after pop");
+        assert!(
+            !KEYBOARD_ENHANCED.load(Ordering::SeqCst),
+            "flag cleared after pop"
+        );
         let mut again: Vec<u8> = Vec::new();
         restore_terminal(&mut again);
-        assert!(!String::from_utf8(again).unwrap().contains("\x1b[<1u"), "no double-pop");
+        assert!(
+            !String::from_utf8(again).unwrap().contains("\x1b[<1u"),
+            "no double-pop"
+        );
     }
 }

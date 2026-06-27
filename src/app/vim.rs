@@ -1,15 +1,10 @@
 //! Vim modal editing for the App: Normal/Visual key dispatch and the
 //! operator/motion/register machinery (#208). Extracted from `mod.rs` (#314).
 
-
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-
 use crate::buffer::{Buffer, FindKind, TextObject};
-use crate::mode::{
-    Find, Mode, Op, VimPending, Yank,
-};
+use crate::mode::{Find, Mode, Op, VimPending, Yank};
 
 use super::App;
 
@@ -31,7 +26,11 @@ impl App {
             VimPending::G => {
                 self.vim_state.pending = VimPending::None;
                 if c == 'g' {
-                    let target = self.vim_state.count.take().map_or(0, |n| n.saturating_sub(1));
+                    let target = self
+                        .vim_state
+                        .count
+                        .take()
+                        .map_or(0, |n| n.saturating_sub(1));
                     self.goto_line(target); // gg → first line (or {count}gg); operator-aware
                 } else {
                     self.vim_state.count = None; // an unknown `g_` aborts
@@ -91,7 +90,12 @@ impl App {
         // accumulates the count prefix.
         if c.is_ascii_digit() && !(c == '0' && self.vim_state.count.is_none()) {
             let d = c.to_digit(10).unwrap_or(0) as usize;
-            let count = self.vim_state.count.unwrap_or(0).saturating_mul(10).saturating_add(d);
+            let count = self
+                .vim_state
+                .count
+                .unwrap_or(0)
+                .saturating_mul(10)
+                .saturating_add(d);
             self.vim_state.count = Some(count);
             return;
         }
@@ -135,11 +139,20 @@ impl App {
             'p' => self.put(true, count),
             'P' => self.put(false, count),
             // Enter Visual mode (#205): `v` characterwise, `V` linewise.
-            'v' | 'V' => self.mode = Mode::Visual { anchor: self.edit_buffer().cursor_byte(), linewise: c == 'V' },
+            'v' | 'V' => {
+                self.mode = Mode::Visual {
+                    anchor: self.edit_buffer().cursor_byte(),
+                    linewise: c == 'V',
+                }
+            }
             // `i`/`a` are a text-object prefix while an operator is pending,
             // otherwise they enter Insert.
-            'i' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: false },
-            'a' if self.vim_state.op.is_some() => self.vim_state.pending = VimPending::Object { around: true },
+            'i' if self.vim_state.op.is_some() => {
+                self.vim_state.pending = VimPending::Object { around: false }
+            }
+            'a' if self.vim_state.op.is_some() => {
+                self.vim_state.pending = VimPending::Object { around: true }
+            }
             'i' => self.mode = Mode::Insert,
             // Append: after the cursor's grapheme, but never past the line end.
             'a' => {
@@ -188,7 +201,10 @@ impl App {
             'j' => self.vertical(count, true),
             'k' => self.vertical(count, false),
             'G' => {
-                let target = raw.map_or_else(|| self.edit_buffer().last_line_index(), |n| n.saturating_sub(1));
+                let target = raw.map_or_else(
+                    || self.edit_buffer().last_line_index(),
+                    |n| n.saturating_sub(1),
+                );
                 self.goto_line(target);
             }
 
@@ -261,7 +277,10 @@ impl App {
     /// own count times the motion's count (`2d3w` → 6). `None` when no operator is
     /// pending, so the motion just moves the cursor.
     fn take_op(&mut self, count: usize) -> Option<(Op, usize)> {
-        self.vim_state.op.take().map(|(op, opc)| (op, count.saturating_mul(opc)))
+        self.vim_state
+            .op
+            .take()
+            .map(|(op, opc)| (op, count.saturating_mul(opc)))
     }
 
     /// A charwise motion: move the cursor, or — when an operator is pending —
@@ -279,7 +298,14 @@ impl App {
                 let target = buf.cursor_byte();
                 buf.cursor = saved;
                 let hi = start.max(target);
-                (start.min(target), if inclusive { buf.grapheme_after(hi) } else { hi })
+                (
+                    start.min(target),
+                    if inclusive {
+                        buf.grapheme_after(hi)
+                    } else {
+                        hi
+                    },
+                )
             };
             self.operate_charwise(op, lo, hi);
         } else {
@@ -299,7 +325,11 @@ impl App {
             let other = if down { cur + n } else { cur.saturating_sub(n) };
             self.operate_linewise(op, cur.min(other), cur.max(other));
         } else {
-            let mv = if down { Buffer::move_down } else { Buffer::move_up };
+            let mv = if down {
+                Buffer::move_down
+            } else {
+                Buffer::move_up
+            };
             self.vim_repeat(count, move |s| s.edit_move_wrapped(mv));
         }
     }
@@ -356,7 +386,10 @@ impl App {
                 }
                 text
             };
-            self.store_register(Yank { text, linewise: false });
+            self.store_register(Yank {
+                text,
+                linewise: false,
+            });
             if op != Op::Yank {
                 self.cache_focus_words();
             }
@@ -392,7 +425,10 @@ impl App {
             }
             text
         };
-        self.store_register(Yank { text, linewise: true });
+        self.store_register(Yank {
+            text,
+            linewise: true,
+        });
         self.edit_move(move |b| b.move_to_line(first));
         if op != Op::Yank {
             self.cache_focus_words();
@@ -427,12 +463,18 @@ impl App {
         if self.guard_vim_edit() {
             return;
         }
-        let Some(yank) = self.active_register() else { return };
+        let Some(yank) = self.active_register() else {
+            return;
+        };
         let body = yank.text.repeat(count);
         let buf = self.edit_buffer_mut();
         if yank.linewise {
             let line = buf.cursor.line;
-            let at = if after { buf.next_line_byte(line) } else { buf.line_start_byte(line) };
+            let at = if after {
+                buf.next_line_byte(line)
+            } else {
+                buf.line_start_byte(line)
+            };
             buf.replace_byte_range(at, at, &body);
             buf.move_to_line(if after { line + 1 } else { line });
         } else {
@@ -453,7 +495,10 @@ impl App {
     /// edit would desync. Returns whether the command was blocked.
     fn guard_vim_edit(&mut self) -> bool {
         if self.manuscript.is_some() {
-            self.message = Some("Editing commands aren't available in the continuous view — Ctrl-l to return.".into());
+            self.message = Some(
+                "Editing commands aren't available in the continuous view — Ctrl-l to return."
+                    .into(),
+            );
             true
         } else {
             false
@@ -494,7 +539,10 @@ impl App {
                 self.mode = if linewise == want_line {
                     Mode::Normal
                 } else {
-                    Mode::Visual { anchor, linewise: want_line }
+                    Mode::Visual {
+                        anchor,
+                        linewise: want_line,
+                    }
                 };
             }
             // `o` swaps the fixed and active ends of the selection.
@@ -502,7 +550,10 @@ impl App {
                 let cur = self.edit_buffer().cursor_byte();
                 let buf = self.edit_buffer_mut();
                 buf.cursor = buf.cursor_at_byte(anchor);
-                self.mode = Mode::Visual { anchor: cur, linewise };
+                self.mode = Mode::Visual {
+                    anchor: cur,
+                    linewise,
+                };
             }
             // Operators act on the selection, then leave Visual (Insert for `c`).
             'd' | 'x' => self.visual_operate(Op::Delete, anchor, linewise),
@@ -625,7 +676,11 @@ impl App {
             self.vim_state.op = None;
             return;
         };
-        let kind = if reverse { find.kind.reversed() } else { find.kind };
+        let kind = if reverse {
+            find.kind.reversed()
+        } else {
+            find.kind
+        };
         let target = find.target;
         self.charwise(1, true, move |b| b.find_char(target, kind, count));
     }
@@ -646,7 +701,6 @@ impl App {
     }
 }
 
-
 /// Whether `c` is a Normal-mode motion key — a count digit, a motion, or a
 /// multi-key motion prefix (`g`/`f`/`"`). These are the keys Visual mode forwards
 /// to the Normal handler to extend the selection. Keep in sync with the motion
@@ -657,7 +711,24 @@ fn is_motion_key(c: char) -> bool {
     c.is_ascii_digit()
         || matches!(
             c,
-            'h' | 'j' | 'k' | 'l' | ' ' | 'w' | 'b' | 'e' | '0' | '^' | '$' | 'g' | 'G' | 'f' | 'F'
-                | 't' | 'T' | ';' | ',' | '"'
+            'h' | 'j'
+                | 'k'
+                | 'l'
+                | ' '
+                | 'w'
+                | 'b'
+                | 'e'
+                | '0'
+                | '^'
+                | '$'
+                | 'g'
+                | 'G'
+                | 'f'
+                | 'F'
+                | 't'
+                | 'T'
+                | ';'
+                | ','
+                | '"'
         )
 }

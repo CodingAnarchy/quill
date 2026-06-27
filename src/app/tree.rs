@@ -57,7 +57,11 @@ impl App {
         if multi {
             rows.push(TreeRow {
                 indent: 0,
-                label: format!("▾ {}  ·  {} w", self.project.series_title().unwrap_or("Series"), thousands(self.series_word_count() as i64)),
+                label: format!(
+                    "▾ {}  ·  {} w",
+                    self.project.series_title().unwrap_or("Series"),
+                    thousands(self.series_word_count() as i64)
+                ),
                 active: false,
                 node: TreeNode::Series,
             });
@@ -86,7 +90,13 @@ impl App {
     }
 
     /// Append book `b`'s chapters (in band order, with part headers) to `rows`.
-    fn push_book_chapters(&self, rows: &mut Vec<TreeRow>, b: usize, book_indent: u16, active_book: bool) {
+    fn push_book_chapters(
+        &self,
+        rows: &mut Vec<TreeRow>,
+        b: usize,
+        book_indent: u16,
+        active_book: bool,
+    ) {
         let chapters = self.project.book_chapters(b);
         let parts = self.project.book_parts(b);
         let order = band_order(chapters);
@@ -128,7 +138,10 @@ impl App {
                         indent: book_indent + 1,
                         label: format!("{name}  ·  {} w", thousands(part_words[pi] as i64)),
                         active: false,
-                        node: TreeNode::Chapter { book: b, file: ch.file.clone() },
+                        node: TreeNode::Chapter {
+                            book: b,
+                            file: ch.file.clone(),
+                        },
                     });
                 }
             } else if !body {
@@ -139,7 +152,10 @@ impl App {
                 indent: chap_indent,
                 label: format!("{}  ·  {} w", ch.title, thousands(words_at(ci) as i64)),
                 active: active_book && self.project.active_file() == ch.file,
-                node: TreeNode::Chapter { book: b, file: ch.file.clone() },
+                node: TreeNode::Chapter {
+                    book: b,
+                    file: ch.file.clone(),
+                },
             });
         }
     }
@@ -166,10 +182,16 @@ impl App {
         let sel = tree.selected.min(rows.len().saturating_sub(1));
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.set_tree_selected(sel.saturating_sub(1)),
-            KeyCode::Down | KeyCode::Char('j') => self.set_tree_selected((sel + 1).min(rows.len().saturating_sub(1))),
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.set_tree_selected((sel + 1).min(rows.len().saturating_sub(1)))
+            }
             // Expand a book (Right), or collapse the selected node's book (Left).
             KeyCode::Right | KeyCode::Char('l') => {
-                if let Some(TreeRow { node: TreeNode::Book(b), .. }) = rows.get(sel) {
+                if let Some(TreeRow {
+                    node: TreeNode::Book(b),
+                    ..
+                }) = rows.get(sel)
+                {
                     self.set_book_expanded(*b, true);
                 }
             }
@@ -222,7 +244,11 @@ impl App {
         // Re-find the book's row in the now-collapsed tree and select it.
         if let Mode::Tree(tree) = &self.mode {
             let expanded = tree.expanded.clone();
-            if let Some(i) = self.tree_rows(&expanded).iter().position(|r| matches!(r.node, TreeNode::Book(b) if b == book)) {
+            if let Some(i) = self
+                .tree_rows(&expanded)
+                .iter()
+                .position(|r| matches!(r.node, TreeNode::Book(b) if b == book))
+            {
                 self.set_tree_selected(i);
             }
         }

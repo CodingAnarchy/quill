@@ -8,7 +8,12 @@ use crate::project::Analysis;
 fn line_texts(lines: &[ratatui::text::Line<'static>]) -> Vec<String> {
     lines
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect()
 }
 
@@ -16,9 +21,11 @@ fn line_texts(lines: &[ratatui::text::Line<'static>]) -> Vec<String> {
 /// (`"N×  word"`), distinct from the same word appearing in a quoted sentence or
 /// a multi-word phrase entry.
 fn most_used_has(lines: &[ratatui::text::Line<'static>], word: &str) -> bool {
-    line_texts(lines)
-        .iter()
-        .any(|t| t.trim().split_once("×  ").is_some_and(|(_, rest)| rest == word))
+    line_texts(lines).iter().any(|t| {
+        t.trim()
+            .split_once("×  ")
+            .is_some_and(|(_, rest)| rest == word)
+    })
 }
 
 #[test]
@@ -28,14 +35,23 @@ fn analysis_report_honors_stopword_overrides() {
     app.buffer = Buffer::from_text("the locket gleamed and the locket gleamed");
 
     // By default the invented content word surfaces in the most-used list.
-    assert!(most_used_has(&app.analysis_lines(), "locket"), "locket in most-used by default");
+    assert!(
+        most_used_has(&app.analysis_lines(), "locket"),
+        "locket in most-used by default"
+    );
 
     // Adding it as a project stopword excludes it.
     app.project.manifest.analysis = Some(Analysis {
         stopwords_add: vec!["locket".into()],
         ..Default::default()
     });
-    assert!(!most_used_has(&app.analysis_lines(), "locket"), "locket excluded after the override");
+    assert!(
+        !most_used_has(&app.analysis_lines(), "locket"),
+        "locket excluded after the override"
+    );
     // A different content word is still listed — only the override changed.
-    assert!(most_used_has(&app.analysis_lines(), "gleamed"), "gleamed still listed");
+    assert!(
+        most_used_has(&app.analysis_lines(), "gleamed"),
+        "gleamed still listed"
+    );
 }

@@ -4,15 +4,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-
 use crossterm::event::{KeyCode, KeyEvent};
 
-
 use crate::buffer::Buffer;
+use crate::config::ProjectsConfig;
 use crate::mode::{
     Command, DirBrowser, DirEntry, Mode, Palette, PaletteItem, Pending, ProjectBrowser,
 };
-use crate::config::ProjectsConfig;
 use crate::project::Project;
 use crate::recent;
 
@@ -31,12 +29,28 @@ impl App {
         let active = self.project.active_book();
         let items = (0..count)
             .map(|i| {
-                let title = self.project.book_title(i).unwrap_or("(untitled)").to_string();
-                let label = if i == active { format!("{title}  ·  current") } else { title };
-                PaletteItem { label, desc: format!("book {} of {count}", i + 1), command: Command::SwitchBook(i) }
+                let title = self
+                    .project
+                    .book_title(i)
+                    .unwrap_or("(untitled)")
+                    .to_string();
+                let label = if i == active {
+                    format!("{title}  ·  current")
+                } else {
+                    title
+                };
+                PaletteItem {
+                    label,
+                    desc: format!("book {} of {count}", i + 1),
+                    command: Command::SwitchBook(i),
+                }
             })
             .collect();
-        self.mode = Mode::Palette(Box::new(Palette { title: "Switch book", items, selected: active }));
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Switch book",
+            items,
+            selected: active,
+        }));
     }
 
     /// Make book `index` the active one (#329): flush the outgoing book's edits,
@@ -77,9 +91,16 @@ impl App {
         let mut projects = recent::list();
         if let Some(home) = ProjectsConfig::load().home_dir() {
             let known: HashSet<PathBuf> = projects.iter().map(|p| p.path.clone()).collect();
-            projects.extend(recent::scan(&home).into_iter().filter(|p| !known.contains(&p.path)));
+            projects.extend(
+                recent::scan(&home)
+                    .into_iter()
+                    .filter(|p| !known.contains(&p.path)),
+            );
         }
-        self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser { projects, selected: 0 }));
+        self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser {
+            projects,
+            selected: 0,
+        }));
     }
 
     /// Navigate the project browser (#270): arrows move, Enter switches to the
@@ -115,7 +136,13 @@ impl App {
         ProjectsConfig::load()
             .home_dir()
             .filter(|p| p.is_dir())
-            .or_else(|| self.project.root.canonicalize().ok().and_then(|r| r.parent().map(Path::to_path_buf)))
+            .or_else(|| {
+                self.project
+                    .root
+                    .canonicalize()
+                    .ok()
+                    .and_then(|r| r.parent().map(Path::to_path_buf))
+            })
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
@@ -173,7 +200,11 @@ impl App {
     /// A sensible directory to start browsing from: the parent of the current
     /// project (sibling projects), falling back to the working directory.
     fn browse_start_dir(&self) -> PathBuf {
-        let root = self.project.root.canonicalize().unwrap_or_else(|_| self.project.root.clone());
+        let root = self
+            .project
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.project.root.clone());
         root.parent()
             .map(Path::to_path_buf)
             .filter(|p| p.is_dir())
@@ -186,7 +217,13 @@ impl App {
     /// in place, rather than failing silently or crashing (#264/#271).
     pub(super) fn browse_into(&mut self, dir: PathBuf) {
         match Self::dir_entries(&dir) {
-            Ok(entries) => self.mode = Mode::DirBrowser(Box::new(DirBrowser { cwd: dir, entries, selected: 0 })),
+            Ok(entries) => {
+                self.mode = Mode::DirBrowser(Box::new(DirBrowser {
+                    cwd: dir,
+                    entries,
+                    selected: 0,
+                }))
+            }
             Err(e) => self.message = Some(format!("Can't open {}: {e}", dir.display())),
         }
     }
@@ -208,13 +245,25 @@ impl App {
             .flatten()
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
             .map(|e| e.path())
-            .filter(|p| !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')))
+            .filter(|p| {
+                !p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with('.'))
+            })
             .collect();
         subdirs.sort();
         for path in subdirs {
-            let label = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let label = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let is_project = Project::manifest_path(&path).exists();
-            entries.push(DirEntry { label, path, is_project, is_parent: false });
+            entries.push(DirEntry {
+                label,
+                path,
+                is_project,
+                is_parent: false,
+            });
         }
         Ok(entries)
     }
@@ -268,7 +317,11 @@ impl App {
     /// switch straight away.
     pub(super) fn request_switch(&mut self, target: PathBuf) {
         let target = target.canonicalize().unwrap_or(target);
-        let current = self.project.root.canonicalize().unwrap_or_else(|_| self.project.root.clone());
+        let current = self
+            .project
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.project.root.clone());
         if target == current {
             self.message = Some("That project is already open.".into());
             self.mode = self.editing_mode();
@@ -276,7 +329,12 @@ impl App {
         }
         if self.edit_dirty() {
             self.pending_switch = Some(target);
-            self.open_prompt(Pending::ConfirmSwitch, "Unsaved changes — save and switch project? (y/N)", "", None);
+            self.open_prompt(
+                Pending::ConfirmSwitch,
+                "Unsaved changes — save and switch project? (y/N)",
+                "",
+                None,
+            );
         } else {
             self.switch_to(target);
         }
@@ -359,7 +417,11 @@ impl App {
         }
         // Resolve against the real location so the parent is correct even when the
         // project was opened by a relative path.
-        let old_root = self.project.root.canonicalize().unwrap_or_else(|_| self.project.root.clone());
+        let old_root = self
+            .project
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.project.root.clone());
         let Some(new_root) = old_root.parent().map(|p| p.join(&name)) else {
             self.message = Some("Can't rename the filesystem root.".into());
             self.mode = self.editing_mode();
@@ -371,7 +433,9 @@ impl App {
             return;
         }
         if new_root.exists() {
-            self.message = Some(format!("A folder named \u{201c}{name}\u{201d} already exists here."));
+            self.message = Some(format!(
+                "A folder named \u{201c}{name}\u{201d} already exists here."
+            ));
             self.mode = self.editing_mode();
             return;
         }

@@ -42,14 +42,23 @@ the issue for the author to address.";
 /// The JSON Schema for a prose/style reply.
 pub fn schema() -> Value {
     super::object_schema(
-        vec![("findings", super::array_of(super::chapters_finding("kind", "detail")))],
+        vec![(
+            "findings",
+            super::array_of(super::chapters_finding("kind", "detail")),
+        )],
         &["findings"],
     )
 }
 
 /// Build the prose/style request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Report the prose/style findings as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Report the prose/style findings as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured prose/style reply.

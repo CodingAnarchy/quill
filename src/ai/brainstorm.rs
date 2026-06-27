@@ -45,7 +45,13 @@ pub fn schema() -> Value {
 /// Build the brainstorm request: the premise as context, schema attached. No
 /// manuscript is sent — this works on an empty project.
 pub fn build_request(premise: &str, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Brainstorm story ideas from this premise as specified.", format!("Premise / idea:\n{premise}"), model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Brainstorm story ideas from this premise as specified.",
+        format!("Premise / idea:\n{premise}"),
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured brainstorm reply.

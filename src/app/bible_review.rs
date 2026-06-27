@@ -14,9 +14,9 @@ use crate::ai::bible;
 use crate::buffer::Buffer;
 use crate::mode::{BibleConflict, BibleReview, Finding, Findings, Mode};
 
-use super::App;
-use super::assist::write_failure_message;
 use super::assist::list_move;
+use super::assist::write_failure_message;
+use super::App;
 
 /// The outcome of staging one generated file (#153) — a bible profile or a
 /// submission artifact. Distinguishes a successful write from a hand-edit
@@ -51,14 +51,24 @@ impl App {
     /// report an I/O failure (#153). `render` receives the author's preserved
     /// Notes block and returns the full file content. Shared by the character,
     /// continuity/setting/scaffold, and submission passes.
-    pub(super) fn stage_bible(&self, path: PathBuf, name: &str, render: impl Fn(&str) -> String) -> Staged {
+    pub(super) fn stage_bible(
+        &self,
+        path: PathBuf,
+        name: &str,
+        render: impl Fn(&str) -> String,
+    ) -> Staged {
         let existing = std::fs::read_to_string(&path).ok();
         let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
         let proposed = render(&notes);
         if let Some(current) = &existing {
             if bible::is_hand_edited(current) {
                 let diff = unified_diff(current, &proposed);
-                return Staged::Conflict(BibleConflict { path, name: name.to_string(), proposed, diff });
+                return Staged::Conflict(BibleConflict {
+                    path,
+                    name: name.to_string(),
+                    proposed,
+                    diff,
+                });
             }
         }
         match self.write_file(&path, &proposed) {
@@ -72,14 +82,18 @@ impl App {
     /// the caller can surface it instead of silently dropping the write (#153).
     pub(super) fn write_file(&self, path: &std::path::Path, content: &str) -> Result<(), String> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", self.display_path(path)))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("{}: {e}", self.display_path(path)))?;
         }
         std::fs::write(path, content).map_err(|e| format!("{}: {e}", self.display_path(path)))
     }
 
     /// A project-relative label for `path`, for author-facing messages.
     pub(super) fn display_path(&self, path: &std::path::Path) -> String {
-        path.strip_prefix(&self.project.root).unwrap_or(path).display().to_string()
+        path.strip_prefix(&self.project.root)
+            .unwrap_or(path)
+            .display()
+            .to_string()
     }
 
     /// Open a findings-only result (analysis passes that write no bible file):
@@ -275,7 +289,9 @@ impl App {
                 if let Some(item) = item {
                     self.focus_finding_book(item.book);
                     if let Some(title) = item.chapters.first() {
-                        if let Some(i) = (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title.as_str())) {
+                        if let Some(i) = (0..self.chapter_count())
+                            .find(|&i| self.project.chapter_title(i) == Some(title.as_str()))
+                        {
                             self.activate_chapter(i);
                         } else {
                             self.message = Some(format!("Chapter '{title}' not found"));
@@ -320,8 +336,8 @@ impl App {
     /// flushed and reloaded so its open buffer sees the marker; other chapters
     /// are appended on disk.
     pub(super) fn insert_todo(&mut self, title: &str, note: &str) {
-        let Some(i) = (0..self.chapter_count())
-            .find(|&i| self.project.chapter_title(i) == Some(title))
+        let Some(i) =
+            (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title))
         else {
             self.message = Some(format!("Chapter '{title}' not found"));
             return;

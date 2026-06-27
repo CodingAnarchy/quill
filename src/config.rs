@@ -58,7 +58,11 @@ fn upsert_workflow(existing: &str, name: &str, steps: &[String]) -> String {
 /// a quoted, escaped basic string — matching how the `toml` serializer would
 /// write it, so a spliced workflow name round-trips through the loader.
 fn toml_key(name: &str) -> String {
-    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         name.to_string()
     } else {
         toml::Value::String(name.to_string()).to_string()
@@ -102,7 +106,9 @@ fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
             .position(|l| l.trim_start().starts_with('['))
             .map_or(lines.len(), |i| h + 1 + i);
         let existing_key = (h + 1..end).find(|&i| {
-            lines[i].split_once('=').is_some_and(|(lhs, _)| lhs.trim() == key)
+            lines[i]
+                .split_once('=')
+                .is_some_and(|(lhs, _)| lhs.trim() == key)
         });
         match existing_key {
             Some(k) => lines[k] = entry,
@@ -235,7 +241,10 @@ fn snippets_from_table(table: HashMap<String, toml::Value>) -> (Vec<Snippet>, Ve
     let mut errors = Vec::new();
     for (name, value) in table {
         match value.as_str() {
-            Some(text) => snippets.push(Snippet { name, text: text.to_string() }),
+            Some(text) => snippets.push(Snippet {
+                name,
+                text: text.to_string(),
+            }),
             None => errors.push(format!("snippet '{name}' must be a string")),
         }
     }
@@ -306,8 +315,14 @@ mod tests {
         assert_eq!(
             snippets,
             vec![
-                Snippet { name: "alpha".into(), text: "* * *".into() },
-                Snippet { name: "zeta".into(), text: "the end".into() },
+                Snippet {
+                    name: "alpha".into(),
+                    text: "* * *".into()
+                },
+                Snippet {
+                    name: "zeta".into(),
+                    text: "the end".into()
+                },
             ],
         );
         // The non-string entry is reported (and skipped), not a parse failure.
@@ -328,7 +343,10 @@ mod tests {
         let out = set_value(existing, "editor", "vim", "true");
         assert!(out.contains("vim = true"), "{out}");
         assert!(!out.contains("vim = false"), "{out}");
-        assert!(out.contains("smart_typography = true"), "other keys kept: {out}");
+        assert!(
+            out.contains("smart_typography = true"),
+            "other keys kept: {out}"
+        );
     }
 
     #[test]
@@ -336,15 +354,24 @@ mod tests {
         let existing = "[editor]\nvim = true\n";
         let out = set_value(existing, "editor", "column_width", "64");
         assert!(out.contains("[editor]"), "{out}");
-        assert!(out.contains("vim = true") && out.contains("column_width = 64"), "{out}");
+        assert!(
+            out.contains("vim = true") && out.contains("column_width = 64"),
+            "{out}"
+        );
     }
 
     #[test]
     fn set_value_appends_a_new_section_preserving_the_rest() {
         let existing = "[editor]\nvim = true\n";
         let out = set_value(existing, "theme", "name", "\"light\"");
-        assert!(out.contains("[editor]\nvim = true"), "existing section kept: {out}");
-        assert!(out.contains("[theme]") && out.contains("name = \"light\""), "{out}");
+        assert!(
+            out.contains("[editor]\nvim = true"),
+            "existing section kept: {out}"
+        );
+        assert!(
+            out.contains("[theme]") && out.contains("name = \"light\""),
+            "{out}"
+        );
     }
 
     #[test]
@@ -357,7 +384,10 @@ mod tests {
     fn set_value_leaves_comments_on_other_lines() {
         let existing = "# my settings\n[editor]\n# turn on vim\nvim = false\n";
         let out = set_value(existing, "editor", "vim", "true");
-        assert!(out.contains("# my settings") && out.contains("# turn on vim"), "comments kept: {out}");
+        assert!(
+            out.contains("# my settings") && out.contains("# turn on vim"),
+            "comments kept: {out}"
+        );
         assert!(out.contains("vim = true"), "{out}");
     }
 
@@ -371,7 +401,10 @@ mod tests {
 
     #[test]
     fn projects_home_passes_an_absolute_path_through() {
-        let cfg = ProjectsConfig { home: Some("/books".into()), ..Default::default() };
+        let cfg = ProjectsConfig {
+            home: Some("/books".into()),
+            ..Default::default()
+        };
         assert_eq!(cfg.home_dir(), Some(PathBuf::from("/books")));
     }
 
@@ -392,7 +425,10 @@ mod tests {
         let existing = "[editor]\nvim = true\n\n[workflows]\nfinish = [\"save\"]\n";
         let out = upsert_workflow(existing, "revise", &steps(&["save", "ai:continuity"]));
         // The new entry is under the header, and the existing content is intact.
-        assert!(out.contains("[workflows]\nrevise = [\"save\", \"ai:continuity\"]\n"), "{out}");
+        assert!(
+            out.contains("[workflows]\nrevise = [\"save\", \"ai:continuity\"]\n"),
+            "{out}"
+        );
         assert!(out.contains("finish = [\"save\"]"));
         assert!(out.contains("[editor]\nvim = true"));
     }
@@ -402,7 +438,10 @@ mod tests {
         let existing = "[editor]\nvim = true\n";
         let out = upsert_workflow(existing, "revise", &steps(&["save"]));
         assert!(out.contains("[editor]\nvim = true"), "existing kept: {out}");
-        assert!(out.ends_with("[workflows]\nrevise = [\"save\"]\n"), "appended: {out}");
+        assert!(
+            out.ends_with("[workflows]\nrevise = [\"save\"]\n"),
+            "appended: {out}"
+        );
     }
 
     #[test]
@@ -421,7 +460,14 @@ mod tests {
     fn re_adding_a_workflow_replaces_it_in_place() {
         let existing = "[workflows]\nrevise = [\"save\"]\n";
         let out = upsert_workflow(existing, "revise", &steps(&["save", "ai:continuity"]));
-        assert!(out.contains("revise = [\"save\", \"ai:continuity\"]"), "replaced: {out}");
-        assert_eq!(out.matches("revise =").count(), 1, "no duplicate entry: {out}");
+        assert!(
+            out.contains("revise = [\"save\", \"ai:continuity\"]"),
+            "replaced: {out}"
+        );
+        assert_eq!(
+            out.matches("revise =").count(),
+            1,
+            "no duplicate entry: {out}"
+        );
     }
 }

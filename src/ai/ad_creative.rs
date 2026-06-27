@@ -44,11 +44,15 @@ impl AdCreative {
     /// The artifacts as `(title, filename, body)` for writing under
     /// `marketing/ads/` — one file per platform. Skips a platform with no content.
     pub fn artifacts(&self) -> Vec<(&'static str, &'static str, String)> {
-        [("Amazon Ads", "amazon.md", &self.amazon), ("Meta Ads", "meta.md", &self.meta), ("X Ads", "x.md", &self.x)]
-            .into_iter()
-            .map(|(title, file, ad)| (title, file, render_ad(ad)))
-            .filter(|(_, _, body)| !body.trim().is_empty())
-            .collect()
+        [
+            ("Amazon Ads", "amazon.md", &self.amazon),
+            ("Meta Ads", "meta.md", &self.meta),
+            ("X Ads", "x.md", &self.x),
+        ]
+        .into_iter()
+        .map(|(title, file, ad)| (title, file, render_ad(ad)))
+        .filter(|(_, _, body)| !body.trim().is_empty())
+        .collect()
     }
 }
 
@@ -131,7 +135,11 @@ mod tests {
             targeting: vec!["fantasy readers".into()],
             image_brief: "a fog-bound coast at dawn".into(),
         };
-        AdCreative { amazon: ad("Unearth the secret"), meta: ad("She came home to bury it"), x: ad("Some doors stay shut") }
+        AdCreative {
+            amazon: ad("Unearth the secret"),
+            meta: ad("She came home to bury it"),
+            x: ad("Some doors stay shut"),
+        }
     }
 
     #[test]
@@ -150,7 +158,10 @@ mod tests {
     #[test]
     fn artifacts_is_one_file_per_platform() {
         let a = sample().artifacts();
-        assert_eq!(a.iter().map(|(_, f, _)| *f).collect::<Vec<_>>(), ["amazon.md", "meta.md", "x.md"]);
+        assert_eq!(
+            a.iter().map(|(_, f, _)| *f).collect::<Vec<_>>(),
+            ["amazon.md", "meta.md", "x.md"]
+        );
         assert!(a[0].2.contains("## Headlines") && a[0].2.contains("Unearth the secret"));
         assert!(a[0].2.contains("## Suggested targeting") && a[0].2.contains("## Ad image"));
     }

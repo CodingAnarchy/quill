@@ -4,9 +4,9 @@
 //! `assist.rs` to keep that module under the ~1,000-line convention (#426); a
 //! child module, so it keeps access to `App`'s private fields.
 
-use super::*;
 use super::assist::write_failure_message;
 use super::bible_review::Staged;
+use super::*;
 use crate::ai::scaffold;
 
 impl App {
@@ -15,14 +15,24 @@ impl App {
     /// Prompt for a notes file (or a folder of them) to import into the story
     /// bible. Available with AI off too — the source is preserved regardless.
     pub(crate) fn start_import(&mut self) {
-        self.open_prompt(Pending::ImportNotes, "Import notes — path to a .md file or a folder of them:", "", None);
+        self.open_prompt(
+            Pending::ImportNotes,
+            "Import notes — path to a .md file or a folder of them:",
+            "",
+            None,
+        );
     }
 
     // --- New project from a folder of notes (#286) ------------------------
 
     /// Prompt for a folder of notes to start a new project from.
     pub(crate) fn start_new_from_notes(&mut self) {
-        self.open_prompt(Pending::NewFromNotesSource, "New project from notes — folder to import:", "", None);
+        self.open_prompt(
+            Pending::NewFromNotesSource,
+            "New project from notes — folder to import:",
+            "",
+            None,
+        );
     }
 
     /// Validate `folder` holds importable notes, then ask where to create the new
@@ -36,7 +46,12 @@ impl App {
         }
         self.pending_notes_folder = Some(std::path::PathBuf::from(folder));
         let prefill = format!("{}/", self.new_project_base().display());
-        self.open_prompt(Pending::NewFromNotesDest, "New project — path:", &prefill, None);
+        self.open_prompt(
+            Pending::NewFromNotesDest,
+            "New project — path:",
+            &prefill,
+            None,
+        );
     }
 
     /// Create the new project at `dest` and import the folder chosen earlier.
@@ -55,22 +70,38 @@ impl App {
 
     /// Prompt for a Markdown manuscript file to import as a new project.
     pub(crate) fn start_import_manuscript(&mut self) {
-        self.open_prompt(Pending::ImportManuscriptSource, "Import manuscript — Markdown file:", "", None);
+        self.open_prompt(
+            Pending::ImportManuscriptSource,
+            "Import manuscript — Markdown file:",
+            "",
+            None,
+        );
     }
 
     /// Validate the chosen file is a Markdown manuscript, then ask where to create
     /// the new project. Shared by the file prompt and the run-action entry point.
     pub(crate) fn begin_import_manuscript(&mut self, file: &str) {
         let path = std::path::Path::new(file.trim());
-        let is_md = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        let is_md = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
         if !(path.is_file() && is_md) {
-            self.message = Some(format!("Not a Markdown (.md) manuscript: {}", path.display()));
+            self.message = Some(format!(
+                "Not a Markdown (.md) manuscript: {}",
+                path.display()
+            ));
             self.mode = self.editing_mode();
             return;
         }
         self.pending_manuscript_source = Some(path.to_path_buf());
         let prefill = format!("{}/", self.new_project_base().display());
-        self.open_prompt(Pending::ImportManuscriptDest, "New project — path:", &prefill, None);
+        self.open_prompt(
+            Pending::ImportManuscriptDest,
+            "New project — path:",
+            &prefill,
+            None,
+        );
     }
 
     /// Create the new project at `dest` and import the manuscript chosen earlier:
@@ -96,8 +127,11 @@ impl App {
             }
         };
         let parsed = crate::manuscript_import::parse_markdown(&text);
-        let chapters: Vec<(String, String)> =
-            parsed.chapters.into_iter().map(|c| (c.title, c.body)).collect();
+        let chapters: Vec<(String, String)> = parsed
+            .chapters
+            .into_iter()
+            .map(|c| (c.title, c.body))
+            .collect();
         let built = Project::create(&dest).and_then(|mut p| {
             p.import_chapters(parsed.title.as_deref(), parsed.author.as_deref(), &chapters)
                 .map(|()| chapters.len())
@@ -140,7 +174,10 @@ impl App {
                     continue;
                 }
             };
-            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "notes.md".into());
+            let name = f
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "notes.md".into());
             if let Err(msg) = self.write_file(&dest_dir.join(&name), &text) {
                 failures.push(msg);
                 continue;
@@ -154,19 +191,32 @@ impl App {
         }
 
         let label = match &files[..] {
-            [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "notes".into()),
+            [one] => one
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "notes".into()),
             _ => format!("{preserved} files"),
         };
         // With AI off, the source is safely preserved but the bible can't be built.
         if self.ai.check_ready().is_err() {
-            self.message = Some(format!("Saved {label} to bible/sources — enable AI to build the story bible from it."));
+            self.message = Some(format!(
+                "Saved {label} to bible/sources — enable AI to build the story bible from it."
+            ));
             return;
         }
         self.import_source = Some(label);
-        self.spawn_generative(&combined, "⟳ Importing notes…", |backend, notes, model| {
-            let req = ai::import::build_request(notes.to_string(), &model);
-            Outcome::Import(backend.complete(&req).and_then(|r| ai::import::parse(&r.text)))
-        });
+        self.spawn_generative(
+            &combined,
+            "⟳ Importing notes…",
+            |backend, notes, model| {
+                let req = ai::import::build_request(notes.to_string(), &model);
+                Outcome::Import(
+                    backend
+                        .complete(&req)
+                        .and_then(|r| ai::import::parse(&r.text)),
+                )
+            },
+        );
     }
 
     /// Apply an import pass: stage the generated character and setting files (and
@@ -190,7 +240,9 @@ impl App {
         let timeline_has = !timeline.events.is_empty();
         let outline_has = !outline.outline.is_empty();
         if chars.is_empty() && !setting_has && !timeline_has && !outline_has {
-            self.message = Some(format!("Imported {source}: no bible content found in the notes."));
+            self.message = Some(format!(
+                "Imported {source}: no bible content found in the notes."
+            ));
             return;
         }
 
@@ -200,17 +252,33 @@ impl App {
         // review so a single import never opens several in a row.
         let mut staged: Vec<Staged> = Vec::new();
         for c in &chars {
-            let path = bible.join("characters").join(format!("{}.md", bible::slug(&c.name)));
-            staged.push(self.stage_bible(path, &c.name, |notes| character::render_profile(c, notes, &today)));
+            let path = bible
+                .join("characters")
+                .join(format!("{}.md", bible::slug(&c.name)));
+            staged.push(self.stage_bible(path, &c.name, |notes| {
+                character::render_profile(c, notes, &today)
+            }));
         }
         if setting_has {
-            staged.push(self.stage_bible(bible.join("setting.md"), "setting", |notes| setting::render(&setting, notes, &today)));
+            staged.push(
+                self.stage_bible(bible.join("setting.md"), "setting", |notes| {
+                    setting::render(&setting, notes, &today)
+                }),
+            );
         }
         if timeline_has {
-            staged.push(self.stage_bible(bible.join("timeline.md"), "timeline", |notes| continuity::render_timeline(&timeline, notes, &today)));
+            staged.push(
+                self.stage_bible(bible.join("timeline.md"), "timeline", |notes| {
+                    continuity::render_timeline(&timeline, notes, &today)
+                }),
+            );
         }
         if outline_has {
-            staged.push(self.stage_bible(bible.join("outline.md"), "outline", |notes| scaffold::render_outline(&outline, notes, &today)));
+            staged.push(
+                self.stage_bible(bible.join("outline.md"), "outline", |notes| {
+                    scaffold::render_outline(&outline, notes, &today)
+                }),
+            );
         }
 
         let mut conflicts = Vec::new();
@@ -227,11 +295,23 @@ impl App {
         if !failures.is_empty() {
             self.message = Some(write_failure_message(&failures));
         } else if conflicts.is_empty() {
-            self.show_ai(import_summary_lines(&source, chars.len(), setting_has, timeline_has, outline_has, written));
+            self.show_ai(import_summary_lines(
+                &source,
+                chars.len(),
+                setting_has,
+                timeline_has,
+                outline_has,
+                written,
+            ));
         } else {
             let pending = conflicts.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview { conflicts, editing: None }));
-            self.message = Some(format!("Imported {source}: wrote {written} · {pending} need review"));
+            self.mode = Mode::BibleReview(Box::new(BibleReview {
+                conflicts,
+                editing: None,
+            }));
+            self.message = Some(format!(
+                "Imported {source}: wrote {written} · {pending} need review"
+            ));
         }
     }
 }
@@ -241,7 +321,9 @@ impl App {
 /// folder imports its notes collectively. Empty when the path is neither.
 fn collect_import_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     let is_md = |p: &std::path::Path| {
-        p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        p.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"))
     };
     if path.is_dir() {
         let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(path)
@@ -280,6 +362,8 @@ fn import_summary_lines(
     lines.push(Line::raw(format!("Outline:    {}", yes(outline))));
     lines.push(Line::raw(format!("Files written: {written}  (bible/)")));
     lines.push(Line::raw(""));
-    lines.push(Line::raw("The original notes are preserved under bible/sources/."));
+    lines.push(Line::raw(
+        "The original notes are preserved under bible/sources/.",
+    ));
     lines
 }
