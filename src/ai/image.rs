@@ -7,7 +7,6 @@
 use serde::Deserialize;
 
 use super::AiError;
-use crate::config::config_path;
 
 /// One image to generate: a text prompt and the provider's model id.
 pub struct ImageRequest {
@@ -103,16 +102,7 @@ impl ImageSettings {
     /// missing/unreadable file yields the defaults, off). `FAL_KEY`, if set, takes
     /// precedence over a key in the file.
     pub fn load() -> Self {
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct File {
-            image: ImageSettings,
-        }
-        let mut settings = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| toml::from_str::<File>(&t).ok())
-            .map(|f| f.image)
-            .unwrap_or_default();
+        let mut settings: ImageSettings = crate::config::load_section("image");
         if let Ok(key) = std::env::var("FAL_KEY") {
             if !key.trim().is_empty() {
                 settings.api_key = Some(key);
