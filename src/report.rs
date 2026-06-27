@@ -1,13 +1,12 @@
 //! The progress report: a single screen tracking the manuscript against the
 //! author's goals. This module is pure — it turns the project's goals plus a
 //! few measured numbers into the report's text lines, so the formulas are
-//! testable against the worked example in [`docs/progress-reports.md`].
+//! testable against the worked example in `docs/progress-reports.md`.
 //!
-//! The daily-momentum lines (today's delta, per-act deltas, moved-to-unused)
-//! need the snapshot log and land with #59/#60; this renders the static lines.
-//! Those deltas are color-coded (green gains / red losses), so #59 should change
-//! [`lines`] to return styled rows (`Vec<Line>` or a small typed enum the UI
-//! colors) and add delta rows — not re-parse these strings for `+`/`-`.
+//! The daily-momentum lines (today's delta, per-part deltas, moved-to-unused)
+//! are color-coded (green gains / red losses), so [`lines`] returns styled rows
+//! ([`Vec<Line>`](Line)), letting the UI render the colored deltas directly
+//! rather than re-parsing strings for `+`/`-`.
 
 use ratatui::style::Style;
 use crate::theme;
@@ -34,11 +33,6 @@ pub struct PartDelta {
     pub removed: usize,
 }
 
-/// Build the report's rows for a project with `words` body words, `section_words`
-/// in front/back matter (counted toward neither the goal nor the projection,
-/// #182), `chapters` body chapters, `todo` TODO markers, and today's `momentum`,
-/// as of `today`. Rows are styled (the word delta is colored). Returns a short
-/// hint when no goals are set.
 /// A multi-book series summary for the report header (#331): total words across
 /// every book and the book count. `None` for a standalone novel.
 pub struct SeriesSummary {
@@ -46,6 +40,11 @@ pub struct SeriesSummary {
     pub books: usize,
 }
 
+/// Build the report's rows for a project with `words` body words, `section_words`
+/// in front/back matter (counted toward neither the goal nor the projection,
+/// #182), `chapters` body chapters, `todo` TODO markers, and today's `momentum`,
+/// as of `today`. Rows are styled (the word delta is colored). Returns a short
+/// hint when no goals are set.
 #[allow(clippy::too_many_arguments)] // the report's measured inputs read clearer flat than boxed
 pub fn lines(
     manifest: &Manifest,

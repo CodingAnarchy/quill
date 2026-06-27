@@ -407,7 +407,6 @@ fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleReview) {
     );
 }
 
-/// Render the AI command palette as a navigable action list.
 /// The series tree navigator (#330): the project as an indented series → book →
 /// part → chapter tree. Rows are derived from cached metadata (never files); the
 /// selected row is reversed and the active book/chapter is accented.
