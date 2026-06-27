@@ -92,21 +92,14 @@ impl Manifest {
     /// (#328): series-level fields come from the file root, per-book fields from
     /// the book. The inverse of [`Manifest::to_book`].
     fn from_series(series: &SeriesFile, book: &Book) -> Self {
+        // Series-level fields come from the file root; the per-book fields are
+        // filled in by `load_book`, and everything else is the manifest default.
         let mut manifest = Manifest {
-            title: String::new(),
-            subtitle: None,
             author: series.author.clone(),
             series: Some(series.title.clone()),
-            epigraph: None,
-            epigraph_by: None,
             start_date: series.start_date.clone(),
             todo_marker: series.todo_marker.clone(),
-            part_label: None,
-            run_on_threshold: None,
-            analysis: None,
-            goals: None,
-            parts: None,
-            chapters: Vec::new(),
+            ..Default::default()
         };
         manifest.load_book(book);
         manifest
@@ -309,6 +302,32 @@ mod tests {
         let mut p = std::env::temp_dir();
         p.push(format!("quill-series-{}-{}", std::process::id(), name));
         p
+    }
+
+    /// Every per-book field hoisted into the active manifest by `load_book` must
+    /// come back out unchanged via `to_book` (#427). `to_book`'s struct literal is
+    /// already compiler-checked, so this specifically guards the assignment-based
+    /// `load_book`: a `Book` field added without a matching `load_book` line fails
+    /// loudly here instead of silently dropping on a series save.
+    #[test]
+    fn book_round_trips_through_the_active_manifest() {
+        let original = Book {
+            title: "Book Two".into(),
+            subtitle: Some("The Reckoning".into()),
+            epigraph: Some("In the deep.".into()),
+            epigraph_by: Some("Anon".into()),
+            part_label: Some("act".into()),
+            run_on_threshold: Some(33),
+            goals: Some(Goals { words: 90_000, chapters: 30, words_per_page: 250, daily: Some(800) }),
+            parts: Some(vec![Part { name: Some("Act I".into()), chapters: [1, 5], goal: Some(20_000) }]),
+            chapters: vec![ChapterEntry::new("One".into(), "one.md".into())],
+        };
+
+        let mut manifest = Manifest::default();
+        manifest.load_book(&original);
+        let round_tripped = manifest.to_book();
+
+        assert_eq!(round_tripped, original, "every Book field must survive load_book → to_book");
     }
 
     /// Write a `books`-shaped series manifest with `books` books of `per_book`
