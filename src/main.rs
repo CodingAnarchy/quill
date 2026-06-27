@@ -34,7 +34,7 @@ mod vcs;
 mod workflow;
 mod wrap;
 
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -63,11 +63,20 @@ use crate::project::Project;
 static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 
 fn main() -> io::Result<()> {
-    // A project lives in a directory (default: the current one).
-    let dir = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    // A project lives in a directory. An explicit path opens (or creates) it
+    // there; a bare launch resolves to an existing project or a freshly named
+    // one in the projects home — never a stray project in the current folder
+    // (#423).
+    let dir = match std::env::args().nth(1) {
+        Some(path) => PathBuf::from(path),
+        None => match startup_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                eprintln!("quill: {e}");
+                std::process::exit(1);
+            }
+        },
+    };
 
     // A foreseeable data-path failure at startup — a malformed manifest, an
     // unreadable chapter, a directory we can't write — exits with a clear,
@@ -115,6 +124,76 @@ fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
     };
     let buffer = Buffer::from_path(project.active_path())?;
     Ok((project, buffer))
+}
+
+/// The project directory for a no-path launch (#423). If the current directory is
+/// already a Quill project, open it in place (the long-standing behavior).
+/// Otherwise — rather than scattering a new project into whatever folder the
+/// shell happens to be in — ask the author what to call the new book and place it
+/// in their projects home. The freshly created project skips the in-app setup
+/// wizard (#282), matching `quill <path>`; the wizard is offered only for
+/// projects created from within the running editor (Ctrl-B → new).
+fn startup_dir() -> io::Result<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if Project::manifest_path(&cwd).exists() {
+        return Ok(cwd); // already inside a project — open it
+    }
+    let (base, fallback) = new_project_base(
+        config::ProjectsConfig::load().home_dir(),
+        std::env::var_os("HOME").map(PathBuf::from),
+        &cwd,
+    );
+    // Don't fall back to the current directory silently (#423): when there's no
+    // projects home, say where the book is going and how to choose.
+    if fallback {
+        eprintln!(
+            "quill: no projects home configured — set [projects] home in your config \
+             to choose where new books live. Creating in {} for now.",
+            base.display()
+        );
+    }
+    let name = prompt_project_name()?;
+    Ok(base.join(name))
+}
+
+/// Where a new project goes for a no-path launch (#423): the configured projects
+/// home if set, else a `Quill` folder under the OS home, else the current
+/// directory. The second return is whether this is the unconfigured fallback, so
+/// the caller can surface the choice instead of placing the book silently.
+fn new_project_base(
+    projects_home: Option<PathBuf>,
+    os_home: Option<PathBuf>,
+    cwd: &Path,
+) -> (PathBuf, bool) {
+    match projects_home {
+        Some(home) => (home, false),
+        None => (os_home.map(|h| h.join("Quill")).unwrap_or_else(|| cwd.to_path_buf()), true),
+    }
+}
+
+/// Ask the author to name the new book (#423), on the plain terminal before the
+/// alternate screen opens (like the startup error path). The folder is derived
+/// from the name; `Project::create` takes the book title from that folder.
+fn prompt_project_name() -> io::Result<String> {
+    print!("New project name: ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let name = sanitize_project_name(&input);
+    if name.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no project name entered"));
+    }
+    Ok(name)
+}
+
+/// A filesystem-safe folder name from the author's typed project name (#423):
+/// trimmed, with path separators replaced and leading/trailing dots stripped so
+/// the name stays a single folder inside the projects home (no `..`, no nesting).
+/// The trailing trim runs last because stripping an outer dot can expose a space
+/// (`"book . "` → `"book "`).
+fn sanitize_project_name(input: &str) -> String {
+    let flattened = input.trim().replace(['/', '\\'], "-");
+    flattened.trim_matches('.').trim().to_string()
 }
 
 /// Undo the terminal setup from [`Tui::new`]: leave raw mode and the alternate
@@ -242,6 +321,46 @@ mod tests {
             "the message should name the manifest: {err}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn new_project_base_prefers_the_configured_projects_home() {
+        // A configured projects home is used as-is, no fallback note (#423).
+        let home = PathBuf::from("/books");
+        let (base, fallback) =
+            new_project_base(Some(home.clone()), Some(PathBuf::from("/home/me")), Path::new("/tmp/cwd"));
+        assert_eq!(base, home);
+        assert!(!fallback);
+    }
+
+    #[test]
+    fn new_project_base_falls_back_to_a_quill_folder_in_home() {
+        // With no projects home, a `Quill` folder under the OS home — never the
+        // current directory — and the fallback is flagged so it isn't silent.
+        let (base, fallback) =
+            new_project_base(None, Some(PathBuf::from("/home/me")), Path::new("/tmp/cwd"));
+        assert_eq!(base, PathBuf::from("/home/me/Quill"));
+        assert!(fallback);
+    }
+
+    #[test]
+    fn new_project_base_last_resorts_to_the_current_directory() {
+        // Only when there's no home at all does it land beside the shell.
+        let (base, fallback) = new_project_base(None, None, Path::new("/tmp/cwd"));
+        assert_eq!(base, PathBuf::from("/tmp/cwd"));
+        assert!(fallback);
+    }
+
+    #[test]
+    fn sanitize_project_name_trims_and_flattens_path_separators() {
+        assert_eq!(sanitize_project_name("  The Silmarillion \n"), "The Silmarillion");
+        assert_eq!(sanitize_project_name("Vol/1"), "Vol-1");
+        // Leading/trailing dots can't smuggle in `..` or a hidden folder.
+        assert_eq!(sanitize_project_name("../escape"), "-escape");
+        assert_eq!(sanitize_project_name("."), "");
+        assert_eq!(sanitize_project_name("   "), "");
+        // Stripping a trailing dot must not leave a dangling space.
+        assert_eq!(sanitize_project_name("Book . "), "Book");
     }
 
     #[test]

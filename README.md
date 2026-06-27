@@ -259,9 +259,18 @@ To run from the checkout without installing, or to develop:
 cargo run --release -- path/to/book
 ```
 
-Quill works on a **project directory**. If the directory has a `book.toml`
-manifest it's opened; otherwise a new project is initialized there (a manifest
-plus a first chapter). With no argument, Quill uses the current directory.
+Quill works on a **project directory**. Pass a path and, if the directory has a
+`book.toml` manifest it's opened; otherwise a new project is initialized there (a
+manifest plus a first chapter).
+
+With **no argument**, Quill doesn't scatter a project into the current folder. If
+you launch from inside an existing project it opens that one; otherwise it asks
+what to call the new book and creates it in your **projects home** (`[projects]
+home`, see [Projects](#projects-switch-without-relaunching)) — so `quill` from
+anywhere starts a tidily-filed book rather than one wherever the shell happens to
+be. With no projects home configured it falls back to a `Quill` folder in your
+home directory and tells you so (set `[projects] home` to choose where books
+live).
 
 ## Project & file format
 
