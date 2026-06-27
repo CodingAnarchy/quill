@@ -24,6 +24,46 @@ pub struct ExportStyle {
     /// [`SCENE_BREAK`] (`#`), so an unstyled export is byte-for-byte unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scene_break: Option<String>,
+    /// Path (relative to the project) to a font file embedded for the body text
+    /// (#469). `None` → the reader's default font.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_font: Option<String>,
+    /// Path (relative to the project) to a font file embedded for headings (#469).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_font: Option<String>,
+    /// The fonts resolved from the paths above at export time (#469) — read from
+    /// disk by the app, not persisted in the manifest.
+    #[serde(skip)]
+    pub fonts: Vec<EmbeddedFont>,
+}
+
+/// Which text a [`EmbeddedFont`] styles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontRole {
+    Body,
+    Heading,
+}
+
+impl FontRole {
+    /// The in-package file slug for this role (`fonts/<slug>.<ext>`).
+    fn slug(self) -> &'static str {
+        match self {
+            FontRole::Body => "body",
+            FontRole::Heading => "heading",
+        }
+    }
+}
+
+/// A font file embedded into a designed export (#469): its CSS family name, the
+/// in-package href, the OPF manifest media type, and the bytes. Resolved by the
+/// app from the `[style]` font paths; not part of the persisted config.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedFont {
+    pub role: FontRole,
+    pub family: String,
+    pub href: String,
+    pub media_type: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 impl ExportStyle {
@@ -31,6 +71,74 @@ impl ExportStyle {
     pub fn scene_break(&self) -> &str {
         self.scene_break.as_deref().unwrap_or(SCENE_BREAK)
     }
+
+    /// The resolved font for `role`, if one was configured and loaded.
+    pub fn font(&self, role: FontRole) -> Option<&EmbeddedFont> {
+        self.fonts.iter().find(|f| f.role == role)
+    }
+
+    /// Resolve the configured font paths into [`EmbeddedFont`]s using `load`
+    /// (a relative path → its bytes), filling [`Self::fonts`]. Returns a warning
+    /// for each font that can't be read or has an unsupported type. The caller
+    /// supplies `load`, so this stays off the filesystem and is testable.
+    pub fn resolve_fonts(
+        &mut self,
+        mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+    ) -> Vec<String> {
+        self.fonts.clear();
+        let mut warnings = Vec::new();
+        let targets = [
+            (FontRole::Body, self.body_font.clone()),
+            (FontRole::Heading, self.heading_font.clone()),
+        ];
+        for (role, path) in targets {
+            let Some(path) = path else { continue };
+            let Some((media_type, ext)) = font_media_type(&path) else {
+                warnings.push(format!(
+                    "style: unsupported font '{path}' (use .ttf/.otf/.woff/.woff2)"
+                ));
+                continue;
+            };
+            match load(&path) {
+                Ok(bytes) => self.fonts.push(EmbeddedFont {
+                    role,
+                    family: font_family(&path),
+                    href: format!("fonts/{}.{ext}", role.slug()),
+                    media_type,
+                    bytes,
+                }),
+                Err(e) => warnings.push(format!("style: couldn't read font '{path}': {e}")),
+            }
+        }
+        warnings
+    }
+}
+
+/// The OPF media type and canonical extension for a font path, or `None` for an
+/// unsupported type.
+fn font_media_type(path: &str) -> Option<(&'static str, &'static str)> {
+    let ext = std::path::Path::new(path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "ttf" => ("font/ttf", "ttf"),
+        "otf" => ("font/otf", "otf"),
+        "woff" => ("font/woff", "woff"),
+        "woff2" => ("font/woff2", "woff2"),
+        _ => return None,
+    })
+}
+
+/// A CSS family name derived from a font file's stem (`Fonts/Georgia.ttf` →
+/// `Georgia`), falling back to a generic name.
+fn font_family(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Embedded")
+        .to_string()
 }
 
 /// A project compiled for export: the book's metadata and its contents as a tree
@@ -468,11 +576,46 @@ mod tests {
         assert_eq!(ExportStyle::default().scene_break(), SCENE_BREAK);
         assert_eq!(
             ExportStyle {
-                scene_break: Some("❧".into())
+                scene_break: Some("❧".into()),
+                ..Default::default()
             }
             .scene_break(),
             "❧"
         );
+    }
+
+    #[test]
+    fn resolve_fonts_loads_supported_files_and_warns_on_the_rest() {
+        let mut style = ExportStyle {
+            body_font: Some("fonts/Georgia.otf".into()),
+            heading_font: Some("fonts/Display.bad".into()),
+            ..Default::default()
+        };
+        let warnings = style.resolve_fonts(|path| match path {
+            "fonts/Georgia.otf" => Ok(b"OTTO".to_vec()),
+            other => Err(std::io::Error::other(format!("no {other}"))),
+        });
+        // The body font resolves: family from the stem, role-named href, media type.
+        let body = style.font(FontRole::Body).expect("body font resolved");
+        assert_eq!(body.family, "Georgia");
+        assert_eq!(body.href, "fonts/body.otf");
+        assert_eq!(body.media_type, "font/otf");
+        assert_eq!(body.bytes, b"OTTO");
+        // The unsupported-extension heading font is skipped with a warning.
+        assert!(style.font(FontRole::Heading).is_none());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unsupported"), "{warnings:?}");
+    }
+
+    #[test]
+    fn resolve_fonts_warns_on_an_unreadable_file() {
+        let mut style = ExportStyle {
+            body_font: Some("missing.ttf".into()),
+            ..Default::default()
+        };
+        let warnings = style.resolve_fonts(|_| Err(std::io::Error::other("nope")));
+        assert!(style.fonts.is_empty());
+        assert!(warnings[0].contains("couldn't read"), "{warnings:?}");
     }
 
     #[test]

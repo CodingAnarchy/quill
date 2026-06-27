@@ -122,11 +122,15 @@ impl App {
                 name,
                 "vellum.docx",
             ),
-            ExportFormat::Epub => self.write_built(
-                export::epub::to_epub(doc, &crate::date::utc_timestamp(), &self.epub_style()),
-                name,
-                "epub",
-            ),
+            ExportFormat::Epub => {
+                let (style, warnings) = self.epub_style();
+                self.write_built(
+                    export::epub::to_epub(doc, &crate::date::utc_timestamp(), &style),
+                    name,
+                    "epub",
+                );
+                self.note_export_warnings(warnings);
+            }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
@@ -137,9 +141,27 @@ impl App {
     }
 
     /// The designed-export styling for this project (#468): the manifest's
-    /// `[style]`, or the default (which reproduces today's plain output).
-    fn epub_style(&self) -> ExportStyle {
-        self.project.manifest.style.clone().unwrap_or_default()
+    /// `[style]`, or the default (which reproduces today's plain output), with its
+    /// font paths resolved to embedded fonts (#469). Returns any font-resolution
+    /// warnings to surface alongside the export result.
+    fn epub_style(&self) -> (ExportStyle, Vec<String>) {
+        let mut style = self.project.manifest.style.clone().unwrap_or_default();
+        let root = self.project.root.clone();
+        let warnings = style.resolve_fonts(|path| std::fs::read(root.join(path)));
+        (style, warnings)
+    }
+
+    /// Append styling warnings (e.g. an unreadable font) to the export message, so
+    /// a misconfigured `[style]` doesn't fail silently.
+    fn note_export_warnings(&mut self, warnings: Vec<String>) {
+        if warnings.is_empty() {
+            return;
+        }
+        let note = warnings.join("; ");
+        self.message = Some(match self.message.take() {
+            Some(m) => format!("{m} — {note}"),
+            None => note,
+        });
     }
 
     /// Write the whole series (one book per [`Document`], in order) in `format` to
@@ -178,17 +200,21 @@ impl App {
                 name,
                 "vellum.docx",
             ),
-            ExportFormat::Epub => self.write_built(
-                export::epub::to_epub_series(
-                    docs,
-                    series,
-                    author.as_deref(),
-                    &crate::date::utc_timestamp(),
-                    &self.epub_style(),
-                ),
-                name,
-                "epub",
-            ),
+            ExportFormat::Epub => {
+                let (style, warnings) = self.epub_style();
+                self.write_built(
+                    export::epub::to_epub_series(
+                        docs,
+                        series,
+                        author.as_deref(),
+                        &crate::date::utc_timestamp(),
+                        &style,
+                    ),
+                    name,
+                    "epub",
+                );
+                self.note_export_warnings(warnings);
+            }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))

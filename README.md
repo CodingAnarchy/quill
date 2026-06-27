@@ -103,10 +103,13 @@ keystrokes that stay out of the way.
   series (books in reading order, each delimited per format: Markdown/Word book
   headings, Scrivener book folders, EPUB book sections in the table of contents)
   or just the active book. The EPUB can be lightly styled (opt-in) via a
-  `[style]` table in `book.toml` — currently `scene_break` chooses the divider
-  glyph between scenes (e.g. `scene_break = "* * *"`); with no `[style]`, the
-  output is exactly the plain default. Only the designed formats (EPUB, and PDF
-  when it lands) read `[style]`; the plain formats ignore it.
+  `[style]` table in `book.toml`: `scene_break` chooses the divider glyph between
+  scenes (e.g. `scene_break = "* * *"`), and `body_font` / `heading_font` point at
+  font files (paths relative to the project, `.ttf`/`.otf`/`.woff`/`.woff2`) that
+  are embedded into the EPUB and applied (only embed fonts you're licensed to
+  distribute). With no `[style]`, the output is exactly the plain default. Only
+  the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
+  formats ignore it.
 
 - **AI assistance (opt-in)** — off by default; a draft only leaves the machine
   when you enable AI and supply a key. Quill's AI is an **assistant, not a
