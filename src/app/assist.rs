@@ -34,6 +34,24 @@ pub(super) fn write_failure_message(failures: &[String]) -> String {
     }
 }
 
+/// Map a pass's typed findings into UI [`Finding`]s, attributing each to `book`
+/// (`None` for an active-book pass). `describe` yields the one-line summary and
+/// the chapters for one item — the single place the analysis applies share, so a
+/// change to `Finding` touches here, not seven handlers (#425).
+fn findings_from<T>(
+    items: &[T],
+    book: Option<usize>,
+    describe: impl Fn(&T) -> (String, Vec<String>),
+) -> Vec<Finding> {
+    items
+        .iter()
+        .map(|it| {
+            let (summary, chapters) = describe(it);
+            Finding { summary, chapters, book }
+        })
+        .collect()
+}
+
 
 impl App {
 
@@ -182,10 +200,7 @@ impl App {
     /// Start a scaffolding pass; the beat outline + gap findings are applied by
     /// [`App::poll_ai`].
     pub(crate) fn analyze_scaffold(&mut self) {
-        self.spawn_ai("⟳ Outlining…", |backend, manuscript, model| {
-            let req = scaffold::build_request(manuscript, &model);
-            Outcome::Scaffold(backend.complete(&req).and_then(|r| scaffold::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass("⟳ Outlining…", scaffold::build_request, scaffold::parse, Outcome::Scaffold);
     }
 
     /// Start a naming-consistency pass; variant findings are applied by
@@ -193,29 +208,30 @@ impl App {
     /// scan), checked against the known entity list.
     pub(crate) fn analyze_naming(&mut self) {
         let entities = self.known_entities();
-        self.spawn_ai("⟳ Checking names…", move |backend, manuscript, _model| {
-            let req = naming::build_request(manuscript, &entities);
-            Outcome::Naming(backend.complete(&req).and_then(|r| naming::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass(
+            "⟳ Checking names…",
+            move |manuscript, _model| naming::build_request(manuscript, &entities),
+            naming::parse,
+            Outcome::Naming,
+        );
     }
 
     /// Start a prose & style pass (POV/tense/voice — semantic, analysis only);
     /// findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_style(&mut self) {
-        self.spawn_ai("⟳ Reviewing prose & style…", |backend, manuscript, model| {
-            let req = style::build_request(manuscript, &model);
-            Outcome::Style(backend.complete(&req).and_then(|r| style::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass("⟳ Reviewing prose & style…", style::build_request, style::parse, Outcome::Style);
     }
 
     /// Start an editorial read (#293): flag structural / continuity / line issues
     /// across the manuscript — observations only, never fixes — applied by
     /// [`App::poll_ai`] into the revision-triage list.
     pub(crate) fn analyze_editorial(&mut self) {
-        self.spawn_ai("⟳ Editorial read…", |backend, manuscript, model| {
-            let req = ai::editorial::build_request(manuscript, &model);
-            Outcome::Editorial(backend.complete(&req).and_then(|r| ai::editorial::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass(
+            "⟳ Editorial read…",
+            ai::editorial::build_request,
+            ai::editorial::parse,
+            Outcome::Editorial,
+        );
     }
 
     /// Start a character-voice pass (#183): check the manuscript against the
@@ -231,19 +247,23 @@ impl App {
             self.message = Some("Run the character pass first to capture voice profiles".into());
             return;
         }
-        self.spawn_ai("⟳ Checking character voice…", move |backend, manuscript, model| {
-            let req = voice::build_request(manuscript, &notes, &model);
-            Outcome::Voice(backend.complete(&req).and_then(|r| voice::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass(
+            "⟳ Checking character voice…",
+            move |manuscript, model| voice::build_request(manuscript, &notes, model),
+            voice::parse,
+            Outcome::Voice,
+        );
     }
 
     /// Generate submission material (synopsis / blurb / query); written to
     /// `submission/` by [`App::poll_ai`].
     pub(crate) fn analyze_submission(&mut self) {
-        self.spawn_ai("⟳ Drafting submission material…", |backend, manuscript, model| {
-            let req = submission::build_request(manuscript, &model);
-            Outcome::Submission(backend.complete(&req).and_then(|r| submission::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass(
+            "⟳ Drafting submission material…",
+            submission::build_request,
+            submission::parse,
+            Outcome::Submission,
+        );
     }
 
     /// Brainstorm story ideas from a premise (#255) — the first generative pass.
@@ -292,19 +312,18 @@ impl App {
     /// Generate marketing copy (#236) — blurb variants & taglines; written to
     /// `marketing/` by [`App::poll_ai`].
     pub(crate) fn analyze_marketing(&mut self) {
-        self.spawn_ai("⟳ Drafting marketing copy…", |backend, manuscript, model| {
-            let req = marketing::build_request(manuscript, &model);
-            Outcome::Marketing(backend.complete(&req).and_then(|r| marketing::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass(
+            "⟳ Drafting marketing copy…",
+            marketing::build_request,
+            marketing::parse,
+            Outcome::Marketing,
+        );
     }
 
     /// Generate social posts (#237) — per-platform promo copy; written to
     /// `marketing/social/` by [`App::poll_ai`].
     pub(crate) fn analyze_social(&mut self) {
-        self.spawn_ai("⟳ Drafting social posts…", |backend, manuscript, model| {
-            let req = social::build_request(manuscript, &model);
-            Outcome::Social(backend.complete(&req).and_then(|r| social::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass("⟳ Drafting social posts…", social::build_request, social::parse, Outcome::Social);
     }
 
     /// Generate ad creative & copy (#251) — per-platform ad fields written to
@@ -312,10 +331,12 @@ impl App {
     /// (#236/#237) so the ads stay on-brand.
     pub(crate) fn analyze_ad_creative(&mut self) {
         let marketing = self.marketing_copy_context();
-        self.spawn_ai("⟳ Drafting ad creative…", move |backend, manuscript, model| {
-            let req = ad_creative::build_request(manuscript, &marketing, &model);
-            Outcome::AdCreative(backend.complete(&req).and_then(|r| ad_creative::parse(&r.text)))
-        });
+        self.spawn_manuscript_pass(
+            "⟳ Drafting ad creative…",
+            move |manuscript, model| ad_creative::build_request(manuscript, &marketing, model),
+            ad_creative::parse,
+            Outcome::AdCreative,
+        );
     }
 
     /// The author's existing marketing copy (#236/#237) as on-brand context for
@@ -337,9 +358,8 @@ impl App {
     /// Apply an ad-creative pass (#251): write the per-platform ad copy to
     /// `marketing/ads/`, conflict-reviewed and off-manuscript.
     pub(crate) fn apply_ad_creative(&mut self, result: Result<AdCreative, ai::AiError>) {
-        match result {
-            Ok(creative) => self.write_off_manuscript("Ad creative", "marketing/ads", creative.artifacts()),
-            Err(e) => self.message = Some(format!("AI: {e}")),
+        if let Some(creative) = self.ok_or_report(result) {
+            self.write_off_manuscript("Ad creative", "marketing/ads", creative.artifacts());
         }
     }
 
@@ -367,9 +387,8 @@ impl App {
     /// status message on error. Shared by the async poll path and tests (which
     /// drive a mock backend synchronously).
     pub(crate) fn apply_qa_result(&mut self, result: Result<ai::Response, ai::AiError>) {
-        match result {
-            Ok(resp) => self.show_ai(ai::answer_to_lines(&resp)),
-            Err(e) => self.message = Some(format!("AI: {e}")),
+        if let Some(resp) = self.ok_or_report(result) {
+            self.show_ai(ai::answer_to_lines(&resp));
         }
     }
 
@@ -450,15 +469,7 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = cont
-            .findings
-            .iter()
-            .map(|f| Finding {
-                summary: format!("{}: {}", f.kind, f.detail),
-                chapters: f.chapters.clone(),
-                book,
-            })
-            .collect();
+        let findings = findings_from(&cont.findings, book, |f| (format!("{}: {}", f.kind, f.detail), f.chapters.clone()));
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("timeline.md");
         self.apply_bible_with_findings(path, "timeline", |notes| {
@@ -473,15 +484,7 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = setting
-            .findings
-            .iter()
-            .map(|f| Finding {
-                summary: format!("{}: {}", f.rule, f.violation),
-                chapters: f.chapters.clone(),
-                book,
-            })
-            .collect();
+        let findings = findings_from(&setting.findings, book, |f| (format!("{}: {}", f.rule, f.violation), f.chapters.clone()));
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("setting.md");
         self.apply_bible_with_findings(path, "setting", |notes| {
@@ -536,9 +539,8 @@ impl App {
 
     /// Show the word-search results in the AI overlay.
     pub(crate) fn apply_thesaurus(&mut self, result: Result<Vec<ai::thesaurus::Word>, ai::AiError>) {
-        match result {
-            Ok(words) => self.show_ai(thesaurus_lines(&words)),
-            Err(e) => self.message = Some(format!("AI: {e}")),
+        if let Some(words) = self.ok_or_report(result) {
+            self.show_ai(thesaurus_lines(&words));
         }
     }
 
@@ -765,15 +767,7 @@ impl App {
         let Some(scaffold) = self.ok_or_report(result) else {
             return;
         };
-        let findings = scaffold
-            .gaps
-            .iter()
-            .map(|g| Finding {
-                summary: format!("gap: {}", g.detail),
-                chapters: vec![g.chapter.clone()],
-                book: None,
-            })
-            .collect();
+        let findings = findings_from(&scaffold.gaps, None, |g| (format!("gap: {}", g.detail), vec![g.chapter.clone()]));
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("outline.md");
         self.apply_bible_with_findings(path, "outline", |notes| {
@@ -787,19 +781,14 @@ impl App {
         let Some(naming) = self.ok_or_report(result) else {
             return;
         };
-        let findings = naming
-            .findings
-            .iter()
-            .map(|f| Finding {
-                summary: if f.variants.is_empty() {
-                    f.name.clone()
-                } else {
-                    format!("{} — also: {}", f.name, f.variants.join(", "))
-                },
-                chapters: f.chapters.clone(),
-                book: None,
-            })
-            .collect();
+        let findings = findings_from(&naming.findings, None, |f| {
+            let summary = if f.variants.is_empty() {
+                f.name.clone()
+            } else {
+                format!("{} — also: {}", f.name, f.variants.join(", "))
+            };
+            (summary, f.chapters.clone())
+        });
         self.show_findings(findings);
     }
 
@@ -809,15 +798,7 @@ impl App {
         let Some(style) = self.ok_or_report(result) else {
             return;
         };
-        let findings = style
-            .findings
-            .iter()
-            .map(|f| Finding {
-                summary: format!("{}: {}", f.kind, f.detail),
-                chapters: f.chapters.clone(),
-                book: None,
-            })
-            .collect();
+        let findings = findings_from(&style.findings, None, |f| (format!("{}: {}", f.kind, f.detail), f.chapters.clone()));
         self.show_findings(findings);
     }
 
@@ -828,17 +809,15 @@ impl App {
         let Some(notes) = self.ok_or_report(result) else {
             return;
         };
-        let findings = notes
-            .into_iter()
-            .map(|n| {
-                let at = n
-                    .location
-                    .filter(|s| !s.is_empty())
-                    .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
-                    .unwrap_or_default();
-                Finding { summary: format!("{}: {}{at}", n.focus, n.concern), chapters: n.chapters, book: None }
-            })
-            .collect();
+        let findings = findings_from(&notes, None, |n| {
+            let at = n
+                .location
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
+                .unwrap_or_default();
+            (format!("{}: {}{at}", n.focus, n.concern), n.chapters.clone())
+        });
         self.show_findings(findings);
     }
 
@@ -848,32 +827,23 @@ impl App {
         let Some(voice) = self.ok_or_report(result) else {
             return;
         };
-        let findings = voice
-            .findings
-            .iter()
-            .map(|f| Finding {
-                summary: if f.character.is_empty() {
-                    format!("{}: {}", f.kind, f.detail)
-                } else {
-                    format!("{} ({}): {}", f.kind, f.character, f.detail)
-                },
-                chapters: f.chapters.clone(),
-                book: None,
-            })
-            .collect();
+        let findings = findings_from(&voice.findings, None, |f| {
+            let summary = if f.character.is_empty() {
+                format!("{}: {}", f.kind, f.detail)
+            } else {
+                format!("{} ({}): {}", f.kind, f.character, f.detail)
+            };
+            (summary, f.chapters.clone())
+        });
         self.show_findings(findings);
     }
 
     /// Apply a submission pass: write the synopsis / blurb / query to
     /// `submission/` (conflict-reviewed like any generated file) and summarize.
     pub(crate) fn apply_submission(&mut self, result: Result<Submission, ai::AiError>) {
-        match result {
-            Ok(sub) => {
-                let artifacts =
-                    sub.artifacts().into_iter().map(|(k, f, t)| (k, f, t.to_string())).collect();
-                self.write_off_manuscript("Submission material", "submission", artifacts);
-            }
-            Err(e) => self.message = Some(format!("AI: {e}")),
+        if let Some(sub) = self.ok_or_report(result) {
+            let artifacts = sub.artifacts().into_iter().map(|(k, f, t)| (k, f, t.to_string())).collect();
+            self.write_off_manuscript("Submission material", "submission", artifacts);
         }
     }
 
@@ -881,18 +851,16 @@ impl App {
     /// to `marketing/`, conflict-reviewed and off-manuscript like the submission
     /// material.
     pub(crate) fn apply_marketing(&mut self, result: Result<Marketing, ai::AiError>) {
-        match result {
-            Ok(copy) => self.write_off_manuscript("Marketing copy", "marketing", copy.artifacts()),
-            Err(e) => self.message = Some(format!("AI: {e}")),
+        if let Some(copy) = self.ok_or_report(result) {
+            self.write_off_manuscript("Marketing copy", "marketing", copy.artifacts());
         }
     }
 
     /// Apply a social-posts pass (#237): write the per-platform posts under
     /// `marketing/social/`, conflict-reviewed and off-manuscript.
     pub(crate) fn apply_social(&mut self, result: Result<Social, ai::AiError>) {
-        match result {
-            Ok(posts) => self.write_off_manuscript("Social posts", "marketing/social", posts.artifacts()),
-            Err(e) => self.message = Some(format!("AI: {e}")),
+        if let Some(posts) = self.ok_or_report(result) {
+            self.write_off_manuscript("Social posts", "marketing/social", posts.artifacts());
         }
     }
 
