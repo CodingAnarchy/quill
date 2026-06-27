@@ -28,6 +28,9 @@ impl App {
     /// Seed today's counters from the history log (resume the day across a
     /// reopen). Called once at startup after the project is open.
     pub fn load_history(&mut self) {
+        // Coalesce any within-session duplicate lines a prior run appended (#439),
+        // so the file stays one line per day. Best-effort, off the save path.
+        let _ = history::compact(&self.project.root);
         if let Some(snap) = history::for_date(&self.project.root, &date::iso(date::today())) {
             self.added = snap.added;
             self.removed = snap.removed;
