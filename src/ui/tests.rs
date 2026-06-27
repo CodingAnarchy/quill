@@ -490,10 +490,7 @@ fn nav_status_bar_shows_the_selected_chapters_metadata() {
 fn continuous_view_shows_chapters_flowing_with_a_divider() {
 
     // A two-chapter project on disk (the manuscript window reads files).
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-ui-cont-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("ui", "cont");
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n\
@@ -524,10 +521,7 @@ fn continuous_view_shows_part_headers_at_boundaries() {
     // A three-chapter project split into two parts: chapter 1 is "Part One",
     // chapters 2-3 are "Part Two". The continuous window loads all three and
     // crosses the boundary (#412).
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-ui-parts-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("ui", "parts");
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n\

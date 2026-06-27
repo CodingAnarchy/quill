@@ -299,9 +299,7 @@ mod tests {
     use std::time::Instant;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let mut p = std::env::temp_dir();
-        p.push(format!("quill-series-{}-{}", std::process::id(), name));
-        p
+        crate::testutil::scratch_dir("series", name)
     }
 
     /// Every per-book field hoisted into the active manifest by `load_book` must
@@ -363,7 +361,6 @@ mod tests {
 
         let (books, per_book) = (6, 250); // 1500 chapters across the series
         let dir = temp_dir("perf-open-multibook");
-        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let manifest = write_series_project(&dir, books, per_book);
         fs::write(Project::manifest_path(&dir), manifest).unwrap();
@@ -499,7 +496,6 @@ file = \"b2/one.md\"
 
         let (books, per_book) = (2, 750);
         let dir = temp_dir("perf-switch-book");
-        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let manifest = write_series_project(&dir, books, per_book);
         fs::write(Project::manifest_path(&dir), manifest).unwrap();
@@ -520,7 +516,6 @@ file = \"b2/one.md\"
     #[test]
     fn a_standalone_novel_is_unchanged_by_the_series_model() {
         let dir = temp_dir("series-single");
-        let _ = fs::remove_dir_all(&dir);
         let mut project = Project::create(&dir).unwrap(); // flat single-book manifest
         project.manifest.series = Some("A label, not a series".into());
         project.save_manifest().unwrap();

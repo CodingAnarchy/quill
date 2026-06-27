@@ -26,6 +26,8 @@ mod recovery;
 mod report;
 mod spell;
 mod syntax;
+#[cfg(test)]
+mod testutil;
 mod text;
 mod theme;
 mod typography;
@@ -294,10 +296,7 @@ mod tests {
     use super::*;
 
     fn tmpdir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-main-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testutil::scratch_dir("main", name)
     }
 
     #[test]

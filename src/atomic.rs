@@ -104,13 +104,8 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    // A unique directory per test, so parallel tests never observe each other's
-    // transient temp files.
     fn tmpdir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-atomic-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testutil::scratch_dir("atomic", name)
     }
 
     #[test]

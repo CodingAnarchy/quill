@@ -6,10 +6,7 @@ use super::*;
 /// with the chapter browser focused (Ctrl-G). Front matter is written verbatim
 /// before the body, so a test can give a chapter a `pov:` or `status:`.
 fn browser_app(name: &str, chapters: &[(&str, &str)]) -> (App, TempProject) {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-filter-{}-{}", std::process::id(), name));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("filter", name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, (title, _)) in chapters.iter().enumerate() {
         manifest.push_str(&format!("[[chapters]]\ntitle = \"{title}\"\nfile = \"ch{i}.md\"\n\n"));
@@ -18,14 +15,7 @@ fn browser_app(name: &str, chapters: &[(&str, &str)]) -> (App, TempProject) {
         fs::write(dir.join(format!("ch{i}.md")), format!("{fm}body\n")).unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();
-    let project = Project::open(&dir).unwrap();
-    let buffer = Buffer::from_path(project.active_path()).unwrap();
-    let mut app = App::new(buffer, project);
-    app.vim = false;
-    app.smart_typography = false;
-    app.mode = Mode::Insert;
-    app.workflows = Vec::new();
-    app.triggers = Default::default();
+    let mut app = open_test_app(&dir);
     app.on_key(ctrl('g')); // focus the chapter browser
     (app, TempProject::new(dir))
 }

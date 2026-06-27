@@ -17,17 +17,13 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 /// Point `XDG_CONFIG_HOME` at a fresh temp dir so `recent::record`/`list` touch
 /// scratch state, never the developer's real `~/.config/quill`.
 fn isolate(tag: &str) {
-    let dir = std::env::temp_dir().join(format!("quill-xdg-{}-{tag}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("xdg", tag);
     std::env::set_var("XDG_CONFIG_HOME", &dir);
 }
 
 /// A one-chapter project on disk with the given title and body.
 fn make_project(tag: &str, title: &str, body: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("quill-proj270-{}-{tag}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("proj270", tag);
     fs::write(
         Project::manifest_path(&dir),
         format!("title = \"{title}\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n"),
@@ -38,15 +34,7 @@ fn make_project(tag: &str, title: &str, body: &str) -> PathBuf {
 }
 
 fn open_app(dir: &Path) -> App {
-    let project = Project::open(dir).unwrap();
-    let buffer = Buffer::from_path(project.active_path()).unwrap();
-    let mut app = App::new(buffer, project);
-    app.vim = false;
-    app.smart_typography = false;
-    app.mode = Mode::Insert;
-    app.workflows = Vec::new();
-    app.triggers = Default::default();
-    app
+    open_test_app(dir)
 }
 
 #[test]
@@ -145,10 +133,7 @@ fn switching_to_the_already_open_project_is_a_no_op_with_a_message() {
 /// A directory holding several project subdirs (and any plain ones the caller
 /// adds), for exercising the navigator.
 fn books_dir(tag: &str) -> PathBuf {
-    let parent = std::env::temp_dir().join(format!("quill-books-{}-{tag}", std::process::id()));
-    let _ = fs::remove_dir_all(&parent);
-    fs::create_dir_all(&parent).unwrap();
-    parent
+    crate::testutil::scratch_dir("navbooks", tag)
 }
 
 fn project_in(parent: &Path, name: &str, title: &str, body: &str) -> PathBuf {

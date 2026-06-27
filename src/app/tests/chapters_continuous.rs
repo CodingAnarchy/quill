@@ -124,10 +124,7 @@ fn momentum_persists_and_resumes_across_a_reopen() {
 /// A two-chapter project where each chapter is its own part ("Beginning",
 /// "End"), for exercising per-part attribution.
 fn parts_app(name: &str) -> (App, TempProject) {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-app-{}-{}", std::process::id(), name));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("parts", name);
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\npart_label = \"part\"\n\n\
@@ -140,9 +137,10 @@ fn parts_app(name: &str) -> (App, TempProject) {
     fs::write(dir.join("one.md"), "first chapter\n").unwrap();
     fs::write(dir.join("two.md"), "second chapter\n").unwrap();
 
-    let project = Project::open(&dir).unwrap();
-    let buffer = Buffer::from_path(project.active_path()).unwrap();
-    (App::new(buffer, project), TempProject::new(dir))
+    // Pinned like every other fixture (#428) — this one previously skipped the
+    // config pins, a latent flakiness source.
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
 }
 
 #[test]

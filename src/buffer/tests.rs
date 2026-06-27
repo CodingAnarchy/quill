@@ -5,11 +5,11 @@ use super::*;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// A unique-per-process temp path so parallel tests don't collide.
+/// A unique-per-process path for a test file, inside a fresh scratch dir (#428).
+/// `name` keeps its extension (some tests assert `.md`-vs-other handling), so it
+/// names both the dir and the file within it.
 fn temp_path(name: &str) -> PathBuf {
-    let mut p = std::env::temp_dir();
-    p.push(format!("quill-test-{}-{}", std::process::id(), name));
-    p
+    crate::testutil::scratch_dir("buffer", name).join(name)
 }
 
 fn write(path: &Path, bytes: &str) {

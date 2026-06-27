@@ -115,11 +115,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let mut p = std::env::temp_dir();
-        p.push(format!("quill-hist-{}-{}", std::process::id(), name));
-        let _ = fs::remove_dir_all(&p);
-        fs::create_dir_all(&p).unwrap();
-        p
+        crate::testutil::scratch_dir("hist", name)
     }
 
     fn snap(date: &str, added: usize) -> Snapshot {

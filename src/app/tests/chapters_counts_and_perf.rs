@@ -32,10 +32,7 @@ fn word_counts_roll_up_and_update_live() {
 
 #[test]
 fn the_report_counts_body_words_not_section_words() {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-rep-sect-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("rep", "sect");
     let dir = TempProject::new(dir);
     fs::write(
         Project::manifest_path(&dir),
@@ -109,10 +106,7 @@ fn navigation_is_fast_in_a_series_sized_project() {
 
     // Far past a single novel: a multi-book series' worth of chapter files.
     let n = 600;
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-perf-nav-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("perf", "nav");
     let dir = TempProject::new(dir);
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
@@ -154,10 +148,7 @@ fn tally_is_independent_of_project_size() {
     use std::time::Instant;
 
     let n = 2000;
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-perf-tally-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("perf", "tally");
     let dir = TempProject::new(dir);
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {

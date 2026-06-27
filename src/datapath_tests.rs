@@ -23,21 +23,17 @@ use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
 use crate::frontmatter::split;
 use crate::project::{Manifest, Project};
 
-/// A scratch path under a per-process, per-tag directory. Reused across a
-/// property's cases (each case overwrites it); distinct tags keep parallel test
-/// functions from colliding.
+/// A scratch path for `file` under a fresh per-process, per-tag directory (#428).
+/// A property's cases run sequentially and each consumes its file before the next
+/// call, so the per-call reset just keeps the dir from accumulating across runs;
+/// distinct tags keep parallel test functions from colliding.
 fn scratch(tag: &str, file: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("quill-datapath-{}-{tag}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    dir.join(file)
+    scratch_dir(tag).join(file)
 }
 
 /// A fresh, empty per-process directory for a failure-injection test.
 fn scratch_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("quill-datapath-{}-{tag}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
+    crate::testutil::scratch_dir("datapath", tag)
 }
 
 /// One editing action, mapped onto the buffer's real edit/navigation API.
