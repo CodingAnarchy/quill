@@ -109,7 +109,8 @@ keystrokes that stay out of the way.
   are embedded into the EPUB and applied (only embed fonts you're licensed to
   distribute); `heading_align` (`left`/`center`/`right`/`justify`) sets the
   chapter-heading alignment and `drop_cap = true` opens each chapter's first
-  paragraph with a drop cap. With no `[style]`, the output is exactly the plain default. Only
+  paragraph with a drop cap; `title_ornament` / `part_ornament` place a decorative
+  glyph on the title page and each part divider. With no `[style]`, the output is exactly the plain default. Only
   the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
   formats ignore it.
 
