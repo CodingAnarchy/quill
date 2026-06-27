@@ -56,7 +56,10 @@ Point Quill at the folder where you keep your books, in
     [projects]
     home = "~/Writing"
 
-Every project under that folder then appears in the browser, ready to open.
+Every project under that folder then appears in the browser, ready to open. It's
+also where a bare `quill` launch (no path) puts a new book: from a folder that
+isn't already a project, Quill asks for a name and creates the project in your
+projects home rather than in the current directory.
 
 A project can hold a series of books. When it does, Quill opens the first book;
 run "Switch book" from the run-action menu (Ctrl-K) to move to another — the
