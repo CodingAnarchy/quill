@@ -159,6 +159,32 @@ fn daily_goal_parses_and_round_trips_and_is_optional() {
 }
 
 #[test]
+fn style_scene_break_parses_and_round_trips_and_is_optional() {
+    // A [style] block parses into the export styling (#468).
+    let m: Manifest =
+        toml::from_str("title = \"B\"\n\n[style]\nscene_break = \"* * *\"\n").unwrap();
+    assert_eq!(
+        m.style.as_ref().unwrap().scene_break.as_deref(),
+        Some("* * *")
+    );
+
+    // Round-trips when set...
+    let out = toml::to_string_pretty(&m).unwrap();
+    assert!(
+        out.contains("[style]") && out.contains("scene_break = \"* * *\""),
+        "{out}"
+    );
+
+    // ...and is omitted entirely when unset, so existing manifests are unchanged.
+    let none: Manifest = toml::from_str("title = \"B\"\n").unwrap();
+    assert!(none.style.is_none());
+    assert!(
+        !toml::to_string_pretty(&none).unwrap().contains("[style]"),
+        "no [style] when unset"
+    );
+}
+
+#[test]
 fn book_metadata_persists_and_old_manifests_still_parse() {
     let dir = temp_dir("book-meta");
 

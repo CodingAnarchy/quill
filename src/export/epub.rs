@@ -12,7 +12,7 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use super::{classify_block, inline_runs, xml_escape, Chapter, Document, Prose, SCENE_BREAK};
+use super::{classify_block, inline_runs, xml_escape, Chapter, Document, ExportStyle, Prose};
 use crate::frontmatter::Epigraph;
 
 const CONTAINER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -38,8 +38,8 @@ h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 /// Compile a [`Document`] to the bytes of an `.epub`. `modified` is the
 /// `dcterms:modified` UTC timestamp (`YYYY-MM-DDThh:mm:ssZ`); callers pass
 /// [`crate::date::utc_timestamp`].
-pub fn to_epub(doc: &Document, modified: &str) -> std::io::Result<Vec<u8>> {
-    let mut b = Builder::new();
+pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
+    let mut b = Builder::new(style);
     b.add_title_page(
         doc.series.as_deref(),
         &doc.title,
@@ -66,8 +66,9 @@ pub fn to_epub_series(
     series: Option<&str>,
     author: Option<&str>,
     modified: &str,
+    style: &ExportStyle,
 ) -> std::io::Result<Vec<u8>> {
-    let mut b = Builder::new();
+    let mut b = Builder::new(style);
     let title = series.unwrap_or("Series");
     b.add_title_page(series, title, None, author, None);
     let mut nav = Vec::new();
@@ -103,13 +104,16 @@ struct Nav {
 struct Builder {
     seq: usize,
     items: Vec<Item>,
+    /// The styling that shapes the rendered XHTML (scene-break ornament, …).
+    style: ExportStyle,
 }
 
 impl Builder {
-    fn new() -> Self {
+    fn new(style: &ExportStyle) -> Self {
         Builder {
             seq: 0,
             items: Vec::new(),
+            style: style.clone(),
         }
     }
 
@@ -170,7 +174,7 @@ impl Builder {
 
     /// One chapter or section as its own XHTML document, returning its TOC entry.
     fn add_chapter(&mut self, ch: &Chapter) -> Nav {
-        let href = self.add("chap", &ch.title, chapter_body(ch));
+        let href = self.add("chap", &ch.title, chapter_body(ch, &self.style));
         Nav {
             label: ch.title.clone(),
             href,
@@ -276,13 +280,13 @@ fn xhtml_doc(title: &str, body: &str) -> String {
 
 /// A chapter's XHTML: its title as `<h1>`, the epigraph set apart, then the prose
 /// blocks (scene breaks, inner headings, and emphasis-bearing paragraphs).
-fn chapter_body(ch: &Chapter) -> String {
+fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
     let mut out = format!("<h1>{}</h1>\n", xml_escape(&ch.title));
     if let Some(e) = &ch.epigraph {
         out.push_str(&epigraph_xhtml(e));
     }
     for block in ch.body.split("\n\n") {
-        if let Some(p) = prose_xhtml(block) {
+        if let Some(p) = prose_xhtml(block, style) {
             out.push_str(&p);
             out.push('\n');
         }
@@ -291,11 +295,16 @@ fn chapter_body(ch: &Chapter) -> String {
 }
 
 /// One body block → XHTML, or `None` for an empty block: a scene break becomes a
-/// centered divider, a heading line an `<h2>`, prose a `<p>` with `*`/`**`
-/// emphasis as `<em>`/`<strong>`.
-fn prose_xhtml(block: &str) -> Option<String> {
+/// centered divider (the styled glyph, default `#`), a heading line an `<h2>`,
+/// prose a `<p>` with `*`/`**` emphasis as `<em>`/`<strong>`.
+fn prose_xhtml(block: &str, style: &ExportStyle) -> Option<String> {
     Some(match classify_block(block)? {
-        Prose::SceneBreak => format!("<p class=\"scene-break\">{SCENE_BREAK}</p>"),
+        Prose::SceneBreak => {
+            format!(
+                "<p class=\"scene-break\">{}</p>",
+                xml_escape(style.scene_break())
+            )
+        }
         Prose::Heading(h) => format!("<h2>{}</h2>", xml_escape(&h)),
         Prose::Paragraph(text) => format!("<p>{}</p>", inline_xhtml(&text)),
     })
@@ -519,7 +528,7 @@ fn nav_depth(entries: &[Nav]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::export::{Chapter, Document, Part};
+    use crate::export::{Chapter, Document, ExportStyle, Part};
     use std::io::Read;
 
     const MODIFIED: &str = "2026-06-27T00:00:00Z";
@@ -575,7 +584,7 @@ mod tests {
 
     #[test]
     fn mimetype_is_first_and_stored() {
-        let bytes = to_epub(&doc(), MODIFIED).unwrap();
+        let bytes = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
         assert_eq!(&bytes[..2], b"PK", "a zip container");
         let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         let first = zip.by_index(0).unwrap();
@@ -594,7 +603,7 @@ mod tests {
 
     #[test]
     fn has_the_required_package_parts() {
-        let bytes = to_epub(&doc(), MODIFIED).unwrap();
+        let bytes = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
         for required in [
             "mimetype",
             "META-INF/container.xml",
@@ -614,7 +623,10 @@ mod tests {
 
     #[test]
     fn opf_carries_book_metadata() {
-        let opf = part(&to_epub(&doc(), MODIFIED).unwrap(), "OEBPS/content.opf");
+        let opf = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
         assert!(
             opf.contains("Red &lt;State&gt; Earth"),
             "title escaped: {opf}"
@@ -647,7 +659,10 @@ mod tests {
 
     #[test]
     fn chapters_appear_in_reading_order_in_the_spine() {
-        let opf = part(&to_epub(&doc(), MODIFIED).unwrap(), "OEBPS/content.opf");
+        let opf = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
         let spine = &opf[opf.find("<spine").unwrap()..];
         // title page, prologue (front), part divider, the chapter, afterword (back) —
         // front/body/back chapters all use the `chap` prefix, in reading order.
@@ -664,7 +679,10 @@ mod tests {
 
     #[test]
     fn nav_nests_chapters_under_their_part() {
-        let nav = part(&to_epub(&doc(), MODIFIED).unwrap(), "OEBPS/nav.xhtml");
+        let nav = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/nav.xhtml",
+        );
         // The part is a TOC entry with a nested list holding its chapter.
         let part_at = nav.find("Part One").expect("part in toc");
         let nested = nav[part_at..].find("<ol>").expect("nested list under part");
@@ -673,7 +691,10 @@ mod tests {
         // Front/back matter are top-level entries.
         assert!(nav.contains("Prologue") && nav.contains("Afterword"));
         // The NCX mirrors the structure for older readers.
-        let ncx = part(&to_epub(&doc(), MODIFIED).unwrap(), "OEBPS/toc.ncx");
+        let ncx = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/toc.ncx",
+        );
         assert!(ncx.contains("Part One") && ncx.contains("The Find"));
         assert!(
             ncx.contains("dtb:depth\" content=\"2\""),
@@ -683,7 +704,7 @@ mod tests {
 
     #[test]
     fn emphasis_and_scene_breaks_render_as_markup_not_literals() {
-        let bytes = to_epub(&doc(), MODIFIED).unwrap();
+        let bytes = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
         let chap = part(&bytes, "OEBPS/chap0004.xhtml");
         assert!(chap.contains("<em>gleamed</em>"), "italic: {chap}");
         assert!(chap.contains("<strong>heavy</strong>"), "bold");
@@ -703,7 +724,10 @@ mod tests {
 
     #[test]
     fn title_page_shows_metadata_and_book_epigraph() {
-        let title = part(&to_epub(&doc(), MODIFIED).unwrap(), "OEBPS/title0001.xhtml");
+        let title = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/title0001.xhtml",
+        );
         assert!(title.contains("The Cycle") && title.contains("Red &lt;State&gt; Earth"));
         assert!(title.contains("a novel") && title.contains("by A. Writer"));
         assert!(title.contains("In the beginning.") && title.contains("— Anon"));
@@ -728,7 +752,10 @@ mod tests {
             }],
             back: vec![],
         };
-        let chap = part(&to_epub(&d, MODIFIED).unwrap(), "OEBPS/chap0002.xhtml");
+        let chap = part(
+            &to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/chap0002.xhtml",
+        );
         assert!(
             chap.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
             "curly glyphs"
@@ -736,8 +763,50 @@ mod tests {
     }
 
     #[test]
+    fn scene_break_renders_the_styled_glyph_default_unchanged() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("C", None, "A.\n\n---\n\nB.")],
+            }],
+            back: vec![],
+        };
+        // Default style → the plain centered `#`, exactly as before.
+        let plain = part(
+            &to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/chap0002.xhtml",
+        );
+        assert!(
+            plain.contains("<p class=\"scene-break\">#</p>"),
+            "default glyph: {plain}"
+        );
+        // A configured glyph replaces it (and is XML-escaped).
+        let style = ExportStyle {
+            scene_break: Some("* * &".into()),
+        };
+        let styled = part(
+            &to_epub(&d, MODIFIED, &style).unwrap(),
+            "OEBPS/chap0002.xhtml",
+        );
+        assert!(
+            styled.contains("<p class=\"scene-break\">* * &amp;</p>"),
+            "styled+escaped: {styled}"
+        );
+        assert!(!styled.contains(">#</p>"), "default glyph replaced");
+    }
+
+    #[test]
     fn a_stable_identifier_is_derived_from_the_title() {
-        let opf = part(&to_epub(&doc(), MODIFIED).unwrap(), "OEBPS/content.opf");
+        let opf = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
         // Same book → same id across exports (readers dedupe on it).
         assert!(
             opf.contains("urn:quill:the-cycle"),
@@ -765,6 +834,7 @@ mod tests {
             Some("The Saga"),
             Some("A. Writer"),
             MODIFIED,
+            &ExportStyle::default(),
         )
         .unwrap();
         let nav = part(&bytes, "OEBPS/nav.xhtml");
