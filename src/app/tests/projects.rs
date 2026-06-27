@@ -978,6 +978,75 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
 }
 
 #[test]
+fn importing_a_scriv_bundle_creates_a_chaptered_project() {
+    use crate::export::scriv::write_scriv;
+    use crate::export::{Chapter, Document, Part};
+    let _g = ENV_LOCK.lock().unwrap();
+    isolate("import-scriv");
+    let cur = make_project("import-scriv-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // A real .scriv bundle (the inverse of what we import): a part folder + chapters.
+    let doc = Document {
+        title: "Salt and Iron".into(),
+        subtitle: None,
+        author: None,
+        series: None,
+        epigraph: None,
+        front: vec![],
+        parts: vec![Part {
+            name: Some("Part One".into()),
+            chapters: vec![
+                Chapter {
+                    title: "One".into(),
+                    epigraph: None,
+                    body: "The sea was *grey*.".into(),
+                },
+                Chapter {
+                    title: "Two".into(),
+                    epigraph: None,
+                    body: "And it **ended**.".into(),
+                },
+            ],
+        }],
+        back: vec![],
+    };
+    let source = books_dir("import-scriv-src").join("Salt and Iron.scriv");
+    write_scriv(&doc, &source).unwrap();
+    let dest = books_dir("import-scriv-dest").join("Salt and Iron");
+
+    // A `.scriv` bundle directory is accepted.
+    app.begin_import_manuscript(source.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest)),
+        "a .scriv bundle is accepted"
+    );
+    app.finish_import_manuscript(dest.to_str().unwrap());
+
+    assert_eq!(app.project.root, dest);
+    assert_eq!(
+        app.project.manifest.title, "Salt and Iron",
+        "title from the bundle name"
+    );
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["One", "Two"], "binder order, folder flattened");
+    let ch1 = fs::read_to_string(dest.join(&app.project.manifest.chapters[0].file)).unwrap();
+    assert_eq!(ch1, "The sea was *grey*.\n", "emphasis converted from RTF");
+
+    // The original bundle still has its binder — read-only.
+    assert!(
+        source.join("Salt and Iron.scrivx").exists(),
+        "the source bundle is untouched"
+    );
+}
+
+#[test]
 fn importing_rejects_a_non_markdown_file() {
     let _g = ENV_LOCK.lock().unwrap();
     isolate("import-ms-bad");

@@ -206,8 +206,9 @@ fn xml_escape(s: &str) -> String {
 
 /// The scene-break glyph the writers emit for a thematic break: a centered `#`,
 /// the standard manuscript / Scrivener scene divider, which Vellum also
-/// recognizes as a scene break on import (#199).
-const SCENE_BREAK: &str = "#";
+/// recognizes as a scene break on import (#199). The `.scriv` importer reads it
+/// back to a thematic break, so it's shared rather than re-declared.
+pub(crate) const SCENE_BREAK: &str = "#";
 
 /// One block of a chapter body (the body split on blank lines), classified so
 /// each format writer renders it in its own markup. Shared by the Word and

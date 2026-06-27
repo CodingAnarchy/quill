@@ -68,28 +68,32 @@ impl App {
 
     // --- New project from an existing manuscript (#298) -------------------
 
-    /// Prompt for a manuscript file (Markdown or Word) to import as a new project.
+    /// Prompt for a manuscript (Markdown / Word / Scrivener) to import as a new
+    /// project.
     pub(crate) fn start_import_manuscript(&mut self) {
         self.open_prompt(
             Pending::ImportManuscriptSource,
-            "Import manuscript — Markdown (.md) or Word (.docx) file:",
+            "Import manuscript — Markdown (.md), Word (.docx), or Scrivener (.scriv):",
             "",
             None,
         );
     }
 
-    /// Validate the chosen file is an importable manuscript (`.md` or `.docx`),
-    /// then ask where to create the new project. Shared by the file prompt and the
-    /// run-action entry point.
+    /// Validate the chosen path is an importable manuscript (`.md` / `.docx` file,
+    /// or a `.scriv` bundle directory), then ask where to create the new project.
+    /// Shared by the file prompt and the run-action entry point.
     pub(crate) fn begin_import_manuscript(&mut self, file: &str) {
         let path = std::path::Path::new(file.trim());
-        let importable = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("docx"));
-        if !(path.is_file() && importable) {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        // A `.scriv` is a bundle directory; the others are single files.
+        let importable = if ext.eq_ignore_ascii_case("scriv") {
+            path.is_dir()
+        } else {
+            path.is_file() && (ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("docx"))
+        };
+        if !importable {
             self.message = Some(format!(
-                "Not a Markdown (.md) or Word (.docx) manuscript: {}",
+                "Not a Markdown (.md), Word (.docx), or Scrivener (.scriv) manuscript: {}",
                 path.display()
             ));
             self.mode = self.editing_mode();
@@ -316,16 +320,15 @@ impl App {
     }
 }
 
-/// Read a manuscript file into the shared parsed form, dispatching on extension
-/// (#401): a `.docx` is parsed from its bytes, anything else (a `.md`) as text.
-/// The source is read only — never altered.
+/// Read a manuscript into the shared parsed form, dispatching on extension
+/// (#401/#402): a `.docx` from its bytes, a `.scriv` bundle from its directory,
+/// anything else (a `.md`) as text. The source is read only — never altered.
 fn read_manuscript(path: &std::path::Path) -> std::io::Result<crate::manuscript_import::Imported> {
-    let is_docx = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("docx"));
-    if is_docx {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext.eq_ignore_ascii_case("docx") {
         crate::manuscript_import::parse_docx(&std::fs::read(path)?)
+    } else if ext.eq_ignore_ascii_case("scriv") {
+        crate::manuscript_import::parse_scriv(path)
     } else {
         Ok(crate::manuscript_import::parse_markdown(
             &std::fs::read_to_string(path)?,
