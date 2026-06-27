@@ -69,78 +69,111 @@ impl Epigraph {
     }
 }
 
-/// A chapter's revision status, cycled by the author and shown in the pane.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Status {
-    Draft,
-    Revised,
-    Final,
+/// Declare the [`Status`] enum and its accessors from one table (#435): each
+/// variant's `status:` key, status-bar label, and pane badge live on a single
+/// line, so adding a status can't leave an accessor — or the `from_key` parse —
+/// silently behind. [`Status::next`] cycles in the declaration order below.
+macro_rules! status_table {
+    ($($variant:ident => $key:literal, $label:literal, $badge:literal);+ $(;)?) => {
+        /// A chapter's revision status, cycled by the author and shown in the pane.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Status { $($variant),+ }
+
+        impl Status {
+            /// The `status:` value as written in front matter.
+            pub fn key(self) -> &'static str {
+                match self { $(Status::$variant => $key),+ }
+            }
+
+            /// Parse a front-matter `status:` value (case-insensitive).
+            pub fn from_key(s: &str) -> Option<Status> {
+                match s.trim().to_ascii_lowercase().as_str() {
+                    $($key => Some(Status::$variant),)+
+                    _ => None,
+                }
+            }
+
+            /// Human label for the status bar.
+            pub fn label(self) -> &'static str {
+                match self { $(Status::$variant => $label),+ }
+            }
+
+            /// Single-character badge for the chapter pane.
+            pub fn badge(self) -> char {
+                match self { $(Status::$variant => $badge),+ }
+            }
+
+            /// The next status in the cycle (the declaration order below,
+            /// wrapping back to the first): draft → revised → final → draft.
+            pub fn next(self) -> Status {
+                const ALL: &[Status] = &[$(Status::$variant),+];
+                let i = ALL.iter().position(|&s| s == self).unwrap_or(0);
+                ALL[(i + 1) % ALL.len()]
+            }
+        }
+    };
 }
 
-impl Status {
-    /// The `status:` value as written in front matter.
-    pub fn key(self) -> &'static str {
-        match self {
-            Status::Draft => "draft",
-            Status::Revised => "revised",
-            Status::Final => "final",
-        }
-    }
-
-    /// Parse a front-matter `status:` value (case-insensitive).
-    pub fn from_key(s: &str) -> Option<Status> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "draft" => Some(Status::Draft),
-            "revised" => Some(Status::Revised),
-            "final" => Some(Status::Final),
-            _ => None,
-        }
-    }
-
-    /// Human label for the status bar.
-    pub fn label(self) -> &'static str {
-        match self {
-            Status::Draft => "Draft",
-            Status::Revised => "Revised",
-            Status::Final => "Final",
-        }
-    }
-
-    /// Single-character badge for the chapter pane.
-    pub fn badge(self) -> char {
-        match self {
-            Status::Draft => 'D',
-            Status::Revised => 'R',
-            Status::Final => 'F',
-        }
-    }
-
-    /// The next status in the draft → revised → final → draft cycle.
-    pub fn next(self) -> Status {
-        match self {
-            Status::Draft => Status::Revised,
-            Status::Revised => Status::Final,
-            Status::Final => Status::Draft,
-        }
-    }
+status_table! {
+    Draft => "draft", "Draft", 'D';
+    Revised => "revised", "Revised", 'R';
+    Final => "final", "Final", 'F';
 }
 
-/// A project file's **section role** (#179): a front- or back-matter section type
-/// for the non-chapter parts of a book. A body chapter has no role (`None`), so
-/// existing projects — which have no `role:` key — read as plain chapters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
+/// Declare the [`Role`] enum and its accessors from one table (#435): each
+/// variant's `role:` key (plus any accepted alias spellings), label, and
+/// ordering band live on a single line, so adding a section role can't parse
+/// without a label or sort into the wrong band by a missed `match` arm. A body
+/// chapter has no role (`None`), so existing projects — which have no `role:`
+/// key — read as plain chapters (#179).
+macro_rules! role_table {
+    ($($variant:ident => $key:literal $(| $alias:literal)*, $label:literal, $band:ident);+ $(;)?) => {
+        /// A project file's **section role** (#179): a front- or back-matter
+        /// section type for the non-chapter parts of a book.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Role { $($variant),+ }
+
+        impl Role {
+            /// Which ordering band this section sits in (#180).
+            pub fn band(self) -> Band {
+                match self { $(Role::$variant => Band::$band),+ }
+            }
+
+            /// The `role:` value as written in front matter.
+            pub fn key(self) -> &'static str {
+                match self { $(Role::$variant => $key),+ }
+            }
+
+            /// Parse a front-matter `role:` value (case-insensitive). Accepts the
+            /// British "acknowledgements" spelling too. `None` for an unknown
+            /// value (read as a plain body chapter).
+            pub fn from_key(s: &str) -> Option<Role> {
+                match s.trim().to_ascii_lowercase().as_str() {
+                    $($key $(| $alias)* => Some(Role::$variant),)+
+                    _ => None,
+                }
+            }
+
+            /// Capitalized label for the chapter pane and messages.
+            pub fn label(self) -> &'static str {
+                match self { $(Role::$variant => $label),+ }
+            }
+        }
+    };
+}
+
+role_table! {
     // Front matter (sorts before the body).
-    Foreword,
-    Preface,
-    Introduction,
-    Prologue,
+    Foreword => "foreword", "Foreword", Front;
+    Preface => "preface", "Preface", Front;
+    Introduction => "introduction", "Introduction", Front;
+    Prologue => "prologue", "Prologue", Front;
     // Back matter (sorts after the body).
-    Epilogue,
-    Afterword,
-    Acknowledgments,
-    Appendix,
-    Glossary,
+    Epilogue => "epilogue", "Epilogue", Back;
+    Afterword => "afterword", "Afterword", Back;
+    Acknowledgments => "acknowledgments" | "acknowledgements", "Acknowledgments", Back;
+    Appendix => "appendix", "Appendix", Back;
+    Glossary => "glossary", "Glossary", Back;
 }
 
 /// The three ordering bands of a manuscript (#180): front matter sorts before
@@ -159,68 +192,6 @@ impl Band {
         match role {
             Some(r) => r.band(),
             None => Band::Body,
-        }
-    }
-}
-
-impl Role {
-    /// Which ordering band this section sits in (#180).
-    pub fn band(self) -> Band {
-        match self {
-            Role::Foreword | Role::Preface | Role::Introduction | Role::Prologue => Band::Front,
-            Role::Epilogue
-            | Role::Afterword
-            | Role::Acknowledgments
-            | Role::Appendix
-            | Role::Glossary => Band::Back,
-        }
-    }
-
-    /// The `role:` value as written in front matter.
-    pub fn key(self) -> &'static str {
-        match self {
-            Role::Foreword => "foreword",
-            Role::Preface => "preface",
-            Role::Introduction => "introduction",
-            Role::Prologue => "prologue",
-            Role::Epilogue => "epilogue",
-            Role::Afterword => "afterword",
-            Role::Acknowledgments => "acknowledgments",
-            Role::Appendix => "appendix",
-            Role::Glossary => "glossary",
-        }
-    }
-
-    /// Parse a front-matter `role:` value (case-insensitive). Accepts the British
-    /// "acknowledgements" spelling too. `None` for an unknown value (read as a
-    /// plain body chapter).
-    pub fn from_key(s: &str) -> Option<Role> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "foreword" => Some(Role::Foreword),
-            "preface" => Some(Role::Preface),
-            "introduction" => Some(Role::Introduction),
-            "prologue" => Some(Role::Prologue),
-            "epilogue" => Some(Role::Epilogue),
-            "afterword" => Some(Role::Afterword),
-            "acknowledgments" | "acknowledgements" => Some(Role::Acknowledgments),
-            "appendix" => Some(Role::Appendix),
-            "glossary" => Some(Role::Glossary),
-            _ => None,
-        }
-    }
-
-    /// Capitalized label for the chapter pane and messages.
-    pub fn label(self) -> &'static str {
-        match self {
-            Role::Foreword => "Foreword",
-            Role::Preface => "Preface",
-            Role::Introduction => "Introduction",
-            Role::Prologue => "Prologue",
-            Role::Epilogue => "Epilogue",
-            Role::Afterword => "Afterword",
-            Role::Acknowledgments => "Acknowledgments",
-            Role::Appendix => "Appendix",
-            Role::Glossary => "Glossary",
         }
     }
 }
