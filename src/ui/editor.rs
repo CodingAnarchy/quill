@@ -10,6 +10,25 @@ use crate::theme::{self, Theme};
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
 type ByteRange = (usize, usize);
 
+/// The "what to highlight in this span" overlays threaded through the body
+/// renderer (#431): one cohesive bundle, built once per pane and passed by
+/// reference through `render_body → styled_line → styled_row`, so a new overlay
+/// kind is one field rather than a parameter added to three signatures.
+struct SpanHighlights<'a> {
+    /// Emphasis-marker ranges to hide, except on the cursor's span (#296).
+    conceal: &'a [(usize, usize)],
+    /// Search/replace matches or the Visual selection, dim-highlighted (#144/#205).
+    matches: &'a [ByteRange],
+    /// The current search match / live selection, highlighted brighter (#144/#205).
+    current: Option<ByteRange>,
+    /// Misspelled-word ranges, underlined (#357).
+    spell: &'a [ByteRange],
+    /// Annotated spans, tinted background (#302).
+    annotations: &'a [ByteRange],
+    /// The focus-mode paragraph; everything outside it dims (#301).
+    focus: Option<ByteRange>,
+}
+
 impl Pane for Editor<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
         render_focused_pane(frame, area, self.0);
@@ -55,10 +74,15 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         && !app.assistant_pane_focused();
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
     let focus = app.focus_mode.then(|| focus_paragraph(buffer));
-    render_body(
-        frame, column, buffer, &inserts, &conceal, search_matches, current_match, spell, &annotations,
-        app.typewriter, focus, editing,
-    );
+    let highlights = SpanHighlights {
+        conceal: &conceal,
+        matches: search_matches,
+        current: current_match,
+        spell,
+        annotations: &annotations,
+        focus,
+    };
+    render_body(frame, column, buffer, &inserts, &highlights, app.typewriter, editing);
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
     if let Mode::EditMeta(meta) = &app.mode {
@@ -89,25 +113,27 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     // No cursor in a reference pane, so conceal every emphasis marker uniformly.
     let conceal = buffer.syntax().conceal_ranges(None);
     // A reference pane isn't where you write — no annotations, typewriter, or focus.
-    render_body(frame, column, buffer, &[], &conceal, &[], None, &[], &[], false, None, false);
+    let highlights = SpanHighlights {
+        conceal: &conceal,
+        matches: &[],
+        current: None,
+        spell: &[],
+        annotations: &[],
+        focus: None,
+    };
+    render_body(frame, column, buffer, &[], &highlights, false, false);
 }
 
 /// Render `buffer`'s soft-wrapped, styled prose into `column`, following the
 /// cursor by visual row. Places the terminal cursor when `place_cursor`. The
 /// shared core of both pane renderers (#163).
-#[allow(clippy::too_many_arguments)]
 fn render_body(
     frame: &mut Frame,
     column: Rect,
     buffer: &Buffer,
     inserts: &[(usize, Vec<Line<'static>>)],
-    conceal: &[(usize, usize)],
-    matches: &[ByteRange],
-    current: Option<ByteRange>,
-    spell: &[ByteRange],
-    annotations: &[ByteRange],
+    hl: &SpanHighlights,
     typewriter: bool,
-    focus: Option<ByteRange>,
     place_cursor: bool,
 ) {
     let height = column.height as usize;
@@ -173,18 +199,7 @@ fn render_body(
                 }
             }
         }
-        let body = styled_line(
-            buffer.syntax(),
-            buffer.line_start_byte(ll),
-            &buffer.line(ll),
-            conceal,
-            matches,
-            current,
-            spell,
-            annotations,
-            focus,
-            wrap,
-        );
+        let body = styled_line(buffer.syntax(), buffer.line_start_byte(ll), &buffer.line(ll), hl, wrap);
         for (sub, line) in body.into_iter().enumerate() {
             if to_skip > 0 {
                 to_skip -= 1;
@@ -209,7 +224,7 @@ fn render_body(
         if let Some(row) = cursor_row {
             let screen_y = column.y + row;
             let row_start = cstarts[cursor_subrow];
-            let col_width = visible_width_before(&cline[row_start..], cline_start + row_start, cursor_byte, conceal);
+            let col_width = visible_width_before(&cline[row_start..], cline_start + row_start, cursor_byte, hl.conceal);
             let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
             frame.set_cursor_position((screen_x, screen_y));
         }
@@ -319,17 +334,11 @@ fn centered_line(label: String, width: u16, style: Style) -> Line<'static> {
 /// one line (no newline); `line_start` its absolute byte offset (highlights,
 /// conceal, and match ranges use document offsets). Returns one [`Line`] per
 /// wrapped row.
-#[allow(clippy::too_many_arguments)]
 fn styled_line(
     syntax: &Syntax,
     line_start: usize,
     text: &str,
-    conceal: &[(usize, usize)],
-    matches: &[ByteRange],
-    current: Option<ByteRange>,
-    spell: &[ByteRange],
-    annotations: &[ByteRange],
-    focus: Option<ByteRange>,
+    hl: &SpanHighlights,
     width: usize,
 ) -> Vec<Line<'static>> {
     if text.is_empty() {
@@ -341,27 +350,14 @@ fn styled_line(
         .enumerate()
         .map(|(i, &rs)| {
             let re = starts.get(i + 1).copied().unwrap_or(text.len());
-            styled_row(syntax, line_start, text, rs, re, conceal, matches, current, spell, annotations, focus)
+            styled_row(syntax, line_start, text, rs, re, hl)
         })
         .collect()
 }
 
 /// Style one visual row — the byte sub-range `[rs, re)` of `text` — into runs of
 /// equal style, dropping concealed (hidden-marker) characters.
-#[allow(clippy::too_many_arguments)]
-fn styled_row(
-    syntax: &Syntax,
-    line_start: usize,
-    text: &str,
-    rs: usize,
-    re: usize,
-    conceal: &[(usize, usize)],
-    matches: &[ByteRange],
-    current: Option<ByteRange>,
-    spell: &[ByteRange],
-    annotations: &[ByteRange],
-    focus: Option<ByteRange>,
-) -> Line<'static> {
+fn styled_row(syntax: &Syntax, line_start: usize, text: &str, rs: usize, re: usize, hl: &SpanHighlights) -> Line<'static> {
     let seg = &text[rs..re];
     if seg.is_empty() {
         return Line::raw("");
@@ -371,19 +367,19 @@ fn styled_row(
     let theme = theme::current(); // once per row, not per character
     // Focus mode (#301): the row is entirely outside the focused paragraph, so it
     // dims as a whole — caught here before any per-character styling work.
-    if focus.is_some_and(|(s, e)| seg_start >= e || seg_end <= s) {
+    if hl.focus.is_some_and(|(s, e)| seg_start >= e || seg_end <= s) {
         return Line::from(Span::styled(seg.to_string(), Style::default().fg(theme.dim)));
     }
     let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
-    let concealed_here = conceal.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    let match_here = matches.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let concealed_here = hl.conceal.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let match_here = hl.matches.iter().any(|&(s, e)| s < seg_end && e > seg_start);
     // `current` (the search current match, or the Visual selection #205) can be
     // set without any entry in `matches`, so check it too before skipping styling.
-    let current_here = current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
-    let spell_here = spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
-    let annotated_here = annotations.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let current_here = hl.current.is_some_and(|(s, e)| s < seg_end && e > seg_start);
+    let spell_here = hl.spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let annotated_here = hl.annotations.iter().any(|&(s, e)| s < seg_end && e > seg_start);
     // A row fully inside the focused span (or focus off) needs no per-char dimming.
-    let focus_covers_row = focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
+    let focus_covers_row = hl.focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
     if hls.is_empty()
         && !concealed_here
         && !match_here
@@ -402,21 +398,21 @@ fn styled_row(
     let mut run_style = Style::default();
     for (local_byte, ch) in seg.char_indices() {
         let abs = seg_start + local_byte;
-        if is_concealed(abs, conceal) {
+        if is_concealed(abs, hl.conceal) {
             continue;
         }
-        let mut style = search_style(style_at(&hls, abs, theme), abs, matches, current, theme);
+        let mut style = search_style(style_at(&hls, abs, theme), abs, hl.matches, hl.current, theme);
         // Misspelled words (#357) get an underline, layered on whatever else.
-        if spell.iter().any(|&(s, e)| abs >= s && abs < e) {
+        if hl.spell.iter().any(|&(s, e)| abs >= s && abs < e) {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
         // Annotated spans (#302) get a tinted background, layered on the rest.
-        if annotations.iter().any(|&(s, e)| abs >= s && abs < e) {
+        if hl.annotations.iter().any(|&(s, e)| abs >= s && abs < e) {
             style = style.bg(theme.annotation);
         }
         // Focus mode (#301): a char outside the focused paragraph renders flat-dim,
         // overriding any syntax/emphasis/match styling so the paragraph stands out.
-        if let Some((s, e)) = focus {
+        if let Some((s, e)) = hl.focus {
             if abs < s || abs >= e {
                 style = Style::default().fg(theme.dim);
             }
