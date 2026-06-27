@@ -110,7 +110,11 @@ keystrokes that stay out of the way.
   distribute); `heading_align` (`left`/`center`/`right`/`justify`) sets the
   chapter-heading alignment and `drop_cap = true` opens each chapter's first
   paragraph with a drop cap; `title_ornament` / `part_ornament` place a decorative
-  glyph on the title page and each part divider. With no `[style]`, the output is exactly the plain default. Only
+  glyph on the title page and each part divider. For artwork instead of glyphs,
+  `scene_break_image` / `chapter_heading_image` / `title_image` point at image
+  files (paths relative to the project, `.png`/`.jpg`/`.gif`/`.svg`/`.webp`)
+  embedded into the EPUB (the scene-break image replaces its glyph). With no
+  `[style]`, the output is exactly the plain default. Only
   the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
   formats ignore it.
 
