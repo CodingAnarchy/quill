@@ -330,6 +330,8 @@ pub(crate) enum Command {
     Portrait(PortraitChoice),
     /// Make the book at this index the active book (#329).
     SwitchBook(usize),
+    /// Insert the author-defined snippet at this index in `App::snippets` (#411).
+    InsertSnippet(usize),
 }
 
 /// Which character(s) a portrait pass should generate (#244), chosen from the
@@ -406,6 +408,8 @@ pub(crate) enum Action {
     ManageModels,
     /// Open the authorial assistant pane (#399), the same as `Ctrl-W a`.
     Assistant,
+    /// Open the snippet picker to insert an author-defined snippet (#411).
+    InsertSnippet,
 }
 
 impl Action {
@@ -457,6 +461,7 @@ impl Action {
         Action::SwitchBackend,
         Action::ManageModels,
         Action::Assistant,
+        Action::InsertSnippet,
         Action::StartSprint,
         Action::StopSprint,
     ];
@@ -513,6 +518,7 @@ impl Action {
             Action::SwitchBackend => "ai:backend",
             Action::ManageModels => "ai:models",
             Action::Assistant => "assistant",
+            Action::InsertSnippet => "snippet",
         }
     }
 
@@ -567,6 +573,7 @@ impl Action {
             Action::SwitchBackend => "Switch AI backend (Claude / local)",
             Action::ManageModels => "Local AI models",
             Action::Assistant => "Authorial assistant",
+            Action::InsertSnippet => "Insert snippet…",
         }
     }
 

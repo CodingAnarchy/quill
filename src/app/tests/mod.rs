@@ -64,6 +64,7 @@ mod panes;
 mod project_search;
 mod projects;
 mod recovery;
+mod snippets;
 mod spell;
 mod sprint;
 mod typography;
