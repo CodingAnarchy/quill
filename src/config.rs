@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::theme::Theme;
@@ -183,20 +184,26 @@ impl Default for EditorConfig {
     }
 }
 
+/// Read one `[section]` table from the home config file, deserialized into `T`
+/// (#430). Best-effort: a missing/unreadable/malformed file, or an absent or
+/// malformed section, yields `T::default()`. Collapses the per-section
+/// wrapper-struct idiom (`struct File { <section>: T }`) every loader used to
+/// re-derive into one call. The config file is small, so re-reading it per
+/// section at startup is negligible.
+pub(crate) fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
+    config_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
+        .and_then(|mut table| table.remove(section))
+        .and_then(|value| value.try_into().ok())
+        .unwrap_or_default()
+}
+
 impl EditorConfig {
     /// Load the `[editor]` section from the home config file. Best-effort: a
     /// missing or unreadable file yields the defaults (Vim off).
     pub fn load() -> Self {
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct File {
-            editor: EditorConfig,
-        }
-        config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| toml::from_str::<File>(&t).ok())
-            .map(|f| f.editor)
-            .unwrap_or_default()
+        load_section("editor")
     }
 }
 
@@ -205,19 +212,10 @@ impl EditorConfig {
 /// Returns the theme and any warnings (bad name / field / color) for the caller
 /// to surface. A missing section (or a malformed one) yields the default theme.
 pub fn load_theme() -> (Theme, Vec<String>) {
-    #[derive(Deserialize, Default)]
-    #[serde(default)]
-    struct File {
-        // The whole `[theme]` table as string keys; `name` is pulled out, the
-        // rest are color-field overrides. Keeping it untyped means an unknown key
-        // is a reported warning, not a parse failure.
-        theme: HashMap<String, String>,
-    }
-    let mut table = config_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| toml::from_str::<File>(&t).ok())
-        .map(|f| f.theme)
-        .unwrap_or_default();
+    // The whole `[theme]` table as string keys; `name` is pulled out, the rest
+    // are color-field overrides. Untyped (string values) so an unknown key is a
+    // reported warning, not a parse failure.
+    let mut table: HashMap<String, String> = load_section("theme");
     let name = table.remove("name");
     Theme::from_config(name.as_deref(), &table)
 }
@@ -236,18 +234,9 @@ pub struct Snippet {
 /// stable menu, plus a warning for any non-string entry (reported and skipped,
 /// like the other config sections). A missing or empty table yields nothing.
 pub fn load_snippets() -> (Vec<Snippet>, Vec<String>) {
-    #[derive(Deserialize, Default)]
-    #[serde(default)]
-    struct File {
-        // Untyped values so a malformed entry (e.g. an array) is a reported,
-        // skipped warning rather than failing the whole section's parse.
-        snippets: HashMap<String, toml::Value>,
-    }
-    let table = config_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| toml::from_str::<File>(&t).ok())
-        .map(|f| f.snippets)
-        .unwrap_or_default();
+    // Untyped values (`toml::Value`) so a malformed entry (e.g. an array) is a
+    // reported, skipped warning rather than failing the whole section's parse.
+    let table: HashMap<String, toml::Value> = load_section("snippets");
     snippets_from_table(table)
 }
 
@@ -285,16 +274,7 @@ impl ProjectsConfig {
     /// Load the `[projects]` section from the home config file. Best-effort: a
     /// missing or unreadable file yields the defaults (no projects home).
     pub fn load() -> Self {
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct File {
-            projects: ProjectsConfig,
-        }
-        config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| toml::from_str::<File>(&t).ok())
-            .map(|f| f.projects)
-            .unwrap_or_default()
+        load_section("projects")
     }
 
     /// The configured projects-home as an absolute path with `~` expanded, if set.

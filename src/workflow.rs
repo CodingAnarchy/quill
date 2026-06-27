@@ -9,7 +9,6 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::config::config_path;
 use crate::mode::{Action, AiAction};
 
 /// One workflow as written in config: a name and its ordered step tokens. Each
@@ -52,25 +51,16 @@ pub fn load() -> Loaded {
         on_save: Option<String>,
         keys: HashMap<String, String>,
     }
-    #[derive(Deserialize, Default)]
-    #[serde(default)]
-    struct File {
-        workflows: HashMap<String, Vec<String>>,
-        triggers: TriggersRaw,
-    }
-    let file = config_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| toml::from_str::<File>(&t).ok())
-        .unwrap_or_default();
+    let raw_workflows: HashMap<String, Vec<String>> = crate::config::load_section("workflows");
+    let triggers: TriggersRaw = crate::config::load_section("triggers");
 
-    let mut workflows: Vec<Workflow> = file
-        .workflows
+    let mut workflows: Vec<Workflow> = raw_workflows
         .into_iter()
         .map(|(name, steps)| Workflow { name, steps })
         .collect();
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let (triggers, errors) = validate_triggers(&workflows, file.triggers.on_save, file.triggers.keys);
+    let (triggers, errors) = validate_triggers(&workflows, triggers.on_save, triggers.keys);
     Loaded { workflows, triggers, errors }
 }
 

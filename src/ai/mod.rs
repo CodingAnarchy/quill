@@ -60,8 +60,6 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use serde::Deserialize;
 
-use crate::config::config_path;
-
 /// A provider that turns a [`Request`] into a [`Response`] — the Claude HTTP
 /// client or the local candle model. `Send + Sync` so a loaded backend can be
 /// cached in an `Arc` and shared with the worker thread.
@@ -404,23 +402,13 @@ impl Default for Settings {
     }
 }
 
-#[derive(Deserialize, Default)]
-struct ConfigFile {
-    #[serde(default)]
-    ai: Settings,
-}
-
 impl Settings {
     /// Load AI settings from `$XDG_CONFIG_HOME/quill/config.toml` (else
     /// `$HOME/.config/quill/config.toml`). Best-effort: a missing or unreadable
     /// file yields the defaults (AI off). The `ANTHROPIC_API_KEY` env var, if
     /// set, takes precedence over a key in the file.
     pub fn load() -> Self {
-        let mut settings = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| toml::from_str::<ConfigFile>(&t).ok())
-            .map(|c| c.ai)
-            .unwrap_or_default();
+        let mut settings: Settings = crate::config::load_section("ai");
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
             if !key.trim().is_empty() {
                 settings.api_key = Some(key);
@@ -515,6 +503,14 @@ pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `[ai]` section wrapper — used by the tests that parse a config string
+    /// directly. (Loading from disk goes through `config::load_section`, #430.)
+    #[derive(Deserialize, Default)]
+    struct ConfigFile {
+        #[serde(default)]
+        ai: Settings,
+    }
 
     #[test]
     fn object_schema_builds_the_envelope() {
