@@ -5,11 +5,33 @@
 //! (#190); the Word / Scrivener / Vellum writers (#191–#193) consume the same
 //! `Document`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::frontmatter::Epigraph;
 
 pub mod docx;
 pub mod epub;
 pub mod scriv;
+
+/// Opt-in styling for the *designed* exports — EPUB now, PDF when it lands
+/// (#465). Loaded from the project manifest's `[style]` table; the default
+/// reproduces today's output exactly, and the plain writers (Markdown, Word,
+/// Scrivener, Vellum) ignore it entirely.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct ExportStyle {
+    /// The scene-break divider glyph (#468). `None` → the default centered
+    /// [`SCENE_BREAK`] (`#`), so an unstyled export is byte-for-byte unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_break: Option<String>,
+}
+
+impl ExportStyle {
+    /// The scene-break glyph to render: the configured one, or the default `#`.
+    pub fn scene_break(&self) -> &str {
+        self.scene_break.as_deref().unwrap_or(SCENE_BREAK)
+    }
+}
 
 /// A project compiled for export: the book's metadata and its contents as a tree
 /// — front matter, the body (grouped into parts), and back matter — so a binder
@@ -439,6 +461,18 @@ mod tests {
     #[test]
     fn xml_escape_escapes_the_markup_chars() {
         assert_eq!(xml_escape("a & b < c > d"), "a &amp; b &lt; c &gt; d");
+    }
+
+    #[test]
+    fn export_style_scene_break_defaults_to_the_plain_glyph() {
+        assert_eq!(ExportStyle::default().scene_break(), SCENE_BREAK);
+        assert_eq!(
+            ExportStyle {
+                scene_break: Some("❧".into())
+            }
+            .scene_break(),
+            "❧"
+        );
     }
 
     #[test]

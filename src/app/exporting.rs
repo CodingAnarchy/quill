@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::export::{self, Chapter, Document, Part};
+use crate::export::{self, Chapter, Document, ExportStyle, Part};
 use crate::frontmatter::Band;
 use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
@@ -123,7 +123,7 @@ impl App {
                 "vellum.docx",
             ),
             ExportFormat::Epub => self.write_built(
-                export::epub::to_epub(doc, &crate::date::utc_timestamp()),
+                export::epub::to_epub(doc, &crate::date::utc_timestamp(), &self.epub_style()),
                 name,
                 "epub",
             ),
@@ -134,6 +134,12 @@ impl App {
                 self.report_export(&path, result);
             }
         }
+    }
+
+    /// The designed-export styling for this project (#468): the manifest's
+    /// `[style]`, or the default (which reproduces today's plain output).
+    fn epub_style(&self) -> ExportStyle {
+        self.project.manifest.style.clone().unwrap_or_default()
     }
 
     /// Write the whole series (one book per [`Document`], in order) in `format` to
@@ -178,6 +184,7 @@ impl App {
                     series,
                     author.as_deref(),
                     &crate::date::utc_timestamp(),
+                    &self.epub_style(),
                 ),
                 name,
                 "epub",

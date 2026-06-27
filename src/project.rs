@@ -215,6 +215,12 @@ pub struct Manifest {
     /// scalar key — keep it before the `goals`/`parts`/`chapters` tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_on_threshold: Option<usize>,
+    /// Opt-in designed-export styling (#468): the `[style]` table the EPUB (and,
+    /// later, PDF) writers read for the scene-break ornament and the rest of the
+    /// styling epic (#465). Absent → the plain default output. A table, so it must
+    /// precede the `goals`/`parts`/`chapters` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<crate::export::ExportStyle>,
     /// Per-project overrides for the analysis report's word lists (#119): add to
     /// or remove from the built-in stopword and filter-word lists. A table, so it
     /// must precede the `goals`/`parts`/`chapters` tables.

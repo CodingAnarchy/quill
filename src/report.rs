@@ -374,6 +374,7 @@ mod tests {
             todo_marker: None,
             part_label: None,
             run_on_threshold: None,
+            style: None,
             analysis: None,
             goals: Some(Goals {
                 words: 150_000,
