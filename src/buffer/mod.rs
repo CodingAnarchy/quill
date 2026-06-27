@@ -82,28 +82,15 @@ impl Buffer {
     /// before its first save) will reuse it — un-gate it then.
     #[cfg(test)]
     pub fn empty() -> Self {
-        Self {
-            rope: Rope::new(),
-            path: None,
-            front_matter: None,
-            cursor: Cursor::default(),
-            dirty: false,
-            goal_x: None,
-            syntax: Syntax::new(""),
-            syntax_dirty: false,
-            undo_stack: VecDeque::new(),
-            redo_stack: VecDeque::new(),
-            group_open: false,
-            word_count_cache: Cell::new(None),
-            anchor_edits: Vec::new(),
-            checkpointed: false,
-        }
+        Self::from_text("")
     }
 
     /// An in-memory buffer over `text`, with no backing path. Used for the
     /// continuous-manuscript view, whose buffer spans several chapter files and
     /// is saved by splitting it back out (see [`crate::manuscript`]), so it has
-    /// no single path or front matter of its own.
+    /// no single path or front matter of its own. The one real constructor: the
+    /// others ([`empty`](Self::empty), [`from_path`](Self::from_path)) build their
+    /// body and delegate here, so a new field is initialized in one place.
     pub fn from_text(text: &str) -> Self {
         Self {
             syntax: Syntax::new(text),
@@ -138,22 +125,10 @@ impl Buffer {
             Err(e) => return Err(e),
         };
         let (front, body) = crate::frontmatter::split(&text);
-        Ok(Self {
-            syntax: Syntax::new(body),
-            rope: Rope::from_str(body),
-            path: Some(path),
-            front_matter: front.map(FrontMatter::from_raw),
-            cursor: Cursor::default(),
-            dirty: false,
-            goal_x: None,
-            syntax_dirty: false,
-            undo_stack: VecDeque::new(),
-            redo_stack: VecDeque::new(),
-            group_open: false,
-            word_count_cache: Cell::new(None),
-            anchor_edits: Vec::new(),
-            checkpointed: false,
-        })
+        let mut buffer = Self::from_text(body);
+        buffer.path = Some(path);
+        buffer.front_matter = front.map(FrontMatter::from_raw);
+        Ok(buffer)
     }
 
     /// The chapter's front matter, if any.

@@ -173,7 +173,7 @@ pub struct Part {
 /// For a multi-book series (#328), this holds the *active* book's structure;
 /// `title` is then the active book's title, `series` is the series title, and the
 /// full book list lives on [`Project`].
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Manifest {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -425,22 +425,7 @@ impl Project {
 
         let mut project = Self {
             root,
-            manifest: Manifest {
-                title,
-                subtitle: None,
-                author: None,
-                series: None,
-                epigraph: None,
-                epigraph_by: None,
-                start_date: None,
-                todo_marker: None,
-                part_label: None,
-                run_on_threshold: None,
-                analysis: None,
-                goals: None,
-                parts: None,
-                chapters: Vec::new(),
-            },
+            manifest: Manifest { title, ..Default::default() },
             active: String::new(),
             words_changed: HashSet::new(),
             books: Vec::new(),
@@ -842,22 +827,7 @@ impl Project {
         let active = chapters[0].file.clone();
         Self {
             root: PathBuf::from("."),
-            manifest: Manifest {
-                title: "untitled".into(),
-                subtitle: None,
-                author: None,
-                series: None,
-                epigraph: None,
-                epigraph_by: None,
-                start_date: None,
-                todo_marker: None,
-                part_label: None,
-                run_on_threshold: None,
-                analysis: None,
-                goals: None,
-                parts: None,
-                chapters,
-            },
+            manifest: Manifest { title: "untitled".into(), chapters, ..Default::default() },
             active,
             words_changed: HashSet::new(),
             books: Vec::new(),
