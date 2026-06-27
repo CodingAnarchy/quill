@@ -49,7 +49,13 @@ pub fn schema() -> Value {
 
 /// Build the submission request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Write the synopsis, blurb, and query letter as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Write the synopsis, blurb, and query letter as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured submission reply.
@@ -77,7 +83,11 @@ mod tests {
 
     #[test]
     fn artifacts_map_to_filenames() {
-        let s = Submission { synopsis: "S".into(), blurb: "B".into(), query: "Q".into() };
+        let s = Submission {
+            synopsis: "S".into(),
+            blurb: "B".into(),
+            query: "Q".into(),
+        };
         let a = s.artifacts();
         assert_eq!(a[0].1, "synopsis.md");
         assert_eq!(a[1].1, "blurb.md");

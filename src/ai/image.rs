@@ -41,7 +41,13 @@ pub trait ImageBackend: Send + Sync {
 /// The file extension for an image MIME type (e.g. `image/jpeg` → `jpg`),
 /// defaulting to `png` for anything unrecognized.
 pub fn extension_for(content_type: &str) -> &'static str {
-    match content_type.rsplit('/').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match content_type
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "jpeg" | "jpg" => "jpg",
         "webp" => "webp",
         "gif" => "gif",
@@ -168,7 +174,9 @@ pub fn portrait_prompt(name: &str, description: &str) -> String {
 /// chapter: the book + chapter titles, a scene excerpt, and the setting bible for
 /// visual consistency. Kept pure for testing.
 pub fn scene_prompt(book: &str, chapter: &str, excerpt: &str, setting: &str) -> String {
-    let mut prompt = format!("An illustration of a scene from the novel \"{book}\", in the chapter \"{chapter}\".");
+    let mut prompt = format!(
+        "An illustration of a scene from the novel \"{book}\", in the chapter \"{chapter}\"."
+    );
     let excerpt = excerpt.trim();
     if !excerpt.is_empty() {
         prompt.push_str(" Scene: ");
@@ -193,30 +201,55 @@ mod tests {
     fn check_ready_requires_enabled_and_a_key() {
         let off = ImageSettings::default();
         assert!(off.check_ready().is_err());
-        let no_key = ImageSettings { enabled: true, ..Default::default() };
-        assert!(no_key.check_ready().unwrap_err().to_string().contains("key"));
-        let ready = ImageSettings { enabled: true, api_key: Some("k".into()), ..Default::default() };
+        let no_key = ImageSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        assert!(no_key
+            .check_ready()
+            .unwrap_err()
+            .to_string()
+            .contains("key"));
+        let ready = ImageSettings {
+            enabled: true,
+            api_key: Some("k".into()),
+            ..Default::default()
+        };
         assert!(ready.check_ready().is_ok());
     }
 
     #[test]
     fn local_backend_needs_no_key() {
-        let s = ImageSettings { enabled: true, backend: ImageBackendKind::Local, ..Default::default() };
+        let s = ImageSettings {
+            enabled: true,
+            backend: ImageBackendKind::Local,
+            ..Default::default()
+        };
         assert!(s.check_ready().is_ok(), "local needs no key");
     }
 
     #[test]
     fn offline_forces_local_and_needs_no_key() {
-        let s = ImageSettings { enabled: true, offline: true, ..Default::default() };
+        let s = ImageSettings {
+            enabled: true,
+            offline: true,
+            ..Default::default()
+        };
         assert_eq!(s.backend(), ImageBackendKind::Local);
         assert!(s.check_ready().is_ok());
     }
 
     #[test]
     fn resolved_key_trims_and_rejects_blank() {
-        let blank = ImageSettings { api_key: Some("   ".into()), ..Default::default() };
+        let blank = ImageSettings {
+            api_key: Some("   ".into()),
+            ..Default::default()
+        };
         assert!(blank.resolved_key().is_none());
-        let set = ImageSettings { api_key: Some(" k ".into()), ..Default::default() };
+        let set = ImageSettings {
+            api_key: Some(" k ".into()),
+            ..Default::default()
+        };
         assert_eq!(set.resolved_key(), Some("k"));
     }
 
@@ -236,7 +269,12 @@ mod tests {
 
     #[test]
     fn scene_prompt_includes_titles_excerpt_and_setting() {
-        let p = scene_prompt("Red State", "The Find", "Mara opens the locket", "a coastal town");
+        let p = scene_prompt(
+            "Red State",
+            "The Find",
+            "Mara opens the locket",
+            "a coastal town",
+        );
         assert!(p.contains("Red State") && p.contains("The Find"));
         assert!(p.contains("Mara opens the locket"));
         assert!(p.contains("coastal town"));

@@ -1,8 +1,8 @@
 //! Tests for the `src/ui/mod.rs` module, split out to keep the module under the
 //! ~1,000-line convention (#404). Pure move — no behavior change.
 
-use super::*;
 use super::render_to_string as render;
+use super::*;
 use crate::buffer::{Buffer, Cursor};
 use crate::manuscript::Manuscript;
 use crate::project::Project;
@@ -43,7 +43,6 @@ fn app_with(text: &str) -> App {
 #[test]
 #[ignore]
 fn render_stays_within_a_frame() {
-
     let titles: Vec<String> = (0..150).map(|i| format!("Chapter {i}")).collect();
     let title_refs: Vec<&str> = titles.iter().map(String::as_str).collect();
     let project = Project::scratch_with(&title_refs);
@@ -62,7 +61,12 @@ fn render_stays_within_a_frame() {
     // A spread of inline annotations (#302) so the per-row/char annotation
     // scan is exercised under the frame budget too.
     app.annotations = (0..50)
-        .map(|i| crate::annotation::Live { chapter: "7B".into(), start: i * 53, end: i * 53 + 5, note: "note".into() })
+        .map(|i| crate::annotation::Live {
+            chapter: "7B".into(),
+            start: i * 53,
+            end: i * 53 + 5,
+            note: "note".into(),
+        })
         .collect();
 
     let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
@@ -93,13 +97,34 @@ fn render_stays_within_a_frame() {
 
 #[test]
 fn a_split_collapses_only_once_a_pane_would_be_too_small() {
-    let wide = Rect { x: 0, y: 0, width: 100, height: 30 };
-    let thin = Rect { x: 0, y: 0, width: 50, height: 30 };
-    let short = Rect { x: 0, y: 0, width: 100, height: 8 };
+    let wide = Rect {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 30,
+    };
+    let thin = Rect {
+        x: 0,
+        y: 0,
+        width: 50,
+        height: 30,
+    };
+    let short = Rect {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 8,
+    };
     assert!(!too_cramped_to_split(SplitDir::SideBySide, wide));
-    assert!(too_cramped_to_split(SplitDir::SideBySide, thin), "two columns need room");
+    assert!(
+        too_cramped_to_split(SplitDir::SideBySide, thin),
+        "two columns need room"
+    );
     assert!(!too_cramped_to_split(SplitDir::Stacked, wide));
-    assert!(too_cramped_to_split(SplitDir::Stacked, short), "two rows need room");
+    assert!(
+        too_cramped_to_split(SplitDir::Stacked, short),
+        "two rows need room"
+    );
 }
 
 #[test]
@@ -115,7 +140,10 @@ fn long_paragraph_soft_wraps_within_the_focus_column() {
     assert!(content_rows.len() > 1, "the long line wrapped:\n{screen}");
     // ...and no rendered row is wider than the centered focus column (+ pad).
     for row in content_rows {
-        assert!(row.trim_end().chars().count() <= 90, "row stays within the column: {row:?}");
+        assert!(
+            row.trim_end().chars().count() <= 90,
+            "row stays within the column: {row:?}"
+        );
     }
 }
 
@@ -123,7 +151,10 @@ fn long_paragraph_soft_wraps_within_the_focus_column() {
 fn vim_mode_is_shown_in_the_status_bar() {
     let mut app = app_with("first chapter\n");
     // Off: no mode chip.
-    assert!(!render(&app, 80, 8).contains("NORMAL"), "no chip when Vim is off");
+    assert!(
+        !render(&app, 80, 8).contains("NORMAL"),
+        "no chip when Vim is off"
+    );
     // On, resting in Normal.
     app.vim = true;
     app.mode = Mode::Normal;
@@ -131,12 +162,24 @@ fn vim_mode_is_shown_in_the_status_bar() {
     // Entering Insert updates the indicator.
     app.mode = Mode::Insert;
     let screen = render(&app, 80, 8);
-    assert!(screen.contains("INSERT") && !screen.contains("NORMAL"), "Insert shown:\n{screen}");
+    assert!(
+        screen.contains("INSERT") && !screen.contains("NORMAL"),
+        "Insert shown:\n{screen}"
+    );
     // Visual modes show their own labels.
-    app.mode = Mode::Visual { anchor: 0, linewise: false };
+    app.mode = Mode::Visual {
+        anchor: 0,
+        linewise: false,
+    };
     assert!(render(&app, 80, 8).contains("VISUAL"), "Visual shown");
-    app.mode = Mode::Visual { anchor: 0, linewise: true };
-    assert!(render(&app, 80, 8).contains("VISUAL LINE"), "Visual Line shown");
+    app.mode = Mode::Visual {
+        anchor: 0,
+        linewise: true,
+    };
+    assert!(
+        render(&app, 80, 8).contains("VISUAL LINE"),
+        "Visual Line shown"
+    );
 }
 
 #[test]
@@ -144,12 +187,16 @@ fn visual_selection_draws_a_highlight() {
     let mut app = app_with("hello world\n");
     app.vim = true;
     // Select the first few graphemes (anchor at 0, cursor at col 2).
-    app.mode = Mode::Visual { anchor: 0, linewise: false };
+    app.mode = Mode::Visual {
+        anchor: 0,
+        linewise: false,
+    };
     app.buffer.cursor = Cursor { line: 0, col: 2 };
     let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
     terminal.draw(|f| draw(f, &app)).unwrap();
     let buf = terminal.backend().buffer();
-    let highlighted = (0..40).any(|x| (0..6).any(|y| buf[(x, y)].style().bg == Some(Color::Yellow)));
+    let highlighted =
+        (0..40).any(|x| (0..6).any(|y| buf[(x, y)].style().bg == Some(Color::Yellow)));
     assert!(highlighted, "the selection carries a highlight background");
 }
 
@@ -188,8 +235,14 @@ fn typewriter_pins_the_cursor_line_to_the_centre() {
     app.typewriter = true;
     let on = row_of_last(&app);
 
-    assert!(on < off, "typewriter lifts the last line off the bottom: on={on} off={off}");
-    assert!((8..=12).contains(&on), "pinned near the centre of a 20-row page: {on}");
+    assert!(
+        on < off,
+        "typewriter lifts the last line off the bottom: on={on} off={off}"
+    );
+    assert!(
+        (8..=12).contains(&on),
+        "pinned near the centre of a 20-row page: {on}"
+    );
 }
 
 #[test]
@@ -203,26 +256,45 @@ fn focus_mode_dims_the_other_paragraphs() {
         terminal.draw(|f| draw(f, app)).unwrap();
         let buf = terminal.backend().buffer().clone();
         let row = (0..12u16)
-            .find(|&y| (0..40).any(|x| buf[(x, y)].symbol() == "a" || buf[(x, y)].symbol() == "b") && {
-                let line: String = (0..40).map(|x| buf[(x, y)].symbol()).collect();
-                line.contains(needle)
+            .find(|&y| {
+                (0..40).any(|x| buf[(x, y)].symbol() == "a" || buf[(x, y)].symbol() == "b") && {
+                    let line: String = (0..40).map(|x| buf[(x, y)].symbol()).collect();
+                    line.contains(needle)
+                }
             })
             .expect("paragraph on screen");
         (0..40)
             .map(|x| &buf[(x, row)])
-            .find(|c| c.symbol().chars().next().is_some_and(|ch| ch.is_alphabetic()))
+            .find(|c| {
+                c.symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_alphabetic())
+            })
             .unwrap()
             .style()
             .fg
     };
 
     // Off (default): both paragraphs render in the normal prose colour.
-    assert_ne!(first_letter_fg(&app, "alpha"), Some(dim), "no dimming when focus mode is off");
+    assert_ne!(
+        first_letter_fg(&app, "alpha"),
+        Some(dim),
+        "no dimming when focus mode is off"
+    );
 
     // On: the other paragraph dims; the one under the cursor stays normal.
     app.focus_mode = true;
-    assert_eq!(first_letter_fg(&app, "alpha"), Some(dim), "the other paragraph dims");
-    assert_ne!(first_letter_fg(&app, "bravo"), Some(dim), "the focused paragraph stays normal");
+    assert_eq!(
+        first_letter_fg(&app, "alpha"),
+        Some(dim),
+        "the other paragraph dims"
+    );
+    assert_ne!(
+        first_letter_fg(&app, "bravo"),
+        Some(dim),
+        "the focused paragraph stays normal"
+    );
 }
 
 #[test]
@@ -232,9 +304,18 @@ fn the_model_manager_lists_the_catalog_with_characteristics() {
     let screen = render(&app, 100, 24);
     assert!(screen.contains("Local AI models"), "{screen}");
     // Models appear with their context window and description.
-    assert!(screen.contains("Qwen2.5-7B"), "the catalog is listed:\n{screen}");
-    assert!(screen.contains("1M ctx"), "the extended-context model's window shows:\n{screen}");
-    assert!(screen.contains("Long context"), "descriptions are shown:\n{screen}");
+    assert!(
+        screen.contains("Qwen2.5-7B"),
+        "the catalog is listed:\n{screen}"
+    );
+    assert!(
+        screen.contains("1M ctx"),
+        "the extended-context model's window shows:\n{screen}"
+    );
+    assert!(
+        screen.contains("Long context"),
+        "descriptions are shown:\n{screen}"
+    );
 }
 
 #[test]
@@ -257,7 +338,10 @@ fn an_open_modal_dims_the_editor_and_casts_a_shadow() {
 
     // Palette open: the editor behind dims, and the box casts a shadow.
     app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
-    assert!(matches!(app.mode, Mode::Palette(_)), "Ctrl-K opened the palette");
+    assert!(
+        matches!(app.mode, Mode::Palette(_)),
+        "Ctrl-K opened the palette"
+    );
     let buf = render(&app);
     let mut dimmed = 0usize;
     let mut shadow = false;
@@ -280,14 +364,22 @@ fn an_annotated_span_is_marked_in_the_editor() {
     let mut app = app_with("first chapter\n");
     let anno_bg = app.theme.annotation;
     // Anchor a note to "first" (bytes 0..5).
-    app.annotations = vec![crate::annotation::Live { chapter: "one.md".into(), start: 0, end: 5, note: "check".into() }];
+    app.annotations = vec![crate::annotation::Live {
+        chapter: "one.md".into(),
+        start: 0,
+        end: 5,
+        note: "check".into(),
+    }];
 
     let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
     terminal.draw(|f| draw(f, &app)).unwrap();
     let buf = terminal.backend().buffer().clone();
 
     let marked = (0..40).any(|x| (0..8).any(|y| buf[(x, y)].style().bg == Some(anno_bg)));
-    assert!(marked, "the annotated span carries the annotation background");
+    assert!(
+        marked,
+        "the annotated span carries the annotation background"
+    );
 }
 
 #[test]
@@ -301,8 +393,16 @@ fn markers_reappear_when_cursor_enters_the_span() {
 #[test]
 fn current_section_is_the_last_heading_at_or_before_the_cursor() {
     let hs = vec![
-        Heading { level: 1, title: "A".into(), start: 0 },
-        Heading { level: 2, title: "B".into(), start: 50 },
+        Heading {
+            level: 1,
+            title: "A".into(),
+            start: 0,
+        },
+        Heading {
+            level: 2,
+            title: "B".into(),
+            start: 50,
+        },
     ];
     assert_eq!(current_section(&hs, 0), Some(0));
     assert_eq!(current_section(&hs, 49), Some(0));
@@ -310,7 +410,11 @@ fn current_section_is_the_last_heading_at_or_before_the_cursor() {
     assert_eq!(current_section(&hs, 999), Some(1));
 
     // Cursor above the first heading, and the no-headings case.
-    let later = vec![Heading { level: 1, title: "A".into(), start: 10 }];
+    let later = vec![Heading {
+        level: 1,
+        title: "A".into(),
+        start: 10,
+    }];
     assert_eq!(current_section(&later, 5), None);
     assert_eq!(current_section(&[], 0), None);
 }
@@ -344,8 +448,16 @@ fn pane_lists_chapter_even_without_headings() {
 #[test]
 fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
     let headings = vec![
-        Heading { level: 1, title: "The Crossing".into(), start: 0 },
-        Heading { level: 2, title: "At the ford".into(), start: 30 },
+        Heading {
+            level: 1,
+            title: "The Crossing".into(),
+            start: 0,
+        },
+        Heading {
+            level: 2,
+            title: "At the ford".into(),
+            start: 30,
+        },
     ];
 
     // The chapter is titled "The Crossing", so its opening H1 is redundant.
@@ -362,10 +474,7 @@ fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
 
     // A non-matching title keeps every heading.
     assert_eq!(redundant_title_heading(&headings, "Different"), None);
-    assert_eq!(
-        heading_outline_lines(&headings, None, None).len(),
-        2
-    );
+    assert_eq!(heading_outline_lines(&headings, None, None).len(), 2);
 }
 
 #[test]
@@ -387,7 +496,10 @@ fn outline_shows_chapter_goal_progress() {
 
     app.project.manifest.chapters[0].goal = Some(10);
     let screen = render(&app, 90, 12);
-    assert!(screen.contains("3 / 10"), "progress toward the goal:\n{screen}");
+    assert!(
+        screen.contains("3 / 10"),
+        "progress toward the goal:\n{screen}"
+    );
 
     // A reached goal is marked.
     app.project.manifest.chapters[0].goal = Some(2);
@@ -423,10 +535,19 @@ fn epigraphs_render_above_the_body() {
     fm.set_epigraph_by("Someone");
 
     let screen = render(&app, 80, 20);
-    assert!(screen.contains("In the beginning."), "book epigraph:\n{screen}");
+    assert!(
+        screen.contains("In the beginning."),
+        "book epigraph:\n{screen}"
+    );
     assert!(screen.contains("— Genesis"), "book attribution:\n{screen}");
-    assert!(screen.contains("A chapter quote."), "chapter epigraph:\n{screen}");
-    assert!(screen.contains("— Someone"), "chapter attribution:\n{screen}");
+    assert!(
+        screen.contains("A chapter quote."),
+        "chapter epigraph:\n{screen}"
+    );
+    assert!(
+        screen.contains("— Someone"),
+        "chapter attribution:\n{screen}"
+    );
     assert!(screen.contains("The prose begins here."), "body:\n{screen}");
 
     // The epigraph is display-only: it never entered the editable buffer.
@@ -446,7 +567,10 @@ fn a_multiline_epigraph_renders_one_line_each() {
     let red = screen.lines().position(|l| l.contains("Roses are red"));
     let blue = screen.lines().position(|l| l.contains("Violets are blue"));
     let by = screen.lines().position(|l| l.contains("— Anon"));
-    assert!(red.is_some() && blue.is_some() && by.is_some(), "screen:\n{screen}");
+    assert!(
+        red.is_some() && blue.is_some() && by.is_some(),
+        "screen:\n{screen}"
+    );
     assert!(red < blue && blue < by, "lines out of order:\n{screen}");
 }
 
@@ -458,7 +582,10 @@ fn editing_an_epigraph_shows_a_banner() {
     assert!(matches!(app.mode, Mode::EditMeta(_)));
 
     let screen = render(&app, 80, 10);
-    assert!(screen.contains("editing chapter epigraph"), "screen:\n{screen}");
+    assert!(
+        screen.contains("editing chapter epigraph"),
+        "screen:\n{screen}"
+    );
     assert!(screen.contains("Ctrl-S save"), "screen:\n{screen}");
 }
 
@@ -479,7 +606,11 @@ fn nav_status_bar_shows_the_selected_chapters_metadata() {
     app.project.manifest.chapters[1].pov = Some("Mara".into());
     app.project.manifest.chapters[1].status = Some(crate::frontmatter::Status::Revised);
     app.outline_visible = true;
-    app.mode = Mode::Nav { selected: 1, filter: String::new(), typing: false };
+    app.mode = Mode::Nav {
+        selected: 1,
+        filter: String::new(),
+        typing: false,
+    };
     let screen = render(&app, 90, 14);
     assert!(screen.contains("A grand opening"), "screen:\n{screen}");
     assert!(screen.contains("POV: Mara"), "screen:\n{screen}");
@@ -488,7 +619,6 @@ fn nav_status_bar_shows_the_selected_chapters_metadata() {
 
 #[test]
 fn continuous_view_shows_chapters_flowing_with_a_divider() {
-
     // A two-chapter project on disk (the manuscript window reads files).
     let dir = crate::testutil::scratch_dir("ui", "cont");
     fs::write(
@@ -548,11 +678,17 @@ fn continuous_view_shows_part_headers_at_boundaries() {
     // ...above the chapter divider for the chapter that starts the part.
     let part_two = screen.find("PART TWO").unwrap();
     let divider_two = screen.find("—— Two ——").unwrap();
-    assert!(part_two < divider_two, "the part header sits above its divider:\n{screen}");
+    assert!(
+        part_two < divider_two,
+        "the part header sits above its divider:\n{screen}"
+    );
     // It's display-only: the part name never entered the editable buffer.
     let flow = app.manuscript.as_ref().unwrap().buffer();
     assert!(
-        !flow.line_range_text(0, flow.line_count()).to_uppercase().contains("PART"),
+        !flow
+            .line_range_text(0, flow.line_count())
+            .to_uppercase()
+            .contains("PART"),
         "the structure header leaked into the buffer",
     );
 

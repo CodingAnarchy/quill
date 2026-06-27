@@ -62,7 +62,10 @@ pub struct VoiceProfile {
 impl VoiceProfile {
     /// Whether the profile carries anything worth rendering.
     fn is_empty(&self) -> bool {
-        self.patterns.is_empty() && self.register.is_none() && self.tics.is_empty() && self.rhythm.is_none()
+        self.patterns.is_empty()
+            && self.register.is_none()
+            && self.tics.is_empty()
+            && self.rhythm.is_none()
     }
 }
 
@@ -173,7 +176,13 @@ pub fn items_schema() -> Value {
 /// Build the character-extraction request: the manuscript as cached context, the
 /// schema attached so the reply is typed JSON.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Extract the character profiles as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Extract the character profiles as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 const CONCEPT_SYSTEM: &str = "You are a story-bible assistant helping an author \
@@ -190,7 +199,13 @@ manuscript to contradict.";
 /// Build a generative request (#256): draft a starter cast from a concept /
 /// premise (no manuscript), into the same schema the extractive pass returns.
 pub fn build_concept_request(concept: &str, model: &str) -> Request {
-    super::manuscript_request(CONCEPT_SYSTEM, "Draft the starter character profiles as specified.", format!("Concept / premise:\n{concept}"), model, schema())
+    super::manuscript_request(
+        CONCEPT_SYSTEM,
+        "Draft the starter character profiles as specified.",
+        format!("Concept / premise:\n{concept}"),
+        model,
+        schema(),
+    )
 }
 
 const REVISE_SYSTEM: &str = "You are a story-bible assistant maintaining an \
@@ -206,8 +221,19 @@ complete revised set of characters.";
 
 /// Build an incremental revision request (#90): revise the existing character
 /// bible from only the changed chapters.
-pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, model: &str) -> Request {
-    incremental::revise_request(REVISE_SYSTEM, schema(), MAX_OUTPUT_TOKENS, prior_bible, changed_chapters, model)
+pub fn build_incremental_request(
+    prior_bible: &str,
+    changed_chapters: &str,
+    model: &str,
+) -> Request {
+    incremental::revise_request(
+        REVISE_SYSTEM,
+        schema(),
+        MAX_OUTPUT_TOKENS,
+        prior_bible,
+        changed_chapters,
+        model,
+    )
 }
 
 /// Parse a structured reply (`{ "characters": [...] }`) into profiles.
@@ -216,8 +242,7 @@ pub fn parse(text: &str) -> Result<Vec<Character>, AiError> {
     struct Reply {
         characters: Vec<Character>,
     }
-    let reply: Reply =
-        super::parse_json(text, "character")?;
+    let reply: Reply = super::parse_json(text, "character")?;
     Ok(reply.characters)
 }
 
@@ -313,10 +338,19 @@ mod tests {
                 rhythm: Some("clipped".into()),
             }),
             personality: vec!["guarded".into()],
-            relationships: vec![Relationship { name: "Tomas".into(), relation: "estranged brother".into() }],
+            relationships: vec![Relationship {
+                name: "Tomas".into(),
+                relation: "estranged brother".into(),
+            }],
             goals: vec!["find the locket's owner".into()],
-            arc: vec![ArcBeat { chapter: "The Find".into(), state: "discovers the locket".into() }],
-            drift: vec![Drift { detail: "eyes green vs grey".into(), chapters: vec!["The Find".into(), "The Reckoning".into()] }],
+            arc: vec![ArcBeat {
+                chapter: "The Find".into(),
+                state: "discovers the locket".into(),
+            }],
+            drift: vec![Drift {
+                detail: "eyes green vs grey".into(),
+                chapters: vec!["The Find".into(), "The Reckoning".into()],
+            }],
             mentions: 42,
             last_chapter: Some("The Reckoning".into()),
         }
@@ -334,23 +368,45 @@ mod tests {
 
     #[test]
     fn parse_rejects_bad_json() {
-        assert!(matches!(parse("not json"), Err(AiError::ModelNonCompliance(_))));
+        assert!(matches!(
+            parse("not json"),
+            Err(AiError::ModelNonCompliance(_))
+        ));
     }
 
     #[test]
     fn concept_request_carries_the_concept_not_a_manuscript() {
         let req = build_concept_request("a heist on a generation ship", "claude-opus-4-8");
         assert!(req.cached_context.contains("generation ship"));
-        assert!(req.system.as_deref().unwrap().contains("INVENT"), "asks to invent, not extract");
-        assert!(req.json_schema.is_some(), "same schema as the extractive pass");
+        assert!(
+            req.system.as_deref().unwrap().contains("INVENT"),
+            "asks to invent, not extract"
+        );
+        assert!(
+            req.json_schema.is_some(),
+            "same schema as the extractive pass"
+        );
     }
 
     #[test]
     fn incremental_request_carries_the_bible_and_only_changed_chapters() {
-        let req = build_incremental_request("EXISTING BIBLE", "# Two\n\nchanged prose", "claude-opus-4-8");
-        assert!(req.cached_context.contains("EXISTING BIBLE"), "feeds the prior bible as cache");
-        assert!(req.cached_context.contains("changed prose"), "feeds the changed chapter");
-        assert!(req.system.as_deref().unwrap().contains("existing"), "asks to revise, not regenerate");
+        let req = build_incremental_request(
+            "EXISTING BIBLE",
+            "# Two\n\nchanged prose",
+            "claude-opus-4-8",
+        );
+        assert!(
+            req.cached_context.contains("EXISTING BIBLE"),
+            "feeds the prior bible as cache"
+        );
+        assert!(
+            req.cached_context.contains("changed prose"),
+            "feeds the changed chapter"
+        );
+        assert!(
+            req.system.as_deref().unwrap().contains("existing"),
+            "asks to revise, not regenerate"
+        );
         assert!(req.json_schema.is_some(), "still constrained to the schema");
     }
 

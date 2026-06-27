@@ -38,14 +38,24 @@ mod tests {
                 }
             }
         }
-        assert!(want.len() >= 10, "sanity: found the Keys table ({} keys)", want.len());
+        assert!(
+            want.len() >= 10,
+            "sanity: found the Keys table ({} keys)",
+            want.len()
+        );
 
         let missing: Vec<&String> = want.iter().filter(|k| !TEXT.contains(k.as_str())).collect();
-        assert!(missing.is_empty(), "guide is missing README keys: {missing:?}");
+        assert!(
+            missing.is_empty(),
+            "guide is missing README keys: {missing:?}"
+        );
     }
 
     #[test]
     fn guide_mentions_f1_to_reopen_itself() {
-        assert!(TEXT.contains("F1"), "the guide should tell the reader how to reopen it");
+        assert!(
+            TEXT.contains("F1"),
+            "the guide should tell the reader how to reopen it"
+        );
     }
 }

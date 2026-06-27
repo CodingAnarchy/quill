@@ -17,7 +17,9 @@ impl Project {
         let at = at.min(self.manifest.chapters.len());
         let file = self.unique_chapter_file();
         fs::write(self.root.join(&file), "")?;
-        self.manifest.chapters.insert(at, ChapterEntry::new(title.to_string(), file));
+        self.manifest
+            .chapters
+            .insert(at, ChapterEntry::new(title.to_string(), file));
         self.save_manifest()
     }
 
@@ -51,7 +53,12 @@ impl Project {
 
     /// Smallest `chapter-{n}.md` not already used by the manifest or on disk.
     fn unique_chapter_file(&self) -> String {
-        let used: HashSet<&str> = self.manifest.chapters.iter().map(|c| c.file.as_str()).collect();
+        let used: HashSet<&str> = self
+            .manifest
+            .chapters
+            .iter()
+            .map(|c| c.file.as_str())
+            .collect();
         (1..)
             .map(|n| format!("chapter-{n}.md"))
             .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())

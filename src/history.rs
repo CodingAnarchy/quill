@@ -65,7 +65,10 @@ pub fn load(root: &Path) -> Vec<Snapshot> {
 /// is read once per call.
 fn coalesce(text: &str) -> Vec<Snapshot> {
     let mut out: Vec<Snapshot> = Vec::new();
-    for snap in text.lines().filter_map(|line| serde_json::from_str::<Snapshot>(line).ok()) {
+    for snap in text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Snapshot>(line).ok())
+    {
         match out.iter_mut().find(|s| s.date == snap.date) {
             Some(existing) => *existing = snap,
             None => out.push(snap),
@@ -87,7 +90,10 @@ pub fn persist(root: &Path, snap: &Snapshot) -> std::io::Result<()> {
     fs::create_dir_all(root.join(DIR))?;
     let mut line = serde_json::to_string(snap).map_err(std::io::Error::other)?;
     line.push('\n');
-    let mut file = OpenOptions::new().create(true).append(true).open(log_path(root))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path(root))?;
     file.write_all(line.as_bytes())
 }
 
@@ -155,7 +161,11 @@ mod tests {
     /// Raw physical line count of the log (before `load` coalesces) — to assert
     /// `persist` appends and `compact` tidies.
     fn raw_line_count(dir: &Path) -> usize {
-        fs::read_to_string(log_path(dir)).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).count()
+        fs::read_to_string(log_path(dir))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
     }
 
     #[test]
@@ -163,7 +173,7 @@ mod tests {
         let dir = temp_dir("append");
         persist(&dir, &snap("2026-06-16", 100)).unwrap();
         persist(&dir, &snap("2026-06-16", 250)).unwrap(); // re-save the same day
-        // Two physical lines (it appended)...
+                                                          // Two physical lines (it appended)...
         assert_eq!(raw_line_count(&dir), 2);
         // ...but one logical record per day, latest winning.
         assert_eq!(load(&dir).len(), 1);

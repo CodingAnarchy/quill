@@ -73,14 +73,22 @@ impl Manifest {
     /// multi-book series; anything else is the flat single-book manifest, parsed
     /// exactly as before. Returns `(manifest, books, active_book)`. Called by
     /// [`Project::open`].
-    pub(super) fn from_toml_value(value: toml::Value) -> Result<(Manifest, Vec<Book>, usize), toml::de::Error> {
-        let is_series = value.get("books").and_then(|b| b.as_array()).is_some_and(|b| !b.is_empty());
+    pub(super) fn from_toml_value(
+        value: toml::Value,
+    ) -> Result<(Manifest, Vec<Book>, usize), toml::de::Error> {
+        let is_series = value
+            .get("books")
+            .and_then(|b| b.as_array())
+            .is_some_and(|b| !b.is_empty());
         if is_series {
             let series: SeriesFile = value.try_into()?;
             // `is_series` was true, so the `[[books]]` array was non-empty and
             // deserializes to a non-empty Vec — a malformed/empty one would have
             // failed `try_into` above, not reached here.
-            let first = series.books.first().expect("is_series guarantees a non-empty [[books]] array");
+            let first = series
+                .books
+                .first()
+                .expect("is_series guarantees a non-empty [[books]] array");
             let manifest = Manifest::from_series(&series, first);
             Ok((manifest, series.books, 0))
         } else {
@@ -142,7 +150,11 @@ impl Manifest {
 /// Serialize a multi-book project to the `[[books]]` form (#328): fold the live
 /// active book back into the series list and write the series file. Called by
 /// [`Project::save_manifest`] for a multi-book project.
-pub(super) fn series_to_toml(manifest: &Manifest, books: &[Book], active_book: usize) -> Result<String, toml::ser::Error> {
+pub(super) fn series_to_toml(
+    manifest: &Manifest,
+    books: &[Book],
+    active_book: usize,
+) -> Result<String, toml::ser::Error> {
     let mut books = books.to_vec();
     books[active_book] = manifest.to_book();
     let series = SeriesFile {
@@ -187,7 +199,11 @@ impl Project {
             self.read_chapter_cache(i);
         }
         self.reorder_by_band();
-        self.active = self.manifest.chapters.first().map_or(String::new(), |c| c.file.clone());
+        self.active = self
+            .manifest
+            .chapters
+            .first()
+            .map_or(String::new(), |c| c.file.clone());
     }
 
     /// The title of book `i`. The active book's live title comes from the
@@ -266,7 +282,10 @@ impl Project {
         if self.books.is_empty() || i == self.active_book {
             self.manifest.part_label()
         } else {
-            self.books.get(i).and_then(|b| b.part_label.as_deref()).unwrap_or("part")
+            self.books
+                .get(i)
+                .and_then(|b| b.part_label.as_deref())
+                .unwrap_or("part")
         }
     }
 
@@ -316,8 +335,17 @@ mod tests {
             epigraph_by: Some("Anon".into()),
             part_label: Some("act".into()),
             run_on_threshold: Some(33),
-            goals: Some(Goals { words: 90_000, chapters: 30, words_per_page: 250, daily: Some(800) }),
-            parts: Some(vec![Part { name: Some("Act I".into()), chapters: [1, 5], goal: Some(20_000) }]),
+            goals: Some(Goals {
+                words: 90_000,
+                chapters: 30,
+                words_per_page: 250,
+                daily: Some(800),
+            }),
+            parts: Some(vec![Part {
+                name: Some("Act I".into()),
+                chapters: [1, 5],
+                goal: Some(20_000),
+            }]),
             chapters: vec![ChapterEntry::new("One".into(), "one.md".into())],
         };
 
@@ -325,7 +353,10 @@ mod tests {
         manifest.load_book(&original);
         let round_tripped = manifest.to_book();
 
-        assert_eq!(round_tripped, original, "every Book field must survive load_book → to_book");
+        assert_eq!(
+            round_tripped, original,
+            "every Book field must survive load_book → to_book"
+        );
     }
 
     /// Write a `books`-shaped series manifest with `books` books of `per_book`
@@ -337,7 +368,9 @@ mod tests {
             manifest.push_str(&format!("[[books]]\ntitle = \"Book {b}\"\n\n"));
             for i in 0..per_book {
                 let file = format!("b{b}/ch{i}.md");
-                manifest.push_str(&format!("[[books.chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+                manifest.push_str(&format!(
+                    "[[books.chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+                ));
                 let mut body = String::from("---\nstatus: draft\npov: Mara\n---\n# Chapter\n\n");
                 for _ in 0..50 {
                     body.push_str("The night was dark and the road was very long indeed.\n");
@@ -358,7 +391,6 @@ mod tests {
     #[test]
     #[ignore]
     fn open_is_fast_for_a_multi_book_series() {
-
         let (books, per_book) = (6, 250); // 1500 chapters across the series
         let dir = temp_dir("perf-open-multibook");
         fs::create_dir_all(&dir).unwrap();
@@ -369,9 +401,16 @@ mod tests {
         let project = Project::open(&dir).unwrap();
         let dt = t.elapsed();
 
-        println!("open {books}-book series ({} chapters total) = {dt:?}", books * per_book);
+        println!(
+            "open {books}-book series ({} chapters total) = {dt:?}",
+            books * per_book
+        );
         assert_eq!(project.book_count(), books);
-        assert_eq!(project.manifest.chapters.len(), per_book, "active book is hoisted");
+        assert_eq!(
+            project.manifest.chapters.len(),
+            per_book,
+            "active book is hoisted"
+        );
         assert!(dt.as_millis() < 500, "open took {dt:?}");
 
         fs::remove_dir_all(&dir).ok();
@@ -427,7 +466,12 @@ file = \"b2/one.md\"
         // existing per-chapter path works on book one unchanged.
         assert_eq!(p.manifest.title, "Book One");
         assert_eq!(p.manifest.author.as_deref(), Some("A. Writer"));
-        let titles: Vec<&str> = p.manifest.chapters.iter().map(|c| c.title.as_str()).collect();
+        let titles: Vec<&str> = p
+            .manifest
+            .chapters
+            .iter()
+            .map(|c| c.title.as_str())
+            .collect();
         assert_eq!(titles, ["Dawn", "Noon"]);
         assert_eq!(p.active_file(), "b1/one.md");
 
@@ -444,8 +488,14 @@ file = \"b2/one.md\"
         let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
         // Series-level scalars precede the [[books]] tables (valid TOML), and the
         // inactive second book is preserved verbatim.
-        assert!(toml.find("title =").unwrap() < toml.find("[[books]]").unwrap(), "{toml}");
-        assert!(toml.contains("Book Two") && toml.contains("b2/one.md"), "inactive book preserved:\n{toml}");
+        assert!(
+            toml.find("title =").unwrap() < toml.find("[[books]]").unwrap(),
+            "{toml}"
+        );
+        assert!(
+            toml.contains("Book Two") && toml.contains("b2/one.md"),
+            "inactive book preserved:\n{toml}"
+        );
 
         let p = Project::open(&dir).unwrap();
         assert_eq!(p.book_count(), 2);
@@ -465,7 +515,12 @@ file = \"b2/one.md\"
         p.set_active_book(1);
         assert_eq!(p.active_book(), 1);
         assert_eq!(p.manifest.title, "Book Two");
-        let titles: Vec<&str> = p.manifest.chapters.iter().map(|c| c.title.as_str()).collect();
+        let titles: Vec<&str> = p
+            .manifest
+            .chapters
+            .iter()
+            .map(|c| c.title.as_str())
+            .collect();
         assert_eq!(titles, ["Dusk"]);
         assert_eq!(p.active_file(), "b2/one.md");
         assert_eq!(p.book_title(0), Some("Book One")); // the stored book is preserved
@@ -476,7 +531,10 @@ file = \"b2/one.md\"
         assert_eq!(p.manifest.title, "Book One");
         p.save_manifest().unwrap();
         let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
-        assert!(toml.contains("Book One") && toml.contains("Book Two") && toml.contains("b2/one.md"), "{toml}");
+        assert!(
+            toml.contains("Book One") && toml.contains("Book Two") && toml.contains("b2/one.md"),
+            "{toml}"
+        );
 
         // A no-op for an unchanged or out-of-range index.
         p.set_active_book(0);
@@ -493,7 +551,6 @@ file = \"b2/one.md\"
     #[test]
     #[ignore]
     fn switching_books_is_fast_in_a_series() {
-
         let (books, per_book) = (2, 750);
         let dir = temp_dir("perf-switch-book");
         fs::create_dir_all(&dir).unwrap();
@@ -528,7 +585,10 @@ file = \"b2/one.md\"
 
         // The flat manifest is serialized exactly as before — no books table.
         let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
-        assert!(!toml.contains("[[books]]") && !toml.contains("\nbooks "), "no series table:\n{toml}");
+        assert!(
+            !toml.contains("[[books]]") && !toml.contains("\nbooks "),
+            "no series table:\n{toml}"
+        );
         assert!(Project::open(&dir).is_ok());
 
         fs::remove_dir_all(&dir).ok();

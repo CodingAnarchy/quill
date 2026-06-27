@@ -7,7 +7,7 @@
 //! refresh's messages. The action is a no-op for a standalone novel, whose
 //! per-book passes are the fast everyday path.
 
-use super::sequenced::{plural, SequencedRun, Sequenced};
+use super::sequenced::{plural, Sequenced, SequencedRun};
 use super::*;
 
 use crate::mode::AiAction;
@@ -15,7 +15,11 @@ use crate::mode::AiAction;
 /// The bible trackers a series refresh runs, each accumulated across the books in
 /// reading order. The bibles are independent, so the order between trackers is
 /// free; within a tracker the books must go in order so each builds on the last.
-const TRACKERS: [AiAction; 3] = [AiAction::Characters, AiAction::Continuity, AiAction::Setting];
+const TRACKERS: [AiAction; 3] = [
+    AiAction::Characters,
+    AiAction::Continuity,
+    AiAction::Setting,
+];
 
 /// A series-bible refresh in progress (#340): the queue of `(tracker, book)`
 /// passes in order, plus the shared sequenced-run bookkeeping (#344). Lives in
@@ -31,7 +35,11 @@ pub(crate) struct SeriesBibleRun {
 
 impl SeriesBibleRun {
     fn new(queue: Vec<(AiAction, usize)>, triage_before: usize) -> Self {
-        Self { queue, seq: SequencedRun::new(), triage_before }
+        Self {
+            queue,
+            seq: SequencedRun::new(),
+            triage_before,
+        }
     }
 }
 
@@ -52,7 +60,9 @@ impl Sequenced for SeriesBibleDriver {
     fn stop(app: &mut App, reason: &str) {
         if let Some(run) = app.series_bible_run.take() {
             let at = run.seq.index + 1;
-            app.message = Some(format!("Series bible refresh stopped at pass {at}: {reason}"));
+            app.message = Some(format!(
+                "Series bible refresh stopped at pass {at}: {reason}"
+            ));
         }
     }
     fn finish(app: &mut App) {
@@ -69,7 +79,8 @@ impl App {
     /// when a run is already going. (Availability is also gated by `action_status`.)
     pub(crate) fn start_refresh_series_bible(&mut self) {
         if self.project.book_count() <= 1 {
-            self.message = Some("This project has only one book — use the per-book bible passes.".into());
+            self.message =
+                Some("This project has only one book — use the per-book bible passes.".into());
             return;
         }
         if self.series_bible_run.is_some() || self.workflow_run.is_some() {
@@ -81,7 +92,10 @@ impl App {
             return;
         }
         let books = self.project.book_count();
-        let queue = TRACKERS.iter().flat_map(|&t| (0..books).map(move |b| (t, b))).collect();
+        let queue = TRACKERS
+            .iter()
+            .flat_map(|&t| (0..books).map(move |b| (t, b)))
+            .collect();
         self.series_bible_run = Some(SeriesBibleRun::new(queue, self.triage.len()));
         self.run_series_bible_step();
     }
@@ -146,7 +160,11 @@ impl App {
     fn finish_series_bible(&mut self) {
         if let Some(run) = self.series_bible_run.take() {
             let (ran, skipped, cancelled) = (run.seq.ran, run.seq.skipped, run.seq.cancelled);
-            let tail = if skipped > 0 { format!(" ({skipped} already current)") } else { String::new() };
+            let tail = if skipped > 0 {
+                format!(" ({skipped} already current)")
+            } else {
+                String::new()
+            };
             // New cross-book findings this run added to revision triage (#341).
             let found = self.triage.len().saturating_sub(run.triage_before);
             let findings = if found > 0 {
@@ -154,8 +172,15 @@ impl App {
             } else {
                 String::new()
             };
-            let verb = if cancelled { "cancelled —" } else { "refreshed —" };
-            self.message = Some(format!("Series bible {verb} {ran} {}{tail}{findings}", plural(ran, "pass", "passes")));
+            let verb = if cancelled {
+                "cancelled —"
+            } else {
+                "refreshed —"
+            };
+            self.message = Some(format!(
+                "Series bible {verb} {ran} {}{tail}{findings}",
+                plural(ran, "pass", "passes")
+            ));
         }
     }
 }
@@ -179,7 +204,9 @@ impl App {
         use super::sequenced::STEP_TIMEOUT;
         use std::time::Instant;
         if let Some(run) = self.series_bible_run.as_mut() {
-            run.seq.started_at = Instant::now().checked_sub(STEP_TIMEOUT * 2).unwrap_or_else(Instant::now);
+            run.seq.started_at = Instant::now()
+                .checked_sub(STEP_TIMEOUT * 2)
+                .unwrap_or_else(Instant::now);
         }
     }
 }

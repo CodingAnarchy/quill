@@ -94,8 +94,7 @@ pub fn parse(text: &str) -> Result<Vec<Word>, AiError> {
     struct Reply {
         words: Vec<Word>,
     }
-    let reply: Reply =
-        super::parse_json(text, "word-search")?;
+    let reply: Reply = super::parse_json(text, "word-search")?;
     Ok(reply.words)
 }
 

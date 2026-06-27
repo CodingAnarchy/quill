@@ -52,7 +52,10 @@ pub fn build_request(description: &str, vocab: &[(String, String)], model: &str)
     let tokens: Vec<String> = vocab.iter().map(|(t, _)| t.clone()).collect();
     Request {
         system: Some(SYSTEM.to_string()),
-        cached_context: super::vocab_context("Available actions (use the exact token on the left):", vocab),
+        cached_context: super::vocab_context(
+            "Available actions (use the exact token on the left):",
+            vocab,
+        ),
         user: format!("Describe-to-workflow request:\n{description}"),
         model: model.to_string(),
         max_tokens: MAX_TOKENS,
@@ -87,8 +90,10 @@ mod tests {
 
     #[test]
     fn parse_reads_name_steps_and_unmapped() {
-        let g = parse(r#"{"name":"revise","steps":["save","ai:continuity"],"unmapped":["email my editor"]}"#)
-            .unwrap();
+        let g = parse(
+            r#"{"name":"revise","steps":["save","ai:continuity"],"unmapped":["email my editor"]}"#,
+        )
+        .unwrap();
         assert_eq!(g.name, "revise");
         assert_eq!(g.steps, ["save", "ai:continuity"]);
         assert_eq!(g.unmapped, ["email my editor"]);

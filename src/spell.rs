@@ -142,13 +142,17 @@ mod tests {
     #[test]
     #[ignore]
     fn spell_pass_is_fast_at_window_size() {
-        let para = "The night was dark and the road was very long indeed and the captain walked on. ";
+        let para =
+            "The night was dark and the road was very long indeed and the captain walked on. ";
         let text = para.repeat(700); // ~10k words, larger than the ~3-chapter window
         let _ = misspellings("warm up the dictionary", nothing); // pay the parse once
         let t = Instant::now();
         let flags = misspellings(&text, nothing);
         let dt = t.elapsed();
-        println!("spell pass on {} words = {dt:?}", text.split_whitespace().count());
+        println!(
+            "spell pass on {} words = {dt:?}",
+            text.split_whitespace().count()
+        );
         assert!(flags.is_empty(), "all real words");
         assert!(dt.as_millis() < 16, "spell pass took {dt:?}");
     }

@@ -37,17 +37,29 @@ pub enum OverlayKind {
 impl Overlay {
     /// A bordered report overlay labelled `label`, scrolled to the top.
     pub fn report(label: &'static str, lines: Vec<Line<'static>>) -> Self {
-        Self { lines, kind: OverlayKind::Report(label), scroll: 0 }
+        Self {
+            lines,
+            kind: OverlayKind::Report(label),
+            scroll: 0,
+        }
     }
 
     /// The AI answer / summary overlay, scrolled to the top.
     pub fn ai(lines: Vec<Line<'static>>) -> Self {
-        Self { lines, kind: OverlayKind::AiPanel, scroll: 0 }
+        Self {
+            lines,
+            kind: OverlayKind::AiPanel,
+            scroll: 0,
+        }
     }
 
     /// The user's-guide overlay (#281), scrolled to the top.
     pub fn guide(lines: Vec<Line<'static>>) -> Self {
-        Self { lines, kind: OverlayKind::Guide, scroll: 0 }
+        Self {
+            lines,
+            kind: OverlayKind::Guide,
+            scroll: 0,
+        }
     }
 }
 
@@ -74,7 +86,11 @@ pub enum Mode {
     /// `/` enters it so keystrokes build the query instead of running the
     /// browser's single-key commands; Esc leaves it (keeping the filter) and a
     /// second Esc clears the filter.
-    Nav { selected: usize, filter: String, typing: bool },
+    Nav {
+        selected: usize,
+        filter: String,
+        typing: bool,
+    },
     /// Editing a multi-line metadata field (an epigraph quotation) in the main
     /// editor: the full editing keys apply to a scratch buffer, Ctrl-S commits,
     /// Esc cancels. Boxed because it carries a whole [`Buffer`], far larger than
@@ -756,7 +772,11 @@ pub(crate) enum Pending {
     /// `force` is whether to force a full bible rebuild (#176); `offer_local` adds
     /// "run locally instead" as a third choice when the hybrid router (#372) found
     /// a usable local backend (`y` Claude · `l` local · anything else cancels).
-    ConfirmAi { action: AiAction, force: bool, offer_local: bool },
+    ConfirmAi {
+        action: AiAction,
+        force: bool,
+        offer_local: bool,
+    },
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,
@@ -832,14 +852,26 @@ pub(crate) enum Pending {
 /// carry the chapter index; book fields are project-level.
 #[derive(Clone, Copy)]
 pub(crate) enum MetaField {
-    Summary { at: usize },
-    Pov { at: usize },
+    Summary {
+        at: usize,
+    },
+    Pov {
+        at: usize,
+    },
     /// The chapter's word-count goal (#146).
-    Goal { at: usize },
+    Goal {
+        at: usize,
+    },
     /// The file's section role (#179): front/back-matter type, or blank for body.
-    Role { at: usize },
-    ChapterEpigraph { at: usize },
-    ChapterEpigraphBy { at: usize },
+    Role {
+        at: usize,
+    },
+    ChapterEpigraph {
+        at: usize,
+    },
+    ChapterEpigraphBy {
+        at: usize,
+    },
     BookTitle,
     Subtitle,
     Author,

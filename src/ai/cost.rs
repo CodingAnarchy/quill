@@ -28,8 +28,7 @@ fn rate(model: &str) -> (f64, f64) {
 pub fn estimate(input_chars: usize, max_tokens: u32, model: &str) -> Estimate {
     let tokens = (input_chars / 4) as u32;
     let (in_rate, out_rate) = rate(model);
-    let dollars =
-        (tokens as f64 * in_rate + max_tokens as f64 * out_rate) / 1_000_000.0;
+    let dollars = (tokens as f64 * in_rate + max_tokens as f64 * out_rate) / 1_000_000.0;
     Estimate { tokens, dollars }
 }
 
@@ -42,7 +41,12 @@ const CACHE_READ: f64 = 0.1;
 /// prefix: `cached_chars` (the manuscript, billed at the cache-read rate) plus
 /// `fresh_chars` (the turn's new conversation) for input, and `max_tokens` out. A
 /// ceiling, like [`estimate`], but it doesn't re-bill the cached novel each turn.
-pub fn estimate_turn(cached_chars: usize, fresh_chars: usize, max_tokens: u32, model: &str) -> Estimate {
+pub fn estimate_turn(
+    cached_chars: usize,
+    fresh_chars: usize,
+    max_tokens: u32,
+    model: &str,
+) -> Estimate {
     let cached = (cached_chars / 4) as u32;
     let fresh = (fresh_chars / 4) as u32;
     let (in_rate, out_rate) = rate(model);
@@ -50,7 +54,10 @@ pub fn estimate_turn(cached_chars: usize, fresh_chars: usize, max_tokens: u32, m
         + f64::from(fresh) * in_rate
         + f64::from(max_tokens) * out_rate)
         / 1_000_000.0;
-    Estimate { tokens: cached + fresh, dollars }
+    Estimate {
+        tokens: cached + fresh,
+        dollars,
+    }
 }
 
 /// A compact human label, e.g. "~31k tokens · ~$0.18 on claude-opus-4-8".
@@ -89,7 +96,10 @@ mod tests {
 
     #[test]
     fn unknown_model_uses_the_opus_tier() {
-        assert_eq!(estimate(4000, 100, "mystery").dollars, estimate(4000, 100, "claude-opus-4-8").dollars);
+        assert_eq!(
+            estimate(4000, 100, "mystery").dollars,
+            estimate(4000, 100, "claude-opus-4-8").dollars
+        );
     }
 
     #[test]
@@ -97,7 +107,12 @@ mod tests {
         // A whole-novel turn: the manuscript cached vs sent fresh, same fresh tail.
         let cached = estimate_turn(400_000, 4_000, 8192, "claude-opus-4-8");
         let fresh = estimate(404_000, 8192, "claude-opus-4-8");
-        assert!(cached.dollars < fresh.dollars, "caching the manuscript is cheaper: {} vs {}", cached.dollars, fresh.dollars);
+        assert!(
+            cached.dollars < fresh.dollars,
+            "caching the manuscript is cheaper: {} vs {}",
+            cached.dollars,
+            fresh.dollars
+        );
         // The cached manuscript bills at 10%: 100k*5*0.1/1e6 + 1k*5/1e6 + 8192*25/1e6
         // = 0.05 + 0.005 + 0.2048 = 0.2598
         assert!((cached.dollars - 0.2598).abs() < 1e-3, "{}", cached.dollars);

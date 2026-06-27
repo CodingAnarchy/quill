@@ -62,28 +62,68 @@ impl App {
     /// Open the version-control palette (#54) — the single entry point for Git
     /// actions, shown with context-appropriate items.
     pub(crate) fn open_git_palette(&mut self) {
-        let git = |label: &str, desc: &str, a| PaletteItem { label: label.into(), desc: desc.into(), command: Command::Git(a) };
+        let git = |label: &str, desc: &str, a| PaletteItem {
+            label: label.into(),
+            desc: desc.into(),
+            command: Command::Git(a),
+        };
         let items = if self.under_vc {
             let has_remote = crate::vcs::remote_url(&self.project.root).is_some();
-            let mut items = vec![git("Commit", "Snapshot the project with a message", GitAction::Commit)];
+            let mut items = vec![git(
+                "Commit",
+                "Snapshot the project with a message",
+                GitAction::Commit,
+            )];
             // Sync actions are only meaningful once a remote is configured.
             if has_remote {
-                items.push(git("Push", "Back up your commits to the remote", GitAction::Push));
-                items.push(git("Pull", "Bring down the remote's latest changes", GitAction::Pull));
+                items.push(git(
+                    "Push",
+                    "Back up your commits to the remote",
+                    GitAction::Push,
+                ));
+                items.push(git(
+                    "Pull",
+                    "Bring down the remote's latest changes",
+                    GitAction::Pull,
+                ));
             }
             items.push(git("History", "Browse past commits", GitAction::History));
-            items.push(git("Changes", "Diff the working tree against the last commit", GitAction::Diff));
-            items.push(git("Restore chapter", "Revert the current chapter to its last commit", GitAction::RestoreChapter));
+            items.push(git(
+                "Changes",
+                "Diff the working tree against the last commit",
+                GitAction::Diff,
+            ));
+            items.push(git(
+                "Restore chapter",
+                "Revert the current chapter to its last commit",
+                GitAction::RestoreChapter,
+            ));
             items.push(if has_remote {
-                git("Change remote", "Point backups at a different remote", GitAction::SetRemote)
+                git(
+                    "Change remote",
+                    "Point backups at a different remote",
+                    GitAction::SetRemote,
+                )
             } else {
-                git("Set remote", "Back the project up to a hosted remote", GitAction::SetRemote)
+                git(
+                    "Set remote",
+                    "Back the project up to a hosted remote",
+                    GitAction::SetRemote,
+                )
             });
             items
         } else {
-            vec![git("Initialize", "Put this project under version control", GitAction::Initialize)]
+            vec![git(
+                "Initialize",
+                "Put this project under version control",
+                GitAction::Initialize,
+            )]
         };
-        self.mode = Mode::Palette(Box::new(Palette { title: "Version control", items, selected: 0 }));
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Version control",
+            items,
+            selected: 0,
+        }));
     }
 
     /// Dispatch a version-control action chosen from the palette.
@@ -91,7 +131,9 @@ impl App {
         match action {
             GitAction::Initialize => self.init_version_control(),
             GitAction::Commit => self.start_commit(),
-            GitAction::History => self.overlay = Some(Overlay::report("history", self.vc_log_lines())),
+            GitAction::History => {
+                self.overlay = Some(Overlay::report("history", self.vc_log_lines()))
+            }
             GitAction::Diff => self.show_diff(),
             GitAction::RestoreChapter => self.start_restore(),
             GitAction::SetRemote => self.start_set_remote(),
@@ -132,10 +174,19 @@ impl App {
         }
         self.save_edit(); // flush edits so the status the author sees is accurate
         let root = self.project.root.clone();
-        self.start_vc("⟳ Pushing to the remote…", move || match crate::vcs::push(&root) {
-            Ok(branch) => VcMsg { text: format!("Pushed {branch} to the remote."), reload: false },
-            Err(e) => VcMsg { text: e, reload: false },
-        });
+        self.start_vc(
+            "⟳ Pushing to the remote…",
+            move || match crate::vcs::push(&root) {
+                Ok(branch) => VcMsg {
+                    text: format!("Pushed {branch} to the remote."),
+                    reload: false,
+                },
+                Err(e) => VcMsg {
+                    text: e,
+                    reload: false,
+                },
+            },
+        );
     }
 
     /// Pull the remote's changes on a worker thread (#134). Conservative: refuses
@@ -153,10 +204,16 @@ impl App {
             return;
         }
         let root = self.project.root.clone();
-        self.start_vc("⟳ Pulling from the remote…", move || match crate::vcs::pull(&root) {
-            Ok(text) => VcMsg { text, reload: true },
-            Err(e) => VcMsg { text: e, reload: false },
-        });
+        self.start_vc(
+            "⟳ Pulling from the remote…",
+            move || match crate::vcs::pull(&root) {
+                Ok(text) => VcMsg { text, reload: true },
+                Err(e) => VcMsg {
+                    text: e,
+                    reload: false,
+                },
+            },
+        );
     }
 
     /// Run a remote op on a worker thread (#134): spawn `work`, stash the receiver
@@ -221,7 +278,11 @@ impl App {
     /// Restore is destructive to that file, so it always asks first.
     fn start_restore(&mut self) {
         self.leave_continuous(); // restore operates on the single active chapter
-        let title = self.project.active_title().unwrap_or("this chapter").to_string();
+        let title = self
+            .project
+            .active_title()
+            .unwrap_or("this chapter")
+            .to_string();
         self.open_prompt(
             Pending::ConfirmRestore,
             format!("Restore '{title}' to last commit? Discards changes (y/N)"),
@@ -233,7 +294,11 @@ impl App {
     /// Restore the active chapter from HEAD and reload it into the editor.
     pub(crate) fn restore_chapter(&mut self) {
         let path = self.project.active_path();
-        let rel = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+        let rel = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
         match crate::vcs::restore(&self.project.root, &rel) {
             Ok(true) => {
                 self.message = Some(match self.reload_active_chapter() {
@@ -242,7 +307,9 @@ impl App {
                 });
                 self.refresh_vc_status();
             }
-            Ok(false) => self.message = Some("No committed version of this chapter to restore.".into()),
+            Ok(false) => {
+                self.message = Some("No committed version of this chapter to restore.".into())
+            }
             Err(e) => self.message = Some(format!("Restore failed: {e}")),
         }
     }

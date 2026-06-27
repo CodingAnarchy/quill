@@ -65,7 +65,10 @@ pub fn schema() -> Value {
     super::object_schema(
         vec![
             ("events", super::array_of(event)),
-            ("findings", super::array_of(super::chapters_finding("kind", "detail"))),
+            (
+                "findings",
+                super::array_of(super::chapters_finding("kind", "detail")),
+            ),
         ],
         &["events", "findings"],
     )
@@ -73,7 +76,13 @@ pub fn schema() -> Value {
 
 /// Build the continuity request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Extract the timeline and continuity findings as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Extract the timeline and continuity findings as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured continuity reply.
@@ -93,8 +102,19 @@ Return the complete revised timeline and findings.";
 
 /// Build an incremental revision request (#90): revise the existing timeline from
 /// only the changed chapters.
-pub fn build_incremental_request(prior_bible: &str, changed_chapters: &str, model: &str) -> Request {
-    incremental::revise_request(REVISE_SYSTEM, schema(), MAX_OUTPUT_TOKENS, prior_bible, changed_chapters, model)
+pub fn build_incremental_request(
+    prior_bible: &str,
+    changed_chapters: &str,
+    model: &str,
+) -> Request {
+    incremental::revise_request(
+        REVISE_SYSTEM,
+        schema(),
+        MAX_OUTPUT_TOKENS,
+        prior_bible,
+        changed_chapters,
+        model,
+    )
 }
 
 pub fn parse(text: &str) -> Result<Continuity, AiError> {
@@ -143,8 +163,16 @@ mod tests {
     fn sample() -> Continuity {
         Continuity {
             events: vec![
-                Event { description: "Mara finds the locket".into(), chapter: "The Find".into(), story_order: 2 },
-                Event { description: "Tomas hides the locket".into(), chapter: "The Reckoning".into(), story_order: 1 },
+                Event {
+                    description: "Mara finds the locket".into(),
+                    chapter: "The Find".into(),
+                    story_order: 2,
+                },
+                Event {
+                    description: "Tomas hides the locket".into(),
+                    chapter: "The Reckoning".into(),
+                    story_order: 1,
+                },
             ],
             findings: vec![Finding {
                 kind: "object".into(),
@@ -156,7 +184,8 @@ mod tests {
 
     #[test]
     fn parse_reads_events_and_findings() {
-        let json = r#"{"events":[{"description":"x","chapter":"One","story_order":1}],"findings":[]}"#;
+        let json =
+            r#"{"events":[{"description":"x","chapter":"One","story_order":1}],"findings":[]}"#;
         let c = parse(json).unwrap();
         assert_eq!(c.events.len(), 1);
         assert_eq!(c.events[0].chapter, "One");

@@ -44,7 +44,13 @@ pub(crate) struct SequencedRun {
 
 impl SequencedRun {
     pub(crate) fn new() -> Self {
-        Self { index: 0, ran: 0, skipped: 0, cancelled: false, started_at: Instant::now() }
+        Self {
+            index: 0,
+            ran: 0,
+            skipped: 0,
+            cancelled: false,
+            started_at: Instant::now(),
+        }
     }
 
     /// Mark the in-flight step as started now — call when spawning an async step,

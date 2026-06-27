@@ -22,16 +22,25 @@ fn annotation_persists_in_a_side_file_and_round_trips() {
 
     // The chapter file stays byte-for-byte clean — the note never enters the
     // prose, which is why exports (they read the chapter bodies) never carry it.
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "first chapter\n");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "first chapter\n"
+    );
     // The note lives in the side file instead, keyed by chapter.
     let side = fs::read_to_string(dir.join("annotations.toml")).unwrap();
-    assert!(side.contains("check the opening") && side.contains("one.md"), "{side}");
+    assert!(
+        side.contains("check the opening") && side.contains("one.md"),
+        "{side}"
+    );
 
     // It survives a reload of the project.
     let reopened = Project::open(&dir).unwrap();
     let live = reopened.annotations_for("one.md");
     assert_eq!(live.len(), 1);
-    assert_eq!((live[0].start, live[0].end, live[0].note.as_str()), (0, 5, "check the opening"));
+    assert_eq!(
+        (live[0].start, live[0].end, live[0].note.as_str()),
+        (0, 5, "check the opening")
+    );
 }
 
 #[test]
@@ -40,14 +49,21 @@ fn annotating_via_the_prompt_anchors_the_word_at_the_cursor() {
     // Cursor inside "chapter" (bytes 6..13 of "first chapter").
     app.buffer.cursor = Cursor { line: 0, col: 8 };
     app.start_annotation();
-    assert!(matches!(app.mode, Mode::Prompt(_)), "the note prompt opened");
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the note prompt opened"
+    );
 
     type_str(&mut app, "is this the right word");
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(app.annotations.len(), 1);
     let a = &app.annotations[0];
-    assert_eq!((a.start, a.end), (6, 13), "the whole word under the cursor is anchored");
+    assert_eq!(
+        (a.start, a.end),
+        (6, 13),
+        "the whole word under the cursor is anchored"
+    );
     assert_eq!(a.note, "is this the right word");
 }
 
@@ -70,7 +86,11 @@ fn anchor_slides_when_text_is_inserted_before_it() {
     app.on_idle(); // re-anchoring runs off the keystroke path
 
     let a = &app.annotations[0];
-    assert_eq!((a.start, a.end), (9, 16), "the note slid right by the inserted text");
+    assert_eq!(
+        (a.start, a.end),
+        (9, 16),
+        "the note slid right by the inserted text"
+    );
 }
 
 #[test]
@@ -85,7 +105,10 @@ fn deleting_the_anchored_text_drops_the_note() {
     }
     app.on_idle();
 
-    assert!(app.annotations.is_empty(), "a note whose text is gone is dropped");
+    assert!(
+        app.annotations.is_empty(),
+        "a note whose text is gone is dropped"
+    );
 }
 
 #[test]
@@ -100,7 +123,11 @@ fn review_list_jumps_to_and_deletes_annotations() {
     // Move to the second annotation and jump — the cursor lands on its start.
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::Enter));
-    assert_eq!(app.buffer.cursor_byte(), 6, "Enter jumps the cursor to the annotation");
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        6,
+        "Enter jumps the cursor to the annotation"
+    );
 
     // Reopen and delete the first; one remains.
     app.open_annotation_review();
@@ -117,18 +144,28 @@ fn annotations_can_be_created_and_anchored_in_the_continuous_view() {
 
     // Annotate "alpha" (buffer bytes 0..5) — the first loaded chapter.
     app.start_annotation_range(0, 5);
-    assert!(matches!(app.mode, Mode::Prompt(_)), "the note prompt opens in continuous view");
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the note prompt opens in continuous view"
+    );
     type_str(&mut app, "first note");
     app.on_key(key(KeyCode::Enter));
     assert_eq!(app.annotations.len(), 1);
-    assert_eq!(app.annotations[0].chapter, "c0.md", "tagged to the chapter that owns the span");
+    assert_eq!(
+        app.annotations[0].chapter, "c0.md",
+        "tagged to the chapter that owns the span"
+    );
 
     // Saving writes it to that chapter's side file, translated chapter-local.
     app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
     let reopened = Project::open(&dir).unwrap();
     let live = reopened.annotations_for("c0.md");
     assert_eq!(live.len(), 1);
-    assert_eq!((live[0].start, live[0].end), (0, 5), "stored chapter-local, not buffer-absolute");
+    assert_eq!(
+        (live[0].start, live[0].end),
+        (0, 5),
+        "stored chapter-local, not buffer-absolute"
+    );
 }
 
 #[test]
@@ -146,13 +183,21 @@ fn an_edit_re_anchors_a_later_chapters_note_in_the_continuous_view() {
     app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
     type_str(&mut app, "XYZ");
     app.on_idle();
-    assert_eq!(app.annotations[0].start, beta_start + 3, "the later note re-anchored");
+    assert_eq!(
+        app.annotations[0].start,
+        beta_start + 3,
+        "the later note re-anchored"
+    );
 
     // It still persists chapter-local (unshifted) to its own chapter on save.
     app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
     let reopened = Project::open(&dir).unwrap();
     let c1 = reopened.annotations_for("c1.md");
-    assert_eq!((c1[0].start, c1[0].end), (0, 4), "chapter-local offset unchanged by ch 0's edit");
+    assert_eq!(
+        (c1[0].start, c1[0].end),
+        (0, 4),
+        "chapter-local offset unchanged by ch 0's edit"
+    );
 }
 
 #[test]
@@ -165,13 +210,25 @@ fn undo_and_redo_move_annotations_with_the_text() {
     app.buffer.cursor = Cursor { line: 0, col: 0 };
     type_str(&mut app, "XYZ");
     app.on_idle();
-    assert_eq!((app.annotations[0].start, app.annotations[0].end), (9, 16), "slid right by the insert");
+    assert_eq!(
+        (app.annotations[0].start, app.annotations[0].end),
+        (9, 16),
+        "slid right by the insert"
+    );
 
     // Undo the insertion → the note returns to its original span (#370).
     app.on_key(ctrl('z'));
-    assert_eq!((app.annotations[0].start, app.annotations[0].end), (6, 13), "undo restores the anchor");
+    assert_eq!(
+        (app.annotations[0].start, app.annotations[0].end),
+        (6, 13),
+        "undo restores the anchor"
+    );
 
     // Redo → it follows the text forward again.
     app.on_key(ctrl('y'));
-    assert_eq!((app.annotations[0].start, app.annotations[0].end), (9, 16), "redo re-applies");
+    assert_eq!(
+        (app.annotations[0].start, app.annotations[0].end),
+        (9, 16),
+        "redo re-applies"
+    );
 }

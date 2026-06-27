@@ -33,7 +33,11 @@ fn voice_findings_open_the_overlay_and_name_the_character() {
     }));
     match &app.mode {
         Mode::Findings(f) => {
-            assert!(f.items[0].summary.contains("Mara"), "names the character: {}", f.items[0].summary);
+            assert!(
+                f.items[0].summary.contains("Mara"),
+                "names the character: {}",
+                f.items[0].summary
+            );
             assert!(f.items[0].summary.contains("dialogue"));
         }
         _ => panic!("expected the findings overlay"),
@@ -49,9 +53,15 @@ fn voice_pass_needs_the_character_bible() {
     app.ai.enabled = true;
     app.ai.api_key = Some("k".into());
     app.analyze_voice(); // no bible/characters yet
-    assert!(!app.ai_task.is_busy(), "nothing sent without voice profiles to ground on");
     assert!(
-        app.message.as_deref().unwrap_or("").contains("character pass first"),
+        !app.ai_task.is_busy(),
+        "nothing sent without voice profiles to ground on"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("character pass first"),
         "{:?}",
         app.message
     );
@@ -67,10 +77,21 @@ fn voice_pass_needs_voice_profiles_not_just_a_character_file() {
     // satisfy the precondition — the pass can't ground on it.
     let chars = dir.join("bible").join("characters");
     fs::create_dir_all(&chars).unwrap();
-    fs::write(chars.join("mara.md"), "name: Mara\n\n## Physical\n- green eyes\n").unwrap();
+    fs::write(
+        chars.join("mara.md"),
+        "name: Mara\n\n## Physical\n- green eyes\n",
+    )
+    .unwrap();
     app.analyze_voice();
     assert!(!app.ai_task.is_busy());
-    assert!(app.message.as_deref().unwrap_or("").contains("character pass first"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("character pass first"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -91,11 +112,20 @@ fn submission_writes_three_artifacts_and_summarizes() {
         blurb: "A locket. A secret. A reckoning.".into(),
         query: "Dear Agent, RED STATE EARTH is …".into(),
     }));
-    assert!(fs::read_to_string(dir.join("submission/synopsis.md")).unwrap().contains("confronts her brother"));
-    assert!(fs::read_to_string(dir.join("submission/blurb.md")).unwrap().contains("reckoning"));
-    assert!(fs::read_to_string(dir.join("submission/query.md")).unwrap().contains("Dear Agent"));
+    assert!(fs::read_to_string(dir.join("submission/synopsis.md"))
+        .unwrap()
+        .contains("confronts her brother"));
+    assert!(fs::read_to_string(dir.join("submission/blurb.md"))
+        .unwrap()
+        .contains("reckoning"));
+    assert!(fs::read_to_string(dir.join("submission/query.md"))
+        .unwrap()
+        .contains("Dear Agent"));
     assert!(app.overlay.is_some(), "summary overlay");
-    assert!(!matches!(app.mode, Mode::BibleReview(_)), "no conflicts on a fresh write");
+    assert!(
+        !matches!(app.mode, Mode::BibleReview(_)),
+        "no conflicts on a fresh write"
+    );
 }
 
 // --- Local analysis report --------------------------------------------------
@@ -113,7 +143,10 @@ fn ctrl_t_opens_the_analysis_report_with_a_row_per_chapter() {
         .join("\n");
     assert!(text.contains("Readability"), "{text}");
     assert!(text.contains("Sentence length"), "sentence section: {text}");
-    assert!(text.contains("One") && text.contains("Two"), "both chapters listed: {text}");
+    assert!(
+        text.contains("One") && text.contains("Two"),
+        "both chapters listed: {text}"
+    );
     assert!(text.contains("Whole manuscript"), "overall row: {text}");
 }
 
@@ -125,7 +158,10 @@ fn a_non_scroll_key_closes_the_analysis_report() {
     app.on_key(key(KeyCode::Down)); // scroll a bit first
     assert!(app.overlay_scroll() > 0);
     app.on_key(key(KeyCode::Char('x'))); // not a scroll key → close
-    assert!(app.overlay.is_none(), "a non-scroll key dismisses the report");
+    assert!(
+        app.overlay.is_none(),
+        "a non-scroll key dismisses the report"
+    );
     assert_eq!(app.overlay_scroll(), 0, "scroll resets on close");
 }
 
@@ -158,7 +194,11 @@ fn submission_never_touches_the_manuscript() {
         blurb: "B".into(),
         query: "Q".into(),
     }));
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
 
 // --- #236: marketing copy ---------------------------------------------------
@@ -168,15 +208,24 @@ fn marketing_writes_blurbs_and_taglines_off_manuscript() {
     let (mut app, dir) = two_chapter_app("marketing");
     let before = fs::read_to_string(dir.join("one.md")).unwrap();
     app.apply_marketing(Ok(ai::marketing::Marketing {
-        blurbs: vec!["A locket. A reckoning.".into(), "She came home to bury a secret.".into()],
+        blurbs: vec![
+            "A locket. A reckoning.".into(),
+            "She came home to bury a secret.".into(),
+        ],
         taglines: vec!["Some doors stay shut for a reason.".into()],
     }));
     let blurbs = fs::read_to_string(dir.join("marketing/blurbs.md")).unwrap();
     assert!(blurbs.contains("## Variant 1") && blurbs.contains("## Variant 2"));
     assert!(blurbs.contains("A reckoning"));
-    assert!(fs::read_to_string(dir.join("marketing/taglines.md")).unwrap().contains("- Some doors stay shut"));
+    assert!(fs::read_to_string(dir.join("marketing/taglines.md"))
+        .unwrap()
+        .contains("- Some doors stay shut"));
     assert!(app.overlay.is_some(), "summary overlay");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
 
 #[test]
@@ -187,7 +236,10 @@ fn marketing_with_no_taglines_writes_only_blurbs() {
         taglines: vec![],
     }));
     assert!(dir.join("marketing/blurbs.md").exists());
-    assert!(!dir.join("marketing/taglines.md").exists(), "no empty taglines file");
+    assert!(
+        !dir.join("marketing/taglines.md").exists(),
+        "no empty taglines file"
+    );
 }
 
 // --- #237: social posts -----------------------------------------------------
@@ -201,11 +253,23 @@ fn social_writes_a_file_per_platform_off_manuscript() {
         facebook: vec!["She came home to bury a secret, and dug up something worse.".into()],
         instagram: vec!["Some doors stay shut for a reason.\n\n#booklover #fantasy".into()],
     }));
-    assert!(fs::read_to_string(dir.join("marketing/social/x.md")).unwrap().contains("reckoning"));
-    assert!(fs::read_to_string(dir.join("marketing/social/facebook.md")).unwrap().contains("bury a secret"));
-    assert!(fs::read_to_string(dir.join("marketing/social/instagram.md")).unwrap().contains("#booklover"));
+    assert!(fs::read_to_string(dir.join("marketing/social/x.md"))
+        .unwrap()
+        .contains("reckoning"));
+    assert!(fs::read_to_string(dir.join("marketing/social/facebook.md"))
+        .unwrap()
+        .contains("bury a secret"));
+    assert!(
+        fs::read_to_string(dir.join("marketing/social/instagram.md"))
+            .unwrap()
+            .contains("#booklover")
+    );
     assert!(app.overlay.is_some(), "summary overlay");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
 
 #[test]
@@ -217,7 +281,10 @@ fn social_skips_a_platform_with_no_posts() {
         instagram: vec![],
     }));
     assert!(dir.join("marketing/social/x.md").exists());
-    assert!(!dir.join("marketing/social/facebook.md").exists(), "no empty facebook file");
+    assert!(
+        !dir.join("marketing/social/facebook.md").exists(),
+        "no empty facebook file"
+    );
     assert!(!dir.join("marketing/social/instagram.md").exists());
 }
 
@@ -238,11 +305,21 @@ fn ad_creative_writes_a_file_per_platform_off_manuscript() {
         meta: ad("She came home to bury it"),
         x: ad("Some doors stay shut"),
     }));
-    assert!(fs::read_to_string(dir.join("marketing/ads/amazon.md")).unwrap().contains("Unearth the secret"));
-    assert!(fs::read_to_string(dir.join("marketing/ads/meta.md")).unwrap().contains("## Suggested targeting"));
-    assert!(fs::read_to_string(dir.join("marketing/ads/x.md")).unwrap().contains("## Ad image"));
+    assert!(fs::read_to_string(dir.join("marketing/ads/amazon.md"))
+        .unwrap()
+        .contains("Unearth the secret"));
+    assert!(fs::read_to_string(dir.join("marketing/ads/meta.md"))
+        .unwrap()
+        .contains("## Suggested targeting"));
+    assert!(fs::read_to_string(dir.join("marketing/ads/x.md"))
+        .unwrap()
+        .contains("## Ad image"));
     assert!(app.overlay.is_some(), "summary overlay");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
 
 #[test]
@@ -252,6 +329,8 @@ fn ad_creative_picks_up_existing_marketing_copy() {
     fs::create_dir_all(&mk).unwrap();
     fs::write(mk.join("blurbs.md"), "---\ntitle: x\n---\n\n<!-- generated:start -->\nA locket and a lie.\n<!-- generated:end -->\n").unwrap();
     let ctx = app.marketing_copy_context();
-    assert!(ctx.contains("A locket and a lie"), "reads existing marketing copy: {ctx:?}");
+    assert!(
+        ctx.contains("A locket and a lie"),
+        "reads existing marketing copy: {ctx:?}"
+    );
 }
-

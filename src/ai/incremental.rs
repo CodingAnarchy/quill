@@ -143,9 +143,20 @@ impl State {
     /// Record what a tracker was just built from and persist the file (creating
     /// `bible/`). Best effort: a write failure is returned for the caller to
     /// surface, but never blocks the pass result that already succeeded.
-    pub fn record(root: &Path, tracker: &str, built: &str, chapters: Digests) -> std::io::Result<()> {
+    pub fn record(
+        root: &Path,
+        tracker: &str,
+        built: &str,
+        chapters: Digests,
+    ) -> std::io::Result<()> {
         let mut state = State::load(root);
-        state.trackers.insert(tracker.to_string(), PassState { built: built.to_string(), chapters });
+        state.trackers.insert(
+            tracker.to_string(),
+            PassState {
+                built: built.to_string(),
+                chapters,
+            },
+        );
         Self::save(root, &state)
     }
 
@@ -154,7 +165,12 @@ impl State {
     /// just folded in without forgetting what the earlier books were built from.
     /// (A book's deleted chapters leave a stale entry until a full rebuild; that's
     /// the series trade-off for not re-scanning every book.)
-    pub fn record_merge(root: &Path, tracker: &str, built: &str, chapters: Digests) -> std::io::Result<()> {
+    pub fn record_merge(
+        root: &Path,
+        tracker: &str,
+        built: &str,
+        chapters: Digests,
+    ) -> std::io::Result<()> {
         let mut state = State::load(root);
         let entry = state.trackers.entry(tracker.to_string()).or_default();
         entry.built = built.to_string();
@@ -177,7 +193,10 @@ mod tests {
     use super::*;
 
     fn digests(pairs: &[(&str, &str)]) -> Digests {
-        pairs.iter().map(|(f, d)| (f.to_string(), d.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(f, d)| (f.to_string(), d.to_string()))
+            .collect()
     }
 
     #[test]
@@ -188,11 +207,17 @@ mod tests {
         State::record(&dir, "characters", "d", digests(&[("b1/one.md", "a")])).unwrap();
         State::record_merge(&dir, "characters", "e", digests(&[("b2/one.md", "b")])).unwrap();
         let recorded = State::load(&dir).built_from("characters").unwrap().clone();
-        assert!(recorded.contains_key("b1/one.md") && recorded.contains_key("b2/one.md"), "{recorded:?}");
+        assert!(
+            recorded.contains_key("b1/one.md") && recorded.contains_key("b2/one.md"),
+            "{recorded:?}"
+        );
         // A plain record still replaces (single-book deletion handling, unchanged).
         State::record(&dir, "characters", "f", digests(&[("b1/one.md", "a")])).unwrap();
         let replaced = State::load(&dir).built_from("characters").unwrap().clone();
-        assert!(!replaced.contains_key("b2/one.md"), "record replaces: {replaced:?}");
+        assert!(
+            !replaced.contains_key("b2/one.md"),
+            "record replaces: {replaced:?}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -213,14 +238,20 @@ mod tests {
     fn one_changed_chapter_is_incremental() {
         let prior = digests(&[("one.md", "a"), ("two.md", "b")]);
         let cur = digests(&[("one.md", "a"), ("two.md", "B!")]); // two changed
-        assert_eq!(decide(Some(&prior), &cur, 5), Scope::Incremental(vec!["two.md".into()]));
+        assert_eq!(
+            decide(Some(&prior), &cur, 5),
+            Scope::Incremental(vec!["two.md".into()])
+        );
     }
 
     #[test]
     fn a_new_chapter_counts_as_changed() {
         let prior = digests(&[("one.md", "a")]);
         let cur = digests(&[("one.md", "a"), ("two.md", "b")]); // two added
-        assert_eq!(decide(Some(&prior), &cur, 5), Scope::Incremental(vec!["two.md".into()]));
+        assert_eq!(
+            decide(Some(&prior), &cur, 5),
+            Scope::Incremental(vec!["two.md".into()])
+        );
     }
 
     #[test]
@@ -228,7 +259,10 @@ mod tests {
         let prior = digests(&[("a", "1"), ("b", "2"), ("c", "3")]);
         let cur = digests(&[("a", "x"), ("b", "y"), ("c", "z")]); // 3 changed
         assert_eq!(decide(Some(&prior), &cur, 3), Scope::Full);
-        assert!(matches!(decide(Some(&prior), &cur, 4), Scope::Incremental(_)));
+        assert!(matches!(
+            decide(Some(&prior), &cur, 4),
+            Scope::Incremental(_)
+        ));
     }
 
     #[test]
@@ -246,9 +280,18 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         assert!(State::load(&root).built_from("characters").is_none());
-        State::record(&root, "characters", "2026-06-21", digests(&[("one.md", "a")])).unwrap();
+        State::record(
+            &root,
+            "characters",
+            "2026-06-21",
+            digests(&[("one.md", "a")]),
+        )
+        .unwrap();
         let state = State::load(&root);
-        assert_eq!(state.built_from("characters"), Some(&digests(&[("one.md", "a")])));
+        assert_eq!(
+            state.built_from("characters"),
+            Some(&digests(&[("one.md", "a")]))
+        );
         assert!(state.built_from("setting").is_none());
 
         std::fs::remove_dir_all(&root).ok();

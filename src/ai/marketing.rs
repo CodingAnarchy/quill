@@ -25,11 +25,18 @@ impl Marketing {
     /// Skips an artifact with no content so an empty round writes no empty file.
     pub fn artifacts(&self) -> Vec<(&'static str, &'static str, String)> {
         let blurbs = numbered_sections("Variant", &self.blurbs);
-        let taglines: String = self.taglines.iter().map(|t| format!("- {}\n", t.trim())).collect();
-        [("Back-cover blurbs", "blurbs.md", blurbs), ("Taglines", "taglines.md", taglines)]
-            .into_iter()
-            .filter(|(_, _, body)| !body.trim().is_empty())
-            .collect()
+        let taglines: String = self
+            .taglines
+            .iter()
+            .map(|t| format!("- {}\n", t.trim()))
+            .collect();
+        [
+            ("Back-cover blurbs", "blurbs.md", blurbs),
+            ("Taglines", "taglines.md", taglines),
+        ]
+        .into_iter()
+        .filter(|(_, _, body)| !body.trim().is_empty())
+        .collect()
     }
 }
 
@@ -44,7 +51,10 @@ rewrite of the author's prose. Return the blurbs and taglines as plain text.";
 /// The JSON Schema for a marketing-copy reply.
 pub fn schema() -> Value {
     super::object_schema(
-        vec![("blurbs", super::string_array()), ("taglines", super::string_array())],
+        vec![
+            ("blurbs", super::string_array()),
+            ("taglines", super::string_array()),
+        ],
         &["blurbs", "taglines"],
     )
 }
@@ -53,7 +63,13 @@ pub fn schema() -> Value {
 /// attached. Manuscript-only for now; the bible (names/stakes) could sharpen the
 /// copy later, but blurbs/taglines come mostly from the prose and tone (#104).
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Write the blurb variants and taglines as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Write the blurb variants and taglines as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured marketing-copy reply.
@@ -80,7 +96,10 @@ mod tests {
 
     #[test]
     fn artifacts_number_blurbs_and_bullet_taglines() {
-        let m = Marketing { blurbs: vec!["A hook.".into(), "Another.".into()], taglines: vec!["Run.".into()] };
+        let m = Marketing {
+            blurbs: vec!["A hook.".into(), "Another.".into()],
+            taglines: vec!["Run.".into()],
+        };
         let a = m.artifacts();
         assert_eq!(a.len(), 2);
         assert_eq!(a[0].1, "blurbs.md");
@@ -92,7 +111,10 @@ mod tests {
 
     #[test]
     fn artifacts_skips_an_empty_section() {
-        let m = Marketing { blurbs: vec!["only a blurb".into()], taglines: vec![] };
+        let m = Marketing {
+            blurbs: vec!["only a blurb".into()],
+            taglines: vec![],
+        };
         let a = m.artifacts();
         assert_eq!(a.len(), 1, "no taglines → no taglines file");
         assert_eq!(a[0].1, "blurbs.md");

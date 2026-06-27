@@ -15,10 +15,17 @@ pub(crate) type Header<'a> = (&'a str, &'a str);
 
 /// POST `body` as JSON to `url` with `headers`; returns the HTTP status and the
 /// parsed JSON response.
-pub(crate) fn post_json(url: &str, headers: &[Header], body: &Value) -> Result<(u16, Value), AiError> {
-    let mut res = with_headers(ureq::post(url).config().http_status_as_error(false).build(), headers)
-        .send_json(body)
-        .map_err(transport)?;
+pub(crate) fn post_json(
+    url: &str,
+    headers: &[Header],
+    body: &Value,
+) -> Result<(u16, Value), AiError> {
+    let mut res = with_headers(
+        ureq::post(url).config().http_status_as_error(false).build(),
+        headers,
+    )
+    .send_json(body)
+    .map_err(transport)?;
     let status = res.status().as_u16();
     let value = res.body_mut().read_json().map_err(malformed)?;
     Ok((status, value))
@@ -26,9 +33,12 @@ pub(crate) fn post_json(url: &str, headers: &[Header], body: &Value) -> Result<(
 
 /// GET `url` as JSON with `headers`; returns the HTTP status and the parsed body.
 pub(crate) fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> {
-    let mut res = with_headers(ureq::get(url).config().http_status_as_error(false).build(), headers)
-        .call()
-        .map_err(transport)?;
+    let mut res = with_headers(
+        ureq::get(url).config().http_status_as_error(false).build(),
+        headers,
+    )
+    .call()
+    .map_err(transport)?;
     let status = res.status().as_u16();
     let value = res.body_mut().read_json().map_err(malformed)?;
     Ok((status, value))
@@ -37,17 +47,23 @@ pub(crate) fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), Ai
 /// GET `url` as raw text with `headers` (e.g. JSONL batch results, not a JSON
 /// document).
 pub(crate) fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
-    with_headers(ureq::get(url).config().http_status_as_error(false).build(), headers)
-        .call()
-        .map_err(transport)?
-        .body_mut()
-        .read_to_string()
-        .map_err(malformed)
+    with_headers(
+        ureq::get(url).config().http_status_as_error(false).build(),
+        headers,
+    )
+    .call()
+    .map_err(transport)?
+    .body_mut()
+    .read_to_string()
+    .map_err(malformed)
 }
 
 /// Apply the auth/content headers to a request builder (generic over the body
 /// marker so it serves both POST and GET).
-fn with_headers<B>(mut req: ureq::RequestBuilder<B>, headers: &[Header]) -> ureq::RequestBuilder<B> {
+fn with_headers<B>(
+    mut req: ureq::RequestBuilder<B>,
+    headers: &[Header],
+) -> ureq::RequestBuilder<B> {
     for &(name, value) in headers {
         req = req.header(name, value);
     }
@@ -56,7 +72,10 @@ fn with_headers<B>(mut req: ureq::RequestBuilder<B>, headers: &[Header]) -> ureq
 
 /// A transport failure (the call never completed): no HTTP status to report.
 fn transport(e: ureq::Error) -> AiError {
-    AiError::Network { status: None, message: e.to_string() }
+    AiError::Network {
+        status: None,
+        message: e.to_string(),
+    }
 }
 
 /// A body we couldn't read or parse as expected.

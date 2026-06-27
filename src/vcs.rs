@@ -58,7 +58,8 @@ pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitMeta>, String> {
     if walk.push_head().is_err() {
         return Ok(Vec::new()); // unborn HEAD — no commits yet
     }
-    walk.set_sorting(git2::Sort::TIME).map_err(|e| e.to_string())?;
+    walk.set_sorting(git2::Sort::TIME)
+        .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for oid in walk.take(limit) {
         let oid = oid.map_err(|e| e.to_string())?;
@@ -105,7 +106,9 @@ impl Status {
 pub fn status(root: &Path) -> Result<Status, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
     let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
     let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
     let changed = statuses
         .iter()
@@ -155,7 +158,8 @@ pub fn restore(root: &Path, rel_path: &str) -> Result<bool, String> {
     }
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force().path(rel_path);
-    repo.checkout_head(Some(&mut checkout)).map_err(|e| format!("restore: {e}"))?;
+    repo.checkout_head(Some(&mut checkout))
+        .map_err(|e| format!("restore: {e}"))?;
     Ok(true)
 }
 
@@ -174,8 +178,12 @@ pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
         .map_err(|e| format!("signature: {e}"))?;
 
     let mut index = repo.index().map_err(|e| e.to_string())?;
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).map_err(|e| e.to_string())?;
-    index.update_all(["*"].iter(), None).map_err(|e| e.to_string())?; // stage deletions of tracked files
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .map_err(|e| e.to_string())?;
+    index
+        .update_all(["*"].iter(), None)
+        .map_err(|e| e.to_string())?; // stage deletions of tracked files
     index.write().map_err(|e| e.to_string())?;
     let tree_id = index.write_tree().map_err(|e| e.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
@@ -207,9 +215,11 @@ pub fn set_remote(root: &Path, url: &str) -> Result<(), String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
     // remote_set_url creates or updates; fall back to add for a brand-new remote.
     if repo.find_remote("origin").is_ok() {
-        repo.remote_set_url("origin", url).map_err(|e| format!("set remote: {e}"))?;
+        repo.remote_set_url("origin", url)
+            .map_err(|e| format!("set remote: {e}"))?;
     } else {
-        repo.remote("origin", url).map_err(|e| format!("add remote: {e}"))?;
+        repo.remote("origin", url)
+            .map_err(|e| format!("add remote: {e}"))?;
     }
     Ok(())
 }
@@ -229,7 +239,9 @@ pub fn remote_url(root: &Path) -> Option<String> {
 pub fn push(root: &Path) -> Result<String, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
     let branch = current_branch(&repo)?;
-    let mut remote = repo.find_remote("origin").map_err(|_| NO_REMOTE.to_string())?;
+    let mut remote = repo
+        .find_remote("origin")
+        .map_err(|_| NO_REMOTE.to_string())?;
 
     // A rejected ref (e.g. non-fast-forward) is reported through this callback,
     // not always as an error from push() — capture it so we never silently
@@ -248,7 +260,9 @@ pub fn push(root: &Path) -> Result<String, String> {
     opts.remote_callbacks(cbs);
 
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
-    remote.push(&[&refspec], Some(&mut opts)).map_err(friendly)?;
+    remote
+        .push(&[&refspec], Some(&mut opts))
+        .map_err(friendly)?;
 
     // A rejection that came back via the callback rather than as an error.
     if rejected.borrow_mut().take().is_some() {
@@ -264,17 +278,27 @@ pub fn push(root: &Path) -> Result<String, String> {
 pub fn pull(root: &Path) -> Result<String, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
     let branch = current_branch(&repo)?;
-    let mut remote = repo.find_remote("origin").map_err(|_| NO_REMOTE.to_string())?;
+    let mut remote = repo
+        .find_remote("origin")
+        .map_err(|_| NO_REMOTE.to_string())?;
 
     let mut cbs = git2::RemoteCallbacks::new();
     cbs.credentials(credentials);
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(cbs);
-    remote.fetch(&[&branch], Some(&mut opts), None).map_err(friendly)?;
+    remote
+        .fetch(&[&branch], Some(&mut opts), None)
+        .map_err(friendly)?;
 
-    let fetch_head = repo.find_reference("FETCH_HEAD").map_err(|e| e.to_string())?;
-    let fetched = repo.reference_to_annotated_commit(&fetch_head).map_err(|e| e.to_string())?;
-    let (analysis, _) = repo.merge_analysis(&[&fetched]).map_err(|e| e.to_string())?;
+    let fetch_head = repo
+        .find_reference("FETCH_HEAD")
+        .map_err(|e| e.to_string())?;
+    let fetched = repo
+        .reference_to_annotated_commit(&fetch_head)
+        .map_err(|e| e.to_string())?;
+    let (analysis, _) = repo
+        .merge_analysis(&[&fetched])
+        .map_err(|e| e.to_string())?;
 
     if analysis.is_up_to_date() {
         return Ok("Already up to date with the remote.".to_string());
@@ -287,15 +311,18 @@ pub fn pull(root: &Path) -> Result<String, String> {
     let refname = format!("refs/heads/{branch}");
     match repo.find_reference(&refname) {
         Ok(mut r) => {
-            r.set_target(fetched.id(), "pull: fast-forward").map_err(|e| e.to_string())?;
+            r.set_target(fetched.id(), "pull: fast-forward")
+                .map_err(|e| e.to_string())?;
         }
         Err(_) => {
             // Unborn branch (no local commits yet) — create it at the fetched commit.
-            repo.reference(&refname, fetched.id(), true, "pull: initial").map_err(|e| e.to_string())?;
+            repo.reference(&refname, fetched.id(), true, "pull: initial")
+                .map_err(|e| e.to_string())?;
         }
     }
     repo.set_head(&refname).map_err(|e| e.to_string())?;
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).map_err(|e| e.to_string())?;
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .map_err(|e| e.to_string())?;
     Ok("Pulled the latest changes from the remote.".to_string())
 }
 
@@ -309,8 +336,12 @@ const BEHIND_REMOTE: &str = "The remote has changes you don't — pull first, th
 /// The short name of the branch `HEAD` points at (e.g. `main`), or an error for a
 /// detached or unborn HEAD (nothing to push/pull).
 fn current_branch(repo: &git2::Repository) -> Result<String, String> {
-    let head = repo.head().map_err(|_| "No commits yet — commit before syncing.".to_string())?;
-    head.shorthand().map(str::to_string).ok_or_else(|| "Not on a branch.".to_string())
+    let head = repo
+        .head()
+        .map_err(|_| "No commits yet — commit before syncing.".to_string())?;
+    head.shorthand()
+        .map(str::to_string)
+        .ok_or_else(|| "Not on a branch.".to_string())
 }
 
 /// git2 credential callback: reuse whatever the author already has, rather than
@@ -336,7 +367,9 @@ fn credentials(
     if allowed.contains(Type::USERNAME) {
         return git2::Cred::username(username.unwrap_or("git"));
     }
-    Err(git2::Error::from_str("no supported authentication method available"))
+    Err(git2::Error::from_str(
+        "no supported authentication method available",
+    ))
 }
 
 /// A personal-access token from the environment, for HTTPS auth without a
@@ -352,7 +385,11 @@ fn token_from_env() -> Option<String> {
 /// cryptic message.
 fn friendly(e: git2::Error) -> String {
     let msg = e.message().to_lowercase();
-    if msg.contains("authentication") || msg.contains("401") || msg.contains("403") || msg.contains("credentials") {
+    if msg.contains("authentication")
+        || msg.contains("401")
+        || msg.contains("403")
+        || msg.contains("credentials")
+    {
         "Authentication failed — set up an SSH key, a credential helper, or a \
          QUILL_GIT_TOKEN for the remote."
             .to_string()
@@ -383,7 +420,10 @@ mod tests {
         assert!(is_repo(&dir), "a .git directory should exist");
         let ignore = fs::read_to_string(dir.join(".gitignore")).unwrap();
         assert!(ignore.contains("/.quill/") && ignore.contains("/unused/"));
-        assert!(ignore.contains("/bible/.state.toml"), "the AI scoping cache is ignored (#90)");
+        assert!(
+            ignore.contains("/bible/.state.toml"),
+            "the AI scoping cache is ignored (#90)"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -440,7 +480,11 @@ mod tests {
         fs::write(dir.join(".quill/history.jsonl"), "{}\n").unwrap();
         fs::create_dir_all(dir.join("unused")).unwrap();
         fs::write(dir.join("unused/old.md"), "# Old\n").unwrap();
-        assert_eq!(commit(&dir, "noise").unwrap(), None, "ignored paths aren't committed");
+        assert_eq!(
+            commit(&dir, "noise").unwrap(),
+            None,
+            "ignored paths aren't committed"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -450,10 +494,16 @@ mod tests {
         init(&dir).unwrap();
         assert!(remote_url(&dir).is_none(), "no remote on a fresh repo");
         set_remote(&dir, "https://example.com/a.git").unwrap();
-        assert_eq!(remote_url(&dir).as_deref(), Some("https://example.com/a.git"));
+        assert_eq!(
+            remote_url(&dir).as_deref(),
+            Some("https://example.com/a.git")
+        );
         // Reconfiguring just replaces the URL.
         set_remote(&dir, "https://example.com/b.git").unwrap();
-        assert_eq!(remote_url(&dir).as_deref(), Some("https://example.com/b.git"));
+        assert_eq!(
+            remote_url(&dir).as_deref(),
+            Some("https://example.com/b.git")
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -470,7 +520,10 @@ mod tests {
         fs::write(a.join("one.md"), "# One\n\nDraft.\n").unwrap();
         commit(&a, "first").unwrap();
         set_remote(&a, url).unwrap();
-        assert!(!push(&a).unwrap().is_empty(), "first push reports the branch");
+        assert!(
+            !push(&a).unwrap().is_empty(),
+            "first push reports the branch"
+        );
 
         // b is a second working copy (clone) — it has "first".
         let b = temp_dir("remote-b");
@@ -484,7 +537,9 @@ mod tests {
         push(&a).unwrap();
         let msg = pull(&b).unwrap();
         assert!(msg.contains("Pulled"), "{msg}");
-        assert!(fs::read_to_string(b.join("one.md")).unwrap().contains("Revised"));
+        assert!(fs::read_to_string(b.join("one.md"))
+            .unwrap()
+            .contains("Revised"));
         // Pulling again with nothing new is a no-op, not an error.
         assert!(pull(&b).unwrap().contains("up to date"));
 
@@ -522,7 +577,10 @@ mod tests {
         init(&dir).unwrap(); // second time is harmless
         assert!(is_repo(&dir));
         // The author's existing .gitignore is left untouched.
-        assert_eq!(fs::read_to_string(dir.join(".gitignore")).unwrap(), "# hand-tuned\n/custom/\n");
+        assert_eq!(
+            fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            "# hand-tuned\n/custom/\n"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

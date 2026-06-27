@@ -59,37 +59,66 @@ impl LocalImageBackend {
 
         let hub = Api::new().map_err(|e| internal(format!("hf-hub: {e}")))?;
         let fetch = |repo: &str, file: &str| -> Result<std::path::PathBuf, AiError> {
-            hub.model(repo.to_string()).get(file).map_err(|e| internal(format!("download {file}: {e}")))
+            hub.model(repo.to_string())
+                .get(file)
+                .map_err(|e| internal(format!("download {file}: {e}")))
         };
         let tokenizer_path = fetch(TOKENIZER_REPO, "tokenizer.json")?;
         let clip_path = fetch(SD_REPO, CLIP_WEIGHTS)?;
         let unet_path = fetch(SD_REPO, UNET_WEIGHTS)?;
         let vae_path = fetch(SD_REPO, VAE_WEIGHTS)?;
 
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| internal(e.to_string()))?;
+        let tokenizer =
+            Tokenizer::from_file(tokenizer_path).map_err(|e| internal(e.to_string()))?;
         let pad_id = pad_token(&tokenizer, &config)?;
-        let clip = stable_diffusion::build_clip_transformer(&config.clip, clip_path, &device, DType::F32)
+        let clip =
+            stable_diffusion::build_clip_transformer(&config.clip, clip_path, &device, DType::F32)
+                .map_err(weights)?;
+        let unet = config
+            .build_unet(unet_path, &device, 4, false, DType::F32)
             .map_err(weights)?;
-        let unet = config.build_unet(unet_path, &device, 4, false, DType::F32).map_err(weights)?;
-        let vae = config.build_vae(vae_path, &device, DType::F32).map_err(weights)?;
+        let vae = config
+            .build_vae(vae_path, &device, DType::F32)
+            .map_err(weights)?;
 
-        Ok(Self { device, config, clip, unet, vae, tokenizer, pad_id })
+        Ok(Self {
+            device,
+            config,
+            clip,
+            unet,
+            vae,
+            tokenizer,
+            pad_id,
+        })
     }
 
     /// The conditioned + unconditioned CLIP embeddings, stacked for classifier-free
     /// guidance: row 0 unconditioned (`""`), row 1 the prompt.
     fn text_embeddings(&self, prompt: &str) -> Result<Tensor, AiError> {
-        let uncond = self.clip.forward_with_mask(&self.tokens("")?, usize::MAX).map_err(weights)?;
-        let cond = self.clip.forward_with_mask(&self.tokens(prompt)?, usize::MAX).map_err(weights)?;
+        let uncond = self
+            .clip
+            .forward_with_mask(&self.tokens("")?, usize::MAX)
+            .map_err(weights)?;
+        let cond = self
+            .clip
+            .forward_with_mask(&self.tokens(prompt)?, usize::MAX)
+            .map_err(weights)?;
         Tensor::cat(&[&uncond, &cond], 0).map_err(weights)
     }
 
     /// Tokenize `text` to a `(1, max_position_embeddings)` id tensor, padded.
     fn tokens(&self, text: &str) -> Result<Tensor, AiError> {
-        let mut ids =
-            self.tokenizer.encode(text, true).map_err(|e| internal(e.to_string()))?.get_ids().to_vec();
+        let mut ids = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| internal(e.to_string()))?
+            .get_ids()
+            .to_vec();
         ids.resize(self.config.clip.max_position_embeddings, self.pad_id);
-        Tensor::new(ids.as_slice(), &self.device).map_err(weights)?.unsqueeze(0).map_err(weights)
+        Tensor::new(ids.as_slice(), &self.device)
+            .map_err(weights)?
+            .unsqueeze(0)
+            .map_err(weights)
     }
 }
 
@@ -109,11 +138,20 @@ impl ImageBackend for LocalImageBackend {
             // latents together, then push away from the unconditioned prediction.
             let input = Tensor::cat(&[&latents, &latents], 0).map_err(weights)?;
             let input = scheduler.scale_model_input(input, t).map_err(weights)?;
-            let noise = self.unet.forward(&input, t as f64, &text).map_err(weights)?;
+            let noise = self
+                .unet
+                .forward(&input, t as f64, &text)
+                .map_err(weights)?;
             let chunks = noise.chunk(2, 0).map_err(weights)?;
             let (uncond, cond) = (&chunks[0], &chunks[1]);
             let guided = uncond
-                .add(&cond.sub(uncond).map_err(weights)?.affine(GUIDANCE, 0.0).map_err(weights)?)
+                .add(
+                    &cond
+                        .sub(uncond)
+                        .map_err(weights)?
+                        .affine(GUIDANCE, 0.0)
+                        .map_err(weights)?,
+                )
                 .map_err(weights)?;
             latents = scheduler.step(&guided, t, &latents).map_err(weights)?;
         }
@@ -135,7 +173,10 @@ impl ImageBackend for LocalImageBackend {
             .squeeze(0)
             .map_err(weights)?;
 
-        Ok(GeneratedImage { bytes: encode_png(&image)?, ext: "png".into() })
+        Ok(GeneratedImage {
+            bytes: encode_png(&image)?,
+            ext: "png".into(),
+        })
     }
 }
 
@@ -143,13 +184,20 @@ impl ImageBackend for LocalImageBackend {
 fn pad_token(tokenizer: &Tokenizer, config: &StableDiffusionConfig) -> Result<u32, AiError> {
     let vocab = tokenizer.get_vocab(true);
     let token = config.clip.pad_with.as_deref().unwrap_or("<|endoftext|>");
-    vocab.get(token).copied().ok_or_else(|| internal(format!("tokenizer has no '{token}' token")))
+    vocab
+        .get(token)
+        .copied()
+        .ok_or_else(|| internal(format!("tokenizer has no '{token}' token")))
 }
 
 /// Encode a `(3, H, W)` u8 tensor to PNG bytes.
 fn encode_png(image: &Tensor) -> Result<Vec<u8>, AiError> {
     let (_c, h, w) = image.dims3().map_err(weights)?;
-    let pixels = image.permute((1, 2, 0)).map_err(weights)?.flatten_all().map_err(weights)?;
+    let pixels = image
+        .permute((1, 2, 0))
+        .map_err(weights)?
+        .flatten_all()
+        .map_err(weights)?;
     let pixels = pixels.to_vec1::<u8>().map_err(weights)?;
     let mut bytes = Vec::new();
     image::codecs::png::PngEncoder::new(&mut bytes)
@@ -177,7 +225,10 @@ mod tests {
     fn generates_an_image() {
         let backend = LocalImageBackend::load().expect("load SD weights");
         let img = backend
-            .generate(&ImageRequest { prompt: "a lighthouse at dawn".into(), model: String::new() })
+            .generate(&ImageRequest {
+                prompt: "a lighthouse at dawn".into(),
+                model: String::new(),
+            })
             .expect("generate");
         assert_eq!(img.ext, "png");
         assert!(!img.bytes.is_empty());

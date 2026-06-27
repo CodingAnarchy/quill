@@ -63,7 +63,10 @@ mod tests {
     }
 
     fn sample() -> Recovery {
-        Recovery { chapter_file: "one.md".into(), body: "unsaved prose\n".into() }
+        Recovery {
+            chapter_file: "one.md".into(),
+            body: "unsaved prose\n".into(),
+        }
     }
 
     #[test]

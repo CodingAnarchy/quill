@@ -1,29 +1,28 @@
 //! Top-level application state and the key handling that drives editing. The
 //! editor-mode types live in [`crate::mode`].
 
-use std::collections::HashMap;
 use crate::theme;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::setting::{self, Setting};
+use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::analysis;
 use crate::buffer::{self, Buffer, TextObject};
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleReview, Command, Finding, Findings, GitAction,
-    MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
+    BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode, Overlay,
+    Palette, PaletteItem, Pending, RefFiles, VimState,
 };
 use crate::project::{Manifest, Project};
 use crate::recovery;
@@ -34,21 +33,21 @@ use crate::typography;
 mod annotations;
 mod assist;
 mod assistant;
-mod editing;
-mod imports;
-mod nav;
-mod models;
 mod bible_review;
-mod palette;
-mod worker;
+mod editing;
 mod exporting;
 mod images;
-mod search;
+mod imports;
 mod meta;
+mod models;
+mod nav;
+mod palette;
 mod panes;
 mod reports;
+mod search;
 pub(crate) mod task; // the generic background-task runner, reused by the assistant loop (#306)
 mod vcs_actions;
+mod worker;
 mod workflows;
 
 mod chapters;
@@ -65,16 +64,15 @@ mod tree;
 mod vim;
 mod wizard;
 
-use panes::{OtherPane, Split};
-pub(crate) use panes::{SplitContent, SplitDir};
+pub(crate) use assistant::{Assistant, Entry, Speaker};
 #[cfg(test)]
 pub(crate) use panes::SplitView; // the type name is only spelled in tests
-pub(crate) use assistant::{Assistant, Entry, Speaker};
+use panes::{OtherPane, Split};
+pub(crate) use panes::{SplitContent, SplitDir};
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 
 const ONLY_CHAPTER_MSG: &str = "Can't delete the only chapter";
-
 
 pub struct App {
     pub buffer: Buffer,
@@ -404,7 +402,10 @@ impl App {
             warnings.push(format!("Vim keymap ignored: {}", key_errors.join("; ")));
         }
         if !trigger_errors.is_empty() {
-            warnings.push(format!("Workflow triggers ignored: {}", trigger_errors.join("; ")));
+            warnings.push(format!(
+                "Workflow triggers ignored: {}",
+                trigger_errors.join("; ")
+            ));
         }
         if !theme_warnings.is_empty() {
             warnings.push(theme_warnings.join("; "));
@@ -417,7 +418,6 @@ impl App {
         }
         app
     }
-
 
     /// The buffer the author is currently editing: the continuous-view buffer
     /// when that view is active, otherwise the single active chapter. The
@@ -485,7 +485,10 @@ impl App {
         }
         let cur = self.edit_buffer().cursor_byte();
         let target = if dir >= 0 {
-            self.spell_flags.iter().find(|&&(s, _)| s > cur).map_or(self.spell_flags[0].0, |&(s, _)| s)
+            self.spell_flags
+                .iter()
+                .find(|&&(s, _)| s > cur)
+                .map_or(self.spell_flags[0].0, |&(s, _)| s)
         } else {
             self.spell_flags
                 .iter()
@@ -524,7 +527,6 @@ impl App {
             Err(err) => self.message = Some(format!("Couldn't write the dictionary: {err}")),
         }
     }
-
 
     /// Handle a terminal event, dispatching key presses to the active mode.
     /// Non-key events and key releases/repeats are ignored.
@@ -577,7 +579,8 @@ impl App {
         // request, submitting, scrolling, cancel/unfocus on Esc. Ctrl-w still
         // starts a window command (switch focus, close the pane).
         if self.assistant_pane_focused() {
-            let ctrl_w = matches!(key.code, KeyCode::Char('w')) && key.modifiers.contains(KeyModifiers::CONTROL);
+            let ctrl_w = matches!(key.code, KeyCode::Char('w'))
+                && key.modifiers.contains(KeyModifiers::CONTROL);
             if ctrl_w {
                 self.window_pending = true;
             } else {
@@ -597,7 +600,8 @@ impl App {
             None
         };
         if let Some(handle) = surface_key {
-            let ctrl_w = matches!(key.code, KeyCode::Char('w')) && key.modifiers.contains(KeyModifiers::CONTROL);
+            let ctrl_w = matches!(key.code, KeyCode::Char('w'))
+                && key.modifiers.contains(KeyModifiers::CONTROL);
             if ctrl_w {
                 self.window_pending = true;
             } else {
@@ -639,21 +643,15 @@ impl App {
         }
     }
 
-
     // --- Crash recovery (#263) --------------------------------------------
-
 
     // --- Project browser & switching (#270) -------------------------------
 
-
     // --- New project (#273) -----------------------------------------------
-
 
     // --- New-project setup wizard (#282) ----------------------------------
 
-
     // --- Filesystem navigator (#271) --------------------------------------
-
 
     // --- Chapter structure editing ----------------------------------------
     //
@@ -661,22 +659,22 @@ impl App {
     // select. The active chapter is tracked by file identity, so insert/rename/
     // move need no active fixup; only delete (of the active chapter) reloads.
 
-
     // --- Chapter metadata (front matter) ----------------------------------
-
 
     /// Quit, or — when there are unsaved changes — open the confirm prompt first.
     /// Shared by Ctrl-Q and `:q`.
     fn request_quit(&mut self) {
         if self.edit_dirty() {
-            self.open_prompt(Pending::Quit, "Unsaved changes — quit anyway? (y/N)", "", None);
+            self.open_prompt(
+                Pending::Quit,
+                "Unsaved changes — quit anyway? (y/N)",
+                "",
+                None,
+            );
         } else {
             self.should_quit = true;
         }
     }
-
-
-
 
     /// The editor's `Ctrl-` shortcuts, shared by Insert and Vim Normal mode so
     /// they keep working in both. A `Ctrl-` combo never produces text in either
@@ -779,8 +777,6 @@ impl App {
             _ => {}
         }
     }
-
-
 }
 
 /// The remappable Vim commands (#208): each named action and its default key.
@@ -856,7 +852,6 @@ fn build_keymap(keys: &HashMap<String, String>) -> (HashMap<char, char>, Vec<Str
     (map, errors)
 }
 
-
 /// The new scroll offset for a scroll key over a `cur` position within
 /// `[0, max]`, paging by `page` lines — or `None` if `code` isn't a scroll key.
 /// Shared by the full-screen overlay and the docked surface pane (#164).
@@ -873,7 +868,6 @@ fn scroll_target(code: KeyCode, ctrl: bool, cur: u16, max: u16, page: u16) -> Op
     };
     Some(target.clamp(0, max) as u16)
 }
-
 
 #[cfg(test)]
 mod tests;

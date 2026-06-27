@@ -25,7 +25,11 @@ pub(crate) struct Sprint {
 impl Sprint {
     /// Begin a sprint of `minutes`, baselining the current word count.
     fn new(minutes: u64, baseline_words: usize) -> Self {
-        Self { start: Instant::now(), duration: Duration::from_secs(minutes * 60), baseline_words }
+        Self {
+            start: Instant::now(),
+            duration: Duration::from_secs(minutes * 60),
+            baseline_words,
+        }
     }
 
     /// Time left before the sprint ends (zero once it's over).
@@ -53,7 +57,12 @@ impl Sprint {
 impl App {
     /// Begin a writing sprint (#299): ask how many minutes to run.
     pub(crate) fn start_sprint(&mut self) {
-        self.open_prompt(Pending::SprintDuration, "Writing sprint — minutes:", "25", None);
+        self.open_prompt(
+            Pending::SprintDuration,
+            "Writing sprint — minutes:",
+            "25",
+            None,
+        );
     }
 
     /// Start the sprint once the author has chosen a length. A blank or unparseable
@@ -146,7 +155,11 @@ mod tests {
     #[test]
     fn a_back_dated_start_is_finished_and_has_no_time_left() {
         // Start a 30s sprint a full minute ago: it's over.
-        let s = Sprint { start: Instant::now() - Duration::from_secs(60), duration: Duration::from_secs(30), baseline_words: 0 };
+        let s = Sprint {
+            start: Instant::now() - Duration::from_secs(60),
+            duration: Duration::from_secs(30),
+            baseline_words: 0,
+        };
         assert!(s.finished());
         assert_eq!(s.remaining(), Duration::ZERO);
     }
@@ -155,7 +168,10 @@ mod tests {
     fn a_fresh_sprint_is_running_with_time_left() {
         let s = Sprint::new(25, 0);
         assert!(!s.finished());
-        assert!(s.remaining() > Duration::from_secs(24 * 60), "≈25 min left just after starting");
+        assert!(
+            s.remaining() > Duration::from_secs(24 * 60),
+            "≈25 min left just after starting"
+        );
         assert!(s.remaining() <= Duration::from_secs(25 * 60));
     }
 
@@ -177,7 +193,10 @@ mod tests {
 
     #[test]
     fn the_status_segment_is_compact() {
-        assert_eq!(status_segment(Duration::from_secs(754), 312), "⏱ 12:34 · +312w");
+        assert_eq!(
+            status_segment(Duration::from_secs(754), 312),
+            "⏱ 12:34 · +312w"
+        );
         assert_eq!(status_segment(Duration::from_secs(5), -7), "⏱ 0:05 · -7w");
     }
 }

@@ -12,6 +12,8 @@ pub mod ad_creative;
 pub mod bible;
 pub mod brainstorm;
 pub mod character;
+mod claude;
+pub mod config_gen;
 #[cfg(feature = "local")] // constrained decoding only drives the local backend (#406)
 pub mod constrain;
 pub mod continuity;
@@ -23,10 +25,10 @@ pub mod image;
 pub mod import;
 pub mod incremental;
 #[cfg(feature = "local")]
+pub mod local;
+#[cfg(feature = "local")]
 pub mod local_image;
 pub mod marketing;
-#[cfg(feature = "local")]
-pub mod local;
 pub mod model_select;
 pub mod naming;
 pub mod router;
@@ -36,13 +38,11 @@ pub mod setting;
 pub mod social;
 pub mod style;
 pub mod submission;
-pub mod config_gen;
 pub mod thesaurus;
 pub mod tool_loop;
 pub mod tools;
 pub mod voice;
 pub mod workflow_gen;
-mod claude;
 
 pub use character::Character;
 pub use claude::ClaudeBackend;
@@ -53,8 +53,8 @@ pub use setting::Setting;
 pub use submission::Submission;
 // `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
-use std::fmt;
 use crate::theme;
+use std::fmt;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -231,7 +231,10 @@ pub enum AiError {
     /// the time limit). `status` is `Some(code)` when the server responded with
     /// an HTTP error, `None` when there's no status to report (a failed
     /// connection, or a remote operation that never produced one).
-    Network { status: Option<u16>, message: String },
+    Network {
+        status: Option<u16>,
+        message: String,
+    },
     /// The server responded, but the body wasn't the shape we expected — an
     /// unreadable body, a missing field, or an empty completion.
     ApiMalformed(String),
@@ -247,10 +250,16 @@ impl fmt::Display for AiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AiError::NotConfigured(m) => write!(f, "{m}"),
-            AiError::Network { status: Some(code), message } => {
+            AiError::Network {
+                status: Some(code),
+                message,
+            } => {
                 write!(f, "network error ({code}): {message}")
             }
-            AiError::Network { status: None, message } => write!(f, "network error: {message}"),
+            AiError::Network {
+                status: None,
+                message,
+            } => write!(f, "network error: {message}"),
             AiError::ApiMalformed(m) => write!(f, "malformed API response: {m}"),
             AiError::ModelNonCompliance(m) => write!(f, "model did not comply: {m}"),
             AiError::Internal(m) => write!(f, "internal error: {m}"),
@@ -294,7 +303,10 @@ pub(crate) fn manuscript_request(
 /// Deserialize a structured AI reply, wrapping a parse failure in a uniform
 /// `bad {kind} JSON` message (#313) so every feature reports it the same way. A
 /// failure here means the model didn't honor the requested schema (#319).
-pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(text: &str, kind: &str) -> Result<T, AiError> {
+pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
+    text: &str,
+    kind: &str,
+) -> Result<T, AiError> {
     serde_json::from_str(text)
         .map_err(|e| AiError::ModelNonCompliance(format!("bad {kind} JSON: {e}")))
 }
@@ -319,7 +331,10 @@ pub(crate) fn array_of(item: serde_json::Value) -> serde_json::Value {
 /// false }` envelope every feature schema shares (#429). `required` is omitted
 /// when empty, so an all-optional object matches a hand-written one that left the
 /// key out (constrained decoding is unchanged).
-pub(crate) fn object_schema(props: Vec<(&str, serde_json::Value)>, required: &[&str]) -> serde_json::Value {
+pub(crate) fn object_schema(
+    props: Vec<(&str, serde_json::Value)>,
+    required: &[&str],
+) -> serde_json::Value {
     let properties: serde_json::Map<String, serde_json::Value> =
         props.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     let mut schema = serde_json::json!({
@@ -337,7 +352,11 @@ pub(crate) fn object_schema(props: Vec<(&str, serde_json::Value)>, required: &[&
 /// (#429), e.g. `kind`/`detail` or `rule`/`violation`. All three keys required.
 pub(crate) fn chapters_finding(field_a: &str, field_b: &str) -> serde_json::Value {
     object_schema(
-        vec![(field_a, string_field()), (field_b, string_field()), ("chapters", string_array())],
+        vec![
+            (field_a, string_field()),
+            (field_b, string_field()),
+            ("chapters", string_array()),
+        ],
         &[field_a, field_b, "chapters"],
     )
 }
@@ -484,7 +503,11 @@ pub fn build_qa_request(manuscript: String, question: &str, model: &str) -> Requ
 /// Render a completion as overlay lines: the answer, then a dimmed usage line.
 /// Long lines are wrapped by the renderer (the overlay enables wrapping).
 pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
-    let mut out: Vec<Line> = resp.text.lines().map(|l| Line::raw(l.to_string())).collect();
+    let mut out: Vec<Line> = resp
+        .text
+        .lines()
+        .map(|l| Line::raw(l.to_string()))
+        .collect();
     if out.is_empty() {
         out.push(Line::raw("(no answer)"));
     }
@@ -514,12 +537,21 @@ mod tests {
 
     #[test]
     fn object_schema_builds_the_envelope() {
-        let s = object_schema(vec![("name", string_field()), ("tags", string_array())], &["name"]);
+        let s = object_schema(
+            vec![("name", string_field()), ("tags", string_array())],
+            &["name"],
+        );
         assert_eq!(s["type"], "object");
         assert_eq!(s["additionalProperties"], false);
         assert_eq!(s["required"], serde_json::json!(["name"]));
-        assert_eq!(s["properties"]["name"], serde_json::json!({ "type": "string" }));
-        assert_eq!(s["properties"]["tags"], serde_json::json!({ "type": "array", "items": { "type": "string" } }));
+        assert_eq!(
+            s["properties"]["name"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert_eq!(
+            s["properties"]["tags"],
+            serde_json::json!({ "type": "array", "items": { "type": "string" } })
+        );
     }
 
     #[test]
@@ -533,10 +565,22 @@ mod tests {
     #[test]
     fn chapters_finding_is_two_strings_plus_chapters() {
         let f = chapters_finding("kind", "detail");
-        assert_eq!(f["required"], serde_json::json!(["kind", "detail", "chapters"]));
-        assert_eq!(f["properties"]["kind"], serde_json::json!({ "type": "string" }));
-        assert_eq!(f["properties"]["detail"], serde_json::json!({ "type": "string" }));
-        assert_eq!(f["properties"]["chapters"], serde_json::json!({ "type": "array", "items": { "type": "string" } }));
+        assert_eq!(
+            f["required"],
+            serde_json::json!(["kind", "detail", "chapters"])
+        );
+        assert_eq!(
+            f["properties"]["kind"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert_eq!(
+            f["properties"]["detail"],
+            serde_json::json!({ "type": "string" })
+        );
+        assert_eq!(
+            f["properties"]["chapters"],
+            serde_json::json!({ "type": "array", "items": { "type": "string" } })
+        );
         assert_eq!(f["additionalProperties"], false);
     }
 
@@ -550,9 +594,10 @@ mod tests {
 
     #[test]
     fn settings_parse_from_config_toml() {
-        let cfg: ConfigFile =
-            toml::from_str("[ai]\nenabled = true\nmodel = \"claude-haiku-4-5\"\napi_key = \"sk-x\"\n")
-                .unwrap();
+        let cfg: ConfigFile = toml::from_str(
+            "[ai]\nenabled = true\nmodel = \"claude-haiku-4-5\"\napi_key = \"sk-x\"\n",
+        )
+        .unwrap();
         assert!(cfg.ai.enabled);
         assert_eq!(cfg.ai.model, "claude-haiku-4-5");
         assert_eq!(cfg.ai.resolved_key(), Some("sk-x"));
@@ -561,7 +606,10 @@ mod tests {
 
     #[test]
     fn check_ready_reports_why_not() {
-        let mut s = Settings { enabled: true, ..Settings::default() };
+        let mut s = Settings {
+            enabled: true,
+            ..Settings::default()
+        };
         s.api_key = Some("k".into());
         s.check_ready().unwrap(); // Claude + key → ready
         s.api_key = None;
@@ -571,27 +619,43 @@ mod tests {
     #[test]
     fn local_backend_is_ready_without_a_key_and_offline_forces_it() {
         // Local needs no key.
-        let s = Settings { enabled: true, backend: BackendKind::Local, ..Settings::default() };
+        let s = Settings {
+            enabled: true,
+            backend: BackendKind::Local,
+            ..Settings::default()
+        };
         assert_eq!(s.backend(), BackendKind::Local);
         s.check_ready().unwrap();
         // Offline forces local even with backend = claude and no key.
-        let s = Settings { enabled: true, offline: true, ..Settings::default() };
+        let s = Settings {
+            enabled: true,
+            offline: true,
+            ..Settings::default()
+        };
         assert_eq!(s.backend(), BackendKind::Local);
         s.check_ready().unwrap();
         // Disabled is never ready, regardless of backend.
-        let s = Settings { backend: BackendKind::Local, ..Settings::default() };
+        let s = Settings {
+            backend: BackendKind::Local,
+            ..Settings::default()
+        };
         assert!(s.check_ready().is_err());
     }
 
     #[test]
     fn backend_parses_from_config() {
-        let cfg: ConfigFile = toml::from_str("[ai]\nenabled = true\nbackend = \"local\"\n").unwrap();
+        let cfg: ConfigFile =
+            toml::from_str("[ai]\nenabled = true\nbackend = \"local\"\n").unwrap();
         assert_eq!(cfg.ai.backend, BackendKind::Local);
     }
 
     #[test]
     fn build_qa_request_carries_manuscript_and_question() {
-        let req = build_qa_request("# One\n\nThe locket gleamed.".into(), "where is the locket?", "claude-opus-4-8");
+        let req = build_qa_request(
+            "# One\n\nThe locket gleamed.".into(),
+            "where is the locket?",
+            "claude-opus-4-8",
+        );
         assert!(req.cached_context.contains("locket gleamed"));
         assert_eq!(req.user, "where is the locket?");
         assert_eq!(req.model, "claude-opus-4-8");
@@ -602,12 +666,21 @@ mod tests {
     fn answer_to_lines_renders_answer_and_usage() {
         let resp = Response {
             text: "Chapter One introduces the locket.".into(),
-            usage: Usage { input_tokens: 1200, output_tokens: 30, cache_read_tokens: 1000 },
+            usage: Usage {
+                input_tokens: 1200,
+                output_tokens: 30,
+                cache_read_tokens: 1000,
+            },
         };
         let lines = answer_to_lines(&resp);
         let text: String = lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("introduces the locket"));

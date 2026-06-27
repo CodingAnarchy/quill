@@ -14,7 +14,9 @@
 #[cfg(feature = "local")]
 pub fn best_device() -> candle_core::Device {
     use candle_core::Device;
-    Device::new_metal(0).or_else(|_| Device::new_cuda(0)).unwrap_or(Device::Cpu)
+    Device::new_metal(0)
+        .or_else(|_| Device::new_cuda(0))
+        .unwrap_or(Device::Cpu)
 }
 
 /// Whether the machine has a GPU accelerator candle can use, or is CPU-only.
@@ -61,15 +63,69 @@ pub const STANDARD_CONTEXT_TOKENS: u32 = 32_768;
 /// Update as new Qwen releases land. (The catalog is vetted for download/load in
 /// #379.)
 pub const MODELS: &[Model] = &[
-    Model { params: "0.5B", gguf_repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF", gguf_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-0.5B-Instruct", size_gb: 0.4, min_ram_gb: 3, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Tiny — instant, for quick lookups" },
-    Model { params: "1.5B", gguf_repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF", gguf_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-1.5B-Instruct", size_gb: 1.0, min_ram_gb: 6, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Small — fast, for light passes" },
-    Model { params: "3B", gguf_repo: "Qwen/Qwen2.5-3B-Instruct-GGUF", gguf_file: "qwen2.5-3b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-3B-Instruct", size_gb: 2.0, min_ram_gb: 12, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Compact — a balance for modest machines" },
-    Model { params: "7B", gguf_repo: "Qwen/Qwen2.5-7B-Instruct-GGUF", gguf_file: "qwen2.5-7b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct", size_gb: 4.7, min_ram_gb: 24, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Capable — solid quality at 32k context" },
+    Model {
+        params: "0.5B",
+        gguf_repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        gguf_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        tokenizer_repo: "Qwen/Qwen2.5-0.5B-Instruct",
+        size_gb: 0.4,
+        min_ram_gb: 3,
+        context_tokens: STANDARD_CONTEXT_TOKENS,
+        description: "Tiny — instant, for quick lookups",
+    },
+    Model {
+        params: "1.5B",
+        gguf_repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+        gguf_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        tokenizer_repo: "Qwen/Qwen2.5-1.5B-Instruct",
+        size_gb: 1.0,
+        min_ram_gb: 6,
+        context_tokens: STANDARD_CONTEXT_TOKENS,
+        description: "Small — fast, for light passes",
+    },
+    Model {
+        params: "3B",
+        gguf_repo: "Qwen/Qwen2.5-3B-Instruct-GGUF",
+        gguf_file: "qwen2.5-3b-instruct-q4_k_m.gguf",
+        tokenizer_repo: "Qwen/Qwen2.5-3B-Instruct",
+        size_gb: 2.0,
+        min_ram_gb: 12,
+        context_tokens: STANDARD_CONTEXT_TOKENS,
+        description: "Compact — a balance for modest machines",
+    },
+    Model {
+        params: "7B",
+        gguf_repo: "Qwen/Qwen2.5-7B-Instruct-GGUF",
+        gguf_file: "qwen2.5-7b-instruct-q4_k_m.gguf",
+        tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct",
+        size_gb: 4.7,
+        min_ram_gb: 24,
+        context_tokens: STANDARD_CONTEXT_TOKENS,
+        description: "Capable — solid quality at 32k context",
+    },
     // Extended-context (#378): a ~1M-token window in the 7B footprint, for
     // whole-manuscript / series passes on-device. Long context is memory-hungry
     // (the KV cache), hence the higher RAM floor than the standard 7B.
-    Model { params: "7B-1M", gguf_repo: "bartowski/Qwen2.5-7B-Instruct-1M-GGUF", gguf_file: "Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf", tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct-1M", size_gb: 4.7, min_ram_gb: 32, context_tokens: 1_010_000, description: "Long context — whole-book passes (~1M tokens)" },
-    Model { params: "14B", gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF", gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf", tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct", size_gb: 9.0, min_ram_gb: 48, context_tokens: STANDARD_CONTEXT_TOKENS, description: "Largest — best quality at 32k context" },
+    Model {
+        params: "7B-1M",
+        gguf_repo: "bartowski/Qwen2.5-7B-Instruct-1M-GGUF",
+        gguf_file: "Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf",
+        tokenizer_repo: "Qwen/Qwen2.5-7B-Instruct-1M",
+        size_gb: 4.7,
+        min_ram_gb: 32,
+        context_tokens: 1_010_000,
+        description: "Long context — whole-book passes (~1M tokens)",
+    },
+    Model {
+        params: "14B",
+        gguf_repo: "Qwen/Qwen2.5-14B-Instruct-GGUF",
+        gguf_file: "qwen2.5-14b-instruct-q4_k_m.gguf",
+        tokenizer_repo: "Qwen/Qwen2.5-14B-Instruct",
+        size_gb: 9.0,
+        min_ram_gb: 48,
+        context_tokens: STANDARD_CONTEXT_TOKENS,
+        description: "Largest — best quality at 32k context",
+    },
 ];
 
 impl Model {
@@ -99,7 +155,10 @@ pub fn by_id(id: &str) -> Option<&'static Model> {
 /// ids are dropped. Empty when none are configured — the caller then falls back
 /// to the single [`recommend`]ed model.
 pub fn available(ids: &[String]) -> Vec<&'static Model> {
-    MODELS.iter().filter(|m| ids.iter().any(|id| id == m.id())).collect()
+    MODELS
+        .iter()
+        .filter(|m| ids.iter().any(|id| id == m.id()))
+        .collect()
 }
 
 /// The context window that bounds on-device routing for the configured set
@@ -126,7 +185,10 @@ const SMALL_REQUEST_TOKENS: u32 = 2_000;
 /// it to the cloud. This is what lets a long-context model take a whole-book pass
 /// the standard ones can't.
 pub fn pick_for(input_tokens: u32, available: &[&'static Model]) -> Option<&'static Model> {
-    let mut fits = available.iter().copied().filter(|m| m.context_tokens >= input_tokens);
+    let mut fits = available
+        .iter()
+        .copied()
+        .filter(|m| m.context_tokens >= input_tokens);
     if input_tokens <= SMALL_REQUEST_TOKENS {
         fits.next()
     } else {
@@ -182,7 +244,10 @@ pub fn recommend(ram_gb: u32, accel: Accel) -> Recommendation {
             MODELS[0].min_ram_gb,
         ),
     };
-    Recommendation { model: choice, reasoning }
+    Recommendation {
+        model: choice,
+        reasoning,
+    }
 }
 
 #[cfg_attr(not(feature = "local"), allow(dead_code))]
@@ -218,14 +283,18 @@ mod tests {
     #[test]
     fn too_small_machines_get_no_recommendation() {
         assert_eq!(pick(2, Accel::Gpu), None);
-        assert!(recommend(2, Accel::Gpu).reasoning.contains("isn't advisable"));
+        assert!(recommend(2, Accel::Gpu)
+            .reasoning
+            .contains("isn't advisable"));
     }
 
     #[test]
     fn cpu_only_is_capped_even_with_lots_of_ram() {
         // 64 GB but CPU-only → capped at 3B, not 14B.
         assert_eq!(pick(64, Accel::Cpu), Some("3B"));
-        assert!(recommend(64, Accel::Cpu).reasoning.contains("capped for CPU"));
+        assert!(recommend(64, Accel::Cpu)
+            .reasoning
+            .contains("capped for CPU"));
         // A GPU machine with the same RAM gets the big model.
         assert_eq!(pick(64, Accel::Gpu), Some("14B"));
     }
@@ -233,7 +302,11 @@ mod tests {
     #[test]
     fn reasoning_names_the_model_and_size() {
         let r = recommend(24, Accel::Gpu);
-        assert!(r.reasoning.contains("Qwen2.5-7B") && r.reasoning.contains("GB"), "{}", r.reasoning);
+        assert!(
+            r.reasoning.contains("Qwen2.5-7B") && r.reasoning.contains("GB"),
+            "{}",
+            r.reasoning
+        );
     }
 
     #[test]
@@ -253,7 +326,10 @@ mod tests {
         let ids = vec!["7B".to_string(), "0.5B".to_string(), "bogus".to_string()];
         let got: Vec<&str> = available(&ids).iter().map(|m| m.params).collect();
         assert_eq!(got, vec!["0.5B", "7B"]);
-        assert!(available(&[]).is_empty(), "no config → caller falls back to recommend()");
+        assert!(
+            available(&[]).is_empty(),
+            "no config → caller falls back to recommend()"
+        );
     }
 
     #[test]
@@ -264,7 +340,10 @@ mod tests {
         // A big request that still fits the 32k window → the largest (best quality).
         assert_eq!(pick_for(20_000, &std).map(|m| m.params), Some("7B"));
         // Bigger than any standard window → nothing fits → cloud (None).
-        assert!(pick_for(80_000, &std).is_none(), "no standard model holds 80k tokens");
+        assert!(
+            pick_for(80_000, &std).is_none(),
+            "no standard model holds 80k tokens"
+        );
 
         // With the long-context model downloaded, the big pass fits — on it (#378).
         let long = available(&["7B".into(), "7B-1M".into()]);
@@ -279,7 +358,10 @@ mod tests {
         // No set configured → the standard (recommended) model's window.
         assert_eq!(local_window(&[]), STANDARD_CONTEXT_TOKENS);
         // A standard set → still 32k.
-        assert_eq!(local_window(&["0.5B".into(), "7B".into()]), STANDARD_CONTEXT_TOKENS);
+        assert_eq!(
+            local_window(&["0.5B".into(), "7B".into()]),
+            STANDARD_CONTEXT_TOKENS
+        );
         // A long-context model in the set raises the bound to its window.
         assert!(local_window(&["7B".into(), "7B-1M".into()]) >= 1_000_000);
     }

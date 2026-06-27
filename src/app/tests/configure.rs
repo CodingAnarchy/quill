@@ -6,7 +6,10 @@ use crate::ai::config_gen::{ConfigChange, GeneratedConfig};
 use crate::mode::Pending;
 
 fn change(key: &str, value: &str) -> ConfigChange {
-    ConfigChange { key: key.to_string(), value: value.to_string() }
+    ConfigChange {
+        key: key.to_string(),
+        value: value.to_string(),
+    }
 }
 
 #[test]
@@ -24,7 +27,10 @@ fn a_valid_proposal_stages_changes_and_opens_a_confirm() {
 
     // Nothing applied yet — staged behind a y/N confirm.
     assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmConfig)));
-    let staged = app.pending_config.as_ref().expect("changes staged for confirm");
+    let staged = app
+        .pending_config
+        .as_ref()
+        .expect("changes staged for confirm");
     assert_eq!(staged.len(), 3);
     // The editor is untouched until the author confirms.
     assert!(!app.vim);
@@ -36,7 +42,7 @@ fn invalid_values_are_rejected_and_the_rest_kept() {
     let (mut app, _dir) = two_chapter_app("cfg-mixed");
     let gen = GeneratedConfig {
         changes: vec![
-            change("editor.vim", "maybe"),    // not a bool
+            change("editor.vim", "maybe"),     // not a bool
             change("theme.heading", "banana"), // not a color
             change("theme.name", "dark"),      // valid
         ],
@@ -44,11 +50,16 @@ fn invalid_values_are_rejected_and_the_rest_kept() {
     };
     app.apply_generated_config(Ok(gen));
 
-    let staged = app.pending_config.as_ref().expect("the one valid change is staged");
+    let staged = app
+        .pending_config
+        .as_ref()
+        .expect("the one valid change is staged");
     assert_eq!(staged.len(), 1);
     assert_eq!(staged[0].0, "theme.name");
     // The confirm label surfaces what couldn't be mapped.
-    let Mode::Prompt(s) = &app.mode else { panic!("expected a confirm prompt") };
+    let Mode::Prompt(s) = &app.mode else {
+        panic!("expected a confirm prompt")
+    };
     assert!(s.label.contains("couldn't map"), "{}", s.label);
     assert!(s.label.contains("bigger font"), "{}", s.label);
 }
@@ -64,7 +75,14 @@ fn nothing_mappable_reports_and_stages_nothing() {
 
     assert!(app.pending_config.is_none(), "nothing staged");
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no confirm opened");
-    assert!(app.message.as_deref().unwrap_or("").contains("couldn't map"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("couldn't map"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -72,7 +90,10 @@ fn dictionary_additions_go_to_the_project_dictionary() {
     use crossterm::event::KeyCode;
     let (mut app, dir) = two_chapter_app("cfg-dict");
     app.apply_generated_config(Ok(GeneratedConfig {
-        changes: vec![change("dictionary.add", "Aerendil"), change("dictionary.add", "Vashti")],
+        changes: vec![
+            change("dictionary.add", "Aerendil"),
+            change("dictionary.add", "Vashti"),
+        ],
         unmapped: vec![],
     }));
     assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmConfig)));
@@ -81,14 +102,20 @@ fn dictionary_additions_go_to_the_project_dictionary() {
 
     assert!(app.project.is_accepted("aerendil") && app.project.is_accepted("vashti"));
     let file = fs::read_to_string(dir.join("dictionary.txt")).unwrap();
-    assert!(file.contains("Aerendil") && file.contains("Vashti"), "written to the project dictionary: {file}");
+    assert!(
+        file.contains("Aerendil") && file.contains("Vashti"),
+        "written to the project dictionary: {file}"
+    );
 }
 
 #[test]
 fn a_mix_of_settings_and_dictionary_words_stages_both() {
     let (mut app, _dir) = two_chapter_app("cfg-mix");
     app.apply_generated_config(Ok(GeneratedConfig {
-        changes: vec![change("editor.column_width", "64"), change("dictionary.add", "Vashti")],
+        changes: vec![
+            change("editor.column_width", "64"),
+            change("dictionary.add", "Vashti"),
+        ],
         unmapped: vec![],
     }));
     let staged = app.pending_config.as_ref().expect("both staged");
@@ -103,7 +130,14 @@ fn dictionary_add_rejects_a_multi_word_value() {
         unmapped: vec![],
     }));
     assert!(app.pending_config.is_none(), "nothing staged");
-    assert!(app.message.as_deref().unwrap_or("").contains("couldn't map"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("couldn't map"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]

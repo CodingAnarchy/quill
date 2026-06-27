@@ -1,13 +1,7 @@
 //! The first-run setup wizard (#282): step through title/author/setting and
 //! seed the bible, draining queued AI drafts. Extracted from `mod.rs` (#314).
 
-
-
-
-
-use crate::mode::{
-    Pending, WizardStep,
-};
+use crate::mode::{Pending, WizardStep};
 use crate::project::Goals;
 
 use super::App;
@@ -46,9 +40,15 @@ impl App {
     /// dismisses the rest.
     fn wizard_label(step: WizardStep) -> &'static str {
         match step {
-            WizardStep::Goals => "Goals — target words and chapters, e.g. \"80000 30\" (blank skips · Esc finishes)",
-            WizardStep::Characters => "Characters — describe the cast for the AI to draft (blank skips · Esc finishes)",
-            WizardStep::Setting => "Setting — describe the world for the AI to draft (blank skips · Esc finishes)",
+            WizardStep::Goals => {
+                "Goals — target words and chapters, e.g. \"80000 30\" (blank skips · Esc finishes)"
+            }
+            WizardStep::Characters => {
+                "Characters — describe the cast for the AI to draft (blank skips · Esc finishes)"
+            }
+            WizardStep::Setting => {
+                "Setting — describe the world for the AI to draft (blank skips · Esc finishes)"
+            }
             WizardStep::Notes => "Notes — a starting note to save (blank skips · Esc finishes)",
         }
     }
@@ -60,16 +60,28 @@ impl App {
         }
         match step {
             WizardStep::Goals => {
-                let nums: Vec<usize> = text.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+                let nums: Vec<usize> = text
+                    .split_whitespace()
+                    .filter_map(|t| t.parse().ok())
+                    .collect();
                 match nums[..] {
                     [words, chapters, ..] if words > 0 && chapters > 0 => {
-                        self.project.manifest.goals = Some(Goals { words, chapters, words_per_page: 250, daily: None });
+                        self.project.manifest.goals = Some(Goals {
+                            words,
+                            chapters,
+                            words_per_page: 250,
+                            daily: None,
+                        });
                         self.message = match self.project.save_manifest() {
                             Ok(()) => Some("Writing goals set.".into()),
                             Err(e) => Some(format!("Couldn't save goals: {e}")),
                         };
                     }
-                    _ => self.message = Some("Skipped goals — give target words and chapters, e.g. 80000 30.".into()),
+                    _ => {
+                        self.message = Some(
+                            "Skipped goals — give target words and chapters, e.g. 80000 30.".into(),
+                        )
+                    }
                 }
             }
             WizardStep::Characters => self.draft_characters(text),

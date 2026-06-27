@@ -118,7 +118,11 @@ pub fn to_markdown(doc: &Document) -> String {
 /// leads a top-level section and its parts/chapters nest beneath). The books
 /// carry no `series`/`author` line of their own — the header above stands for the
 /// whole series.
-pub fn to_markdown_series(books: &[Document], series: Option<&str>, author: Option<&str>) -> String {
+pub fn to_markdown_series(
+    books: &[Document],
+    series: Option<&str>,
+    author: Option<&str>,
+) -> String {
     let mut out = String::new();
     if let Some(series) = series {
         out.push_str(series);
@@ -194,7 +198,9 @@ fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, 
 
 /// Escape `& < >` for embedding text in XML (the `.docx` and `.scrivx` markup).
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The scene-break glyph the writers emit for a thematic break: a centered `#`,
@@ -226,10 +232,16 @@ fn classify_block(block: &str) -> Option<Prose> {
         return Some(Prose::SceneBreak);
     }
     if let Some(heading) = text.strip_prefix('#') {
-        return Some(Prose::Heading(heading.trim_start_matches('#').trim().to_string()));
+        return Some(Prose::Heading(
+            heading.trim_start_matches('#').trim().to_string(),
+        ));
     }
     // Soft-wrapped lines join into one paragraph.
-    let joined = text.split('\n').map(str::trim).collect::<Vec<_>>().join(" ");
+    let joined = text
+        .split('\n')
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ");
     Some(Prose::Paragraph(joined))
 }
 
@@ -268,11 +280,18 @@ mod tests {
     use super::*;
 
     fn epigraph(text: &str, by: Option<&str>) -> Epigraph {
-        Epigraph { text: text.to_string(), attribution: by.map(str::to_string) }
+        Epigraph {
+            text: text.to_string(),
+            attribution: by.map(str::to_string),
+        }
     }
 
     fn chapter(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
-        Chapter { title: title.to_string(), epigraph, body: body.to_string() }
+        Chapter {
+            title: title.to_string(),
+            epigraph,
+            body: body.to_string(),
+        }
     }
 
     fn doc() -> Document {
@@ -285,7 +304,11 @@ mod tests {
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
                 name: Some("Part One".into()),
-                chapters: vec![chapter("The Find", Some(epigraph("A line.", None)), "The locket *gleamed*.")],
+                chapters: vec![chapter(
+                    "The Find",
+                    Some(epigraph("A line.", None)),
+                    "The locket *gleamed*.",
+                )],
             }],
             back: vec![],
         }
@@ -300,10 +323,17 @@ mod tests {
             series: None,
             epigraph: None,
             front: vec![],
-            parts: vec![Part { name: None, chapters: vec![chapter("Ch", None, body)] }],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("Ch", None, body)],
+            }],
             back: vec![],
         };
-        let md = to_markdown_series(&[book("Book One", "alpha"), book("Book Two", "beta")], Some("The Saga"), Some("A. Writer"));
+        let md = to_markdown_series(
+            &[book("Book One", "alpha"), book("Book Two", "beta")],
+            Some("The Saga"),
+            Some("A. Writer"),
+        );
         assert!(md.starts_with("The Saga\n\n"), "{md}");
         let one = md.find("# Book One").expect("book one heading");
         let two = md.find("# Book Two").expect("book two heading");
@@ -322,11 +352,18 @@ mod tests {
             front: vec![],
             parts: vec![Part {
                 name: None,
-                chapters: vec![chapter("C", None, "He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}")],
+                chapters: vec![chapter(
+                    "C",
+                    None,
+                    "He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}",
+                )],
             }],
             back: vec![],
         };
-        assert!(to_markdown(&d).contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"), "curly glyphs reach the Markdown/Vellum output");
+        assert!(
+            to_markdown(&d).contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
+            "curly glyphs reach the Markdown/Vellum output"
+        );
     }
 
     #[test]
@@ -342,23 +379,35 @@ mod tests {
         let prologue = md.find("## Prologue").unwrap();
         let part = md.find("## Part One").unwrap();
         let chapter = md.find("## The Find").unwrap();
-        assert!(prologue < part && part < chapter, "reading order preserved:\n{md}");
+        assert!(
+            prologue < part && part < chapter,
+            "reading order preserved:\n{md}"
+        );
         // The chapter epigraph renders before its body; prose is verbatim.
         let find = &md[chapter..];
-        assert!(find.find("> A line.").unwrap() < find.find("The locket *gleamed*.").unwrap(), "{md}");
+        assert!(
+            find.find("> A line.").unwrap() < find.find("The locket *gleamed*.").unwrap(),
+            "{md}"
+        );
     }
 
     #[test]
     fn strips_a_body_heading_only_when_it_repeats_the_title() {
         // A leading `# Title` that matches is dropped (the compiled heading has it).
-        assert_eq!(strip_repeated_title("# The Find\n\nProse.\n", "The Find"), "Prose.\n");
+        assert_eq!(
+            strip_repeated_title("# The Find\n\nProse.\n", "The Find"),
+            "Prose.\n"
+        );
         // A differing heading is kept (don't lose the author's text).
         assert_eq!(
             strip_repeated_title("# Prologue\n\nBefore.\n", "A Prologue"),
             "# Prologue\n\nBefore.\n"
         );
         // No leading heading → untouched.
-        assert_eq!(strip_repeated_title("Just prose.\n", "Title"), "Just prose.\n");
+        assert_eq!(
+            strip_repeated_title("Just prose.\n", "Title"),
+            "Just prose.\n"
+        );
     }
 
     #[test]
@@ -366,13 +415,23 @@ mod tests {
         assert_eq!(inline_runs("plain"), vec![("plain".into(), false, false)]);
         assert_eq!(
             inline_runs("a *b* c"),
-            vec![("a ".into(), false, false), ("b".into(), false, true), (" c".into(), false, false)]
+            vec![
+                ("a ".into(), false, false),
+                ("b".into(), false, true),
+                (" c".into(), false, false)
+            ]
         );
         assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
         // Underscores are literal (not emphasis), so snake_case survives.
-        assert_eq!(inline_runs("snake_case"), vec![("snake_case".into(), false, false)]);
+        assert_eq!(
+            inline_runs("snake_case"),
+            vec![("snake_case".into(), false, false)]
+        );
         // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
-        assert_eq!(inline_runs("5 * 3 = 15"), vec![("5 * 3 = 15".into(), false, false)]);
+        assert_eq!(
+            inline_runs("5 * 3 = 15"),
+            vec![("5 * 3 = 15".into(), false, false)]
+        );
     }
 
     #[test]
@@ -385,10 +444,19 @@ mod tests {
         // The scene-break forms an author might type.
         for br in ["---", "***", "___", "* * *", "- - -", "----"] {
             assert!(is_thematic_break(br), "{br:?} is a scene break");
-            assert!(matches!(classify_block(br), Some(Prose::SceneBreak)), "{br:?}");
+            assert!(
+                matches!(classify_block(br), Some(Prose::SceneBreak)),
+                "{br:?}"
+            );
         }
         // Prose that merely contains the same characters is not a break.
-        for prose in ["a — dash", "5 * 3 = 15", "--", "well - maybe", "* one bullet"] {
+        for prose in [
+            "a — dash",
+            "5 * 3 = 15",
+            "--",
+            "well - maybe",
+            "* one bullet",
+        ] {
             assert!(!is_thematic_break(prose), "{prose:?} is prose, not a break");
         }
         // Headings and paragraphs still classify as before.
@@ -411,7 +479,11 @@ mod tests {
             }],
             back: vec![],
         };
-        assert!(to_markdown(&d).contains("Scene one.\n\n---\n\nScene two."), "{}", to_markdown(&d));
+        assert!(
+            to_markdown(&d).contains("Scene one.\n\n---\n\nScene two."),
+            "{}",
+            to_markdown(&d)
+        );
     }
 
     #[test]
@@ -427,6 +499,9 @@ mod tests {
             back: vec![],
         };
         let md = to_markdown(&d);
-        assert!(md.contains("> Roses are red\n>\n> Violets are blue\n"), "{md}");
+        assert!(
+            md.contains("> Roses are red\n>\n> Violets are blue\n"),
+            "{md}"
+        );
     }
 }

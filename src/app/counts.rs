@@ -1,10 +1,6 @@
 //! Word-count surfaces and the daily tally: per-chapter/section/project counts
 //! and the idle-tick tally over changed chapters. Extracted from `mod.rs` (#314).
 
-
-
-
-
 use crate::frontmatter::Band;
 
 use super::App;
@@ -83,7 +79,10 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                let name = p.name.clone().unwrap_or_else(|| format!("{label} {}", i + 1));
+                let name = p
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("{label} {}", i + 1));
                 let start = p.chapters[0].saturating_sub(1).min(body);
                 let end = p.chapters[1].min(body).max(start);
                 (name, (front + start)..(front + end))
@@ -152,6 +151,8 @@ impl App {
     /// Total words across the whole series (#331): the active book live, the rest
     /// from their caches. Equals `project_word_count` for a standalone novel.
     pub fn series_word_count(&self) -> usize {
-        (0..self.project.book_count()).map(|b| self.book_word_count(b)).sum()
+        (0..self.project.book_count())
+            .map(|b| self.book_word_count(b))
+            .sum()
     }
 }

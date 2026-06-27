@@ -43,7 +43,9 @@ impl LocalBackend {
     pub fn recommended() -> Result<(Self, model_select::Recommendation), AiError> {
         let (ram_gb, accel) = detect_hardware();
         let rec = model_select::recommend(ram_gb, accel);
-        let model = rec.model.ok_or_else(|| AiError::NotConfigured(rec.reasoning.clone()))?;
+        let model = rec
+            .model
+            .ok_or_else(|| AiError::NotConfigured(rec.reasoning.clone()))?;
         let backend = Self::for_model(model)?;
         Ok((backend, rec))
     }
@@ -61,24 +63,38 @@ impl LocalBackend {
             .model(model.tokenizer_repo.to_string())
             .get("tokenizer.json")
             .map_err(|e| internal(format!("download tokenizer: {e}")))?;
-        Self::load(gguf.to_str().unwrap_or_default(), tokenizer.to_str().unwrap_or_default())
+        Self::load(
+            gguf.to_str().unwrap_or_default(),
+            tokenizer.to_str().unwrap_or_default(),
+        )
     }
 
     /// Load a quantized Qwen from a `GGUF` file plus its `tokenizer.json`. Uses
     /// Metal when candle was built with it (macOS), else CPU.
     pub fn load(gguf_path: &str, tokenizer_path: &str) -> Result<Self, AiError> {
         let device = model_select::best_device();
-        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| internal(format!("tokenizer: {e}")))?;
-        let mut file = std::fs::File::open(gguf_path).map_err(|e| internal(format!("open gguf: {e}")))?;
-        let content = gguf_file::Content::read(&mut file).map_err(|e| internal(format!("read gguf: {e}")))?;
-        let model = Qwen2::from_gguf(content, &mut file, &device).map_err(|e| internal(format!("load gguf: {e}")))?;
-        Ok(Self { model: Mutex::new(model), tokenizer, device })
+        let tokenizer = Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| internal(format!("tokenizer: {e}")))?;
+        let mut file =
+            std::fs::File::open(gguf_path).map_err(|e| internal(format!("open gguf: {e}")))?;
+        let content =
+            gguf_file::Content::read(&mut file).map_err(|e| internal(format!("read gguf: {e}")))?;
+        let model = Qwen2::from_gguf(content, &mut file, &device)
+            .map_err(|e| internal(format!("load gguf: {e}")))?;
+        Ok(Self {
+            model: Mutex::new(model),
+            tokenizer,
+            device,
+        })
     }
 
     /// Build the Qwen chat-template prompt for a request (manuscript folded into
     /// the user turn, since the local backend has no separate cached block).
     fn prompt(req: &Request) -> String {
-        let system = req.system.as_deref().unwrap_or("You are a helpful assistant.");
+        let system = req
+            .system
+            .as_deref()
+            .unwrap_or("You are a helpful assistant.");
         let user = if req.cached_context.is_empty() {
             req.user.clone()
         } else {
@@ -100,7 +116,10 @@ impl Backend for LocalBackend {
             .get_ids()
             .to_vec();
 
-        let mut model = self.model.lock().map_err(|_| internal("model lock poisoned".into()))?;
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|_| internal("model lock poisoned".into()))?;
         let mut constraint = req.json_schema.as_ref().map(Constraint::new);
 
         // Prompt pass → logits for the first generated token.
@@ -129,9 +148,18 @@ impl Backend for LocalBackend {
         let text = match &constraint {
             // The constraint accumulated the exact accepted text already.
             Some(c) => c.text().to_string(),
-            None => self.tokenizer.decode(&generated, true).map_err(|e| internal(format!("decode: {e}")))?,
+            None => self
+                .tokenizer
+                .decode(&generated, true)
+                .map_err(|e| internal(format!("decode: {e}")))?,
         };
-        Ok(Response { text, usage: Usage { output_tokens: generated.len() as u32, ..Usage::default() } })
+        Ok(Response {
+            text,
+            usage: Usage {
+                output_tokens: generated.len() as u32,
+                ..Usage::default()
+            },
+        })
     }
 
     fn as_converse(&self) -> Option<&dyn Converse> {
@@ -151,9 +179,16 @@ impl Backend for LocalBackend {
 impl Converse for LocalBackend {
     fn respond(&self, body: &serde_json::Value) -> Result<Turn, AiError> {
         let names = tool_loop::tool_names(body);
-        let messages = body["messages"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        let messages = body["messages"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let transcript = tool_loop::flatten_conversation(messages);
-        let tool_list = names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
+        let tool_list = names
+            .iter()
+            .map(|n| format!("\"{n}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         let user = format!(
             "{transcript}\nDecide the next step and reply as JSON {{\"action\", \"argument\", \"message\"}}. \
              Set action to \"{}\" and put your reply in message to answer the author, or set action to \
@@ -201,12 +236,18 @@ impl LocalBackend {
         generated: &[u32],
     ) -> Result<Option<u32>, AiError> {
         let ranked = rank_desc(logits);
-        let prev = self.tokenizer.decode(generated, true).map_err(|e| internal(format!("decode: {e}")))?;
+        let prev = self
+            .tokenizer
+            .decode(generated, true)
+            .map_err(|e| internal(format!("decode: {e}")))?;
         for id in ranked {
             // The piece this token adds = decode(generated+id) minus decode(generated).
             let mut ids = generated.to_vec();
             ids.push(id);
-            let whole = self.tokenizer.decode(&ids, true).map_err(|e| internal(format!("decode: {e}")))?;
+            let whole = self
+                .tokenizer
+                .decode(&ids, true)
+                .map_err(|e| internal(format!("decode: {e}")))?;
             let Some(piece) = whole.strip_prefix(&prev) else {
                 continue; // detokenization wasn't a clean extension — skip this candidate
             };
@@ -279,8 +320,14 @@ mod tests {
     fn auto_download_then_generate() {
         let m = &model_select::MODELS[0]; // 0.5B — keep the download small
         let hub = hf_hub::api::sync::Api::new().expect("hf-hub");
-        let gguf = hub.model(m.gguf_repo.into()).get(m.gguf_file).expect("download gguf");
-        let tok = hub.model(m.tokenizer_repo.into()).get("tokenizer.json").expect("download tokenizer");
+        let gguf = hub
+            .model(m.gguf_repo.into())
+            .get(m.gguf_file)
+            .expect("download gguf");
+        let tok = hub
+            .model(m.tokenizer_repo.into())
+            .get("tokenizer.json")
+            .expect("download tokenizer");
         let backend =
             LocalBackend::load(gguf.to_str().unwrap(), tok.to_str().unwrap()).expect("load");
 
@@ -327,9 +374,10 @@ mod tests {
         let req = Request {
             system: Some("Extract the protagonist from the passage as JSON.".into()),
             cached_context: String::new(),
-            user: "Mara Vance had spent thirty winters in the lightsteel mines, her hands scarred, \
+            user:
+                "Mara Vance had spent thirty winters in the lightsteel mines, her hands scarred, \
                    her temper short, but her loyalty to the miners absolute."
-                .into(),
+                    .into(),
             model: "local-qwen".into(),
             max_tokens: 200,
             json_schema: Some(schema.clone()),
@@ -372,9 +420,16 @@ mod tests {
         let turn = backend.respond(&body).expect("a parsed turn");
         match turn {
             Turn::ToolCalls(calls) => {
-                println!("LOCAL ASSISTANT CALLED: {:?}", calls.iter().map(|c| &c.name).collect::<Vec<_>>());
+                println!(
+                    "LOCAL ASSISTANT CALLED: {:?}",
+                    calls.iter().map(|c| &c.name).collect::<Vec<_>>()
+                );
                 for c in &calls {
-                    assert!(["save", "report:progress"].contains(&c.name.as_str()), "off-list: {}", c.name);
+                    assert!(
+                        ["save", "report:progress"].contains(&c.name.as_str()),
+                        "off-list: {}",
+                        c.name
+                    );
                 }
             }
             Turn::Final(text) => println!("LOCAL ASSISTANT REPLIED: {text}"),

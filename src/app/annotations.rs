@@ -81,7 +81,12 @@ impl App {
         let mut out = Vec::new();
         for (file, base) in self.chapter_bases() {
             for a in self.project.annotations_for(&file) {
-                out.push(Live { chapter: file.clone(), start: base + a.start, end: base + a.end, note: a.note });
+                out.push(Live {
+                    chapter: file.clone(),
+                    start: base + a.start,
+                    end: base + a.end,
+                    note: a.note,
+                });
             }
         }
         out.sort_by_key(|a| (a.start, a.end));
@@ -141,7 +146,11 @@ impl App {
     /// other, the exact mirror of the buffer's `step`.
     pub(crate) fn restore_annotation_history(&mut self, redo: bool) {
         let current = self.annotations.clone();
-        let popped = if redo { self.anno_redo.pop_back() } else { self.anno_undo.pop_back() };
+        let popped = if redo {
+            self.anno_redo.pop_back()
+        } else {
+            self.anno_undo.pop_back()
+        };
         if let Some(prev) = popped {
             if redo {
                 self.anno_undo.push_back(current);
@@ -184,7 +193,9 @@ impl App {
         };
         match range {
             Some((start, end)) => self.start_annotation_range(start, end),
-            None => self.message = Some("Select text or place the cursor on a word to annotate.".into()),
+            None => {
+                self.message = Some("Select text or place the cursor on a word to annotate.".into())
+            }
         }
     }
 
@@ -209,7 +220,12 @@ impl App {
             return;
         }
         let (chapter, _base) = self.owning_chapter(start);
-        self.annotations.push(Live { chapter, start, end, note });
+        self.annotations.push(Live {
+            chapter,
+            start,
+            end,
+            note,
+        });
         self.annotations.sort_by_key(|a| (a.start, a.end));
         self.persist_annotations();
         self.message = Some("Annotation added.".into());
@@ -252,7 +268,9 @@ impl App {
                     if self.annotations.is_empty() {
                         self.mode = self.editing_mode();
                     } else {
-                        self.mode = Mode::Annotations { selected: selected.min(self.annotations.len() - 1) };
+                        self.mode = Mode::Annotations {
+                            selected: selected.min(self.annotations.len() - 1),
+                        };
                     }
                 }
             }

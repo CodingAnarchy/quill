@@ -9,7 +9,9 @@ fn browser_app(name: &str, chapters: &[(&str, &str)]) -> (App, TempProject) {
     let dir = crate::testutil::scratch_dir("filter", name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, (title, _)) in chapters.iter().enumerate() {
-        manifest.push_str(&format!("[[chapters]]\ntitle = \"{title}\"\nfile = \"ch{i}.md\"\n\n"));
+        manifest.push_str(&format!(
+            "[[chapters]]\ntitle = \"{title}\"\nfile = \"ch{i}.md\"\n\n"
+        ));
     }
     for (i, (_, fm)) in chapters.iter().enumerate() {
         fs::write(dir.join(format!("ch{i}.md")), format!("{fm}body\n")).unwrap();
@@ -53,15 +55,25 @@ fn match_count(app: &App) -> usize {
 
 #[test]
 fn slash_filters_by_title_and_enter_quick_jumps() {
-    let (mut app, _dir) =
-        browser_app("jump", &[("Dawn", ""), ("The Meeting", ""), ("Departure", ""), ("Nightfall", "")]);
+    let (mut app, _dir) = browser_app(
+        "jump",
+        &[
+            ("Dawn", ""),
+            ("The Meeting", ""),
+            ("Departure", ""),
+            ("Nightfall", ""),
+        ],
+    );
     app.on_key(key(KeyCode::Char('/')));
     assert!(nav_typing(&app), "slash enters the filter-input sub-mode");
     type_into(&mut app, "meet");
     assert_eq!(nav_filter(&app), "meet");
     assert_eq!(nav_sel(&app), 1, "selection snaps to the matching chapter");
     app.on_key(key(KeyCode::Enter));
-    assert!(matches!(app.mode, Mode::Insert), "Enter opens the match and leaves the browser");
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "Enter opens the match and leaves the browser"
+    );
     assert_eq!(app.project.active_index(), 1);
 }
 
@@ -76,8 +88,15 @@ fn filtering_is_case_insensitive_substring() {
 
 #[test]
 fn arrows_move_only_within_the_matches() {
-    let (mut app, _dir) =
-        browser_app("within", &[("Alpha", ""), ("Beta meet", ""), ("Gamma", ""), ("Delta meet", "")]);
+    let (mut app, _dir) = browser_app(
+        "within",
+        &[
+            ("Alpha", ""),
+            ("Beta meet", ""),
+            ("Gamma", ""),
+            ("Delta meet", ""),
+        ],
+    );
     app.on_key(key(KeyCode::Char('/')));
     type_into(&mut app, "meet");
     assert_eq!(nav_sel(&app), 1, "first match");
@@ -91,8 +110,10 @@ fn arrows_move_only_within_the_matches() {
 
 #[test]
 fn esc_keeps_the_filter_then_clears_it_then_exits() {
-    let (mut app, _dir) =
-        browser_app("esc", &[("Alpha", ""), ("Beta meet", ""), ("Gamma meet", "")]);
+    let (mut app, _dir) = browser_app(
+        "esc",
+        &[("Alpha", ""), ("Beta meet", ""), ("Gamma meet", "")],
+    );
     app.on_key(key(KeyCode::Char('/')));
     type_into(&mut app, "meet");
     assert!(nav_typing(&app));
@@ -143,8 +164,14 @@ fn bare_letters_run_commands_outside_input_and_are_query_text_inside() {
 
 #[test]
 fn filter_matches_a_pov_character() {
-    let (mut app, _dir) =
-        browser_app("pov", &[("Alpha", "---\npov: Sarah\n---\n"), ("Beta", ""), ("Gamma", "")]);
+    let (mut app, _dir) = browser_app(
+        "pov",
+        &[
+            ("Alpha", "---\npov: Sarah\n---\n"),
+            ("Beta", ""),
+            ("Gamma", ""),
+        ],
+    );
     app.on_key(key(KeyCode::Char('/')));
     type_into(&mut app, "sarah");
     assert_eq!(match_count(&app), 1);
@@ -153,8 +180,14 @@ fn filter_matches_a_pov_character() {
 
 #[test]
 fn filter_matches_a_status() {
-    let (mut app, _dir) =
-        browser_app("status", &[("Alpha", ""), ("Beta", "---\nstatus: draft\n---\n"), ("Gamma", "")]);
+    let (mut app, _dir) = browser_app(
+        "status",
+        &[
+            ("Alpha", ""),
+            ("Beta", "---\nstatus: draft\n---\n"),
+            ("Gamma", ""),
+        ],
+    );
     app.on_key(key(KeyCode::Char('/')));
     type_into(&mut app, "draft");
     assert_eq!(match_count(&app), 1);

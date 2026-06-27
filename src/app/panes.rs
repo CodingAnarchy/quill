@@ -119,7 +119,11 @@ impl App {
     /// editor pane (read, edit, and save independently), reusing the #163 split
     /// machinery. Single-chapter view only.
     pub(super) fn open_file_in_pane(&mut self, path: PathBuf) {
-        self.place_editor_pane(&path, SplitDir::SideBySide, "Opened in a pane — Ctrl-w w to focus it, Ctrl-w c to close.");
+        self.place_editor_pane(
+            &path,
+            SplitDir::SideBySide,
+            "Opened in a pane — Ctrl-w w to focus it, Ctrl-w c to close.",
+        );
     }
 
     /// Load `path` into the other pane as an editor, the shared tail of opening a
@@ -151,7 +155,9 @@ impl App {
     /// Dock the open full-screen overlay into a pane beside the editor (#164), so
     /// the manuscript stays visible and editable. Single-chapter view only.
     fn dock_overlay(&mut self, dir: SplitDir) {
-        let Some(overlay) = self.overlay.take() else { return };
+        let Some(overlay) = self.overlay.take() else {
+            return;
+        };
         if self.manuscript.is_some() {
             self.overlay = Some(overlay);
             self.message = Some("Leave the continuous view (Ctrl-l) to dock a report.".into());
@@ -159,7 +165,10 @@ impl App {
         }
         self.close_split_if_any(); // two panes max — replace any existing split
         self.split = Some(Split {
-            other: OtherPane::Surface { overlay, focused: false },
+            other: OtherPane::Surface {
+                overlay,
+                focused: false,
+            },
             dir,
             focused_first: true,
             first_ratio: EVEN_SPLIT,
@@ -172,10 +181,15 @@ impl App {
     /// Reached from `Ctrl-W a` and the `Ctrl-K` run-action menu (#399).
     pub(super) fn open_assistant(&mut self) {
         if self.manuscript.is_some() {
-            self.message = Some("Leave the continuous view (Ctrl-l) before opening the assistant.".into());
+            self.message =
+                Some("Leave the continuous view (Ctrl-l) before opening the assistant.".into());
             return;
         }
-        if let Some(Split { other: OtherPane::Assistant { focused, .. }, .. }) = self.split.as_mut() {
+        if let Some(Split {
+            other: OtherPane::Assistant { focused, .. },
+            ..
+        }) = self.split.as_mut()
+        {
             *focused = true; // already open — just give it focus
             self.message = Some("Assistant — type a request; Ctrl-w c closes it.".into());
             return;
@@ -191,7 +205,10 @@ impl App {
             conv.note(&format!("The assistant is unavailable: {e}"));
         }
         self.split = Some(Split {
-            other: OtherPane::Assistant { conv, focused: true },
+            other: OtherPane::Assistant {
+                conv,
+                focused: true,
+            },
             dir: SplitDir::SideBySide,
             focused_first: true,
             first_ratio: EVEN_SPLIT,
@@ -202,13 +219,21 @@ impl App {
     /// Move focus to the other pane: swap editors (#163), hand scroll input to a
     /// docked surface (#164), or focus the assistant pane (#307).
     fn focus_other_pane(&mut self) {
-        let is_editor = matches!(self.split.as_ref(), Some(Split { other: OtherPane::Editor(_), .. }));
+        let is_editor = matches!(
+            self.split.as_ref(),
+            Some(Split {
+                other: OtherPane::Editor(_),
+                ..
+            })
+        );
         if is_editor {
             self.swap_editor_panes();
         } else if let Some(s) = self.split.as_mut() {
             // A docked surface or the assistant: toggle which pane keys go to.
             match &mut s.other {
-                OtherPane::Surface { focused, .. } | OtherPane::Assistant { focused, .. } => *focused = !*focused,
+                OtherPane::Surface { focused, .. } | OtherPane::Assistant { focused, .. } => {
+                    *focused = !*focused
+                }
                 OtherPane::Editor(_) => {}
             }
         }
@@ -220,8 +245,12 @@ impl App {
     fn swap_editor_panes(&mut self) {
         let _ = self.flush_active();
         let other_path = {
-            let Some(split) = self.split.as_mut() else { return };
-            let OtherPane::Editor(other) = &mut split.other else { return };
+            let Some(split) = self.split.as_mut() else {
+                return;
+            };
+            let OtherPane::Editor(other) = &mut split.other else {
+                return;
+            };
             std::mem::swap(&mut self.buffer, other);
             split.focused_first = !split.focused_first;
             other.path.clone()
@@ -239,7 +268,11 @@ impl App {
     /// Scroll a focused docked surface, or unfocus it on Esc (#164).
     pub(super) fn on_key_surface(&mut self, key: KeyEvent) {
         let height = self.surface_height.get();
-        let Some(Split { other: OtherPane::Surface { overlay, focused }, .. }) = self.split.as_mut() else {
+        let Some(Split {
+            other: OtherPane::Surface { overlay, focused },
+            ..
+        }) = self.split.as_mut()
+        else {
             return;
         };
         let max = crate::ui::max_scroll(overlay.lines.len(), height);
@@ -282,16 +315,23 @@ impl App {
     /// not split. Which physical side is focused depends on the pane kind — a
     /// docked surface taking scroll focus is the *second* pane.
     fn resize_split(&mut self, grow: bool) {
-        let Some(split) = self.split.as_mut() else { return };
+        let Some(split) = self.split.as_mut() else {
+            return;
+        };
         // A scroll-focused surface is the *second* pane; otherwise the focused
         // editor is the first pane when `focused_first`.
         let focused_is_first = match &split.other {
-            OtherPane::Surface { focused: true, .. } | OtherPane::Assistant { focused: true, .. } => !split.focused_first,
+            OtherPane::Surface { focused: true, .. }
+            | OtherPane::Assistant { focused: true, .. } => !split.focused_first,
             _ => split.focused_first,
         };
         // Grow the focused pane → enlarge whichever side it's on (XNOR). The
         // `.clamp` bounds both ends, so plain signed arithmetic is safe.
-        let step = if grow == focused_is_first { RESIZE_STEP as i32 } else { -(RESIZE_STEP as i32) };
+        let step = if grow == focused_is_first {
+            RESIZE_STEP as i32
+        } else {
+            -(RESIZE_STEP as i32)
+        };
         let next = split.first_ratio as i32 + step;
         split.first_ratio = next.clamp(MIN_RATIO as i32, 100 - MIN_RATIO as i32) as u16;
     }
@@ -306,12 +346,24 @@ impl App {
 
     /// Whether a docked surface currently has scroll focus (#164) — keys go to it.
     pub(crate) fn surface_pane_focused(&self) -> bool {
-        matches!(&self.split, Some(Split { other: OtherPane::Surface { focused: true, .. }, .. }))
+        matches!(
+            &self.split,
+            Some(Split {
+                other: OtherPane::Surface { focused: true, .. },
+                ..
+            })
+        )
     }
 
     /// Whether the assistant pane currently has key focus (#307) — keys go to it.
     pub(crate) fn assistant_pane_focused(&self) -> bool {
-        matches!(&self.split, Some(Split { other: OtherPane::Assistant { focused: true, .. }, .. }))
+        matches!(
+            &self.split,
+            Some(Split {
+                other: OtherPane::Assistant { focused: true, .. },
+                ..
+            })
+        )
     }
 
     /// What the renderer needs to lay out the split (#163/#164). `None` when not split.
@@ -320,9 +372,17 @@ impl App {
         let content = match &s.other {
             OtherPane::Editor(other) => SplitContent::Editor(other),
             OtherPane::Surface { overlay, .. } => SplitContent::Surface(overlay),
-            OtherPane::Assistant { conv, focused } => SplitContent::Assistant { conv, focused: *focused },
+            OtherPane::Assistant { conv, focused } => SplitContent::Assistant {
+                conv,
+                focused: *focused,
+            },
         };
-        Some(SplitView { dir: s.dir, first_ratio: s.first_ratio, focused_first: s.focused_first, content })
+        Some(SplitView {
+            dir: s.dir,
+            first_ratio: s.first_ratio,
+            focused_first: s.focused_first,
+            content,
+        })
     }
 
     /// Refresh the cached word count for the *focused* buffer's own chapter
@@ -347,7 +407,10 @@ impl App {
     /// pane shows a chapter, otherwise the file's stem (e.g. a bible entry's name),
     /// falling back to "reference" for an unnamed buffer.
     pub(crate) fn pane_title_for(&self, buffer: &Buffer) -> String {
-        if let Some(title) = self.chapter_index_of(buffer).and_then(|i| self.project.chapter_title(i)) {
+        if let Some(title) = self
+            .chapter_index_of(buffer)
+            .and_then(|i| self.project.chapter_title(i))
+        {
             return title.to_string();
         }
         buffer
@@ -371,7 +434,11 @@ impl App {
     /// same chapter so it reflects the write (the common case right after a split).
     pub(super) fn refresh_split_sibling(&mut self) {
         let saved = self.buffer.path.clone();
-        if let Some(Split { other: OtherPane::Editor(other), .. }) = &mut self.split {
+        if let Some(Split {
+            other: OtherPane::Editor(other),
+            ..
+        }) = &mut self.split
+        {
             if !other.dirty && other.path == saved {
                 if let Some(path) = saved {
                     if let Ok(reloaded) = Buffer::from_path(path) {

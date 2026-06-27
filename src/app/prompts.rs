@@ -3,14 +3,9 @@
 
 use std::path::PathBuf;
 
-
 use crossterm::event::{KeyCode, KeyEvent};
 
-
-use crate::mode::{
-    Mode, Pending,
-    PromptState, WizardStep,
-};
+use crate::mode::{Mode, Pending, PromptState, WizardStep};
 
 use super::App;
 
@@ -20,7 +15,11 @@ impl App {
     /// editor's resting mode.
     pub(super) fn closed_mode(&self, nav_return: Option<usize>) -> Mode {
         match nav_return {
-            Some(selected) => Mode::Nav { selected, filter: String::new(), typing: false },
+            Some(selected) => Mode::Nav {
+                selected,
+                filter: String::new(),
+                typing: false,
+            },
             None => self.editing_mode(),
         }
     }
@@ -67,7 +66,11 @@ impl App {
         if let Mode::Nav { selected: s, .. } = &mut self.mode {
             *s = selected;
         } else {
-            self.mode = Mode::Nav { selected, filter: String::new(), typing: false };
+            self.mode = Mode::Nav {
+                selected,
+                filter: String::new(),
+                typing: false,
+            };
         }
     }
 
@@ -136,7 +139,11 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
-            Pending::ConfirmAi { action, force, offer_local } => match key.code {
+            Pending::ConfirmAi {
+                action,
+                force,
+                offer_local,
+            } => match key.code {
                 // Confirm: run on the paid cloud backend.
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
@@ -200,7 +207,9 @@ impl App {
                 }
             },
             Pending::WizardStart => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.wizard_open(Some(WizardStep::Goals)),
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.wizard_open(Some(WizardStep::Goals))
+                }
                 _ => self.mode = closed, // declined now — land in the editor
             },
             Pending::ConfirmPortraits => match key.code {
@@ -269,8 +278,11 @@ impl App {
                         let fallback = nav_return.unwrap_or(0);
                         match pending {
                             Pending::NewChapter { at } => {
-                                let sel =
-                                    if text.is_empty() { fallback } else { self.create_chapter(at, text) };
+                                let sel = if text.is_empty() {
+                                    fallback
+                                } else {
+                                    self.create_chapter(at, text)
+                                };
                                 self.select(sel);
                             }
                             Pending::Rename { at } => {
@@ -353,9 +365,15 @@ impl App {
                             Pending::NewProject => {
                                 // A trailing separator means no name was typed
                                 // after the prefilled location (#273).
-                                if text.is_empty() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR) {
+                                if text.is_empty()
+                                    || text.ends_with('/')
+                                    || text.ends_with(std::path::MAIN_SEPARATOR)
+                                {
                                     self.mode = closed;
-                                    self.message = Some("Enter a path ending in the new project's folder name.".into());
+                                    self.message = Some(
+                                        "Enter a path ending in the new project's folder name."
+                                            .into(),
+                                    );
                                 } else {
                                     self.create_project_at(PathBuf::from(text));
                                 }
@@ -389,10 +407,16 @@ impl App {
                                 }
                             }
                             Pending::NewFromNotesDest => {
-                                if text.is_empty() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR) {
+                                if text.is_empty()
+                                    || text.ends_with('/')
+                                    || text.ends_with(std::path::MAIN_SEPARATOR)
+                                {
                                     self.mode = closed;
                                     self.pending_notes_folder = None;
-                                    self.message = Some("Enter a path ending in the new project's folder name.".into());
+                                    self.message = Some(
+                                        "Enter a path ending in the new project's folder name."
+                                            .into(),
+                                    );
                                 } else {
                                     self.finish_new_from_notes(text);
                                 }
@@ -407,10 +431,16 @@ impl App {
                                 }
                             }
                             Pending::ImportManuscriptDest => {
-                                if text.is_empty() || text.ends_with('/') || text.ends_with(std::path::MAIN_SEPARATOR) {
+                                if text.is_empty()
+                                    || text.ends_with('/')
+                                    || text.ends_with(std::path::MAIN_SEPARATOR)
+                                {
                                     self.mode = closed;
                                     self.pending_manuscript_source = None;
-                                    self.message = Some("Enter a path ending in the new project's folder name.".into());
+                                    self.message = Some(
+                                        "Enter a path ending in the new project's folder name."
+                                            .into(),
+                                    );
                                 } else {
                                     self.finish_import_manuscript(text);
                                 }

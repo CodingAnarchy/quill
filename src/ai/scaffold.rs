@@ -45,22 +45,37 @@ only structural notes. Reference chapters by title.";
 /// The JSON Schema for a scaffolding reply.
 pub fn schema() -> Value {
     let outline_item = super::object_schema(
-        vec![("chapter", super::string_field()), ("beats", super::string_array())],
+        vec![
+            ("chapter", super::string_field()),
+            ("beats", super::string_array()),
+        ],
         &["chapter", "beats"],
     );
     let gap = super::object_schema(
-        vec![("detail", super::string_field()), ("chapter", super::string_field())],
+        vec![
+            ("detail", super::string_field()),
+            ("chapter", super::string_field()),
+        ],
         &["detail", "chapter"],
     );
     super::object_schema(
-        vec![("outline", super::array_of(outline_item)), ("gaps", super::array_of(gap))],
+        vec![
+            ("outline", super::array_of(outline_item)),
+            ("gaps", super::array_of(gap)),
+        ],
         &["outline", "gaps"],
     )
 }
 
 /// Build the scaffolding request: the manuscript as cached context, schema attached.
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Produce the beat outline and the structural gaps as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Produce the beat outline and the structural gaps as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured scaffolding reply.

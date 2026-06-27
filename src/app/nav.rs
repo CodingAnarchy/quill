@@ -5,7 +5,12 @@ use super::*;
 
 impl App {
     pub(super) fn on_key_nav(&mut self, key: KeyEvent) {
-        let Mode::Nav { selected: sel, typing, .. } = self.mode else {
+        let Mode::Nav {
+            selected: sel,
+            typing,
+            ..
+        } = self.mode
+        else {
             return;
         };
         // In the filter-input sub-mode, keystrokes build the query (#410); the
@@ -48,35 +53,74 @@ impl App {
                 self.select(s);
             }
             // Add / rename / delete (each returns to the browser when done).
-            KeyCode::Char('a') => {
-                self.open_prompt(Pending::NewChapter { at: sel + 1 }, "New chapter title: ", "", Some(sel))
-            }
+            KeyCode::Char('a') => self.open_prompt(
+                Pending::NewChapter { at: sel + 1 },
+                "New chapter title: ",
+                "",
+                Some(sel),
+            ),
             KeyCode::Char('r') => {
                 let title = self.project.manifest.chapters[sel].title.clone();
-                self.open_prompt(Pending::Rename { at: sel }, "Rename chapter: ", &title, Some(sel));
+                self.open_prompt(
+                    Pending::Rename { at: sel },
+                    "Rename chapter: ",
+                    &title,
+                    Some(sel),
+                );
             }
             // Chapter metadata (front matter): status, summary, POV, epigraph.
             KeyCode::Char('s') => self.cycle_status(sel),
             KeyCode::Char('m') => {
                 let prefill = self.project.chapter_summary(sel).unwrap_or("").to_string();
-                self.open_prompt(Pending::SetMeta(MetaField::Summary { at: sel }), "Summary: ", &prefill, Some(sel));
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Summary { at: sel }),
+                    "Summary: ",
+                    &prefill,
+                    Some(sel),
+                );
             }
             KeyCode::Char('v') => {
                 let prefill = self.project.chapter_pov(sel).unwrap_or("").to_string();
-                self.open_prompt(Pending::SetMeta(MetaField::Pov { at: sel }), "POV: ", &prefill, Some(sel));
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Pov { at: sel }),
+                    "POV: ",
+                    &prefill,
+                    Some(sel),
+                );
             }
             KeyCode::Char('g') => {
-                let text = self.chapter_epigraph(sel).map(|e| e.text).unwrap_or_default();
-                self.edit_meta(MetaField::ChapterEpigraph { at: sel }, "chapter epigraph", text, Some(sel));
+                let text = self
+                    .chapter_epigraph(sel)
+                    .map(|e| e.text)
+                    .unwrap_or_default();
+                self.edit_meta(
+                    MetaField::ChapterEpigraph { at: sel },
+                    "chapter epigraph",
+                    text,
+                    Some(sel),
+                );
             }
             // Set the chapter's word-count goal (#146); blank clears it.
             KeyCode::Char('l') => {
-                let prefill = self.project.chapter_goal(sel).map(|g| g.to_string()).unwrap_or_default();
-                self.open_prompt(Pending::SetMeta(MetaField::Goal { at: sel }), "Word goal: ", &prefill, Some(sel));
+                let prefill = self
+                    .project
+                    .chapter_goal(sel)
+                    .map(|g| g.to_string())
+                    .unwrap_or_default();
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Goal { at: sel }),
+                    "Word goal: ",
+                    &prefill,
+                    Some(sel),
+                );
             }
             // Set the file's section role (#179); blank clears it to a body chapter.
             KeyCode::Char('S') => {
-                let prefill = self.project.chapter_role(sel).map(|r| r.key().to_string()).unwrap_or_default();
+                let prefill = self
+                    .project
+                    .chapter_role(sel)
+                    .map(|r| r.key().to_string())
+                    .unwrap_or_default();
                 self.open_prompt(
                     Pending::SetMeta(MetaField::Role { at: sel }),
                     "Section role (prologue/epilogue/appendix/…; blank = body): ",
@@ -87,19 +131,39 @@ impl App {
             // Project-level book / series metadata.
             KeyCode::Char('t') => {
                 let cur = self.project.manifest.title.clone();
-                self.open_prompt(Pending::SetMeta(MetaField::BookTitle), "Book title: ", &cur, Some(sel));
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::BookTitle),
+                    "Book title: ",
+                    &cur,
+                    Some(sel),
+                );
             }
             KeyCode::Char('b') => {
                 let cur = self.project.manifest.subtitle.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetMeta(MetaField::Subtitle), "Subtitle: ", &cur, Some(sel));
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Subtitle),
+                    "Subtitle: ",
+                    &cur,
+                    Some(sel),
+                );
             }
             KeyCode::Char('w') => {
                 let cur = self.project.manifest.author.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetMeta(MetaField::Author), "Author: ", &cur, Some(sel));
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Author),
+                    "Author: ",
+                    &cur,
+                    Some(sel),
+                );
             }
             KeyCode::Char('e') => {
                 let cur = self.project.manifest.series.clone().unwrap_or_default();
-                self.open_prompt(Pending::SetMeta(MetaField::Series), "Series: ", &cur, Some(sel));
+                self.open_prompt(
+                    Pending::SetMeta(MetaField::Series),
+                    "Series: ",
+                    &cur,
+                    Some(sel),
+                );
             }
             KeyCode::Char('G') => {
                 let text = self.project.manifest.epigraph.clone().unwrap_or_default();
@@ -169,9 +233,19 @@ impl App {
         if q.is_empty() {
             return true;
         }
-        self.project.chapter_title(index).unwrap_or_default().to_lowercase().contains(q)
-            || self.project.chapter_status(index).is_some_and(|s| s.label().to_lowercase().contains(q))
-            || self.project.chapter_pov(index).is_some_and(|p| p.to_lowercase().contains(q))
+        self.project
+            .chapter_title(index)
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains(q)
+            || self
+                .project
+                .chapter_status(index)
+                .is_some_and(|s| s.label().to_lowercase().contains(q))
+            || self
+                .project
+                .chapter_pov(index)
+                .is_some_and(|p| p.to_lowercase().contains(q))
     }
 
     /// The active quick-jump query, lowercased (empty when not browsing or with
@@ -187,7 +261,9 @@ impl App {
     /// status line; lowercases the query once for the whole scan.
     pub(crate) fn nav_match_count(&self) -> usize {
         let q = self.nav_query();
-        (0..self.chapter_count()).filter(|&i| self.nav_chapter_matches(i, &q)).count()
+        (0..self.chapter_count())
+            .filter(|&i| self.nav_chapter_matches(i, &q))
+            .count()
     }
 
     fn nav_has_filter(&self) -> bool {
@@ -234,7 +310,9 @@ impl App {
     fn nav_snap(&mut self) {
         let q = self.nav_query();
         if !self.nav_chapter_matches(self.nav_selected(), &q) {
-            if let Some(first) = (0..self.chapter_count()).find(|&i| self.nav_chapter_matches(i, &q)) {
+            if let Some(first) =
+                (0..self.chapter_count()).find(|&i| self.nav_chapter_matches(i, &q))
+            {
                 self.select(first);
             }
         }
@@ -269,7 +347,8 @@ impl App {
     pub(super) fn open_ref_files(&mut self) {
         let files = self.project.reference_files();
         if files.is_empty() {
-            self.message = Some("No reference files yet — add notes or a bible under the project.".into());
+            self.message =
+                Some("No reference files yet — add notes or a bible under the project.".into());
             return;
         }
         self.mode = Mode::RefFiles(Box::new(RefFiles { files, selected: 0 }));

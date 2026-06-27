@@ -61,7 +61,11 @@ pub fn load() -> Loaded {
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
 
     let (triggers, errors) = validate_triggers(&workflows, triggers.on_save, triggers.keys);
-    Loaded { workflows, triggers, errors }
+    Loaded {
+        workflows,
+        triggers,
+        errors,
+    }
 }
 
 /// Drop trigger entries that name an unknown workflow or aren't a single key,
@@ -134,13 +138,21 @@ fn expand<'a>(
             // passes run off-thread — #227).
             match action {
                 Action::Ai(AiAction::Ask) => {
-                    return Err(format!("step '{step}' needs a typed question — not usable in a workflow"))
+                    return Err(format!(
+                        "step '{step}' needs a typed question — not usable in a workflow"
+                    ))
                 }
-                Action::Ai(AiAction::Brainstorm | AiAction::DraftCharacters | AiAction::DraftSetting) => {
-                    return Err(format!("step '{step}' needs a typed premise — not usable in a workflow"))
+                Action::Ai(
+                    AiAction::Brainstorm | AiAction::DraftCharacters | AiAction::DraftSetting,
+                ) => {
+                    return Err(format!(
+                        "step '{step}' needs a typed premise — not usable in a workflow"
+                    ))
                 }
                 Action::Ai(AiAction::Portrait | AiAction::Scene) => {
-                    return Err(format!("step '{step}' is interactive — not usable in a workflow"))
+                    return Err(format!(
+                        "step '{step}' is interactive — not usable in a workflow"
+                    ))
                 }
                 _ => {}
             }
@@ -158,11 +170,17 @@ mod tests {
     use super::*;
 
     fn wf(name: &str, steps: &[&str]) -> Workflow {
-        Workflow { name: name.into(), steps: steps.iter().map(|s| (*s).to_string()).collect() }
+        Workflow {
+            name: name.into(),
+            steps: steps.iter().map(|s| (*s).to_string()).collect(),
+        }
     }
 
     fn keymap(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
     }
 
     #[test]
@@ -217,7 +235,11 @@ mod tests {
     #[test]
     fn an_async_ai_step_resolves() {
         let wfs = vec![wf("deep", &["save", "ai:characters"])];
-        let names: Vec<_> = resolve(&wfs, "deep").unwrap().iter().map(|a| a.name()).collect();
+        let names: Vec<_> = resolve(&wfs, "deep")
+            .unwrap()
+            .iter()
+            .map(|a| a.name())
+            .collect();
         assert_eq!(names, ["save", "ai:characters"]);
     }
 
@@ -232,7 +254,10 @@ mod tests {
     fn the_interactive_portrait_step_is_rejected() {
         let wfs = vec![wf("art", &["ai:portrait"])];
         let err = resolve(&wfs, "art").unwrap_err();
-        assert!(err.contains("ai:portrait") && err.contains("interactive"), "{err}");
+        assert!(
+            err.contains("ai:portrait") && err.contains("interactive"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -248,7 +273,11 @@ mod tests {
             wf("a", &["save", "b"]),
             wf("b", &["report:analysis", "export:markdown"]),
         ];
-        let names: Vec<_> = resolve(&wfs, "a").unwrap().iter().map(|a| a.name()).collect();
+        let names: Vec<_> = resolve(&wfs, "a")
+            .unwrap()
+            .iter()
+            .map(|a| a.name())
+            .collect();
         assert_eq!(names, ["save", "report:analysis", "export:markdown"]);
     }
 

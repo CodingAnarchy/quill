@@ -1,9 +1,9 @@
 //! AI generation: scaffolding, naming, the command palette, brainstorm, and drafting.
 
 use super::*;
-use std::fs;
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
+use std::fs;
 
 // --- AI: scaffolding (outline + gaps + xxx insertion) ----------------------
 
@@ -11,14 +11,23 @@ use crate::ai::scaffold::{self, Scaffold};
 fn scaffold_writes_outline_and_opens_gap_findings() {
     let (mut app, dir) = two_chapter_app("scaffold");
     let s = Scaffold {
-        outline: vec![scaffold::OutlineItem { chapter: "One".into(), beats: vec!["a beat".into()] }],
-        gaps: vec![scaffold::Gap { detail: "no clear goal".into(), chapter: "Two".into() }],
+        outline: vec![scaffold::OutlineItem {
+            chapter: "One".into(),
+            beats: vec!["a beat".into()],
+        }],
+        gaps: vec![scaffold::Gap {
+            detail: "no clear goal".into(),
+            chapter: "Two".into(),
+        }],
     };
     app.apply_scaffold(Ok(s));
     let file = fs::read_to_string(dir.join("bible/outline.md")).expect("outline written");
     assert!(file.contains("## One") && file.contains("a beat"));
     assert!(file.contains("## Gaps"));
-    assert!(matches!(app.mode, Mode::Findings(_)), "gap findings overlay opens");
+    assert!(
+        matches!(app.mode, Mode::Findings(_)),
+        "gap findings overlay opens"
+    );
 }
 
 #[test]
@@ -26,12 +35,23 @@ fn marking_a_finding_inserts_an_xxx_todo_in_a_nonactive_chapter() {
     let (mut app, dir) = two_chapter_app("mark-todo"); // active is "One"
     app.apply_scaffold(Ok(Scaffold {
         outline: vec![],
-        gaps: vec![scaffold::Gap { detail: "needs a hook".into(), chapter: "Two".into() }],
+        gaps: vec![scaffold::Gap {
+            detail: "needs a hook".into(),
+            chapter: "Two".into(),
+        }],
     }));
     let before = app.count_todo();
     app.on_key(key(KeyCode::Char('i'))); // mark xxx in "Two" (non-active → file)
-    assert!(app.count_todo() > before, "the report's xxx count should rise");
-    assert!(fs::read_to_string(dir.join("two.md")).unwrap().contains("xxx"), "marker on disk");
+    assert!(
+        app.count_todo() > before,
+        "the report's xxx count should rise"
+    );
+    assert!(
+        fs::read_to_string(dir.join("two.md"))
+            .unwrap()
+            .contains("xxx"),
+        "marker on disk"
+    );
 }
 
 #[test]
@@ -39,10 +59,16 @@ fn marking_a_finding_in_the_active_chapter_updates_the_buffer() {
     let (mut app, _dir) = two_chapter_app("mark-active"); // active is "One"
     app.apply_scaffold(Ok(Scaffold {
         outline: vec![],
-        gaps: vec![scaffold::Gap { detail: "weak open".into(), chapter: "One".into() }],
+        gaps: vec![scaffold::Gap {
+            detail: "weak open".into(),
+            chapter: "One".into(),
+        }],
     }));
     app.on_key(key(KeyCode::Char('i')));
-    assert!(app.buffer.text().contains("xxx"), "marker shows in the active buffer");
+    assert!(
+        app.buffer.text().contains("xxx"),
+        "marker shows in the active buffer"
+    );
 }
 
 // --- AI: naming & term consistency -----------------------------------------
@@ -56,13 +82,20 @@ fn known_entities_reads_gazetteer_and_character_names() {
         "---\n---\n\n## Gazetteer\n- Aldermoor\n- lightsteel\n\n## Other\n- nope\n",
     )
     .unwrap();
-    fs::write(dir.join("bible/characters/mara.md"), "---\nname: Mara Vance\n---\n").unwrap();
+    fs::write(
+        dir.join("bible/characters/mara.md"),
+        "---\nname: Mara Vance\n---\n",
+    )
+    .unwrap();
 
     let e = app.known_entities();
     assert!(e.contains(&"Aldermoor".to_string()));
     assert!(e.contains(&"lightsteel".to_string()));
     assert!(e.contains(&"Mara Vance".to_string()));
-    assert!(!e.contains(&"nope".to_string()), "only the Gazetteer section is read");
+    assert!(
+        !e.contains(&"nope".to_string()),
+        "only the Gazetteer section is read"
+    );
 }
 
 #[test]
@@ -119,7 +152,10 @@ fn applying_word_search_results_opens_the_overlay() {
     )
     .unwrap();
     app.apply_thesaurus(Ok(words));
-    assert!(app.overlay.is_some(), "candidates are shown in the AI overlay");
+    assert!(
+        app.overlay.is_some(),
+        "candidates are shown in the AI overlay"
+    );
 }
 
 #[test]
@@ -137,9 +173,16 @@ fn editorial_read_flags_land_in_the_findings_list_tagged_by_lens() {
     match &app.mode {
         Mode::Findings(f) => {
             let summaries: Vec<&str> = f.items.iter().map(|i| i.summary.as_str()).collect();
-            assert!(summaries.iter().any(|s| s.starts_with("structural:") && s.contains("stakes")), "{summaries:?}");
             assert!(
-                summaries.iter().any(|s| s.starts_with("line:") && s.contains('\u{201c}') && s.contains("could of")),
+                summaries
+                    .iter()
+                    .any(|s| s.starts_with("structural:") && s.contains("stakes")),
+                "{summaries:?}"
+            );
+            assert!(
+                summaries.iter().any(|s| s.starts_with("line:")
+                    && s.contains('\u{201c}')
+                    && s.contains("could of")),
                 "line flag pinpoints a quoted span: {summaries:?}"
             );
         }
@@ -163,7 +206,10 @@ fn palette_enter_on_ask_opens_the_question_prompt() {
     let (mut app, _dir) = two_chapter_app("palette-ask");
     app.open_ai_palette(); // "Ask the manuscript" is the first item
     app.on_key(key(KeyCode::Enter));
-    assert!(matches!(app.mode, Mode::Prompt(_)), "Ask opens the question prompt");
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "Ask opens the question prompt"
+    );
 }
 
 #[test]
@@ -190,7 +236,11 @@ fn brainstorm_writes_an_off_manuscript_doc() {
     assert!(doc.contains("## Premises") && doc.contains("buried secret"));
     assert!(doc.contains("## What if") && doc.contains("## Central conflicts"));
     assert!(doc.contains("Generated by Quill"), "marked AI-generated");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
 
 #[test]
@@ -258,7 +308,11 @@ fn drafted_setting_writes_to_the_bible_off_manuscript() {
     let bible = fs::read_to_string(dir.join("bible/setting.md")).unwrap();
     assert!(bible.contains("Geography & locations") && bible.contains("Saltmere"));
     assert!(bible.contains("Generated by Quill"), "marked AI-generated");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
 
 #[test]
@@ -275,7 +329,13 @@ fn drafted_characters_write_to_the_bible_off_manuscript() {
     let profile = fs::read_to_string(dir.join("bible/characters/mara-vance.md")).unwrap();
     assert!(profile.contains("name: Mara Vance"));
     assert!(profile.contains("## Goals") && profile.contains("locket"));
-    assert!(profile.contains("Generated by Quill"), "marked AI-generated");
-    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), before, "chapter prose untouched");
+    assert!(
+        profile.contains("Generated by Quill"),
+        "marked AI-generated"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "chapter prose untouched"
+    );
 }
-

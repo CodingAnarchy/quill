@@ -36,7 +36,10 @@ impl ImageBackend for FalBackend {
         }
         let (url, content_type) = first_image(&value)?;
         let bytes = self.download(&url)?;
-        Ok(GeneratedImage { bytes, ext: image::extension_for(&content_type).to_string() })
+        Ok(GeneratedImage {
+            bytes,
+            ext: image::extension_for(&content_type).to_string(),
+        })
     }
 }
 
@@ -45,7 +48,14 @@ impl FalBackend {
     /// the parsed JSON body (fal returns JSON on errors too).
     fn post(&self, url: &str, body: &Value) -> Result<(u16, Value), AiError> {
         let auth = format!("Key {}", self.key);
-        http::post_json(url, &[("authorization", &auth), ("content-type", "application/json")], body)
+        http::post_json(
+            url,
+            &[
+                ("authorization", &auth),
+                ("content-type", "application/json"),
+            ],
+            body,
+        )
     }
 
     /// Download the generated image bytes from its (fal-hosted) URL. Bespoke (not
@@ -56,16 +66,25 @@ impl FalBackend {
             .http_status_as_error(false)
             .build()
             .call()
-            .map_err(|e| AiError::Network { status: None, message: e.to_string() })?;
+            .map_err(|e| AiError::Network {
+                status: None,
+                message: e.to_string(),
+            })?;
         let status = res.status().as_u16();
         if !is_ok(status) {
-            return Err(AiError::Network { status: Some(status), message: "image download failed".into() });
+            return Err(AiError::Network {
+                status: Some(status),
+                message: "image download failed".into(),
+            });
         }
         res.body_mut()
             .with_config()
             .limit(MAX_IMAGE_BYTES)
             .read_to_vec()
-            .map_err(|e| AiError::Network { status: None, message: e.to_string() })
+            .map_err(|e| AiError::Network {
+                status: None,
+                message: e.to_string(),
+            })
     }
 }
 
@@ -90,8 +109,10 @@ fn first_image(value: &Value) -> Result<(String, String), AiError> {
         .get("url")
         .and_then(Value::as_str)
         .ok_or_else(|| AiError::ApiMalformed("fal image had no url".into()))?;
-    let content_type =
-        image.get("content_type").and_then(Value::as_str).unwrap_or("image/png");
+    let content_type = image
+        .get("content_type")
+        .and_then(Value::as_str)
+        .unwrap_or("image/png");
     Ok((url.to_string(), content_type.to_string()))
 }
 
@@ -101,9 +122,17 @@ fn api_error(status: u16, value: &Value) -> AiError {
     let msg = value
         .pointer("/detail")
         .and_then(Value::as_str)
-        .or_else(|| value.get("detail").and_then(|d| d.pointer("/0/msg")).and_then(Value::as_str))
+        .or_else(|| {
+            value
+                .get("detail")
+                .and_then(|d| d.pointer("/0/msg"))
+                .and_then(Value::as_str)
+        })
         .unwrap_or("unknown error");
-    AiError::Network { status: Some(status), message: msg.to_string() }
+    AiError::Network {
+        status: Some(status),
+        message: msg.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -112,19 +141,28 @@ mod tests {
 
     #[test]
     fn run_url_joins_the_model() {
-        assert_eq!(run_url("fal-ai/flux/schnell"), "https://fal.run/fal-ai/flux/schnell");
+        assert_eq!(
+            run_url("fal-ai/flux/schnell"),
+            "https://fal.run/fal-ai/flux/schnell"
+        );
     }
 
     #[test]
     fn body_carries_the_prompt() {
-        let req = ImageRequest { prompt: "a portrait of Mara".into(), model: "m".into() };
+        let req = ImageRequest {
+            prompt: "a portrait of Mara".into(),
+            model: "m".into(),
+        };
         assert_eq!(body(&req)["prompt"], "a portrait of Mara");
     }
 
     #[test]
     fn first_image_reads_url_and_content_type() {
         let v = json!({ "images": [ { "url": "https://cdn.fal/img.jpg", "content_type": "image/jpeg" } ] });
-        assert_eq!(first_image(&v).unwrap(), ("https://cdn.fal/img.jpg".into(), "image/jpeg".into()));
+        assert_eq!(
+            first_image(&v).unwrap(),
+            ("https://cdn.fal/img.jpg".into(), "image/jpeg".into())
+        );
     }
 
     #[test]
@@ -135,7 +173,10 @@ mod tests {
 
     #[test]
     fn first_image_errors_when_absent() {
-        assert!(matches!(first_image(&json!({ "images": [] })), Err(AiError::ApiMalformed(_))));
+        assert!(matches!(
+            first_image(&json!({ "images": [] })),
+            Err(AiError::ApiMalformed(_))
+        ));
     }
 
     #[test]

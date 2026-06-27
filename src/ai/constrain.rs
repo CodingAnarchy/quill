@@ -55,7 +55,10 @@ pub struct Constraint<'a> {
 
 impl<'a> Constraint<'a> {
     pub fn new(schema: &'a Value) -> Self {
-        Self { schema, text: String::new() }
+        Self {
+            schema,
+            text: String::new(),
+        }
     }
 
     /// Whether the accumulated output is already a complete schema-valid value.
@@ -66,7 +69,10 @@ impl<'a> Constraint<'a> {
     /// From candidate `(id, piece)` pairs in **descending preference** (logit)
     /// order, accept the first whose `piece` keeps the output a viable prefix and
     /// return its id; `None` if none is viable (the decode loop then stops).
-    pub fn pick<'p>(&mut self, candidates: impl IntoIterator<Item = (u32, &'p str)>) -> Option<u32> {
+    pub fn pick<'p>(
+        &mut self,
+        candidates: impl IntoIterator<Item = (u32, &'p str)>,
+    ) -> Option<u32> {
         for (id, piece) in candidates {
             let mut next = String::with_capacity(self.text.len() + piece.len());
             next.push_str(&self.text);
@@ -164,7 +170,10 @@ fn scan_string<'s>(s: &'s str, allowed: Option<&[&str]>) -> StrOut<'s> {
                         return StrOut::Invalid;
                     }
                 }
-                return StrOut::Complete { content: content.to_string(), rest: &s[i + 1..] };
+                return StrOut::Complete {
+                    content: content.to_string(),
+                    rest: &s[i + 1..],
+                };
             }
             _ => i += 1,
         }
@@ -214,7 +223,11 @@ fn consume_number(s: &str, integer: bool) -> Outcome<'_> {
     }
     if i == digits_start {
         // no integer digits yet: "-" alone (or empty) at EOF is a viable prefix
-        return if i == n { Outcome::Partial } else { Outcome::Invalid };
+        return if i == n {
+            Outcome::Partial
+        } else {
+            Outcome::Invalid
+        };
     }
     if i == n {
         return Outcome::Partial; // all digits so far; a delimiter is expected next
@@ -226,7 +239,11 @@ fn consume_number(s: &str, integer: bool) -> Outcome<'_> {
             i += 1;
         }
         if i == frac_start {
-            return if i == n { Outcome::Partial } else { Outcome::Invalid };
+            return if i == n {
+                Outcome::Partial
+            } else {
+                Outcome::Invalid
+            };
         }
         if i == n {
             return Outcome::Partial;
@@ -242,7 +259,11 @@ fn consume_number(s: &str, integer: bool) -> Outcome<'_> {
             i += 1;
         }
         if i == exp_start {
-            return if i == n { Outcome::Partial } else { Outcome::Invalid };
+            return if i == n {
+                Outcome::Partial
+            } else {
+                Outcome::Invalid
+            };
         }
         if i == n {
             return Outcome::Partial;
@@ -263,7 +284,10 @@ fn consume_object<'s>(schema: &Value, s: &'s str) -> Outcome<'s> {
     };
 
     let empty = serde_json::Map::new();
-    let props = schema.get("properties").and_then(Value::as_object).unwrap_or(&empty);
+    let props = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
     let required: Vec<&str> = schema
         .get("required")
         .and_then(Value::as_array)
@@ -282,8 +306,11 @@ fn consume_object<'s>(schema: &Value, s: &'s str) -> Outcome<'s> {
             return close_object(rest, &required, &seen);
         }
         // A key: a string equal to one of the not-yet-seen property names.
-        let remaining: Vec<&str> =
-            props.keys().map(String::as_str).filter(|k| !seen.contains(k)).collect();
+        let remaining: Vec<&str> = props
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !seen.contains(k))
+            .collect();
         let key = match scan_string(rest, Some(&remaining)) {
             StrOut::Complete { content, rest: r } => {
                 // Borrow the matching property name (lives as long as `schema`).
@@ -486,7 +513,10 @@ mod tests {
         let full = "{\"name\": \"Mara\", \"role\": \"protagonist\", \"traits\": [\"brave\"]}";
         assert_eq!(status(&o, full), Prefix::Complete);
         // A complete object plus a half-typed next value stays valid as a prefix.
-        assert_eq!(status(&o, "{\"name\": \"Mara\", \"role\": \"prot"), Prefix::Partial);
+        assert_eq!(
+            status(&o, "{\"name\": \"Mara\", \"role\": \"prot"),
+            Prefix::Partial
+        );
     }
 
     #[test]

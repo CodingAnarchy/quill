@@ -110,7 +110,7 @@ mod tests {
     fn visual_pos_and_back_round_trip() {
         let text = "the quick brown fox";
         let starts = row_starts(text, 10); // [0, 10]
-        // "brown" starts at byte 10 → row 1, x 0.
+                                           // "brown" starts at byte 10 → row 1, x 0.
         assert_eq!(visual_pos(text, &starts, 10), (1, 0));
         // Byte 4 ("quick") → row 0, x 4.
         assert_eq!(visual_pos(text, &starts, 4), (0, 4));

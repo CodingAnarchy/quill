@@ -1,10 +1,6 @@
 //! Chapter CRUD and navigation (activate, create, rename, move, delete).
 //! Extracted from `mod.rs` (#314).
 
-
-
-
-
 use crate::buffer::Buffer;
 
 use super::App;
@@ -73,7 +69,8 @@ impl App {
         // Reordering stays within a band — a section can't be shuffled out of
         // front/back matter into the body or vice versa (#180).
         if self.project.chapter_band(sel) != self.project.chapter_band(j) {
-            self.message = Some("Reordering stays within front matter / body / back matter.".into());
+            self.message =
+                Some("Reordering stays within front matter / body / back matter.".into());
             return sel;
         }
         match self.project.swap_chapters(sel, j) {

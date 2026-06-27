@@ -19,7 +19,11 @@ fn normal_mode_keys_do_not_insert_text() {
     let original = app.buffer.text();
     // An unmapped letter is a no-op, never typed input.
     app.on_key(key(KeyCode::Char('z')));
-    assert_eq!(app.buffer.text(), original, "letters are commands, not input");
+    assert_eq!(
+        app.buffer.text(),
+        original,
+        "letters are commands, not input"
+    );
     assert!(matches!(app.mode, Mode::Normal));
 }
 
@@ -29,7 +33,11 @@ fn i_enters_insert_then_esc_returns_to_normal() {
     app.on_key(key(KeyCode::Char('i')));
     assert!(matches!(app.mode, Mode::Insert), "i enters Insert");
     type_str(&mut app, "Hi");
-    assert!(app.buffer.text().starts_with("Hifirst chapter"), "{}", app.buffer.text());
+    assert!(
+        app.buffer.text().starts_with("Hifirst chapter"),
+        "{}",
+        app.buffer.text()
+    );
     app.on_key(key(KeyCode::Esc));
     assert!(matches!(app.mode, Mode::Normal), "Esc returns to Normal");
 }
@@ -40,9 +48,16 @@ fn a_appends_after_the_cursor() {
     // Cursor starts at col 0; `a` enters Insert one grapheme to the right.
     app.on_key(key(KeyCode::Char('a')));
     assert!(matches!(app.mode, Mode::Insert));
-    assert_eq!(app.buffer.cursor.col, 1, "append moves past the first grapheme");
+    assert_eq!(
+        app.buffer.cursor.col, 1,
+        "append moves past the first grapheme"
+    );
     type_str(&mut app, "X");
-    assert!(app.buffer.text().starts_with("fXirst chapter"), "{}", app.buffer.text());
+    assert!(
+        app.buffer.text().starts_with("fXirst chapter"),
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -51,7 +66,11 @@ fn capital_a_appends_at_line_end() {
     app.on_key(key(KeyCode::Char('A')));
     assert!(matches!(app.mode, Mode::Insert));
     type_str(&mut app, "!");
-    assert!(app.buffer.text().starts_with("first chapter!"), "{}", app.buffer.text());
+    assert!(
+        app.buffer.text().starts_with("first chapter!"),
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -66,7 +85,12 @@ fn o_opens_a_line_below_and_capital_o_above() {
     app.on_key(key(KeyCode::Esc));
     app.on_key(key(KeyCode::Char('O')));
     type_str(&mut app, "top");
-    assert_eq!(app.buffer.text(), "first chapter\ntop\nnew\n", "{}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter\ntop\nnew\n",
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -84,7 +108,10 @@ fn ctrl_shortcuts_still_work_in_normal_mode() {
     let (mut app, _dir) = vim_app("vim-ctrl");
     // Ctrl-g focuses the chapter browser, the same as in Insert mode.
     app.on_key(ctrl('g'));
-    assert!(matches!(app.mode, Mode::Nav { .. }), "Ctrl-g reaches the browser from Normal");
+    assert!(
+        matches!(app.mode, Mode::Nav { .. }),
+        "Ctrl-g reaches the browser from Normal"
+    );
 }
 
 #[test]
@@ -92,7 +119,10 @@ fn returning_from_the_browser_lands_in_normal_when_vim_is_on() {
     let (mut app, _dir) = vim_app("vim-return");
     app.on_key(ctrl('g')); // into the browser
     app.on_key(key(KeyCode::Enter)); // open the selected chapter
-    assert!(matches!(app.mode, Mode::Normal), "Vim returns to Normal, not Insert");
+    assert!(
+        matches!(app.mode, Mode::Normal),
+        "Vim returns to Normal, not Insert"
+    );
 }
 
 #[test]
@@ -104,7 +134,11 @@ fn word_motion_and_count_move_the_cursor() {
     app.on_key(key(KeyCode::Char('0'))); // back to line start
     assert_eq!(app.buffer.cursor.col, 0, "0 goes to the line start");
     app.on_key(key(KeyCode::Char('$'))); // to line end
-    assert_eq!(app.buffer.cursor.col, app.buffer.line_len(), "$ goes to the line end");
+    assert_eq!(
+        app.buffer.cursor.col,
+        app.buffer.line_len(),
+        "$ goes to the line end"
+    );
 }
 
 #[test]
@@ -125,13 +159,19 @@ fn gg_and_capital_g_jump_between_lines() {
     app.on_key(key(KeyCode::Char('A')));
     type_str(&mut app, "\nsecond\nthird");
     app.on_key(key(KeyCode::Esc));
-    assert_eq!(app.buffer.cursor.line, 2, "cursor on the last line after typing");
+    assert_eq!(
+        app.buffer.cursor.line, 2,
+        "cursor on the last line after typing"
+    );
     type_str(&mut app, "gg");
     assert_eq!(app.buffer.cursor.line, 0, "gg jumps to the first line");
     app.on_key(key(KeyCode::Char('G')));
     assert_eq!(app.buffer.cursor.line, 2, "G jumps to the last line");
     type_str(&mut app, "2G");
-    assert_eq!(app.buffer.cursor.line, 1, "a count before G jumps to that line");
+    assert_eq!(
+        app.buffer.cursor.line, 1,
+        "a count before G jumps to that line"
+    );
 }
 
 #[test]
@@ -182,7 +222,12 @@ fn x_deletes_the_char_under_the_cursor() {
     type_str(&mut app, "x");
     assert_eq!(app.buffer.text(), "irst chapter\n", "{}", app.buffer.text());
     type_str(&mut app, "2x");
-    assert_eq!(app.buffer.text(), "st chapter\n", "2x deletes two: {}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "st chapter\n",
+        "2x deletes two: {}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -196,7 +241,12 @@ fn ci_quote_changes_inside_quotes() {
     type_str(&mut app, "ci\""); // change inside the quotes
     assert!(matches!(app.mode, Mode::Insert));
     type_str(&mut app, "bye");
-    assert_eq!(app.buffer.text(), "say \"bye\" now\n", "{}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "say \"bye\" now\n",
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -217,7 +267,7 @@ fn an_operator_composes_with_the_arrow_keys() {
     type_str(&mut app, "\nsecond\nthird");
     app.on_key(key(KeyCode::Esc));
     type_str(&mut app, "gg"); // to line 0
-    // d<Down> deletes this line and the next, like dj.
+                              // d<Down> deletes this line and the next, like dj.
     app.on_key(key(KeyCode::Char('d')));
     app.on_key(key(KeyCode::Down));
     assert_eq!(app.buffer.text(), "third\n", "{}", app.buffer.text());
@@ -228,7 +278,12 @@ fn yy_then_p_duplicates_a_line() {
     let (mut app, _dir) = vim_app("vim-yy-p");
     type_str(&mut app, "yy"); // yank "first chapter"
     type_str(&mut app, "p"); // put it on a new line below
-    assert_eq!(app.buffer.text(), "first chapter\nfirst chapter\n", "{}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "first chapter\nfirst chapter\n",
+        "{}",
+        app.buffer.text()
+    );
     assert!(matches!(app.mode, Mode::Normal), "put stays in Normal");
 }
 
@@ -241,7 +296,12 @@ fn dd_then_p_moves_a_line() {
     type_str(&mut app, "gg"); // line 0 ("first chapter")
     type_str(&mut app, "dd"); // delete it (now in unnamed register)
     type_str(&mut app, "p"); // put below the current line ("second")
-    assert_eq!(app.buffer.text(), "second\nfirst chapter\n", "{}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "second\nfirst chapter\n",
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -249,7 +309,12 @@ fn yw_then_capital_p_puts_inline_before_the_cursor() {
     let (mut app, _dir) = vim_app("vim-yw-P");
     type_str(&mut app, "yw"); // yank "first " (charwise)
     type_str(&mut app, "P"); // put before the cursor, inline
-    assert_eq!(app.buffer.text(), "first first chapter\n", "{}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "first first chapter\n",
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -263,7 +328,7 @@ fn named_registers_hold_separate_text() {
     type_str(&mut app, "\"ayy"); // line 0 → register a
     type_str(&mut app, "j");
     type_str(&mut app, "\"byy"); // line 1 → register b
-    // Put register a below the current (last) line.
+                                 // Put register a below the current (last) line.
     type_str(&mut app, "\"ap");
     assert_eq!(
         app.buffer.text(),
@@ -292,7 +357,10 @@ fn visual_char_selection_deletes_the_range() {
     // v selects from col 0; ll extends to col 2; d deletes "fir" (inclusive).
     type_str(&mut app, "vlld");
     assert_eq!(app.buffer.text(), "st chapter\n", "{}", app.buffer.text());
-    assert!(matches!(app.mode, Mode::Normal), "delete leaves Visual for Normal");
+    assert!(
+        matches!(app.mode, Mode::Normal),
+        "delete leaves Visual for Normal"
+    );
 }
 
 #[test]
@@ -320,7 +388,12 @@ fn visual_yank_then_put() {
     let (mut app, _dir) = vim_app("vim-v-y");
     type_str(&mut app, "vlly"); // yank "fir"; cursor returns to the start
     type_str(&mut app, "P"); // put it before the cursor, inline
-    assert_eq!(app.buffer.text(), "firfirst chapter\n", "{}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "firfirst chapter\n",
+        "{}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -332,7 +405,12 @@ fn esc_cancels_visual_and_o_swaps_ends() {
     assert!(matches!(app.mode, Mode::Normal), "Esc cancels Visual");
     // `o` swaps the ends without changing which text is selected.
     type_str(&mut app, "vllod");
-    assert_eq!(app.buffer.text(), "st chapter\n", "swap leaves the same selection: {}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "st chapter\n",
+        "swap leaves the same selection: {}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -341,7 +419,10 @@ fn slash_search_jumps_and_n_repeats() {
     // "first chapter": search for "r" → jumps to the first 'r' (col 3).
     type_str(&mut app, "/r");
     app.on_key(key(KeyCode::Enter));
-    assert!(matches!(app.mode, Mode::Normal), "Enter finalizes back to Normal");
+    assert!(
+        matches!(app.mode, Mode::Normal),
+        "Enter finalizes back to Normal"
+    );
     assert_eq!(app.buffer.cursor.col, 2, "jumped to the first match");
     app.on_key(key(KeyCode::Char('n'))); // next 'r' (in "chapter", col 12)
     assert_eq!(app.buffer.cursor.col, 12, "n repeats forward");
@@ -357,7 +438,11 @@ fn search_wraps_with_a_notice() {
     app.on_key(key(KeyCode::Char('n'))); // col 12 (last 'r')
     app.on_key(key(KeyCode::Char('n'))); // wraps to col 2
     assert_eq!(app.buffer.cursor.col, 2, "wrapped to the first match");
-    assert!(app.message.as_deref().unwrap_or("").contains("BOTTOM"), "{:?}", app.message);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("BOTTOM"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
@@ -372,7 +457,10 @@ fn question_searches_backward_and_esc_restores_the_cursor() {
     // A fresh search, abandoned with Esc, restores the origin.
     type_str(&mut app, "/f");
     app.on_key(key(KeyCode::Esc));
-    assert_eq!(app.buffer.cursor.col, 10, "Esc restores the pre-search cursor");
+    assert_eq!(
+        app.buffer.cursor.col, 10,
+        "Esc restores the pre-search cursor"
+    );
     let _ = start;
 }
 
@@ -385,7 +473,12 @@ fn star_searches_the_word_under_the_cursor() {
     app.on_key(key(KeyCode::Esc));
     type_str(&mut app, "gg0"); // back to the start ("first chapter first")
     type_str(&mut app, "*"); // search "first" → next occurrence
-    assert_eq!(app.buffer.cursor.col, 14, "* jumped to the next 'first': {}", app.buffer.text());
+    assert_eq!(
+        app.buffer.cursor.col,
+        14,
+        "* jumped to the next 'first': {}",
+        app.buffer.text()
+    );
 }
 
 /// Make the active chapter dirty (an unsaved edit), back in Normal mode.
@@ -420,7 +513,10 @@ fn ex_quit_is_clean_or_prompts_when_dirty() {
     type_str(&mut app, ":q");
     app.on_key(key(KeyCode::Enter));
     assert!(!app.should_quit, "':q' on unsaved changes doesn't quit yet");
-    assert!(matches!(app.mode, Mode::Prompt(_)), "it opens the quit confirm");
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "it opens the quit confirm"
+    );
 }
 
 #[test]
@@ -448,16 +544,29 @@ fn ex_unknown_command_reports_and_does_nothing() {
     type_str(&mut app, ":frobnicate");
     app.on_key(key(KeyCode::Enter));
     assert!(!app.should_quit);
-    assert!(app.message.as_deref().unwrap_or("").contains("Not an editor command"), "{:?}", app.message);
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Not an editor command"),
+        "{:?}",
+        app.message
+    );
 }
 
 #[test]
 fn ex_command_can_be_cancelled() {
     let (mut app, _dir) = vim_app("vim-ex-esc");
     app.on_key(key(KeyCode::Char(':')));
-    assert!(matches!(app.mode, Mode::Prompt(_)), "':' opens the command line");
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "':' opens the command line"
+    );
     app.on_key(key(KeyCode::Esc));
-    assert!(matches!(app.mode, Mode::Normal), "Esc cancels back to Normal");
+    assert!(
+        matches!(app.mode, Mode::Normal),
+        "Esc cancels back to Normal"
+    );
     assert!(!app.should_quit);
 }
 
@@ -468,7 +577,10 @@ fn entering_continuous_view_leaves_visual() {
     assert!(matches!(app.mode, Mode::Visual { .. }));
     app.on_key(ctrl('l')); // toggle the continuous view
     assert!(app.manuscript.is_some(), "entered the continuous view");
-    assert!(matches!(app.mode, Mode::Normal), "Visual's stale anchor is dropped");
+    assert!(
+        matches!(app.mode, Mode::Normal),
+        "Visual's stale anchor is dropped"
+    );
 }
 
 #[test]
@@ -493,14 +605,18 @@ fn a_remapped_operator_composes_with_motions() {
 fn keymap_builds_valid_entries_and_reports_bad_ones() {
     use std::collections::HashMap;
     let cfg = HashMap::from([
-        ("down".to_string(), "n".to_string()),   // valid: 'n' → 'j'
+        ("down".to_string(), "n".to_string()),       // valid: 'n' → 'j'
         ("frobnicate".to_string(), "z".to_string()), // unknown action
-        ("left".to_string(), "hh".to_string()),  // not a single key
+        ("left".to_string(), "hh".to_string()),      // not a single key
     ]);
     let (map, errors) = super::super::build_keymap(&cfg);
     assert_eq!(map.get(&'n'), Some(&'j'), "down maps the 'n' key to 'j'");
     assert_eq!(map.len(), 1, "only the valid entry is kept");
-    assert_eq!(errors.len(), 2, "the unknown action and multi-char value are reported: {errors:?}");
+    assert_eq!(
+        errors.len(),
+        2,
+        "the unknown action and multi-char value are reported: {errors:?}"
+    );
 }
 
 #[test]
@@ -520,7 +636,12 @@ fn a_remapped_motion_extends_a_visual_selection() {
     let (mut app, _dir) = vim_app("vim-remap-visual");
     app.vim_keys.insert('s', 'l'); // 's' moves right
     type_str(&mut app, "vssd"); // visual, extend right twice via 's', delete
-    assert_eq!(app.buffer.text(), "st chapter\n", "remapped motion drove the selection: {}", app.buffer.text());
+    assert_eq!(
+        app.buffer.text(),
+        "st chapter\n",
+        "remapped motion drove the selection: {}",
+        app.buffer.text()
+    );
 }
 
 #[test]
@@ -530,9 +651,16 @@ fn modeless_default_is_unchanged_when_vim_is_off() {
     app.mode = Mode::Insert;
     // Letters type straight into the buffer, and Esc is inert.
     type_str(&mut app, "Z");
-    assert!(app.buffer.text().starts_with("Zfirst chapter"), "{}", app.buffer.text());
+    assert!(
+        app.buffer.text().starts_with("Zfirst chapter"),
+        "{}",
+        app.buffer.text()
+    );
     app.on_key(key(KeyCode::Esc));
-    assert!(matches!(app.mode, Mode::Insert), "Esc does nothing without Vim mode");
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "Esc does nothing without Vim mode"
+    );
 }
 
 #[test]

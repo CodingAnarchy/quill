@@ -76,7 +76,16 @@ impl ChapterEntry {
     /// A new entry with the given title and file; the transient caches start
     /// empty (populated from the file at open and as the chapter is edited).
     fn new(title: String, file: String) -> Self {
-        Self { title, file, words: 0, status: None, summary: None, pov: None, goal: None, role: None }
+        Self {
+            title,
+            file,
+            words: 0,
+            status: None,
+            summary: None,
+            pov: None,
+            goal: None,
+            role: None,
+        }
     }
 
     /// Refresh the cached front-matter metadata from `front` (none clears it).
@@ -267,14 +276,19 @@ impl Manifest {
 /// Count of leading front-matter chapters (#185) in a band-ordered chapter list.
 /// Shared by [`Manifest::front_chapter_count`] and the series tree (#330).
 pub(crate) fn front_chapter_count(chapters: &[ChapterEntry]) -> usize {
-    chapters.iter().filter(|c| Band::of(c.role) == Band::Front).count()
+    chapters
+        .iter()
+        .filter(|c| Band::of(c.role) == Band::Front)
+        .count()
 }
 
 /// The 0-based part containing 1-based **body** position `body_pos`, if any. Part
 /// ranges are inclusive 1-based positions among the body chapters (#185). Shared
 /// by [`Manifest::part_of`] and the series tree (#330) so the mapping can't drift.
 pub(crate) fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
-    parts.iter().position(|p| p.chapters[0] <= body_pos && body_pos <= p.chapters[1])
+    parts
+        .iter()
+        .position(|p| p.chapters[0] <= body_pos && body_pos <= p.chapters[1])
 }
 
 /// A filesystem-safe single folder name from an author-typed project name —
@@ -293,7 +307,10 @@ mod sanitize_tests {
 
     #[test]
     fn trims_and_flattens_path_separators() {
-        assert_eq!(sanitize_dir_name("  The Silmarillion \n"), "The Silmarillion");
+        assert_eq!(
+            sanitize_dir_name("  The Silmarillion \n"),
+            "The Silmarillion"
+        );
         assert_eq!(sanitize_dir_name("Vol/1"), "Vol-1");
         // Leading/trailing dots can't smuggle in `..` or a hidden folder.
         assert_eq!(sanitize_dir_name("../escape"), "-escape");
@@ -351,7 +368,10 @@ impl Project {
         let root = dir.as_ref().to_path_buf();
         let text = fs::read_to_string(Self::manifest_path(&root))?;
         let invalid = |e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid {MANIFEST_NAME}: {e}"))
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid {MANIFEST_NAME}: {e}"),
+            )
         };
         // A `books` array marks a multi-book series (#328); anything else is the
         // flat single-book manifest, parsed and saved exactly as before. Peek via
@@ -425,7 +445,10 @@ impl Project {
 
         let mut project = Self {
             root,
-            manifest: Manifest { title, ..Default::default() },
+            manifest: Manifest {
+                title,
+                ..Default::default()
+            },
             active: String::new(),
             words_changed: HashSet::new(),
             books: Vec::new(),
@@ -455,7 +478,9 @@ impl Project {
         for (i, (ctitle, body)) in chapters.iter().enumerate() {
             let file = format!("chapter-{}.md", i + 1);
             atomic::write(&self.root.join(&file), body.as_bytes())?;
-            self.manifest.chapters.push(ChapterEntry::new(ctitle.clone(), file));
+            self.manifest
+                .chapters
+                .push(ChapterEntry::new(ctitle.clone(), file));
         }
         if let Some(t) = title.map(str::trim).filter(|t| !t.is_empty()) {
             self.manifest.title = t.to_string();
@@ -463,7 +488,12 @@ impl Project {
         if let Some(a) = author.map(str::trim).filter(|a| !a.is_empty()) {
             self.manifest.author = Some(a.to_string());
         }
-        self.active = self.manifest.chapters.first().map(|c| c.file.clone()).unwrap_or_default();
+        self.active = self
+            .manifest
+            .chapters
+            .first()
+            .map(|c| c.file.clone())
+            .unwrap_or_default();
         self.save_manifest()
     }
 
@@ -489,7 +519,10 @@ impl Project {
     /// The chapter's file name relative to the project root ("" if out of
     /// range) — a stable identity for keying per-chapter bookkeeping.
     pub fn chapter_file(&self, index: usize) -> &str {
-        self.manifest.chapters.get(index).map_or("", |c| c.file.as_str())
+        self.manifest
+            .chapters
+            .get(index)
+            .map_or("", |c| c.file.as_str())
     }
 
     /// Index of the active chapter — derived from its file identity, so it stays
@@ -514,8 +547,9 @@ impl Project {
     /// in `unused/`. These are the files an author can open in a side pane to read
     /// or edit alongside the prose. Sorted by path for a stable list.
     pub fn reference_files(&self) -> Vec<PathBuf> {
-        let chapters: Vec<PathBuf> =
-            (0..self.manifest.chapters.len()).map(|i| self.chapter_path(i)).collect();
+        let chapters: Vec<PathBuf> = (0..self.manifest.chapters.len())
+            .map(|i| self.chapter_path(i))
+            .collect();
         let mut found = Vec::new();
         collect_markdown(&self.root, &chapters, &mut found);
         found.sort();
@@ -625,7 +659,11 @@ impl Project {
     /// How many files are body chapters — the count the progress report measures
     /// against the chapter goal, excluding front/back matter (#180).
     pub fn body_chapter_count(&self) -> usize {
-        self.manifest.chapters.iter().filter(|c| Band::of(c.role) == Band::Body).count()
+        self.manifest
+            .chapters
+            .iter()
+            .filter(|c| Band::of(c.role) == Band::Body)
+            .count()
     }
 
     /// Sort chapters into reading order — front matter, body, back matter (#180) —
@@ -637,7 +675,11 @@ impl Project {
     pub fn reorder_by_band(&mut self) -> bool {
         // A stable sort, so "changed" is exactly "wasn't already in band order" —
         // checked without cloning the file list.
-        if self.manifest.chapters.is_sorted_by_key(|c| Band::of(c.role)) {
+        if self
+            .manifest
+            .chapters
+            .is_sorted_by_key(|c| Band::of(c.role))
+        {
             return false;
         }
         self.manifest.chapters.sort_by_key(|c| Band::of(c.role));
@@ -680,7 +722,12 @@ impl Project {
     /// the front matter and preserves the body. Used by manuscript-wide replace
     /// for chapters other than the active one (whose live buffer is edited
     /// directly so its change stays undoable).
-    pub(crate) fn replace_chapter_body(&mut self, index: usize, ranges: &[(usize, usize)], replacement: &str) {
+    pub(crate) fn replace_chapter_body(
+        &mut self,
+        index: usize,
+        ranges: &[(usize, usize)],
+        replacement: &str,
+    ) {
         let path = self.chapter_path(index);
         let text = self.read_chapter(index);
         let (front, body) = frontmatter::split(&text);
@@ -735,7 +782,12 @@ impl Project {
             .annotations
             .iter()
             .filter(|a| a.chapter == file)
-            .map(|a| crate::annotation::Live { chapter: file.to_string(), start: a.start, end: a.end, note: a.note.clone() })
+            .map(|a| crate::annotation::Live {
+                chapter: file.to_string(),
+                start: a.start,
+                end: a.end,
+                note: a.note.clone(),
+            })
             .collect();
         live.sort_by_key(|a| (a.start, a.end));
         live
@@ -766,8 +818,11 @@ impl Project {
                 _ => Ok(()),
             };
         }
-        self.annotations.sort_by(|a, b| (&a.chapter, a.start, a.end).cmp(&(&b.chapter, b.start, b.end)));
-        let file = AnnotationFile { items: self.annotations.clone() };
+        self.annotations
+            .sort_by(|a, b| (&a.chapter, a.start, a.end).cmp(&(&b.chapter, b.start, b.end)));
+        let file = AnnotationFile {
+            items: self.annotations.clone(),
+        };
         let text = toml::to_string_pretty(&file).map_err(std::io::Error::other)?;
         atomic::write(&path, text.as_bytes())
     }
@@ -822,12 +877,18 @@ impl Project {
         let chapters: Vec<ChapterEntry> = titles
             .iter()
             .enumerate()
-            .map(|(i, title)| ChapterEntry::new((*title).to_string(), format!("chapter-{}.md", i + 1)))
+            .map(|(i, title)| {
+                ChapterEntry::new((*title).to_string(), format!("chapter-{}.md", i + 1))
+            })
             .collect();
         let active = chapters[0].file.clone();
         Self {
             root: PathBuf::from("."),
-            manifest: Manifest { title: "untitled".into(), chapters, ..Default::default() },
+            manifest: Manifest {
+                title: "untitled".into(),
+                chapters,
+                ..Default::default()
+            },
             active,
             words_changed: HashSet::new(),
             books: Vec::new(),
@@ -864,7 +925,9 @@ fn load_annotations(root: &Path) -> Vec<Annotation> {
 /// subtree and any `chapters` (which the chapter browser already lists). Best
 /// effort: an unreadable directory is silently skipped.
 fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -874,12 +937,13 @@ fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
             if !matches!(name, Some("unused") | Some("export")) {
                 collect_markdown(&path, chapters, out);
             }
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") && !chapters.contains(&path) {
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md")
+            && !chapters.contains(&path)
+        {
             out.push(path);
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests;

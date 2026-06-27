@@ -57,7 +57,10 @@ impl App {
             self.message = Some("No word under the cursor.".into());
             return;
         }
-        self.vim_state.last_search = Some(VimSearch { query: word.clone(), backward: false });
+        self.vim_state.last_search = Some(VimSearch {
+            query: word.clone(),
+            backward: false,
+        });
         self.vim_search_jump(&word, false);
     }
 
@@ -87,8 +90,12 @@ impl App {
         buffer.cursor = buffer.cursor_at_byte(target);
         if wrapped {
             self.message = Some(
-                if backward { "search hit TOP, continuing at BOTTOM" } else { "search hit BOTTOM, continuing at TOP" }
-                    .into(),
+                if backward {
+                    "search hit TOP, continuing at BOTTOM"
+                } else {
+                    "search hit BOTTOM, continuing at TOP"
+                }
+                .into(),
             );
         }
     }
@@ -152,7 +159,10 @@ impl App {
         if s.query.is_empty() {
             self.close_search();
         } else if s.from_vim {
-            self.vim_state.last_search = Some(VimSearch { query: s.query.clone(), backward: s.backward });
+            self.vim_state.last_search = Some(VimSearch {
+                query: s.query.clone(),
+                backward: s.backward,
+            });
             self.mode = self.editing_mode(); // cursor already on the current match
         } else {
             self.search_mut().stage = SearchStage::Navigate;

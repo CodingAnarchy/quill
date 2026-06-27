@@ -33,7 +33,11 @@ fn front_and_back_matter_sort_around_the_body_on_load() {
     assert_eq!(p.index_of_file("b.md"), Some(1));
     assert_eq!(p.index_of_file("a.md"), Some(2));
     assert_eq!(p.chapter_role(0), Some(Role::Prologue));
-    assert_eq!(p.body_chapter_count(), 1, "only the body file counts as a chapter");
+    assert_eq!(
+        p.body_chapter_count(),
+        1,
+        "only the body file counts as a chapter"
+    );
 }
 
 #[test]
@@ -49,9 +53,15 @@ fn the_pane_groups_sections_under_band_headers() {
     let c = screen.find("CHAPTERS").expect("body header");
     let b = screen.find("BACK MATTER").expect("back-matter header");
     assert!(f < c && c < b, "bands shown in reading order:\n{screen}");
-    assert!(screen.contains("1. Body"), "the body chapter is numbered:\n{screen}");
+    assert!(
+        screen.contains("1. Body"),
+        "the body chapter is numbered:\n{screen}"
+    );
     // The total separates body words from section words (#181).
-    assert!(screen.contains("in sections"), "section words kept clear of the body total:\n{screen}");
+    assert!(
+        screen.contains("in sections"),
+        "section words kept clear of the body total:\n{screen}"
+    );
 }
 
 #[test]
@@ -59,9 +69,18 @@ fn an_all_body_pane_keeps_the_flat_unnumbered_list() {
     let (mut app, _dir) = two_chapter_app("pane-flat"); // "One", "Two", no roles
     app.on_key(ctrl('g'));
     let screen = crate::ui::render_to_string(&app, 80, 16);
-    assert!(screen.contains("CHAPTERS"), "still has the body header:\n{screen}");
-    assert!(!screen.contains("FRONT MATTER") && !screen.contains("BACK MATTER"), "no section headers:\n{screen}");
-    assert!(!screen.contains("1. One"), "no numbers without sections:\n{screen}");
+    assert!(
+        screen.contains("CHAPTERS"),
+        "still has the body header:\n{screen}"
+    );
+    assert!(
+        !screen.contains("FRONT MATTER") && !screen.contains("BACK MATTER"),
+        "no section headers:\n{screen}"
+    );
+    assert!(
+        !screen.contains("1. One"),
+        "no numbers without sections:\n{screen}"
+    );
 }
 
 #[test]
@@ -71,8 +90,18 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
 
-    app.run_export(crate::mode::ExportFormat::Markdown, crate::mode::ExportScope::ActiveBook);
-    assert!(app.message.as_deref().unwrap_or("").contains("Exported to export/"), "{:?}", app.message);
+    app.run_export(
+        crate::mode::ExportFormat::Markdown,
+        crate::mode::ExportScope::ActiveBook,
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Exported to export/"),
+        "{:?}",
+        app.message
+    );
 
     let out = fs::read_to_string(dir.join("export").join("book.md")).unwrap();
     assert!(out.starts_with("# Book\n"), "book title heading:\n{out}");
@@ -80,12 +109,21 @@ fn export_compiles_the_manuscript_to_a_single_markdown_file() {
     let pro = out.find("## Pro").unwrap();
     let body = out.find("## Body").unwrap();
     let appendix = out.find("## App").unwrap();
-    assert!(pro < body && body < appendix, "reading order preserved:\n{out}");
-    assert!(out.contains("before") && !out.contains("role: prologue"), "prose without front matter:\n{out}");
+    assert!(
+        pro < body && body < appendix,
+        "reading order preserved:\n{out}"
+    );
+    assert!(
+        out.contains("before") && !out.contains("role: prologue"),
+        "prose without front matter:\n{out}"
+    );
 
     // The compiled output isn't itself a reference file (#165).
     assert!(
-        !app.project.reference_files().iter().any(|p| p.to_string_lossy().contains("export")),
+        !app.project
+            .reference_files()
+            .iter()
+            .any(|p| p.to_string_lossy().contains("export")),
         "export/ is excluded from the reference-file browser"
     );
 }
@@ -110,19 +148,30 @@ fn a_part_range_past_the_chapters_exports_and_trees_without_panicking() {
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
 
-    app.run_export(crate::mode::ExportFormat::Markdown, crate::mode::ExportScope::ActiveBook);
+    app.run_export(
+        crate::mode::ExportFormat::Markdown,
+        crate::mode::ExportScope::ActiveBook,
+    );
     let out = fs::read_to_string(dir.join("export").join("book.md")).unwrap();
-    assert!(out.contains("the only chapter"), "the chapter still compiles:\n{out}");
+    assert!(
+        out.contains("the only chapter"),
+        "the chapter still compiles:\n{out}"
+    );
 
     app.open_tree(); // builds the series tree rows over the same odd parts
-    assert!(matches!(app.mode, Mode::Tree(_)), "the tree opens without panicking");
+    assert!(
+        matches!(app.mode, Mode::Tree(_)),
+        "the tree opens without panicking"
+    );
 }
 
 #[test]
 fn ctrl_e_opens_the_export_menu() {
     let (mut app, _dir) = two_chapter_app("export-menu");
     app.on_key(ctrl('e'));
-    let Mode::Palette(p) = &app.mode else { panic!("expected the export palette") };
+    let Mode::Palette(p) = &app.mode else {
+        panic!("expected the export palette")
+    };
     assert_eq!(p.title, "Export");
 }
 
@@ -132,8 +181,18 @@ fn export_writes_a_docx_file() {
     let project = Project::open(&dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
-    app.run_export(crate::mode::ExportFormat::Docx, crate::mode::ExportScope::ActiveBook);
-    assert!(app.message.as_deref().unwrap_or("").contains("Exported to export/"), "{:?}", app.message);
+    app.run_export(
+        crate::mode::ExportFormat::Docx,
+        crate::mode::ExportScope::ActiveBook,
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Exported to export/"),
+        "{:?}",
+        app.message
+    );
     let bytes = fs::read(dir.join("export").join("book.docx")).unwrap();
     assert_eq!(&bytes[..2], b"PK", "a .docx is a zip container");
 }
@@ -142,9 +201,22 @@ fn export_writes_a_docx_file() {
 fn export_is_guarded_in_the_continuous_view() {
     let (mut app, dir) = two_chapter_app("export-cont");
     app.on_key(ctrl('l')); // enter the continuous view
-    app.run_export(crate::mode::ExportFormat::Markdown, crate::mode::ExportScope::ActiveBook);
-    assert!(app.message.as_deref().unwrap_or("").contains("Leave the continuous view"), "{:?}", app.message);
-    assert!(!dir.join("export").exists(), "no file written from the continuous view");
+    app.run_export(
+        crate::mode::ExportFormat::Markdown,
+        crate::mode::ExportScope::ActiveBook,
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Leave the continuous view"),
+        "{:?}",
+        app.message
+    );
+    assert!(
+        !dir.join("export").exists(),
+        "no file written from the continuous view"
+    );
 }
 
 #[test]
@@ -178,13 +250,37 @@ fn parts_map_to_body_chapters_not_sections() {
 
     // Load order: [pro, b1, b2, b3, b4, ap]. The parts cover body chapters only.
     let ranges = app.part_ranges();
-    assert_eq!(ranges[0].1, 1..3, "Act I = the first two body chapters, not the prologue");
-    assert_eq!(ranges[1].1, 3..5, "Act II = the next two body chapters, not the appendix");
+    assert_eq!(
+        ranges[0].1,
+        1..3,
+        "Act I = the first two body chapters, not the prologue"
+    );
+    assert_eq!(
+        ranges[1].1,
+        3..5,
+        "Act II = the next two body chapters, not the appendix"
+    );
     // And part membership: sections belong to no part.
-    assert_eq!(app.project.manifest.part_of(0), None, "prologue is in no part");
-    assert_eq!(app.project.manifest.part_of(1), Some(0), "first body chapter is in Act I");
-    assert_eq!(app.project.manifest.part_of(4), Some(1), "fourth body chapter is in Act II");
-    assert_eq!(app.project.manifest.part_of(5), None, "appendix is in no part");
+    assert_eq!(
+        app.project.manifest.part_of(0),
+        None,
+        "prologue is in no part"
+    );
+    assert_eq!(
+        app.project.manifest.part_of(1),
+        Some(0),
+        "first body chapter is in Act I"
+    );
+    assert_eq!(
+        app.project.manifest.part_of(4),
+        Some(1),
+        "fourth body chapter is in Act II"
+    );
+    assert_eq!(
+        app.project.manifest.part_of(5),
+        None,
+        "appendix is in no part"
+    );
 }
 
 #[test]
@@ -197,13 +293,25 @@ fn reordering_is_clamped_within_a_band() {
 
     // The prologue can't move down into the body.
     app.on_key(key(KeyCode::Char('J')));
-    assert_eq!(app.project.index_of_file("p.md"), Some(0), "front matter stays ahead of the body");
-    assert!(app.message.as_deref().unwrap_or("").contains("stays within"));
+    assert_eq!(
+        app.project.index_of_file("p.md"),
+        Some(0),
+        "front matter stays ahead of the body"
+    );
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("stays within"));
 
     // The body can't move up into front matter.
     app.on_key(key(KeyCode::Down)); // select the body (index 1)
     app.on_key(key(KeyCode::Char('K')));
-    assert_eq!(app.project.index_of_file("b.md"), Some(1), "the body stays out of front matter");
+    assert_eq!(
+        app.project.index_of_file("b.md"),
+        Some(1),
+        "the body stays out of front matter"
+    );
 }
 
 #[test]
@@ -218,6 +326,9 @@ fn metadata_survives_reopening_the_project() {
 
     // Reopen from disk: the cached metadata is read back from front matter.
     let reopened = Project::open(&dir).unwrap();
-    assert_eq!(reopened.chapter_status(1), Some(crate::frontmatter::Status::Draft));
+    assert_eq!(
+        reopened.chapter_status(1),
+        Some(crate::frontmatter::Status::Draft)
+    );
     assert_eq!(reopened.chapter_pov(1), Some("Mara"));
 }

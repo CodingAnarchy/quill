@@ -39,8 +39,14 @@ fn split_panes_edit_different_chapters_independently() {
 
     let one = fs::read_to_string(dir.join("one.md")).unwrap();
     let two = fs::read_to_string(dir.join("two.md")).unwrap();
-    assert!(one.contains("ONE-EDIT") && two.contains("TWO-EDIT"), "one:{one:?} two:{two:?}");
-    assert!(!one.contains("TWO-EDIT"), "panes didn't cross-corrupt: {one:?}");
+    assert!(
+        one.contains("ONE-EDIT") && two.contains("TWO-EDIT"),
+        "one:{one:?} two:{two:?}"
+    );
+    assert!(
+        !one.contains("TWO-EDIT"),
+        "panes didn't cross-corrupt: {one:?}"
+    );
 }
 
 #[test]
@@ -49,11 +55,18 @@ fn editing_the_same_chapter_in_both_panes_stays_consistent() {
     window_cmd(&mut app, 'v');
     type_str(&mut app, "AAA"); // edit the focused pane
     window_cmd(&mut app, 'w'); // switch: flush, then reload the sibling on the same chapter
-    assert!(app.buffer.text().contains("AAA"), "the other pane reflects the saved edit: {:?}", app.buffer.text());
+    assert!(
+        app.buffer.text().contains("AAA"),
+        "the other pane reflects the saved edit: {:?}",
+        app.buffer.text()
+    );
     type_str(&mut app, "BBB");
     window_cmd(&mut app, 'w'); // switch back
     let text = app.buffer.text();
-    assert!(text.contains("AAA") && text.contains("BBB"), "edits accumulate, no clobber: {text:?}");
+    assert!(
+        text.contains("AAA") && text.contains("BBB"),
+        "edits accumulate, no clobber: {text:?}"
+    );
     let one = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(one.contains("AAA") && one.contains("BBB"), "{one}");
 }
@@ -64,7 +77,10 @@ fn split_is_guarded_in_the_continuous_view() {
     app.on_key(ctrl('l'));
     assert!(app.manuscript.is_some());
     window_cmd(&mut app, 'v');
-    assert!(app.split_view().is_none(), "can't split the continuous view");
+    assert!(
+        app.split_view().is_none(),
+        "can't split the continuous view"
+    );
 }
 
 #[test]
@@ -83,8 +99,20 @@ fn ctrl_w_docks_an_open_report_beside_the_editor() {
     app.on_key(ctrl('r')); // open the progress report full-screen
     assert!(app.overlay.is_some());
     window_cmd(&mut app, 'v'); // dock it into a split (#164)
-    assert!(app.overlay.is_none(), "the full-screen overlay moved into the pane");
-    assert!(matches!(app.split_view(), Some(SplitView { content: SplitContent::Surface(_), .. })), "now a surface split");
+    assert!(
+        app.overlay.is_none(),
+        "the full-screen overlay moved into the pane"
+    );
+    assert!(
+        matches!(
+            app.split_view(),
+            Some(SplitView {
+                content: SplitContent::Surface(_),
+                ..
+            })
+        ),
+        "now a surface split"
+    );
     // The editor stays editable in the other pane.
     type_str(&mut app, "EDIT");
     assert!(app.buffer.text().contains("EDIT"));
@@ -114,7 +142,10 @@ fn docking_is_guarded_in_the_continuous_view() {
     app.on_key(ctrl('l')); // continuous view
     app.on_key(ctrl('r')); // report opens full-screen
     window_cmd(&mut app, 'v'); // try to dock
-    assert!(app.split_view().is_none(), "no docking in the continuous view");
+    assert!(
+        app.split_view().is_none(),
+        "no docking in the continuous view"
+    );
     assert!(app.overlay.is_some(), "the overlay stays full-screen");
 }
 
@@ -123,7 +154,10 @@ fn docking_is_guarded_in_the_continuous_view() {
 /// The title a reference pane shows for the non-focused buffer.
 fn other_pane_title(app: &App) -> String {
     match app.split_view() {
-        Some(SplitView { content: SplitContent::Editor(other), .. }) => app.pane_title_for(other),
+        Some(SplitView {
+            content: SplitContent::Editor(other),
+            ..
+        }) => app.pane_title_for(other),
         _ => panic!("expected two editor panes"),
     }
 }
@@ -133,7 +167,11 @@ fn other_pane_title(app: &App) -> String {
 fn write_bible(dir: &std::path::Path) {
     let chars = dir.join("bible").join("characters");
     fs::create_dir_all(&chars).unwrap();
-    fs::write(dir.join("bible").join("setting.md"), "# Setting\n\nthe city\n").unwrap();
+    fs::write(
+        dir.join("bible").join("setting.md"),
+        "# Setting\n\nthe city\n",
+    )
+    .unwrap();
     fs::write(chars.join("mara.md"), "# Mara\n\na sailor\n").unwrap();
 }
 
@@ -144,11 +182,24 @@ fn reference_files_list_the_bible_and_skip_chapters() {
     let files = app.project.reference_files();
     let names: Vec<String> = files
         .iter()
-        .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/"))
+        .map(|p| {
+            p.strip_prefix(&dir)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
         .collect();
-    assert!(names.contains(&"bible/characters/mara.md".to_string()), "{names:?}");
+    assert!(
+        names.contains(&"bible/characters/mara.md".to_string()),
+        "{names:?}"
+    );
     assert!(names.contains(&"bible/setting.md".to_string()), "{names:?}");
-    assert!(!names.iter().any(|n| n.ends_with("one.md") || n.ends_with("two.md")), "chapters excluded: {names:?}");
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.ends_with("one.md") || n.ends_with("two.md")),
+        "chapters excluded: {names:?}"
+    );
 }
 
 #[test]
@@ -169,8 +220,15 @@ fn reference_browser_reports_when_there_are_no_files() {
     let (mut app, _dir) = two_chapter_app("ref-empty");
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Char('f')));
-    assert!(matches!(app.mode, Mode::Nav { .. }), "stays in the chapter browser");
-    assert!(app.message.as_deref().unwrap_or("").contains("No reference files"));
+    assert!(
+        matches!(app.mode, Mode::Nav { .. }),
+        "stays in the chapter browser"
+    );
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("No reference files"));
 }
 
 #[test]
@@ -181,8 +239,15 @@ fn opening_a_reference_file_puts_it_in_a_pane() {
     app.on_key(key(KeyCode::Char('f')));
     app.on_key(key(KeyCode::Enter)); // open the first file (bible/characters/mara.md, sorted)
     assert!(app.split_view().is_some(), "a reference pane opened");
-    assert_eq!(other_pane_title(&app), "mara", "the pane is titled by the file");
-    assert!(matches!(app.mode, Mode::Insert), "focus returns to the editor");
+    assert_eq!(
+        other_pane_title(&app),
+        "mara",
+        "the pane is titled by the file"
+    );
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "focus returns to the editor"
+    );
 }
 
 #[test]
@@ -191,7 +256,11 @@ fn o_in_the_browser_opens_the_selected_chapter_in_a_pane() {
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select "Two"
     app.on_key(key(KeyCode::Char('o')));
-    assert_eq!(other_pane_title(&app), "Two", "the other chapter opens in the pane");
+    assert_eq!(
+        other_pane_title(&app),
+        "Two",
+        "the other chapter opens in the pane"
+    );
 }
 
 #[test]
@@ -206,7 +275,10 @@ fn a_reference_pane_saves_independently() {
     app.on_key(ctrl('s'));
     let mara = fs::read_to_string(dir.join("bible").join("characters").join("mara.md")).unwrap();
     let one = fs::read_to_string(dir.join("one.md")).unwrap();
-    assert!(mara.contains("NOTE"), "the bible file saved its edit: {mara:?}");
+    assert!(
+        mara.contains("NOTE"),
+        "the bible file saved its edit: {mara:?}"
+    );
     assert!(!one.contains("NOTE"), "the chapter is untouched: {one:?}");
 }
 
@@ -245,14 +317,26 @@ fn a_narrow_terminal_draws_only_the_focused_pane() {
     window_cmd(&mut app, 'w'); // focus back: first pane = "first chapter"
 
     let wide = screen(&app, 100, 20);
-    assert!(wide.contains("first chapter") && wide.contains("second chapter"), "both panes draw when wide:\n{wide}");
+    assert!(
+        wide.contains("first chapter") && wide.contains("second chapter"),
+        "both panes draw when wide:\n{wide}"
+    );
 
     let narrow = screen(&app, 50, 20); // below 2 × MIN_PANE_WIDTH
-    assert!(narrow.contains("first chapter"), "the focused pane still draws:\n{narrow}");
-    assert!(!narrow.contains("second chapter"), "the other pane collapses away:\n{narrow}");
+    assert!(
+        narrow.contains("first chapter"),
+        "the focused pane still draws:\n{narrow}"
+    );
+    assert!(
+        !narrow.contains("second chapter"),
+        "the other pane collapses away:\n{narrow}"
+    );
 
     // The split survives the squeeze: widening restores it.
-    assert!(app.split_view().is_some(), "the split state is kept, just not drawn");
+    assert!(
+        app.split_view().is_some(),
+        "the split state is kept, just not drawn"
+    );
 }
 
 #[test]
@@ -268,5 +352,9 @@ fn editing_a_reference_pane_does_not_corrupt_the_chapter_word_cache() {
     app.on_key(ctrl('s'));
     // The bible file's word count must not have been written into chapter One's
     // cached entry (which feeds the outline pane and the progress report).
-    assert_eq!(app.project.chapter_words(0), one_words, "chapter One's cached count is untouched");
+    assert_eq!(
+        app.project.chapter_words(0),
+        one_words,
+        "chapter One's cached count is untouched"
+    );
 }

@@ -16,13 +16,22 @@ fn accepts_words_into_the_project_dictionary() {
 
     assert!(!p.is_accepted("Vashti"));
     assert!(p.accept_word("Vashti").unwrap(), "newly added");
-    assert!(p.is_accepted("Vashti") && p.is_accepted("vashti"), "matched case-insensitively");
-    assert!(!p.accept_word("vashti").unwrap(), "deduped case-insensitively");
+    assert!(
+        p.is_accepted("Vashti") && p.is_accepted("vashti"),
+        "matched case-insensitively"
+    );
+    assert!(
+        !p.accept_word("vashti").unwrap(),
+        "deduped case-insensitively"
+    );
 
     // Persisted to dictionary.txt (original case) and respected after reload.
     let file = fs::read_to_string(dir.join(DICTIONARY_NAME)).unwrap();
     assert!(file.contains("Vashti"), "{file}");
-    assert!(Project::open(&dir).unwrap().is_accepted("VASHTI"), "loaded on reopen");
+    assert!(
+        Project::open(&dir).unwrap().is_accepted("VASHTI"),
+        "loaded on reopen"
+    );
 
     fs::remove_dir_all(&dir).ok();
 }
@@ -35,7 +44,10 @@ fn accepting_a_word_preserves_existing_dictionary_entries() {
     p.dictionary = load_dictionary(&dir); // re-read what we just wrote
     p.accept_word("Vashti").unwrap();
     let file = fs::read_to_string(dir.join(DICTIONARY_NAME)).unwrap();
-    assert!(file.contains("Aerendil") && file.contains("Vashti"), "both kept: {file}");
+    assert!(
+        file.contains("Aerendil") && file.contains("Vashti"),
+        "both kept: {file}"
+    );
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -46,7 +58,9 @@ fn write_chapter_project(dir: &Path, n: usize, title: &str) -> String {
     let mut manifest = format!("title = \"{title}\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!("[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"));
+        manifest.push_str(&format!(
+            "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+        ));
         let mut body = String::from("---\nstatus: draft\npov: Mara\n---\n# Chapter\n\n");
         for _ in 0..50 {
             body.push_str("The night was dark and the road was very long indeed.\n");
@@ -135,9 +149,13 @@ fn daily_goal_parses_and_round_trips_and_is_optional() {
     assert!(out.contains("daily = 1000"), "daily persists: {out}");
 
     // ...and is omitted entirely when unset (old manifests still parse).
-    let none: Manifest = toml::from_str("title = \"B\"\n\n[goals]\nwords = 90000\nchapters = 40\n").unwrap();
+    let none: Manifest =
+        toml::from_str("title = \"B\"\n\n[goals]\nwords = 90000\nchapters = 40\n").unwrap();
     assert_eq!(none.goals.as_ref().unwrap().daily, None);
-    assert!(!toml::to_string_pretty(&none).unwrap().contains("daily"), "no daily key when unset");
+    assert!(
+        !toml::to_string_pretty(&none).unwrap().contains("daily"),
+        "no daily key when unset"
+    );
 }
 
 #[test]
@@ -226,8 +244,16 @@ fn parts_round_trip_and_map_chapters_to_ranges() {
     project.add_chapter(3, "Four").unwrap();
     project.manifest.part_label = Some("act".into());
     project.manifest.parts = Some(vec![
-        Part { name: Some("The Gathering".into()), chapters: [1, 2], goal: Some(20_000) },
-        Part { name: None, chapters: [3, 4], goal: None },
+        Part {
+            name: Some("The Gathering".into()),
+            chapters: [1, 2],
+            goal: Some(20_000),
+        },
+        Part {
+            name: None,
+            chapters: [3, 4],
+            goal: None,
+        },
     ]);
     project.save_manifest().unwrap();
 
@@ -287,7 +313,10 @@ fn a_multiline_book_epigraph_round_trips_through_the_manifest() {
 
     // toml serializes the multi-line string as a readable `"""` block.
     let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
-    assert!(toml.contains("epigraph = \"\"\""), "expected a multi-line literal:\n{toml}");
+    assert!(
+        toml.contains("epigraph = \"\"\""),
+        "expected a multi-line literal:\n{toml}"
+    );
 
     let reopened = Project::open(&dir).unwrap();
     assert_eq!(
@@ -318,9 +347,14 @@ fn open_reports_a_malformed_manifest_without_panicking() {
     // Broken TOML — an unterminated array-of-tables header.
     fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters]\n").unwrap();
 
-    let err = Project::open(&dir).err().expect("a malformed manifest is an error, not a panic");
+    let err = Project::open(&dir)
+        .err()
+        .expect("a malformed manifest is an error, not a panic");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-    assert!(err.to_string().contains(MANIFEST_NAME), "clear message: {err}");
+    assert!(
+        err.to_string().contains(MANIFEST_NAME),
+        "clear message: {err}"
+    );
 
     fs::remove_dir_all(&dir).ok();
 }
@@ -329,9 +363,17 @@ fn open_reports_a_malformed_manifest_without_panicking() {
 fn open_tolerates_garbage_front_matter() {
     let dir = temp_dir("bad-frontmatter");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(Project::manifest_path(&dir), "title = \"B\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"B\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
     // A fenced block whose contents are not valid YAML at all.
-    fs::write(dir.join("one.md"), "---\n: : : not yaml [}{\n\tstatus\n---\nThe prose body.\n").unwrap();
+    fs::write(
+        dir.join("one.md"),
+        "---\n: : : not yaml [}{\n\tstatus\n---\nThe prose body.\n",
+    )
+    .unwrap();
 
     // Opening caches each chapter's front matter — garbage must not panic; the
     // typed fields just come back empty, and the prose body is intact.
@@ -395,7 +437,6 @@ fn add_rename_swap_remove_persist() {
 #[test]
 #[ignore]
 fn open_is_fast_for_a_large_novel() {
-
     let dir = temp_dir("perf-open");
     fs::create_dir_all(&dir).unwrap();
     let manifest = write_chapter_project(&dir, 150, "Big");
@@ -420,7 +461,6 @@ fn open_is_fast_for_a_large_novel() {
 #[test]
 #[ignore]
 fn open_is_fast_for_a_series_sized_project() {
-
     let n = 1500;
     let dir = temp_dir("perf-open-series");
     fs::create_dir_all(&dir).unwrap();

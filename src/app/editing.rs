@@ -114,13 +114,19 @@ impl App {
     pub(super) fn history_step(&mut self, redo: bool) {
         let verb = if redo { "Redo" } else { "Undo" };
         if self.manuscript.is_some() {
-            self.message = Some(format!("{verb} isn't available in the continuous view yet — Ctrl-l to return."));
+            self.message = Some(format!(
+                "{verb} isn't available in the continuous view yet — Ctrl-l to return."
+            ));
             return;
         }
         // Snapshot any open edit group's annotations before stepping, so the
         // undo/redo stacks are aligned with the buffer's (#370).
         self.note_annotation_undo_point();
-        let changed = if redo { self.buffer.redo() } else { self.buffer.undo() };
+        let changed = if redo {
+            self.buffer.redo()
+        } else {
+            self.buffer.undo()
+        };
         if changed {
             self.restore_annotation_history(redo); // swap annotations with the rope
             self.cache_focus_words();
@@ -149,7 +155,11 @@ impl App {
         // A reslide rebuilds the buffer, resetting every offset, so flush the
         // current annotation offsets to disk first — the next idle reloads and
         // re-translates them for the paged window (#370).
-        if self.manuscript.as_ref().is_some_and(|m| m.would_reslide(&self.project)) {
+        if self
+            .manuscript
+            .as_ref()
+            .is_some_and(|m| m.would_reslide(&self.project))
+        {
             self.persist_annotations();
         }
         if let Some(mut m) = self.manuscript.take() {
@@ -190,7 +200,9 @@ impl App {
             result.map_err(|e| format!("Save failed: {e}"))?;
             self.persist_annotations();
         } else {
-            self.buffer.save().map_err(|e| format!("Save failed: {e}"))?;
+            self.buffer
+                .save()
+                .map_err(|e| format!("Save failed: {e}"))?;
             self.cache_focus_words();
             self.refresh_split_sibling();
             self.persist_annotations();

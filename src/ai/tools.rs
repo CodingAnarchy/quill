@@ -17,7 +17,11 @@ use crate::mode::Action;
 /// Still registry-derived — a new runnable action becomes a tool with no second
 /// list to maintain.
 pub fn assistant_tools() -> Vec<Value> {
-    Action::ALL.iter().filter(|a| a.assistant_runnable()).map(|a| tool_for(*a)).collect()
+    Action::ALL
+        .iter()
+        .filter(|a| a.assistant_runnable())
+        .map(|a| tool_for(*a))
+        .collect()
 }
 
 /// One action's tool definition (Messages API shape). The input schema is derived
@@ -51,7 +55,10 @@ mod tests {
         for t in &tools {
             let name = t["name"].as_str().unwrap();
             let action = Action::from_name(name).expect("tool maps back to an action");
-            assert!(action.assistant_runnable(), "only runnable actions are offered: {name}");
+            assert!(
+                action.assistant_runnable(),
+                "only runnable actions are offered: {name}"
+            );
             assert!(!t["description"].as_str().unwrap().is_empty());
             assert_eq!(t["input_schema"]["type"], "object");
         }

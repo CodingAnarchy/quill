@@ -48,14 +48,24 @@ pub struct LongestSentences {
 
 impl LongestSentences {
     pub fn new(cap: usize) -> Self {
-        Self { cap, items: Vec::with_capacity(cap + 1) }
+        Self {
+            cap,
+            items: Vec::with_capacity(cap + 1),
+        }
     }
 
     /// Offer a sentence; kept only if it ranks among the longest seen so far.
     pub fn consider(&mut self, chapter: &str, text: &str, words: usize) {
         if self.items.len() < self.cap || words > self.items.last().map_or(0, |l| l.words) {
             let pos = self.items.partition_point(|l| l.words >= words);
-            self.items.insert(pos, LongSentence { chapter: chapter.to_string(), words, text: text.to_string() });
+            self.items.insert(
+                pos,
+                LongSentence {
+                    chapter: chapter.to_string(),
+                    words,
+                    text: text.to_string(),
+                },
+            );
             self.items.truncate(self.cap);
         }
     }
@@ -93,7 +103,11 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     let mut out = vec![bold(format!("{} — analysis", report.title)), Line::raw("")];
     out.extend(readability_section(report.chapters));
     out.push(Line::raw(""));
-    out.extend(sentence_section(report.chapters, report.longest, report.run_on_threshold));
+    out.extend(sentence_section(
+        report.chapters,
+        report.longest,
+        report.run_on_threshold,
+    ));
     out.push(Line::raw(""));
     out.extend(length_section(report.chapters, report.parts));
     out.push(Line::raw(""));
@@ -101,7 +115,11 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     out.push(Line::raw(""));
     out.extend(style_section(report.chapters, report.top_phrases));
     out.push(Line::raw(""));
-    out.extend(vocabulary_section(report.chapters, report.top_words, report.overall_variety));
+    out.extend(vocabulary_section(
+        report.chapters,
+        report.top_words,
+        report.overall_variety,
+    ));
     out
 }
 
@@ -154,14 +172,29 @@ fn data_row(name: &str, cols: &[Col], cells: &[String]) -> String {
 // Each section's columns — label + width — defined once and shared by the
 // section's `header` and its row helper (via `data_row`), in report order.
 const READABILITY_COLS: &[Col] = &[col("Ease", 9), col("F–K", 8), col("Fog", 8), col("SMOG", 8)];
-const SENTENCE_COLS: &[Col] =
-    &[col("Sent", 6), col("Mean", 7), col("Med", 7), col("Min", 6), col("Max", 6), col("Run-ons", 9)];
+const SENTENCE_COLS: &[Col] = &[
+    col("Sent", 6),
+    col("Mean", 7),
+    col("Med", 7),
+    col("Min", 6),
+    col("Max", 6),
+    col("Run-ons", 9),
+];
 // `Dialogue%` is width 9 (its 9-char label and the data column share one width); the
 // header previously padded the label to 10, leaving it one column right of the data
 // it titled (#438).
-const DIALOGUE_COLS: &[Col] =
-    &[col("Dialogue%", 9), col("Para~", 9), col("Median", 8), col("Longest", 9)];
-const STYLE_COLS: &[Col] = &[col("-ly%", 7), col("Filter", 8), col("to-be%", 7), col("Passive", 9)];
+const DIALOGUE_COLS: &[Col] = &[
+    col("Dialogue%", 9),
+    col("Para~", 9),
+    col("Median", 8),
+    col("Longest", 9),
+];
+const STYLE_COLS: &[Col] = &[
+    col("-ly%", 7),
+    col("Filter", 8),
+    col("to-be%", 7),
+    col("Passive", 9),
+];
 const VOCAB_COLS: &[Col] = &[col("Variety", 9), col("Words", 8)];
 
 /// The readability table: one row per chapter plus a whole-manuscript total.
@@ -173,7 +206,9 @@ fn readability_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
         out.push(Line::raw(score_text(&c.title, readability(c.stats))));
     }
     out.push(bold(score_text("Whole manuscript", readability(total))));
-    out.push(dim("Reading Ease: higher is easier (60–70 ≈ plain English); the rest are grades."));
+    out.push(dim(
+        "Reading Ease: higher is easier (60–70 ≈ plain English); the rest are grades.",
+    ));
     out
 }
 
@@ -185,13 +220,18 @@ fn sentence_section(
     threshold: usize,
 ) -> Vec<Line<'static>> {
     let mut out = vec![
-        dim(format!("Sentence length (words) · run-on threshold {threshold}")),
+        dim(format!(
+            "Sentence length (words) · run-on threshold {threshold}"
+        )),
         header(SENTENCE_COLS),
     ];
     let mut all = Vec::new();
     for c in chapters {
         all.extend_from_slice(&c.sentence_lengths);
-        out.push(Line::raw(sentence_text(&c.title, &sentence_stats(&c.sentence_lengths, threshold))));
+        out.push(Line::raw(sentence_text(
+            &c.title,
+            &sentence_stats(&c.sentence_lengths, threshold),
+        )));
     }
     let overall = sentence_stats(&all, threshold);
     out.push(bold(sentence_text("Whole manuscript", &overall)));
@@ -252,11 +292,21 @@ fn length_section(chapters: &[ChapterAnalysis], parts: &[PartSpan]) -> Vec<Line<
 
 /// One chapter's pacing row: indented (truncated) title, word count, a bar scaled
 /// to the longest chapter, and a short/long flag for outliers.
-fn length_bar_row(title: &str, words: usize, peak: usize, stats: &LengthStats, indent: usize) -> Line<'static> {
+fn length_bar_row(
+    title: &str,
+    words: usize,
+    peak: usize,
+    stats: &LengthStats,
+    indent: usize,
+) -> Line<'static> {
     let avail = 24 - indent; // the indent + name region together pad to 24
     let name = truncate(title, avail);
     let flag = length_flag(words, stats).map_or(String::new(), |f| format!("  ⚠ {f}"));
-    Line::raw(format!("{:indent$}{name:<avail$}{words:>7}  {}{flag}", "", bar(words, peak)))
+    Line::raw(format!(
+        "{:indent$}{name:<avail$}{words:>7}  {}{flag}",
+        "",
+        bar(words, peak)
+    ))
 }
 
 /// The dialogue / paragraph section: per-chapter (and overall) dialogue share and
@@ -268,9 +318,17 @@ fn dialogue_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
     for c in chapters {
         total_dialogue.add(c.dialogue);
         all_paragraphs.extend_from_slice(&c.paragraph_lengths);
-        out.push(Line::raw(dialogue_text(&c.title, c.dialogue, &c.paragraph_lengths)));
+        out.push(Line::raw(dialogue_text(
+            &c.title,
+            c.dialogue,
+            &c.paragraph_lengths,
+        )));
     }
-    out.push(bold(dialogue_text("Whole manuscript", total_dialogue, &all_paragraphs)));
+    out.push(bold(dialogue_text(
+        "Whole manuscript",
+        total_dialogue,
+        &all_paragraphs,
+    )));
     out
 }
 
@@ -293,7 +351,10 @@ fn dialogue_text(name: &str, dialogue: Dialogue, paragraphs: &[usize]) -> String
 /// The style-flags section: a per-chapter (and overall) table of `-ly` adverb,
 /// filter-word, weak-verb, and passive density, plus the manuscript's most
 /// repeated phrases. Descriptive only — counts, never edits.
-fn style_section(chapters: &[ChapterAnalysis], top_phrases: &[(String, usize)]) -> Vec<Line<'static>> {
+fn style_section(
+    chapters: &[ChapterAnalysis],
+    top_phrases: &[(String, usize)],
+) -> Vec<Line<'static>> {
     let mut out = vec![dim("Style flags (frequency)"), header(STYLE_COLS)];
     let mut total = StyleFlags::default();
     for c in chapters {
@@ -318,7 +379,11 @@ fn vocabulary_section(
     let mut words = 0usize;
     for c in chapters {
         words += c.stats.words;
-        out.push(Line::raw(vocab_text(&c.title, c.lexical_variety, c.stats.words)));
+        out.push(Line::raw(vocab_text(
+            &c.title,
+            c.lexical_variety,
+            c.stats.words,
+        )));
     }
     out.push(bold(vocab_text("Whole manuscript", overall_variety, words)));
     out.extend(count_list("Most-used words", top_words));
@@ -328,7 +393,11 @@ fn vocabulary_section(
 /// One vocabulary row: lexical variety scaled to 0–100 (unique words per 100-word
 /// window) and the word count it was measured over.
 fn vocab_text(name: &str, variety: f64, words: usize) -> String {
-    data_row(name, VOCAB_COLS, &[format!("{:.1}", variety * 100.0), words.to_string()])
+    data_row(
+        name,
+        VOCAB_COLS,
+        &[format!("{:.1}", variety * 100.0), words.to_string()],
+    )
 }
 
 /// A titled `count×  item` list (one per line, so long lists scroll rather than
@@ -339,13 +408,23 @@ fn count_list(title: &str, items: &[(String, usize)]) -> Vec<Line<'static>> {
         return Vec::new();
     }
     let mut out = vec![Line::raw(""), dim(title.to_string())];
-    out.extend(items.iter().map(|(item, count)| Line::raw(format!("{count:>4}×  {item}"))));
+    out.extend(
+        items
+            .iter()
+            .map(|(item, count)| Line::raw(format!("{count:>4}×  {item}"))),
+    );
     out
 }
 
 /// One style-flags row: densities as a percent of the chapter's words.
 fn style_text(name: &str, f: &StyleFlags) -> String {
-    let pct = |n: usize| if f.words == 0 { 0.0 } else { n as f64 * 100.0 / f.words as f64 };
+    let pct = |n: usize| {
+        if f.words == 0 {
+            0.0
+        } else {
+            n as f64 * 100.0 / f.words as f64
+        }
+    };
     data_row(
         name,
         STYLE_COLS,
@@ -408,11 +487,17 @@ fn sentence_text(name: &str, s: &SentenceStats) -> String {
 
 /// A bold line and a dim (dark-gray) line, the two row styles the report uses.
 fn bold(text: impl Into<String>) -> Line<'static> {
-    Line::from(Span::styled(text.into(), Style::default().add_modifier(Modifier::BOLD)))
+    Line::from(Span::styled(
+        text.into(),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))
 }
 
 fn dim(text: impl Into<String>) -> Line<'static> {
-    Line::from(Span::styled(text.into(), Style::default().fg(theme::current().dim)))
+    Line::from(Span::styled(
+        text.into(),
+        Style::default().fg(theme::current().dim),
+    ))
 }
 
 /// Truncate to `max` characters with an ellipsis, counting by character so a
@@ -425,7 +510,6 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{kept}…")
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -504,8 +588,14 @@ mod tests {
             chapter("Three", "C.", 900),
         ];
         let parts = vec![
-            PartSpan { name: "Act I".to_string(), range: 0..1 },
-            PartSpan { name: "Act II".to_string(), range: 1..3 },
+            PartSpan {
+                name: "Act I".to_string(),
+                range: 0..1,
+            },
+            PartSpan {
+                name: "Act II".to_string(),
+                range: 1..3,
+            },
         ];
         let report = Report {
             title: "Book",
@@ -534,4 +624,3 @@ mod tests {
         assert!(t.ends_with('…'));
     }
 }
-

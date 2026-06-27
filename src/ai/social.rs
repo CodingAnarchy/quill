@@ -63,7 +63,13 @@ pub fn schema() -> Value {
 /// Build the social-posts request: the manuscript as cached context, schema
 /// attached. Manuscript-only for now, like the marketing copy (#104).
 pub fn build_request(manuscript: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Write the social posts per platform as specified.", manuscript, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Write the social posts per platform as specified.",
+        manuscript,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured social-posts reply.
@@ -98,13 +104,20 @@ mod tests {
         };
         let a = s.artifacts();
         assert_eq!(a.len(), 3);
-        assert_eq!(a.iter().map(|(_, f, _)| *f).collect::<Vec<_>>(), ["x.md", "facebook.md", "instagram.md"]);
+        assert_eq!(
+            a.iter().map(|(_, f, _)| *f).collect::<Vec<_>>(),
+            ["x.md", "facebook.md", "instagram.md"]
+        );
         assert!(a[1].2.contains("## Post 1") && a[1].2.contains("## Post 2"));
     }
 
     #[test]
     fn artifacts_skips_a_platform_with_no_posts() {
-        let s = Social { x: vec!["only x".into()], facebook: vec![], instagram: vec![] };
+        let s = Social {
+            x: vec!["only x".into()],
+            facebook: vec![],
+            instagram: vec![],
+        };
         let a = s.artifacts();
         assert_eq!(a.len(), 1);
         assert_eq!(a[0].1, "x.md");

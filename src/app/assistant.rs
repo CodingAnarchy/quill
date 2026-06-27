@@ -93,7 +93,10 @@ pub(crate) struct Entry {
 
 impl Entry {
     fn new(who: Speaker, text: impl Into<String>) -> Self {
-        Self { who, text: text.into() }
+        Self {
+            who,
+            text: text.into(),
+        }
     }
     fn you(text: &str) -> Self {
         Self::new(Speaker::You, text)
@@ -259,7 +262,11 @@ impl App {
     /// Hand keys back to the editor (so a pass's findings UI is interactive while
     /// the assistant keeps working in the background).
     fn blur_assistant_pane(&mut self) {
-        if let Some(Split { other: OtherPane::Assistant { focused, .. }, .. }) = self.split.as_mut() {
+        if let Some(Split {
+            other: OtherPane::Assistant { focused, .. },
+            ..
+        }) = self.split.as_mut()
+        {
             *focused = false;
         }
     }
@@ -282,12 +289,16 @@ impl App {
             // Esc (idle) hands keys back to the editor; the pane stays docked.
             KeyCode::Esc => self.blur_assistant_pane(),
             _ => {
-                let Some(c) = self.assistant_mut() else { return };
+                let Some(c) = self.assistant_mut() else {
+                    return;
+                };
                 match key.code {
                     KeyCode::Backspace if !locked => {
                         c.input.pop();
                     }
-                    KeyCode::Char(ch) if !locked && !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    KeyCode::Char(ch)
+                        if !locked && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
                         c.input.push(ch);
                     }
                     KeyCode::Up => c.scroll_up = (c.scroll_up + 1).min(max),
@@ -305,7 +316,10 @@ impl App {
     /// network turn. A no-op while a run is in progress or the line is empty.
     fn submit_assistant(&mut self) {
         // A pending confirmation consumes this line as the answer, not a new request.
-        if self.assistant().is_some_and(|c| c.pending_confirm.is_some()) {
+        if self
+            .assistant()
+            .is_some_and(|c| c.pending_confirm.is_some())
+        {
             self.answer_assistant_confirm();
             return;
         }
@@ -315,7 +329,9 @@ impl App {
         }
 
         let (request, first) = {
-            let Some(a) = self.assistant_mut() else { return };
+            let Some(a) = self.assistant_mut() else {
+                return;
+            };
             if a.is_running() {
                 return;
             }
@@ -353,7 +369,8 @@ impl App {
             vec![json!({ "type": "text", "text": request })]
         };
         if let Some(a) = self.assistant_mut() {
-            a.messages.push(json!({ "role": "user", "content": content }));
+            a.messages
+                .push(json!({ "role": "user", "content": content }));
         }
         self.spawn_assistant_turn();
     }
@@ -394,13 +411,18 @@ impl App {
         };
         let model = self.ai.model.clone();
         let tools = tools::assistant_tools();
-        let Some(a) = self.assistant_mut() else { return };
+        let Some(a) = self.assistant_mut() else {
+            return;
+        };
         a.spent += est; // count this turn against the run's budget (#309)
-        let body = tool_loop::build_body(&model, Some(SYSTEM), &a.messages, &tools, MAX_OUTPUT_TOKENS);
+        let body =
+            tool_loop::build_body(&model, Some(SYSTEM), &a.messages, &tools, MAX_OUTPUT_TOKENS);
         a.task.spawn(move || match spec.build() {
             Ok(backend) => match backend.as_converse() {
                 Some(conv) => conv.respond(&body),
-                None => Err(AiError::NotConfigured("this backend has no tool-use support".into())),
+                None => Err(AiError::NotConfigured(
+                    "this backend has no tool-use support".into(),
+                )),
             },
             Err(e) => Err(e),
         });
@@ -413,14 +435,19 @@ impl App {
         if self.ai.backend() != BackendKind::Claude {
             return 0.0;
         }
-        let Some(a) = self.assistant() else { return 0.0 };
+        let Some(a) = self.assistant() else {
+            return 0.0;
+        };
         // The manuscript is the first user block (the cached prefix); everything
         // else — the request, tool calls, results, replies — is fresh this turn.
         let (mut cached, mut fresh) = (0usize, 0usize);
         for (mi, m) in a.messages.iter().enumerate() {
             if let Some(blocks) = m["content"].as_array() {
                 for (bi, b) in blocks.iter().enumerate() {
-                    let len = b["text"].as_str().or_else(|| b["content"].as_str()).map_or(0, str::len);
+                    let len = b["text"]
+                        .as_str()
+                        .or_else(|| b["content"].as_str())
+                        .map_or(0, str::len);
                     if mi == 0 && bi == 0 {
                         cached += len;
                     } else {
@@ -436,7 +463,9 @@ impl App {
     /// the run (no more asking) and continue, or stop it within budget.
     fn answer_assistant_continue(&mut self) {
         let yes = {
-            let Some(a) = self.assistant_mut() else { return };
+            let Some(a) = self.assistant_mut() else {
+                return;
+            };
             let yes = matches!(a.input.trim().chars().next(), Some('y' | 'Y'));
             a.input.clear();
             a.pending_continue = false;
@@ -462,7 +491,10 @@ impl App {
             Some(a) => match a.task.poll() {
                 Poll::Pending => return,
                 Poll::Ready(r) => r,
-                Poll::Died => Err(AiError::Network { status: None, message: "the assistant request failed".into() }),
+                Poll::Died => Err(AiError::Network {
+                    status: None,
+                    message: "the assistant request failed".into(),
+                }),
             },
             None => return,
         };
@@ -475,7 +507,9 @@ impl App {
     pub(super) fn apply_assistant_turn(&mut self, outcome: TurnResult) {
         // Take the split out so action execution can borrow `&mut self` freely —
         // `conv` then borrows the local split, not a field of `self`.
-        let Some(mut split) = self.split.take() else { return };
+        let Some(mut split) = self.split.take() else {
+            return;
+        };
         let OtherPane::Assistant { conv, .. } = &mut split.other else {
             self.split = Some(split);
             return;
@@ -493,7 +527,10 @@ impl App {
                 conv.follow();
             }
             Ok(Turn::ToolCalls(_)) if conv.turns >= tool_loop::MAX_TURNS => {
-                conv.entries.push(Entry::sys(&format!("Stopped after {} tool-use turns.", tool_loop::MAX_TURNS)));
+                conv.entries.push(Entry::sys(&format!(
+                    "Stopped after {} tool-use turns.",
+                    tool_loop::MAX_TURNS
+                )));
                 conv.ran.clear();
                 conv.turns = 0;
                 conv.follow();
@@ -509,7 +546,8 @@ impl App {
                 drive = true;
             }
             Err(e) => {
-                conv.entries.push(Entry::sys(&format!("Assistant error: {e}")));
+                conv.entries
+                    .push(Entry::sys(&format!("Assistant error: {e}")));
                 conv.ran.clear();
                 conv.turns = 0;
                 conv.follow();
@@ -526,7 +564,9 @@ impl App {
     /// (then send the results back and ask the model to continue) or a call parks
     /// the batch — an async pass started, or a cost confirm posted (#392).
     fn drive_assistant_batch(&mut self) {
-        let Some(mut split) = self.split.take() else { return };
+        let Some(mut split) = self.split.take() else {
+            return;
+        };
         let OtherPane::Assistant { conv, focused } = &mut split.other else {
             self.split = Some(split);
             return;
@@ -536,12 +576,15 @@ impl App {
             match self.assistant_run_action(&call.name, &call.input) {
                 Step::Sync(result) => {
                     conv.ran.push(call.name.clone());
-                    conv.entries.push(Entry::tool(&format!("{} — {result}", call.name)));
-                    conv.batch_results.push(tool_loop::tool_result_block(&call.id, &result));
+                    conv.entries
+                        .push(Entry::tool(&format!("{} — {result}", call.name)));
+                    conv.batch_results
+                        .push(tool_loop::tool_result_block(&call.id, &result));
                 }
                 Step::Started => {
                     conv.ran.push(call.name.clone());
-                    conv.entries.push(Entry::tool(&format!("{} — running…", call.name)));
+                    conv.entries
+                        .push(Entry::tool(&format!("{} — running…", call.name)));
                     conv.awaiting = Some(call);
                     conv.follow();
                     // Yield focus so the pass's findings UI is interactive.
@@ -597,7 +640,9 @@ impl App {
     /// on Claude, or skip it, then drive the rest of the batch.
     fn answer_assistant_confirm(&mut self) {
         let (yes, call) = {
-            let Some(c) = self.assistant_mut() else { return };
+            let Some(c) = self.assistant_mut() else {
+                return;
+            };
             let yes = matches!(c.input.trim().chars().next(), Some('y' | 'Y'));
             c.input.clear();
             (yes, c.pending_confirm.take())
@@ -609,7 +654,8 @@ impl App {
                 if self.fire_pass(a, BackendKind::Claude) {
                     if let Some(c) = self.assistant_mut() {
                         c.ran.push(call.name.clone());
-                        c.entries.push(Entry::tool(&format!("{} — running…", call.name)));
+                        c.entries
+                            .push(Entry::tool(&format!("{} — running…", call.name)));
                         c.awaiting = Some(call);
                         c.follow();
                     }
@@ -617,7 +663,10 @@ impl App {
                     return; // parked for poll_ai
                 }
             }
-            let msg = self.message.take().unwrap_or_else(|| "couldn't start the pass".into());
+            let msg = self
+                .message
+                .take()
+                .unwrap_or_else(|| "couldn't start the pass".into());
             self.record_assistant_result(&call, &msg);
         } else {
             self.record_assistant_result(&call, "skipped by the author");
@@ -629,8 +678,10 @@ impl App {
     fn record_assistant_result(&mut self, call: &ToolCall, text: &str) {
         if let Some(c) = self.assistant_mut() {
             c.ran.push(call.name.clone());
-            c.entries.push(Entry::tool(&format!("{} — {text}", call.name)));
-            c.batch_results.push(tool_loop::tool_result_block(&call.id, text));
+            c.entries
+                .push(Entry::tool(&format!("{} — {text}", call.name)));
+            c.batch_results
+                .push(tool_loop::tool_result_block(&call.id, text));
             c.follow();
         }
     }
@@ -683,7 +734,11 @@ impl App {
         }
         self.message = None;
         self.dispatch_action(action, false);
-        Step::Sync(self.message.take().unwrap_or_else(|| format!("Ran {}.", action.label())))
+        Step::Sync(
+            self.message
+                .take()
+                .unwrap_or_else(|| format!("Ran {}.", action.label())),
+        )
     }
 
     /// Fire a text-argument AI action (#390) with the model's argument, on the
@@ -702,7 +757,11 @@ impl App {
         if self.ai_task.is_busy() {
             Step::Started
         } else {
-            Step::Sync(self.message.take().unwrap_or_else(|| "couldn't start the action".into()))
+            Step::Sync(
+                self.message
+                    .take()
+                    .unwrap_or_else(|| "couldn't start the action".into()),
+            )
         }
     }
 
@@ -717,7 +776,11 @@ impl App {
                 if self.fire_pass(action, backend) {
                     Step::Started
                 } else {
-                    Step::Sync(self.message.take().unwrap_or_else(|| "couldn't start the pass".into()))
+                    Step::Sync(
+                        self.message
+                            .take()
+                            .unwrap_or_else(|| "couldn't start the pass".into()),
+                    )
                 }
             }
             AiStart::Confirm { label: cost, .. } => {
@@ -725,7 +788,9 @@ impl App {
                 // "… — y Claude · l local · N cancel"); keep just the estimate (the
                 // part before the first " — ") and ask for a y/skip here instead.
                 let estimate = cost.split(" — ").next().unwrap_or(&cost);
-                Step::AwaitConfirm(format!("{label} would cost {estimate}. Reply 'y' to run it, anything else to skip."))
+                Step::AwaitConfirm(format!(
+                    "{label} would cost {estimate}. Reply 'y' to run it, anything else to skip."
+                ))
             }
         }
     }

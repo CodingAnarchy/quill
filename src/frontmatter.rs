@@ -367,7 +367,9 @@ impl FrontMatter {
     /// The chapter's word-count goal, if set (#146). A non-positive or
     /// unparseable value reads as "no goal".
     pub fn goal(&self) -> Option<usize> {
-        self.get("goal").and_then(|v| v.trim().parse().ok()).filter(|&n| n > 0)
+        self.get("goal")
+            .and_then(|v| v.trim().parse().ok())
+            .filter(|&n| n > 0)
     }
 
     /// Set the chapter's word-count goal; `None` clears it.
@@ -544,7 +546,9 @@ mod tests {
         // A summary with a colon must be quoted to stay valid, and read back whole.
         let mut fm = FrontMatter::default();
         fm.set_summary("The reckoning: part one");
-        assert!(fm.as_str().contains(r#"summary: "The reckoning: part one""#));
+        assert!(fm
+            .as_str()
+            .contains(r#"summary: "The reckoning: part one""#));
         assert_eq!(fm.summary().as_deref(), Some("The reckoning: part one"));
     }
 
@@ -566,7 +570,7 @@ mod tests {
         assert!(fm.as_str().contains("role: prologue\n"));
         assert_eq!(fm.role(), Some(Role::Prologue));
         assert_eq!(fm.status(), Some(Status::Draft)); // sibling untouched
-        // Clearing drops the key (back to a body chapter).
+                                                      // Clearing drops the key (back to a body chapter).
         fm.set_role(None);
         assert_eq!(fm.role(), None);
         assert!(!fm.as_str().contains("role"));
@@ -576,8 +580,14 @@ mod tests {
     fn role_keys_parse_case_insensitively_with_the_british_alias() {
         assert_eq!(Role::from_key("Prologue"), Some(Role::Prologue));
         assert_eq!(Role::from_key("  EPILOGUE "), Some(Role::Epilogue));
-        assert_eq!(Role::from_key("acknowledgements"), Some(Role::Acknowledgments));
-        assert_eq!(Role::from_key("acknowledgments"), Some(Role::Acknowledgments));
+        assert_eq!(
+            Role::from_key("acknowledgements"),
+            Some(Role::Acknowledgments)
+        );
+        assert_eq!(
+            Role::from_key("acknowledgments"),
+            Some(Role::Acknowledgments)
+        );
         assert_eq!(Role::from_key("chapter"), None); // unknown → body
         assert_eq!(Role::Appendix.key(), "appendix");
         assert_eq!(Role::Appendix.label(), "Appendix");
@@ -621,7 +631,7 @@ mod tests {
         let mut fm = FrontMatter::default();
         fm.set_epigraph_text("Line one\nLine two");
         fm.set_status(Status::Final); // a key written after the block
-        // Shrink the block back to a single line.
+                                      // Shrink the block back to a single line.
         fm.set_epigraph_text("Just one line");
         assert_eq!(fm.epigraph().unwrap().text, "Just one line");
         assert!(fm.as_str().contains("epigraph: Just one line\n"));

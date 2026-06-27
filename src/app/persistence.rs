@@ -1,10 +1,6 @@
 //! Recovery sidecar and history snapshots: load/persist and the recovery
 //! offer/restore flow. Extracted from `mod.rs` (#314).
 
-
-
-
-
 use crate::buffer::{self};
 use crate::date;
 use crate::history;
@@ -19,7 +15,12 @@ impl App {
     /// edit that shouldn't be booked as prose.
     pub(super) fn seed_baselines(&mut self) {
         self.baselines = (0..self.chapter_count())
-            .map(|i| (self.project.chapter_file(i).to_string(), self.chapter_word_count(i)))
+            .map(|i| {
+                (
+                    self.project.chapter_file(i).to_string(),
+                    self.chapter_word_count(i),
+                )
+            })
             .collect();
         // A full re-baseline supersedes any pending per-chapter changes (#220).
         self.project.clear_words_changed();
@@ -102,11 +103,17 @@ impl App {
             return;
         };
         let disk_body = self.project.chapter_body(index);
-        if buffer::normalize_trailing_newline(&disk_body) == buffer::normalize_trailing_newline(&rec.body) {
+        if buffer::normalize_trailing_newline(&disk_body)
+            == buffer::normalize_trailing_newline(&rec.body)
+        {
             recovery::clear(&self.project.root); // already saved — nothing was lost
             return;
         }
-        let title = self.project.chapter_title(index).unwrap_or("a chapter").to_string();
+        let title = self
+            .project
+            .chapter_title(index)
+            .unwrap_or("a chapter")
+            .to_string();
         self.pending_recovery = Some(rec);
         self.open_prompt(
             Pending::ConfirmRecovery,

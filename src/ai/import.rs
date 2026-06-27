@@ -69,7 +69,13 @@ pub fn schema() -> Value {
 /// Build the import request: the author's notes as cached context, the combined
 /// schema attached.
 pub fn build_request(notes: String, model: &str) -> Request {
-    super::manuscript_request(SYSTEM, "Organize these notes into the story bible as specified.", notes, model, schema())
+    super::manuscript_request(
+        SYSTEM,
+        "Organize these notes into the story bible as specified.",
+        notes,
+        model,
+        schema(),
+    )
 }
 
 /// Parse a structured import reply.
@@ -108,7 +114,10 @@ mod tests {
 
     #[test]
     fn parse_rejects_bad_json() {
-        assert!(matches!(parse("not json"), Err(AiError::ModelNonCompliance(_))));
+        assert!(matches!(
+            parse("not json"),
+            Err(AiError::ModelNonCompliance(_))
+        ));
     }
 
     #[test]
