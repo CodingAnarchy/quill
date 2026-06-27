@@ -94,9 +94,15 @@ keystrokes that stay out of the way.
   part titles are styled **Heading 1**, which is where Vellum splits chapters on
   import (in Vellum: *File → Import Word File…* and pick the `.vellum.docx`), so
   chapters arrive as separate, correctly-ordered elements with emphasis intact.
+  *EPUB* writes a finished `.epub` ebook — the standard distribution format for
+  Apple Books, Kobo, and Kindle — with a navigable table of contents built from
+  the part/chapter structure, book metadata (title, subtitle, author, series),
+  epigraphs set apart, and `*`/`**` emphasis as italic/bold; no second paid tool
+  or Mac required, and it validates against [epubcheck](https://www.w3.org/publishing/epubcheck/).
   For a multi-book **series**, the menu offers each format twice — the whole
   series (books in reading order, each delimited per format: Markdown/Word book
-  headings, Scrivener book folders) or just the active book.
+  headings, Scrivener book folders, EPUB book sections in the table of contents)
+  or just the active book.
 
 - **AI assistance (opt-in)** — off by default; a draft only leaves the machine
   when you enable AI and supply a key. Quill's AI is an **assistant, not a
@@ -315,7 +321,7 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | Ctrl-O         | toggle the chapter pane         |
 | Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
-| Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), or Vellum (`.docx`) → `export/` |
+| Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), Vellum (`.docx`), or EPUB (`.epub`) → `export/` |
 | Ctrl-K         | run action: one menu for save, export, the reports, and the AI passes (unavailable ones say why) |
 | Ctrl-X         | run workflow: pick one of your defined action sequences and run it |
 | Ctrl-B         | browse projects: switch to a recently-opened project, or press `b` to browse the filesystem for any project (saves the current first) |

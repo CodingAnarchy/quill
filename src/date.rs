@@ -25,6 +25,22 @@ pub fn iso(date: Date) -> String {
         .unwrap_or_default()
 }
 
+/// The current UTC instant as an EPUB `dcterms:modified` timestamp
+/// (`YYYY-MM-DDThh:mm:ssZ`, the OPF-required form) — the one place export needs a
+/// full datetime rather than a `Date`.
+pub fn utc_timestamp() -> String {
+    let t = OffsetDateTime::now_utc();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        t.year(),
+        t.month() as u8,
+        t.day(),
+        t.hour(),
+        t.minute(),
+        t.second()
+    )
+}
+
 /// Human form `D Mon YYYY`, e.g. `27 Jun 2026` — for the report's dates.
 pub fn human(date: Date) -> String {
     date.format(format_description!(

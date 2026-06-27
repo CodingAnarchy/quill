@@ -462,8 +462,9 @@ fn a_standalone_export_menu_is_unchanged() {
     let Mode::Palette(p) = &app.mode else {
         panic!("export palette")
     };
-    assert_eq!(p.items.len(), 4);
+    assert_eq!(p.items.len(), 5);
     assert_eq!(p.items[0].label, "Manuscript (Markdown)");
+    assert_eq!(p.items[4].label, "EPUB (.epub)");
 }
 
 fn report_text(app: &App) -> String {

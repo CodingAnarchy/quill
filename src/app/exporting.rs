@@ -10,8 +10,8 @@ use crate::frontmatter::Band;
 use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
 
-/// The four export formats with their menu label and description.
-const FORMATS: [(ExportFormat, &str, &str); 4] = [
+/// The export formats with their menu label and description.
+const FORMATS: [(ExportFormat, &str, &str); 5] = [
     (
         ExportFormat::Markdown,
         "Manuscript (Markdown)",
@@ -32,12 +32,17 @@ const FORMATS: [(ExportFormat, &str, &str); 4] = [
         "Vellum (.docx)",
         "Word tuned for Vellum — chapters split on Heading 1",
     ),
+    (
+        ExportFormat::Epub,
+        "EPUB (.epub)",
+        "A finished ebook — Apple Books, Kobo, Kindle",
+    ),
 ];
 
 impl App {
     /// Open the export menu (#7): pick a format, then [`run_export`] writes it.
     /// A multi-book series (#332) offers each format twice — the whole series and
-    /// just the active book; a standalone novel lists the four formats as before.
+    /// just the active book; a standalone novel lists the formats once.
     pub(crate) fn open_export_palette(&mut self) {
         let item = |label: String, desc: &str, format, scope| PaletteItem {
             label,
@@ -107,15 +112,20 @@ impl App {
             ExportFormat::Markdown => {
                 self.write_export(name, "md", export::to_markdown(doc).as_bytes())
             }
-            ExportFormat::Docx => self.write_docx(
+            ExportFormat::Docx => self.write_built(
                 export::docx::to_docx(doc, export::docx::Profile::Manuscript),
                 name,
                 "docx",
             ),
-            ExportFormat::Vellum => self.write_docx(
+            ExportFormat::Vellum => self.write_built(
                 export::docx::to_docx(doc, export::docx::Profile::Vellum),
                 name,
                 "vellum.docx",
+            ),
+            ExportFormat::Epub => self.write_built(
+                export::epub::to_epub(doc, &crate::date::utc_timestamp()),
+                name,
+                "epub",
             ),
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
@@ -142,7 +152,7 @@ impl App {
                 "md",
                 export::to_markdown_series(docs, series, author.as_deref()).as_bytes(),
             ),
-            ExportFormat::Docx => self.write_docx(
+            ExportFormat::Docx => self.write_built(
                 export::docx::to_docx_series(
                     docs,
                     series,
@@ -152,7 +162,7 @@ impl App {
                 name,
                 "docx",
             ),
-            ExportFormat::Vellum => self.write_docx(
+            ExportFormat::Vellum => self.write_built(
                 export::docx::to_docx_series(
                     docs,
                     series,
@@ -161,6 +171,16 @@ impl App {
                 ),
                 name,
                 "vellum.docx",
+            ),
+            ExportFormat::Epub => self.write_built(
+                export::epub::to_epub_series(
+                    docs,
+                    series,
+                    author.as_deref(),
+                    &crate::date::utc_timestamp(),
+                ),
+                name,
+                "epub",
             ),
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
@@ -171,8 +191,9 @@ impl App {
         }
     }
 
-    /// Write a compiled `.docx`'s bytes (or report the build error).
-    fn write_docx(&mut self, built: std::io::Result<Vec<u8>>, name: &str, ext: &str) {
+    /// Write a compiled binary export's bytes (`.docx` / `.epub`), or report the
+    /// build error.
+    fn write_built(&mut self, built: std::io::Result<Vec<u8>>, name: &str, ext: &str) {
         match built {
             Ok(bytes) => self.write_export(name, ext, &bytes),
             Err(e) => self.message = Some(format!("Export failed: {e}")),
