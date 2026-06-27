@@ -156,6 +156,9 @@ impl Builder {
         if let Some(a) = author {
             body.push_str(&format!("<p class=\"author\">by {}</p>\n", xml_escape(a)));
         }
+        if let Some(o) = &self.style.title_ornament {
+            body.push_str(&format!("<p class=\"ornament\">{}</p>\n", xml_escape(o)));
+        }
         body.push_str("</div>\n");
         if let Some(e) = epigraph {
             body.push_str(&epigraph_xhtml(e));
@@ -196,7 +199,10 @@ impl Builder {
         for part in &doc.parts {
             match &part.name {
                 Some(name) => {
-                    let body = format!("<h1 class=\"part-title\">{}</h1>\n", xml_escape(name));
+                    let mut body = format!("<h1 class=\"part-title\">{}</h1>\n", xml_escape(name));
+                    if let Some(o) = &self.style.part_ornament {
+                        body.push_str(&format!("<p class=\"ornament\">{}</p>\n", xml_escape(o)));
+                    }
                     let href = self.add("part", name, body);
                     let children = part.chapters.iter().map(|c| self.add_chapter(c)).collect();
                     nav.push(Nav {
@@ -311,6 +317,9 @@ fn stylesheet(style: &ExportStyle) -> String {
         // its first line is flush so the initial sits in the margin.
         css.push_str("p.opening { text-indent: 0; }\n");
         css.push_str(".opening::first-letter { float: left; font-size: 3.2em; line-height: 0.72; padding-right: 0.06em; font-weight: bold; }\n");
+    }
+    if style.title_ornament.is_some() || style.part_ornament.is_some() {
+        css.push_str(".ornament { text-align: center; text-indent: 0; margin: 1.5em 0; font-size: 1.5em; }\n");
     }
     css
 }
@@ -985,6 +994,33 @@ mod tests {
         assert!(!part(&plain, "OEBPS/style.css").contains("text-align: left"));
         assert!(!part(&plain, "OEBPS/style.css").contains("first-letter"));
         assert!(!part(&plain, "OEBPS/chap0002.xhtml").contains("opening"));
+    }
+
+    #[test]
+    fn title_and_part_ornaments_render_when_configured() {
+        // `doc()` has a title page (with author) and a named part ("Part One").
+        let style = ExportStyle {
+            title_ornament: Some("❧".into()),
+            part_ornament: Some("* * &".into()),
+            ..Default::default()
+        };
+        let bytes = to_epub(&doc(), MODIFIED, &style).unwrap();
+        let css = part(&bytes, "OEBPS/style.css");
+        assert!(css.contains(".ornament {"), "ornament rule: {css}");
+        // Title-page ornament (inside the centered title block).
+        let title = part(&bytes, "OEBPS/title0001.xhtml");
+        assert!(title.contains("<p class=\"ornament\">❧</p>"), "{title}");
+        // Part-divider ornament, XML-escaped.
+        let part_doc = part(&bytes, "OEBPS/part0003.xhtml");
+        assert!(
+            part_doc.contains("<p class=\"ornament\">* * &amp;</p>"),
+            "{part_doc}"
+        );
+
+        // Default style → no ornaments, no rule.
+        let plain = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
+        assert!(!part(&plain, "OEBPS/style.css").contains(".ornament"));
+        assert!(!part(&plain, "OEBPS/title0001.xhtml").contains("ornament"));
     }
 
     #[test]

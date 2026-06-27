@@ -42,6 +42,12 @@ pub struct ExportStyle {
     /// Whether each chapter's first paragraph opens with a drop cap (#470).
     #[serde(skip_serializing_if = "is_false")]
     pub drop_cap: bool,
+    /// A decorative glyph centered on the title page (#471). `None` → none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_ornament: Option<String>,
+    /// A decorative glyph centered on each part-divider page (#471). `None` → none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub part_ornament: Option<String>,
 }
 
 /// `skip_serializing_if` for a `bool` default — keeps `drop_cap = false` out of an
