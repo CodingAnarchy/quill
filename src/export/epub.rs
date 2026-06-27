@@ -147,17 +147,17 @@ impl Builder {
     ) {
         let mut body = String::from("<div class=\"title-page\">\n");
         if let Some(s) = series {
-            body.push_str(&format!("<p class=\"series\">{}</p>\n", xml_escape(s)));
+            push_p(&mut body, "series", s);
         }
-        body.push_str(&format!("<p class=\"title\">{}</p>\n", xml_escape(title)));
+        push_p(&mut body, "title", title);
         if let Some(s) = subtitle {
-            body.push_str(&format!("<p class=\"subtitle\">{}</p>\n", xml_escape(s)));
+            push_p(&mut body, "subtitle", s);
         }
         if let Some(a) = author {
-            body.push_str(&format!("<p class=\"author\">by {}</p>\n", xml_escape(a)));
+            push_p(&mut body, "author", &format!("by {a}"));
         }
         if let Some(o) = &self.style.title_ornament {
-            body.push_str(&format!("<p class=\"ornament\">{}</p>\n", xml_escape(o)));
+            push_p(&mut body, "ornament", o);
         }
         body.push_str("</div>\n");
         if let Some(e) = epigraph {
@@ -170,7 +170,7 @@ impl Builder {
     fn add_book_divider(&mut self, doc: &Document) -> String {
         let mut body = format!("<h1 class=\"book-title\">{}</h1>\n", xml_escape(&doc.title));
         if let Some(s) = &doc.subtitle {
-            body.push_str(&format!("<p class=\"subtitle\">{}</p>\n", xml_escape(s)));
+            push_p(&mut body, "subtitle", s);
         }
         if let Some(e) = &doc.epigraph {
             body.push_str(&epigraph_xhtml(e));
@@ -201,7 +201,7 @@ impl Builder {
                 Some(name) => {
                     let mut body = format!("<h1 class=\"part-title\">{}</h1>\n", xml_escape(name));
                     if let Some(o) = &self.style.part_ornament {
-                        body.push_str(&format!("<p class=\"ornament\">{}</p>\n", xml_escape(o)));
+                        push_p(&mut body, "ornament", o);
                     }
                     let href = self.add("part", name, body);
                     let children = part.chapters.iter().map(|c| self.add_chapter(c)).collect();
@@ -368,12 +368,7 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
 /// the `opening` class when drop caps are enabled.
 fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
     match prose {
-        Prose::SceneBreak => {
-            format!(
-                "<p class=\"scene-break\">{}</p>",
-                xml_escape(style.scene_break())
-            )
-        }
+        Prose::SceneBreak => p_class("scene-break", style.scene_break()),
         Prose::Heading(h) => format!("<h2>{}</h2>", xml_escape(h)),
         Prose::Paragraph(text) => {
             let class = if opening { " class=\"opening\"" } else { "" };
@@ -388,16 +383,27 @@ fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
 fn epigraph_xhtml(e: &Epigraph) -> String {
     let mut out = String::from("<div class=\"epigraph\">\n");
     for line in e.text.lines() {
+        // A class-less `<p>`, so not via `push_p`.
         out.push_str(&format!("<p>{}</p>\n", xml_escape(line)));
     }
     if let Some(a) = &e.attribution {
-        out.push_str(&format!(
-            "<p class=\"attribution\">— {}</p>\n",
-            xml_escape(a)
-        ));
+        push_p(&mut out, "attribution", &format!("— {a}"));
     }
     out.push_str("</div>\n");
     out
+}
+
+/// `<p class="…">…</p>` with the text XML-escaped — the styled-paragraph idiom the
+/// designed pages share (title, ornaments, scene break, …).
+fn p_class(class: &str, text: &str) -> String {
+    format!("<p class=\"{class}\">{}</p>", xml_escape(text))
+}
+
+/// Append a [`p_class`] paragraph and a trailing newline to `body` — the
+/// title-page / divider builders' convention.
+fn push_p(body: &mut String, class: &str, text: &str) {
+    body.push_str(&p_class(class, text));
+    body.push('\n');
 }
 
 /// Render `*`/`**` runs as `<em>`/`<strong>`, escaping the text of each run.
