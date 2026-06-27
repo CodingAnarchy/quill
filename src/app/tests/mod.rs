@@ -100,12 +100,31 @@ fn cont_with(findings: Vec<continuity::Finding>) -> Continuity {
     }
 }
 
+/// A unique-per-process scratch directory for an app-test project (#428).
+fn app_scratch_dir(name: &str) -> PathBuf {
+    crate::testutil::scratch_dir("app", name)
+}
+
+/// Open the project at `dir`, build the editor, and pin every config-derived
+/// setting (#428). The single open→build→pin path every app fixture builds on:
+/// `App::new` reads the developer's real config, so without these pins a dev with
+/// Vim mode, smart typography, or an on-save trigger would make tests flaky or
+/// config-dependent. Tests that want those opt back in explicitly.
+fn open_test_app(dir: &Path) -> App {
+    let project = Project::open(dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.vim = false;
+    app.smart_typography = false;
+    app.mode = Mode::Insert;
+    app.workflows = Vec::new();
+    app.triggers = Default::default();
+    app
+}
+
 /// A two-chapter project on disk with distinct content per chapter.
 fn two_chapter_app(name: &str) -> (App, TempProject) {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-app-{}-{}", std::process::id(), name));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = app_scratch_dir(name);
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n\
@@ -116,22 +135,7 @@ fn two_chapter_app(name: &str) -> (App, TempProject) {
     fs::write(dir.join("one.md"), "first chapter\n").unwrap();
     fs::write(dir.join("two.md"), "second chapter\n").unwrap();
 
-    let project = Project::open(&dir).unwrap();
-    let buffer = Buffer::from_path(project.active_path()).unwrap();
-    let mut app = App::new(buffer, project);
-    // App::new reads the developer's real config; pin the modeless default so the
-    // tests don't depend on whether the dev has Vim mode (#27) enabled. The Vim
-    // tests opt back in explicitly via `vim_app`.
-    app.vim = false;
-    // Smart typography (#296) is on by default; pin it off so tests that type
-    // quotes/dashes/dots assert the literal ASCII (the typography tests opt in).
-    app.smart_typography = false;
-    app.mode = Mode::Insert;
-    // Likewise drop any workflows / triggers from the real config, so a developer
-    // with an on-save trigger doesn't perturb the save-based tests (#228). The
-    // workflow tests set these explicitly.
-    app.workflows = Vec::new();
-    app.triggers = Default::default();
+    let app = open_test_app(&dir);
     (app, TempProject::new(dir))
 }
 
@@ -139,10 +143,7 @@ fn two_chapter_app(name: &str) -> (App, TempProject) {
 /// test pins as [`two_chapter_app`] — for the continuous-view tests, where the
 /// window holds several chapters at known byte offsets.
 fn three_chapter_app(name: &str) -> (App, TempProject) {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-app-{}-{}", std::process::id(), name));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = app_scratch_dir(name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, body) in ["alpha\n", "beta\n", "gamma\n"].iter().enumerate() {
         manifest.push_str(&format!("[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"));
@@ -150,13 +151,6 @@ fn three_chapter_app(name: &str) -> (App, TempProject) {
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();
 
-    let project = Project::open(&dir).unwrap();
-    let buffer = Buffer::from_path(project.active_path()).unwrap();
-    let mut app = App::new(buffer, project);
-    app.vim = false;
-    app.smart_typography = false;
-    app.mode = Mode::Insert;
-    app.workflows = Vec::new();
-    app.triggers = Default::default();
+    let app = open_test_app(&dir);
     (app, TempProject::new(dir))
 }

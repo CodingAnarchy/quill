@@ -145,8 +145,7 @@ mod tests {
 
     #[test]
     fn record_then_list_round_trips_through_the_store() {
-        let dir = std::env::temp_dir().join(format!("quill-recent-{}-rt", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::testutil::scratch_dir("recent", "rt");
         // A real project so it survives the existence prune.
         let proj = dir.join("book");
         Project::create(&proj).unwrap();
@@ -162,9 +161,7 @@ mod tests {
 
     #[test]
     fn list_prunes_a_project_that_no_longer_exists() {
-        let dir = std::env::temp_dir().join(format!("quill-recent-{}-prune", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::scratch_dir("recent", "prune");
         // A recorded entry pointing at a project that isn't there.
         let json = serde_json::to_string(&vec![rp("/nowhere/ghost", "Ghost")]).unwrap();
         std::fs::write(store_path(&dir), json).unwrap();
@@ -175,8 +172,7 @@ mod tests {
 
     #[test]
     fn scan_finds_projects_and_skips_plain_folders() {
-        let home = std::env::temp_dir().join(format!("quill-home-{}-scan", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
+        let home = crate::testutil::scratch_dir("home", "scan");
         Project::create(home.join("alpha")).unwrap();
         Project::create(home.join("beta")).unwrap();
         std::fs::create_dir_all(home.join("not-a-project")).unwrap();
@@ -195,6 +191,8 @@ mod tests {
 
     #[test]
     fn scan_of_a_missing_dir_is_empty() {
+        // Deliberately a path that does NOT exist — not `scratch_dir`, which would
+        // create it and turn this into the empty-dir case instead of the missing one.
         let missing = std::env::temp_dir().join(format!("quill-home-{}-missing", std::process::id()));
         let _ = std::fs::remove_dir_all(&missing);
         assert!(scan(&missing).is_empty());

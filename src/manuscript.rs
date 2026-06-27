@@ -404,10 +404,7 @@ mod tests {
     /// Build a temp project whose chapters hold the given contents, and return
     /// the loaded `Project` plus its directory.
     fn project_with(name: &str, chapters: &[&str]) -> (Project, PathBuf) {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("quill-ms-{}-{}", std::process::id(), name));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::scratch_dir("ms", name);
 
         let mut manifest = String::from("title = \"Book\"\n\n");
         for (i, body) in chapters.iter().enumerate() {
@@ -478,10 +475,7 @@ mod tests {
     /// A four-body-chapter project split into two named parts (#412): body
     /// positions 1-2 are "Part One", 3-4 are "Part Two".
     fn project_with_parts(name: &str) -> (Project, PathBuf) {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("quill-ms-{}-{}", std::process::id(), name));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::scratch_dir("ms", name);
         let manifest = "title = \"Book\"\n\n\
             [[parts]]\nname = \"Part One\"\nchapters = [1, 2]\n\n\
             [[parts]]\nname = \"Part Two\"\nchapters = [3, 4]\n\n\
@@ -530,10 +524,7 @@ mod tests {
     /// A project whose first chapter is a front-matter section (a prologue),
     /// followed by plain body chapters in no part (#412).
     fn project_with_section(name: &str) -> (Project, PathBuf) {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("quill-ms-{}-{}", std::process::id(), name));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::scratch_dir("ms", name);
         let manifest = "title = \"Book\"\n\n\
             [[chapters]]\ntitle = \"Prologue\"\nfile = \"ch0.md\"\n\n\
             [[chapters]]\ntitle = \"Ch1\"\nfile = \"ch1.md\"\n\n\

@@ -8,10 +8,7 @@ use std::fs;
 /// manifest (deliberately out of band order) — front-matter and back-matter
 /// front matter set. Returns its dir.
 fn sectioned_project(name: &str) -> TempProject {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-sect-{}-{}", std::process::id(), name));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("sect", name);
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n\
@@ -98,10 +95,7 @@ fn a_part_range_past_the_chapters_exports_and_trees_without_panicking() {
     // A valid-TOML but structurally-odd manifest (#407): a [[parts]] whose range
     // points past the only chapter. The part just never matches a chapter, so the
     // export compile and the series tree must report/skip it, not panic.
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-oddparts-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("sections", "oddparts");
     fs::write(
         Project::manifest_path(&dir),
         "title = \"Book\"\n\n\
@@ -157,10 +151,7 @@ fn export_is_guarded_in_the_continuous_view() {
 fn parts_map_to_body_chapters_not_sections() {
     // A project with a prologue + 4 body chapters + an appendix, listed out of
     // band order, and two parts over the body chapters (#185).
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-parts-sect-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testutil::scratch_dir("sections", "parts-sect");
     let dir = TempProject::new(dir);
     fs::write(
         Project::manifest_path(&dir),

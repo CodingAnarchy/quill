@@ -6,15 +6,12 @@ use crate::buffer::Buffer;
 use std::time::Instant;
 
 fn temp_dir(name: &str) -> PathBuf {
-    let mut p = std::env::temp_dir();
-    p.push(format!("quill-proj-{}-{}", std::process::id(), name));
-    p
+    crate::testutil::scratch_dir("proj", name)
 }
 
 #[test]
 fn accepts_words_into_the_project_dictionary() {
     let dir = temp_dir("dict");
-    let _ = fs::remove_dir_all(&dir);
     let mut p = Project::create(&dir).unwrap();
 
     assert!(!p.is_accepted("Vashti"));
@@ -33,7 +30,6 @@ fn accepts_words_into_the_project_dictionary() {
 #[test]
 fn accepting_a_word_preserves_existing_dictionary_entries() {
     let dir = temp_dir("dict-append");
-    let _ = fs::remove_dir_all(&dir);
     let mut p = Project::create(&dir).unwrap();
     fs::write(dir.join(DICTIONARY_NAME), "Aerendil\n").unwrap();
     p.dictionary = load_dictionary(&dir); // re-read what we just wrote
@@ -63,7 +59,6 @@ fn write_chapter_project(dir: &Path, n: usize, title: &str) -> String {
 #[test]
 fn create_initializes_manifest_and_first_chapter() {
     let dir = temp_dir("create");
-    let _ = fs::remove_dir_all(&dir);
     let project = Project::create(&dir).unwrap();
 
     assert_eq!(project.manifest.chapters.len(), 1);
@@ -77,7 +72,6 @@ fn create_initializes_manifest_and_first_chapter() {
 #[test]
 fn create_then_open_round_trips_structure_and_text() {
     let dir = temp_dir("roundtrip");
-    let _ = fs::remove_dir_all(&dir);
 
     // Create, write some prose into the active chapter, save it.
     let project = Project::create(&dir).unwrap();
@@ -109,7 +103,6 @@ fn create_then_open_round_trips_structure_and_text() {
 #[test]
 fn open_parses_a_hand_written_manifest() {
     let dir = temp_dir("handwritten");
-    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         Project::manifest_path(&dir),
@@ -150,7 +143,6 @@ fn daily_goal_parses_and_round_trips_and_is_optional() {
 #[test]
 fn book_metadata_persists_and_old_manifests_still_parse() {
     let dir = temp_dir("book-meta");
-    let _ = fs::remove_dir_all(&dir);
 
     // A manifest written before these fields existed still opens.
     let mut project = Project::create(&dir).unwrap();
@@ -176,7 +168,6 @@ fn book_metadata_persists_and_old_manifests_still_parse() {
 #[test]
 fn book_epigraph_persists_and_builds() {
     let dir = temp_dir("book-epigraph");
-    let _ = fs::remove_dir_all(&dir);
     let mut project = Project::create(&dir).unwrap();
     project.manifest.epigraph = Some("Call me Ishmael.".into());
     project.manifest.epigraph_by = Some("Melville".into());
@@ -193,7 +184,6 @@ fn book_epigraph_persists_and_builds() {
 #[test]
 fn goals_round_trip_through_the_manifest() {
     let dir = temp_dir("goals");
-    let _ = fs::remove_dir_all(&dir);
     let mut project = Project::create(&dir).unwrap();
     assert!(project.manifest.goals.is_none());
     assert_eq!(project.manifest.todo_marker(), "xxx"); // default
@@ -225,7 +215,6 @@ fn goals_round_trip_through_the_manifest() {
 #[test]
 fn parts_round_trip_and_map_chapters_to_ranges() {
     let dir = temp_dir("parts");
-    let _ = fs::remove_dir_all(&dir);
     let mut project = Project::create(&dir).unwrap(); // 1 starter chapter
     assert!(project.manifest.parts.is_none());
     assert_eq!(project.manifest.part_label(), "part"); // default
@@ -273,7 +262,6 @@ fn parts_round_trip_and_map_chapters_to_ranges() {
 #[test]
 fn words_per_page_defaults_to_a_standard_page() {
     let dir = temp_dir("wpp-default");
-    let _ = fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     // A goals block that omits words_per_page (the common case).
     std::fs::write(
@@ -293,7 +281,6 @@ fn words_per_page_defaults_to_a_standard_page() {
 #[test]
 fn a_multiline_book_epigraph_round_trips_through_the_manifest() {
     let dir = temp_dir("book-epigraph-multi");
-    let _ = fs::remove_dir_all(&dir);
     let mut project = Project::create(&dir).unwrap();
     project.manifest.epigraph = Some("Line one\nLine two\nLine three".into());
     project.save_manifest().unwrap();
@@ -314,7 +301,6 @@ fn a_multiline_book_epigraph_round_trips_through_the_manifest() {
 #[test]
 fn open_repairs_a_chapterless_manifest() {
     let dir = temp_dir("empty-manifest");
-    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(Project::manifest_path(&dir), "title = \"Empty\"\n").unwrap();
 
@@ -328,7 +314,6 @@ fn open_repairs_a_chapterless_manifest() {
 #[test]
 fn open_reports_a_malformed_manifest_without_panicking() {
     let dir = temp_dir("bad-manifest");
-    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     // Broken TOML — an unterminated array-of-tables header.
     fs::write(Project::manifest_path(&dir), "title = \"X\"\n[[chapters]\n").unwrap();
@@ -343,7 +328,6 @@ fn open_reports_a_malformed_manifest_without_panicking() {
 #[test]
 fn open_tolerates_garbage_front_matter() {
     let dir = temp_dir("bad-frontmatter");
-    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(Project::manifest_path(&dir), "title = \"B\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n").unwrap();
     // A fenced block whose contents are not valid YAML at all.
@@ -361,7 +345,6 @@ fn open_tolerates_garbage_front_matter() {
 #[test]
 fn add_rename_swap_remove_persist() {
     let dir = temp_dir("structure");
-    let _ = fs::remove_dir_all(&dir);
     let mut project = Project::create(&dir).unwrap(); // "Chapter 1"
 
     // Add a second chapter after the first; file is created with a fresh name.
@@ -414,7 +397,6 @@ fn add_rename_swap_remove_persist() {
 fn open_is_fast_for_a_large_novel() {
 
     let dir = temp_dir("perf-open");
-    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let manifest = write_chapter_project(&dir, 150, "Big");
     fs::write(Project::manifest_path(&dir), manifest).unwrap();
@@ -441,7 +423,6 @@ fn open_is_fast_for_a_series_sized_project() {
 
     let n = 1500;
     let dir = temp_dir("perf-open-series");
-    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let manifest = write_chapter_project(&dir, n, "Series");
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

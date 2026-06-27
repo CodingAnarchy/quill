@@ -8,9 +8,7 @@ use crate::project::Project;
 /// A two-book series on disk, opened on book one, with the deterministic test
 /// pins the shared helper applies (Vim / smart typography / workflows off).
 fn series_app(name: &str) -> (App, TempProject) {
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-series-{}-{}", std::process::id(), name));
-    let _ = fs::remove_dir_all(&dir);
+    let dir = crate::testutil::scratch_dir("books", name);
     for sub in ["b1", "b2"] {
         fs::create_dir_all(dir.join(sub)).unwrap();
     }
@@ -28,14 +26,7 @@ fn series_app(name: &str) -> (App, TempProject) {
     )
     .unwrap();
 
-    let project = Project::open(&dir).unwrap();
-    let buffer = Buffer::from_path(project.active_path()).unwrap();
-    let mut app = App::new(buffer, project);
-    app.vim = false;
-    app.smart_typography = false;
-    app.mode = Mode::Insert;
-    app.workflows = Vec::new();
-    app.triggers = Default::default();
+    let app = open_test_app(&dir);
     (app, TempProject::new(dir))
 }
 
@@ -423,9 +414,7 @@ fn tree_rows_are_fast_for_a_series() {
     use std::time::Instant;
 
     let (books, per_book) = (4, 200);
-    let mut dir = std::env::temp_dir();
-    dir.push(format!("quill-tree-perf-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
+    let dir = crate::testutil::scratch_dir("tree", "perf");
     let mut manifest = String::from("title = \"Series\"\n\n");
     for b in 0..books {
         fs::create_dir_all(dir.join(format!("b{b}"))).unwrap();
