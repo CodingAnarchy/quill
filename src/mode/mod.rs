@@ -438,6 +438,7 @@ impl Action {
         Action::Export(ExportFormat::Docx),
         Action::Export(ExportFormat::Scriv),
         Action::Export(ExportFormat::Vellum),
+        Action::Export(ExportFormat::Epub),
         Action::ProgressReport,
         Action::AnalysisReport,
         Action::Ai(AiAction::Ask),
@@ -494,6 +495,7 @@ impl Action {
             Action::Export(ExportFormat::Docx) => "export:docx",
             Action::Export(ExportFormat::Scriv) => "export:scriv",
             Action::Export(ExportFormat::Vellum) => "export:vellum",
+            Action::Export(ExportFormat::Epub) => "export:epub",
             Action::ProgressReport => "report:progress",
             Action::AnalysisReport => "report:analysis",
             Action::Ai(AiAction::Ask) => "ai:ask",
@@ -550,6 +552,7 @@ impl Action {
             Action::Export(ExportFormat::Docx) => "Export → Word (.docx)",
             Action::Export(ExportFormat::Scriv) => "Export → Scrivener",
             Action::Export(ExportFormat::Vellum) => "Export → Vellum (.docx)",
+            Action::Export(ExportFormat::Epub) => "Export → EPUB",
             Action::ProgressReport => "Progress report",
             Action::AnalysisReport => "Analysis report",
             Action::Ai(AiAction::Ask) => "AI · Ask the manuscript",
@@ -682,6 +685,8 @@ pub(crate) enum ExportFormat {
     Scriv,
     /// A Word `.docx` tuned for Vellum import — chapter titles as Heading 1 (#193).
     Vellum,
+    /// An `.epub` ebook — the standard ebook distribution format (#297).
+    Epub,
 }
 
 /// What an export covers (#332): just the active book, or the whole multi-book

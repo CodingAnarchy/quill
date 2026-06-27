@@ -8,6 +8,7 @@
 use crate::frontmatter::Epigraph;
 
 pub mod docx;
+pub mod epub;
 pub mod scriv;
 
 /// A project compiled for export: the book's metadata and its contents as a tree
