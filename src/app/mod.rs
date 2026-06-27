@@ -35,6 +35,7 @@ mod annotations;
 mod assist;
 mod assistant;
 mod editing;
+mod imports;
 mod nav;
 mod models;
 mod bible_review;
