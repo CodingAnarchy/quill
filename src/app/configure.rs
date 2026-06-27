@@ -155,10 +155,10 @@ fn settings_vocab() -> Vec<(String, String)> {
         ),
         ("theme.name".to_string(), "Base color theme — dark or light".to_string()),
     ];
-    for field in theme::COLOR_FIELDS {
+    for &field in theme::COLOR_FIELDS {
         v.push((
             format!("theme.{field}"),
-            format!("Color of {} — an ANSI name, #hex, r,g,b, or 0–255 index", color_role(field)),
+            format!("Color of {} — an ANSI name, #hex, r,g,b, or 0–255 index", theme::color_role(field)),
         ));
     }
     v.push((
@@ -168,26 +168,6 @@ fn settings_vocab() -> Vec<(String, String)> {
             .to_string(),
     ));
     v
-}
-
-/// A short human description of what a theme color field controls, for the vocab.
-fn color_role(field: &str) -> &'static str {
-    match field {
-        "heading" => "headings and accents",
-        "on_accent" => "text on an accent/match background",
-        "dim" => "secondary text and chrome (hints, dividers)",
-        "muted" => "muted prose (epigraphs)",
-        "match_current" => "the current search match background",
-        "match_other" => "other search matches' background",
-        "status_bg" => "the status bar background",
-        "added" => "additions (diff +, gains)",
-        "removed" => "removals (diff -, losses)",
-        "revised" => "the 'revised' chapter status",
-        "mode_insert" => "the Insert-mode indicator",
-        "mode_normal" => "the Normal-mode indicator",
-        "mode_visual" => "the Visual-mode indicator",
-        _ => "a theme element",
-    }
 }
 
 /// Validate a proposed `(key, value)` against the real settings and, on success,

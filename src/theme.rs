@@ -36,39 +36,80 @@ pub fn current() -> Theme {
     CURRENT.with(Cell::get)
 }
 
-/// The editor's color palette — one named [`Color`] per semantic role. Emphasis
-/// (bold / italic) is a text modifier, not a color, so it isn't themed; prose
-/// uses the terminal's default foreground, so it isn't here either.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Theme {
+/// Declare the themable colors once (#434): generate the [`Theme`] struct field,
+/// the `set_field` arm, the `COLOR_FIELDS` override-key list, and the
+/// describe-to-config role blurb from a single `name => "role"` (+ doc) per
+/// color, so adding one is a single line, not four coordinated edits. The
+/// per-theme values live in [`Theme::dark`] / [`Theme::light`], which assign
+/// these fields by name.
+macro_rules! theme_colors {
+    ($($(#[$attr:meta])* $name:ident => $role:literal),+ $(,)?) => {
+        /// The editor's color palette — one named [`Color`] per semantic role.
+        /// Emphasis (bold / italic) is a text modifier, not a color, so it isn't
+        /// themed; prose uses the terminal's default foreground, so it isn't here.
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub struct Theme {
+            $($(#[$attr])* pub $name: Color,)+
+        }
+
+        impl Theme {
+            /// Set the field named `key` (the `[theme]` config key) to `color`;
+            /// returns `false` for an unknown field.
+            fn set_field(&mut self, key: &str, color: Color) -> bool {
+                match key {
+                    $(stringify!($name) => self.$name = color,)+
+                    _ => return false,
+                }
+                true
+            }
+        }
+
+        /// The overridable color-field keys (the `[theme]` keys other than
+        /// `name`), for the describe-to-config vocabulary (#303) and any other
+        /// schema-driven caller.
+        pub(crate) const COLOR_FIELDS: &[&str] = &[$(stringify!($name)),+];
+
+        /// A short human description of what a theme color field controls, for
+        /// the describe-to-config vocabulary (#303). Falls back to a generic
+        /// phrase for an unknown key.
+        pub(crate) fn color_role(field: &str) -> &'static str {
+            match field {
+                $(stringify!($name) => $role,)+
+                _ => "a theme element",
+            }
+        }
+    };
+}
+
+theme_colors! {
     /// Headings, and the accent used for active rows and banner backgrounds.
-    pub heading: Color,
+    heading => "headings and accents",
     /// Foreground for text on an accent / match / mode-chip background.
-    pub on_accent: Color,
+    on_accent => "text on an accent/match background",
     /// Secondary text and chrome: hints, dividers, attributions, diff context.
-    pub dim: Color,
+    dim => "secondary text and chrome (hints, dividers)",
     /// Muted prose set off from the body — epigraph text, placeholders.
-    pub muted: Color,
+    muted => "muted prose (epigraphs)",
     /// Background of the current search match (the bright one).
-    pub match_current: Color,
+    match_current => "the current search match background",
     /// Background of the other (non-current) search matches.
-    pub match_other: Color,
+    match_other => "other search matches' background",
     /// The status bar's background.
-    pub status_bg: Color,
+    status_bg => "the status bar background",
     /// Additions: diff `+`, a positive day's net, the `Final` chapter status.
-    pub added: Color,
+    added => "additions (diff +, gains)",
     /// Removals: diff `-`, a negative day's net.
-    pub removed: Color,
+    removed => "removals (diff -, losses)",
     /// The `Revised` chapter status.
-    pub revised: Color,
+    revised => "the 'revised' chapter status",
     /// The Insert-mode status indicator.
-    pub mode_insert: Color,
+    mode_insert => "the Insert-mode indicator",
     /// The Normal-mode status indicator.
-    pub mode_normal: Color,
+    mode_normal => "the Normal-mode indicator",
     /// The Visual-mode status indicator.
-    pub mode_visual: Color,
+    mode_visual => "the Visual-mode indicator",
     /// Background of an inline author annotation's anchored span (#302).
-    pub annotation: Color,
+    annotation => "an inline author annotation's highlight",
 }
 
 impl Default for Theme {
@@ -159,49 +200,7 @@ impl Theme {
         }
         (theme, warnings)
     }
-
-    /// Set the field named `key` (the `[theme]` config key) to `color`; returns
-    /// `false` for an unknown field.
-    fn set_field(&mut self, key: &str, color: Color) -> bool {
-        match key {
-            "heading" => self.heading = color,
-            "on_accent" => self.on_accent = color,
-            "dim" => self.dim = color,
-            "muted" => self.muted = color,
-            "match_current" => self.match_current = color,
-            "match_other" => self.match_other = color,
-            "status_bg" => self.status_bg = color,
-            "added" => self.added = color,
-            "removed" => self.removed = color,
-            "revised" => self.revised = color,
-            "mode_insert" => self.mode_insert = color,
-            "mode_normal" => self.mode_normal = color,
-            "mode_visual" => self.mode_visual = color,
-            "annotation" => self.annotation = color,
-            _ => return false,
-        }
-        true
-    }
 }
-
-/// The overridable color-field keys (the `[theme]` keys other than `name`), for
-/// the describe-to-config vocabulary (#303) and any other schema-driven caller.
-pub(crate) const COLOR_FIELDS: [&str; 14] = [
-    "heading",
-    "on_accent",
-    "dim",
-    "muted",
-    "match_current",
-    "match_other",
-    "status_bg",
-    "added",
-    "removed",
-    "revised",
-    "mode_insert",
-    "mode_normal",
-    "mode_visual",
-    "annotation",
-];
 
 /// Whether `s` parses as a color value (for validating a proposed override).
 pub(crate) fn is_color(s: &str) -> bool {
@@ -301,10 +300,11 @@ mod tests {
 
     #[test]
     fn every_color_field_is_settable() {
-        // COLOR_FIELDS (the override vocabulary) must stay in lockstep with the
-        // fields `set_field` actually accepts.
+        // COLOR_FIELDS (the override vocabulary) and the fields `set_field`
+        // accepts are now both generated from the one `theme_colors!` list, so
+        // they can't drift; this still exercises that every key is settable.
         let mut t = Theme::dark();
-        for field in COLOR_FIELDS {
+        for &field in COLOR_FIELDS {
             assert!(t.set_field(field, Color::Red), "{field} should be a settable color field");
         }
     }
