@@ -191,6 +191,24 @@ impl App {
         self.spawn_outcome(message, move |backend| run(backend, manuscript, model));
     }
 
+    /// Spawn a manuscript analysis pass (#425): `build` makes the request from the
+    /// manuscript text + model, `parse` turns the completed response into the
+    /// pass's typed result, and `wrap` is the matching [`Outcome`] variant. This
+    /// is the `complete`-then-`parse`-then-wrap plumbing every analysis pass
+    /// shared by hand — most call it with the module's `build_request`/`parse`
+    /// functions and the variant directly, one declarative line.
+    pub(super) fn spawn_manuscript_pass<T>(
+        &mut self,
+        message: &str,
+        build: impl FnOnce(String, &str) -> ai::Request + Send + 'static,
+        parse: impl FnOnce(&str) -> Result<T, ai::AiError> + Send + 'static,
+        wrap: impl FnOnce(Result<T, ai::AiError>) -> Outcome + Send + 'static,
+    ) {
+        self.spawn_ai(message, move |backend, manuscript, model| {
+            wrap(backend.complete(&build(manuscript, &model)).and_then(|r| parse(&r.text)))
+        });
+    }
+
     /// The shared worker-spawn lifecycle for an AI request: bail if one's already
     /// in flight, resolve the backend (gating readiness on the UI thread; the
     /// heavy build happens off-thread), then run `produce` to an `Outcome`.
