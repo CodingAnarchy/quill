@@ -107,6 +107,10 @@ impl App {
             // Sprint controls reflect whether one is running (#299).
             Action::StartSprint if self.sprint.is_some() => Some("a sprint is already running".into()),
             Action::StopSprint if self.sprint.is_none() => Some("no sprint is running".into()),
+            // Snippets need a `[snippets]` table to insert from (#411).
+            Action::InsertSnippet if self.snippets.is_empty() => {
+                Some("no snippets defined — add a [snippets] table to your config".into())
+            }
             _ => None,
         }
     }
@@ -185,7 +189,47 @@ impl App {
             Action::SwitchBackend => self.toggle_ai_backend(),
             Action::ManageModels => self.open_model_manager(),
             Action::Assistant => self.open_assistant(),
+            Action::InsertSnippet => self.open_snippet_picker(),
         }
+    }
+
+    /// Open the snippet picker (#411): a palette listing each author-defined
+    /// snippet by name (with a preview of its text), inserted on Enter. The
+    /// run-action menu gates on [`action_status`](App::action_status) when none
+    /// are defined, so this normally has at least one entry.
+    pub(crate) fn open_snippet_picker(&mut self) {
+        if self.snippets.is_empty() {
+            self.message = Some("No snippets defined — add a [snippets] table to your config.".into());
+            return;
+        }
+        let items = self
+            .snippets
+            .iter()
+            .enumerate()
+            .map(|(i, s)| PaletteItem {
+                label: s.name.clone(),
+                desc: snippet_preview(&s.text),
+                command: Command::InsertSnippet(i),
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette { title: "Insert snippet", items, selected: 0 }));
+    }
+
+    /// Insert the author-defined snippet's literal text at the cursor (#411),
+    /// through the normal edit path (so it works in both the single-chapter and
+    /// continuous views) as one undo group — a single Ctrl-Z removes it in the
+    /// single-chapter view. No transformation: smart typography is bypassed, the
+    /// text lands exactly as configured.
+    pub(crate) fn insert_snippet(&mut self, index: usize) {
+        let Some(snippet) = self.snippets.get(index).cloned() else {
+            return;
+        };
+        self.edit_buffer_mut().seal_undo_group();
+        for c in snippet.text.chars() {
+            self.edit_insert_raw(c);
+        }
+        self.edit_buffer_mut().seal_undo_group();
+        self.message = Some(format!("Inserted snippet '{}'", snippet.name));
     }
 
     pub(crate) fn on_key_palette(&mut self, key: KeyEvent) {
@@ -212,6 +256,7 @@ impl App {
                     Some(Command::NewWorkflowFromPrompt) => self.start_describe_workflow(),
                     Some(Command::Portrait(c)) => self.confirm_portraits(c),
                     Some(Command::SwitchBook(i)) => self.switch_book(i),
+                    Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
                     None => {}
                 }
             }
@@ -353,6 +398,17 @@ impl App {
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::Editorial => self.analyze_editorial(),
         }
+    }
+}
+
+/// A one-line preview of a snippet's text for the picker (#411): newlines shown
+/// as `⏎`, truncated with an ellipsis so a long expansion stays on one row.
+fn snippet_preview(text: &str) -> String {
+    let one_line = text.replace('\n', "⏎");
+    if one_line.chars().count() > 40 {
+        format!("{}…", one_line.chars().take(40).collect::<String>())
+    } else {
+        one_line
     }
 }
 

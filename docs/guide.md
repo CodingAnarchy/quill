@@ -162,6 +162,11 @@ Ctrl-X runs a workflow: a named sequence of actions you define in config.toml,
 so a single command can, say, save, refresh the character bible, flag
 continuity, and export. Workflows can also fire on save or from a Vim key.
 
+Snippets are fixed text you insert often — a scene break, a tricky name —
+defined once in a [snippets] table in config.toml (name = "literal text"). Run
+"Insert snippet" from the Ctrl-K menu to pick one by name; its text drops in at
+the cursor verbatim, as a single undo.
+
 
 KEY REFERENCE
 

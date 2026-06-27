@@ -249,6 +249,9 @@ pub struct App {
     /// Workflow triggers (#228) from the `[triggers]` config — on-save and bound
     /// Vim Normal-mode keys, validated against `workflows` at startup.
     triggers: crate::workflow::Triggers,
+    /// Author-defined text snippets (#411) from the `[snippets]` config, sorted by
+    /// name. Inserted verbatim from the snippet picker; empty when none are set.
+    snippets: Vec<crate::config::Snippet>,
     /// The steps of an AI-proposed workflow (#232) awaiting the author's
     /// name-confirm prompt; taken when they save it, cleared when they cancel.
     pending_workflow: Option<Vec<String>>,
@@ -312,6 +315,7 @@ impl App {
         theme::set_current(theme);
         let loaded = crate::workflow::load();
         let trigger_errors = loaded.errors;
+        let (snippets, snippet_errors) = crate::config::load_snippets();
         // Load the active chapter's annotations (#302) so they mark immediately,
         // before the first idle tick.
         let active_file = project.active_file().to_string();
@@ -373,6 +377,7 @@ impl App {
             pending_pass: None,
             workflows: loaded.workflows,
             triggers: loaded.triggers,
+            snippets,
             pending_workflow: None,
             pending_config: None,
             workflow_run: None,
@@ -402,6 +407,9 @@ impl App {
         }
         if !theme_warnings.is_empty() {
             warnings.push(theme_warnings.join("; "));
+        }
+        if !snippet_errors.is_empty() {
+            warnings.push(format!("Snippets ignored: {}", snippet_errors.join("; ")));
         }
         if !warnings.is_empty() {
             app.message = Some(warnings.join(" · "));

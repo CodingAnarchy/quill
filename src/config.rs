@@ -222,6 +222,51 @@ pub fn load_theme() -> (Theme, Vec<String>) {
     Theme::from_config(name.as_deref(), &table)
 }
 
+/// An author-defined text snippet (#411): a `name` and the literal `text` it
+/// expands to. Configured in the `[snippets]` table and inserted verbatim from
+/// the snippet picker — no transformation, no templating.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Snippet {
+    pub name: String,
+    pub text: String,
+}
+
+/// Load the `[snippets]` section (#411): a table mapping each snippet's name to
+/// its literal expansion (a string). Returns the snippets, sorted by name for a
+/// stable menu, plus a warning for any non-string entry (reported and skipped,
+/// like the other config sections). A missing or empty table yields nothing.
+pub fn load_snippets() -> (Vec<Snippet>, Vec<String>) {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct File {
+        // Untyped values so a malformed entry (e.g. an array) is a reported,
+        // skipped warning rather than failing the whole section's parse.
+        snippets: HashMap<String, toml::Value>,
+    }
+    let table = config_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| toml::from_str::<File>(&t).ok())
+        .map(|f| f.snippets)
+        .unwrap_or_default();
+    snippets_from_table(table)
+}
+
+/// Turn a parsed `[snippets]` table into sorted snippets plus a warning per
+/// non-string entry. Separate from [`load_snippets`] so the rule is testable
+/// without a config file on disk (like `validate_triggers` for workflows).
+fn snippets_from_table(table: HashMap<String, toml::Value>) -> (Vec<Snippet>, Vec<String>) {
+    let mut snippets = Vec::new();
+    let mut errors = Vec::new();
+    for (name, value) in table {
+        match value.as_str() {
+            Some(text) => snippets.push(Snippet { name, text: text.to_string() }),
+            None => errors.push(format!("snippet '{name}' must be a string")),
+        }
+    }
+    snippets.sort_by(|a, b| a.name.cmp(&b.name));
+    (snippets, errors)
+}
+
 /// The `[projects]` section (#272): where the project browser looks for books
 /// beyond the recently-opened list.
 #[derive(Clone, Deserialize, Default)]
@@ -284,6 +329,30 @@ mod tests {
 
     fn steps(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| (*x).to_string()).collect()
+    }
+
+    #[test]
+    fn snippets_parse_sorts_strings_and_reports_non_strings() {
+        let table = toml::from_str("zeta = \"the end\"\nalpha = \"* * *\"\nbad = 42\n").unwrap();
+        let (snippets, errors) = snippets_from_table(table);
+        // Kept entries are the string values, sorted by name for a stable menu.
+        assert_eq!(
+            snippets,
+            vec![
+                Snippet { name: "alpha".into(), text: "* * *".into() },
+                Snippet { name: "zeta".into(), text: "the end".into() },
+            ],
+        );
+        // The non-string entry is reported (and skipped), not a parse failure.
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("bad"), "{errors:?}");
+    }
+
+    #[test]
+    fn an_empty_snippets_table_yields_nothing() {
+        let (snippets, errors) = snippets_from_table(HashMap::new());
+        assert!(snippets.is_empty());
+        assert!(errors.is_empty());
     }
 
     #[test]

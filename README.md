@@ -199,6 +199,23 @@ keystrokes that stay out of the way.
   it couldn't map, and shows the proposal for you to name and confirm — nothing is
   written to `config.toml` until you do, and the rest of your config is left as-is.
 
+- **Snippets** — fixed text you type often (a scene break, a tricky proper
+  name, a stock phrase) defined once in `config.toml` and inserted verbatim:
+
+  ```toml
+  [snippets]
+  scene = "* * *"
+  heroine = "Aelindra Voss"
+  ```
+
+  Each entry maps a name to its literal expansion. Insert one from **Ctrl-K →
+  Insert snippet…**, which opens a picker of your snippets by name; Enter drops
+  the exact text at the cursor (no transformation — smart typography is bypassed)
+  as a single undo. It works in both the chapter and continuous views. This is
+  pure mechanical convenience: the author defines the text, Quill only inserts
+  it. An empty or absent `[snippets]` table changes nothing; a non-string entry
+  is reported at startup and skipped, like the rest of the config.
+
 - **Configure by description** — the same idea for *settings*: in the `Ctrl-K`
   command palette, run **Configure by description** and say what you want — "turn
   on Vim mode," "narrow the text column," "give me a warm dark theme," or "add
