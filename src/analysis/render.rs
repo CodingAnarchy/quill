@@ -105,12 +105,68 @@ pub fn lines(report: &Report) -> Vec<Line<'static>> {
     out
 }
 
+/// The width the chapter-name column truncates to / pads to, shared by every
+/// analysis table so each section's rows and its `Chapter` header line up on the
+/// same left edge. The name is truncated to `NAME_MAX` then left-padded to `NAME_W`.
+const NAME_MAX: usize = 24;
+const NAME_W: usize = 26;
+
+/// The left-aligned first cell of any analysis row: a chapter (or "Whole
+/// manuscript") name, truncated and padded to the shared name-column width. Used
+/// by every table row and the matching `Chapter` header, so the first column's
+/// width lives in exactly one place.
+fn name_cell(name: &str) -> String {
+    format!("{:<w$}", truncate(name, NAME_MAX), w = NAME_W)
+}
+
+/// One numeric column of an analysis table: its header label and width. The same
+/// `Col` drives both the header cell and the data cell (see [`header`] /
+/// [`data_row`]), so the two can't drift out of alignment when a width changes (#438).
+struct Col {
+    label: &'static str,
+    width: usize,
+}
+
+const fn col(label: &'static str, width: usize) -> Col {
+    Col { label, width }
+}
+
+/// A section's header line: the `Chapter` name column followed by each numeric
+/// column's label, right-aligned to that column's width.
+fn header(cols: &[Col]) -> Line<'static> {
+    let mut s = name_cell("Chapter");
+    for c in cols {
+        s.push_str(&format!("{:>w$}", c.label, w = c.width));
+    }
+    dim(s)
+}
+
+/// A data row: the name column followed by the pre-formatted `cells`, each
+/// right-aligned to the matching column's width. `cells` lines up with `cols`.
+fn data_row(name: &str, cols: &[Col], cells: &[String]) -> String {
+    let mut s = name_cell(name);
+    for (c, cell) in cols.iter().zip(cells) {
+        s.push_str(&format!("{:>w$}", cell, w = c.width));
+    }
+    s
+}
+
+// Each section's columns — label + width — defined once and shared by the
+// section's `header` and its row helper (via `data_row`), in report order.
+const READABILITY_COLS: &[Col] = &[col("Ease", 9), col("F–K", 8), col("Fog", 8), col("SMOG", 8)];
+const SENTENCE_COLS: &[Col] =
+    &[col("Sent", 6), col("Mean", 7), col("Med", 7), col("Min", 6), col("Max", 6), col("Run-ons", 9)];
+// `Dialogue%` is width 9 (its 9-char label and the data column share one width); the
+// header previously padded the label to 10, leaving it one column right of the data
+// it titled (#438).
+const DIALOGUE_COLS: &[Col] =
+    &[col("Dialogue%", 9), col("Para~", 9), col("Median", 8), col("Longest", 9)];
+const STYLE_COLS: &[Col] = &[col("-ly%", 7), col("Filter", 8), col("to-be%", 7), col("Passive", 9)];
+const VOCAB_COLS: &[Col] = &[col("Variety", 9), col("Words", 8)];
+
 /// The readability table: one row per chapter plus a whole-manuscript total.
 fn readability_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
-    let mut out = vec![
-        dim("Readability"),
-        dim(format!("{:<26}{:>9}{:>8}{:>8}{:>8}", "Chapter", "Ease", "F–K", "Fog", "SMOG")),
-    ];
+    let mut out = vec![dim("Readability"), header(READABILITY_COLS)];
     let mut total = Stats::default();
     for c in chapters {
         total.add(c.stats);
@@ -130,10 +186,7 @@ fn sentence_section(
 ) -> Vec<Line<'static>> {
     let mut out = vec![
         dim(format!("Sentence length (words) · run-on threshold {threshold}")),
-        dim(format!(
-            "{:<26}{:>6}{:>7}{:>7}{:>6}{:>6}{:>9}",
-            "Chapter", "Sent", "Mean", "Med", "Min", "Max", "Run-ons"
-        )),
+        header(SENTENCE_COLS),
     ];
     let mut all = Vec::new();
     for c in chapters {
@@ -209,13 +262,7 @@ fn length_bar_row(title: &str, words: usize, peak: usize, stats: &LengthStats, i
 /// The dialogue / paragraph section: per-chapter (and overall) dialogue share and
 /// paragraph-length rhythm (mean / median / longest, in words).
 fn dialogue_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
-    let mut out = vec![
-        dim("Dialogue & paragraphs"),
-        dim(format!(
-            "{:<26}{:>10}{:>9}{:>8}{:>9}",
-            "Chapter", "Dialogue%", "Para~", "Median", "Longest"
-        )),
-    ];
+    let mut out = vec![dim("Dialogue & paragraphs"), header(DIALOGUE_COLS)];
     let mut total_dialogue = Dialogue::default();
     let mut all_paragraphs = Vec::new();
     for c in chapters {
@@ -231,13 +278,15 @@ fn dialogue_section(chapters: &[ChapterAnalysis]) -> Vec<Line<'static>> {
 /// longest for the span.
 fn dialogue_text(name: &str, dialogue: Dialogue, paragraphs: &[usize]) -> String {
     let p = spread(paragraphs);
-    format!(
-        "{:<26}{:>9.1}{:>9.0}{:>8.0}{:>9}",
-        truncate(name, 24),
-        dialogue.dialogue_pct(),
-        p.mean,
-        p.median,
-        p.max, // longest paragraph
+    data_row(
+        name,
+        DIALOGUE_COLS,
+        &[
+            format!("{:.1}", dialogue.dialogue_pct()),
+            format!("{:.0}", p.mean),
+            format!("{:.0}", p.median),
+            p.max.to_string(), // longest paragraph
+        ],
     )
 }
 
@@ -245,10 +294,7 @@ fn dialogue_text(name: &str, dialogue: Dialogue, paragraphs: &[usize]) -> String
 /// filter-word, weak-verb, and passive density, plus the manuscript's most
 /// repeated phrases. Descriptive only — counts, never edits.
 fn style_section(chapters: &[ChapterAnalysis], top_phrases: &[(String, usize)]) -> Vec<Line<'static>> {
-    let mut out = vec![
-        dim("Style flags (frequency)"),
-        dim(format!("{:<26}{:>7}{:>8}{:>7}{:>9}", "Chapter", "-ly%", "Filter", "to-be%", "Passive")),
-    ];
+    let mut out = vec![dim("Style flags (frequency)"), header(STYLE_COLS)];
     let mut total = StyleFlags::default();
     for c in chapters {
         total.add(c.style);
@@ -268,10 +314,7 @@ fn vocabulary_section(
     top_words: &[(String, usize)],
     overall_variety: f64,
 ) -> Vec<Line<'static>> {
-    let mut out = vec![
-        dim("Vocabulary"),
-        dim(format!("{:<26}{:>9}{:>8}", "Chapter", "Variety", "Words")),
-    ];
+    let mut out = vec![dim("Vocabulary"), header(VOCAB_COLS)];
     let mut words = 0usize;
     for c in chapters {
         words += c.stats.words;
@@ -285,7 +328,7 @@ fn vocabulary_section(
 /// One vocabulary row: lexical variety scaled to 0–100 (unique words per 100-word
 /// window) and the word count it was measured over.
 fn vocab_text(name: &str, variety: f64, words: usize) -> String {
-    format!("{:<26}{:>9.1}{:>8}", truncate(name, 24), variety * 100.0, words)
+    data_row(name, VOCAB_COLS, &[format!("{:.1}", variety * 100.0), words.to_string()])
 }
 
 /// A titled `count×  item` list (one per line, so long lists scroll rather than
@@ -303,13 +346,15 @@ fn count_list(title: &str, items: &[(String, usize)]) -> Vec<Line<'static>> {
 /// One style-flags row: densities as a percent of the chapter's words.
 fn style_text(name: &str, f: &StyleFlags) -> String {
     let pct = |n: usize| if f.words == 0 { 0.0 } else { n as f64 * 100.0 / f.words as f64 };
-    format!(
-        "{:<26}{:>7.1}{:>8}{:>7.1}{:>9}",
-        truncate(name, 24),
-        pct(f.adverbs_ly),
-        f.filter_words,
-        pct(f.weak_verbs),
-        f.passive,
+    data_row(
+        name,
+        STYLE_COLS,
+        &[
+            format!("{:.1}", pct(f.adverbs_ly)),
+            f.filter_words.to_string(),
+            format!("{:.1}", pct(f.weak_verbs)),
+            f.passive.to_string(),
+        ],
     )
 }
 
@@ -333,19 +378,31 @@ fn bar(value: usize, peak: usize) -> String {
 
 /// One readability row: a (truncated) name and the four scores to one decimal.
 fn score_text(name: &str, r: Readability) -> String {
-    let name = truncate(name, 24);
-    format!(
-        "{name:<26}{:>9.1}{:>8.1}{:>8.1}{:>8.1}",
-        r.flesch_reading_ease, r.flesch_kincaid_grade, r.gunning_fog, r.smog
+    data_row(
+        name,
+        READABILITY_COLS,
+        &[
+            format!("{:.1}", r.flesch_reading_ease),
+            format!("{:.1}", r.flesch_kincaid_grade),
+            format!("{:.1}", r.gunning_fog),
+            format!("{:.1}", r.smog),
+        ],
     )
 }
 
 /// One sentence-length row: a (truncated) name and the length statistics.
 fn sentence_text(name: &str, s: &SentenceStats) -> String {
-    let name = truncate(name, 24);
-    format!(
-        "{name:<26}{:>6}{:>7.1}{:>7.1}{:>6}{:>6}{:>9}",
-        s.count, s.mean, s.median, s.min, s.max, s.run_ons
+    data_row(
+        name,
+        SENTENCE_COLS,
+        &[
+            s.count.to_string(),
+            format!("{:.1}", s.mean),
+            format!("{:.1}", s.median),
+            s.min.to_string(),
+            s.max.to_string(),
+            s.run_ons.to_string(),
+        ],
     )
 }
 
@@ -477,3 +534,4 @@ mod tests {
         assert!(t.ends_with('…'));
     }
 }
+
