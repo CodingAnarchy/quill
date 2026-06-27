@@ -465,22 +465,23 @@ impl App {
         });
     }
 
-    /// Choose the backend for a request from settings (after the readiness gate).
-    /// Cheap — the heavy local-model load is deferred to [`BackendSpec::build`] on
-    /// the worker thread.
-    pub(super) fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
-        // The hybrid router (#372) may have picked a backend for this one request;
-        // otherwise fall back to the session backend. Both one-shots are consumed
-        // every call so a choice never leaks into a later request.
-        let chosen = self.routed_backend.take().unwrap_or_else(|| self.ai.backend());
-        let model = self.routed_model.take();
+    /// Resolve the `chosen` backend into a [`BackendSpec`] after the readiness
+    /// gate (#433): check `ready_for`, fail fast when local isn't compiled in,
+    /// then build it — Claude with the resolved key, or local with `model`. Cheap;
+    /// the heavy local-model load is deferred to [`BackendSpec::build`] on the
+    /// worker thread. The one shared resolution body, behind [`backend_spec`] and
+    /// [`assistant_backend`].
+    fn build_spec(
+        &self,
+        chosen: ai::BackendKind,
+        model: Option<&'static ai::model_select::Model>,
+    ) -> Result<BackendSpec, ai::AiError> {
         self.ai.ready_for(chosen)?;
-        // Fail fast on the UI thread when local wasn't compiled in, before we
-        // record it as in-flight or spawn a worker just to error.
+        // Fail fast on the UI thread when local wasn't compiled in, rather than
+        // spawning a worker just to error.
         if chosen == ai::BackendKind::Local && cfg!(not(feature = "local")) {
             return Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()));
         }
-        self.ai_in_flight.set(Some(chosen)); // the status bar shows where it runs
         Ok(match chosen {
             ai::BackendKind::Claude => {
                 // ready_for already guaranteed a key for Claude; resolve it
@@ -491,31 +492,30 @@ impl App {
                     .ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
                 BackendSpec::Claude(key.to_string())
             }
-            // The router (#377) may have picked a specific model for this pass.
             ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone(), model),
         })
     }
 
+    /// Choose the backend for a request from settings (after the readiness gate).
+    /// The hybrid router (#372/#377) may have picked the backend and model for this
+    /// one request; otherwise the session backend with no per-pass model. Both
+    /// one-shots are consumed every call so a choice never leaks into a later
+    /// request, and the in-flight indicator is set once a spec resolves.
+    pub(super) fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
+        let chosen = self.routed_backend.take().unwrap_or_else(|| self.ai.backend());
+        let model = self.routed_model.take();
+        let spec = self.build_spec(chosen, model)?;
+        self.ai_in_flight.set(Some(chosen)); // the status bar shows where it runs
+        Ok(spec)
+    }
+
     /// The backend the assistant pane runs its tool-use turns on (#310): the
-    /// session backend (an `offline` pin forces local). Unlike [`backend_spec`],
-    /// it doesn't touch the pass status indicator or consume the per-pass routing
-    /// one-shots — the assistant has its own task and shows its own "thinking"
-    /// state, separate from `ai_task`.
+    /// session backend (an `offline` pin forces local), the hardware-recommended /
+    /// configured model (no per-turn size routing). Unlike [`backend_spec`], it
+    /// doesn't touch the pass status indicator or consume the per-pass routing
+    /// one-shots — the assistant has its own task and "thinking" state.
     pub(super) fn assistant_backend(&self) -> Result<BackendSpec, ai::AiError> {
-        let chosen = self.ai.backend();
-        self.ai.ready_for(chosen)?;
-        if chosen == ai::BackendKind::Local && cfg!(not(feature = "local")) {
-            return Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()));
-        }
-        Ok(match chosen {
-            ai::BackendKind::Claude => {
-                let key = self.ai.resolved_key().ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
-                BackendSpec::Claude(key.to_string())
-            }
-            // The assistant uses the hardware-recommended / configured model (no
-            // per-turn size routing); extended context (#378) is the author's choice.
-            ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone(), None),
-        })
+        self.build_spec(self.ai.backend(), None)
     }
 
     /// A label for the backend a running AI request is using (#372) — `Claude` or
