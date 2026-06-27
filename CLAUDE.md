@@ -57,6 +57,11 @@ it never licenses editing the surrounding prose.
 
 ## Code conventions
 
+- **Formatting is `rustfmt`'s** (#459). Run `cargo fmt` before committing and
+  keep `cargo fmt --check` clean; don't hand-format against the tool or
+  reintroduce the old compact style. The one-time tree-wide reformat is listed
+  in `.git-blame-ignore-revs` — run `git config blame.ignoreRevsFile
+  .git-blame-ignore-revs` once so `git blame` skips it.
 - **`use` imports go at the top of the module**, after the module doc comment —
   not inside functions or partway down the file. Test modules follow the same
   rule: put the test `use`s at the top of the `#[cfg(test)] mod tests` block,
@@ -77,9 +82,13 @@ it never licenses editing the surrounding prose.
 Run these before opening a PR:
 
 ```sh
+cargo fmt --check     # formatting must match rustfmt (run `cargo fmt` to fix)
 cargo test            # unit + render tests (must be green)
 cargo clippy --all-targets   # must be clean
 ```
+
+(No CI runs yet; when it lands, gate PRs on `cargo fmt --check` so the tree
+stays formatted.)
 
 ## Performance guards (ignored tests)
 
