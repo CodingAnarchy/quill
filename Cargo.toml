@@ -36,8 +36,10 @@ tokenizers = { version = "0.20", optional = true }
 # Hardware detection + direct model download for hardware-aware selection (#85).
 sysinfo = { version = "0.33", optional = true }
 hf-hub = { version = "0.4", optional = true }
-# PNG encoding for the local image backend (#240) — only needed with `local`.
-image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+# Raster decode/encode (#240 local PNG output; #490 PDF image ornaments — the PDF
+# embeds decoded image samples, which needs a codec). A default dep since image
+# ornaments are part of the standard designed-export path.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 spellbook = "0.4.2"
 # Print-ready PDF export (#464) reads glyph metrics (advances, cmap, bbox) from the
 # bundled fonts it embeds. ttf-parser is pure-Rust and dependency-free; it only
@@ -50,7 +52,7 @@ ttf-parser = "0.25"
 proptest = "1"
 
 [features]
-local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub", "dep:image"]
+local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
 
 # On macOS, give candle the Metal backend (GPU). Cargo unions these features into
 # the optional deps above, so `--features local` is CPU elsewhere and Metal here.

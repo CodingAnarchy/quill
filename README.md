@@ -146,11 +146,12 @@ keystrokes that stay out of the way.
 
   With no `[style]`, the output is exactly the plain default. Both designed formats
   read `[style]`; the plain formats (Markdown, Word, Scrivener, Vellum) ignore it.
-  The PDF honors the fonts, scene-break glyph, heading alignment, drop caps, and
-  presets; two things don't carry to PDF yet and are reported as a warning when
-  configured: image ornaments (EPUB only for now) and decorative ornament glyphs
-  outside the standard serif set (e.g. `❦`/`⚜`) — the EPUB shows these, the PDF
-  skips them (a non-renderable scene break falls back to `#`). To see a look before committing to a full export, the export
+  The PDF honors the fonts, scene-break glyph, heading alignment, drop caps,
+  presets, and raster image ornaments (PNG/JPEG/GIF/WebP, transparency included).
+  Two PDF-only gaps are reported as a warning when configured: `.svg` image
+  ornaments (the PDF takes raster only) and decorative ornament glyphs outside the
+  standard serif set (e.g. `❦`/`⚜`) — the EPUB shows these, the PDF skips them (a
+  non-renderable scene break falls back to `#`). To see a look before committing to a full export, the export
   menu (`Ctrl-e`) opens with **Preview style…**, which renders a fixed sample book
   (title page, a chapter opening, a scene break, a part divider) through your
   current `[style]` and opens it in your system EPUB reader — the same output a
