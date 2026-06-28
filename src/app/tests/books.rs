@@ -462,12 +462,12 @@ fn a_standalone_export_menu_lists_the_preview_then_each_format_once() {
     let Mode::Palette(p) = &app.mode else {
         panic!("export palette")
     };
-    // The style preview leads, then the five formats once each (no series/book
+    // The style preview leads, then the six formats once each (no series/book
     // scope duplication for a standalone novel).
-    assert_eq!(p.items.len(), 6);
+    assert_eq!(p.items.len(), 7);
     assert_eq!(p.items[0].label, "Preview style…");
     assert_eq!(p.items[1].label, "Manuscript (Markdown)");
-    assert_eq!(p.items[5].label, "EPUB (.epub)");
+    assert_eq!(p.items[6].label, "PDF (.pdf)");
 }
 
 fn report_text(app: &App) -> String {

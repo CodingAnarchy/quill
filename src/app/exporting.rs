@@ -11,7 +11,7 @@ use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
 
 /// The export formats with their menu label and description.
-const FORMATS: [(ExportFormat, &str, &str); 5] = [
+const FORMATS: [(ExportFormat, &str, &str); 6] = [
     (
         ExportFormat::Markdown,
         "Manuscript (Markdown)",
@@ -36,6 +36,11 @@ const FORMATS: [(ExportFormat, &str, &str); 5] = [
         ExportFormat::Epub,
         "EPUB (.epub)",
         "A finished ebook — Apple Books, Kobo, Kindle",
+    ),
+    (
+        ExportFormat::Pdf,
+        "PDF (.pdf)",
+        "A paginated, ready-to-read or print proof",
     ),
 ];
 
@@ -136,6 +141,7 @@ impl App {
                 );
                 self.note_export_warnings(warnings);
             }
+            ExportFormat::Pdf => self.write_built(export::pdf::to_pdf(doc), name, "pdf"),
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
@@ -266,6 +272,11 @@ impl App {
                 );
                 self.note_export_warnings(warnings);
             }
+            ExportFormat::Pdf => self.write_built(
+                export::pdf::to_pdf_series(docs, series, author.as_deref()),
+                name,
+                "pdf",
+            ),
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))

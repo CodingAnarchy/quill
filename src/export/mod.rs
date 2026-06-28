@@ -11,6 +11,7 @@ use crate::frontmatter::Epigraph;
 
 pub mod docx;
 pub mod epub;
+pub mod pdf;
 pub mod scriv;
 
 /// Opt-in styling for the *designed* exports — EPUB now, PDF when it lands
