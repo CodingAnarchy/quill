@@ -128,18 +128,18 @@ impl FontPlan {
                     "Times-BoldItalic",
                 ];
                 for (i, base) in BASES.iter().enumerate() {
-                    let id = take(next);
+                    let id = super::take(next);
                     out.insert(id, format!("<< /Type /Font /Subtype /Type1 /BaseFont /{base} /Encoding /WinAnsiEncoding >>").into_bytes());
                     ids[i] = id;
                 }
             }
             FontPlan::Embedded(faces) => {
                 for (i, face) in faces.iter().enumerate() {
-                    let file = take(next);
+                    let file = super::take(next);
                     out.insert(file, font_file_stream(&face.program));
-                    let desc = take(next);
+                    let desc = super::take(next);
                     out.insert(desc, face.descriptor(file).into_bytes());
-                    let dict = take(next);
+                    let dict = super::take(next);
                     out.insert(dict, face.font_dict(desc).into_bytes());
                     ids[i] = dict;
                 }
@@ -264,12 +264,6 @@ fn font_file_stream(program: &[u8]) -> Vec<u8> {
     v.extend_from_slice(program);
     v.extend_from_slice(b"\nendstream");
     v
-}
-
-fn take(next: &mut u32) -> u32 {
-    let id = *next;
-    *next += 1;
-    id
 }
 
 fn trim_float(x: f32) -> String {

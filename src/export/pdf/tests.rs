@@ -389,18 +389,78 @@ fn pdf_style_warnings_flag_images_and_unrenderable_glyphs() {
             .any(|w| w.contains("font set")),
         "glyph reported"
     );
-    // A configured image ornament is reported as deferred.
-    let mut imaged = ExportStyle {
+    // An SVG image ornament can't be rasterized for PDF and is reported.
+    let mut svg = ExportStyle {
+        scene_break_image: Some("art/break.svg".into()),
+        ..Default::default()
+    };
+    svg.resolve_images(|_| Ok(b"<svg/>".to_vec()));
+    assert!(
+        pdf_style_warnings(&svg).iter().any(|w| w.contains("SVG")),
+        "SVG image ornament reported as unsupported"
+    );
+    // A raster (PNG) ornament is supported → no warning.
+    let mut png = ExportStyle {
         scene_break_image: Some("art/break.png".into()),
         ..Default::default()
     };
-    imaged.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+    png.resolve_images(|_| Ok(png_bytes(2, 2, 255)));
     assert!(
-        pdf_style_warnings(&imaged)
-            .iter()
-            .any(|w| w.contains("image ornaments")),
-        "image ornaments reported as not-yet-applied"
+        pdf_style_warnings(&png).is_empty(),
+        "a PNG ornament is embeddable, no warning: {:?}",
+        pdf_style_warnings(&png)
     );
+}
+
+/// Encode a tiny `w`×`h` solid-red PNG with the given alpha (255 = opaque) — a real
+/// raster the PDF writer can decode and embed.
+fn png_bytes(w: u32, h: u32, alpha: u8) -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 0, 0, alpha]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+#[test]
+fn image_ornaments_embed_as_xobjects_and_are_placed() {
+    let mut style = ExportStyle {
+        scene_break_image: Some("art/break.png".into()),
+        chapter_heading_image: Some("art/head.png".into()),
+        title_image: Some("art/title.png".into()),
+        ..Default::default()
+    };
+    // Opaque images → no soft mask; transparent ones add an /SMask.
+    style.resolve_images(|p| Ok(png_bytes(4, 4, if p.contains("break") { 128 } else { 255 })));
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    let s = text(&bytes);
+    // Three image XObjects, registered for the pages and drawn in the content.
+    assert_eq!(count(&s, "/Subtype /Image"), 4, "3 images + 1 soft mask");
+    assert_eq!(
+        count(&s, "/SMask"),
+        1,
+        "only the transparent scene break gets a mask"
+    );
+    assert!(s.contains("/XObject <<"), "images registered in resources");
+    for name in ["/ImSceneBreak Do", "/ImChapterHeading Do", "/ImTitle Do"] {
+        assert!(s.contains(name), "{name} drawn in the content stream");
+    }
+    // The scene-break image replaces the glyph — no `#` divider remains.
+    assert!(
+        !shown(&bytes).contains('#'),
+        "scene glyph replaced by the image"
+    );
+}
+
+#[test]
+fn no_image_ornaments_means_no_xobjects() {
+    let s = text(&to_pdf(&doc(), &ExportStyle::default()).unwrap());
+    assert!(
+        !s.contains("/Subtype /Image"),
+        "no images embedded by default"
+    );
+    assert!(!s.contains("/XObject"), "no XObject resource dict");
 }
 
 #[test]

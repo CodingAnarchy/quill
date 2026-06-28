@@ -65,25 +65,29 @@ fn renderable(glyph: &str) -> bool {
     glyph.chars().all(|c| font::winansi(c).is_some())
 }
 
-/// Warnings for `[style]` settings the PDF writers can't honor (#489), to surface
-/// alongside the export: image ornaments aren't embedded yet (#490), and decorative
-/// glyphs outside the serif fonts' WinAnsi set (e.g. `❦`/`⚜`) can't render — the
-/// scene break falls back to `#` and ornaments are skipped.
+/// Warnings for `[style]` settings the PDF writers can't honor (#489/#490), to
+/// surface alongside the export: SVG image ornaments can't be embedded (PDF takes
+/// raster only), and decorative glyphs outside the serif fonts' WinAnsi set (e.g.
+/// `❦`/`⚜`) can't render — the scene break falls back to `#` and ornaments skip.
 pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
     let mut warnings = Vec::new();
-    let images: Vec<&str> = [
+    let svgs: Vec<&str> = [
         (ImageRole::SceneBreak, "scene break"),
         (ImageRole::ChapterHeading, "chapter heading"),
         (ImageRole::Title, "title"),
     ]
     .into_iter()
-    .filter(|(role, _)| style.image(*role).is_some())
+    .filter(|(role, _)| {
+        style
+            .image(*role)
+            .is_some_and(|i| i.media_type == "image/svg+xml")
+    })
     .map(|(_, label)| label)
     .collect();
-    if !images.is_empty() {
+    if !svgs.is_empty() {
         warnings.push(format!(
-            "style: image ornaments ({}) aren't applied to PDF yet — see #490",
-            images.join(", ")
+            "style: SVG image ornaments ({}) can't render in PDF (raster only)",
+            svgs.join(", ")
         ));
     }
     let glyphs: Vec<&str> = [
@@ -163,7 +167,7 @@ pub fn to_pdf_series_print(
 
 /// Lay out one standalone book onto a fresh `Pdf` with `layout` and serialize it.
 fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
-    let mut pdf = Pdf::new(layout, StyleBits::from_style(style));
+    let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
     pdf.title_page(
         doc.series.as_deref(),
@@ -185,7 +189,7 @@ fn render_series(
     style: &ExportStyle,
     layout: Layout,
 ) -> Vec<u8> {
-    let mut pdf = Pdf::new(layout, StyleBits::from_style(style));
+    let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     let title = series.unwrap_or("Series");
     pdf.set_heads(title, author.unwrap_or(title));
     pdf.title_page(None, title, None, author, None);
@@ -353,6 +357,57 @@ impl OutlineItem {
     }
 }
 
+/// A decoded `[style]` image ornament (#490), ready to embed as a PDF image
+/// XObject: the role it fills, a resource name, pixel dimensions, the RGB samples,
+/// and the alpha channel when the source had transparency (→ a soft mask).
+struct PdfImage {
+    role: ImageRole,
+    name: String,
+    width: u32,
+    height: u32,
+    rgb: Vec<u8>,
+    alpha: Option<Vec<u8>>,
+}
+
+/// Decode the configured image ornaments to RGB(+alpha) samples for embedding.
+/// Anything the raster codec can't read (SVG, a corrupt file) is skipped — those
+/// are reported by [`pdf_style_warnings`].
+fn decode_images(style: &ExportStyle) -> Vec<PdfImage> {
+    let mut images = Vec::new();
+    let roles = [
+        (ImageRole::SceneBreak, "ImSceneBreak"),
+        (ImageRole::ChapterHeading, "ImChapterHeading"),
+        (ImageRole::Title, "ImTitle"),
+    ];
+    for (role, name) in roles {
+        let Some(embedded) = style.image(role) else {
+            continue;
+        };
+        let Ok(decoded) = image::load_from_memory(&embedded.bytes) else {
+            continue;
+        };
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+        let mut alpha = Vec::with_capacity((width * height) as usize);
+        let mut has_alpha = false;
+        for px in rgba.pixels() {
+            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
+            alpha.push(px[3]);
+            has_alpha |= px[3] != 255;
+        }
+        images.push(PdfImage {
+            role,
+            name: name.to_string(),
+            width,
+            height,
+            rgb,
+            alpha: has_alpha.then_some(alpha),
+        });
+    }
+    images
+}
+
 /// What a page is, for decoration: a section opener and blank pages get no running
 /// head; blank pages (inserted for recto starts) get no folio either.
 struct PageMeta {
@@ -395,6 +450,7 @@ impl StyleBits {
 struct Pdf {
     layout: Layout,
     bits: StyleBits,
+    images: Vec<PdfImage>,
     pages: Vec<String>,
     meta: Vec<PageMeta>,
     y: f32,
@@ -404,10 +460,11 @@ struct Pdf {
 }
 
 impl Pdf {
-    fn new(layout: Layout, bits: StyleBits) -> Self {
+    fn new(layout: Layout, bits: StyleBits, images: Vec<PdfImage>) -> Self {
         Pdf {
             layout,
             bits,
+            images,
             pages: Vec::new(),
             meta: Vec::new(),
             y: 0.0,
@@ -415,6 +472,35 @@ impl Pdf {
             head_verso: String::new(),
             head_recto: String::new(),
         }
+    }
+
+    /// The decoded image ornament for `role`, if one was configured and decodable.
+    fn image(&self, role: ImageRole) -> Option<&PdfImage> {
+        self.images.iter().find(|i| i.role == role)
+    }
+
+    /// Place an image ornament for `role` centered in the text column, scaled to fit
+    /// `max_w`×`max_h` (aspect preserved), and advance past it. No-op if absent.
+    fn place_image(&mut self, role: ImageRole, max_w: f32, max_h: f32, gap_after: f32) {
+        let Some((name, w, h)) = self
+            .image(role)
+            .map(|i| (i.name.clone(), i.width as f32, i.height as f32))
+        else {
+            return;
+        };
+        let scale = (max_w / w).min(max_h / h);
+        let (dw, dh) = (w * scale, h * scale);
+        self.need(dh);
+        let x = self.left() + (self.layout.text_w() - dw) / 2.0;
+        let bottom = self.y - dh;
+        self.cur().push_str(&format!(
+            "q {} 0 0 {} {} {} cm /{name} Do Q\n",
+            num(dw),
+            num(dh),
+            num(x),
+            num(bottom)
+        ));
+        self.y -= dh + gap_after;
     }
 
     fn cur(&mut self) -> &mut String {
@@ -477,7 +563,18 @@ impl Pdf {
         epigraph: Option<&Epigraph>,
     ) {
         self.open_section();
-        self.y = self.layout.page_h * 0.62;
+        if self.image(ImageRole::Title).is_some() {
+            // A title image sits at the top, with the text block below it (#490).
+            self.y = self.layout.text_top() - BODY_LEADING;
+            self.place_image(
+                ImageRole::Title,
+                self.layout.text_w(),
+                self.layout.page_h * 0.3,
+                BODY_LEADING * 2.0,
+            );
+        } else {
+            self.y = self.layout.page_h * 0.62;
+        }
         if let Some(s) = series {
             self.centered(s, false, false, BODY_SIZE, BODY_LEADING * 2.0);
         }
@@ -521,6 +618,13 @@ impl Pdf {
     fn chapter(&mut self, ch: &Chapter) -> usize {
         let page = self.open_section();
         self.y -= HEADING_LEADING * 2.0;
+        // A chapter-heading image sits above the title (#490).
+        self.place_image(
+            ImageRole::ChapterHeading,
+            self.layout.text_w(),
+            HEADING_LEADING * 4.0,
+            HEADING_LEADING,
+        );
         let align = self.bits.heading_align;
         self.heading_line(&ch.title, HEADING_SIZE, HEADING_LEADING * 1.6, align);
         if let Some(e) = &ch.epigraph {
@@ -568,6 +672,16 @@ impl Pdf {
     fn scene_break_line(&mut self) {
         self.need(BODY_LEADING * 2.0);
         self.y -= BODY_LEADING * 0.5;
+        if self.image(ImageRole::SceneBreak).is_some() {
+            // An image divider replaces the glyph (#490).
+            self.place_image(
+                ImageRole::SceneBreak,
+                self.layout.text_w() * 0.4,
+                BODY_LEADING * 2.0,
+                BODY_LEADING * 0.5,
+            );
+            return;
+        }
         let glyph = if renderable(&self.bits.scene_break) {
             self.bits.scene_break.clone()
         } else {
@@ -789,6 +903,7 @@ impl Pdf {
         // 1 catalog, 2 pages, 3 outlines, then fonts, pages+contents, outline items.
         let mut next = 4u32;
         let font_ids = self.layout.fonts.objects(&mut next, &mut objects);
+        let image_names = emit_images(&self.images, &mut next, &mut objects);
         let mut page_obj = Vec::with_capacity(n_pages);
         let mut content_obj = Vec::with_capacity(n_pages);
         for _ in 0..n_pages {
@@ -811,8 +926,17 @@ impl Pdf {
 
         // Page tree (MediaBox + font resources inherited by every page).
         let kids: String = page_obj.iter().map(|id| format!("{id} 0 R ")).collect();
+        let xobjects = if image_names.is_empty() {
+            String::new()
+        } else {
+            let entries: String = image_names
+                .iter()
+                .map(|(name, id)| format!("/{name} {id} 0 R "))
+                .collect();
+            format!(" /XObject << {entries}>>")
+        };
         let resources = format!(
-            "/Resources << /Font << /F1 {} 0 R /F2 {} 0 R /F3 {} 0 R /F4 {} 0 R >> >>",
+            "/Resources << /Font << /F1 {} 0 R /F2 {} 0 R /F3 {} 0 R /F4 {} 0 R >>{xobjects} >>",
             font_ids[0], font_ids[1], font_ids[2], font_ids[3]
         );
         objects.insert(
@@ -1012,6 +1136,60 @@ fn flatten_outline(
         objects.insert(id, body.into_bytes());
     }
     (ids.first().copied(), ids.last().copied())
+}
+
+/// Emit each decoded image as a PDF image XObject (RGB samples, uncompressed) with
+/// a grayscale `/SMask` when the source had alpha, returning the (resource name,
+/// object id) pairs for the page-tree `/Resources /XObject` dictionary.
+fn emit_images(images: &[PdfImage], next: &mut u32, out: &mut ObjMap) -> Vec<(String, u32)> {
+    let mut names = Vec::new();
+    for img in images {
+        let smask = img.alpha.as_ref().map(|alpha| {
+            let id = take(next);
+            out.insert(
+                id,
+                image_xobject(img.width, img.height, "DeviceGray", alpha, None),
+            );
+            id
+        });
+        let id = take(next);
+        out.insert(
+            id,
+            image_xobject(img.width, img.height, "DeviceRGB", &img.rgb, smask),
+        );
+        names.push((img.name.clone(), id));
+    }
+    names
+}
+
+/// One image XObject: an (uncompressed) sample stream of `color`/8-bit data, with an
+/// optional soft mask reference.
+fn image_xobject(
+    width: u32,
+    height: u32,
+    color: &str,
+    samples: &[u8],
+    smask: Option<u32>,
+) -> Vec<u8> {
+    let smask = smask
+        .map(|id| format!(" /SMask {id} 0 R"))
+        .unwrap_or_default();
+    let mut v = format!(
+        "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} \
+         /ColorSpace /{color} /BitsPerComponent 8{smask} /Length {} >>\nstream\n",
+        samples.len()
+    )
+    .into_bytes();
+    v.extend_from_slice(samples);
+    v.extend_from_slice(b"\nendstream");
+    v
+}
+
+/// Allocate the next object id (shared with [`font`]).
+pub(super) fn take(next: &mut u32) -> u32 {
+    let id = *next;
+    *next += 1;
+    id
 }
 
 /// Write the objects (in id order), the xref table, and the trailer.
