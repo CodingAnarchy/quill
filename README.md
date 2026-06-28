@@ -115,10 +115,17 @@ keystrokes that stay out of the way.
   files (paths relative to the project, `.png`/`.jpg`/`.gif`/`.svg`/`.webp`)
   embedded into the EPUB (the scene-break image replaces its glyph). To start
   from a coordinated look instead of setting each key, `preset` selects a
-  built-in bundle (`classic` — `* * *` scene breaks, drop caps, `❦` title/part
-  ornaments; `modern` — left-aligned headings, `•` scene breaks); any explicit
-  `[style]` key you also set overrides just that part of the preset. With no
-  `[style]`, the output is exactly the plain default. Only
+  built-in bundle of these settings, and any explicit `[style]` key you also set
+  overrides just that part of the preset. The library:
+  - `classic` — `* * *` scene breaks, drop caps, `❦` title/part ornaments
+  - `modern` — left-aligned headings, `•` scene breaks
+  - `literary` — `⁂` (asterism) scene breaks and drop caps, no ornaments
+  - `romance` — `❀` scene breaks, drop caps, `❦` ornaments
+  - `thriller` — left-aligned headings, em-dash (`—`) scene breaks, spare
+  - `fantasy` — `❖` scene breaks, drop caps, `⚜` (fleur-de-lis) ornaments
+  - `minimalist` — left-aligned headings, a single centered mid-dot (`·`)
+
+  With no `[style]`, the output is exactly the plain default. Only
   the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
   formats ignore it.
 

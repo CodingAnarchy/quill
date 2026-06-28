@@ -1122,6 +1122,17 @@ mod tests {
             "modern has no drop cap: {mcss}"
         );
         assert!(part(&mbytes, "OEBPS/chap0004.xhtml").contains("<p class=\"scene-break\">•</p>"));
+
+        // A genre preset from the library (#482) renders its own bundle too:
+        // `fantasy` is a diamond scene break with fleur-de-lis ornaments.
+        let mut fantasy = ExportStyle {
+            preset: Some("fantasy".into()),
+            ..Default::default()
+        };
+        assert!(fantasy.apply_preset().is_none());
+        let fbytes = to_epub(&doc(), MODIFIED, &fantasy).unwrap();
+        assert!(part(&fbytes, "OEBPS/title0001.xhtml").contains("<p class=\"ornament\">⚜</p>"));
+        assert!(part(&fbytes, "OEBPS/chap0004.xhtml").contains("<p class=\"scene-break\">❖</p>"));
     }
 
     #[test]

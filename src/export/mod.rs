@@ -74,9 +74,25 @@ pub struct ExportStyle {
 /// value is interpolated into the stylesheet.
 const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
 
-/// The base [`ExportStyle`] for a built-in preset (#473), or `None` for an unknown
-/// name. Presets set only the asset-free knobs (glyphs, alignment, drop cap) — an
-/// author still supplies their own `body_font` / images on top.
+/// The built-in preset names (#473, #482), in the order shown to authors. The
+/// single source of truth: [`preset_base`] resolves each one and the unknown-preset
+/// warning lists them, so the library can't drift between code and the message (a
+/// test asserts every name here resolves).
+pub(crate) const PRESET_NAMES: [&str; 7] = [
+    "classic",
+    "modern",
+    "literary",
+    "romance",
+    "thriller",
+    "fantasy",
+    "minimalist",
+];
+
+/// The base [`ExportStyle`] for a built-in preset (#473, #482), or `None` for an
+/// unknown name. Presets set only the asset-free knobs (scene break, ornaments,
+/// heading alignment, drop cap) so any author can use one without bundling licensed
+/// fonts or artwork — those are layered on top via explicit `[style]` keys. Each is
+/// a distinct, coherent look; keep the arms in sync with [`PRESET_NAMES`].
 fn preset_base(name: &str) -> Option<ExportStyle> {
     Some(match name {
         // Traditional: centered headings, drop caps, floral scene break + dividers.
@@ -91,6 +107,44 @@ fn preset_base(name: &str) -> Option<ExportStyle> {
         "modern" => ExportStyle {
             heading_align: Some("left".into()),
             scene_break: Some("•".into()),
+            ..Default::default()
+        },
+        // Literary fiction: understated — an asterism between scenes and a drop cap,
+        // no divider ornaments.
+        "literary" => ExportStyle {
+            scene_break: Some("⁂".into()),
+            drop_cap: Some(true),
+            ..Default::default()
+        },
+        // Romance: warm and decorative — a flower scene break with floral dividers.
+        "romance" => ExportStyle {
+            scene_break: Some("❀".into()),
+            drop_cap: Some(true),
+            title_ornament: Some("❦".into()),
+            part_ornament: Some("❦".into()),
+            ..Default::default()
+        },
+        // Thriller: stark and punchy — left-aligned headings, an em-dash scene
+        // break, no drop cap or ornaments.
+        "thriller" => ExportStyle {
+            heading_align: Some("left".into()),
+            scene_break: Some("—".into()),
+            ..Default::default()
+        },
+        // Fantasy: ornate — a diamond scene break with fleur-de-lis dividers and a
+        // drop cap.
+        "fantasy" => ExportStyle {
+            scene_break: Some("❖".into()),
+            drop_cap: Some(true),
+            title_ornament: Some("⚜".into()),
+            part_ornament: Some("⚜".into()),
+            ..Default::default()
+        },
+        // Minimalist: the barest mark — left-aligned headings, a single centered
+        // mid-dot, nothing else.
+        "minimalist" => ExportStyle {
+            heading_align: Some("left".into()),
+            scene_break: Some("·".into()),
             ..Default::default()
         },
         _ => return None,
@@ -219,7 +273,8 @@ impl ExportStyle {
                 None
             }
             None => Some(format!(
-                "style: unknown preset '{name}' (use classic/modern)"
+                "style: unknown preset '{name}' (presets: {})",
+                PRESET_NAMES.join(", ")
             )),
         }
     }
@@ -965,17 +1020,41 @@ mod tests {
         assert_eq!(modern.heading_align(), Some("left"));
         assert!(!modern.drop_cap());
 
-        // An unknown preset warns and leaves the style untouched.
+        // An unknown preset warns (listing the library) and leaves the style
+        // untouched.
         let mut bad = ExportStyle {
             preset: Some("retro".into()),
             ..Default::default()
         };
         let warning = bad.apply_preset().expect("unknown preset warns");
         assert!(warning.contains("unknown preset"), "{warning}");
+        assert!(warning.contains("fantasy"), "lists the library: {warning}");
         assert_eq!(bad.scene_break(), "#", "default scene break unchanged");
 
         // No preset → no-op, no warning.
         assert!(ExportStyle::default().apply_preset().is_none());
+    }
+
+    #[test]
+    fn every_named_preset_resolves_to_a_distinct_styled_look() {
+        // Each name in the library resolves without warning and actually changes
+        // something from the plain default — this guards against a name being added
+        // to PRESET_NAMES (or the warning) without a matching `preset_base` arm.
+        for name in PRESET_NAMES {
+            let mut style = ExportStyle {
+                preset: Some(name.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                style.apply_preset().is_none(),
+                "preset '{name}' should resolve"
+            );
+            assert_ne!(
+                style,
+                ExportStyle::default(),
+                "preset '{name}' should style something"
+            );
+        }
     }
 
     #[test]
