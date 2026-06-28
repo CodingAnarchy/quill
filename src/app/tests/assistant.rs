@@ -476,6 +476,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "export:scriv",
         "export:vellum",
         "export:epub",
+        "export:pdf",
         "report:progress",
         "report:analysis",
         "guide",

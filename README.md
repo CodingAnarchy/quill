@@ -99,10 +99,17 @@ keystrokes that stay out of the way.
   the part/chapter structure, book metadata (title, subtitle, author, series),
   epigraphs set apart, and `*`/`**` emphasis as italic/bold; no second paid tool
   or Mac required, and it validates against [epubcheck](https://www.w3.org/publishing/epubcheck/).
+  *PDF* writes a paginated `.pdf` — the universal fixed-layout proof for beta
+  readers, submissions, or a print interior — with a title page, each chapter on
+  a fresh page, page numbers, a navigable bookmark outline of the part/chapter
+  structure, epigraphs set apart, and `*`/`**` emphasis as italic/bold. It uses
+  the standard Times faces every viewer ships (no external tool), so the text is
+  English / Latin-1 plus the usual typographic punctuation; anything outside that
+  set renders as `?` (round-trip through Vellum for full-Unicode typesetting).
   For a multi-book **series**, the menu offers each format twice — the whole
   series (books in reading order, each delimited per format: Markdown/Word book
-  headings, Scrivener book folders, EPUB book sections in the table of contents)
-  or just the active book. The EPUB can be lightly styled (opt-in) via a
+  headings, Scrivener book folders, EPUB book sections in the table of contents,
+  PDF book divider pages) or just the active book. The EPUB can be lightly styled (opt-in) via a
   `[style]` table in `book.toml`: `scene_break` chooses the divider glyph between
   scenes (e.g. `scene_break = "* * *"`), and `body_font` / `heading_font` point at
   font files (paths relative to the project, `.ttf`/`.otf`/`.woff`/`.woff2`) that
