@@ -20,7 +20,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use self::font::{font_name, pdf_string, FontPlan, ObjMap};
-use super::{classify_block, inline_runs, Chapter, Document, Prose, SCENE_BREAK};
+use super::{
+    classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose, SCENE_BREAK,
+};
 use crate::frontmatter::Epigraph;
 
 // Type sizes and vertical rhythm, shared by both profiles (in points).
@@ -58,9 +60,55 @@ pub fn trim_points(name: &str) -> Option<(f32, f32)> {
     Some((w * 72.0, h * 72.0))
 }
 
-/// Compile a [`Document`] to a screen PDF (#463): US-Letter, standard-14 Times.
-pub fn to_pdf(doc: &Document) -> std::io::Result<Vec<u8>> {
-    Ok(render_book(doc, Layout::screen()))
+/// Whether every character of `glyph` can be shown by the PDF's WinAnsi fonts.
+fn renderable(glyph: &str) -> bool {
+    glyph.chars().all(|c| font::winansi(c).is_some())
+}
+
+/// Warnings for `[style]` settings the PDF writers can't honor (#489), to surface
+/// alongside the export: image ornaments aren't embedded yet (#490), and decorative
+/// glyphs outside the serif fonts' WinAnsi set (e.g. `❦`/`⚜`) can't render — the
+/// scene break falls back to `#` and ornaments are skipped.
+pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let images: Vec<&str> = [
+        (ImageRole::SceneBreak, "scene break"),
+        (ImageRole::ChapterHeading, "chapter heading"),
+        (ImageRole::Title, "title"),
+    ]
+    .into_iter()
+    .filter(|(role, _)| style.image(*role).is_some())
+    .map(|(_, label)| label)
+    .collect();
+    if !images.is_empty() {
+        warnings.push(format!(
+            "style: image ornaments ({}) aren't applied to PDF yet — see #490",
+            images.join(", ")
+        ));
+    }
+    let glyphs: Vec<&str> = [
+        &style.scene_break,
+        &style.title_ornament,
+        &style.part_ornament,
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|g| !renderable(g))
+    .map(String::as_str)
+    .collect();
+    if !glyphs.is_empty() {
+        warnings.push(format!(
+            "style: glyph(s) {} aren't in the PDF font set and were skipped",
+            glyphs.join(" ")
+        ));
+    }
+    warnings
+}
+
+/// Compile a [`Document`] to a screen PDF (#463): US-Letter, standard-14 Times,
+/// honoring the designed `[style]` (#489) — a default style reproduces #463 exactly.
+pub fn to_pdf(doc: &Document, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
+    Ok(render_book(doc, style, Layout::screen(style)))
 }
 
 /// Compile a whole series to one screen PDF (#332/#463).
@@ -68,14 +116,31 @@ pub fn to_pdf_series(
     books: &[Document],
     series: Option<&str>,
     author: Option<&str>,
+    style: &ExportStyle,
 ) -> std::io::Result<Vec<u8>> {
-    Ok(render_series(books, series, author, Layout::screen()))
+    Ok(render_series(
+        books,
+        series,
+        author,
+        style,
+        Layout::screen(style),
+    ))
 }
 
 /// Compile a [`Document`] to a print-ready interior PDF (#464) at the given trim
-/// (points): mirrored margins + gutter, running heads, recto starts, embedded fonts.
-pub fn to_pdf_print(doc: &Document, trim_w: f32, trim_h: f32) -> std::io::Result<Vec<u8>> {
-    Ok(render_book(doc, Layout::print(trim_w, trim_h)))
+/// (points): mirrored margins + gutter, running heads, recto starts, embedded fonts,
+/// honoring the designed `[style]` (#489).
+pub fn to_pdf_print(
+    doc: &Document,
+    trim_w: f32,
+    trim_h: f32,
+    style: &ExportStyle,
+) -> std::io::Result<Vec<u8>> {
+    Ok(render_book(
+        doc,
+        style,
+        Layout::print(trim_w, trim_h, style),
+    ))
 }
 
 /// Compile a whole series to one print-ready interior PDF (#464).
@@ -85,18 +150,20 @@ pub fn to_pdf_series_print(
     author: Option<&str>,
     trim_w: f32,
     trim_h: f32,
+    style: &ExportStyle,
 ) -> std::io::Result<Vec<u8>> {
     Ok(render_series(
         books,
         series,
         author,
-        Layout::print(trim_w, trim_h),
+        style,
+        Layout::print(trim_w, trim_h, style),
     ))
 }
 
 /// Lay out one standalone book onto a fresh `Pdf` with `layout` and serialize it.
-fn render_book(doc: &Document, layout: Layout) -> Vec<u8> {
-    let mut pdf = Pdf::new(layout);
+fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
+    let mut pdf = Pdf::new(layout, StyleBits::from_style(style));
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
     pdf.title_page(
         doc.series.as_deref(),
@@ -115,16 +182,17 @@ fn render_series(
     books: &[Document],
     series: Option<&str>,
     author: Option<&str>,
+    style: &ExportStyle,
     layout: Layout,
 ) -> Vec<u8> {
-    let mut pdf = Pdf::new(layout);
+    let mut pdf = Pdf::new(layout, StyleBits::from_style(style));
     let title = series.unwrap_or("Series");
     pdf.set_heads(title, author.unwrap_or(title));
     pdf.title_page(None, title, None, author, None);
     let mut outline = Vec::new();
     for book in books {
         pdf.set_heads(&book.title, author.unwrap_or(&book.title));
-        let page = pdf.divider_page(&book.title, PART_SIZE);
+        let page = pdf.divider_page(&book.title, PART_SIZE, None, Align::Center);
         let mut item = OutlineItem::new(book.title.clone(), page);
         item.children = book_outline(&mut pdf, book);
         outline.push(item);
@@ -144,7 +212,12 @@ fn book_outline(pdf: &mut Pdf, doc: &Document) -> Vec<OutlineItem> {
     for part in &doc.parts {
         match &part.name {
             Some(name) => {
-                let mut item = OutlineItem::new(name.clone(), pdf.divider_page(name, PART_SIZE));
+                // A named part divider honors the heading alignment and the part
+                // ornament glyph (#489).
+                let ornament = pdf.bits.part_ornament.clone();
+                let align = pdf.bits.heading_align;
+                let page = pdf.divider_page(name, PART_SIZE, ornament.as_deref(), align);
+                let mut item = OutlineItem::new(name.clone(), page);
                 for ch in &part.chapters {
                     item.children
                         .push(OutlineItem::new(ch.title.clone(), pdf.chapter(ch)));
@@ -185,8 +258,9 @@ struct Layout {
 }
 
 impl Layout {
-    /// The screen proof (#463): US-Letter, uniform 1" margins, standard-14 Times.
-    fn screen() -> Self {
+    /// The screen proof (#463): US-Letter, uniform 1" margins, standard-14 Times
+    /// (or the configured fonts embedded, #489).
+    fn screen(style: &ExportStyle) -> Self {
         Layout {
             page_w: 612.0,
             page_h: 792.0,
@@ -197,7 +271,7 @@ impl Layout {
             mirrored: false,
             running_heads: false,
             recto_starts: false,
-            fonts: FontPlan::Standard,
+            fonts: FontPlan::for_screen(style),
         }
     }
 
@@ -205,7 +279,7 @@ impl Layout {
     /// margins, a wider binding (inside) margin than outside for the gutter, with
     /// running heads, recto starts, and embedded fonts. Margins clear KDP's minimums
     /// for a typical book.
-    fn print(trim_w: f32, trim_h: f32) -> Self {
+    fn print(trim_w: f32, trim_h: f32, style: &ExportStyle) -> Self {
         Layout {
             page_w: trim_w,
             page_h: trim_h,
@@ -216,7 +290,7 @@ impl Layout {
             mirrored: true,
             running_heads: true,
             recto_starts: true,
-            fonts: FontPlan::embedded(),
+            fonts: FontPlan::for_print(style),
         }
     }
 
@@ -288,10 +362,39 @@ struct PageMeta {
     blank: bool,
 }
 
+/// The non-font `[style]` settings the layout consults (#489): the scene-break
+/// glyph, heading alignment, drop cap, and ornament glyphs. Fonts live in the
+/// `Layout`'s [`FontPlan`]; a default `StyleBits` reproduces the plain output.
+struct StyleBits {
+    scene_break: String,
+    heading_align: Align,
+    drop_cap: bool,
+    title_ornament: Option<String>,
+    part_ornament: Option<String>,
+}
+
+impl StyleBits {
+    fn from_style(style: &ExportStyle) -> Self {
+        StyleBits {
+            scene_break: style.scene_break().to_string(),
+            // Headings aren't justified; map justify/left to flush-left.
+            heading_align: match style.heading_align() {
+                Some("left") | Some("justify") => Align::Left,
+                Some("right") => Align::RightInset(0.0),
+                _ => Align::Center,
+            },
+            drop_cap: style.drop_cap(),
+            title_ornament: style.title_ornament.clone(),
+            part_ornament: style.part_ornament.clone(),
+        }
+    }
+}
+
 /// Accumulates per-page content as the book is laid out, then [`Pdf::finish`]
 /// decorates the pages (running heads, folios) and serializes the file.
 struct Pdf {
     layout: Layout,
+    bits: StyleBits,
     pages: Vec<String>,
     meta: Vec<PageMeta>,
     y: f32,
@@ -301,9 +404,10 @@ struct Pdf {
 }
 
 impl Pdf {
-    fn new(layout: Layout) -> Self {
+    fn new(layout: Layout, bits: StyleBits) -> Self {
         Pdf {
             layout,
+            bits,
             pages: Vec::new(),
             meta: Vec::new(),
             y: 0.0,
@@ -384,70 +488,155 @@ impl Pdf {
         if let Some(a) = author {
             self.centered(&format!("by {a}"), false, false, BODY_SIZE, BODY_LEADING);
         }
+        if let Some(o) = self.bits.title_ornament.clone().filter(|o| renderable(o)) {
+            self.centered(&o, false, false, HEADING_SIZE, BODY_LEADING);
+        }
         if let Some(e) = epigraph {
             self.y -= BODY_LEADING * 3.0;
             self.epigraph(e);
         }
     }
 
-    /// A standalone divider page (a part or a series book): one centered line.
-    fn divider_page(&mut self, title: &str, size: f32) -> usize {
+    /// A standalone divider page (a part or a series book): the title (with the given
+    /// alignment), and an optional ornament glyph beneath it.
+    fn divider_page(
+        &mut self,
+        title: &str,
+        size: f32,
+        ornament: Option<&str>,
+        align: Align,
+    ) -> usize {
         let page = self.open_section();
         self.y = self.layout.page_h * 0.5;
-        self.centered(title, true, false, size, size * 1.4);
+        self.heading_line(title, size, size * 1.4, align);
+        if let Some(o) = ornament.filter(|o| renderable(o)) {
+            self.centered(o, false, false, HEADING_SIZE, BODY_LEADING);
+        }
         page
     }
 
-    /// One chapter on a fresh page: a centered title, an optional epigraph, then the
-    /// body. Returns the page it starts on (for its bookmark).
+    /// One chapter on a fresh page: the title (honoring the heading alignment), an
+    /// optional epigraph, then the body — the opening paragraph dropped-capped when
+    /// styled. Returns the page it starts on (for its bookmark).
     fn chapter(&mut self, ch: &Chapter) -> usize {
         let page = self.open_section();
         self.y -= HEADING_LEADING * 2.0;
-        self.centered(&ch.title, true, false, HEADING_SIZE, HEADING_LEADING * 1.6);
+        let align = self.bits.heading_align;
+        self.heading_line(&ch.title, HEADING_SIZE, HEADING_LEADING * 1.6, align);
         if let Some(e) = &ch.epigraph {
             self.epigraph(e);
             self.y -= BODY_LEADING;
         }
+        let mut opened = false;
         for block in ch.body.split("\n\n") {
-            self.prose_block(block);
+            match classify_block(block) {
+                None => {}
+                Some(Prose::SceneBreak) => self.scene_break_line(),
+                Some(Prose::Heading(h)) => self.sub_heading(&h),
+                Some(Prose::Paragraph(text)) => {
+                    let runs = inline_runs(&text);
+                    if !opened && self.bits.drop_cap {
+                        self.dropped_paragraph(&runs);
+                    } else {
+                        self.paragraph(&runs);
+                    }
+                    opened = true;
+                }
+            }
         }
         page
     }
 
-    /// Render one body block: a scene break (centered glyph), a sub-heading
-    /// (centered, bold), or a normal indented paragraph with `*`/`**` emphasis.
-    fn prose_block(&mut self, block: &str) {
-        match classify_block(block) {
-            None => {}
-            Some(Prose::SceneBreak) => {
-                self.need(BODY_LEADING * 2.0);
-                self.y -= BODY_LEADING * 0.5;
-                self.centered(SCENE_BREAK, false, false, BODY_SIZE, BODY_LEADING * 1.5);
+    /// A normal body paragraph: first-line indented, left-aligned, with `*`/`**`
+    /// emphasis as italic/bold runs.
+    fn paragraph(&mut self, runs: &[(String, bool, bool)]) {
+        let words = words_of(runs);
+        self.flow(
+            &words,
+            self.layout.text_w(),
+            INDENT,
+            BODY_SIZE,
+            BODY_LEADING,
+            Align::Left,
+        );
+    }
+
+    /// The scene-break divider — the configured glyph, centered. A glyph the PDF
+    /// fonts can't show (a decorative ornament outside WinAnsi) falls back to the
+    /// default `#` so a divider still appears (the fallback is warned about in
+    /// [`pdf_style_warnings`]).
+    fn scene_break_line(&mut self) {
+        self.need(BODY_LEADING * 2.0);
+        self.y -= BODY_LEADING * 0.5;
+        let glyph = if renderable(&self.bits.scene_break) {
+            self.bits.scene_break.clone()
+        } else {
+            SCENE_BREAK.to_string()
+        };
+        self.centered(&glyph, false, false, BODY_SIZE, BODY_LEADING * 1.5);
+    }
+
+    /// A body sub-heading (`##` …), bold, honoring the heading alignment.
+    fn sub_heading(&mut self, h: &str) {
+        self.need(BODY_LEADING * 2.0);
+        self.y -= BODY_LEADING * 0.5;
+        let align = self.bits.heading_align;
+        self.heading_line(h, BODY_SIZE, BODY_LEADING, align);
+    }
+
+    /// A bold heading line at `align` (chapter/part titles, sub-headings).
+    fn heading_line(&mut self, text: &str, size: f32, leading: f32, align: Align) {
+        let words = words_of(&[(text.to_string(), true, false)]);
+        self.flow(&words, self.layout.text_w(), 0.0, size, leading, align);
+    }
+
+    /// The chapter's opening paragraph with a three-line drop-cap initial: the first
+    /// character is set large at the left margin and the first lines are indented to
+    /// clear it (#489 / mirrors the EPUB `.opening` first-letter treatment).
+    fn dropped_paragraph(&mut self, runs: &[(String, bool, bool)]) {
+        const LINES: usize = 3;
+        let mut words = words_of(runs);
+        let Some(first_word) = words.first_mut() else {
+            return;
+        };
+        let initial = match first_word.text.chars().next() {
+            Some(c) => c,
+            None => return,
+        };
+        first_word.text = first_word.text.chars().skip(1).collect();
+        if first_word.text.is_empty() {
+            words.remove(0);
+        }
+        let cap_size = BODY_LEADING * LINES as f32;
+        let cap_w = self
+            .layout
+            .measure(&initial.to_string(), cap_size, false, false)
+            + 2.0;
+        // Reserve the cap block so the initial and its first lines stay together.
+        self.need(BODY_LEADING * LINES as f32);
+        let left = self.left();
+        let cap_baseline = self.y - (LINES as f32 - 1.0) * BODY_LEADING;
+        self.draw_line(
+            left,
+            cap_baseline,
+            &[(initial.to_string(), false, false)],
+            cap_size,
+        );
+        // The first LINES lines are inset by the cap width; the rest run full width.
+        let full = self.layout.text_w();
+        let lines = wrap_lines(&self.layout, &words, BODY_SIZE, |i| {
+            if i < LINES {
+                full - cap_w
+            } else {
+                full
             }
-            Some(Prose::Heading(h)) => {
-                self.need(BODY_LEADING * 2.0);
-                self.y -= BODY_LEADING * 0.5;
-                let words = words_of(&[(h, true, false)]);
-                self.flow(
-                    &words,
-                    self.layout.text_w(),
-                    0.0,
-                    BODY_SIZE,
-                    BODY_LEADING,
-                    Align::Center,
-                );
-            }
-            Some(Prose::Paragraph(text)) => {
-                let words = words_of(&inline_runs(&text));
-                self.flow(
-                    &words,
-                    self.layout.text_w(),
-                    INDENT,
-                    BODY_SIZE,
-                    BODY_LEADING,
-                    Align::Left,
-                );
-            }
+        });
+        for (i, (line, _w)) in lines.into_iter().enumerate() {
+            self.need(BODY_LEADING);
+            let x = self.left() + if i < LINES { cap_w } else { 0.0 };
+            let segs = segments(&line);
+            self.draw_line(x, self.y, &segs, BODY_SIZE);
+            self.y -= BODY_LEADING;
         }
     }
 
@@ -505,7 +694,14 @@ impl Pdf {
         align: Align,
     ) {
         let col = self.layout.text_w();
-        let lines = wrap(&self.layout, words, max_width, first_indent, size);
+        // The first line is narrowed by the indent; the rest run the full width.
+        let lines = wrap_lines(&self.layout, words, size, |i| {
+            if i == 0 {
+                max_width - first_indent
+            } else {
+                max_width
+            }
+        });
         for (i, (line, line_w)) in lines.into_iter().enumerate() {
             self.need(leading);
             let left = self.left();
@@ -667,6 +863,7 @@ impl Pdf {
 }
 
 /// Where a wrapped line sits in its column.
+#[derive(Clone, Copy)]
 enum Align {
     Left,
     Center,
@@ -703,28 +900,27 @@ fn words_of(runs: &[(String, bool, bool)]) -> Vec<Word> {
     words
 }
 
-/// Greedy line-wrap: pack words up to `max_width` for the layout's fonts, indenting
-/// only the first line. Each line is returned with its content width (excluding the
-/// indent), so callers can align it without re-measuring.
-fn wrap<'w>(
+/// Greedy line-wrap: pack words into the available width for each line, given by
+/// `width_for_line(line_index)`. Each line is returned with its content width
+/// (words + inter-word spaces), so callers can align it without re-measuring. The
+/// width-per-line callback lets one wrapper serve flush paragraphs (a narrower
+/// first line for the indent) and drop caps (narrower first lines for the initial).
+fn wrap_lines<'w>(
     layout: &Layout,
     words: &'w [Word],
-    max_width: f32,
-    first_indent: f32,
     size: f32,
+    width_for_line: impl Fn(usize) -> f32,
 ) -> Vec<(Vec<&'w Word>, f32)> {
     let space = layout.measure(" ", size, false, false);
     let mut lines: Vec<(Vec<&Word>, f32)> = Vec::new();
     let mut line: Vec<&Word> = Vec::new();
     let mut content = 0.0; // width of the current line's words + inter-word spaces
-    let mut indent = first_indent; // applied to the first line only
     for w in words {
         let ww = layout.measure(&w.text, size, w.bold, w.italic);
         let advance = if line.is_empty() { ww } else { space + ww };
-        if !line.is_empty() && indent + content + advance > max_width {
+        if !line.is_empty() && content + advance > width_for_line(lines.len()) {
             lines.push((std::mem::take(&mut line), content));
             content = ww;
-            indent = 0.0;
             line.push(w);
         } else {
             content += advance;

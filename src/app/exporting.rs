@@ -138,7 +138,7 @@ impl App {
                 "vellum.docx",
             ),
             ExportFormat::Epub => {
-                let (style, warnings) = self.epub_style();
+                let (style, warnings) = self.export_style();
                 self.write_built(
                     export::epub::to_epub(doc, &crate::date::utc_timestamp(), &style),
                     name,
@@ -146,11 +146,23 @@ impl App {
                 );
                 self.note_export_warnings(warnings);
             }
-            ExportFormat::Pdf => self.write_built(export::pdf::to_pdf(doc), name, "pdf"),
+            ExportFormat::Pdf => {
+                let (style, mut warnings) = self.export_style();
+                warnings.extend(export::pdf::pdf_style_warnings(&style));
+                self.write_built(export::pdf::to_pdf(doc, &style), name, "pdf");
+                self.note_export_warnings(warnings);
+            }
             ExportFormat::PdfPrint => {
-                let ((w, h), warning) = self.print_trim();
-                self.write_built(export::pdf::to_pdf_print(doc, w, h), name, "print.pdf");
-                self.note_export_warnings(warning.into_iter().collect());
+                let (style, mut warnings) = self.export_style();
+                let ((w, h), trim_warning) = self.print_trim();
+                warnings.extend(trim_warning);
+                warnings.extend(export::pdf::pdf_style_warnings(&style));
+                self.write_built(
+                    export::pdf::to_pdf_print(doc, w, h, &style),
+                    name,
+                    "print.pdf",
+                );
+                self.note_export_warnings(warnings);
             }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
@@ -185,9 +197,10 @@ impl App {
 
     /// The designed-export styling for this project (#468): the manifest's
     /// `[style]`, or the default (which reproduces today's plain output), with its
-    /// font paths resolved to embedded fonts (#469). Returns any font-resolution
-    /// warnings to surface alongside the export result.
-    fn epub_style(&self) -> (ExportStyle, Vec<String>) {
+    /// preset applied and font/image paths resolved (#469/#472). Shared by the EPUB
+    /// (#468) and PDF (#489) writers. Returns any resolution warnings to surface
+    /// alongside the export result.
+    fn export_style(&self) -> (ExportStyle, Vec<String>) {
         let mut style = self.project.manifest.style.clone().unwrap_or_default();
         let root = self.project.root.clone();
         // Resolve the preset first (its values are the base for the rest).
@@ -247,7 +260,7 @@ impl App {
     /// and the EPUB writer, returning the bytes and any styling warnings — the pure,
     /// side-effect-free core of [`preview_style`] (no temp file, no reader launch).
     pub(crate) fn style_preview_epub(&self) -> std::io::Result<(Vec<u8>, Vec<String>)> {
-        let (style, warnings) = self.epub_style();
+        let (style, warnings) = self.export_style();
         let doc = style_preview_document();
         let bytes = export::epub::to_epub(&doc, &crate::date::utc_timestamp(), &style)?;
         Ok((bytes, warnings))
@@ -290,7 +303,7 @@ impl App {
                 "vellum.docx",
             ),
             ExportFormat::Epub => {
-                let (style, warnings) = self.epub_style();
+                let (style, warnings) = self.export_style();
                 self.write_built(
                     export::epub::to_epub_series(
                         docs,
@@ -304,19 +317,27 @@ impl App {
                 );
                 self.note_export_warnings(warnings);
             }
-            ExportFormat::Pdf => self.write_built(
-                export::pdf::to_pdf_series(docs, series, author.as_deref()),
-                name,
-                "pdf",
-            ),
-            ExportFormat::PdfPrint => {
-                let ((w, h), warning) = self.print_trim();
+            ExportFormat::Pdf => {
+                let (style, mut warnings) = self.export_style();
+                warnings.extend(export::pdf::pdf_style_warnings(&style));
                 self.write_built(
-                    export::pdf::to_pdf_series_print(docs, series, author.as_deref(), w, h),
+                    export::pdf::to_pdf_series(docs, series, author.as_deref(), &style),
+                    name,
+                    "pdf",
+                );
+                self.note_export_warnings(warnings);
+            }
+            ExportFormat::PdfPrint => {
+                let (style, mut warnings) = self.export_style();
+                let ((w, h), trim_warning) = self.print_trim();
+                warnings.extend(trim_warning);
+                warnings.extend(export::pdf::pdf_style_warnings(&style));
+                self.write_built(
+                    export::pdf::to_pdf_series_print(docs, series, author.as_deref(), w, h, &style),
                     name,
                     "print.pdf",
                 );
-                self.note_export_warnings(warning.into_iter().collect());
+                self.note_export_warnings(warnings);
             }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
