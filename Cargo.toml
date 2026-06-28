@@ -39,6 +39,10 @@ hf-hub = { version = "0.4", optional = true }
 # PNG encoding for the local image backend (#240) — only needed with `local`.
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 spellbook = "0.4.2"
+# Print-ready PDF export (#464) reads glyph metrics (advances, cmap, bbox) from the
+# bundled fonts it embeds. ttf-parser is pure-Rust and dependency-free; it only
+# reads the font — the PDF itself is still hand-written (like docx/epub/pdf).
+ttf-parser = "0.25"
 
 [dev-dependencies]
 # Property / round-trip and adversarial-input testing for the data path (#265).

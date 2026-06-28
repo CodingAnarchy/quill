@@ -443,6 +443,7 @@ impl Action {
         Action::Export(ExportFormat::Vellum),
         Action::Export(ExportFormat::Epub),
         Action::Export(ExportFormat::Pdf),
+        Action::Export(ExportFormat::PdfPrint),
         Action::ProgressReport,
         Action::AnalysisReport,
         Action::Ai(AiAction::Ask),
@@ -501,6 +502,7 @@ impl Action {
             Action::Export(ExportFormat::Vellum) => "export:vellum",
             Action::Export(ExportFormat::Epub) => "export:epub",
             Action::Export(ExportFormat::Pdf) => "export:pdf",
+            Action::Export(ExportFormat::PdfPrint) => "export:pdf-print",
             Action::ProgressReport => "report:progress",
             Action::AnalysisReport => "report:analysis",
             Action::Ai(AiAction::Ask) => "ai:ask",
@@ -559,6 +561,7 @@ impl Action {
             Action::Export(ExportFormat::Vellum) => "Export → Vellum (.docx)",
             Action::Export(ExportFormat::Epub) => "Export → EPUB",
             Action::Export(ExportFormat::Pdf) => "Export → PDF",
+            Action::Export(ExportFormat::PdfPrint) => "Export → PDF (print interior)",
             Action::ProgressReport => "Progress report",
             Action::AnalysisReport => "Analysis report",
             Action::Ai(AiAction::Ask) => "AI · Ask the manuscript",
@@ -695,6 +698,9 @@ pub(crate) enum ExportFormat {
     Epub,
     /// A `.pdf` — the universal fixed-layout, ready-to-read/print artifact (#463).
     Pdf,
+    /// A print-ready interior `.pdf` for print-on-demand (#464): a book trim size,
+    /// mirrored margins + gutter, running heads, recto starts, embedded fonts.
+    PdfPrint,
 }
 
 /// What an export covers (#332): just the active book, or the whole multi-book

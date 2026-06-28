@@ -221,6 +221,11 @@ pub struct Manifest {
     /// precede the `goals`/`parts`/`chapters` tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<crate::export::ExportStyle>,
+    /// Opt-in print-interior settings (#464): the `[print]` table the print-ready
+    /// PDF reads for its trim size. Absent → the default 6×9 trim. A table, so it
+    /// must precede the `goals`/`parts`/`chapters` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print: Option<crate::export::pdf::PrintConfig>,
     /// Per-project overrides for the analysis report's word lists (#119): add to
     /// or remove from the built-in stopword and filter-word lists. A table, so it
     /// must precede the `goals`/`parts`/`chapters` tables.

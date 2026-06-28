@@ -106,6 +106,17 @@ keystrokes that stay out of the way.
   the standard Times faces every viewer ships (no external tool), so the text is
   English / Latin-1 plus the usual typographic punctuation; anything outside that
   set renders as `?` (round-trip through Vellum for full-Unicode typesetting).
+  *PDF (print interior)* writes a print-on-demand book block from the same
+  content: a chosen trim size, mirrored inside/outside margins with a binding
+  gutter, running heads (book title on the left page, author on the right), page
+  numbers at the outer corner, chapters starting on a right-hand (recto) page,
+  and the body fonts **embedded** — what services like KDP and IngramSpark
+  require. Set the trim in a `[print]` table in `book.toml` (`trim = "6x9"`;
+  also `5x8`, `5.5x8.5`; default `6x9`). Current limitations: those three trim
+  sizes only, no bleed, and no cover/spine (a cover is a separate artifact);
+  Latin-1 text as above. The default 6×9 interior (0.875″ inside, 0.5″ outside,
+  0.75″ top/bottom margins) clears KDP's published minimums; validate the file in
+  your service's preview before ordering a proof.
   For a multi-book **series**, the menu offers each format twice — the whole
   series (books in reading order, each delimited per format: Markdown/Word book
   headings, Scrivener book folders, EPUB book sections in the table of contents,

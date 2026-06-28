@@ -11,7 +11,7 @@ use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
 
 /// The export formats with their menu label and description.
-const FORMATS: [(ExportFormat, &str, &str); 6] = [
+const FORMATS: [(ExportFormat, &str, &str); 7] = [
     (
         ExportFormat::Markdown,
         "Manuscript (Markdown)",
@@ -41,6 +41,11 @@ const FORMATS: [(ExportFormat, &str, &str); 6] = [
         ExportFormat::Pdf,
         "PDF (.pdf)",
         "A paginated, ready-to-read or print proof",
+    ),
+    (
+        ExportFormat::PdfPrint,
+        "PDF (print interior)",
+        "Print-on-demand book block — trim, gutter, embedded fonts",
     ),
 ];
 
@@ -142,12 +147,39 @@ impl App {
                 self.note_export_warnings(warnings);
             }
             ExportFormat::Pdf => self.write_built(export::pdf::to_pdf(doc), name, "pdf"),
+            ExportFormat::PdfPrint => {
+                let ((w, h), warning) = self.print_trim();
+                self.write_built(export::pdf::to_pdf_print(doc, w, h), name, "print.pdf");
+                self.note_export_warnings(warning.into_iter().collect());
+            }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
                     .and_then(|()| export::scriv::write_scriv(doc, &path));
                 self.report_export(&path, result);
             }
+        }
+    }
+
+    /// The print trim (in points) from the manifest `[print]` table, with a warning
+    /// when the configured size is unknown (the default is used instead).
+    fn print_trim(&self) -> ((f32, f32), Option<String>) {
+        let name = self
+            .project
+            .manifest
+            .print
+            .as_ref()
+            .and_then(|p| p.trim.as_deref())
+            .unwrap_or(export::pdf::DEFAULT_TRIM);
+        match export::pdf::trim_points(name) {
+            Some(dims) => (dims, None),
+            None => (
+                export::pdf::trim_points(export::pdf::DEFAULT_TRIM).expect("default trim is valid"),
+                Some(format!(
+                    "print: unknown trim '{name}' (use 6x9/5x8/5.5x8.5) — using {}",
+                    export::pdf::DEFAULT_TRIM
+                )),
+            ),
         }
     }
 
@@ -277,6 +309,15 @@ impl App {
                 name,
                 "pdf",
             ),
+            ExportFormat::PdfPrint => {
+                let ((w, h), warning) = self.print_trim();
+                self.write_built(
+                    export::pdf::to_pdf_series_print(docs, series, author.as_deref(), w, h),
+                    name,
+                    "print.pdf",
+                );
+                self.note_export_warnings(warning.into_iter().collect());
+            }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
                 let result = std::fs::create_dir_all(path.parent().unwrap_or(&path))
