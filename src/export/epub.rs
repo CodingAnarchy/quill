@@ -319,7 +319,7 @@ fn stylesheet(style: &ExportStyle) -> String {
     if let Some(align) = style.heading_align() {
         css.push_str(&format!("h1, h2 {{ text-align: {align}; }}\n"));
     }
-    if style.drop_cap {
+    if style.drop_cap() {
         // The first paragraph of each chapter (marked `opening`) gets a drop cap;
         // its first line is flush so the initial sits in the margin.
         css.push_str("p.opening { text-indent: 0; }\n");
@@ -374,7 +374,7 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
         let Some(prose) = classify_block(block) else {
             continue;
         };
-        let opening = style.drop_cap && !opened && matches!(prose, Prose::Paragraph(_));
+        let opening = style.drop_cap() && !opened && matches!(prose, Prose::Paragraph(_));
         opened |= opening;
         out.push_str(&prose_xhtml(&prose, style, opening));
         out.push('\n');
@@ -1023,7 +1023,7 @@ mod tests {
         };
         let style = ExportStyle {
             heading_align: Some("left".into()),
-            drop_cap: true,
+            drop_cap: Some(true),
             ..Default::default()
         };
         let bytes = to_epub(&d, MODIFIED, &style).unwrap();
@@ -1077,6 +1077,51 @@ mod tests {
         let plain = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
         assert!(!part(&plain, "OEBPS/style.css").contains(".ornament"));
         assert!(!part(&plain, "OEBPS/title0001.xhtml").contains("ornament"));
+    }
+
+    #[test]
+    fn a_preset_styles_the_export_and_explicit_keys_still_override_it() {
+        // `classic` bundles a scene break, drop cap, and ornaments; one explicit
+        // key overrides just that setting and the rest of the preset stands.
+        let mut style = ExportStyle {
+            preset: Some("classic".into()),
+            scene_break: Some("~ ~ ~".into()),
+            ..Default::default()
+        };
+        assert!(style.apply_preset().is_none());
+        let bytes = to_epub(&doc(), MODIFIED, &style).unwrap();
+
+        let css = part(&bytes, "OEBPS/style.css");
+        assert!(css.contains(".opening::first-letter {"), "drop cap: {css}");
+        assert!(css.contains(".ornament {"), "ornaments: {css}");
+
+        // The preset's title ornament renders; the overridden scene break wins.
+        assert!(part(&bytes, "OEBPS/title0001.xhtml").contains("<p class=\"ornament\">❦</p>"));
+        let chap = part(&bytes, "OEBPS/chap0004.xhtml");
+        assert!(
+            chap.contains("<p class=\"scene-break\">~ ~ ~</p>"),
+            "{chap}"
+        );
+        assert!(
+            chap.contains("class=\"opening\""),
+            "drop cap applied: {chap}"
+        );
+
+        // `modern` is the contrasting bundle: left headings, a bullet break, no
+        // drop cap.
+        let mut modern = ExportStyle {
+            preset: Some("modern".into()),
+            ..Default::default()
+        };
+        assert!(modern.apply_preset().is_none());
+        let mbytes = to_epub(&doc(), MODIFIED, &modern).unwrap();
+        let mcss = part(&mbytes, "OEBPS/style.css");
+        assert!(mcss.contains("text-align: left;"), "modern align: {mcss}");
+        assert!(
+            !mcss.contains("first-letter"),
+            "modern has no drop cap: {mcss}"
+        );
+        assert!(part(&mbytes, "OEBPS/chap0004.xhtml").contains("<p class=\"scene-break\">•</p>"));
     }
 
     #[test]
@@ -1185,5 +1230,3 @@ mod tests {
         assert!(part(&bytes, "OEBPS/chap0003.xhtml").contains("alpha"));
     }
 }
-
-

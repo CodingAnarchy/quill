@@ -113,7 +113,11 @@ keystrokes that stay out of the way.
   glyph on the title page and each part divider. For artwork instead of glyphs,
   `scene_break_image` / `chapter_heading_image` / `title_image` point at image
   files (paths relative to the project, `.png`/`.jpg`/`.gif`/`.svg`/`.webp`)
-  embedded into the EPUB (the scene-break image replaces its glyph). With no
+  embedded into the EPUB (the scene-break image replaces its glyph). To start
+  from a coordinated look instead of setting each key, `preset` selects a
+  built-in bundle (`classic` — `* * *` scene breaks, drop caps, `❦` title/part
+  ornaments; `modern` — left-aligned headings, `•` scene breaks); any explicit
+  `[style]` key you also set overrides just that part of the preset. With no
   `[style]`, the output is exactly the plain default. Only
   the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
   formats ignore it.

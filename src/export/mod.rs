@@ -20,6 +20,11 @@ pub mod scriv;
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct ExportStyle {
+    /// A named preset bundling the knobs below into a coherent look (#473) — its
+    /// values are the base, and any explicit key here overrides it. `None` → no
+    /// preset. See [`Self::apply_preset`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
     /// The scene-break divider glyph (#468). `None` → the default centered
     /// [`SCENE_BREAK`] (`#`), so an unstyled export is byte-for-byte unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,8 +45,9 @@ pub struct ExportStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heading_align: Option<String>,
     /// Whether each chapter's first paragraph opens with a drop cap (#470).
-    #[serde(skip_serializing_if = "is_false")]
-    pub drop_cap: bool,
+    /// `None` → off (and lets a preset's value show through, #473).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_cap: Option<bool>,
     /// A decorative glyph centered on the title page (#471). `None` → none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title_ornament: Option<String>,
@@ -64,15 +70,32 @@ pub struct ExportStyle {
     pub images: Vec<EmbeddedImage>,
 }
 
-/// `skip_serializing_if` for a `bool` default — keeps `drop_cap = false` out of an
-/// unstyled manifest.
-fn is_false(b: &bool) -> bool {
-    !*b
-}
-
 /// The CSS `text-align` values a heading may use (#470) — an allowlist, since the
 /// value is interpolated into the stylesheet.
 const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
+
+/// The base [`ExportStyle`] for a built-in preset (#473), or `None` for an unknown
+/// name. Presets set only the asset-free knobs (glyphs, alignment, drop cap) — an
+/// author still supplies their own `body_font` / images on top.
+fn preset_base(name: &str) -> Option<ExportStyle> {
+    Some(match name {
+        // Traditional: centered headings, drop caps, floral scene break + dividers.
+        "classic" => ExportStyle {
+            scene_break: Some("* * *".into()),
+            drop_cap: Some(true),
+            title_ornament: Some("❦".into()),
+            part_ornament: Some("❦".into()),
+            ..Default::default()
+        },
+        // Spare and contemporary: left-aligned headings, a minimal scene mark.
+        "modern" => ExportStyle {
+            heading_align: Some("left".into()),
+            scene_break: Some("•".into()),
+            ..Default::default()
+        },
+        _ => return None,
+    })
+}
 
 /// Which text a [`EmbeddedFont`] styles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +198,64 @@ impl ExportStyle {
         self.heading_align
             .as_deref()
             .filter(|v| HEADING_ALIGNS.contains(v))
+    }
+
+    /// Whether chapter openings get a drop cap (#470) — off unless set.
+    pub fn drop_cap(&self) -> bool {
+        self.drop_cap.unwrap_or(false)
+    }
+
+    /// Apply the named `preset` (#473): start from its bundled values and overlay
+    /// the explicitly-set keys on top, so an author can pick a look and still tweak
+    /// individual knobs. No-op when no preset is set; returns a warning (and leaves
+    /// the style untouched) for an unknown preset name. Run before font/image
+    /// resolution.
+    pub fn apply_preset(&mut self) -> Option<String> {
+        let name = self.preset.clone()?;
+        match preset_base(&name) {
+            Some(base) => {
+                let overrides = std::mem::take(self);
+                *self = base.merged_with(overrides);
+                None
+            }
+            None => Some(format!(
+                "style: unknown preset '{name}' (use classic/modern)"
+            )),
+        }
+    }
+
+    /// Overlay `over`'s explicitly-set (`Some`/named) config fields onto `self`,
+    /// so `over` wins where set — the preset-override merge (#473). Destructured
+    /// (no `..`) on purpose: a field added to `ExportStyle` won't compile until it
+    /// gets a merge rule here, so a new style knob can't silently skip presets.
+    /// `preset` is the input, not a result; `fonts`/`images` are resolved later.
+    fn merged_with(mut self, over: ExportStyle) -> ExportStyle {
+        let ExportStyle {
+            preset: _,
+            scene_break,
+            body_font,
+            heading_font,
+            heading_align,
+            drop_cap,
+            title_ornament,
+            part_ornament,
+            scene_break_image,
+            chapter_heading_image,
+            title_image,
+            fonts: _,
+            images: _,
+        } = over;
+        self.scene_break = scene_break.or(self.scene_break);
+        self.body_font = body_font.or(self.body_font);
+        self.heading_font = heading_font.or(self.heading_font);
+        self.heading_align = heading_align.or(self.heading_align);
+        self.drop_cap = drop_cap.or(self.drop_cap);
+        self.title_ornament = title_ornament.or(self.title_ornament);
+        self.part_ornament = part_ornament.or(self.part_ornament);
+        self.scene_break_image = scene_break_image.or(self.scene_break_image);
+        self.chapter_heading_image = chapter_heading_image.or(self.chapter_heading_image);
+        self.title_image = title_image.or(self.title_image);
+        self
     }
 
     /// Warnings for non-fatal `[style]` config problems (#470) — e.g. an unknown
@@ -847,6 +928,54 @@ mod tests {
         assert!(style.image(ImageRole::Title).is_none());
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("unsupported image"), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_preset_seeds_the_style_and_explicit_keys_override_it() {
+        // `classic` bundles a scene break, drop cap, and ornaments.
+        let mut style = ExportStyle {
+            preset: Some("classic".into()),
+            ..Default::default()
+        };
+        assert!(style.apply_preset().is_none());
+        assert!(style.drop_cap());
+        assert_eq!(style.scene_break(), "* * *");
+        assert_eq!(style.title_ornament.as_deref(), Some("❦"));
+
+        // An explicit key wins; unset keys keep the preset's value.
+        let mut tweaked = ExportStyle {
+            preset: Some("classic".into()),
+            scene_break: Some("@@@".into()),
+            ..Default::default()
+        };
+        assert!(tweaked.apply_preset().is_none());
+        assert_eq!(
+            tweaked.scene_break(),
+            "@@@",
+            "explicit key overrides preset"
+        );
+        assert!(tweaked.drop_cap(), "unset key keeps the preset");
+
+        // `modern` is the contrasting look.
+        let mut modern = ExportStyle {
+            preset: Some("modern".into()),
+            ..Default::default()
+        };
+        assert!(modern.apply_preset().is_none());
+        assert_eq!(modern.heading_align(), Some("left"));
+        assert!(!modern.drop_cap());
+
+        // An unknown preset warns and leaves the style untouched.
+        let mut bad = ExportStyle {
+            preset: Some("retro".into()),
+            ..Default::default()
+        };
+        let warning = bad.apply_preset().expect("unknown preset warns");
+        assert!(warning.contains("unknown preset"), "{warning}");
+        assert_eq!(bad.scene_break(), "#", "default scene break unchanged");
+
+        // No preset → no-op, no warning.
+        assert!(ExportStyle::default().apply_preset().is_none());
     }
 
     #[test]
