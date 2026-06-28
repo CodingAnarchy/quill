@@ -333,6 +333,9 @@ pub(crate) enum Command {
     Ai(AiAction),
     Git(GitAction),
     Export(ExportFormat, ExportScope),
+    /// Open a styled sample EPUB of the current `[style]` settings in the system
+    /// reader (#483), so an author can see a preset + overrides before exporting.
+    PreviewStyle,
     /// Run a registry [`Action`] from the unified run-action menu (#225). This is
     /// the going-forward path; `Ai`/`Export` above remain as their own variants
     /// only because the AI and export palettes still emit them directly — folding

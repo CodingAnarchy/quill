@@ -456,15 +456,18 @@ fn the_export_menu_offers_series_and_book_scopes() {
 }
 
 #[test]
-fn a_standalone_export_menu_is_unchanged() {
+fn a_standalone_export_menu_lists_the_preview_then_each_format_once() {
     let (mut app, _dir) = two_chapter_app("export-single");
     app.open_export_palette();
     let Mode::Palette(p) = &app.mode else {
         panic!("export palette")
     };
-    assert_eq!(p.items.len(), 5);
-    assert_eq!(p.items[0].label, "Manuscript (Markdown)");
-    assert_eq!(p.items[4].label, "EPUB (.epub)");
+    // The style preview leads, then the five formats once each (no series/book
+    // scope duplication for a standalone novel).
+    assert_eq!(p.items.len(), 6);
+    assert_eq!(p.items[0].label, "Preview style…");
+    assert_eq!(p.items[1].label, "Manuscript (Markdown)");
+    assert_eq!(p.items[5].label, "EPUB (.epub)");
 }
 
 fn report_text(app: &App) -> String {

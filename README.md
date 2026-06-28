@@ -127,7 +127,12 @@ keystrokes that stay out of the way.
 
   With no `[style]`, the output is exactly the plain default. Only
   the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
-  formats ignore it.
+  formats ignore it. To see a look before committing to a full export, the export
+  menu (`Ctrl-e`) opens with **Preview style…**, which renders a fixed sample book
+  (title page, a chapter opening, a scene break, a part divider) through your
+  current `[style]` and opens it in your system EPUB reader — the same output a
+  real export produces, so fonts, images, drop caps, and ornaments all show. It
+  writes only a temp file and never touches your manuscript.
 
 - **AI assistance (opt-in)** — off by default; a draft only leaves the machine
   when you enable AI and supply a key. Quill's AI is an **assistant, not a

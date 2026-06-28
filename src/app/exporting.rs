@@ -6,7 +6,7 @@
 use super::*;
 
 use crate::export::{self, Chapter, Document, ExportStyle, Part};
-use crate::frontmatter::Band;
+use crate::frontmatter::{Band, Epigraph};
 use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
 
@@ -50,6 +50,11 @@ impl App {
             command: Command::Export(format, scope),
         };
         let mut items = Vec::new();
+        items.push(PaletteItem {
+            label: "Preview style…".into(),
+            desc: "Open a styled sample of your [style] settings in your EPUB reader".into(),
+            command: Command::PreviewStyle,
+        });
         if self.project.book_count() > 1 {
             for (f, label, desc) in FORMATS {
                 items.push(item(
@@ -166,6 +171,48 @@ impl App {
             Some(m) => format!("{m} — {note}"),
             None => note,
         });
+    }
+
+    /// Preview the designed-export styling (#483): render a fixed sample book
+    /// through the *same* style-resolution and EPUB writer a real export uses, write
+    /// it to a temp file, and open it in the system EPUB reader. Lets an author see
+    /// a preset + overrides — scene break, ornaments, drop cap, heading alignment,
+    /// embedded fonts/images — before committing to a full export. Touches only a
+    /// temp file; the project is never modified.
+    pub(crate) fn preview_style(&mut self) {
+        let (bytes, warnings) = match self.style_preview_epub() {
+            Ok(built) => built,
+            Err(e) => {
+                self.message = Some(format!("Style preview failed: {e}"));
+                return;
+            }
+        };
+        let path = std::env::temp_dir().join("quill-style-preview.epub");
+        if let Err(e) = std::fs::write(&path, &bytes) {
+            self.message = Some(format!("Style preview failed: {e}"));
+            return;
+        }
+        match open_in_default_app(&path) {
+            Ok(()) => self.message = Some(format!("Style preview opened ({})", path.display())),
+            // The EPUB is written; only the launch failed — point the author at it.
+            Err(e) => {
+                self.message = Some(format!(
+                    "Wrote {} but couldn't open it: {e}",
+                    path.display()
+                ))
+            }
+        }
+        self.note_export_warnings(warnings);
+    }
+
+    /// Render the fixed style-preview sample (#483) through the resolved `[style]`
+    /// and the EPUB writer, returning the bytes and any styling warnings — the pure,
+    /// side-effect-free core of [`preview_style`] (no temp file, no reader launch).
+    pub(crate) fn style_preview_epub(&self) -> std::io::Result<(Vec<u8>, Vec<String>)> {
+        let (style, warnings) = self.epub_style();
+        let doc = style_preview_document();
+        let bytes = export::epub::to_epub(&doc, &crate::date::utc_timestamp(), &style)?;
+        Ok((bytes, warnings))
     }
 
     /// Write the whole series (one book per [`Document`], in order) in `format` to
@@ -414,4 +461,57 @@ impl App {
             back,
         }
     }
+}
+
+/// A fixed sample book for the style preview (#483): generic title-page metadata, a
+/// book epigraph, and one named part with a chapter whose opening paragraph, scene
+/// break, and a following paragraph exercise every styled element (drop cap, scene
+/// break, heading alignment, title/part ornaments). Built from a constant snippet —
+/// it never reads the author's chapters.
+fn style_preview_document() -> Document {
+    Document {
+        title: "The Sample Novel".into(),
+        subtitle: Some("A Style Preview".into()),
+        author: Some("Your Name".into()),
+        series: Some("The Sample Series".into()),
+        epigraph: Some(Epigraph {
+            text: "A book opens on an epigraph.".into(),
+            attribution: Some("Anon.".into()),
+        }),
+        front: Vec::new(),
+        parts: vec![Part {
+            name: Some("Part One".into()),
+            chapters: vec![Chapter {
+                title: "Chapter One".into(),
+                epigraph: None,
+                body: "This opening paragraph shows how a drop cap and the body text \
+                       look in your chosen style, running long enough to wrap across a \
+                       line or two so the indentation reads true.\n\n\
+                       A second paragraph follows, set in the body font.\n\n\
+                       ---\n\n\
+                       After the scene break the story resumes, so the divider — a glyph \
+                       or an image — appears in place between the two scenes."
+                    .into(),
+            }],
+        }],
+        back: Vec::new(),
+    }
+}
+
+/// Open `path` in the operating system's default application (#483) — the EPUB
+/// reader, for the style preview. Spawns the platform launcher and returns without
+/// waiting, so the editor keeps running.
+fn open_in_default_app(path: &std::path::Path) -> std::io::Result<()> {
+    use std::process::Command as Proc;
+    #[cfg(target_os = "macos")]
+    let mut cmd = Proc::new("open");
+    #[cfg(target_os = "linux")]
+    let mut cmd = Proc::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Proc::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    };
+    cmd.arg(path).spawn().map(|_| ())
 }
