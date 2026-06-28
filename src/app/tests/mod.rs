@@ -59,6 +59,7 @@ mod chapters_filter;
 mod chapters_sections;
 mod configure;
 mod editing;
+mod export_styling;
 mod models;
 mod panes;
 mod project_search;
