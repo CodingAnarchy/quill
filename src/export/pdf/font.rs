@@ -4,7 +4,10 @@
 //! the bundled fonts is delegated to `ttf-parser`; everything emitted into the PDF
 //! is still hand-written here.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+
+use crate::export::{ExportStyle, FontRole};
 
 /// PDF object bodies keyed by id — shared with the layout module. Bodies are bytes
 /// because embedded font programs (`/FontFile2`) are binary.
@@ -41,13 +44,57 @@ pub(super) enum FontPlan {
 }
 
 impl FontPlan {
-    /// Parse and load the four bundled faces for embedding.
-    pub(super) fn embedded() -> FontPlan {
+    /// The screen profile's fonts (#463/#489): the standard-14 Times faces when no
+    /// font is configured (the unchanged default), otherwise the embedded plan so a
+    /// `[style]` body/heading font can be applied.
+    pub(super) fn for_screen(style: &ExportStyle) -> FontPlan {
+        if style.font(FontRole::Body).is_some() || style.font(FontRole::Heading).is_some() {
+            FontPlan::embedded(style)
+        } else {
+            FontPlan::Standard
+        }
+    }
+
+    /// The print profile's fonts (#464): always embedded (POD requires it).
+    pub(super) fn for_print(style: &ExportStyle) -> FontPlan {
+        FontPlan::embedded(style)
+    }
+
+    /// The four embedded faces (#464/#489): bundled Liberation Serif by default, with
+    /// a configured `body_font` substituted for the regular face and `heading_font`
+    /// for the bold face. Body emphasis (italic/bold-italic) and any unset slot keep
+    /// the bundled face — PDF can't faux-style a single configured file, so a chosen
+    /// body font pairs with the bundled weights for emphasis (a documented gap).
+    fn embedded(style: &ExportStyle) -> FontPlan {
+        let face =
+            |default: &'static [u8], role: Option<FontRole>, base: &str, bold, italic| match role
+                .and_then(|r| style.font(r))
+            {
+                Some(f) => EmbeddedFace::load(
+                    Cow::Owned(f.bytes.clone()),
+                    &pdf_name(&f.family),
+                    bold,
+                    italic,
+                ),
+                None => EmbeddedFace::load(Cow::Borrowed(default), base, bold, italic),
+            };
         FontPlan::Embedded(vec![
-            EmbeddedFace::load(REGULAR, "LiberationSerif", false, false),
-            EmbeddedFace::load(BOLD, "LiberationSerif-Bold", true, false),
-            EmbeddedFace::load(ITALIC, "LiberationSerif-Italic", false, true),
-            EmbeddedFace::load(BOLD_ITALIC, "LiberationSerif-BoldItalic", true, true),
+            face(
+                REGULAR,
+                Some(FontRole::Body),
+                "LiberationSerif",
+                false,
+                false,
+            ),
+            face(
+                BOLD,
+                Some(FontRole::Heading),
+                "LiberationSerif-Bold",
+                true,
+                false,
+            ),
+            face(ITALIC, None, "LiberationSerif-Italic", false, true),
+            face(BOLD_ITALIC, None, "LiberationSerif-BoldItalic", true, true),
         ])
     }
 
@@ -89,7 +136,7 @@ impl FontPlan {
             FontPlan::Embedded(faces) => {
                 for (i, face) in faces.iter().enumerate() {
                     let file = take(next);
-                    out.insert(file, font_file_stream(face.program));
+                    out.insert(file, font_file_stream(&face.program));
                     let desc = take(next);
                     out.insert(desc, face.descriptor(file).into_bytes());
                     let dict = take(next);
@@ -106,7 +153,7 @@ impl FontPlan {
 /// metrics and per-WinAnsi-byte advances the PDF font objects need.
 pub(super) struct EmbeddedFace {
     base: String,
-    program: &'static [u8],
+    program: Cow<'static, [u8]>,
     flags: i32,
     bbox: [i32; 4],
     italic_angle: f32,
@@ -119,8 +166,8 @@ pub(super) struct EmbeddedFace {
 }
 
 impl EmbeddedFace {
-    fn load(program: &'static [u8], base: &str, bold: bool, italic: bool) -> EmbeddedFace {
-        let face = ttf_parser::Face::parse(program, 0).expect("bundled font parses");
+    fn load(program: Cow<'static, [u8]>, base: &str, bold: bool, italic: bool) -> EmbeddedFace {
+        let face = ttf_parser::Face::parse(&program, 0).expect("font parses");
         let scale = 1000.0 / face.units_per_em() as f32;
         let mut em = [0.0f32; 256];
         for b in 0x20u16..=0xFF {
@@ -137,18 +184,23 @@ impl EmbeddedFace {
         // Serif + nonsymbolic (uses a standard encoding), italic when slanted.
         let flags = 0x02 | 0x20 | if italic { 0x40 } else { 0 };
         let ascent = s(face.ascender());
+        let descent = s(face.descender());
+        let italic_angle = face.italic_angle();
+        let bbox = [s(bb.x_min), s(bb.y_min), s(bb.x_max), s(bb.y_max)];
         let cap_height = face
             .capital_height()
             .map(s)
             .unwrap_or((ascent as f32 * 0.7) as i32);
+        // All face-derived values are read into locals above, so `face`'s borrow of
+        // `program` ends here — before `program` moves into the struct below.
         EmbeddedFace {
             base: base.to_string(),
             program,
             flags,
-            bbox: [s(bb.x_min), s(bb.y_min), s(bb.x_max), s(bb.y_max)],
-            italic_angle: face.italic_angle(),
+            bbox,
+            italic_angle,
             ascent,
-            descent: s(face.descender()),
+            descent,
             cap_height,
             stem_v: if bold { 120 } else { 80 },
             em,
@@ -183,6 +235,20 @@ impl EmbeddedFace {
              /Widths [ {widths}] /FontDescriptor {descriptor} 0 R /Encoding /WinAnsiEncoding >>",
             self.base,
         )
+    }
+}
+
+/// A PDF name token for a font family: drop spaces and anything outside
+/// `[A-Za-z0-9-]` so the configured family is a valid `/BaseFont` name.
+fn pdf_name(family: &str) -> String {
+    let cleaned: String = family
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if cleaned.is_empty() {
+        "EmbeddedFont".to_string()
+    } else {
+        cleaned
     }
 }
 

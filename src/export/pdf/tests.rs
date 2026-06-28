@@ -1,7 +1,12 @@
 //! Tests for the PDF writer (#463) and the print-interior profile (#464).
 
 use super::*;
-use crate::export::{Chapter, Part};
+use crate::export::{Chapter, ExportStyle, Part};
+
+/// The default (no `[style]`) — screen/print output is the plain #463/#464 baseline.
+fn plain() -> ExportStyle {
+    ExportStyle::default()
+}
 
 fn ep(text: &str, by: Option<&str>) -> Epigraph {
     Epigraph {
@@ -80,7 +85,7 @@ fn count(s: &str, needle: &str) -> usize {
 
 #[test]
 fn is_a_well_formed_pdf_with_a_locatable_xref() {
-    let bytes = to_pdf(&doc()).unwrap();
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
     let s = text(&bytes);
     assert!(s.starts_with("%PDF-1.7"), "header");
     assert!(s.trim_end().ends_with("%%EOF"), "trailer marker");
@@ -98,7 +103,7 @@ fn is_a_well_formed_pdf_with_a_locatable_xref() {
 
 #[test]
 fn screen_pdf_uses_the_standard_times_faces() {
-    let s = text(&to_pdf(&doc()).unwrap());
+    let s = text(&to_pdf(&doc(), &plain()).unwrap());
     for base in [
         "Times-Roman",
         "Times-Bold",
@@ -118,7 +123,7 @@ fn screen_pdf_uses_the_standard_times_faces() {
 
 #[test]
 fn carries_metadata_structure_and_emphasis() {
-    let bytes = to_pdf(&doc()).unwrap();
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
     let visible = shown(&bytes);
     for piece in [
         "Red State Earth",
@@ -145,14 +150,14 @@ fn carries_metadata_structure_and_emphasis() {
 
 #[test]
 fn each_section_starts_on_its_own_page_in_the_screen_profile() {
-    let s = text(&to_pdf(&doc()).unwrap());
+    let s = text(&to_pdf(&doc(), &plain()).unwrap());
     // title + prologue + part page + chapter + afterword, no blanks inserted.
     assert_eq!(count(&s, "/Type /Page /Parent"), 5);
 }
 
 #[test]
 fn builds_a_nested_bookmark_outline() {
-    let s = text(&to_pdf(&doc()).unwrap());
+    let s = text(&to_pdf(&doc(), &plain()).unwrap());
     assert!(
         s.contains("/PageMode /UseOutlines"),
         "opens with the outline"
@@ -192,6 +197,7 @@ fn a_series_carries_every_book_in_order_under_the_series_title() {
         &[book("Book One"), book("Book Two")],
         Some("The Saga"),
         Some("A. Writer"),
+        &plain(),
     )
     .unwrap();
     let visible = shown(&bytes);
@@ -221,7 +227,7 @@ fn trim_points_resolves_known_sizes_only() {
 #[test]
 fn print_pdf_embeds_the_fonts_at_the_chosen_trim() {
     let (w, h) = trim_points("6x9").unwrap();
-    let s = text(&to_pdf_print(&doc(), w, h).unwrap());
+    let s = text(&to_pdf_print(&doc(), w, h, &plain()).unwrap());
     // The bundled faces are embedded as TrueType with a descriptor + program.
     assert!(s.contains("/Subtype /TrueType"), "embedded TrueType font");
     assert_eq!(count(&s, "/FontFile2"), 4, "four font programs embedded");
@@ -268,9 +274,12 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         back: vec![],
     };
     let (w, h) = trim_points("6x9").unwrap();
-    let screen = count(&text(&to_pdf(&mini).unwrap()), "/Type /Page /Parent");
+    let screen = count(
+        &text(&to_pdf(&mini, &plain()).unwrap()),
+        "/Type /Page /Parent",
+    );
     let print = count(
-        &text(&to_pdf_print(&mini, w, h).unwrap()),
+        &text(&to_pdf_print(&mini, w, h, &plain()).unwrap()),
         "/Type /Page /Parent",
     );
     assert_eq!(screen, 2, "title + chapter");
@@ -296,10 +305,170 @@ fn print_pdf_draws_running_heads() {
         back: vec![],
     };
     let (w, h) = trim_points("6x9").unwrap();
-    let visible = shown(&to_pdf_print(&d, w, h).unwrap());
+    let visible = shown(&to_pdf_print(&d, w, h, &plain()).unwrap());
     // Title page mentions each once; running heads on continuation pages add more.
     assert!(
         count(&visible, "TITLEX") + count(&visible, "AUTHORX") > 2,
         "running heads render on continuation pages: {visible}"
+    );
+}
+
+/// A bundled face reused as a "configured" font in tests (any valid TTF works).
+const TEST_FONT: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
+
+/// The x of the text matrix immediately before `needle` — to check line placement.
+fn tm_x_before(s: &str, needle: &str) -> f32 {
+    let at = s.find(needle).expect("needle present");
+    let tm = s[..at].rfind("1 0 0 1 ").expect("a Tm precedes it");
+    s[tm + "1 0 0 1 ".len()..]
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn style_glyphs_and_ornaments_carry_into_the_pdf() {
+    // WinAnsi glyphs (asterisks, an asterisk ornament) render; the scene break
+    // replaces the default `#`.
+    let style = ExportStyle {
+        scene_break: Some("* * *".into()),
+        title_ornament: Some("*".into()),
+        ..Default::default()
+    };
+    let visible = shown(&to_pdf(&doc(), &style).unwrap());
+    assert!(
+        visible.contains("* * *"),
+        "configured scene break: {visible}"
+    );
+    assert!(!visible.contains(" # "), "default glyph replaced");
+    assert!(visible.contains('*'), "renderable ornament drawn");
+    assert!(
+        pdf_style_warnings(&style).is_empty(),
+        "all-WinAnsi style, no warnings"
+    );
+}
+
+#[test]
+fn a_preset_styles_the_pdf_within_the_font_set() {
+    // `classic` resolves (via apply_preset) to a `* * *` scene break, a drop cap,
+    // and `❦` ornaments. The WinAnsi glyphs and drop cap render; the decorative
+    // ornament can't (it's outside the serif fonts) and is reported.
+    let mut style = ExportStyle {
+        preset: Some("classic".into()),
+        ..Default::default()
+    };
+    style.apply_preset();
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    let visible = shown(&bytes);
+    assert!(visible.contains("* * *"), "classic scene break renders");
+    assert!(
+        text(&bytes).contains(&format!("/F1 {} Tf", BODY_LEADING * 3.0)),
+        "classic drop cap"
+    );
+    assert!(!visible.contains('❦'), "the ❦ ornament can't render in PDF");
+    assert!(
+        pdf_style_warnings(&style).iter().any(|w| w.contains('❦')),
+        "the skipped ornament is reported"
+    );
+}
+
+#[test]
+fn pdf_style_warnings_flag_images_and_unrenderable_glyphs() {
+    // A non-WinAnsi scene break falls back to `#` and is reported.
+    let glyphy = ExportStyle {
+        scene_break: Some("❖".into()),
+        ..Default::default()
+    };
+    let visible = shown(&to_pdf(&doc(), &glyphy).unwrap());
+    assert!(visible.contains('#'), "falls back to the default divider");
+    assert!(
+        pdf_style_warnings(&glyphy)
+            .iter()
+            .any(|w| w.contains("font set")),
+        "glyph reported"
+    );
+    // A configured image ornament is reported as deferred.
+    let mut imaged = ExportStyle {
+        scene_break_image: Some("art/break.png".into()),
+        ..Default::default()
+    };
+    imaged.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+    assert!(
+        pdf_style_warnings(&imaged)
+            .iter()
+            .any(|w| w.contains("image ornaments")),
+        "image ornaments reported as not-yet-applied"
+    );
+}
+
+#[test]
+fn drop_cap_sets_a_large_initial_only_when_styled() {
+    let cap = format!("/F1 {} Tf", BODY_LEADING * 3.0);
+    let off = ExportStyle::default();
+    assert!(
+        !text(&to_pdf(&doc(), &off).unwrap()).contains(&cap),
+        "no drop cap by default"
+    );
+    let on = ExportStyle {
+        drop_cap: Some(true),
+        ..Default::default()
+    };
+    assert!(
+        text(&to_pdf(&doc(), &on).unwrap()).contains(&cap),
+        "drop cap initial is set large"
+    );
+}
+
+#[test]
+fn heading_alignment_places_the_chapter_title() {
+    let book = |align: Option<&str>| {
+        let style = ExportStyle {
+            heading_align: align.map(str::to_string),
+            ..Default::default()
+        };
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![ch("HEADX", None, "")],
+            }],
+            back: vec![],
+        };
+        text(&to_pdf(&d, &style).unwrap())
+    };
+    // Left-aligned headings sit at the text-column left edge (the 72pt margin);
+    // centered (the default) sits further in.
+    let left_x = tm_x_before(&book(Some("left")), "(HEADX)");
+    let center_x = tm_x_before(&book(None), "(HEADX)");
+    assert!(
+        (left_x - 72.0).abs() < 0.5,
+        "left heading at the margin: {left_x}"
+    );
+    assert!(center_x > 80.0, "centered heading is indented: {center_x}");
+}
+
+#[test]
+fn a_configured_body_font_is_embedded_even_in_the_screen_pdf() {
+    let mut style = ExportStyle {
+        body_font: Some("body.ttf".into()),
+        ..Default::default()
+    };
+    let warnings = style.resolve_fonts(|_| Ok(TEST_FONT.to_vec()));
+    assert!(warnings.is_empty(), "font resolves: {warnings:?}");
+    let s = text(&to_pdf(&doc(), &style).unwrap());
+    // The screen profile embeds nothing by default; a configured font switches it
+    // to the embedded plan.
+    assert!(s.contains("/FontFile2"), "configured body font embedded");
+    assert!(s.contains("/Subtype /TrueType"), "embedded as TrueType");
+    assert!(
+        !s.contains("/BaseFont /Times-Roman"),
+        "no longer the standard face"
     );
 }

@@ -120,11 +120,12 @@ keystrokes that stay out of the way.
   For a multi-book **series**, the menu offers each format twice — the whole
   series (books in reading order, each delimited per format: Markdown/Word book
   headings, Scrivener book folders, EPUB book sections in the table of contents,
-  PDF book divider pages) or just the active book. The EPUB can be lightly styled (opt-in) via a
+  PDF book divider pages) or just the active book. The designed exports — EPUB and
+  PDF — can be lightly styled (opt-in) via a
   `[style]` table in `book.toml`: `scene_break` chooses the divider glyph between
   scenes (e.g. `scene_break = "* * *"`), and `body_font` / `heading_font` point at
   font files (paths relative to the project, `.ttf`/`.otf`/`.woff`/`.woff2`) that
-  are embedded into the EPUB and applied (only embed fonts you're licensed to
+  are embedded into the export and applied (only embed fonts you're licensed to
   distribute); `heading_align` (`left`/`center`/`right`/`justify`) sets the
   chapter-heading alignment and `drop_cap = true` opens each chapter's first
   paragraph with a drop cap; `title_ornament` / `part_ornament` place a decorative
@@ -143,9 +144,13 @@ keystrokes that stay out of the way.
   - `fantasy` — `❖` scene breaks, drop caps, `⚜` (fleur-de-lis) ornaments
   - `minimalist` — left-aligned headings, a single centered mid-dot (`·`)
 
-  With no `[style]`, the output is exactly the plain default. Only
-  the designed formats (EPUB, and PDF when it lands) read `[style]`; the plain
-  formats ignore it. To see a look before committing to a full export, the export
+  With no `[style]`, the output is exactly the plain default. Both designed formats
+  read `[style]`; the plain formats (Markdown, Word, Scrivener, Vellum) ignore it.
+  The PDF honors the fonts, scene-break glyph, heading alignment, drop caps, and
+  presets; two things don't carry to PDF yet and are reported as a warning when
+  configured: image ornaments (EPUB only for now) and decorative ornament glyphs
+  outside the standard serif set (e.g. `❦`/`⚜`) — the EPUB shows these, the PDF
+  skips them (a non-renderable scene break falls back to `#`). To see a look before committing to a full export, the export
   menu (`Ctrl-e`) opens with **Preview style…**, which renders a fixed sample book
   (title page, a chapter opening, a scene break, a part divider) through your
   current `[style]` and opens it in your system EPUB reader — the same output a
