@@ -9,7 +9,27 @@ use super::bible_review::Staged;
 use super::*;
 use crate::ai::scaffold;
 
+/// The source stashed between an import wizard's two prompts (#508): the folder
+/// of notes to seed a new project's bible from (#286), or the manuscript file to
+/// split into chapters (#298). Held in `App::pending_import_source` while the
+/// destination prompt is open, then taken by the matching `finish_*`.
+pub(crate) enum PendingImportSource {
+    /// A folder of Markdown notes to import into the new project's bible (#286).
+    NotesFolder(PathBuf),
+    /// A Markdown / Word / Scrivener manuscript to split into chapters (#298).
+    Manuscript(PathBuf),
+}
+
 impl App {
+    /// Stash `pending` and open the new-project destination prompt under `dest`,
+    /// prefilled with `"{base}/"` so the author only types the project's folder
+    /// name (#508). Shared by both import wizards' `begin_*` steps.
+    fn prompt_new_project_dest(&mut self, pending: PendingImportSource, dest: Pending) {
+        self.pending_import_source = Some(pending);
+        let prefill = format!("{}/", self.new_project_base().display());
+        self.open_prompt(dest, "New project — path:", &prefill, None);
+    }
+
     // --- Notes import (#283) ----------------------------------------------
 
     /// Prompt for a notes file (or a folder of them) to import into the story
@@ -44,19 +64,17 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
-        self.pending_notes_folder = Some(std::path::PathBuf::from(folder));
-        let prefill = format!("{}/", self.new_project_base().display());
-        self.open_prompt(
+        let folder = PathBuf::from(folder);
+        self.prompt_new_project_dest(
+            PendingImportSource::NotesFolder(folder),
             Pending::NewFromNotesDest,
-            "New project — path:",
-            &prefill,
-            None,
         );
     }
 
     /// Create the new project at `dest` and import the folder chosen earlier.
     pub(crate) fn finish_new_from_notes(&mut self, dest: &str) {
-        let Some(folder) = self.pending_notes_folder.take() else {
+        let Some(PendingImportSource::NotesFolder(folder)) = self.pending_import_source.take()
+        else {
             self.mode = self.editing_mode();
             return;
         };
@@ -99,13 +117,10 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
-        self.pending_manuscript_source = Some(path.to_path_buf());
-        let prefill = format!("{}/", self.new_project_base().display());
-        self.open_prompt(
+        let source = path.to_path_buf();
+        self.prompt_new_project_dest(
+            PendingImportSource::Manuscript(source),
             Pending::ImportManuscriptDest,
-            "New project — path:",
-            &prefill,
-            None,
         );
     }
 
@@ -113,7 +128,8 @@ impl App {
     /// split it into per-chapter files in reading order. The source is read only —
     /// never moved or altered.
     pub(crate) fn finish_import_manuscript(&mut self, dest: &str) {
-        let Some(source) = self.pending_manuscript_source.take() else {
+        let Some(PendingImportSource::Manuscript(source)) = self.pending_import_source.take()
+        else {
             self.mode = self.editing_mode();
             return;
         };
