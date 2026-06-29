@@ -330,8 +330,9 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
 }
 
 /// Display-only lines for an epigraph: the quotation (inset, italic) and its
-/// attribution (`— Name`, dimmed), set off by blank lines. Long lines soft-wrap to
-/// the column so nothing is cut off (#518). Never enters the buffer or any file.
+/// attribution (`— Name`, dimmed, right-aligned to match the export), set off by
+/// blank lines. Long lines soft-wrap to the column so nothing is cut off (#518).
+/// Never enters the buffer or any file.
 fn epigraph_lines(epigraph: &Epigraph, width: u16) -> Vec<Line<'static>> {
     let theme = theme::current();
     const INDENT: &str = "    ";
@@ -347,10 +348,13 @@ fn epigraph_lines(epigraph: &Epigraph, width: u16) -> Vec<Line<'static>> {
         }
     }
     if let Some(attribution) = &epigraph.attribution {
-        for row in wrap_rows(&format!("— {attribution}"), wrap_width) {
+        // Right-aligned to the column edge, matching the export (`text-align: right`).
+        let dim = Style::default().fg(theme.dim);
+        for row in wrap_rows(&format!("— {attribution}"), width as usize) {
+            let pad = (width as usize).saturating_sub(row.chars().count());
             lines.push(Line::from(Span::styled(
-                format!("{INDENT}{row}"),
-                Style::default().fg(theme.dim),
+                format!("{}{row}", " ".repeat(pad)),
+                dim,
             )));
         }
     }

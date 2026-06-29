@@ -572,6 +572,23 @@ fn a_multiline_epigraph_renders_one_line_each() {
         "screen:\n{screen}"
     );
     assert!(red < blue && blue < by, "lines out of order:\n{screen}");
+
+    // The attribution is right-aligned (more leading space than the inset quote),
+    // matching the export's `text-align: right` (#518).
+    let quote_indent = screen
+        .lines()
+        .find(|l| l.contains("Roses are red"))
+        .map(|l| l.len() - l.trim_start().len())
+        .unwrap();
+    let attr_indent = screen
+        .lines()
+        .find(|l| l.contains("— Anon"))
+        .map(|l| l.len() - l.trim_start().len())
+        .unwrap();
+    assert!(
+        attr_indent > quote_indent,
+        "attribution right-aligned past the inset quote:\n{screen}"
+    );
 }
 
 #[test]
