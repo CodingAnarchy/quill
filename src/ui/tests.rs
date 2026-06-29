@@ -332,6 +332,34 @@ fn a_fenced_code_block_renders_in_the_code_colour() {
 }
 
 #[test]
+fn a_long_palette_scrolls_to_keep_the_selection_visible() {
+    // The Ctrl-K action palette has ~50 entries; on a short terminal it overflows.
+    let mut app = app_with("text\n");
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    assert!(matches!(app.mode, Mode::Palette(_)), "palette open");
+    // Drive the selection well past a short viewport.
+    for _ in 0..30 {
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+    let screen = render(&app, 100, 16);
+
+    let Mode::Palette(p) = &app.mode else {
+        unreachable!()
+    };
+    let selected = p.items[p.selected].label.clone();
+    let first = p.items[0].label.clone();
+    // The selected row scrolled into view; the first row scrolled off the top.
+    assert!(
+        screen.contains(&selected),
+        "selected row '{selected}' is visible:\n{screen}"
+    );
+    assert!(
+        !screen.contains(&first),
+        "first row '{first}' scrolled off:\n{screen}"
+    );
+}
+
+#[test]
 fn the_model_manager_lists_the_catalog_with_characteristics() {
     let mut app = app_with("text\n");
     app.mode = Mode::ModelManager { selected: 0 };
