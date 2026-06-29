@@ -187,23 +187,66 @@ fn tag_attrs<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
     find_open(xml, 0, name).map(|(start, gt, _)| xml[start..gt].trim_end_matches('/').trim())
 }
 
-/// Invoke `f` for each `<name>…</name>` element in `xml`, in order, with its
-/// inner XML — or `f(None)` for a self-closing `<name/>`. Centralizes the
-/// open/find-close/advance bookkeeping the paragraph, run, and text scans share.
-fn for_each_element(xml: &str, name: &str, mut f: impl FnMut(Option<&str>)) {
+/// The single nesting-aware traversal primitive: invoke `f` for each
+/// `<name …>…</name>` / `<name …/>` element in `xml`, in order, passing its
+/// attribute substring and its inner XML — `None` inner for a self-closing tag.
+/// Each element is bounded by [`matching_close`], so a same-named element nested
+/// inside another is part of the outer element's inner XML, not a separate top
+/// item. This is the one source of truth for the open/close/advance-with-depth
+/// bookkeeping every scan shares; [`for_each_element`] and the `.scrivx` binder
+/// walk are thin projections of it.
+fn for_each_child<'a>(xml: &'a str, name: &str, mut f: impl FnMut(&'a str, Option<&'a str>)) {
     let close = format!("</{name}>");
-    let mut i = 0;
-    while let Some(open) = next_element(xml, i, name) {
-        if open.self_closing {
-            f(None);
-            i = open.after;
+    let mut pos = 0;
+    while let Some((attrs_start, gt, self_closing)) = find_open(xml, pos, name) {
+        let attrs = xml[attrs_start..gt].trim_end_matches('/').trim();
+        if self_closing {
+            f(attrs, None);
+            pos = gt + 1;
             continue;
         }
-        let Some(rel) = xml[open.after..].find(&close) else {
+        let Some(at) = matching_close(xml, name, gt + 1) else {
             return;
         };
-        f(Some(&xml[open.after..open.after + rel]));
-        i = open.after + rel + close.len();
+        f(attrs, Some(&xml[gt + 1..at]));
+        pos = at + close.len();
+    }
+}
+
+/// Invoke `f` for each `<name>…</name>` element in `xml`, in order, with its
+/// inner XML — or `f(None)` for a self-closing `<name/>`. A nesting-aware
+/// projection of [`for_each_child`] that drops the attributes; centralizes the
+/// open/find-close/advance bookkeeping the paragraph, run, and text scans share.
+fn for_each_element(xml: &str, name: &str, mut f: impl FnMut(Option<&str>)) {
+    for_each_child(xml, name, |_attrs, inner| f(inner));
+}
+
+/// The byte index of the `</name>` that closes the element whose content starts at
+/// `inner_start`, accounting for nested same-named elements. The depth bookkeeping
+/// at the heart of [`for_each_child`].
+fn matching_close(xml: &str, name: &str, inner_start: usize) -> Option<usize> {
+    let close = format!("</{name}>");
+    let mut depth = 1usize;
+    let mut pos = inner_start;
+    loop {
+        let next_open = find_open(xml, pos, name);
+        let next_close = xml[pos..].find(&close).map(|r| pos + r);
+        match (next_open, next_close) {
+            (Some((_, gt, self_closing)), Some(at)) if gt < at => {
+                if !self_closing {
+                    depth += 1;
+                }
+                pos = gt + 1;
+            }
+            (_, Some(at)) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at);
+                }
+                pos = at + close.len();
+            }
+            _ => return None,
+        }
     }
 }
 
@@ -275,5 +318,50 @@ fn decode_entity(entity: &str) -> Option<char> {
             };
             char::from_u32(code)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `for_each_child` yields only the top-level elements, with a same-named
+    /// element nested inside the first one folded into that element's inner XML —
+    /// not surfaced as a separate top-level item. Two levels of nesting plus a
+    /// flat sibling exercise the depth bookkeeping in both directions.
+    #[test]
+    fn for_each_child_bounds_deeper_and_sibling_nesting() {
+        // <g a="1"> contains a nested <g> which itself contains a <g>; then a
+        // flat sibling <g a="2"/> self-closes at the top level.
+        let xml = r#"<g a="1">x<g a="11">y<g a="111">z</g></g>w</g><g a="2"/>"#;
+        let mut seen: Vec<(String, Option<String>)> = Vec::new();
+        for_each_child(xml, "g", |attrs, inner| {
+            seen.push((attrs.to_string(), inner.map(str::to_string)));
+        });
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    "a=\"1\"".to_string(),
+                    // the whole nested subtree is the first element's inner XML
+                    Some(r#"x<g a="11">y<g a="111">z</g></g>w"#.to_string()),
+                ),
+                ("a=\"2\"".to_string(), None),
+            ],
+            "only the two top-level <g> are yielded; nesting is bounded"
+        );
+    }
+
+    /// `matching_close` skips over nested same-named elements (and self-closing
+    /// ones, which don't open a level) to find the close that balances the open.
+    #[test]
+    fn matching_close_balances_nested_elements() {
+        let xml = r#"<g><g/><g>inner</g></g>after"#;
+        // The content of the outer <g> starts just past its '>': index 3.
+        let inner_start = 3;
+        let at = matching_close(xml, "g", inner_start).unwrap();
+        assert_eq!(&xml[inner_start..at], "<g/><g>inner</g>");
+        // What follows the balancing close is the trailing text.
+        assert_eq!(&xml[at + "</g>".len()..], "after");
     }
 }

@@ -9,8 +9,8 @@ use std::path::Path;
 use crate::export::SCENE_BREAK;
 
 use super::{
-    attr_value, element_text, finalize_titles, find_open, join_paragraphs, wrap_emphasis, Imported,
-    ImportedChapter,
+    attr_value, element_text, finalize_titles, for_each_child, join_paragraphs, wrap_emphasis,
+    Imported, ImportedChapter,
 };
 
 /// Parse a Scrivener `.scriv` bundle directory: read its `.scrivx` binder for the
@@ -73,21 +73,19 @@ fn parse_binder(
 
 /// The inner XML of the `DraftFolder` binder item (the "Manuscript" folder).
 fn draft_folder(scrivx: &str) -> Option<&str> {
-    let mut pos = 0;
-    while let Some((attrs_start, gt, _)) = find_open(scrivx, pos, "BinderItem") {
-        let attrs = scrivx[attrs_start..gt].trim_end_matches('/').trim();
-        let close = matching_close(scrivx, "BinderItem", gt + 1)?;
-        if attr_value(attrs, "Type").as_deref() == Some("DraftFolder") {
-            return Some(&scrivx[gt + 1..close]);
+    let mut draft = None;
+    for_each_child(scrivx, "BinderItem", |attrs, inner| {
+        if draft.is_none() && attr_value(attrs, "Type").as_deref() == Some("DraftFolder") {
+            draft = inner;
         }
-        pos = close + "</BinderItem>".len();
-    }
-    None
+    });
+    draft
 }
 
 /// Walk a binder item's direct children, in order: each `Text` document becomes a
 /// chapter (its `content.rtf` converted from RTF); a folder recurses (its title is
-/// dropped — the chapter list is flat). Nesting-aware so folders nest correctly.
+/// dropped — the chapter list is flat). Nesting-aware (via [`for_each_child`]) so
+/// folders nest correctly.
 ///
 /// A listed `Text` document whose `content.rtf` can't be read (`read_rtf`
 /// returns `None`) still becomes a chapter — with an empty body — but is tallied
@@ -99,17 +97,8 @@ fn collect_items(
     out: &mut Vec<ImportedChapter>,
     unreadable: &mut usize,
 ) {
-    let mut pos = 0;
-    while let Some((attrs_start, gt, self_closing)) = find_open(children, pos, "BinderItem") {
-        let attrs = children[attrs_start..gt].trim_end_matches('/').trim();
-        if self_closing {
-            pos = gt + 1;
-            continue;
-        }
-        let Some(close) = matching_close(children, "BinderItem", gt + 1) else {
-            break;
-        };
-        let inner = &children[gt + 1..close];
+    for_each_child(children, "BinderItem", |attrs, inner| {
+        let Some(inner) = inner else { return };
         if attr_value(attrs, "Type").as_deref() == Some("Text") {
             let uuid = attr_value(attrs, "UUID").unwrap_or_default();
             let body = match read_rtf(&uuid) {
@@ -128,43 +117,18 @@ fn collect_items(
         if let Some(grandchildren) = children_group(inner) {
             collect_items(grandchildren, read_rtf, out, unreadable);
         }
-        pos = close + "</BinderItem>".len();
-    }
+    });
 }
 
 /// The inner XML of the first direct `<Children>` element, or `None`.
 fn children_group(item: &str) -> Option<&str> {
-    let (_, gt, _) = find_open(item, 0, "Children")?;
-    let close = matching_close(item, "Children", gt + 1)?;
-    Some(&item[gt + 1..close])
-}
-
-/// The byte index of the `</name>` that closes the element whose content starts at
-/// `inner_start`, accounting for nested same-named elements.
-fn matching_close(xml: &str, name: &str, inner_start: usize) -> Option<usize> {
-    let close = format!("</{name}>");
-    let mut depth = 1usize;
-    let mut pos = inner_start;
-    loop {
-        let next_open = find_open(xml, pos, name);
-        let next_close = xml[pos..].find(&close).map(|r| pos + r);
-        match (next_open, next_close) {
-            (Some((_, gt, self_closing)), Some(at)) if gt < at => {
-                if !self_closing {
-                    depth += 1;
-                }
-                pos = gt + 1;
-            }
-            (_, Some(at)) => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(at);
-                }
-                pos = at + close.len();
-            }
-            _ => return None,
+    let mut group = None;
+    for_each_child(item, "Children", |_attrs, inner| {
+        if group.is_none() {
+            group = inner;
         }
-    }
+    });
+    group
 }
 
 /// Convert a document's RTF to Markdown: each `\par` paragraph becomes a line,
@@ -404,6 +368,32 @@ mod tests {
         assert_eq!(titles, vec!["One", "Two"]);
         assert_eq!(out.chapters[0].body, "Alpha.\n");
         assert_eq!(out.chapters[1].body, "Beta.\n");
+    }
+
+    #[test]
+    fn binder_flattens_deeply_nested_folders_in_order() {
+        // A folder nested two deep, plus sibling text docs at each level, exercises
+        // the nesting-aware walk over `for_each_child` (depth in both directions).
+        let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="u1" Type="Text"><Title>One</Title></BinderItem>
+<BinderItem UUID="f1" Type="Folder"><Title>Part One</Title><Children>
+<BinderItem UUID="u2" Type="Text"><Title>Two</Title></BinderItem>
+<BinderItem UUID="f2" Type="Folder"><Title>Section A</Title><Children>
+<BinderItem UUID="u3" Type="Text"><Title>Three</Title></BinderItem>
+</Children></BinderItem>
+<BinderItem UUID="u4" Type="Text"><Title>Four</Title></BinderItem>
+</Children></BinderItem>
+<BinderItem UUID="u5" Type="Text"><Title>Five</Title></BinderItem>
+</Children></BinderItem>
+</Binder></ScrivenerProject>"#;
+        let out = parse_binder(scrivx, Some("My Novel".into()), |uuid| {
+            Some(rtf(&format!("Body of {uuid}.")))
+        });
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        // Depth-first reading order; every nested folder flattened to its docs.
+        assert_eq!(titles, vec!["One", "Two", "Three", "Four", "Five"]);
+        assert_eq!(out.chapters[2].body, "Body of u3.\n");
     }
 
     #[test]
