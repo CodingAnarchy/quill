@@ -60,6 +60,7 @@ mod chapters_sections;
 mod configure;
 mod editing;
 mod export_styling;
+mod imports;
 mod models;
 mod panes;
 mod project_search;
@@ -156,4 +157,35 @@ fn three_chapter_app(name: &str) -> (App, TempProject) {
 
     let app = open_test_app(&dir);
     (app, TempProject::new(dir))
+}
+
+/// Point the config dir at a fresh temp dir for this test thread (#528), so
+/// `recent::record`/`list` and config reads touch scratch state, never the
+/// developer's real `~/.config/quill`. Shared by the project-management and
+/// import test modules (#500).
+pub(super) fn isolate(tag: &str) {
+    let dir = crate::testutil::scratch_dir("xdg", tag);
+    crate::config::set_config_dir(Some(dir));
+}
+
+/// A one-chapter project on disk with the given title and body.
+pub(super) fn make_project(tag: &str, title: &str, body: &str) -> PathBuf {
+    let dir = crate::testutil::scratch_dir("proj270", tag);
+    fs::write(
+        Project::manifest_path(&dir),
+        format!("title = \"{title}\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n"),
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), body).unwrap();
+    dir
+}
+
+pub(super) fn open_app(dir: &Path) -> App {
+    open_test_app(dir)
+}
+
+/// A directory holding several project subdirs (and any plain ones the caller
+/// adds), for exercising the navigator and as a parent for new projects.
+pub(super) fn books_dir(tag: &str) -> PathBuf {
+    crate::testutil::scratch_dir("navbooks", tag)
 }
