@@ -1,7 +1,8 @@
 //! Quill — a terminal editor optimized for writing novels.
 //!
-//! Run `quill [DIR]` to open a project (or create one in an empty directory).
-//! Defaults to the current directory.
+//! Run `quill [PATH]` to open a project (or create one in an empty directory).
+//! A bare `quill` resolves a project via the startup chooser; `quill --help`
+//! and `quill --version` print usage / the version and exit.
 
 mod ai;
 mod analysis;
@@ -69,29 +70,79 @@ static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 /// is the crate version from `Cargo.toml`, baked in at compile time.
 const VERSION_LINE: &str = concat!("quill ", env!("CARGO_PKG_VERSION"));
 
-/// Whether `arg` is the version flag (#516). Checked before any path handling so
-/// `quill --version` prints the version and exits, rather than treating the flag
-/// as a project directory and scaffolding a `--version` folder.
-fn is_version_flag(arg: &str) -> bool {
-    arg == "--version" || arg == "-V"
+/// What the first command-line argument asks Quill to do. Decided by [`parse_arg`]
+/// before any filesystem work so a flag-style argument (`--help`, `--version`) is
+/// never mistaken for a project directory and scaffolded into a junk folder
+/// (#517/#516).
+#[derive(Debug, PartialEq, Eq)]
+enum Invocation {
+    /// `quill --help` / `quill -h`: print usage and exit (#517).
+    Help,
+    /// `quill --version` / `quill -V`: print the version and exit (#516).
+    Version,
+    /// `quill <path>`: open or create a project at this directory.
+    Path(PathBuf),
+    /// A bare `quill`: resolve a project via the startup chooser.
+    NoArg,
+}
+
+/// Classify the first command-line argument into an [`Invocation`]. Pure (no
+/// filesystem or environment access) so the flag-vs-path decision is unit-testable
+/// and so a help/version query does zero filesystem work (#517/#516): the flag
+/// checks come first, then anything else is taken as a project path.
+fn parse_arg(arg: Option<&str>) -> Invocation {
+    match arg {
+        Some("--help" | "-h") => Invocation::Help,
+        Some("--version" | "-V") => Invocation::Version,
+        Some(path) => Invocation::Path(PathBuf::from(path)),
+        None => Invocation::NoArg,
+    }
+}
+
+/// The usage summary printed for `quill --help`/`-h` (#517). Kept short and
+/// accurate to current behavior: a bare launch resolves to a project in the
+/// projects home (#423) via the startup chooser (#526), and an explicit path opens
+/// or creates a project there. A pure function so the text is unit-testable.
+fn usage_text() -> String {
+    format!(
+        "{VERSION_LINE}\n\
+         A terminal editor for writing novels.\n\
+         \n\
+         Usage: quill [OPTIONS] [PATH]\n\
+         \n\
+         Arguments:\n  \
+         [PATH]  Open or create a project at this directory\n\
+         \n\
+         Options:\n  \
+         -h, --help     Print this help and exit\n  \
+         -V, --version  Print version and exit\n\
+         \n\
+         With no PATH, Quill opens the current directory if it is a project,\n\
+         otherwise it offers to open a recent project or create a new one in\n\
+         your projects home."
+    )
 }
 
 fn main() -> io::Result<()> {
-    // A version query prints and exits before any filesystem work (#516), so a
-    // flag-style argument never gets treated as a project directory.
+    // Classify the first argument before any filesystem work (#517/#516), so a
+    // flag-style argument prints and exits rather than being treated as a project
+    // directory and scaffolding a junk folder named after the flag.
     let first_arg = std::env::args().nth(1);
-    if first_arg.as_deref().is_some_and(is_version_flag) {
-        println!("{VERSION_LINE}");
-        return Ok(());
-    }
-
-    // A project lives in a directory. An explicit path opens (or creates) it
-    // there; a bare launch resolves to an existing project, one chosen from the
-    // library, or a freshly named one in the projects home — never a stray project
-    // in the current folder (#423/#526).
-    let dir = match first_arg {
-        Some(path) => PathBuf::from(path),
-        None => match startup_dir() {
+    let dir = match parse_arg(first_arg.as_deref()) {
+        Invocation::Help => {
+            println!("{}", usage_text());
+            return Ok(());
+        }
+        Invocation::Version => {
+            println!("{VERSION_LINE}");
+            return Ok(());
+        }
+        // An explicit path opens (or creates) a project there.
+        Invocation::Path(path) => path,
+        // A bare launch resolves to an existing project, one chosen from the
+        // library, or a freshly named one in the projects home — never a stray
+        // project in the current folder (#423/#526).
+        Invocation::NoArg => match startup_dir() {
             Ok(Some(dir)) => dir,
             // The author quit at the startup chooser without picking anything (#526).
             Ok(None) => return Ok(()),
@@ -386,15 +437,44 @@ mod tests {
     }
 
     #[test]
-    fn version_flag_recognizes_both_spellings() {
-        // `--version` and `-V` are the version query (#516); everything else —
-        // including a path that merely starts with a dash-free word — is not.
-        assert!(is_version_flag("--version"));
-        assert!(is_version_flag("-V"));
-        assert!(!is_version_flag("--help"));
-        assert!(!is_version_flag("-v"));
-        assert!(!is_version_flag("version"));
-        assert!(!is_version_flag("/tmp/book"));
+    fn parse_arg_classifies_flags_paths_and_no_arg() {
+        // The help and version flags are recognized in both spellings (#517/#516)
+        // and never treated as a path, so neither scaffolds a junk folder.
+        assert_eq!(parse_arg(Some("--help")), Invocation::Help);
+        assert_eq!(parse_arg(Some("-h")), Invocation::Help);
+        assert_eq!(parse_arg(Some("--version")), Invocation::Version);
+        assert_eq!(parse_arg(Some("-V")), Invocation::Version);
+        // Anything else is a project path; a bare launch is the no-arg case.
+        assert_eq!(
+            parse_arg(Some("/tmp/book")),
+            Invocation::Path(PathBuf::from("/tmp/book"))
+        );
+        assert_eq!(parse_arg(None), Invocation::NoArg);
+        // Near-misses are paths, not flags — `-v` and a bare `help` aren't the flag.
+        assert_eq!(parse_arg(Some("-v")), Invocation::Path(PathBuf::from("-v")));
+        assert_eq!(
+            parse_arg(Some("help")),
+            Invocation::Path(PathBuf::from("help"))
+        );
+    }
+
+    #[test]
+    fn usage_text_describes_the_real_invocations() {
+        // The help text leads with the version banner and covers the actual
+        // invocations: a bare launch, an explicit path, and both flags (#517).
+        let usage = usage_text();
+        assert!(
+            usage.starts_with(VERSION_LINE),
+            "leads with the banner: {usage}"
+        );
+        assert!(usage.contains("Usage: quill [OPTIONS] [PATH]"));
+        assert!(usage.contains("[PATH]"));
+        assert!(usage.contains("--help"));
+        assert!(usage.contains("--version"));
+        assert!(
+            usage.contains("projects home"),
+            "explains the no-path behavior: {usage}"
+        );
     }
 
     #[test]
