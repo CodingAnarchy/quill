@@ -31,6 +31,19 @@ fn double_hyphen_and_triple_dot_substitute() {
 }
 
 #[test]
+fn smart_typography_still_fires_inside_a_fenced_block() {
+    // Fenced blocks hold "log line"-style prose (transmissions, letters), which
+    // still wants curly quotes and em-dashes — typography is not suppressed (#522).
+    let (mut app, _dir) = smart_app("typo-fence");
+    type_str(&mut app, "```\n\"Wait--no\"\n```");
+    assert!(
+        app.buffer.text().contains("\u{201C}Wait\u{2014}no\u{201D}"),
+        "typography applies inside the fence: {:?}",
+        app.buffer.text()
+    );
+}
+
+#[test]
 fn a_lone_hyphen_and_dot_stay_literal() {
     let (mut app, _dir) = smart_app("typo-literal");
     type_str(&mut app, "well-being. end.");

@@ -547,6 +547,8 @@ fn style_at(hls: &[Highlight], byte: usize, theme: Theme) -> Style {
             HighlightKind::Heading => style.fg(theme.heading).add_modifier(Modifier::BOLD),
             HighlightKind::Strong => style.add_modifier(Modifier::BOLD),
             HighlightKind::Emphasis => style.add_modifier(Modifier::ITALIC),
+            // Verbatim, set apart by color; the fence markers show literally (#522).
+            HighlightKind::Code => style.fg(theme.code),
         };
     }
     style

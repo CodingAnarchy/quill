@@ -298,6 +298,40 @@ fn focus_mode_dims_the_other_paragraphs() {
 }
 
 #[test]
+fn a_fenced_code_block_renders_in_the_code_colour() {
+    // A chapter with a fenced block; its content should be set apart by colour.
+    let app = app_with("Intro line.\n\n```\nZENITH log\n```\n");
+    let code = app.theme.code;
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    terminal.draw(|f| draw(f, &app)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+
+    let fg_on_row = |needle: &str| -> Option<Color> {
+        let row = (0..12u16).find(|&y| {
+            let line: String = (0..40).map(|x| buf[(x, y)].symbol()).collect();
+            line.contains(needle)
+        })?;
+        (0..40)
+            .map(|x| &buf[(x, row)])
+            .find(|c| {
+                c.symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_alphabetic())
+            })
+            .map(|c| c.style().fg)?
+    };
+
+    // The fenced content is in the code colour; ordinary prose is not.
+    assert_eq!(
+        fg_on_row("ZENITH log"),
+        Some(code),
+        "code line in code colour"
+    );
+    assert_ne!(fg_on_row("Intro line."), Some(code), "prose is not");
+}
+
+#[test]
 fn the_model_manager_lists_the_catalog_with_characteristics() {
     let mut app = app_with("text\n");
     app.mode = Mode::ModelManager { selected: 0 };

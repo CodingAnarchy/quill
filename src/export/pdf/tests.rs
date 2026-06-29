@@ -80,6 +80,32 @@ fn is_a_well_formed_pdf() {
 }
 
 #[test]
+fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
+    // A chapter whose body is a fenced block (with a blank line inside) must lay
+    // out and serialize without panicking, into a valid PDF (#522).
+    let d = Document {
+        title: "T".into(),
+        subtitle: None,
+        author: None,
+        series: None,
+        epigraph: None,
+        front: vec![],
+        parts: vec![Part {
+            name: None,
+            chapters: vec![ch(
+                "C",
+                None,
+                "Intro.\n\n```\nZENITH // 2053\n\nPRE-IGNIT\n```\n\nAfter.",
+            )],
+        }],
+        back: vec![],
+    };
+    let bytes = to_pdf(&d, &plain()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    assert!(has(&bytes, "/Type /Catalog") && has(&bytes, "xref"));
+}
+
+#[test]
 fn text_is_drawn_with_embedded_type0_fonts() {
     let bytes = to_pdf(&doc(), &plain()).unwrap();
     for marker in [

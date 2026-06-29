@@ -28,7 +28,8 @@ use self::images::{decode_images, emit_images, PdfImage};
 use self::wrap::{segments, words_of, wrap_lines, Word};
 use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
-    classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose, SCENE_BREAK,
+    body_blocks, classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose,
+    SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -570,11 +571,12 @@ impl Pdf {
             self.y -= BODY_LEADING;
         }
         let mut opened = false;
-        for block in ch.body.split("\n\n") {
-            match classify_block(block) {
+        for block in body_blocks(&ch.body) {
+            match classify_block(&block) {
                 None => {}
                 Some(Prose::SceneBreak) => self.scene_break_line(),
                 Some(Prose::Heading(h)) => self.sub_heading(&h),
+                Some(Prose::Preformatted(code)) => self.preformatted(&code),
                 Some(Prose::Paragraph(text)) => {
                     let runs = inline_runs(&text);
                     if !opened && self.bits.drop_cap {
@@ -587,6 +589,24 @@ impl Pdf {
             }
         }
         page
+    }
+
+    /// A preformatted (fenced) block: each line drawn verbatim, left-aligned, its
+    /// breaks and indentation preserved and no emphasis applied, set apart by space
+    /// above and below (#522). Falls back to the body serif — a bundled monospace
+    /// face is the follow-up, so long lines aren't yet wrapped or fixed-width.
+    fn preformatted(&mut self, code: &str) {
+        self.need(BODY_LEADING * 1.5);
+        self.y -= BODY_LEADING * 0.5;
+        for line in code.lines() {
+            self.need(BODY_LEADING);
+            if !line.is_empty() {
+                let left = self.left();
+                self.draw_line(left, self.y, &[(line.to_string(), false, false)], BODY_SIZE);
+            }
+            self.y -= BODY_LEADING;
+        }
+        self.y -= BODY_LEADING * 0.5;
     }
 
     /// A normal body paragraph: first-line indented, left-aligned, with `*`/`**`

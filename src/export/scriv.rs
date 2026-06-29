@@ -12,7 +12,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use super::{classify_block, inline_runs, xml_escape, Chapter, Document, Part, Prose, SCENE_BREAK};
+use super::{
+    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, Part, Prose,
+    SCENE_BREAK,
+};
 
 /// Write `doc` as a Scrivener `.scriv` bundle at `bundle` (the `<name>.scriv`
 /// directory). Any existing bundle there is replaced so the export always
@@ -156,8 +159,8 @@ fn to_rtf(chapter: &Chapter) -> String {
             body.push_str(&rtf_paragraph(&[(format!("— {by}"), false, true)]));
         }
     }
-    for block in chapter.body.split("\n\n") {
-        match classify_block(block) {
+    for block in body_blocks(&chapter.body) {
+        match classify_block(&block) {
             None => {}
             // A centered scene divider, the conventional Scrivener separator.
             Some(Prose::SceneBreak) => {
@@ -167,10 +170,18 @@ fn to_rtf(chapter: &Chapter) -> String {
                 body.push_str(&rtf_paragraph(&[(heading, true, false)]))
             }
             Some(Prose::Paragraph(text)) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
+            // Verbatim, monospaced (`\f1`), line breaks kept as `\line` (#522).
+            Some(Prose::Preformatted(code)) => {
+                let lines: Vec<String> = code.lines().map(rtf_escape).collect();
+                body.push_str(&format!(
+                    "\\pard\\sa180\\f1 {}\\f0\\par\n",
+                    lines.join("\\line ")
+                ));
+            }
         }
     }
     format!(
-        "{{\\rtf1\\ansi\\ansicpg1252\\deff0{{\\fonttbl{{\\f0\\froman Times New Roman;}}}}\n\\f0\\fs24\n{body}}}"
+        "{{\\rtf1\\ansi\\ansicpg1252\\deff0{{\\fonttbl{{\\f0\\froman Times New Roman;}}{{\\f1\\fmodern Courier New;}}}}\n\\f0\\fs24\n{body}}}"
     )
 }
 
@@ -394,6 +405,24 @@ mod tests {
         let hash = rtf.find("\\qc\\sa180 #").unwrap();
         let two = rtf.find("Scene two.").unwrap();
         assert!(one < hash && hash < two, "divider between scenes: {rtf}");
+    }
+
+    #[test]
+    fn a_fenced_block_becomes_a_monospace_rtf_paragraph() {
+        let rtf = to_rtf(&chapter(
+            "One",
+            None,
+            "Before.\n\n```\nLOG one\nLOG two\n```",
+        ));
+        // The mono font is declared and the block uses it, lines kept with \line.
+        assert!(
+            rtf.contains("\\f1\\fmodern Courier New;"),
+            "mono font: {rtf}"
+        );
+        assert!(
+            rtf.contains("\\pard\\sa180\\f1 LOG one\\line LOG two\\f0\\par"),
+            "mono block with breaks: {rtf}"
+        );
     }
 
     #[test]

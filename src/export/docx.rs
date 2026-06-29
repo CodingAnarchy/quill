@@ -10,7 +10,9 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
-use super::{classify_block, inline_runs, xml_escape, Block, Document, Prose, SCENE_BREAK};
+use super::{
+    body_blocks, classify_block, inline_runs, xml_escape, Block, Document, Prose, SCENE_BREAK,
+};
 use crate::frontmatter::Epigraph;
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -163,8 +165,8 @@ fn book_body(doc: &Document, profile: Profile) -> String {
                 if let Some(epigraph) = &chapter.epigraph {
                     body.push_str(&epigraph_paras(epigraph));
                 }
-                for prose_block in chapter.body.split("\n\n") {
-                    if let Some(p) = prose_paragraph(prose_block) {
+                for prose_block in body_blocks(&chapter.body) {
+                    if let Some(p) = prose_paragraph(&prose_block) {
                         body.push_str(&p);
                     }
                 }
@@ -240,7 +242,24 @@ fn prose_paragraph(block: &str) -> Option<String> {
                 .collect();
             para(r#"<w:ind w:firstLine="720"/>"#, runs)
         }
+        // Verbatim monospace: line breaks preserved, no indent or emphasis (#522).
+        Prose::Preformatted(code) => para(
+            r#"<w:spacing w:line="240" w:lineRule="auto"/>"#,
+            mono_run(&code),
+        ),
     })
+}
+
+/// A single monospaced run carrying a preformatted block — its lines separated by
+/// `<w:br/>` and whitespace preserved, no emphasis (#522).
+fn mono_run(code: &str) -> String {
+    // The breaks only ever sit between two `<w:t>` runs, so this is a join.
+    let inner = code
+        .lines()
+        .map(|line| format!("<w:t xml:space=\"preserve\">{}</w:t>", xml_escape(line)))
+        .collect::<Vec<_>>()
+        .join("<w:br/>");
+    format!("<w:r><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\"/></w:rPr>{inner}</w:r>")
 }
 
 /// An epigraph as set-apart italic paragraphs (single-spaced, indented), the
@@ -358,6 +377,37 @@ mod tests {
         assert!(
             xml.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
             "curly glyphs reach the docx body"
+        );
+    }
+
+    #[test]
+    fn a_fenced_block_renders_as_a_monospace_paragraph_with_breaks() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: None,
+                chapters: vec![crate::export::Chapter {
+                    title: "C".into(),
+                    epigraph: None,
+                    body: "Before.\n\n```\nLOG one\nLOG two\n```\n\nAfter.".into(),
+                }],
+            }],
+            back: vec![],
+        };
+        let xml = part(
+            &to_docx(&d, Profile::Manuscript).unwrap(),
+            "word/document.xml",
+        );
+        // Monospace font, both lines present, joined by a run-level break.
+        assert!(xml.contains("Courier New"), "monospace font:\n{xml}");
+        assert!(
+            xml.contains("LOG one</w:t><w:br/><w:t xml:space=\"preserve\">LOG two"),
+            "lines kept with a break:\n{xml}"
         );
     }
 

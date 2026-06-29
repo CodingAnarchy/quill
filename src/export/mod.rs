@@ -667,6 +667,7 @@ pub(crate) const SCENE_BREAK: &str = "#";
 /// each format writer renders it in its own markup. Shared by the Word and
 /// Scrivener writers so scene breaks, headings, and prose are recognized
 /// identically.
+#[derive(Debug)]
 enum Prose {
     /// A scene break — a thematic-break line (`---`, `* * *`, …).
     SceneBreak,
@@ -674,11 +675,70 @@ enum Prose {
     Heading(String),
     /// A normal paragraph, soft-wrapped lines joined into one.
     Paragraph(String),
+    /// A fenced code block (#522), rendered verbatim and monospaced — line breaks
+    /// and indentation preserved, no emphasis parsed. The inner content, fences
+    /// removed.
+    Preformatted(String),
 }
 
-/// Classify one body block (already split on blank lines), or `None` when it's
-/// empty.
+/// Split a chapter body into blocks for classification. Blocks are separated by
+/// blank lines, except a fenced code block (```` ``` ````) is kept whole even
+/// when it contains blank lines, so preformatted text survives intact (#522).
+fn body_blocks(body: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut cur: Vec<&str> = Vec::new();
+    let mut in_fence = false;
+    let flush = |cur: &mut Vec<&str>, blocks: &mut Vec<String>| {
+        if !cur.is_empty() {
+            blocks.push(cur.join("\n"));
+            cur.clear();
+        }
+    };
+    for line in body.lines() {
+        let is_fence = line.trim_start().starts_with("```");
+        if in_fence {
+            cur.push(line);
+            if is_fence {
+                flush(&mut cur, &mut blocks);
+                in_fence = false;
+            }
+        } else if is_fence {
+            flush(&mut cur, &mut blocks);
+            cur.push(line);
+            in_fence = true;
+        } else if line.trim().is_empty() {
+            flush(&mut cur, &mut blocks);
+        } else {
+            cur.push(line);
+        }
+    }
+    flush(&mut cur, &mut blocks);
+    blocks
+}
+
+/// The inner content of a fenced code block, with the fence delimiter lines (and
+/// any info string) removed and the line breaks and indentation between them kept
+/// verbatim. `None` if `block` isn't fence-led (#522).
+fn fenced_code(block: &str) -> Option<String> {
+    let mut lines = block.lines();
+    if !lines.next()?.trim_start().starts_with("```") {
+        return None;
+    }
+    let rest: Vec<&str> = lines.collect();
+    // Drop the closing fence when present (an unterminated fence runs to the end).
+    let inner = match rest.last() {
+        Some(last) if last.trim_start().starts_with("```") => &rest[..rest.len() - 1],
+        _ => &rest[..],
+    };
+    Some(inner.join("\n"))
+}
+
+/// Classify one body block (already split via [`body_blocks`]), or `None` when
+/// it's empty.
 fn classify_block(block: &str) -> Option<Prose> {
+    if let Some(code) = fenced_code(block) {
+        return Some(Prose::Preformatted(code));
+    }
     let text = block.trim();
     if text.is_empty() {
         return None;
@@ -794,6 +854,61 @@ mod tests {
         let two = md.find("# Book Two").expect("book two heading");
         assert!(one < two, "books in order");
         assert!(md.contains("alpha") && md.contains("beta"));
+    }
+
+    #[test]
+    fn a_fenced_code_block_is_kept_whole_and_classified_preformatted() {
+        // A fence with a blank line inside must not be split on the blank line.
+        let body = "Intro line.\n\n```\nZENITH // 2053\n\nPRE-IGNIT\n```\n\nAfter.";
+        let blocks = body_blocks(body);
+        assert_eq!(blocks.len(), 3, "{blocks:?}");
+        assert_eq!(blocks[0], "Intro line.");
+        assert_eq!(blocks[2], "After.");
+        // The fenced block is preformatted: fences gone, inner breaks preserved.
+        match classify_block(&blocks[1]) {
+            Some(Prose::Preformatted(code)) => {
+                assert_eq!(code, "ZENITH // 2053\n\nPRE-IGNIT");
+            }
+            other => panic!("expected Preformatted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unterminated_fence_runs_to_the_end_of_the_body() {
+        // No closing fence: everything after the opener is the preformatted block.
+        let blocks = body_blocks("```\nlog one\nlog two");
+        assert_eq!(blocks.len(), 1);
+        match classify_block(&blocks[0]) {
+            Some(Prose::Preformatted(code)) => assert_eq!(code, "log one\nlog two"),
+            other => panic!("expected Preformatted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn markdown_export_preserves_a_fenced_code_block_verbatim() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter(
+                    "C",
+                    None,
+                    "Before.\n\n```\nLOG: --ok\n```\n\nAfter.",
+                )],
+            }],
+            back: vec![],
+        };
+        // The body is emitted verbatim, so the fence (and its literal `--`) survive.
+        assert!(
+            to_markdown(&d).contains("```\nLOG: --ok\n```"),
+            "{}",
+            to_markdown(&d)
+        );
     }
 
     #[test]
