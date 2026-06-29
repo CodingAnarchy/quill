@@ -77,6 +77,9 @@ impl App {
         // Only the prose-edit path runs this; prompts and titles insert verbatim.
         if self.smart_typography {
             // The substitution only inspects the last ≤2 chars before the cursor.
+            // Smart typography stays on inside fenced blocks too — they hold
+            // "log line"-style prose (transmissions, letters) that still wants
+            // curly quotes and em-dashes, not literal source code (#522).
             let before = match &self.manuscript {
                 Some(m) => m.buffer().text_before_cursor(2),
                 None => self.buffer.text_before_cursor(2),

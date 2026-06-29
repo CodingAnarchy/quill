@@ -17,6 +17,11 @@ Markdown is understood as you write: emphasis (*italic*, **bold**) renders
 softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
 in-chapter outline pane.
 
+Fence a block in ``` to set it apart verbatim — a log readout, a transmission,
+a letter, anything whose line breaks and spacing should be preserved exactly. It
+renders monospaced and unstyled, and carries through to every export. (Smart
+typography still applies inside: these blocks hold prose, not source code.)
+
 
 CHAPTERS & NAVIGATION
 

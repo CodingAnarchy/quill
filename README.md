@@ -23,6 +23,11 @@ keystrokes that stay out of the way.
 - **Markdown-aware editing** — incremental `tree-sitter` parse drives live
   syntax highlighting, soft-rendered emphasis (markers hidden until you edit a
   span), and an in-chapter outline (Ctrl-O).
+- **Preformatted blocks** — fence a block in ` ``` ` to set it apart verbatim:
+  a log readout, transmission, letter, or any text whose line breaks and spacing
+  should be preserved. It renders monospaced and unstyled in the editor and
+  carries through to every export. (Smart typography still applies — these blocks
+  hold prose, not source code.)
 - **Spell-checking** — misspelled words are underlined as you write (a bundled
   en_US dictionary, checked off the keystroke path so typing stays instant);
   accept invented names into a per-project dictionary, and sweep the flags from

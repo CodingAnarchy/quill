@@ -13,8 +13,8 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use super::{
-    classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedFont, EmbeddedImage,
-    ExportStyle, FontRole, ImageRole, Prose,
+    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedFont,
+    EmbeddedImage, ExportStyle, FontRole, ImageRole, Prose,
 };
 use crate::frontmatter::Epigraph;
 
@@ -36,6 +36,7 @@ h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 .epigraph { margin: 2em 10%; font-style: italic; }
 .epigraph .attribution { text-align: right; }
 .scene-break { text-align: center; margin: 1.5em 0; }
+pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent: 0; }
 "#;
 
 /// Compile a [`Document`] to the bytes of an `.epub`. `modified` is the
@@ -370,8 +371,8 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
     }
     // With drop caps on, the chapter's first prose paragraph is marked `opening`.
     let mut opened = false;
-    for block in ch.body.split("\n\n") {
-        let Some(prose) = classify_block(block) else {
+    for block in body_blocks(&ch.body) {
+        let Some(prose) = classify_block(&block) else {
             continue;
         };
         let opening = style.drop_cap() && !opened && matches!(prose, Prose::Paragraph(_));
@@ -397,6 +398,8 @@ fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
             let class = if opening { " class=\"opening\"" } else { "" };
             format!("<p{class}>{}</p>", inline_xhtml(text))
         }
+        // Verbatim, monospaced, whitespace preserved — no emphasis parsing (#522).
+        Prose::Preformatted(code) => format!("<pre>{}</pre>", xml_escape(code)),
     }
 }
 
@@ -898,6 +901,37 @@ mod tests {
             chap.contains("He said \u{201C}hi\u{2014}bye\u{2026}\u{201D}"),
             "curly glyphs"
         );
+    }
+
+    #[test]
+    fn a_fenced_block_renders_as_verbatim_preformatted_xhtml() {
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter(
+                    "C",
+                    None,
+                    "Before.\n\n```\nLOG // 2053\n  indented\n```\n\nAfter.",
+                )],
+            }],
+            back: vec![],
+        };
+        let chap = part(
+            &to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/chap0002.xhtml",
+        );
+        // Whitespace and line breaks preserved; not wrapped in a <p>.
+        assert!(
+            chap.contains("<pre>LOG // 2053\n  indented</pre>"),
+            "{chap}"
+        );
+        assert!(!chap.contains("<p>LOG"), "code is not a paragraph:\n{chap}");
     }
 
     #[test]

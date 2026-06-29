@@ -25,6 +25,9 @@ pub enum HighlightKind {
     Heading,
     Strong,
     Emphasis,
+    /// A fenced code block (#522), rendered verbatim and set apart — no emphasis
+    /// concealment or smart typography applies inside it.
+    Code,
 }
 
 /// A styled range of the document, in absolute byte offsets.
@@ -179,6 +182,14 @@ fn collect(
                 kind: HighlightKind::Heading,
             });
             headings.push(heading_info(&node, &read));
+        } else if node.kind() == "fenced_code_block" {
+            // The whole fence (delimiters + content) is set apart; its content
+            // has no inline tree, so no emphasis is parsed or concealed inside.
+            out.push(Highlight {
+                start: node.start_byte(),
+                end: node.end_byte(),
+                kind: HighlightKind::Code,
+            });
         }
     });
 
@@ -367,6 +378,27 @@ mod tests {
         let still_hidden = s.conceal_ranges(Some(inside_bold));
         assert_eq!(still_hidden.len(), 2);
         assert!(still_hidden.iter().all(|&(a, _)| a < bold_start));
+    }
+
+    #[test]
+    fn fenced_code_block_is_highlighted_and_holds_no_concealed_emphasis() {
+        let text = "Intro.\n\n```\nlog *not italic* line\n```\n\nAfter.\n";
+        let s = Syntax::new(text);
+        let code = all(&s)
+            .into_iter()
+            .find(|h| h.kind == HighlightKind::Code)
+            .expect("code highlight");
+        // The whole fence (delimiters + content) is the highlighted span.
+        let span = &text[code.start..code.end];
+        assert!(
+            span.contains("```") && span.contains("log *not italic* line"),
+            "{span}"
+        );
+        // The `*` inside the fence is plain code, so nothing is concealed there.
+        assert!(
+            s.conceal_ranges(None).is_empty(),
+            "no emphasis parsed in code"
+        );
     }
 
     #[test]
