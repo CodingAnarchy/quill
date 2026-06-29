@@ -161,6 +161,11 @@ pub struct App {
     pub(crate) last_activity: std::time::Instant,
     /// Whether the chapter / outline pane is shown.
     pub outline_visible: bool,
+    /// Whether the chapter browser (Ctrl-G) is what turned the outline pane on,
+    /// so Esc can dismiss the pane it opened (#529) while leaving an outline the
+    /// author had already toggled on with Ctrl-O alone. `true` only while the
+    /// browser is the reason the pane is visible.
+    pub(crate) browser_opened_outline: bool,
     /// Whether the project is under version control (#54). Cached so the status
     /// bar needn't stat the filesystem every frame; set at open and after the
     /// author initializes a repository.
@@ -349,6 +354,7 @@ impl App {
             autosave_interval_secs,
             last_activity: std::time::Instant::now(),
             outline_visible: false,
+            browser_opened_outline: false,
             under_vc,
             vc_changes: 0,
             overlay: None,
@@ -728,6 +734,10 @@ impl App {
             // the single-chapter view, so leave continuous first.
             KeyCode::Char('g') => {
                 self.leave_continuous();
+                // Remember whether the browser is what opened the pane, so Esc
+                // can put the view back exactly as it was (#529) — hiding a pane
+                // Ctrl-G revealed, but leaving an outline already up via Ctrl-O.
+                self.browser_opened_outline = !self.outline_visible;
                 self.outline_visible = true;
                 self.select(self.project.active_index());
             }

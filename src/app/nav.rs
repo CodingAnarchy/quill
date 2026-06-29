@@ -33,12 +33,16 @@ impl App {
             }
             KeyCode::Enter => {
                 self.activate_chapter(sel);
+                // Opening a chapter keeps the pane (it shows where you landed);
+                // just drop the browser's claim on it (#529).
+                self.browser_opened_outline = false;
                 self.mode = self.editing_mode();
             }
             // Open the selected chapter in a side pane (#165) — compare two
             // chapters, or keep one as reference while editing another.
             KeyCode::Char('o') => {
                 self.open_file_in_pane(self.project.chapter_path(sel));
+                self.browser_opened_outline = false;
                 self.mode = self.editing_mode();
             }
             // Switch to the reference-file browser (#165): bible entries and notes.
@@ -188,11 +192,24 @@ impl App {
                 if self.nav_has_filter() {
                     self.clear_nav_filter();
                 } else {
-                    self.mode = Mode::Insert;
+                    self.leave_browser();
                 }
             }
             _ => {}
         }
+    }
+
+    /// Dismiss the chapter browser back to the editor (#529): if Ctrl-G was what
+    /// opened the outline pane, hide it again so Esc puts the screen back exactly
+    /// as it was; an outline the author had already toggled on with Ctrl-O stays.
+    /// Routes through [`editing_mode`](Self::editing_mode) so it lands in Vim
+    /// Normal or Insert per the user's config.
+    fn leave_browser(&mut self) {
+        if self.browser_opened_outline {
+            self.outline_visible = false;
+            self.browser_opened_outline = false;
+        }
+        self.mode = self.editing_mode();
     }
 
     /// Keys for the chapter browser's filter-input sub-mode (#410): printable
@@ -206,6 +223,7 @@ impl App {
             KeyCode::Enter => {
                 if self.nav_chapter_matches(sel, &self.nav_query()) {
                     self.activate_chapter(sel);
+                    self.browser_opened_outline = false;
                     self.mode = self.editing_mode();
                 }
             }
@@ -368,6 +386,7 @@ impl App {
             KeyCode::Enter => {
                 let path = state.files[state.selected].clone();
                 self.open_file_in_pane(path);
+                self.browser_opened_outline = false;
                 self.mode = self.editing_mode();
             }
             // Back to the chapter browser.
