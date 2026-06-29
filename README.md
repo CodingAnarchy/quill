@@ -107,7 +107,8 @@ keystrokes that stay out of the way.
   the full Unicode they cover — Latin, Greek, Cyrillic, smart punctuation, and
   decorative ornaments all show. Chinese and other CJK need an author-supplied CJK
   font (`[style].body_font`); glyphs no embedded font has are reported and skipped.
-  Fonts embed whole for now, so PDFs are a few MB until glyph subsetting lands.
+  Each font is subset to just the glyphs the book uses, so files stay small even
+  with a large Unicode or CJK source font.
   *PDF (print interior)* writes a print-on-demand book block from the same
   content: a chosen trim size, mirrored inside/outside margins with a binding
   gutter, running heads (book title on the left page, author on the right), page

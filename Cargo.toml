@@ -45,6 +45,7 @@ spellbook = "0.4.2"
 # bundled fonts it embeds. ttf-parser is pure-Rust and dependency-free; it only
 # reads the font — the PDF itself is still hand-written (like docx/epub/pdf).
 ttf-parser = "0.25"
+subsetter = "0.2.6"
 
 [dev-dependencies]
 # Property / round-trip and adversarial-input testing for the data path (#265).

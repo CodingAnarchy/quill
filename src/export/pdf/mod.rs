@@ -10,9 +10,9 @@
 //! chapter starts — what print-on-demand services require. Both embed their fonts
 //! and render text via Type0 /Identity-H composites (#492; see [`font`]), so the PDF
 //! shows the full Unicode range its fonts cover (Latin, Greek, Cyrillic, symbols,
-//! ornaments — CJK with an author-supplied CJK font). Fonts embed whole; subsetting
-//! to shrink files is #495. Designed typography (font choice, ornaments) is the
-//! styling epic; cover/bleed are a separate artifact.
+//! ornaments — CJK with an author-supplied CJK font). Each face is subset to the
+//! glyphs used (#495), so files stay small. Designed typography (font choice,
+//! ornaments) is the styling epic; cover/bleed are a separate artifact.
 
 mod font;
 mod images;
@@ -23,10 +23,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use self::font::{glyph_run, Fonts, ObjMap};
+use self::font::{glyph_run, Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::wrap::{segments, words_of, wrap_lines, Word};
-use self::write::{flatten_outline, serialize, OutlineItem};
+use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
     classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose, SCENE_BREAK,
 };
@@ -863,6 +863,10 @@ impl Pdf {
             self.start_page();
         }
         let n_pages = self.pages.len();
+        // Build the page decorations (running heads + folios) first: they resolve
+        // glyphs too, and every used glyph must be recorded before the fonts are
+        // subset below.
+        let decorations: Vec<String> = (0..n_pages).map(|i| self.decorations(i)).collect();
         let mut objects: ObjMap = BTreeMap::new();
         // 1 catalog, 2 pages, 3 outlines, then fonts, pages+contents, outline items.
         let mut next = 4u32;
@@ -901,9 +905,11 @@ impl Pdf {
         };
         let fonts: String = font_names
             .iter()
-            .map(|(name, id)| format!("/{name} {id} 0 R "))
+            .map(|(name, id, _)| format!("/{name} {id} 0 R "))
             .collect();
         let resources = format!("/Resources << /Font << {fonts}>>{xobjects} >>");
+        // Subsetting renumbered glyphs, so remap the content-stream glyph ids.
+        let maps: Vec<(&str, &GidMap)> = font_names.iter().map(|(name, _, m)| (*name, m)).collect();
         objects.insert(
             2,
             format!(
@@ -923,7 +929,8 @@ impl Pdf {
                 .into_bytes(),
             );
             let mut content = std::mem::take(&mut self.pages[i]);
-            content.push_str(&self.decorations(i));
+            content.push_str(&decorations[i]);
+            let content = remap_glyph_ids(&content, &maps);
             objects.insert(
                 content_obj[i],
                 format!(

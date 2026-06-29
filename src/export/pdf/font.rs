@@ -8,12 +8,14 @@
 //! Bundled defaults: Liberation Serif (the body, four weights, SIL OFL) and DejaVu
 //! Sans (a broad fallback for glyphs the body lacks — ornaments, symbols, scripts;
 //! Bitstream Vera license). A `[style]` body/heading font overrides the serif. CJK
-//! needs an author-supplied CJK font (the fallback has no CJK). Fonts embed whole;
-//! glyph subsetting to shrink files is tracked in #495.
+//! needs an author-supplied CJK font (the fallback has no CJK). Each face is subset
+//! to the glyphs the document uses (#495), so embedding stays small; subsetting
+//! renumbers glyphs, so the content streams are remapped through [`GidMap`].
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use subsetter::GlyphRemapper;
 use ttf_parser::{Face, GlyphId};
 
 use crate::export::{ExportStyle, FontRole};
@@ -21,6 +23,11 @@ use crate::export::{ExportStyle, FontRole};
 /// PDF object bodies keyed by id — shared with the layout module. Bodies are bytes
 /// because embedded font programs (`/FontFile2`) are binary.
 pub(super) type ObjMap = BTreeMap<u32, Vec<u8>>;
+
+/// A glyph-id remapping from the original font to its embedded subset (old → new).
+/// Subsetting renumbers glyphs, so content streams keyed by glyph id are remapped
+/// through this at serialization.
+pub(super) type GidMap = BTreeMap<u16, u16>;
 
 // Bundled font programs.
 const REGULAR: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
@@ -98,17 +105,24 @@ impl Fonts {
         self.faces.iter().any(|f| f.gid(c).is_some()) || self.fallback.gid(c).is_some()
     }
 
-    /// Emit the objects for every face that was used, returning the
-    /// (resource name, Type0 object id) pairs for the page `/Resources /Font` dict.
-    pub(super) fn objects(&self, next: &mut u32, out: &mut ObjMap) -> Vec<(&'static str, u32)> {
+    /// Emit the objects for every face that was used, returning per face its resource
+    /// name, Type0 object id, and the glyph-id remap from subsetting (for the page
+    /// `/Resources /Font` dict and remapping content-stream glyph ids).
+    pub(super) fn objects(
+        &self,
+        next: &mut u32,
+        out: &mut ObjMap,
+    ) -> Vec<(&'static str, u32, GidMap)> {
         let mut map = Vec::new();
         for (i, face) in self.faces.iter().enumerate() {
             if face.is_used() {
-                map.push((FACE_NAMES[i], face.emit(next, out)));
+                let (id, gids) = face.emit(next, out);
+                map.push((FACE_NAMES[i], id, gids));
             }
         }
         if self.fallback.is_used() {
-            map.push((FALLBACK_NAME, self.fallback.emit(next, out)));
+            let (id, gids) = self.fallback.emit(next, out);
+            map.push((FALLBACK_NAME, id, gids));
         }
         map
     }
@@ -159,12 +173,31 @@ impl CidFont {
         !self.used.borrow().is_empty()
     }
 
-    /// Emit `/FontFile2`, `/FontDescriptor`, the descendant `CIDFontType2`, a
-    /// `/ToUnicode` CMap, and the Type0 dict; return the Type0 object id.
-    fn emit(&self, next: &mut u32, out: &mut ObjMap) -> u32 {
+    /// Emit `/FontFile2` (a glyph subset), `/FontDescriptor`, the descendant
+    /// `CIDFontType2`, a `/ToUnicode` CMap, and the Type0 dict; return the Type0
+    /// object id and the old→new glyph-id remap the subset introduced.
+    fn emit(&self, next: &mut u32, out: &mut ObjMap) -> (u32, GidMap) {
         let used = self.used.borrow();
+        // Subset to just the used glyphs (renumbered); fall back to the whole font
+        // with identity ids if subsetting fails (shouldn't for our valid fonts).
+        let old_gids: Vec<u16> = used.keys().copied().collect();
+        let remapper = GlyphRemapper::new_from_glyphs(&old_gids);
+        let (program, gids): (Vec<u8>, GidMap) = match subsetter::subset(self.program, 0, &remapper)
+        {
+            Ok(sub) => (
+                sub,
+                old_gids
+                    .iter()
+                    .map(|&o| (o, remapper.get(o).unwrap_or(o)))
+                    .collect(),
+            ),
+            Err(_) => (
+                self.program.to_vec(),
+                old_gids.iter().map(|&o| (o, o)).collect(),
+            ),
+        };
         let file = take(next);
-        out.insert(file, font_file_stream(self.program));
+        out.insert(file, font_file_stream(&program));
 
         let bb = self.face.global_bounding_box();
         let s = |v: i16| (v as f32 * self.scale).round() as i32;
@@ -194,9 +227,10 @@ impl CidFont {
             .into_bytes(),
         );
 
+        // Widths keyed by the new (subset) glyph id, measured from the original.
         let widths: String = used
             .keys()
-            .map(|&gid| format!("{gid} [{}] ", self.advance_em(gid).round() as i32))
+            .map(|&old| format!("{} [{}] ", gids[&old], self.advance_em(old).round() as i32))
             .collect();
         let cid = take(next);
         out.insert(
@@ -210,8 +244,10 @@ impl CidFont {
             .into_bytes(),
         );
 
+        // ToUnicode keyed by the new glyph id.
         let to_unicode = take(next);
-        out.insert(to_unicode, to_unicode_cmap(&used));
+        let unicode: BTreeMap<u16, char> = used.iter().map(|(&old, &c)| (gids[&old], c)).collect();
+        out.insert(to_unicode, to_unicode_cmap(&unicode));
 
         let type0 = take(next);
         out.insert(
@@ -223,7 +259,7 @@ impl CidFont {
             )
             .into_bytes(),
         );
-        type0
+        (type0, gids)
     }
 }
 

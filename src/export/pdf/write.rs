@@ -2,8 +2,43 @@
 //! objects → xref → trailer byte assembly. Layout produces the objects and the
 //! outline; this turns them into the file.
 
-use super::font::{pdf_text_string, ObjMap};
+use super::font::{pdf_text_string, GidMap, ObjMap};
 use super::num;
+
+/// Remap the glyph ids in a content stream from the original fonts to their embedded
+/// subsets. The writer emits one op per line: a `/Fn … Tf` font switch, then glyph
+/// runs as `<hhhh…> Tj` (4 hex digits per id). This tracks the current font and
+/// rewrites each id through that font's map. Every drawn glyph was recorded before
+/// subsetting, so every id has a mapping; a miss would fall back to `.notdef` (0)
+/// rather than a stale id that points at the wrong glyph in the subset.
+pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut current: Option<&GidMap> = None;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix('/') {
+            if line.ends_with(" Tf") {
+                let name = rest.split(' ').next().unwrap_or("");
+                current = maps.iter().find(|(n, _)| *n == name).map(|(_, m)| *m);
+            }
+            out.push_str(line);
+        } else if let (Some(hex), Some(map)) = (
+            line.strip_prefix('<').and_then(|l| l.strip_suffix("> Tj")),
+            current,
+        ) {
+            out.push('<');
+            for chunk in hex.as_bytes().chunks(4) {
+                let old =
+                    u16::from_str_radix(std::str::from_utf8(chunk).unwrap_or(""), 16).unwrap_or(0);
+                out.push_str(&format!("{:04X}", map.get(&old).copied().unwrap_or(0)));
+            }
+            out.push_str("> Tj");
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
 
 /// A bookmark: a title, the page it jumps to, and any nested entries.
 pub(super) struct OutlineItem {
