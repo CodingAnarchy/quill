@@ -106,6 +106,67 @@ fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
 }
 
 #[test]
+fn a_fenced_block_renders_in_the_embedded_monospace_face() {
+    // A fenced block routes to the bundled DejaVu Sans Mono face (#524), embedded as
+    // a Type0 composite like every other face — so the block reads fixed-width, not
+    // in the body serif. A document with no fenced block embeds no mono face.
+    let mono = Document {
+        title: "T".into(),
+        subtitle: None,
+        author: None,
+        series: None,
+        epigraph: None,
+        front: vec![],
+        parts: vec![Part {
+            name: None,
+            chapters: vec![ch(
+                "C",
+                None,
+                "Before.\n\n```\nID  NAME\n01  ok\n```\n\nAfter.",
+            )],
+        }],
+        back: vec![],
+    };
+    let bytes = to_pdf(&mono, &plain()).unwrap();
+    assert!(
+        has(&bytes, "/BaseFont /DejaVuSansMono"),
+        "fenced block uses the bundled monospace face"
+    );
+    // No fenced block → no mono face embedded.
+    assert!(
+        !has(&to_pdf(&doc(), &plain()).unwrap(), "DejaVuSansMono"),
+        "the mono face is only embedded when a fenced block uses it"
+    );
+}
+
+#[test]
+fn a_long_preformatted_line_wraps_to_the_text_column() {
+    // An over-long fenced line is broken into multiple pieces at character boundaries
+    // so it doesn't run off the page edge (#524); a line that fits is left whole.
+    let layout = Layout::screen(&plain());
+    let col = layout.text_w();
+    let long = "x".repeat(400);
+    let pieces = mono_wrap(&layout, &long, col);
+    assert!(pieces.len() > 1, "an over-long line is wrapped");
+    for piece in &pieces {
+        assert!(
+            layout.measure_mono(piece, MONO_SIZE) <= col,
+            "each wrapped piece fits the text column"
+        );
+    }
+    assert_eq!(
+        pieces.concat(),
+        long,
+        "wrapping preserves every character in order"
+    );
+    assert_eq!(
+        mono_wrap(&layout, "ID  NAME", col),
+        vec!["ID  NAME".to_string()],
+        "a line that fits is left whole"
+    );
+}
+
+#[test]
 fn text_is_drawn_with_embedded_type0_fonts() {
     let bytes = to_pdf(&doc(), &plain()).unwrap();
     for marker in [

@@ -5,10 +5,12 @@
 //! objects (Type0 + CIDFontType2 + descriptor + `/FontFile2` + `/W` + `/ToUnicode`)
 //! are hand-written here.
 //!
-//! Bundled defaults: Liberation Serif (the body, four weights, SIL OFL) and DejaVu
+//! Bundled defaults: Liberation Serif (the body, four weights, SIL OFL), DejaVu
 //! Sans (a broad fallback for glyphs the body lacks — ornaments, symbols, scripts;
-//! Bitstream Vera license). A `[style]` body/heading font overrides the serif. CJK
-//! needs an author-supplied CJK font (the fallback has no CJK). Each face is subset
+//! Bitstream Vera license), and DejaVu Sans Mono (the fixed-width face for fenced
+//! preformatted blocks, #524; same Bitstream Vera license). A `[style]` body/heading
+//! font overrides the serif. CJK needs an author-supplied CJK font (the fallback has
+//! no CJK). Each face is subset
 //! to the glyphs the document uses (#495), so embedding stays small; subsetting
 //! renumbers glyphs, so the content streams are remapped through [`GidMap`].
 
@@ -35,11 +37,13 @@ const BOLD: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Bold.t
 const ITALIC: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Italic.ttf");
 const BOLD_ITALIC: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-BoldItalic.ttf");
 const FALLBACK: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
+const MONO: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSansMono.ttf");
 
-/// The `/F1`…`/F4` resource names for the four body faces, plus `/Ffb` for the
-/// fallback — the order [`Fonts`] lays them out in.
+/// The `/F1`…`/F4` resource names for the four body faces, plus `/Ffb` for the broad
+/// fallback and `/Fmo` for the monospace face — the order [`Fonts`] lays them out in.
 const FACE_NAMES: [&str; 4] = ["F1", "F2", "F3", "F4"];
 const FALLBACK_NAME: &str = "Ffb";
+const MONO_NAME: &str = "Fmo";
 
 fn face_index(bold: bool, italic: bool) -> usize {
     match (bold, italic) {
@@ -55,6 +59,8 @@ fn face_index(bold: bool, italic: bool) -> usize {
 pub(super) struct Fonts {
     faces: [CidFont; 4],
     fallback: CidFont,
+    /// The fixed-width face for fenced preformatted blocks (#524).
+    mono: CidFont,
 }
 
 impl Fonts {
@@ -73,6 +79,7 @@ impl Fonts {
                 CidFont::load(BOLD_ITALIC, "LiberationSerif-BoldItalic", true),
             ],
             fallback: CidFont::load(FALLBACK, "DejaVuSans", false),
+            mono: CidFont::load(MONO, "DejaVuSansMono", false),
         }
     }
 
@@ -93,6 +100,28 @@ impl Fonts {
         let idx = face_index(bold, italic);
         if let Some(gid) = self.faces[idx].gid(c) {
             return self.faces[idx].advance_em(gid);
+        }
+        self.fallback
+            .gid(c)
+            .map(|gid| self.fallback.advance_em(gid))
+            .unwrap_or(0.0)
+    }
+
+    /// Resolve `c` for the monospace face (fenced preformatted blocks, #524) to a
+    /// `(resource name, glyph id)`, recording the glyph for embedding. Falls back to
+    /// DejaVu Sans for glyphs the mono face lacks; `None` if no font has the glyph.
+    pub(super) fn resolve_mono(&self, c: char) -> Option<(&'static str, u16)> {
+        if let Some(gid) = self.mono.record(c) {
+            return Some((MONO_NAME, gid));
+        }
+        self.fallback.record(c).map(|gid| (FALLBACK_NAME, gid))
+    }
+
+    /// One character's advance in the monospace face (em units / 1000), using the same
+    /// mono→fallback resolution as drawing. 0 if unrenderable.
+    pub(super) fn advance_mono(&self, c: char) -> f32 {
+        if let Some(gid) = self.mono.gid(c) {
+            return self.mono.advance_em(gid);
         }
         self.fallback
             .gid(c)
@@ -123,6 +152,10 @@ impl Fonts {
         if self.fallback.is_used() {
             let (id, gids) = self.fallback.emit(next, out);
             map.push((FALLBACK_NAME, id, gids));
+        }
+        if self.mono.is_used() {
+            let (id, gids) = self.mono.emit(next, out);
+            map.push((MONO_NAME, id, gids));
         }
         map
     }
@@ -309,6 +342,22 @@ pub(super) fn glyph_run(
     let mut runs: Vec<(&'static str, String)> = Vec::new();
     for c in text.chars() {
         let Some((name, gid)) = fonts.resolve(c, bold, italic) else {
+            continue;
+        };
+        match runs.last_mut() {
+            Some((n, hex)) if *n == name => hex.push_str(&format!("{gid:04X}")),
+            _ => runs.push((name, format!("{gid:04X}"))),
+        }
+    }
+    runs
+}
+
+/// Glyph ids for `text` in the monospace face (mono→fallback resolved), as content
+/// hex runs grouped by resource name (#524). Unrenderable characters are dropped.
+pub(super) fn glyph_run_mono(fonts: &Fonts, text: &str) -> Vec<(&'static str, String)> {
+    let mut runs: Vec<(&'static str, String)> = Vec::new();
+    for c in text.chars() {
+        let Some((name, gid)) = fonts.resolve_mono(c) else {
             continue;
         };
         match runs.last_mut() {
