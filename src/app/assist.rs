@@ -192,38 +192,12 @@ impl App {
 
     /// Run one persistent-bible pass (#339) for `action` scoped to `book` — the
     /// active-book passes call it with the active book; the series-bible refresh
-    /// (#340) drives it per book. Routes to each tracker's request builders.
+    /// (#340) drives it per book. The tracker carries its own request builders and
+    /// parse, so the single `bible_tracker` lookup is both the gate and the
+    /// dispatch (#510).
     pub(crate) fn run_book_bible_pass(&mut self, action: AiAction, book: usize, force: bool) {
-        let Some(t) = bible_tracker(action) else {
-            return;
-        };
-        match action {
-            AiAction::Characters => self.run_bible_tracker(
-                t,
-                book,
-                force,
-                character::build_request,
-                character::build_incremental_request,
-                |r| Outcome::Characters(r.and_then(|resp| character::parse(&resp.text))),
-            ),
-            AiAction::Continuity => self.run_bible_tracker(
-                t,
-                book,
-                force,
-                continuity::build_request,
-                continuity::build_incremental_request,
-                |r| Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text))),
-            ),
-            AiAction::Setting => self.run_bible_tracker(
-                t,
-                book,
-                force,
-                setting::build_request,
-                setting::build_incremental_request,
-                |r| Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text))),
-            ),
-            // `bible_tracker` returned `Some`, so `action` is one of the three above.
-            _ => unreachable!("run_book_bible_pass: non-bible action passed the tracker gate"),
+        if let Some(t) = bible_tracker(action) {
+            self.run_bible_tracker(t, book, force);
         }
     }
 
