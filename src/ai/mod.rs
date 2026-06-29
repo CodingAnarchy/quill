@@ -427,12 +427,19 @@ impl Settings {
     /// file yields the defaults (AI off). The `ANTHROPIC_API_KEY` env var, if
     /// set, takes precedence over a key in the file.
     pub fn load() -> Self {
-        let mut settings: Settings = crate::config::load_section("ai");
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if !key.trim().is_empty() {
-                settings.api_key = Some(key);
+        let settings: Settings = crate::config::load_section("ai");
+        // Production also picks the key up from the environment; test builds never
+        // do, so the suite can't authenticate or reach the API by accident (#528).
+        #[cfg(not(test))]
+        let settings = {
+            let mut settings = settings;
+            if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+                if !key.trim().is_empty() {
+                    settings.api_key = Some(key);
+                }
             }
-        }
+            settings
+        };
         settings
     }
 

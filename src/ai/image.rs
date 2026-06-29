@@ -108,12 +108,19 @@ impl ImageSettings {
     /// missing/unreadable file yields the defaults, off). `FAL_KEY`, if set, takes
     /// precedence over a key in the file.
     pub fn load() -> Self {
-        let mut settings: ImageSettings = crate::config::load_section("image");
-        if let Ok(key) = std::env::var("FAL_KEY") {
-            if !key.trim().is_empty() {
-                settings.api_key = Some(key);
+        let settings: ImageSettings = crate::config::load_section("image");
+        // As with the Claude key, test builds never read the env key, so the suite
+        // can't authenticate or reach the image provider by accident (#528).
+        #[cfg(not(test))]
+        let settings = {
+            let mut settings = settings;
+            if let Ok(key) = std::env::var("FAL_KEY") {
+                if !key.trim().is_empty() {
+                    settings.api_key = Some(key);
+                }
             }
-        }
+            settings
+        };
         settings
     }
 

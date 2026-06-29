@@ -5,6 +5,11 @@
 //! transport failure to `Network { status: None, .. }`, an unreadable body to
 //! `ApiMalformed`. The caller checks the status and turns an error response into
 //! its own `Network { status: Some(..), .. }`. (#319)
+//!
+//! In test builds the three entry points are replaced by stubs that refuse the
+//! request, so the suite can never reach a live provider API — the no-network
+//! half of the hermeticity guarantee (#528). Tests drive the backends through
+//! injected results / mock backends instead of the wire.
 
 use serde_json::Value;
 
@@ -15,6 +20,7 @@ pub(crate) type Header<'a> = (&'a str, &'a str);
 
 /// POST `body` as JSON to `url` with `headers`; returns the HTTP status and the
 /// parsed JSON response.
+#[cfg(not(test))]
 pub(crate) fn post_json(
     url: &str,
     headers: &[Header],
@@ -32,6 +38,7 @@ pub(crate) fn post_json(
 }
 
 /// GET `url` as JSON with `headers`; returns the HTTP status and the parsed body.
+#[cfg(not(test))]
 pub(crate) fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> {
     let mut res = with_headers(
         ureq::get(url).config().http_status_as_error(false).build(),
@@ -46,6 +53,7 @@ pub(crate) fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), Ai
 
 /// GET `url` as raw text with `headers` (e.g. JSONL batch results, not a JSON
 /// document).
+#[cfg(not(test))]
 pub(crate) fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
     with_headers(
         ureq::get(url).config().http_status_as_error(false).build(),
@@ -60,6 +68,7 @@ pub(crate) fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError>
 
 /// Apply the auth/content headers to a request builder (generic over the body
 /// marker so it serves both POST and GET).
+#[cfg(not(test))]
 fn with_headers<B>(
     mut req: ureq::RequestBuilder<B>,
     headers: &[Header],
@@ -71,6 +80,7 @@ fn with_headers<B>(
 }
 
 /// A transport failure (the call never completed): no HTTP status to report.
+#[cfg(not(test))]
 fn transport(e: ureq::Error) -> AiError {
     AiError::Network {
         status: None,
@@ -79,6 +89,37 @@ fn transport(e: ureq::Error) -> AiError {
 }
 
 /// A body we couldn't read or parse as expected.
+#[cfg(not(test))]
 fn malformed(e: impl std::fmt::Display) -> AiError {
     AiError::ApiMalformed(e.to_string())
+}
+
+// --- Test stubs: every outbound request is refused before it leaves the machine,
+// so the suite can never reach a live provider API (#528). ---------------------
+
+#[cfg(test)]
+pub(crate) fn post_json(
+    _url: &str,
+    _headers: &[Header],
+    _body: &Value,
+) -> Result<(u16, Value), AiError> {
+    Err(offline())
+}
+
+#[cfg(test)]
+pub(crate) fn get_json(_url: &str, _headers: &[Header]) -> Result<(u16, Value), AiError> {
+    Err(offline())
+}
+
+#[cfg(test)]
+pub(crate) fn get_text(_url: &str, _headers: &[Header]) -> Result<String, AiError> {
+    Err(offline())
+}
+
+#[cfg(test)]
+fn offline() -> AiError {
+    AiError::Network {
+        status: None,
+        message: "outbound network is disabled in tests (#528)".into(),
+    }
 }

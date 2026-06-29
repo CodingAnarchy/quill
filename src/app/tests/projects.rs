@@ -4,21 +4,16 @@
 
 use super::*;
 use std::path::Path;
-use std::sync::Mutex;
 
 use crate::mode::WizardStep;
 use crate::recent;
 
-/// These tests redirect the global config dir (where the recent-projects list
-/// lives) to a temp dir via `XDG_CONFIG_HOME`. The env var is process-global, so
-/// serialize them — and isolate each one's recents — under this lock.
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-/// Point `XDG_CONFIG_HOME` at a fresh temp dir so `recent::record`/`list` touch
-/// scratch state, never the developer's real `~/.config/quill`.
+/// Point the config dir at a fresh temp dir for this test thread (#528), so
+/// `recent::record`/`list` and config reads touch scratch state, never the
+/// developer's real `~/.config/quill`.
 fn isolate(tag: &str) {
     let dir = crate::testutil::scratch_dir("xdg", tag);
-    std::env::set_var("XDG_CONFIG_HOME", &dir);
+    crate::config::set_config_dir(Some(dir));
 }
 
 /// A one-chapter project on disk with the given title and body.
@@ -39,7 +34,6 @@ fn open_app(dir: &Path) -> App {
 
 #[test]
 fn ctrl_b_lists_recent_projects_newest_first() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("list");
     let a = make_project("list-a", "Alpha", "alpha\n");
     let b = make_project("list-b", "Beta", "beta\n");
@@ -67,7 +61,6 @@ fn ctrl_b_lists_recent_projects_newest_first() {
 
 #[test]
 fn switching_swaps_the_active_project_in_place() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("swap");
     let a = make_project("swap-a", "Alpha", "alpha prose\n");
     let b = make_project("swap-b", "Beta", "beta prose\n");
@@ -92,7 +85,6 @@ fn switching_swaps_the_active_project_in_place() {
 
 #[test]
 fn switching_with_unsaved_work_prompts_then_saves_and_switches() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("dirty");
     let a = make_project("dirty-a", "Alpha", "alpha\n");
     let b = make_project("dirty-b", "Beta", "beta\n");
@@ -118,7 +110,6 @@ fn switching_with_unsaved_work_prompts_then_saves_and_switches() {
 
 #[test]
 fn cancelling_the_switch_keeps_the_current_project_and_its_unsaved_work() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("cancel");
     let a = make_project("cancel-a", "Alpha", "alpha\n");
     let b = make_project("cancel-b", "Beta", "beta\n");
@@ -141,7 +132,6 @@ fn cancelling_the_switch_keeps_the_current_project_and_its_unsaved_work() {
 
 #[test]
 fn switching_to_the_already_open_project_is_a_no_op_with_a_message() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("same");
     let a = make_project("same-a", "Alpha", "alpha\n");
 
@@ -202,7 +192,6 @@ fn select_entry(app: &mut App, label: &str) {
 
 #[test]
 fn browsing_files_is_reachable_even_with_no_recent_projects() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("no-recents");
     let parent = books_dir("nr");
     let a = project_in(&parent, "alpha", "Alpha", "alpha\n");
@@ -223,7 +212,6 @@ fn browsing_files_is_reachable_even_with_no_recent_projects() {
 
 #[test]
 fn navigator_lists_subfolders_and_marks_projects() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("list-dirs");
     let parent = books_dir("ld");
     let a = project_in(&parent, "alpha", "Alpha", "alpha\n");
@@ -259,7 +247,6 @@ fn navigator_lists_subfolders_and_marks_projects() {
 
 #[test]
 fn entering_a_project_in_the_navigator_switches_to_it() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("enter-proj");
     let parent = books_dir("ep");
     let a = project_in(&parent, "alpha", "Alpha", "alpha\n");
@@ -279,7 +266,6 @@ fn entering_a_project_in_the_navigator_switches_to_it() {
 
 #[test]
 fn entering_a_plain_folder_descends_into_it() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("descend");
     let parent = books_dir("de");
     let a = project_in(&parent, "alpha", "Alpha", "alpha\n");
@@ -302,7 +288,6 @@ fn entering_a_plain_folder_descends_into_it() {
 
 #[test]
 fn the_parent_entry_navigates_up() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("up");
     let parent = books_dir("up");
     let a = project_in(&parent, "alpha", "Alpha", "alpha\n");
@@ -320,7 +305,6 @@ fn the_parent_entry_navigates_up() {
 
 #[test]
 fn an_unreadable_directory_shows_a_message_without_crashing() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("unreadable");
     let a = make_project("unreadable-a", "Alpha", "alpha\n");
     let mut app = open_app(&a);
@@ -363,7 +347,6 @@ fn browser_titles(app: &App) -> Vec<String> {
 
 #[test]
 fn projects_under_the_configured_home_appear_in_the_browser() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("home");
     let lib = books_dir("home-lib");
     project_in(&lib, "alpha", "Alpha", "a\n");
@@ -384,7 +367,6 @@ fn projects_under_the_configured_home_appear_in_the_browser() {
 
 #[test]
 fn a_home_project_already_in_recents_is_not_duplicated() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("home-dedup");
     let lib = books_dir("dedup-lib");
     let a = project_in(&lib, "alpha", "Alpha", "a\n");
@@ -407,7 +389,6 @@ fn a_home_project_already_in_recents_is_not_duplicated() {
 
 #[test]
 fn with_no_projects_home_only_recents_are_listed() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("no-home");
     let a = make_project("nohome-a", "Alpha", "a\n");
     recent::record(&a, "Alpha");
@@ -426,7 +407,6 @@ fn with_no_projects_home_only_recents_are_listed() {
 
 #[test]
 fn creating_a_new_project_initializes_and_opens_it() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("create");
     let parent = books_dir("create-parent");
     let cur = make_project("create-cur", "Current", "c\n");
@@ -452,7 +432,6 @@ fn creating_a_new_project_initializes_and_opens_it() {
 
 #[test]
 fn creating_refuses_to_clobber_an_existing_project() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("clobber");
     let existing = make_project("clobber-existing", "Existing", "important prose\n");
     let cur = make_project("clobber-cur", "Current", "c\n");
@@ -479,7 +458,6 @@ fn creating_refuses_to_clobber_an_existing_project() {
 
 #[test]
 fn n_in_the_browser_prompts_for_a_new_project_path() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("prompt");
     let cur = make_project("prompt-cur", "Current", "c\n");
 
@@ -502,7 +480,6 @@ fn n_in_the_browser_prompts_for_a_new_project_path() {
 
 #[test]
 fn the_new_project_prompt_creates_and_opens_on_enter() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("prompt-create");
     let parent = books_dir("pc-parent");
     let cur = make_project("pc-cur", "Current", "c\n");
@@ -518,7 +495,6 @@ fn the_new_project_prompt_creates_and_opens_on_enter() {
 
 #[test]
 fn a_new_project_path_with_no_name_is_rejected() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("empty-name");
     let parent = books_dir("en-parent");
     let cur = make_project("en-cur", "Current", "c\n");
@@ -554,7 +530,6 @@ fn app_at_new_project(tag: &str) -> (App, PathBuf) {
 
 #[test]
 fn creating_a_project_offers_the_setup_wizard() {
-    let _g = ENV_LOCK.lock().unwrap();
     let (app, target) = app_at_new_project("wiz-offer");
     assert_eq!(
         app.project.manifest.title, "New Book",
@@ -569,7 +544,6 @@ fn creating_a_project_offers_the_setup_wizard() {
 
 #[test]
 fn declining_the_wizard_lands_in_the_editor() {
-    let _g = ENV_LOCK.lock().unwrap();
     let (mut app, _t) = app_at_new_project("wiz-decline");
     app.on_key(key(KeyCode::Char('n')));
     assert!(
@@ -580,7 +554,6 @@ fn declining_the_wizard_lands_in_the_editor() {
 
 #[test]
 fn the_goals_step_records_goals_in_the_manifest() {
-    let _g = ENV_LOCK.lock().unwrap();
     let (mut app, _t) = app_at_new_project("wiz-goals");
     app.on_key(key(KeyCode::Char('y'))); // start → Goals
     assert!(at_step(&app, WizardStep::Goals));
@@ -595,7 +568,6 @@ fn the_goals_step_records_goals_in_the_manifest() {
 
 #[test]
 fn ai_steps_are_skipped_when_ai_is_off() {
-    let _g = ENV_LOCK.lock().unwrap();
     let (mut app, _t) = app_at_new_project("wiz-noai");
     app.on_key(key(KeyCode::Char('y'))); // → Goals
     app.on_key(key(KeyCode::Enter)); // skip goals (blank)
@@ -608,7 +580,6 @@ fn ai_steps_are_skipped_when_ai_is_off() {
 
 #[test]
 fn the_notes_step_writes_notes_md_and_finishes() {
-    let _g = ENV_LOCK.lock().unwrap();
     let (mut app, _t) = app_at_new_project("wiz-notes");
     app.on_key(key(KeyCode::Char('y')));
     app.on_key(key(KeyCode::Enter)); // skip goals → Notes (AI off)
@@ -623,7 +594,6 @@ fn the_notes_step_writes_notes_md_and_finishes() {
 
 #[test]
 fn esc_dismisses_the_rest_of_the_wizard() {
-    let _g = ENV_LOCK.lock().unwrap();
     let (mut app, _t) = app_at_new_project("wiz-esc");
     app.on_key(key(KeyCode::Char('y'))); // → Goals
     app.on_key(key(KeyCode::Esc));
@@ -632,7 +602,6 @@ fn esc_dismisses_the_rest_of_the_wizard() {
 
 #[test]
 fn the_wizard_can_be_disabled_in_config() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("wiz-off");
     let cfg_dir = crate::config::config_dir().unwrap();
     fs::create_dir_all(&cfg_dir).unwrap();
@@ -661,7 +630,6 @@ fn the_wizard_can_be_disabled_in_config() {
 
 #[test]
 fn importing_with_ai_off_preserves_the_source_file() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-off"); // no [ai] config → AI is off
     let cur = make_project("import-off-cur", "Book", "c\n");
     let mut app = open_app(&cur);
@@ -691,7 +659,6 @@ fn importing_with_ai_off_preserves_the_source_file() {
 
 #[test]
 fn importing_a_directory_preserves_all_markdown_collectively() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-dir");
     let cur = make_project("import-dir-cur", "Book", "c\n");
     let mut app = open_app(&cur);
@@ -719,7 +686,6 @@ fn importing_a_directory_preserves_all_markdown_collectively() {
 
 #[test]
 fn importing_a_missing_path_reports_no_files() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-missing");
     let cur = make_project("import-missing-cur", "Book", "c\n");
     let mut app = open_app(&cur);
@@ -737,7 +703,6 @@ fn importing_a_missing_path_reports_no_files() {
 
 #[test]
 fn applying_an_import_writes_the_bible_files() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-apply");
     let cur = make_project("import-apply-cur", "Book", "c\n");
     let mut app = open_app(&cur);
@@ -781,7 +746,6 @@ fn notes_folder(tag: &str, files: &[(&str, &str)]) -> PathBuf {
 
 #[test]
 fn new_from_notes_creates_the_project_and_preserves_the_sources() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("nfn"); // AI off → sources preserved, bible generation deferred
     let cur = make_project("nfn-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -816,7 +780,6 @@ fn new_from_notes_creates_the_project_and_preserves_the_sources() {
 
 #[test]
 fn new_from_notes_rejects_a_folder_with_no_markdown() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("nfn-empty");
     let cur = make_project("nfn-empty-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -841,7 +804,6 @@ fn new_from_notes_rejects_a_folder_with_no_markdown() {
 
 #[test]
 fn new_from_notes_action_opens_the_folder_prompt() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("nfn-action");
     let cur = make_project("nfn-action-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -856,7 +818,6 @@ fn new_from_notes_action_opens_the_folder_prompt() {
 
 #[test]
 fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-ms");
     let cur = make_project("import-ms-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -910,7 +871,6 @@ fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
 fn importing_a_docx_manuscript_creates_a_chaptered_project() {
     use crate::export::docx::{to_docx, Profile};
     use crate::export::{Chapter, Document, Part};
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-docx");
     let cur = make_project("import-docx-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -981,7 +941,6 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
 fn importing_a_scriv_bundle_creates_a_chaptered_project() {
     use crate::export::scriv::write_scriv;
     use crate::export::{Chapter, Document, Part};
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-scriv");
     let cur = make_project("import-scriv-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -1048,7 +1007,6 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
 
 #[test]
 fn importing_rejects_a_non_markdown_file() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-ms-bad");
     let cur = make_project("import-ms-bad-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -1075,7 +1033,6 @@ fn importing_rejects_a_non_markdown_file() {
 
 #[test]
 fn import_manuscript_action_opens_the_file_prompt() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("import-ms-action");
     let cur = make_project("import-ms-action-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -1088,7 +1045,6 @@ fn import_manuscript_action_opens_the_file_prompt() {
 
 #[test]
 fn renaming_moves_the_folder_and_keeps_unsaved_work() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("rename");
     let dir = make_project("rename-src", "Working Title", "the opening line\n");
     let mut app = open_app(&dir);
@@ -1123,7 +1079,6 @@ fn renaming_moves_the_folder_and_keeps_unsaved_work() {
 
 #[test]
 fn renaming_refuses_to_clobber_an_existing_folder() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("rename-collide");
     let dir = make_project("rename-collide", "Book", "body\n");
     let mut app = open_app(&dir);
@@ -1152,7 +1107,6 @@ fn renaming_refuses_to_clobber_an_existing_folder() {
 
 #[test]
 fn renaming_rejects_an_empty_name() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("rename-empty");
     let dir = make_project("rename-empty", "Book", "body\n");
     let mut app = open_app(&dir);
@@ -1170,7 +1124,6 @@ fn renaming_rejects_an_empty_name() {
 
 #[test]
 fn renaming_updates_recents_to_the_new_path() {
-    let _g = ENV_LOCK.lock().unwrap();
     isolate("rename-recent");
     let dir = make_project("rename-recent", "Book", "body\n");
     recent::record(&dir, "Book"); // the pre-rename entry
