@@ -24,6 +24,7 @@ mod http;
 pub mod image;
 pub mod import;
 pub mod incremental;
+pub mod keychain;
 #[cfg(feature = "local")]
 pub mod local;
 #[cfg(feature = "local")]
@@ -185,10 +186,20 @@ pub(crate) fn is_ok(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
-/// A configured key from an optional config string: trimmed, `None` when blank.
-/// Shared by the text [`Settings`] and image [`image::ImageSettings`].
-pub(crate) fn resolved_key(key: &Option<String>) -> Option<&str> {
-    key.as_deref().map(str::trim).filter(|k| !k.is_empty())
+/// Resolve a provider's API key by precedence — env var → OS keychain → the
+/// plaintext `api_key` in config (#530) — via the pure [`keychain::resolve`]. The
+/// env var is read by the caller (gated out of test builds), the keychain by
+/// [`keychain::get`] (a no-op `None` in test builds), and `plaintext` is the
+/// trimmed config field. Shared by the text [`Settings`] and image
+/// [`image::ImageSettings`]; returns an owned key since it may come from the
+/// keychain rather than the borrowed config. `None` when every source is empty.
+pub(crate) fn resolved_key(
+    env: Option<&str>,
+    which: keychain::Key,
+    plaintext: &Option<String>,
+) -> Option<String> {
+    let keychain = keychain::get(which);
+    keychain::resolve(env, keychain.as_deref(), plaintext.as_deref()).map(str::to_string)
 }
 
 /// Render a list of items as numbered Markdown sections (`## {label} N`), each
@@ -424,28 +435,27 @@ impl Default for Settings {
 impl Settings {
     /// Load AI settings from `$XDG_CONFIG_HOME/quill/config.toml` (else
     /// `$HOME/.config/quill/config.toml`). Best-effort: a missing or unreadable
-    /// file yields the defaults (AI off). The `ANTHROPIC_API_KEY` env var, if
-    /// set, takes precedence over a key in the file.
+    /// file yields the defaults (AI off). The key itself is resolved lazily in
+    /// [`resolved_key`](Self::resolved_key) — env var → OS keychain → the plaintext
+    /// `api_key` here (#530) — so this just parses the file.
     pub fn load() -> Self {
-        let settings: Settings = crate::config::load_section("ai");
-        // Production also picks the key up from the environment; test builds never
-        // do, so the suite can't authenticate or reach the API by accident (#528).
-        #[cfg(not(test))]
-        let settings = {
-            let mut settings = settings;
-            if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-                if !key.trim().is_empty() {
-                    settings.api_key = Some(key);
-                }
-            }
-            settings
-        };
-        settings
+        crate::config::load_section("ai")
     }
 
-    /// The configured API key, if any (non-empty).
-    pub fn resolved_key(&self) -> Option<&str> {
-        resolved_key(&self.api_key)
+    /// The resolved Claude API key, if any: `ANTHROPIC_API_KEY` → OS keychain →
+    /// the plaintext `api_key` in config (#530). The env var is the headless / CI
+    /// escape hatch; the keychain keeps the secret out of the synced config; the
+    /// plaintext field keeps existing setups working and is the migration source.
+    /// Test builds read neither the env var nor the keychain (#528/#531), so the
+    /// suite can't authenticate, and a default config resolves to `None`.
+    pub fn resolved_key(&self) -> Option<String> {
+        // The env key is the headless escape hatch in production; test builds never
+        // read it, so the suite can't reach the API by accident (#528).
+        #[cfg(test)]
+        let env: Option<String> = None;
+        #[cfg(not(test))]
+        let env = std::env::var("ANTHROPIC_API_KEY").ok();
+        resolved_key(env.as_deref(), keychain::Key::Anthropic, &self.api_key)
     }
 
     /// The backend that will actually run, accounting for the privacy switch:
@@ -480,8 +490,8 @@ impl Settings {
             BackendKind::Local => Ok(()),
             BackendKind::Claude if self.resolved_key().is_some() => Ok(()),
             BackendKind::Claude => Err(AiError::NotConfigured(
-                "no API key — set ANTHROPIC_API_KEY or `api_key` under [ai] in the config \
-                 (or set `backend = \"local\"`)"
+                "no API key — run \"Set Claude API key\" from the run-action menu, set \
+                 ANTHROPIC_API_KEY, or set `backend = \"local\"`"
                     .into(),
             )),
         }
@@ -607,7 +617,7 @@ mod tests {
         .unwrap();
         assert!(cfg.ai.enabled);
         assert_eq!(cfg.ai.model, "claude-haiku-4-5");
-        assert_eq!(cfg.ai.resolved_key(), Some("sk-x"));
+        assert_eq!(cfg.ai.resolved_key().as_deref(), Some("sk-x"));
         cfg.ai.check_ready().unwrap(); // enabled + key + online → ready
     }
 

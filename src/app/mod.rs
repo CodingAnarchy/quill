@@ -31,6 +31,7 @@ use crate::typography;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod annotations;
+mod api_keys;
 mod assist;
 mod assistant;
 mod bible_review;

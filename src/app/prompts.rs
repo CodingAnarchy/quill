@@ -167,6 +167,17 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            Pending::StripPlaintextKey(which) => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.strip_plaintext_key(which);
+                }
+                _ => {
+                    // Leaving it is fine — it stays the lowest-precedence fallback.
+                    self.mode = closed;
+                    self.message = Some("Left the plaintext key in the config.".into());
+                }
+            },
             Pending::ConfirmRestore => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;
@@ -266,6 +277,7 @@ impl App {
             | Pending::NewFromNotesDest
             | Pending::ImportManuscriptSource
             | Pending::ImportManuscriptDest
+            | Pending::SetApiKey(_)
             | Pending::SprintDuration => {
                 match key.code {
                     KeyCode::Char(c) => self.prompt_mut().input.push(c),
@@ -448,6 +460,12 @@ impl App {
                             Pending::SprintDuration => {
                                 // begin_sprint restores the editing mode and reports.
                                 self.begin_sprint(text);
+                            }
+                            Pending::SetApiKey(which) => {
+                                // Back to editing; store_api_key may chain a strip
+                                // confirm, which opens its own prompt (#530).
+                                self.mode = closed;
+                                self.store_api_key(which, text);
                             }
                             // Confirmations never reach the text arm.
                             _ => self.select(fallback),

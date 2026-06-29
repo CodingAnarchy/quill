@@ -46,6 +46,11 @@ spellbook = "0.4.2"
 # reads the font — the PDF itself is still hand-written (like docx/epub/pdf).
 ttf-parser = "0.25"
 subsetter = "0.2.6"
+# OS secret store for API keys (#530): keys live in the macOS Keychain / Linux
+# Secret Service / Windows Credential Manager, not plaintext in the synced config.
+# The platform-native + sync-secret-service stores cover desktop; env vars cover
+# headless (where there's no login session to unlock the store).
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [dev-dependencies]
 # Property / round-trip and adversarial-input testing for the data path (#265).

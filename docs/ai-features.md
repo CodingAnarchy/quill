@@ -33,14 +33,17 @@ offline = false                # true forces the local backend (nothing leaves t
 model = "claude-opus-4-8"      # Claude model; the local backend picks its own
 cost_threshold = 0.20          # confirm before a Claude pass estimated above this (USD)
 refresh_after_changes = 5      # rebuild a bible fully once this many chapters change (else revise incrementally)
-# api_key = "sk-ant-..."       # or set ANTHROPIC_API_KEY (env wins); Claude only
+# The key is NOT kept here — run "Set Claude API key" from the Ctrl-K menu to
+# store it in the OS keychain (see "Where the API key lives" below). A legacy
+# plaintext `api_key = "sk-ant-..."` still works but is the lowest precedence.
 
 [image]                          # image generation (#238) — its own opt-in & key
 enabled = true                   # off by default
 backend = "remote"               # "remote" (fal.ai) or "local" (on-device SD, #240)
 offline = false                  # true forces the local backend
 model = "fal-ai/flux/schnell"    # a fal.ai model id (remote backend)
-# api_key = "..."                # or set FAL_KEY (env wins); remote backend only
+# As with Claude: run "Set image API key" from the Ctrl-K menu to store it in the
+# OS keychain; FAL_KEY (env) overrides; a legacy plaintext `api_key` is last.
 ```
 
 Image generation (#238) is a separate opt-in with its own `[image]` section and
@@ -59,8 +62,34 @@ tells you to rebuild. Both satisfy the same image-backend trait, so portraits an
 scenes work against either; the local model loads once on first use (off the UI
 thread) and downloads its weights via `hf-hub` (cached outside the project).
 
-The API key comes from `ANTHROPIC_API_KEY` (preferred) or the `api_key` field —
-never from the project directory. **Backends:** the default `claude` backend sends
+**Where the API key lives (#530).** Quill no longer keeps the key in
+`config.toml`, where it would ride along into a synced dotfile repo, a backup, or
+a casual `cat` of the file. The key is resolved by precedence:
+
+1. **Environment variable** — `ANTHROPIC_API_KEY` (text) / `FAL_KEY` (image). The
+   headless / CI escape hatch: a server or CI box has no login session to unlock
+   the OS keychain, so the env var covers it.
+2. **OS keychain** — the macOS Keychain, the Linux Secret Service (libsecret), or
+   the Windows Credential Manager. Set it from inside Quill with **Set Claude API
+   key** / **Set image API key** in the `Ctrl-K` run-action menu: you type the
+   key once, Quill writes it to the OS store, and it never touches the config
+   file. This is the recommended path.
+3. **Plaintext `api_key`** in `config.toml` — still read, so existing setups keep
+   working, but lowest precedence. To migrate: run the set-key command (which
+   stores the key in the keychain) and accept its offer to strip the now-redundant
+   plaintext line from your config.
+
+On a headless Linux box with no Secret Service daemon, the keychain write fails
+and Quill tells you to use the env var instead — that's the supported path there.
+
+**Threat model.** Keychain storage protects against *accidental disclosure*: a
+key leaking through a dotfile sync, a backup, or someone glancing at your config.
+It does **not** protect against a local attacker who can already run Quill (or any
+process) as you — the OS unlocks the store for your logged-in session, so anything
+running as you can read it, exactly as you can. The goal is to stop the key from
+sitting in a file that travels off the machine, not to defend a compromised login.
+
+**Backends:** the default `claude` backend sends
 the manuscript to the Anthropic API (needs a key); the `local` backend runs an
 on-device Qwen with candle (#83/#124) — no key, nothing leaves the machine — and
 `offline = true` forces local regardless of `backend`. The local backend is a
