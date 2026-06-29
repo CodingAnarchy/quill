@@ -1,7 +1,6 @@
 //! Project switching and directory browsing: the project/dir browsers and the
 //! new-project flow. Extracted from `mod.rs` (#314).
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -88,16 +87,9 @@ impl App {
         // Recent projects first (newest), then every other project under the
         // configured projects-home — a complete library view (#272). Omitted
         // silently when no home is set. Always opens even when empty, so `b`
-        // (browse) stays reachable for a first-time author (#271).
-        let mut projects = recent::list();
-        if let Some(home) = ProjectsConfig::load().home_dir() {
-            let known: HashSet<PathBuf> = projects.iter().map(|p| p.path.clone()).collect();
-            projects.extend(
-                recent::scan(&home)
-                    .into_iter()
-                    .filter(|p| !known.contains(&p.path)),
-            );
-        }
+        // (browse) stays reachable for a first-time author (#271). Shared with the
+        // startup chooser (#526) so the two offer the same library.
+        let projects = recent::openable(ProjectsConfig::load().home_dir().as_deref());
         self.mode = Mode::ProjectBrowser(Box::new(ProjectBrowser {
             projects,
             selected: 0,

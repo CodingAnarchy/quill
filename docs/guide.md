@@ -61,10 +61,25 @@ Point Quill at the folder where you keep your books, in
     [projects]
     home = "~/Writing"
 
-Every project under that folder then appears in the browser, ready to open. It's
-also where a bare `quill` launch (no path) puts a new book: from a folder that
-isn't already a project, Quill asks for a name and creates the project in your
-projects home rather than in the current directory.
+Every project under that folder then appears in the browser, ready to open.
+
+STARTING UP WITHOUT A PATH
+
+A bare `quill` launch (no path) follows where you are. Inside an existing project,
+it opens that one straight away. From a folder that isn't a project — when you
+have books to return to — it shows a chooser: "Create a new project" or "Open an
+existing project". Choosing to open lists your recent projects together with every
+project under your projects home (the same library the Ctrl-B browser shows);
+arrow keys move, Enter opens the highlighted one, Esc steps back to the chooser.
+Choosing to create asks for a name and files the new project in your projects home
+rather than in the current directory.
+
+When there's nothing to open yet — no recent projects and no projects home set —
+the chooser would be empty, so Quill skips it and goes straight to naming a new
+book. With no projects home configured, that new book lands in a `Quill` folder in
+your home directory, and Quill says so (set `[projects] home` to choose where
+books live). Passing an explicit path — `quill path/to/book` — always opens or
+creates that project directly, with no chooser.
 
 To make the project's folder match its title, run "Rename project folder" from
 the Ctrl-K menu: it's prefilled with the book title, the folder moves without
