@@ -64,12 +64,31 @@ use crate::project::Project;
 /// the panic hook (which has no per-instance state) via this process-global.
 static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 
+/// The `quill <version>` banner printed for `--version`/`-V` (#516). The version
+/// is the crate version from `Cargo.toml`, baked in at compile time.
+const VERSION_LINE: &str = concat!("quill ", env!("CARGO_PKG_VERSION"));
+
+/// Whether `arg` is the version flag (#516). Checked before any path handling so
+/// `quill --version` prints the version and exits, rather than treating the flag
+/// as a project directory and scaffolding a `--version` folder.
+fn is_version_flag(arg: &str) -> bool {
+    arg == "--version" || arg == "-V"
+}
+
 fn main() -> io::Result<()> {
+    // A version query prints and exits before any filesystem work (#516), so a
+    // flag-style argument never gets treated as a project directory.
+    let first_arg = std::env::args().nth(1);
+    if first_arg.as_deref().is_some_and(is_version_flag) {
+        println!("{VERSION_LINE}");
+        return Ok(());
+    }
+
     // A project lives in a directory. An explicit path opens (or creates) it
     // there; a bare launch resolves to an existing project or a freshly named
     // one in the projects home — never a stray project in the current folder
     // (#423).
-    let dir = match std::env::args().nth(1) {
+    let dir = match first_arg {
         Some(path) => PathBuf::from(path),
         None => match startup_dir() {
             Ok(dir) => dir,
@@ -324,6 +343,24 @@ mod tests {
             "the message should name the manifest: {err}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn version_flag_recognizes_both_spellings() {
+        // `--version` and `-V` are the version query (#516); everything else —
+        // including a path that merely starts with a dash-free word — is not.
+        assert!(is_version_flag("--version"));
+        assert!(is_version_flag("-V"));
+        assert!(!is_version_flag("--help"));
+        assert!(!is_version_flag("-v"));
+        assert!(!is_version_flag("version"));
+        assert!(!is_version_flag("/tmp/book"));
+    }
+
+    #[test]
+    fn version_line_matches_the_crate_version() {
+        // The banner is `quill <Cargo.toml version>`, baked in at compile time.
+        assert_eq!(VERSION_LINE, format!("quill {}", env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
