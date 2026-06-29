@@ -284,6 +284,23 @@ fn a_configured_body_font_replaces_the_serif() {
 }
 
 #[test]
+fn embedded_fonts_are_subset_to_keep_pdfs_small() {
+    // Each bundled face is ~390 KB and DejaVu ~750 KB; a short doc uses a few dozen
+    // glyphs, so subsetting must keep the whole PDF far under a single whole font.
+    let style = ExportStyle {
+        scene_break: Some("❦".into()), // pulls in (and subsets) the fallback too
+        ..Default::default()
+    };
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    assert!(has(&bytes, "/FontFile2"), "fonts still embedded");
+    assert!(
+        bytes.len() < 200_000,
+        "subset keeps the PDF small, got {} bytes",
+        bytes.len()
+    );
+}
+
+#[test]
 fn trim_points_resolves_known_sizes_only() {
     assert_eq!(trim_points("6x9"), Some((432.0, 648.0)));
     assert_eq!(trim_points("5x8"), Some((360.0, 576.0)));
