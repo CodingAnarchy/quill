@@ -12,11 +12,14 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+use self::opf::{build_nav, build_ncx, build_opf, OpfMeta};
 use super::{
-    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedFont,
-    EmbeddedImage, ExportStyle, FontRole, ImageRole, Prose,
+    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedImage,
+    ExportStyle, FontRole, ImageRole, Prose,
 };
 use crate::frontmatter::Epigraph;
+
+mod opf;
 
 const CONTAINER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#;
@@ -494,178 +497,6 @@ fn identifier(title: &str, series: Option<&str>) -> String {
     )
 }
 
-/// The OPF package: metadata (identifier, title + optional subtitle, language,
-/// author, series collection, modified time), the manifest (nav, NCX, CSS, and
-/// every content doc), and the spine in reading order.
-/// The OPF metadata for one package — grouped so [`build_opf`] stays within a
-/// sane argument count.
-struct OpfMeta<'a> {
-    id: &'a str,
-    title: &'a str,
-    subtitle: Option<&'a str>,
-    author: Option<&'a str>,
-    series: Option<&'a str>,
-    modified: &'a str,
-}
-
-fn build_opf(
-    book: &OpfMeta,
-    items: &[Item],
-    fonts: &[EmbeddedFont],
-    images: &[EmbeddedImage],
-) -> String {
-    let mut meta = String::new();
-    meta.push_str(&format!(
-        "<dc:identifier id=\"bookid\">{}</dc:identifier>",
-        xml_escape(book.id)
-    ));
-    meta.push_str(&format!(
-        "<dc:title id=\"title\">{}</dc:title>",
-        xml_escape(book.title)
-    ));
-    meta.push_str("<meta refines=\"#title\" property=\"title-type\">main</meta>");
-    if let Some(s) = book.subtitle {
-        meta.push_str(&format!(
-            "<dc:title id=\"subtitle\">{}</dc:title>",
-            xml_escape(s)
-        ));
-        meta.push_str("<meta refines=\"#subtitle\" property=\"title-type\">subtitle</meta>");
-    }
-    meta.push_str("<dc:language>en</dc:language>");
-    if let Some(a) = book.author {
-        meta.push_str(&format!("<dc:creator>{}</dc:creator>", xml_escape(a)));
-    }
-    if let Some(s) = book.series {
-        meta.push_str(&format!(
-            "<meta property=\"belongs-to-collection\" id=\"series\">{}</meta>",
-            xml_escape(s)
-        ));
-        meta.push_str("<meta refines=\"#series\" property=\"collection-type\">series</meta>");
-    }
-    meta.push_str(&format!(
-        "<meta property=\"dcterms:modified\">{}</meta>",
-        book.modified
-    ));
-
-    let mut manifest = String::from(concat!(
-        "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>",
-        "<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>",
-        "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>"
-    ));
-    for (i, font) in fonts.iter().enumerate() {
-        manifest.push_str(&format!(
-            "<item id=\"font{i}\" href=\"{}\" media-type=\"{}\"/>",
-            font.href, font.media_type
-        ));
-    }
-    for (i, image) in images.iter().enumerate() {
-        manifest.push_str(&format!(
-            "<item id=\"img{i}\" href=\"{}\" media-type=\"{}\"/>",
-            image.href, image.media_type
-        ));
-    }
-    let mut spine = String::new();
-    for it in items {
-        manifest.push_str(&format!(
-            "<item id=\"{}\" href=\"{}\" media-type=\"application/xhtml+xml\"/>",
-            it.id, it.href
-        ));
-        spine.push_str(&format!("<itemref idref=\"{}\"/>", it.id));
-    }
-
-    format!(
-        concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
-            "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" ",
-            "unique-identifier=\"bookid\" xml:lang=\"en\">",
-            "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">{meta}</metadata>",
-            "<manifest>{manifest}</manifest>",
-            "<spine toc=\"ncx\">{spine}</spine></package>"
-        ),
-        meta = meta,
-        manifest = manifest,
-        spine = spine,
-    )
-}
-
-/// The EPUB 3 navigation document — a nested `<ol>` table of contents.
-fn build_nav(entries: &[Nav]) -> String {
-    format!(
-        concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
-            "<!DOCTYPE html>\n",
-            "<html xmlns=\"http://www.w3.org/1999/xhtml\" ",
-            "xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"en\" lang=\"en\">",
-            "<head><meta charset=\"utf-8\"/><title>Contents</title></head>",
-            "<body><nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1>\n{ol}</nav></body></html>"
-        ),
-        ol = nav_ol(entries),
-    )
-}
-
-fn nav_ol(entries: &[Nav]) -> String {
-    let mut s = String::from("<ol>\n");
-    for e in entries {
-        s.push_str(&format!(
-            "<li><a href=\"{}\">{}</a>",
-            e.href,
-            xml_escape(&e.label)
-        ));
-        if !e.children.is_empty() {
-            s.push('\n');
-            s.push_str(&nav_ol(&e.children));
-        }
-        s.push_str("</li>\n");
-    }
-    s.push_str("</ol>\n");
-    s
-}
-
-/// The EPUB 2 NCX, for readers that don't read the EPUB 3 nav doc.
-fn build_ncx(id: &str, title: &str, entries: &[Nav]) -> String {
-    let mut order = 0;
-    let points = ncx_points(entries, &mut order);
-    format!(
-        concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
-            "<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\">",
-            "<head><meta name=\"dtb:uid\" content=\"{uid}\"/>",
-            "<meta name=\"dtb:depth\" content=\"{depth}\"/>",
-            "<meta name=\"dtb:totalPageCount\" content=\"0\"/>",
-            "<meta name=\"dtb:maxPageNumber\" content=\"0\"/></head>",
-            "<docTitle><text>{title}</text></docTitle><navMap>{points}</navMap></ncx>"
-        ),
-        uid = xml_escape(id),
-        depth = nav_depth(entries),
-        title = xml_escape(title),
-        points = points,
-    )
-}
-
-fn ncx_points(entries: &[Nav], order: &mut usize) -> String {
-    let mut s = String::new();
-    for e in entries {
-        *order += 1;
-        s.push_str(&format!(
-            "<navPoint id=\"np{order}\" playOrder=\"{order}\"><navLabel><text>{}</text></navLabel><content src=\"{}\"/>",
-            xml_escape(&e.label),
-            e.href
-        ));
-        s.push_str(&ncx_points(&e.children, order));
-        s.push_str("</navPoint>");
-    }
-    s
-}
-
-/// The deepest nesting level of the TOC, for the NCX `dtb:depth`.
-fn nav_depth(entries: &[Nav]) -> usize {
-    entries
-        .iter()
-        .map(|e| 1 + nav_depth(&e.children))
-        .max()
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,87 +591,6 @@ mod tests {
         }
         // container.xml points at the OPF.
         assert!(part(&bytes, "META-INF/container.xml").contains("OEBPS/content.opf"));
-    }
-
-    #[test]
-    fn opf_carries_book_metadata() {
-        let opf = part(
-            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
-            "OEBPS/content.opf",
-        );
-        assert!(
-            opf.contains("Red &lt;State&gt; Earth"),
-            "title escaped: {opf}"
-        );
-        assert!(
-            opf.contains("a novel") && opf.contains("title-type\">subtitle"),
-            "subtitle"
-        );
-        assert!(opf.contains("<dc:creator>A. Writer</dc:creator>"), "author");
-        assert!(
-            opf.contains("belongs-to-collection") && opf.contains("The Cycle"),
-            "series"
-        );
-        assert!(
-            opf.contains("dcterms:modified\">2026-06-27T00:00:00Z"),
-            "modified"
-        );
-        assert!(opf.contains("unique-identifier=\"bookid\""));
-        // Every spine itemref resolves to a manifest item id.
-        let manifest = &opf[opf.find("<manifest>").unwrap()..opf.find("</manifest>").unwrap()];
-        let spine = &opf[opf.find("<spine").unwrap()..];
-        for chunk in spine.split("idref=\"").skip(1) {
-            let id = &chunk[..chunk.find('"').unwrap()];
-            assert!(
-                manifest.contains(&format!("id=\"{id}\"")),
-                "spine {id} in manifest"
-            );
-        }
-    }
-
-    #[test]
-    fn chapters_appear_in_reading_order_in_the_spine() {
-        let opf = part(
-            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
-            "OEBPS/content.opf",
-        );
-        let spine = &opf[opf.find("<spine").unwrap()..];
-        // title page, prologue (front), part divider, the chapter, afterword (back) —
-        // front/body/back chapters all use the `chap` prefix, in reading order.
-        let order = ["title0001", "chap0002", "part0003", "chap0004", "chap0005"];
-        let mut last = 0;
-        for id in order {
-            let at = spine
-                .find(id)
-                .unwrap_or_else(|| panic!("{id} in spine: {spine}"));
-            assert!(at >= last, "{id} out of order");
-            last = at;
-        }
-    }
-
-    #[test]
-    fn nav_nests_chapters_under_their_part() {
-        let nav = part(
-            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
-            "OEBPS/nav.xhtml",
-        );
-        // The part is a TOC entry with a nested list holding its chapter.
-        let part_at = nav.find("Part One").expect("part in toc");
-        let nested = nav[part_at..].find("<ol>").expect("nested list under part");
-        let chapter_at = nav[part_at..].find("The Find").expect("chapter in toc");
-        assert!(nested < chapter_at, "chapter nested under the part: {nav}");
-        // Front/back matter are top-level entries.
-        assert!(nav.contains("Prologue") && nav.contains("Afterword"));
-        // The NCX mirrors the structure for older readers.
-        let ncx = part(
-            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
-            "OEBPS/toc.ncx",
-        );
-        assert!(ncx.contains("Part One") && ncx.contains("The Find"));
-        assert!(
-            ncx.contains("dtb:depth\" content=\"2\""),
-            "two-level depth: {ncx}"
-        );
     }
 
     #[test]
@@ -1237,41 +987,5 @@ mod tests {
             opf.contains("urn:quill:the-cycle"),
             "series+title slug: {opf}"
         );
-    }
-
-    #[test]
-    fn series_epub_nests_each_book_with_its_parts() {
-        let book = |title: &str, body: &str| Document {
-            title: title.into(),
-            subtitle: None,
-            author: None,
-            series: None,
-            epigraph: None,
-            front: vec![],
-            parts: vec![Part {
-                name: None,
-                chapters: vec![chapter("Ch", None, body)],
-            }],
-            back: vec![],
-        };
-        let bytes = to_epub_series(
-            &[book("Book One", "alpha"), book("Book Two", "beta")],
-            Some("The Saga"),
-            Some("A. Writer"),
-            MODIFIED,
-            &ExportStyle::default(),
-        )
-        .unwrap();
-        let nav = part(&bytes, "OEBPS/nav.xhtml");
-        let one = nav.find("Book One").expect("book one");
-        let two = nav.find("Book Two").expect("book two");
-        assert!(one < two, "books in order");
-        let opf = part(&bytes, "OEBPS/content.opf");
-        assert!(
-            opf.contains("The Saga") && opf.contains("A. Writer"),
-            "series metadata"
-        );
-        // Each book's prose is in its own chapter file.
-        assert!(part(&bytes, "OEBPS/chap0003.xhtml").contains("alpha"));
     }
 }
