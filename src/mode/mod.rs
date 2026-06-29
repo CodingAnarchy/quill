@@ -512,6 +512,10 @@ pub(crate) enum Action {
     SwitchBackend,
     /// Open the local AI model manager — choose which models to use (#379).
     ManageModels,
+    /// Store the Claude API key in the OS keychain (#530).
+    SetClaudeKey,
+    /// Store the image (fal.ai) API key in the OS keychain (#530).
+    SetImageKey,
     /// Open the authorial assistant pane (#399), the same as `Ctrl-W a`.
     Assistant,
     /// Open the snippet picker to insert an author-defined snippet (#411).
@@ -568,6 +572,8 @@ impl Action {
         Action::DescribeConfig,
         Action::SwitchBackend,
         Action::ManageModels,
+        Action::SetClaudeKey,
+        Action::SetImageKey,
         Action::Assistant,
         // Editing
         Action::AcceptWord,
@@ -640,6 +646,8 @@ impl Action {
             Action::ReviewAnnotations => "annotate:review",
             Action::SwitchBackend => "ai:backend",
             Action::ManageModels => "ai:models",
+            Action::SetClaudeKey => "ai:set-key",
+            Action::SetImageKey => "image:set-key",
             Action::Assistant => "assistant",
             Action::InsertSnippet => "snippet",
         }
@@ -666,6 +674,8 @@ impl Action {
             | Action::DescribeConfig
             | Action::SwitchBackend
             | Action::ManageModels
+            | Action::SetClaudeKey
+            | Action::SetImageKey
             | Action::Assistant => "AI",
             Action::AcceptWord
             | Action::NextMisspelling
@@ -734,6 +744,8 @@ impl Action {
             Action::ReviewAnnotations => "Review annotations",
             Action::SwitchBackend => "Switch AI backend (Claude / local)",
             Action::ManageModels => "Local AI models",
+            Action::SetClaudeKey => "Set Claude API key (keychain)",
+            Action::SetImageKey => "Set image API key (keychain)",
             Action::Assistant => "Authorial assistant",
             Action::InsertSnippet => "Insert snippet…",
         }
@@ -994,6 +1006,15 @@ pub(crate) enum Pending {
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.
     SetMeta(MetaField),
+    /// Text input: an API key to store in the OS keychain (#530), for the given
+    /// provider. On Enter the key is written to the keychain (never the config
+    /// file); a blank entry cancels. The provider determines the keychain entry
+    /// and which plaintext field, if any, is then offered for removal.
+    SetApiKey(crate::ai::keychain::Key),
+    /// y/N: a plaintext `api_key` is now redundant (the key is in the keychain) —
+    /// strip it from the config file (#530). `y` removes it; anything else leaves
+    /// it (where it stays the lowest-precedence fallback).
+    StripPlaintextKey(crate::ai::keychain::Key),
 }
 
 /// Which metadata field a [`Pending::SetMeta`] prompt writes. Chapter fields

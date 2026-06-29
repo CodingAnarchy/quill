@@ -166,7 +166,13 @@ keystrokes that stay out of the way.
   writes only a temp file and never touches your manuscript.
 
 - **AI assistance (opt-in)** — off by default; a draft only leaves the machine
-  when you enable AI and supply a key. Quill's AI is an **assistant, not a
+  when you enable AI and supply a key. Your **API key is kept in the OS keychain,
+  not in plaintext** (#530): run **Set Claude API key** / **Set image API key**
+  from the `Ctrl-K` menu and Quill stores it in the macOS Keychain / Linux Secret
+  Service / Windows Credential Manager, so a synced dotfile or backup of your
+  config never carries the key. `ANTHROPIC_API_KEY` / `FAL_KEY` still override
+  (the headless / CI path), and a legacy plaintext `api_key` still works with an
+  offer to migrate it into the keychain. Quill's AI is an **assistant, not a
   co-writer** — it tracks, outlines, marks, observes, and looks up, but never
   drafts or rewrites your prose. Talking to the Claude API (prompt caching, the
   Batch API, structured outputs), it keeps a human-readable **story bible** in

@@ -284,6 +284,8 @@ impl App {
             Action::ReviewAnnotations => self.open_annotation_review(),
             Action::SwitchBackend => self.toggle_ai_backend(),
             Action::ManageModels => self.open_model_manager(),
+            Action::SetClaudeKey => self.start_set_api_key(ai::keychain::Key::Anthropic),
+            Action::SetImageKey => self.start_set_api_key(ai::keychain::Key::Fal),
             Action::Assistant => self.open_assistant(),
             Action::InsertSnippet => self.open_snippet_picker(),
         }

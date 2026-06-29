@@ -151,6 +151,17 @@ posts). Revision triage collects every finding into one list to work through.
 Each pass runs off the editor thread, so the editor never freezes, and a pass
 that would cost more than your threshold asks before spending.
 
+Your API key is kept in the OS keychain, not in plaintext in your config file, so
+a synced dotfile or a backup of the config never carries it. Run "Set Claude API
+key" (or "Set image API key") from the Ctrl-K menu, type the key once, and Quill
+stores it in the system keychain. If you already had a plaintext "api_key" in the
+config, it offers to remove it. The key is resolved as: the environment variable
+(ANTHROPIC_API_KEY / FAL_KEY, for headless or CI use) first, then the keychain,
+then any leftover plaintext "api_key". This guards against the key leaking by
+accident — a synced dotfile, a backup, a casual look at the file; it does not stop
+anyone who can already run Quill as you (the system unlocks the keychain for your
+session). On a headless Linux box with no keychain daemon, set the env var.
+
 Stuck on a word? "Word search" is an in-context thesaurus: it prefills the word
 under your cursor — add constraints in plain words ("2 syllables, Anglo-Saxon,
 common; 8 results") if you like — and returns candidate words or short phrases

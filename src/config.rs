@@ -170,6 +170,59 @@ fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
     out
 }
 
+/// Remove `key` from `[section]` in the config file (#530), preserving everything
+/// else (other keys, sections, comments). Used to strip a now-redundant plaintext
+/// `api_key` once the key is stored in the OS keychain. Returns whether a line was
+/// removed (so the caller can report "nothing to remove" rather than rewriting an
+/// unchanged file). A missing file / section / key is a no-op.
+pub fn remove_value(section: &str, key: &str) -> io::Result<bool> {
+    let Some(path) = config_path() else {
+        return Ok(false);
+    };
+    let Ok(existing) = std::fs::read_to_string(&path) else {
+        return Ok(false);
+    };
+    let (updated, removed) = strip_value(&existing, section, key);
+    if removed {
+        std::fs::write(&path, updated)?;
+    }
+    Ok(removed)
+}
+
+/// Drop the `key = …` line under `[section]` from `existing`, returning the new
+/// text and whether a line was removed. Pure (no I/O), so the splice is testable
+/// without a file on disk, like [`set_value`]. Everything else is left
+/// byte-for-byte; the section header stays even if it ends up empty.
+fn strip_value(existing: &str, section: &str, key: &str) -> (String, bool) {
+    let header = format!("[{section}]");
+    let mut lines: Vec<String> = existing.lines().map(String::from).collect();
+    let trailing_nl = existing.is_empty() || existing.ends_with('\n');
+
+    let Some(h) = lines.iter().position(|l| l.trim() == header) else {
+        return (existing.to_string(), false);
+    };
+    // The section body runs to the next `[…]` header (or end of file).
+    let end = lines[h + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map_or(lines.len(), |i| h + 1 + i);
+    let found = (h + 1..end).find(|&i| {
+        lines[i]
+            .split_once('=')
+            .is_some_and(|(lhs, _)| lhs.trim() == key)
+    });
+    let Some(k) = found else {
+        return (existing.to_string(), false);
+    };
+    lines.remove(k);
+
+    let mut out = lines.join("\n");
+    if trailing_nl && !out.is_empty() {
+        out.push('\n');
+    }
+    (out, true)
+}
+
 /// Editor behavior from the `[editor]` section. The default keeps Quill's
 /// modeless editing unchanged (but with smart typography on — see below).
 #[derive(Clone, Deserialize)]
@@ -465,6 +518,43 @@ mod tests {
             "comments kept: {out}"
         );
         assert!(out.contains("vim = true"), "{out}");
+    }
+
+    #[test]
+    fn strip_value_removes_the_key_and_keeps_the_rest() {
+        let existing = "[ai]\nenabled = true\napi_key = \"sk-secret\"\nmodel = \"x\"\n";
+        let (out, removed) = strip_value(existing, "ai", "api_key");
+        assert!(removed);
+        assert!(!out.contains("sk-secret"), "plaintext key gone: {out}");
+        assert!(
+            out.contains("enabled = true") && out.contains("model = \"x\""),
+            "other keys kept: {out}"
+        );
+        assert!(out.ends_with('\n'), "trailing newline preserved: {out:?}");
+    }
+
+    #[test]
+    fn strip_value_is_a_no_op_when_absent() {
+        let existing = "[ai]\nenabled = true\n";
+        let (out, removed) = strip_value(existing, "ai", "api_key");
+        assert!(!removed);
+        assert_eq!(out, existing, "unchanged when the key isn't there");
+        // A missing section is likewise a no-op.
+        let (out, removed) = strip_value(existing, "image", "api_key");
+        assert!(!removed);
+        assert_eq!(out, existing);
+    }
+
+    #[test]
+    fn strip_value_only_touches_the_named_section() {
+        let existing = "[ai]\napi_key = \"a\"\n\n[image]\napi_key = \"b\"\n";
+        let (out, removed) = strip_value(existing, "image", "api_key");
+        assert!(removed);
+        assert!(
+            out.contains("[ai]\napi_key = \"a\""),
+            "[ai] key kept: {out}"
+        );
+        assert!(!out.contains("\"b\""), "[image] key removed: {out}");
     }
 
     #[test]

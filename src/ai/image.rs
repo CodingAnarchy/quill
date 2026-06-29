@@ -105,28 +105,24 @@ impl Default for ImageSettings {
 
 impl ImageSettings {
     /// Load the `[image]` section from the home config file. Best-effort (a
-    /// missing/unreadable file yields the defaults, off). `FAL_KEY`, if set, takes
-    /// precedence over a key in the file.
+    /// missing/unreadable file yields the defaults, off). The key is resolved
+    /// lazily in [`resolved_key`](Self::resolved_key) — env → keychain → plaintext
+    /// (#530) — so this just parses the file.
     pub fn load() -> Self {
-        let settings: ImageSettings = crate::config::load_section("image");
-        // As with the Claude key, test builds never read the env key, so the suite
-        // can't authenticate or reach the image provider by accident (#528).
-        #[cfg(not(test))]
-        let settings = {
-            let mut settings = settings;
-            if let Ok(key) = std::env::var("FAL_KEY") {
-                if !key.trim().is_empty() {
-                    settings.api_key = Some(key);
-                }
-            }
-            settings
-        };
-        settings
+        crate::config::load_section("image")
     }
 
-    /// The configured API key, if any (non-empty).
-    pub fn resolved_key(&self) -> Option<&str> {
-        super::resolved_key(&self.api_key)
+    /// The resolved fal.ai API key, if any: `FAL_KEY` → OS keychain → the
+    /// plaintext `api_key` in config (#530). Mirrors the text key's precedence.
+    /// Test builds read neither the env var nor the keychain (#528/#531).
+    pub fn resolved_key(&self) -> Option<String> {
+        // As with the Claude key, test builds never read the env key, so the suite
+        // can't authenticate or reach the image provider by accident (#528).
+        #[cfg(test)]
+        let env: Option<String> = None;
+        #[cfg(not(test))]
+        let env = std::env::var("FAL_KEY").ok();
+        super::resolved_key(env.as_deref(), super::keychain::Key::Fal, &self.api_key)
     }
 
     /// The backend that will actually run, accounting for the privacy switch:
@@ -155,8 +151,8 @@ impl ImageSettings {
             ImageBackendKind::Local => Ok(()),
             ImageBackendKind::Remote if self.resolved_key().is_some() => Ok(()),
             ImageBackendKind::Remote => Err(AiError::NotConfigured(
-                "No image API key — set FAL_KEY or `api_key` under [image] in the config \
-                 (or set `backend = \"local\"`)"
+                "No image API key — run \"Set image API key\" from the run-action menu, set \
+                 FAL_KEY, or set `backend = \"local\"`"
                     .into(),
             )),
         }
@@ -257,7 +253,7 @@ mod tests {
             api_key: Some(" k ".into()),
             ..Default::default()
         };
-        assert_eq!(set.resolved_key(), Some("k"));
+        assert_eq!(set.resolved_key().as_deref(), Some("k"));
     }
 
     #[test]
