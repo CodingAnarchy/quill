@@ -130,42 +130,54 @@ enum BibleSource {
 }
 
 /// A persistent-bible tracker's incremental-scoping descriptor (#90): its state
-/// key, where its prior bible lives, and the status message for each scope.
+/// key, where its prior bible lives, the status message for each scope, and the
+/// request builders + parse-into-[`Outcome`] that make this a *bible* pass — the
+/// single source mapping a bible action to everything `run_bible_tracker` needs,
+/// so the dispatch lives here, not split across a second match (#510).
 pub(super) struct BibleTracker {
     key: &'static str,
     source: BibleSource,
     full_msg: &'static str,
     incr_msg: &'static str,
+    /// Build the full-rebuild request from `(manuscript, model)`.
+    full: fn(String, &str) -> ai::Request,
+    /// Build the incremental-revise request from `(prior_bible, changed, model)`.
+    incr: fn(&str, &str, &str) -> ai::Request,
+    /// Parse the completed response into this tracker's [`Outcome`] variant.
+    finish: fn(Result<ai::Response, ai::AiError>) -> Outcome,
 }
 
 /// The bible tracker behind a costed AI action, or `None` for findings-only and
 /// interactive actions (which send the whole manuscript or nothing).
 pub(super) fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
-    let make = |key, source, full_msg, incr_msg| BibleTracker {
-        key,
-        source,
-        full_msg,
-        incr_msg,
-    };
     match action {
-        AiAction::Characters => Some(make(
-            "characters",
-            BibleSource::Dir("characters"),
-            "⟳ Analyzing characters…",
-            "⟳ Updating characters from changed chapters…",
-        )),
-        AiAction::Continuity => Some(make(
-            "timeline",
-            BibleSource::File("timeline.md"),
-            "⟳ Checking continuity…",
-            "⟳ Updating the timeline from changed chapters…",
-        )),
-        AiAction::Setting => Some(make(
-            "setting",
-            BibleSource::File("setting.md"),
-            "⟳ Building setting bible…",
-            "⟳ Updating the setting bible from changed chapters…",
-        )),
+        AiAction::Characters => Some(BibleTracker {
+            key: "characters",
+            source: BibleSource::Dir("characters"),
+            full_msg: "⟳ Analyzing characters…",
+            incr_msg: "⟳ Updating characters from changed chapters…",
+            full: character::build_request,
+            incr: character::build_incremental_request,
+            finish: |r| Outcome::Characters(r.and_then(|resp| character::parse(&resp.text))),
+        }),
+        AiAction::Continuity => Some(BibleTracker {
+            key: "timeline",
+            source: BibleSource::File("timeline.md"),
+            full_msg: "⟳ Checking continuity…",
+            incr_msg: "⟳ Updating the timeline from changed chapters…",
+            full: continuity::build_request,
+            incr: continuity::build_incremental_request,
+            finish: |r| Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text))),
+        }),
+        AiAction::Setting => Some(BibleTracker {
+            key: "setting",
+            source: BibleSource::File("setting.md"),
+            full_msg: "⟳ Building setting bible…",
+            incr_msg: "⟳ Updating the setting bible from changed chapters…",
+            full: setting::build_request,
+            incr: setting::build_incremental_request,
+            finish: |r| Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text))),
+        }),
         _ => None,
     }
 }
@@ -286,16 +298,10 @@ impl App {
 
     /// Run a persistent-bible tracker with incremental scoping (#90): revise the
     /// bible from only the changed chapters, rebuild it from the whole manuscript,
-    /// or skip (already current). `full`/`incr` build the request for each case.
-    pub(super) fn run_bible_tracker(
-        &mut self,
-        t: BibleTracker,
-        book: usize,
-        force: bool,
-        full: impl FnOnce(String, &str) -> ai::Request,
-        incr: impl FnOnce(&str, &str, &str) -> ai::Request,
-        finish: impl FnOnce(Result<ai::Response, ai::AiError>) -> Outcome + Send + 'static,
-    ) {
+    /// or skip (already current). The tracker carries its own request builders and
+    /// parse (#510): `t.full`/`t.incr` build the request for each case, `t.finish`
+    /// turns the response into the matching [`Outcome`].
+    pub(super) fn run_bible_tracker(&mut self, t: BibleTracker, book: usize, force: bool) {
         let (scope, prior, current) = self.plan_bible_pass(&t, book);
         // The AI palette's `R` forces a full rebuild regardless of the delta (#176).
         let scope = if force {
@@ -326,7 +332,7 @@ impl App {
                 // the whole book. `book_render(book, None)` is the active book's
                 // whole manuscript for a single-book project.
                 (
-                    full(self.book_render(book, None), &model),
+                    (t.full)(self.book_render(book, None), &model),
                     t.full_msg,
                     claude,
                 )
@@ -334,13 +340,13 @@ impl App {
             ai::incremental::Scope::Full => {
                 // Series, bible exists: revise it with all of this book's chapters.
                 (
-                    incr(&prior, &self.book_render(book, None), &model),
+                    (t.incr)(&prior, &self.book_render(book, None), &model),
                     t.full_msg,
                     false,
                 )
             }
             ai::incremental::Scope::Incremental(changed) => (
-                incr(&prior, &self.book_render(book, Some(&changed)), &model),
+                (t.incr)(&prior, &self.book_render(book, Some(&changed)), &model),
                 t.incr_msg,
                 false,
             ),
@@ -353,7 +359,7 @@ impl App {
         } else {
             base_msg.to_string()
         };
-        self.spawn_request(&message, req, batch, finish);
+        self.spawn_request(&message, req, batch, t.finish);
     }
 
     /// Run a pre-built request on a worker thread (#90), delivering `finish`'s
