@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use self::font::{glyph_run, Fonts, GidMap, ObjMap};
+use self::font::{glyph_run, glyph_run_mono, Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::wrap::{segments, words_of, wrap_lines, Word};
 use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
@@ -44,6 +44,8 @@ const PART_SIZE: f32 = 20.0;
 const EPIGRAPH_SIZE: f32 = 11.0;
 const EPIGRAPH_LEADING: f32 = 14.0;
 const EPIGRAPH_INSET: f32 = 36.0; // left/right inset for the set-apart block
+const MONO_SIZE: f32 = 10.5; // fixed-width face for fenced blocks (#524)
+const MONO_LEADING: f32 = 13.0;
 const HEAD_SIZE: f32 = 10.0; // running heads + folios in the print profile
 
 /// The default print trim, used when a project sets no `[print] trim`.
@@ -336,6 +338,15 @@ impl Layout {
             * size
     }
 
+    /// The rendered width of `text` at `size` in the monospace face, in points (#524).
+    fn measure_mono(&self, text: &str, size: f32) -> f32 {
+        text.chars()
+            .map(|c| self.fonts.advance_mono(c))
+            .sum::<f32>()
+            / 1000.0
+            * size
+    }
+
     /// Whether the fonts can render every character of `glyph`.
     fn renders(&self, glyph: &str) -> bool {
         glyph.chars().all(|c| self.fonts.covers(c))
@@ -591,20 +602,25 @@ impl Pdf {
         page
     }
 
-    /// A preformatted (fenced) block: each line drawn verbatim, left-aligned, its
-    /// breaks and indentation preserved and no emphasis applied, set apart by space
-    /// above and below (#522). Falls back to the body serif — a bundled monospace
-    /// face is the follow-up, so long lines aren't yet wrapped or fixed-width.
+    /// A preformatted (fenced) block: each line drawn verbatim in the bundled
+    /// monospace face (DejaVu Sans Mono, #524), left-aligned, its breaks and
+    /// indentation preserved and no emphasis applied, set apart by space above and
+    /// below (#522). Lines too wide for the text column are wrapped at character
+    /// boundaries — preserving alignment, since the face is fixed-width — so nothing
+    /// runs off the page edge.
     fn preformatted(&mut self, code: &str) {
-        self.need(BODY_LEADING * 1.5);
+        self.need(MONO_LEADING * 1.5);
         self.y -= BODY_LEADING * 0.5;
+        let col = self.layout.text_w();
         for line in code.lines() {
-            self.need(BODY_LEADING);
-            if !line.is_empty() {
-                let left = self.left();
-                self.draw_line(left, self.y, &[(line.to_string(), false, false)], BODY_SIZE);
+            for piece in mono_wrap(&self.layout, line, col) {
+                self.need(MONO_LEADING);
+                if !piece.is_empty() {
+                    let left = self.left();
+                    self.draw_mono_line(left, self.y, &piece);
+                }
+                self.y -= MONO_LEADING;
             }
-            self.y -= BODY_LEADING;
         }
         self.y -= BODY_LEADING * 0.5;
     }
@@ -803,6 +819,23 @@ impl Pdf {
         self.cur().push_str(&block);
     }
 
+    /// Emit one positioned line of monospace text into the current page's content,
+    /// resolved through the fixed-width face (mono→fallback) and shown as Identity-H
+    /// hex runs (#524).
+    fn draw_mono_line(&mut self, x: f32, y: f32, text: &str) {
+        let mut s = format!("BT\n1 0 0 1 {} {} Tm\n", num(x), num(y));
+        let mut cur_font = "";
+        for (name, hex) in glyph_run_mono(&self.layout.fonts, text) {
+            if name != cur_font {
+                s.push_str(&format!("/{name} {} Tf\n", num(MONO_SIZE)));
+                cur_font = name;
+            }
+            s.push_str(&format!("<{hex}> Tj\n"));
+        }
+        s.push_str("ET\n");
+        self.cur().push_str(&s);
+    }
+
     /// A `BT…ET` text block at `(x, y)`: each `(text, bold, italic)` segment resolved
     /// to glyph-id hex runs (`/Fn` font switches between body faces and the fallback).
     fn glyph_block<'a>(
@@ -987,6 +1020,33 @@ enum Align {
     LeftInset(f32),
     /// Flush to a right edge inset by this many points (epigraph attribution).
     RightInset(f32),
+}
+
+/// Wrap one preformatted line to the text column at character boundaries (#524).
+/// The face is fixed-width, so breaking on whole characters keeps columns aligned;
+/// a line that fits returns unchanged. Leading whitespace (indentation) is preserved
+/// on the first piece, and a continuation that itself overflows is broken again, so
+/// nothing runs off the page edge. An empty line yields one empty piece.
+fn mono_wrap(layout: &Layout, line: &str, width: f32) -> Vec<String> {
+    if layout.measure_mono(line, MONO_SIZE) <= width {
+        return vec![line.to_string()];
+    }
+    let mut pieces = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0.0;
+    for c in line.chars() {
+        let cw = layout.measure_mono(&c.to_string(), MONO_SIZE);
+        if !cur.is_empty() && cur_w + cw > width {
+            pieces.push(std::mem::take(&mut cur));
+            cur_w = 0.0;
+        }
+        cur.push(c);
+        cur_w += cw;
+    }
+    if !cur.is_empty() {
+        pieces.push(cur);
+    }
+    pieces
 }
 
 /// Format a coordinate/size compactly (drop a trailing `.00`).

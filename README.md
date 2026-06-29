@@ -108,9 +108,9 @@ keystrokes that stay out of the way.
   readers, submissions, or a print interior — with a title page, each chapter on
   a fresh page, page numbers, a navigable bookmark outline of the part/chapter
   structure, epigraphs set apart, and `*`/`**` emphasis as italic/bold. It embeds
-  its fonts (Liberation Serif as the body, with a DejaVu Sans fallback) and renders
-  the full Unicode they cover — Latin, Greek, Cyrillic, smart punctuation, and
-  decorative ornaments all show. Chinese and other CJK need an author-supplied CJK
+  its fonts (Liberation Serif as the body, a DejaVu Sans fallback, and DejaVu Sans
+  Mono for fenced preformatted blocks) and renders the full Unicode they cover —
+  Latin, Greek, Cyrillic, smart punctuation, and decorative ornaments all show. Chinese and other CJK need an author-supplied CJK
   font (`[style].body_font`); glyphs no embedded font has are reported and skipped.
   Each font is subset to just the glyphs the book uses, so files stay small even
   with a large Unicode or CJK source font.
