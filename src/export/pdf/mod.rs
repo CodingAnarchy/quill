@@ -29,7 +29,7 @@ use self::wrap::{segments, words_of, wrap_lines, Word};
 use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
     body_blocks, classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose,
-    SCENE_BREAK,
+    Run, SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -627,7 +627,7 @@ impl Pdf {
 
     /// A normal body paragraph: first-line indented, left-aligned, with `*`/`**`
     /// emphasis as italic/bold runs.
-    fn paragraph(&mut self, runs: &[(String, bool, bool)]) {
+    fn paragraph(&mut self, runs: &[Run]) {
         let words = words_of(runs);
         self.flow(
             &words,
@@ -674,14 +674,14 @@ impl Pdf {
 
     /// A bold heading line at `align` (chapter/part titles, sub-headings).
     fn heading_line(&mut self, text: &str, size: f32, leading: f32, align: Align) {
-        let words = words_of(&[(text.to_string(), true, false)]);
+        let words = words_of(&[Run::new(text, true, false)]);
         self.flow(&words, self.layout.text_w(), 0.0, size, leading, align);
     }
 
     /// The chapter's opening paragraph with a three-line drop-cap initial: the first
     /// character is set large at the left margin and the first lines are indented to
     /// clear it (#489 / mirrors the EPUB `.opening` first-letter treatment).
-    fn dropped_paragraph(&mut self, runs: &[(String, bool, bool)]) {
+    fn dropped_paragraph(&mut self, runs: &[Run]) {
         const LINES: usize = 3;
         let mut words = words_of(runs);
         let Some(first_word) = words.first_mut() else {
@@ -707,7 +707,7 @@ impl Pdf {
         self.draw_line(
             left,
             cap_baseline,
-            &[(initial.to_string(), false, false)],
+            &[Run::new(initial.to_string(), false, false)],
             cap_size,
         );
         // The first LINES lines are inset by the cap width; the rest run full width.
@@ -733,7 +733,7 @@ impl Pdf {
     fn epigraph(&mut self, e: &Epigraph) {
         let width = self.layout.text_w() - 2.0 * EPIGRAPH_INSET;
         for line in e.text.lines() {
-            let words = words_of(&[(line.to_string(), false, true)]);
+            let words = words_of(&[Run::new(line, false, true)]);
             self.flow(
                 &words,
                 width,
@@ -744,7 +744,7 @@ impl Pdf {
             );
         }
         if let Some(by) = &e.attribution {
-            let words = words_of(&[(format!("— {by}"), false, true)]);
+            let words = words_of(&[Run::new(format!("— {by}"), false, true)]);
             self.flow(
                 &words,
                 width,
@@ -758,7 +758,7 @@ impl Pdf {
 
     /// A single centered line (titles, headings, scene breaks) followed by a gap.
     fn centered(&mut self, text: &str, bold: bool, italic: bool, size: f32, leading: f32) {
-        let words = words_of(&[(text.to_string(), bold, italic)]);
+        let words = words_of(&[Run::new(text, bold, italic)]);
         self.flow(
             &words,
             self.layout.text_w(),
@@ -809,12 +809,12 @@ impl Pdf {
     /// Emit one positioned line of styled segments into the current page's content.
     /// Each segment's text is resolved to glyph ids (body face, or the fallback for
     /// glyphs it lacks) and shown as Identity-H hex runs.
-    fn draw_line(&mut self, x: f32, y: f32, segs: &[(String, bool, bool)], size: f32) {
+    fn draw_line(&mut self, x: f32, y: f32, segs: &[Run], size: f32) {
         let block = self.glyph_block(
             x,
             y,
             size,
-            segs.iter().map(|(t, b, i)| (t.as_str(), *b, *i)),
+            segs.iter().map(|r| (r.text.as_str(), r.bold, r.italic)),
         );
         self.cur().push_str(&block);
     }

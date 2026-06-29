@@ -2,7 +2,7 @@
 //! lines for a given per-line width, measuring with the layout's fonts. Pure of any
 //! PDF emission — the layout module positions and draws the returned lines.
 
-use super::Layout;
+use super::{Layout, Run};
 
 /// One word carrying the emphasis it inherits from its run, the unit line-wrapping
 /// works in.
@@ -13,9 +13,9 @@ pub(super) struct Word {
 }
 
 /// Split runs into wrap-able words, preserving each run's emphasis.
-pub(super) fn words_of(runs: &[(String, bool, bool)]) -> Vec<Word> {
+pub(super) fn words_of(runs: &[Run]) -> Vec<Word> {
     let mut words = Vec::new();
-    for (text, bold, italic) in runs {
+    for Run { text, bold, italic } in runs {
         for w in text.split(' ').filter(|w| !w.is_empty()) {
             words.push(Word {
                 text: w.to_string(),
@@ -62,7 +62,7 @@ pub(super) fn wrap_lines<'w>(
 
 /// A wrapped line as drawable segments: each word carries a trailing space except
 /// the last, so `Tj` advances spell the gaps in each word's own font.
-pub(super) fn segments(line: &[&Word]) -> Vec<(String, bool, bool)> {
+pub(super) fn segments(line: &[&Word]) -> Vec<Run> {
     let n = line.len();
     line.iter()
         .enumerate()
@@ -72,7 +72,7 @@ pub(super) fn segments(line: &[&Word]) -> Vec<(String, bool, bool)> {
             } else {
                 w.text.clone()
             };
-            (text, w.bold, w.italic)
+            Run::new(text, w.bold, w.italic)
         })
         .collect()
 }
