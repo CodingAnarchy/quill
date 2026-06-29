@@ -74,26 +74,23 @@ impl App {
     pub(crate) fn open_workflow_palette(&mut self) {
         // The menu always offers to build a new workflow from a description (#232),
         // so it's useful even before any workflow is defined.
-        let mut items = vec![PaletteItem {
-            label: "✎ New workflow from a description…".into(),
-            desc: "describe a routine in words; the AI drafts it".into(),
-            command: Command::NewWorkflowFromPrompt,
-        }];
+        let mut items = vec![PaletteItem::new(
+            "✎ New workflow from a description…",
+            "describe a routine in words; the AI drafts it",
+            Command::NewWorkflowFromPrompt,
+        )];
         items.extend(self.workflows.iter().enumerate().map(|(i, wf)| {
             let desc = match workflow::resolve(&self.workflows, &wf.name) {
                 Ok(actions) => format!("{} steps: {}", actions.len(), wf.steps.join(" → ")),
                 Err(e) => format!("⚠ {e}"),
             };
-            PaletteItem {
-                label: wf.name.clone(),
-                desc,
-                command: Command::RunWorkflow(i),
-            }
+            PaletteItem::new(wf.name.clone(), desc, Command::RunWorkflow(i))
         }));
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Workflows",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 

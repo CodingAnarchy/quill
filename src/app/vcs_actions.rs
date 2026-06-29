@@ -62,11 +62,7 @@ impl App {
     /// Open the version-control palette (#54) — the single entry point for Git
     /// actions, shown with context-appropriate items.
     pub(crate) fn open_git_palette(&mut self) {
-        let git = |label: &str, desc: &str, a| PaletteItem {
-            label: label.into(),
-            desc: desc.into(),
-            command: Command::Git(a),
-        };
+        let git = |label: &str, desc: &str, a| PaletteItem::new(label, desc, Command::Git(a));
         let items = if self.under_vc {
             let has_remote = crate::vcs::remote_url(&self.project.root).is_some();
             let mut items = vec![git(
@@ -123,6 +119,7 @@ impl App {
             title: "Version control",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 

@@ -504,7 +504,7 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
 }
 
 /// The accent style for the active/current item in the nav pane.
-fn active_style() -> Style {
+pub(super) fn active_style() -> Style {
     Style::default()
         .fg(theme::current().heading)
         .add_modifier(Modifier::BOLD)

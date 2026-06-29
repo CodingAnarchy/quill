@@ -167,9 +167,12 @@ book, and jumping to one switches books for you.
 ACTIONS & WORKFLOWS
 
 Ctrl-K opens the run-action menu: every invokable action — save, each export,
-the reports, the AI passes, and this guide — in one searchable list, each run
-through the same path its shortcut uses. An action that can't run right now
-stays listed with the reason.
+the reports, the AI passes, and this guide — grouped under collapsible headings
+(Project, Export, Reports, AI, Editing, View, Help), each run through the same
+path its shortcut uses. Navigate with ↑↓; on a heading, → expands and ← collapses
+(Enter toggles it), so you can fold away the groups you're not using — handy for
+the large block of AI passes. Enter runs the selected action. An action that
+can't run right now stays listed with the reason.
 
 Ctrl-X runs a workflow: a named sequence of actions you define in config.toml,
 so a single command can, say, save, refresh the character bible, flag

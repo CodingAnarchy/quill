@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::ai;
-use crate::mode::{Action, AiAction, ExportFormat};
+use crate::mode::{Action, AiAction, ExportFormat, PaletteRow};
 
 /// Every registry action has a distinct stable name — workflows (#89) reference
 /// these, so a collision would make one unaddressable.
@@ -32,6 +32,120 @@ fn action_palette_lists_every_registry_action() {
         Mode::Palette(p) => assert_eq!(p.items.len(), Action::ALL.len(), "all actions listed"),
         _ => panic!("expected the run-action palette to open"),
     }
+}
+
+/// Each group's actions must be contiguous in `ALL` — otherwise the menu would
+/// emit a second header for a re-opened group. Guards future `ALL` additions.
+#[test]
+fn action_groups_are_contiguous_in_the_registry() {
+    let mut seen: Vec<&str> = Vec::new();
+    let mut prev: Option<&str> = None;
+    for a in Action::ALL {
+        let g = a.group();
+        if prev != Some(g) {
+            assert!(
+                !seen.contains(&g),
+                "group '{g}' is split across the registry — keep each group's actions together"
+            );
+            seen.push(g);
+            prev = Some(g);
+        }
+    }
+}
+
+#[test]
+fn the_action_palette_groups_actions_under_collapsible_headers() {
+    let (mut app, _dir) = two_chapter_app("palette-groups");
+    app.open_action_palette();
+    let Mode::Palette(p) = &app.mode else {
+        panic!("expected the run-action palette");
+    };
+    let rows = p.rows();
+    // The first visible row is a group header.
+    assert!(
+        matches!(
+            rows[0],
+            PaletteRow::Header {
+                group: "Project",
+                ..
+            }
+        ),
+        "first row is the Project header"
+    );
+    // The AI passes gather under one heading; each group emits exactly one header.
+    let headers: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| match r {
+            PaletteRow::Header { group, .. } => Some(*group),
+            PaletteRow::Item(_) => None,
+        })
+        .collect();
+    assert!(headers.contains(&"AI") && headers.contains(&"Export"));
+    let mut unique = headers.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), headers.len(), "one header per group");
+}
+
+#[test]
+fn collapsing_a_group_hides_its_items_but_keeps_the_header() {
+    let (mut app, _dir) = two_chapter_app("palette-collapse");
+    app.open_action_palette();
+    let before = match &app.mode {
+        Mode::Palette(p) => p.rows().len(),
+        _ => unreachable!(),
+    };
+    // The Project header is selected first; ← collapses it.
+    app.on_key(key(KeyCode::Left));
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(p.collapsed.contains("Project"), "group collapsed");
+    assert!(p.rows().len() < before, "the group's items are hidden");
+    assert!(
+        matches!(
+            p.rows()[p.selected],
+            PaletteRow::Header {
+                group: "Project",
+                collapsed: true
+            }
+        ),
+        "the header stays, still selected"
+    );
+}
+
+#[test]
+fn enter_on_a_header_toggles_it_rather_than_running_an_action() {
+    let (mut app, _dir) = two_chapter_app("palette-toggle");
+    app.open_action_palette();
+    app.on_key(key(KeyCode::Enter)); // on the Project header
+    assert!(
+        matches!(app.mode, Mode::Palette(_)),
+        "Enter on a header keeps the palette open"
+    );
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(p.collapsed.contains("Project"), "collapsed by Enter");
+    app.on_key(key(KeyCode::Enter)); // toggles back open
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(!p.collapsed.contains("Project"), "Enter expands it again");
+}
+
+#[test]
+fn a_flat_palette_has_no_group_headers() {
+    let (mut app, _dir) = two_chapter_app("palette-flat");
+    app.open_ai_palette(); // the AI palette is ungrouped
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(
+        p.rows().iter().all(|r| matches!(r, PaletteRow::Item(_))),
+        "a flat palette renders no headers"
+    );
+    assert_eq!(p.rows().len(), p.items.len());
 }
 
 #[test]

@@ -39,17 +39,18 @@ impl App {
                 } else {
                     title
                 };
-                PaletteItem {
+                PaletteItem::new(
                     label,
-                    desc: format!("book {} of {count}", i + 1),
-                    command: Command::SwitchBook(i),
-                }
+                    format!("book {} of {count}", i + 1),
+                    Command::SwitchBook(i),
+                )
             })
             .collect();
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Switch book",
             items,
             selected: active,
+            collapsed: Default::default(),
         }));
     }
 

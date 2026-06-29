@@ -18,7 +18,7 @@ use ratatui::{
 };
 
 use crate::mode::{
-    DirBrowser, Findings, Palette, ProjectBrowser, ProjectSearch, ProjectSearchStage,
+    DirBrowser, Findings, Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage,
 };
 use crate::project::Project;
 
@@ -161,15 +161,34 @@ pub(super) fn draw_list_overlay(
 
 pub(super) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
     let rows = palette
-        .items
-        .iter()
+        .rows()
+        .into_iter()
         .enumerate()
-        .map(|(i, item)| {
-            list_row(
-                i == palette.selected,
-                item.label.clone(),
-                Some(item.desc.clone()),
-            )
+        .map(|(ri, row)| {
+            let selected = ri == palette.selected;
+            match row {
+                // A collapsible group heading: a ▾/▸ disclosure + the group name,
+                // in the heading color (reversed when selected) (#514).
+                PaletteRow::Header { group, collapsed } => {
+                    let arrow = if collapsed { "▸" } else { "▾" };
+                    // The heading accent shared with the tree/nav, reversed when selected.
+                    let mut style = super::active_style();
+                    if selected {
+                        style = style.add_modifier(Modifier::REVERSED);
+                    }
+                    Line::from(Span::styled(format!("{arrow} {group}"), style))
+                }
+                // An item, indented under its group heading when it has one.
+                PaletteRow::Item(i) => {
+                    let item = &palette.items[i];
+                    let indent = if item.group.is_some() { "  " } else { "" };
+                    list_row(
+                        selected,
+                        format!("{indent}{}", item.label),
+                        Some(item.desc.clone()),
+                    )
+                }
+            }
         })
         .collect();
     let title = format!(" {} ", palette.title);
@@ -179,8 +198,14 @@ pub(super) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
     } else {
         ""
     };
+    // Mention expand/collapse only when the palette actually has group headings.
+    let groups = if palette.items.iter().any(|it| it.group.is_some()) {
+        " · ←/→ collapse/expand"
+    } else {
+        ""
+    };
     let help = format!(
-        "{} — ↑↓ move · enter run{rebuild} · esc close",
+        "{} — ↑↓ move · enter run{groups}{rebuild} · esc close",
         palette.title
     );
     draw_list_overlay(frame, area, &title, &help, rows, Some(palette.selected));

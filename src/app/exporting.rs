@@ -54,17 +54,15 @@ impl App {
     /// A multi-book series (#332) offers each format twice — the whole series and
     /// just the active book; a standalone novel lists the formats once.
     pub(crate) fn open_export_palette(&mut self) {
-        let item = |label: String, desc: &str, format, scope| PaletteItem {
-            label,
-            desc: desc.into(),
-            command: Command::Export(format, scope),
+        let item = |label: String, desc: &str, format, scope| {
+            PaletteItem::new(label, desc, Command::Export(format, scope))
         };
         let mut items = Vec::new();
-        items.push(PaletteItem {
-            label: "Preview style…".into(),
-            desc: "Open a styled sample of your [style] settings in your EPUB reader".into(),
-            command: Command::PreviewStyle,
-        });
+        items.push(PaletteItem::new(
+            "Preview style…",
+            "Open a styled sample of your [style] settings in your EPUB reader",
+            Command::PreviewStyle,
+        ));
         if self.project.book_count() > 1 {
             for (f, label, desc) in FORMATS {
                 items.push(item(
@@ -91,6 +89,7 @@ impl App {
             title: "Export",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 
