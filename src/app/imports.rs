@@ -147,6 +147,10 @@ impl App {
                 return;
             }
         };
+        // Some documents may have been listed but unreadable (e.g. a corrupt
+        // `.scriv` bundle): the body comes in empty and the parser counts it, so
+        // we can warn the author rather than report a clean success (#511).
+        let unreadable = parsed.unreadable_bodies;
         let chapters: Vec<(String, String)> = parsed
             .chapters
             .into_iter()
@@ -159,7 +163,15 @@ impl App {
         match built {
             Ok(n) => {
                 self.switch_to(dest); // open the finished project fresh from disk
-                self.message = Some(format!("Imported {n} chapters from {}", source.display()));
+                let dropped = if unreadable > 0 {
+                    format!(" ({unreadable} bodies unreadable)")
+                } else {
+                    String::new()
+                };
+                self.message = Some(format!(
+                    "Imported {n} chapters{dropped} from {}",
+                    source.display()
+                ));
             }
             Err(e) => {
                 self.message = Some(format!("Import failed: {e}"));

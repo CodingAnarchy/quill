@@ -69,6 +69,8 @@ pub fn parse_markdown(source: &str) -> Imported {
         title,
         author,
         chapters,
+        // Markdown is infallible: there's no per-chapter I/O to fail.
+        unreadable_bodies: 0,
     }
 }
 

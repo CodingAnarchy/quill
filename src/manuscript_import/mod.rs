@@ -51,6 +51,24 @@ pub use markdown::parse_markdown;
 pub use scriv::parse_scriv;
 
 /// A manuscript parsed into book metadata and chapters.
+///
+/// # Unreadable-content policy
+///
+/// The three importers share one contract for content that the source *lists*
+/// but whose body can't be read: surface it, never silently drop it.
+///
+/// - **Markdown** is infallible (text in, chapters out) — there's no per-chapter
+///   I/O to fail, so nothing to count.
+/// - **`.docx`** and **`.scriv`** return `io::Result`: a missing/corrupt
+///   *container* (`word/document.xml`, the `.scrivx` binder) is a hard error.
+///   `.docx` carries all its bodies inside that one container, so once it's read
+///   there is no analogous per-body failure to count.
+/// - **`.scriv`** stores each document's body in a separate `content.rtf` file,
+///   so an individual body can be unreadable while the binder is fine. Rather
+///   than swallow that into an empty chapter, [`parse_scriv`] counts those drops
+///   in [`unreadable_bodies`] so the caller can warn the author.
+///
+/// [`unreadable_bodies`]: Imported::unreadable_bodies
 #[derive(Debug, PartialEq, Eq)]
 pub struct Imported {
     /// The book title, from front matter or the title-page `#` heading.
@@ -59,6 +77,11 @@ pub struct Imported {
     pub author: Option<String>,
     /// The chapters, in reading order (always at least one).
     pub chapters: Vec<ImportedChapter>,
+    /// How many listed documents came in with an empty body because their
+    /// content couldn't be read (only `.scriv`; 0 for the others). Surfaced by
+    /// the caller so a partially-unreadable import isn't reported as a clean
+    /// success.
+    pub unreadable_bodies: usize,
 }
 
 /// One imported chapter: its heading text and its prose body.

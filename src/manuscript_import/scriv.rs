@@ -51,8 +51,9 @@ fn parse_binder(
     read_rtf: impl Fn(&str) -> Option<String>,
 ) -> Imported {
     let mut chapters = Vec::new();
+    let mut unreadable_bodies = 0;
     if let Some(draft) = draft_folder(scrivx).and_then(children_group) {
-        collect_items(draft, &read_rtf, &mut chapters);
+        collect_items(draft, &read_rtf, &mut chapters, &mut unreadable_bodies);
     }
     if chapters.is_empty() {
         let only = title.clone().unwrap_or_else(|| "Manuscript".into());
@@ -66,6 +67,7 @@ fn parse_binder(
         title,
         author: None,
         chapters,
+        unreadable_bodies,
     }
 }
 
@@ -86,10 +88,16 @@ fn draft_folder(scrivx: &str) -> Option<&str> {
 /// Walk a binder item's direct children, in order: each `Text` document becomes a
 /// chapter (its `content.rtf` converted from RTF); a folder recurses (its title is
 /// dropped — the chapter list is flat). Nesting-aware so folders nest correctly.
+///
+/// A listed `Text` document whose `content.rtf` can't be read (`read_rtf`
+/// returns `None`) still becomes a chapter — with an empty body — but is tallied
+/// in `unreadable` rather than silently passed off as empty, so the caller can
+/// warn that content was dropped (#511).
 fn collect_items(
     children: &str,
     read_rtf: &impl Fn(&str) -> Option<String>,
     out: &mut Vec<ImportedChapter>,
+    unreadable: &mut usize,
 ) {
     let mut pos = 0;
     while let Some((attrs_start, gt, self_closing)) = find_open(children, pos, "BinderItem") {
@@ -104,9 +112,13 @@ fn collect_items(
         let inner = &children[gt + 1..close];
         if attr_value(attrs, "Type").as_deref() == Some("Text") {
             let uuid = attr_value(attrs, "UUID").unwrap_or_default();
-            let body = read_rtf(&uuid)
-                .map(|rtf| rtf_to_markdown(&rtf))
-                .unwrap_or_default();
+            let body = match read_rtf(&uuid) {
+                Some(rtf) => rtf_to_markdown(&rtf),
+                None => {
+                    *unreadable += 1;
+                    String::new()
+                }
+            };
             out.push(ImportedChapter {
                 title: element_text(inner, "Title").unwrap_or_default(),
                 body,
@@ -114,7 +126,7 @@ fn collect_items(
         }
         // Recurse into any children (a folder's documents, or a text item's own).
         if let Some(grandchildren) = children_group(inner) {
-            collect_items(grandchildren, read_rtf, out);
+            collect_items(grandchildren, read_rtf, out, unreadable);
         }
         pos = close + "</BinderItem>".len();
     }
@@ -452,6 +464,58 @@ mod tests {
         assert!(
             parse_scriv(&dir).is_err(),
             "a directory with no .scrivx is rejected"
+        );
+    }
+
+    #[test]
+    fn binder_counts_documents_whose_content_is_unreadable() {
+        // Two listed Text documents; the second's content.rtf can't be read.
+        let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="u1" Type="Text"><Title>One</Title></BinderItem>
+<BinderItem UUID="u2" Type="Text"><Title>Two</Title></BinderItem>
+</Children></BinderItem>
+</Binder></ScrivenerProject>"#;
+        let out = parse_binder(scrivx, Some("My Novel".into()), |uuid| match uuid {
+            "u1" => Some(rtf("Alpha.")),
+            _ => None, // "u2" is listed but its content.rtf is missing/unreadable
+        });
+        // Both chapters are kept, in order; the unreadable one comes in empty.
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["One", "Two"]);
+        assert_eq!(out.chapters[0].body, "Alpha.\n");
+        assert_eq!(out.chapters[1].body, "");
+        // …and the drop is surfaced rather than swallowed.
+        assert_eq!(out.unreadable_bodies, 1);
+    }
+
+    #[test]
+    fn parse_scriv_reports_a_missing_binder_document() {
+        // Build a minimal `.scriv` bundle, then remove one document's content so
+        // it's listed in the binder but unreadable on disk (#511).
+        use std::fs;
+
+        let dir = crate::testutil::scratch_dir("scriv-import", "missing-doc").join("Gap.scriv");
+        let data = dir.join("Files").join("Data");
+        fs::create_dir_all(data.join("u1")).unwrap();
+        fs::create_dir_all(data.join("u2")).unwrap();
+        fs::write(data.join("u1").join("content.rtf"), rtf("Alpha.")).unwrap();
+        // u2's content.rtf is deliberately never written — the body is unreadable.
+        let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="u1" Type="Text"><Title>One</Title></BinderItem>
+<BinderItem UUID="u2" Type="Text"><Title>Two</Title></BinderItem>
+</Children></BinderItem>
+</Binder></ScrivenerProject>"#;
+        fs::write(dir.join("Gap.scrivx"), scrivx).unwrap();
+
+        let out = parse_scriv(&dir).unwrap();
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["One", "Two"]);
+        assert_eq!(out.chapters[1].body, "", "the missing document is empty");
+        assert_eq!(
+            out.unreadable_bodies, 1,
+            "the unreadable document is reported, not silently dropped"
         );
     }
 }
