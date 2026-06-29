@@ -99,6 +99,18 @@ impl App {
     /// a [`MetaField`] to where it's stored. Returns a new browser selection index
     /// when the edit re-sorted the chapter list (a role change, #180), else `None`.
     pub(crate) fn apply_meta(&mut self, field: MetaField, text: &str) -> Option<usize> {
+        // Epigraphs (chapter & book, quotation & attribution) are display prose
+        // that ships in the EPUB/PDF, so they get the same smart-typography pass
+        // as the body when the setting is on — committed whole here rather than
+        // per-keystroke, but through the shared `typography` core so the two paths
+        // can't drift (#519). Off, or any other field, leaves the text verbatim.
+        let smartened;
+        let text = if self.smart_typography && field.is_epigraph() {
+            smartened = typography::smarten(text);
+            smartened.as_str()
+        } else {
+            text
+        };
         // Optional fields clear to `None` on empty input; only one arm uses this.
         let optional = (!text.is_empty()).then(|| text.to_string());
         match field {

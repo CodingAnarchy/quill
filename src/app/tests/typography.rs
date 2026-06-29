@@ -79,6 +79,55 @@ fn substitutions_persist_to_disk_and_reload() {
         .contains("\u{201C}hi\u{2014}bye\u{2026}\u{201D}"));
 }
 
+// --- Epigraph metadata edits get the same pass as prose (#519) -------------
+
+/// The #519 reproduction string and its smart-typeset form.
+const RAW_EPIGRAPH: &str = "He said \"wait\" -- now...";
+const SMART_EPIGRAPH: &str = "He said \u{201C}wait\u{201D} \u{2014} now\u{2026}";
+
+#[test]
+fn chapter_epigraph_fields_get_smart_typography() {
+    let (mut app, _dir) = smart_app("typo-chapter-epigraph");
+    let at = app.project.active_index();
+    app.apply_meta(MetaField::ChapterEpigraph { at }, RAW_EPIGRAPH);
+    app.apply_meta(MetaField::ChapterEpigraphBy { at }, "A -- B...");
+
+    let ep = app.chapter_epigraph(at).expect("epigraph set");
+    assert_eq!(ep.text, SMART_EPIGRAPH);
+    assert_eq!(ep.attribution.as_deref(), Some("A \u{2014} B\u{2026}"));
+}
+
+#[test]
+fn book_epigraph_fields_get_smart_typography() {
+    let (mut app, _dir) = smart_app("typo-book-epigraph");
+    app.apply_meta(MetaField::BookEpigraph, RAW_EPIGRAPH);
+    app.apply_meta(MetaField::BookEpigraphBy, "A -- B...");
+
+    let m = &app.project.manifest;
+    assert_eq!(m.epigraph.as_deref(), Some(SMART_EPIGRAPH));
+    assert_eq!(m.epigraph_by.as_deref(), Some("A \u{2014} B\u{2026}"));
+}
+
+#[test]
+fn epigraph_fields_left_verbatim_when_smart_typography_off() {
+    let (mut app, _dir) = two_chapter_app("typo-epigraph-off"); // pins it off
+    let at = app.project.active_index();
+    app.apply_meta(MetaField::ChapterEpigraph { at }, RAW_EPIGRAPH);
+    app.apply_meta(MetaField::BookEpigraph, RAW_EPIGRAPH);
+
+    assert_eq!(app.chapter_epigraph(at).unwrap().text, RAW_EPIGRAPH);
+    assert_eq!(app.project.manifest.epigraph.as_deref(), Some(RAW_EPIGRAPH));
+}
+
+#[test]
+fn non_epigraph_meta_fields_stay_verbatim_even_when_smart_on() {
+    // A summary holds raw notes, not display prose — no substitution (#519).
+    let (mut app, _dir) = smart_app("typo-summary-verbatim");
+    let at = app.project.active_index();
+    app.apply_meta(MetaField::Summary { at }, RAW_EPIGRAPH);
+    assert_eq!(app.project.chapter_summary(at), Some(RAW_EPIGRAPH));
+}
+
 #[test]
 fn substitution_is_one_undo_with_the_typing_burst() {
     let (mut app, _dir) = smart_app("typo-undo");
