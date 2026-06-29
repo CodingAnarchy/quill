@@ -6,7 +6,7 @@ use super::*;
 
 use super::assist::list_move;
 use crate::ai::{self, cost, naming, router, BackendKind};
-use crate::mode::{Action, AiAction, ExportScope};
+use crate::mode::{Action, AiAction, ExportScope, PaletteRow};
 
 /// The routing decision for starting an AI action (#82/#372): run it now on a
 /// chosen backend, or confirm first (the estimate is over the threshold) — the
@@ -20,11 +20,7 @@ impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
-        let ai = |label: &str, desc: &str, a| PaletteItem {
-            label: label.into(),
-            desc: desc.into(),
-            command: Command::Ai(a),
-        };
+        let ai = |label: &str, desc: &str, a| PaletteItem::new(label, desc, Command::Ai(a));
         let items = vec![
             ai(
                 "Ask the manuscript",
@@ -131,6 +127,7 @@ impl App {
             title: "AI",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 
@@ -150,17 +147,14 @@ impl App {
                     }
                     None => a.name().to_string(),
                 };
-                PaletteItem {
-                    label: a.label().into(),
-                    desc,
-                    command: Command::Run(a),
-                }
+                PaletteItem::new(a.label(), desc, Command::Run(a)).in_group(a.group())
             })
             .collect();
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Run action",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 
@@ -309,16 +303,19 @@ impl App {
             .snippets
             .iter()
             .enumerate()
-            .map(|(i, s)| PaletteItem {
-                label: s.name.clone(),
-                desc: snippet_preview(&s.text),
-                command: Command::InsertSnippet(i),
+            .map(|(i, s)| {
+                PaletteItem::new(
+                    s.name.clone(),
+                    snippet_preview(&s.text),
+                    Command::InsertSnippet(i),
+                )
             })
             .collect();
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Insert snippet",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 
@@ -343,16 +340,58 @@ impl App {
         let Mode::Palette(p) = &mut self.mode else {
             return;
         };
-        if let Some(s) = list_move(p.selected, p.items.len(), key.code) {
+        // Navigation and collapse run over the *visible* rows (headers + the items
+        // of expanded groups), so the selection tracks what's on screen (#514).
+        let rows = p.rows();
+        if let Some(s) = list_move(p.selected, rows.len(), key.code) {
             p.selected = s;
             return;
         }
+        let current = rows.get(p.selected);
         match key.code {
-            // Enter runs the selected action (auto-scoped for bibles); `R` forces a
-            // full-manuscript rebuild of a bible regardless of the delta (#176).
+            // On a group header: →/← (and Enter) expand or collapse it (#514).
+            KeyCode::Right => {
+                if let Some(PaletteRow::Header {
+                    group,
+                    collapsed: true,
+                }) = current
+                {
+                    p.set_collapsed(group, false);
+                }
+            }
+            KeyCode::Left => {
+                match current {
+                    Some(PaletteRow::Header {
+                        group,
+                        collapsed: false,
+                    }) => p.set_collapsed(group, true),
+                    // From an item, ← collapses its group and lands on that header.
+                    Some(PaletteRow::Item(i)) => {
+                        if let Some(g) = p.items[*i].group {
+                            p.set_collapsed(g, true);
+                            // Collapsing only removes the rows *after* the header, so its
+                            // index in the rows we already computed still points at it.
+                            p.selected = rows
+                            .iter()
+                            .position(|r| matches!(r, PaletteRow::Header { group, .. } if *group == g))
+                            .unwrap_or(p.selected);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Enter toggles a header; on an item it runs the action (auto-scoped for
+            // bibles); `R` forces a full-manuscript bible rebuild (#176).
             KeyCode::Enter | KeyCode::Char('R') => {
+                let command = match current {
+                    Some(PaletteRow::Header { group, collapsed }) => {
+                        p.set_collapsed(group, !*collapsed);
+                        return;
+                    }
+                    Some(PaletteRow::Item(i)) => Some(p.items[*i].command),
+                    None => None,
+                };
                 let force = matches!(key.code, KeyCode::Char('R'));
-                let command = p.items.get(p.selected).map(|it| it.command);
                 self.mode = self.editing_mode();
                 match command {
                     Some(Command::Ai(a)) => self.start_ai_action(a, force),

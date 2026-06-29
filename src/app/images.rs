@@ -144,25 +144,23 @@ impl App {
         }
         // Lead with "all", then one item per character. The choice carries the
         // index; the targets are recomputed (stable order) when it's confirmed.
-        let mut items = vec![PaletteItem {
-            label: format!("All characters ({})", targets.len()),
-            desc: "a portrait for every character".into(),
-            command: Command::Portrait(PortraitChoice::All),
-        }];
-        items.extend(
-            targets
-                .iter()
-                .enumerate()
-                .map(|(i, (_, name, _))| PaletteItem {
-                    label: name.clone(),
-                    desc: "a portrait for this character".into(),
-                    command: Command::Portrait(PortraitChoice::One(i)),
-                }),
-        );
+        let mut items = vec![PaletteItem::new(
+            format!("All characters ({})", targets.len()),
+            "a portrait for every character",
+            Command::Portrait(PortraitChoice::All),
+        )];
+        items.extend(targets.iter().enumerate().map(|(i, (_, name, _))| {
+            PaletteItem::new(
+                name.clone(),
+                "a portrait for this character",
+                Command::Portrait(PortraitChoice::One(i)),
+            )
+        }));
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Character portrait",
             items,
             selected: 0,
+            collapsed: Default::default(),
         }));
     }
 

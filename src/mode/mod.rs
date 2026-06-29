@@ -310,20 +310,105 @@ impl WizardStep {
     }
 }
 
-/// State for an open [`Mode::Palette`]: the available AI actions and the selected
-/// row.
+/// State for an open [`Mode::Palette`]: the entries, the selected row, and which
+/// group headings are collapsed. `selected` indexes the *visible* rows
+/// ([`Palette::rows`]) — headers plus the items of expanded groups — not `items`,
+/// so it tracks what's on screen as groups collapse (#514).
 pub struct Palette {
     /// Title shown in the palette's bar (e.g. "AI", "Version control").
     pub(crate) title: &'static str,
     pub(crate) items: Vec<PaletteItem>,
     pub(crate) selected: usize,
+    /// Collapsed group headings — their items are hidden until expanded. Empty for
+    /// a flat palette (every item ungrouped), which then renders exactly as before.
+    pub(crate) collapsed: std::collections::HashSet<&'static str>,
 }
 
-/// One palette entry: a label, a one-line description, and the command it runs.
+/// One palette entry: a label, a one-line description, the command it runs, and an
+/// optional group it belongs to (for the collapsible run-action menu, #514).
 pub struct PaletteItem {
     pub(crate) label: String,
     pub(crate) desc: String,
     pub(crate) command: Command,
+    /// The collapsible group this item sits under, or `None` for a flat (header-
+    /// less) palette.
+    pub(crate) group: Option<&'static str>,
+}
+
+/// A rendered row of an open palette: a collapsible group header, or a runnable
+/// item carrying its index into [`Palette::items`] (#514).
+pub(crate) enum PaletteRow {
+    Header {
+        group: &'static str,
+        collapsed: bool,
+    },
+    Item(usize),
+}
+
+impl PaletteItem {
+    /// An ungrouped palette entry — the default; flat palettes (AI, export, git,
+    /// snippets, …) use this and render exactly as before.
+    pub(crate) fn new(label: impl Into<String>, desc: impl Into<String>, command: Command) -> Self {
+        PaletteItem {
+            label: label.into(),
+            desc: desc.into(),
+            command,
+            group: None,
+        }
+    }
+
+    /// Place this entry under a collapsible group heading (the run-action menu).
+    pub(crate) fn in_group(mut self, group: &'static str) -> Self {
+        self.group = Some(group);
+        self
+    }
+}
+
+impl Palette {
+    /// The rows to show: a header before each group (an item whose group differs
+    /// from the one above), then that group's items unless it's collapsed.
+    /// Ungrouped items render flat with no header, so a palette with no groups
+    /// yields exactly its items — the pre-#514 behavior.
+    pub(crate) fn rows(&self) -> Vec<PaletteRow> {
+        let mut rows = Vec::with_capacity(self.items.len());
+        let mut current: Option<&'static str> = None;
+        let mut hidden = false;
+        for (i, item) in self.items.iter().enumerate() {
+            match item.group {
+                Some(g) if current == Some(g) => {
+                    if !hidden {
+                        rows.push(PaletteRow::Item(i));
+                    }
+                }
+                Some(g) => {
+                    current = Some(g);
+                    hidden = self.collapsed.contains(g);
+                    rows.push(PaletteRow::Header {
+                        group: g,
+                        collapsed: hidden,
+                    });
+                    if !hidden {
+                        rows.push(PaletteRow::Item(i));
+                    }
+                }
+                None => {
+                    current = None;
+                    hidden = false;
+                    rows.push(PaletteRow::Item(i));
+                }
+            }
+        }
+        rows
+    }
+
+    /// Collapse (`want = true`) or expand a group heading (#514).
+    pub(crate) fn set_collapsed(&mut self, group: &'static str, want: bool) {
+        if want {
+            self.collapsed.insert(group);
+        } else {
+            self.collapsed.remove(group);
+        }
+    }
 }
 
 /// A command reachable from a palette — the AI menu (Ctrl-A), the version-control
@@ -434,9 +519,20 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    /// Every action, in menu order — the registry.
+    /// Every action, grouped in menu order — the registry. Ordered so each
+    /// [`group`](Action::group) is contiguous, so the run-action menu emits one
+    /// header per group (#514). Names are stable regardless of this order.
     pub(crate) const ALL: &'static [Action] = &[
+        // Project
         Action::Save,
+        Action::ProjectFind,
+        Action::SwitchBook,
+        Action::SeriesTree,
+        Action::RenameProject,
+        Action::ImportNotes,
+        Action::NewProjectFromNotes,
+        Action::ImportManuscript,
+        // Export
         Action::Export(ExportFormat::Markdown),
         Action::Export(ExportFormat::Docx),
         Action::Export(ExportFormat::Scriv),
@@ -444,8 +540,10 @@ impl Action {
         Action::Export(ExportFormat::Epub),
         Action::Export(ExportFormat::Pdf),
         Action::Export(ExportFormat::PdfPrint),
+        // Reports
         Action::ProgressReport,
         Action::AnalysisReport,
+        // AI
         Action::Ai(AiAction::Ask),
         Action::Ai(AiAction::Characters),
         Action::Ai(AiAction::Continuity),
@@ -466,29 +564,25 @@ impl Action {
         Action::Ai(AiAction::Triage),
         Action::Ai(AiAction::Thesaurus),
         Action::Ai(AiAction::Editorial),
-        Action::UserGuide,
-        Action::ImportNotes,
-        Action::NewProjectFromNotes,
-        Action::ImportManuscript,
-        Action::SwitchBook,
-        Action::SeriesTree,
-        Action::RenameProject,
         Action::RefreshSeriesBible,
-        Action::ProjectFind,
         Action::DescribeConfig,
-        Action::AcceptWord,
-        Action::NextMisspelling,
-        Action::PrevMisspelling,
-        Action::ToggleTypewriter,
-        Action::ToggleFocus,
-        Action::AddAnnotation,
-        Action::ReviewAnnotations,
         Action::SwitchBackend,
         Action::ManageModels,
         Action::Assistant,
+        // Editing
+        Action::AcceptWord,
+        Action::NextMisspelling,
+        Action::PrevMisspelling,
+        Action::AddAnnotation,
+        Action::ReviewAnnotations,
         Action::InsertSnippet,
         Action::StartSprint,
         Action::StopSprint,
+        // View
+        Action::ToggleTypewriter,
+        Action::ToggleFocus,
+        // Help
+        Action::UserGuide,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -548,6 +642,41 @@ impl Action {
             Action::ManageModels => "ai:models",
             Action::Assistant => "assistant",
             Action::InsertSnippet => "snippet",
+        }
+    }
+
+    /// The collapsible group this action sits under in the run-action menu (#514).
+    /// `ALL` is ordered so each group's actions are contiguous, so the menu emits
+    /// one header per group as it iterates. AI passes and the AI-powered helpers
+    /// gather under one "AI" heading, the large block the grouping is meant to tame.
+    pub(crate) fn group(self) -> &'static str {
+        match self {
+            Action::Save
+            | Action::ProjectFind
+            | Action::SwitchBook
+            | Action::SeriesTree
+            | Action::RenameProject
+            | Action::ImportNotes
+            | Action::NewProjectFromNotes
+            | Action::ImportManuscript => "Project",
+            Action::Export(_) => "Export",
+            Action::ProgressReport | Action::AnalysisReport => "Reports",
+            Action::Ai(_)
+            | Action::RefreshSeriesBible
+            | Action::DescribeConfig
+            | Action::SwitchBackend
+            | Action::ManageModels
+            | Action::Assistant => "AI",
+            Action::AcceptWord
+            | Action::NextMisspelling
+            | Action::PrevMisspelling
+            | Action::AddAnnotation
+            | Action::ReviewAnnotations
+            | Action::InsertSnippet
+            | Action::StartSprint
+            | Action::StopSprint => "Editing",
+            Action::ToggleTypewriter | Action::ToggleFocus => "View",
+            Action::UserGuide => "Help",
         }
     }
 

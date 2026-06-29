@@ -346,16 +346,20 @@ fn a_long_palette_scrolls_to_keep_the_selection_visible() {
     let Mode::Palette(p) = &app.mode else {
         unreachable!()
     };
-    let selected = p.items[p.selected].label.clone();
-    let first = p.items[0].label.clone();
-    // The selected row scrolled into view; the first row scrolled off the top.
+    // `selected` indexes the visible rows (headers + items); resolve its label.
+    let rows = p.rows();
+    let selected = match &rows[p.selected] {
+        crate::mode::PaletteRow::Header { group, .. } => group.to_string(),
+        crate::mode::PaletteRow::Item(i) => p.items[*i].label.clone(),
+    };
+    // The selected row scrolled into view; the first item ("Save") scrolled off.
     assert!(
         screen.contains(&selected),
         "selected row '{selected}' is visible:\n{screen}"
     );
     assert!(
-        !screen.contains(&first),
-        "first row '{first}' scrolled off:\n{screen}"
+        !screen.contains("Save"),
+        "the first item scrolled off the top:\n{screen}"
     );
 }
 
