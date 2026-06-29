@@ -78,6 +78,64 @@ fn nav_mode_selects_and_opens_a_chapter() {
     assert!(app.buffer.line(0).contains("second"));
 }
 
+/// Esc out of the chapter browser (#529) dismisses the pane Ctrl-G opened in the
+/// same keystroke: the outline is gone and focus is back in the editor.
+#[test]
+fn esc_from_browser_hides_the_pane_ctrl_g_opened() {
+    use crate::ui::render_to_string as screen;
+    let (mut app, _dir) = two_chapter_app("esc-hides-pane");
+    assert!(!app.outline_visible, "pane starts hidden");
+
+    app.on_key(ctrl('g')); // open the browser
+    assert!(matches!(app.mode, Mode::Nav { .. }));
+    assert!(app.outline_visible, "Ctrl-G shows the pane");
+    assert!(
+        screen(&app, 100, 20).contains("CHAPTERS"),
+        "the browser pane is drawn while open"
+    );
+
+    app.on_key(key(KeyCode::Esc)); // one Esc dismisses it
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "focus is back in the editor"
+    );
+    assert!(!app.outline_visible, "the pane is hidden again");
+    assert!(
+        !screen(&app, 100, 20).contains("CHAPTERS"),
+        "the browser pane is no longer drawn after Esc"
+    );
+}
+
+/// Esc restores the *pre-open* visibility: an outline the author had already
+/// toggled on with Ctrl-O stays open after browsing and pressing Esc (#529).
+#[test]
+fn esc_from_browser_keeps_an_outline_opened_with_ctrl_o() {
+    let (mut app, _dir) = two_chapter_app("esc-keeps-outline");
+    app.on_key(ctrl('o')); // author opens the outline on purpose
+    assert!(app.outline_visible);
+
+    app.on_key(ctrl('g')); // browse, with the pane already up
+    app.on_key(key(KeyCode::Esc)); // leave the browser
+    assert!(matches!(app.mode, Mode::Insert));
+    assert!(
+        app.outline_visible,
+        "the outline the author opened with Ctrl-O survives Esc"
+    );
+}
+
+/// Opening a chapter (the other browser exit) is unaffected (#529): the active
+/// chapter changes and focus returns to the editor, as before.
+#[test]
+fn opening_a_chapter_still_works_after_the_esc_fix() {
+    let (mut app, _dir) = two_chapter_app("open-chapter-exit");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter two
+    app.on_key(key(KeyCode::Enter)); // open it
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(app.project.active_index(), 1);
+    assert!(app.buffer.line(0).contains("second"));
+}
+
 fn project_titles(project: &Project) -> Vec<String> {
     project
         .manifest
