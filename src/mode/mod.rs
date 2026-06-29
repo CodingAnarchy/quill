@@ -1027,3 +1027,19 @@ pub(crate) enum MetaField {
     BookEpigraph,
     BookEpigraphBy,
 }
+
+impl MetaField {
+    /// Whether this field is an epigraph — the quotation or its attribution, at
+    /// chapter or book level. These are display prose that ships in the export, so
+    /// they get the same smart-typography pass as the body (#519); other metadata
+    /// (titles, POV, summaries, goals) is stored verbatim.
+    pub(crate) fn is_epigraph(self) -> bool {
+        matches!(
+            self,
+            MetaField::ChapterEpigraph { .. }
+                | MetaField::ChapterEpigraphBy { .. }
+                | MetaField::BookEpigraph
+                | MetaField::BookEpigraphBy
+        )
+    }
+}

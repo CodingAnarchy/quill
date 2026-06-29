@@ -36,6 +36,27 @@ pub fn substitute(c: char, before: &str) -> Option<(usize, char)> {
     }
 }
 
+/// Apply the smart-typography substitutions across a whole string, as if the
+/// author had typed it character by character with the setting on. Used by the
+/// metadata edit path (epigraphs, #519), which commits a whole field at once
+/// rather than per-keystroke like the prose path; both share the same
+/// per-character [`substitute`] core so they can't drift.
+pub fn smarten(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match substitute(c, &out) {
+            Some((delete, replacement)) => {
+                for _ in 0..delete {
+                    out.pop();
+                }
+                out.push(replacement);
+            }
+            None => out.push(c),
+        }
+    }
+    out
+}
+
 /// Whether a quote at this position should be the opening form: true at the start
 /// of a line, after whitespace, or after an opening bracket / opening quote —
 /// false otherwise, so a quote or apostrophe after a word closes (and contraction
@@ -91,5 +112,27 @@ mod tests {
         assert_eq!(substitute('a', "hello"), None);
         assert_eq!(substitute(' ', "hello"), None);
         assert_eq!(substitute('\n', "hello"), None);
+    }
+
+    #[test]
+    fn smarten_applies_every_substitution_across_a_whole_string() {
+        // The #519 reproduction: curly quotes, em-dash, and ellipsis at once.
+        assert_eq!(
+            smarten("He said \"wait\" -- now..."),
+            "He said \u{201C}wait\u{201D} \u{2014} now\u{2026}"
+        );
+    }
+
+    #[test]
+    fn smarten_curls_contractions_and_keeps_single_marks_literal() {
+        assert_eq!(smarten("don't"), "don\u{2019}t");
+        assert_eq!(smarten("well-being"), "well-being"); // a lone hyphen stays
+        assert_eq!(smarten("Mr. Jones"), "Mr. Jones"); // lone dots stay
+    }
+
+    #[test]
+    fn smarten_leaves_plain_text_untouched() {
+        assert_eq!(smarten("nothing to do here"), "nothing to do here");
+        assert_eq!(smarten(""), "");
     }
 }
