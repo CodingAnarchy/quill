@@ -5,6 +5,7 @@
 //! and the `[editor]` section.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
 
@@ -16,11 +17,51 @@ use crate::theme::Theme;
 /// Quill's config directory: `$XDG_CONFIG_HOME/quill`, else `$HOME/.config/quill`.
 /// Home of the config file and other global state shared across projects (e.g.
 /// the recent-projects list, #270).
+///
+/// In test builds this is hermetic (#528): it returns a per-thread override
+/// (default `None`) instead of the developer's real `~/.config`, so no test reads
+/// the machine's config — and the AI backend, finding no key, never makes a live
+/// request. A test that exercises config points it at a temp dir via
+/// [`set_config_dir`].
 pub fn config_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
+    #[cfg(test)]
+    {
+        TEST_CONFIG_DIR.with(|c| c.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        resolve_config_dir(
+            std::env::var_os("XDG_CONFIG_HOME"),
+            std::env::var_os("HOME"),
+        )
+    }
+}
+
+/// The config dir from the raw `$XDG_CONFIG_HOME` / `$HOME` values: XDG wins,
+/// else `$HOME/.config`, else nothing. Pure, so the production resolution stays
+/// unit-tested even though [`config_dir`] is hermetically stubbed in test builds
+/// (#528).
+fn resolve_config_dir(xdg: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let base = xdg
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        .or_else(|| home.map(|h| PathBuf::from(h).join(".config")))?;
     Some(base.join("quill"))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Per-test override for [`config_dir`] (#528) — see its docs. Per-thread, so
+    /// parallel tests don't race the way a process-global env var would.
+    static TEST_CONFIG_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Point config resolution at `dir` (or clear it with `None`) for the current
+/// test thread (#528). Test-only; production resolves from `$XDG_CONFIG_HOME` /
+/// `$HOME`.
+#[cfg(test)]
+pub(crate) fn set_config_dir(dir: Option<PathBuf>) {
+    TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = dir);
 }
 
 /// `$XDG_CONFIG_HOME/quill/config.toml`, else `$HOME/.config/quill/config.toml`.
@@ -302,6 +343,41 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The suite must never read the developer's real config (#528): with no
+    /// override, config resolution yields nothing, so every loader defaults — and
+    /// the AI backend, finding no key, can't authenticate or reach the API.
+    #[test]
+    fn config_resolution_is_hermetic_by_default() {
+        assert_eq!(config_dir(), None, "no real ~/.config is read in tests");
+        let ai = crate::ai::Settings::load();
+        assert!(!ai.enabled, "AI defaults off");
+        assert!(ai.resolved_key().is_none(), "no API key leaks into tests");
+    }
+
+    #[test]
+    fn production_resolution_prefers_xdg_then_home_config() {
+        // `config_dir` is stubbed in tests, so cover the real resolver directly.
+        assert_eq!(
+            resolve_config_dir(Some("/x".into()), Some("/h".into())),
+            Some(PathBuf::from("/x/quill"))
+        );
+        assert_eq!(
+            resolve_config_dir(None, Some("/h".into())),
+            Some(PathBuf::from("/h/.config/quill"))
+        );
+        assert_eq!(resolve_config_dir(None, None), None);
+    }
+
+    #[test]
+    fn set_config_dir_points_resolution_at_a_temp_dir_then_clears() {
+        let dir = std::env::temp_dir().join("quill-cfg-hermetic-test");
+        set_config_dir(Some(dir.clone()));
+        assert_eq!(config_dir(), Some(dir.clone()));
+        assert_eq!(config_path(), Some(dir.join("config.toml")));
+        set_config_dir(None);
+        assert_eq!(config_dir(), None, "cleared back to hermetic default");
+    }
 
     fn steps(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| (*x).to_string()).collect()
