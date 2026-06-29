@@ -7,6 +7,7 @@
 
 use crate::theme;
 use std::path::Path;
+use unicode_width::UnicodeWidthStr;
 
 use ratatui::{
     layout::Rect,
@@ -60,15 +61,87 @@ pub(super) fn list_row(
     Line::from(spans)
 }
 
+/// The display width of a row in terminal cells (its spans' widths summed).
+fn row_cells(line: &Line) -> usize {
+    line.spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
+}
+
+/// How many wrapped display rows `cells` of content occupy in a box `width` cells
+/// wide — at least one. A lower bound for word-wrap (which can spill a little
+/// further), so the scroll window keeps a one-row cushion below the selection.
+fn wrapped_rows(cells: usize, width: usize) -> usize {
+    if width == 0 {
+        return 1;
+    }
+    cells.div_ceil(width).max(1)
+}
+
+/// The first row to render so `selected` stays visible in a `viewport`-line
+/// window, given each row's wrapped `heights`. Once the list has scrolled the
+/// selection pins to the bottom of the window (the most context above it shows).
+/// Returns 0 when everything fits or there's no selection (#513).
+fn scroll_offset(heights: &[usize], viewport: usize, selected: Option<usize>) -> usize {
+    let total: usize = heights.iter().sum();
+    match selected {
+        Some(sel) if total > viewport && sel < heights.len() => {
+            let mut offset = sel;
+            let mut used = heights[sel];
+            while offset > 0 && used + heights[offset - 1] <= viewport {
+                offset -= 1;
+                used += heights[offset];
+            }
+            offset
+        }
+        _ => 0,
+    }
+}
+
 /// Render a navigable list overlay: a bold help line, a blank, then the rows, in
-/// a bordered wrapping box. Shared by every list overlay and the tree navigator.
+/// a bordered wrapping box (#316). Shared by every list overlay and the tree
+/// navigator. When the rows don't all fit, the list scrolls to keep `selected` in
+/// view and the title shows how many rows are hidden above/below (#513) — derived
+/// from `selected` each frame, so no per-overlay scroll state is needed. Pass
+/// `selected = None` for a list with no active row (it renders from the top).
 pub(super) fn draw_list_overlay(
     frame: &mut Frame,
     area: Rect,
     title: &str,
     help: &str,
-    rows: impl Iterator<Item = Line<'static>>,
+    rows: Vec<Line<'static>>,
+    selected: Option<usize>,
 ) {
+    // Interior of the bordered box, then the rows region under the help + blank.
+    let width = area.width.saturating_sub(2) as usize;
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let header_h = wrapped_rows(UnicodeWidthStr::width(help), width) + 1;
+    let viewport = inner_h.saturating_sub(header_h);
+
+    let heights: Vec<usize> = rows
+        .iter()
+        .map(|r| wrapped_rows(row_cells(r), width))
+        .collect();
+    let offset = scroll_offset(&heights, viewport, selected);
+
+    // How many rows fit from `offset` — for the hidden-above/below affordance.
+    let mut used = 0;
+    let mut last = offset;
+    while last < rows.len() && used + heights[last] <= viewport {
+        used += heights[last];
+        last += 1;
+    }
+    // A selected row taller than the whole viewport still counts as shown, so it
+    // isn't double-counted into "below".
+    let last = last.max(offset + 1);
+    let (above, below) = (offset, rows.len().saturating_sub(last));
+    let title = if above > 0 || below > 0 {
+        format!("{title}↑{above} ↓{below} ")
+    } else {
+        title.to_string()
+    };
+
     let mut lines = vec![
         Line::from(Span::styled(
             help.to_string(),
@@ -76,10 +149,8 @@ pub(super) fn draw_list_overlay(
         )),
         Line::raw(""),
     ];
-    lines.extend(rows);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(title.to_string());
+    lines.extend(rows.into_iter().skip(offset));
+    let block = Block::default().borders(Borders::ALL).title(title);
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -89,13 +160,18 @@ pub(super) fn draw_list_overlay(
 }
 
 pub(super) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
-    let rows = palette.items.iter().enumerate().map(|(i, item)| {
-        list_row(
-            i == palette.selected,
-            item.label.clone(),
-            Some(item.desc.clone()),
-        )
-    });
+    let rows = palette
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            list_row(
+                i == palette.selected,
+                item.label.clone(),
+                Some(item.desc.clone()),
+            )
+        })
+        .collect();
     let title = format!(" {} ", palette.title);
     // The `R` force-rebuild gesture only applies to the AI bible passes (#176).
     let rebuild = if palette.title == "AI" {
@@ -107,7 +183,7 @@ pub(super) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
         "{} — ↑↓ move · enter run{rebuild} · esc close",
         palette.title
     );
-    draw_list_overlay(frame, area, &title, &help, rows);
+    draw_list_overlay(frame, area, &title, &help, rows, Some(palette.selected));
 }
 
 /// Render the recently-opened projects as a navigable list (#270). The
@@ -119,37 +195,48 @@ pub(super) fn draw_project_browser(
     current: &Path,
 ) {
     let current = current.canonicalize();
-    let rows = browser.projects.iter().enumerate().map(|(i, p)| {
-        let here = current.as_ref().map(|c| c == &p.path).unwrap_or(false);
-        let tag = if here { "  (open)" } else { "" };
-        list_row(
-            i == browser.selected,
-            format!("{}{tag}", p.title),
-            Some(p.path.display().to_string()),
-        )
-    });
+    let rows = browser
+        .projects
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let here = current.as_ref().map(|c| c == &p.path).unwrap_or(false);
+            let tag = if here { "  (open)" } else { "" };
+            list_row(
+                i == browser.selected,
+                format!("{}{tag}", p.title),
+                Some(p.path.display().to_string()),
+            )
+        })
+        .collect();
     draw_list_overlay(
         frame,
         area,
         " Projects ",
         "Projects — ↑↓ move · enter open · b browse files · n new project · esc cancel",
         rows,
+        Some(browser.selected),
     );
 }
 
 /// Render the filesystem navigator (#271): the current directory's subfolders,
 /// with `..` to go up and Quill projects marked as openable.
 pub(super) fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrowser) {
-    let rows = browser.entries.iter().enumerate().map(|(i, e)| {
-        let tag = if e.is_project {
-            "  (project — enter opens)"
-        } else if e.is_parent {
-            "  (up)"
-        } else {
-            "/"
-        };
-        list_row(i == browser.selected, format!("{}{tag}", e.label), None)
-    });
+    let rows = browser
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let tag = if e.is_project {
+                "  (project — enter opens)"
+            } else if e.is_parent {
+                "  (up)"
+            } else {
+                "/"
+            };
+            list_row(i == browser.selected, format!("{}{tag}", e.label), None)
+        })
+        .collect();
     let title = format!(" {} ", browser.cwd.display());
     draw_list_overlay(
         frame,
@@ -157,6 +244,7 @@ pub(super) fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrows
         &title,
         "Browse — ↑↓ move · enter open/into · n new project · ← up · esc cancel",
         rows,
+        Some(browser.selected),
     );
 }
 
@@ -218,39 +306,46 @@ pub(super) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &ProjectSea
         area,
         " Find across manuscript ",
         &help,
-        rows.into_iter(),
+        rows,
+        show_selection.then_some(ps.selected),
     );
 }
 
 /// Render the findings as a navigable triage list.
 pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, project: &Project) {
     let title = format!(" Findings ({}) ", findings.items.len());
-    let rows = findings.items.iter().enumerate().map(|(i, item)| {
-        // In a series, a finding carries the book it was found in (#341); show it
-        // so cross-book findings are attributed (chapter titles can repeat).
-        let book = item
-            .book
-            .filter(|_| project.book_count() > 1)
-            .and_then(|b| project.book_title(b));
-        let chapters = item.chapters.join(", ");
-        let loc = match (book, chapters.is_empty()) {
-            (None, true) => String::new(),
-            (None, false) => format!("  [{chapters}]"),
-            (Some(t), true) => format!("  [{t}]"),
-            (Some(t), false) => format!("  [{t} · {chapters}]"),
-        };
-        list_row(
-            i == findings.selected,
-            format!("{}{loc}", item.summary),
-            None,
-        )
-    });
+    let rows = findings
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            // In a series, a finding carries the book it was found in (#341); show
+            // it so cross-book findings are attributed (chapter titles can repeat).
+            let book = item
+                .book
+                .filter(|_| project.book_count() > 1)
+                .and_then(|b| project.book_title(b));
+            let chapters = item.chapters.join(", ");
+            let loc = match (book, chapters.is_empty()) {
+                (None, true) => String::new(),
+                (None, false) => format!("  [{chapters}]"),
+                (Some(t), true) => format!("  [{t}]"),
+                (Some(t), false) => format!("  [{t} · {chapters}]"),
+            };
+            list_row(
+                i == findings.selected,
+                format!("{}{loc}", item.summary),
+                None,
+            )
+        })
+        .collect();
     draw_list_overlay(
         frame,
         area,
         &title,
         "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close",
         rows,
+        Some(findings.selected),
     );
 }
 
@@ -265,21 +360,27 @@ pub(super) fn draw_annotations(
     let buffer = app.edit_buffer();
     let len = buffer.len_bytes();
     let title = format!(" Annotations ({}) ", app.annotations.len());
-    let rows = app.annotations.iter().enumerate().map(|(i, a)| {
-        let (s, e) = (a.start.min(len), a.end.min(len));
-        let snippet = if s < e {
-            crate::text::ellipsize(&buffer.byte_slice(s, e), 40)
-        } else {
-            "(text gone)".to_string()
-        };
-        list_row(i == selected, a.note.clone(), Some(snippet))
-    });
+    let rows = app
+        .annotations
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let (s, e) = (a.start.min(len), a.end.min(len));
+            let snippet = if s < e {
+                crate::text::ellipsize(&buffer.byte_slice(s, e), 40)
+            } else {
+                "(text gone)".to_string()
+            };
+            list_row(i == selected, a.note.clone(), Some(snippet))
+        })
+        .collect();
     draw_list_overlay(
         frame,
         area,
         &title,
         "Annotations — ↑↓ move · enter jump · d delete · esc close",
         rows,
+        Some(selected),
     );
 }
 
@@ -295,35 +396,85 @@ pub(super) fn draw_model_manager(
     use crate::ai::model_select::MODELS;
     let set = &app.ai.local_models;
     let title = format!(" Local AI models ({} chosen) ", set.len());
-    let rows = MODELS.iter().enumerate().map(|(i, m)| {
-        let mark = if set.iter().any(|id| id == m.id()) {
-            "● "
-        } else {
-            "○ "
-        };
-        // On-disk status (#382), from the cached set — no per-frame cache probe.
-        let disk = if app.model_is_downloaded(m.id()) {
-            " · ✓ downloaded"
-        } else {
-            ""
-        };
-        let stats = format!(
-            "{:.1} GB · needs {} GB RAM · {} ctx{disk}",
-            m.size_gb,
-            m.min_ram_gb,
-            m.context_label()
-        );
-        list_row(
-            i == selected,
-            format!("{mark}Qwen2.5-{}", m.id()),
-            Some(format!("{stats} — {}", m.description)),
-        )
-    });
+    let rows = MODELS
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let mark = if set.iter().any(|id| id == m.id()) {
+                "● "
+            } else {
+                "○ "
+            };
+            // On-disk status (#382), from the cached set — no per-frame cache probe.
+            let disk = if app.model_is_downloaded(m.id()) {
+                " · ✓ downloaded"
+            } else {
+                ""
+            };
+            let stats = format!(
+                "{:.1} GB · needs {} GB RAM · {} ctx{disk}",
+                m.size_gb,
+                m.min_ram_gb,
+                m.context_label()
+            );
+            list_row(
+                i == selected,
+                format!("{mark}Qwen2.5-{}", m.id()),
+                Some(format!("{stats} — {}", m.description)),
+            )
+        })
+        .collect();
     // Local inference is a build-time opt-in; say so rather than imply it runs.
     let help = if cfg!(feature = "local") {
         "Local models — ↑↓ move · enter/space use · d download · x remove · esc close"
     } else {
         "Local models — ↑↓ move · enter/space choose · esc close · (rebuild with --features local to download/run)"
     };
-    draw_list_overlay(frame, area, &title, help, rows);
+    draw_list_overlay(frame, area, &title, help, rows, Some(selected));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scroll_offset;
+
+    #[test]
+    fn a_list_that_fits_does_not_scroll() {
+        // 5 single-line rows in a 10-line viewport: always render from the top.
+        let heights = [1; 5];
+        assert_eq!(scroll_offset(&heights, 10, Some(0)), 0);
+        assert_eq!(scroll_offset(&heights, 10, Some(4)), 0);
+    }
+
+    #[test]
+    fn no_selection_renders_from_the_top() {
+        let heights = [1; 50];
+        assert_eq!(scroll_offset(&heights, 10, None), 0);
+    }
+
+    #[test]
+    fn scrolling_keeps_the_selection_within_the_viewport() {
+        // 50 single-line rows, a 10-line viewport. The selection stays visible,
+        // pinned to the bottom of the window once scrolled.
+        let heights = [1; 50];
+        // Still near the top: no scroll until the selection passes the viewport.
+        assert_eq!(scroll_offset(&heights, 10, Some(9)), 0);
+        // Past it: the window scrolls so `selected` is the last visible row.
+        assert_eq!(scroll_offset(&heights, 10, Some(10)), 1);
+        assert_eq!(scroll_offset(&heights, 10, Some(30)), 21);
+        assert_eq!(scroll_offset(&heights, 10, Some(49)), 40);
+        // In every case the selection sits inside [offset, offset + viewport).
+        for sel in 0..50 {
+            let off = scroll_offset(&heights, 10, Some(sel));
+            assert!(off <= sel && sel < off + 10, "sel {sel} visible from {off}");
+        }
+    }
+
+    #[test]
+    fn wrapped_rows_consume_their_extra_height_in_the_window() {
+        // Row 4 wraps to 3 lines. Viewport 5, selecting the last row: the window
+        // accounts for the tall row's height, so only rows 4,5,6 fit (3+1+1 = 5),
+        // not the 5 rows a naive row count would show. Offset lands on row 4.
+        let heights = [1, 1, 1, 1, 3, 1, 1];
+        assert_eq!(scroll_offset(&heights, 5, Some(6)), 4);
+    }
 }

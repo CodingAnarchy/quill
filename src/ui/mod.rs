@@ -491,7 +491,8 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App, tree: &Tree) {
         area,
         &title,
         "Project tree — ↑↓ move · → expand · ← collapse · enter open / expand · esc close",
-        lines.into_iter(),
+        lines,
+        Some(sel),
     );
 }
 
