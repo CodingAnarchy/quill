@@ -5,21 +5,28 @@
 //! ourselves; only glyph metrics are read from the bundled fonts (see [`font`]).
 //!
 //! Two [`Layout`]s share that machinery: the **screen** profile (#463) is US-Letter
-//! with the standard-14 Times faces (nothing embedded) for a readable proof; the
-//! **print** profile (#464) is a chosen trim size with mirrored inside/outside
-//! margins and a binding gutter, running heads, recto chapter starts, and the
-//! bundled fonts embedded whole — what print-on-demand services require. Text is
-//! WinAnsi (English / Latin-1 plus the common typographic punctuation); characters
-//! outside that set render as `?`. Designed typography (font choice, ornaments) is
-//! the styling epic; cover/bleed are a separate artifact.
+//! for a readable proof; the **print** profile (#464) is a chosen trim size with
+//! mirrored inside/outside margins and a binding gutter, running heads, recto
+//! chapter starts — what print-on-demand services require. Both embed their fonts
+//! and render text via Type0 /Identity-H composites (#492; see [`font`]), so the PDF
+//! shows the full Unicode range its fonts cover (Latin, Greek, Cyrillic, symbols,
+//! ornaments — CJK with an author-supplied CJK font). Fonts embed whole; subsetting
+//! to shrink files is #495. Designed typography (font choice, ornaments) is the
+//! styling epic; cover/bleed are a separate artifact.
 
 mod font;
+mod images;
+mod wrap;
+mod write;
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use self::font::{font_name, pdf_string, FontPlan, ObjMap};
+use self::font::{glyph_run, Fonts, ObjMap};
+use self::images::{decode_images, emit_images, PdfImage};
+use self::wrap::{segments, words_of, wrap_lines, Word};
+use self::write::{flatten_outline, serialize, OutlineItem};
 use super::{
     classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose, SCENE_BREAK,
 };
@@ -60,15 +67,10 @@ pub fn trim_points(name: &str) -> Option<(f32, f32)> {
     Some((w * 72.0, h * 72.0))
 }
 
-/// Whether every character of `glyph` can be shown by the PDF's WinAnsi fonts.
-fn renderable(glyph: &str) -> bool {
-    glyph.chars().all(|c| font::winansi(c).is_some())
-}
-
-/// Warnings for `[style]` settings the PDF writers can't honor (#489/#490), to
+/// Warnings for `[style]` settings the PDF writers can't honor (#490/#492), to
 /// surface alongside the export: SVG image ornaments can't be embedded (PDF takes
-/// raster only), and decorative glyphs outside the serif fonts' WinAnsi set (e.g.
-/// `❦`/`⚜`) can't render — the scene break falls back to `#` and ornaments skip.
+/// raster only), and glyphs no embedded font covers (e.g. CJK without a CJK font)
+/// can't render — the scene break falls back to `#` and ornaments skip.
 pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
     let mut warnings = Vec::new();
     let svgs: Vec<&str> = [
@@ -90,6 +92,7 @@ pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
             svgs.join(", ")
         ));
     }
+    let fonts = Fonts::new(style);
     let glyphs: Vec<&str> = [
         &style.scene_break,
         &style.title_ornament,
@@ -97,7 +100,7 @@ pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
     ]
     .into_iter()
     .flatten()
-    .filter(|g| !renderable(g))
+    .filter(|g| !g.chars().all(|c| fonts.covers(c)))
     .map(String::as_str)
     .collect();
     if !glyphs.is_empty() {
@@ -109,8 +112,8 @@ pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
     warnings
 }
 
-/// Compile a [`Document`] to a screen PDF (#463): US-Letter, standard-14 Times,
-/// honoring the designed `[style]` (#489) — a default style reproduces #463 exactly.
+/// Compile a [`Document`] to a screen PDF (#463): US-Letter, embedded Type0 fonts,
+/// honoring the designed `[style]` (#489/#492).
 pub fn to_pdf(doc: &Document, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
     Ok(render_book(doc, style, Layout::screen(style)))
 }
@@ -258,12 +261,14 @@ struct Layout {
     running_heads: bool,
     /// Begin each section on a recto (odd) page, inserting a blank verso if needed.
     recto_starts: bool,
-    fonts: FontPlan,
+    /// The embedded Type0 fonts (body faces + broad fallback) — both profiles embed
+    /// (#492), so the PDF renders the full Unicode its fonts cover.
+    fonts: Fonts,
 }
 
 impl Layout {
-    /// The screen proof (#463): US-Letter, uniform 1" margins, standard-14 Times
-    /// (or the configured fonts embedded, #489).
+    /// The screen proof (#463): US-Letter, uniform 1" margins; the body serif (or a
+    /// configured font) and the fallback embedded (#492).
     fn screen(style: &ExportStyle) -> Self {
         Layout {
             page_w: 612.0,
@@ -275,7 +280,7 @@ impl Layout {
             mirrored: false,
             running_heads: false,
             recto_starts: false,
-            fonts: FontPlan::for_screen(style),
+            fonts: Fonts::new(style),
         }
     }
 
@@ -294,7 +299,7 @@ impl Layout {
             mirrored: true,
             running_heads: true,
             recto_starts: true,
-            fonts: FontPlan::for_print(style),
+            fonts: Fonts::new(style),
         }
     }
 
@@ -324,88 +329,16 @@ impl Layout {
     /// The rendered width of `text` at `size` for the given face, in points.
     fn measure(&self, text: &str, size: f32, bold: bool, italic: bool) -> f32 {
         text.chars()
-            .map(|c| self.fonts.em_width(c, bold, italic))
+            .map(|c| self.fonts.advance_em(c, bold, italic))
             .sum::<f32>()
             / 1000.0
             * size
     }
-}
 
-/// One word carrying the emphasis it inherits from its run, the unit line-wrapping
-/// works in.
-struct Word {
-    text: String,
-    bold: bool,
-    italic: bool,
-}
-
-/// A bookmark: a title, the page it jumps to, and any nested entries.
-struct OutlineItem {
-    title: String,
-    page: usize,
-    children: Vec<OutlineItem>,
-}
-
-impl OutlineItem {
-    /// A bookmark to `page`; nest entries by pushing onto `children` afterward.
-    fn new(title: String, page: usize) -> Self {
-        OutlineItem {
-            title,
-            page,
-            children: Vec::new(),
-        }
+    /// Whether the fonts can render every character of `glyph`.
+    fn renders(&self, glyph: &str) -> bool {
+        glyph.chars().all(|c| self.fonts.covers(c))
     }
-}
-
-/// A decoded `[style]` image ornament (#490), ready to embed as a PDF image
-/// XObject: the role it fills, a resource name, pixel dimensions, the RGB samples,
-/// and the alpha channel when the source had transparency (→ a soft mask).
-struct PdfImage {
-    role: ImageRole,
-    name: String,
-    width: u32,
-    height: u32,
-    rgb: Vec<u8>,
-    alpha: Option<Vec<u8>>,
-}
-
-/// Decode the configured image ornaments to RGB(+alpha) samples for embedding.
-/// Anything the raster codec can't read (SVG, a corrupt file) is skipped — those
-/// are reported by [`pdf_style_warnings`].
-fn decode_images(style: &ExportStyle) -> Vec<PdfImage> {
-    let mut images = Vec::new();
-    let roles = [
-        (ImageRole::SceneBreak, "ImSceneBreak"),
-        (ImageRole::ChapterHeading, "ImChapterHeading"),
-        (ImageRole::Title, "ImTitle"),
-    ];
-    for (role, name) in roles {
-        let Some(embedded) = style.image(role) else {
-            continue;
-        };
-        let Ok(decoded) = image::load_from_memory(&embedded.bytes) else {
-            continue;
-        };
-        let rgba = decoded.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        let mut rgb = Vec::with_capacity((width * height * 3) as usize);
-        let mut alpha = Vec::with_capacity((width * height) as usize);
-        let mut has_alpha = false;
-        for px in rgba.pixels() {
-            rgb.extend_from_slice(&[px[0], px[1], px[2]]);
-            alpha.push(px[3]);
-            has_alpha |= px[3] != 255;
-        }
-        images.push(PdfImage {
-            role,
-            name: name.to_string(),
-            width,
-            height,
-            rgb,
-            alpha: has_alpha.then_some(alpha),
-        });
-    }
-    images
 }
 
 /// What a page is, for decoration: a section opener and blank pages get no running
@@ -585,7 +518,12 @@ impl Pdf {
         if let Some(a) = author {
             self.centered(&format!("by {a}"), false, false, BODY_SIZE, BODY_LEADING);
         }
-        if let Some(o) = self.bits.title_ornament.clone().filter(|o| renderable(o)) {
+        if let Some(o) = self
+            .bits
+            .title_ornament
+            .clone()
+            .filter(|o| self.layout.renders(o))
+        {
             self.centered(&o, false, false, HEADING_SIZE, BODY_LEADING);
         }
         if let Some(e) = epigraph {
@@ -606,7 +544,7 @@ impl Pdf {
         let page = self.open_section();
         self.y = self.layout.page_h * 0.5;
         self.heading_line(title, size, size * 1.4, align);
-        if let Some(o) = ornament.filter(|o| renderable(o)) {
+        if let Some(o) = ornament.filter(|o| self.layout.renders(o)) {
             self.centered(o, false, false, HEADING_SIZE, BODY_LEADING);
         }
         page
@@ -682,7 +620,7 @@ impl Pdf {
             );
             return;
         }
-        let glyph = if renderable(&self.bits.scene_break) {
+        let glyph = if self.layout.renders(&self.bits.scene_break) {
             self.bits.scene_break.clone()
         } else {
             SCENE_BREAK.to_string()
@@ -833,20 +771,40 @@ impl Pdf {
     }
 
     /// Emit one positioned line of styled segments into the current page's content.
+    /// Each segment's text is resolved to glyph ids (body face, or the fallback for
+    /// glyphs it lacks) and shown as Identity-H hex runs.
     fn draw_line(&mut self, x: f32, y: f32, segs: &[(String, bool, bool)], size: f32) {
-        let mut s = String::from("BT\n");
-        s.push_str(&format!("1 0 0 1 {} {} Tm\n", num(x), num(y)));
+        let block = self.glyph_block(
+            x,
+            y,
+            size,
+            segs.iter().map(|(t, b, i)| (t.as_str(), *b, *i)),
+        );
+        self.cur().push_str(&block);
+    }
+
+    /// A `BT…ET` text block at `(x, y)`: each `(text, bold, italic)` segment resolved
+    /// to glyph-id hex runs (`/Fn` font switches between body faces and the fallback).
+    fn glyph_block<'a>(
+        &self,
+        x: f32,
+        y: f32,
+        size: f32,
+        segments: impl Iterator<Item = (&'a str, bool, bool)>,
+    ) -> String {
+        let mut s = format!("BT\n1 0 0 1 {} {} Tm\n", num(x), num(y));
         let mut cur_font = "";
-        for (text, bold, italic) in segs {
-            let f = font_name(*bold, *italic);
-            if f != cur_font {
-                s.push_str(&format!("/{f} {} Tf\n", num(size)));
-                cur_font = f;
+        for (text, bold, italic) in segments {
+            for (name, hex) in glyph_run(&self.layout.fonts, text, bold, italic) {
+                if name != cur_font {
+                    s.push_str(&format!("/{name} {} Tf\n", num(size)));
+                    cur_font = name;
+                }
+                s.push_str(&format!("<{hex}> Tj\n"));
             }
-            s.push_str(&format!("({}) Tj\n", pdf_string(text)));
         }
         s.push_str("ET\n");
-        self.cur().push_str(&s);
+        s
     }
 
     /// The running head + folio for page `i` (the screen profile centers the folio;
@@ -878,7 +836,7 @@ impl Pdf {
             } else {
                 left + (col - w) / 2.0
             };
-            s.push_str(&text_op(x, self.layout.text_bottom() * 0.5, &label, size));
+            s.push_str(&self.text_op(x, self.layout.text_bottom() * 0.5, &label, size));
         }
         // Running head, print only, off the title and section-opening pages.
         if self.layout.running_heads && i > 0 && !m.opener {
@@ -887,10 +845,16 @@ impl Pdf {
                 let w = self.layout.measure(head, HEAD_SIZE, false, false);
                 let x = left + (col - w) / 2.0;
                 let y = self.layout.page_h - self.layout.margin_top * 0.5;
-                s.push_str(&text_op(x, y, head, HEAD_SIZE));
+                s.push_str(&self.text_op(x, y, head, HEAD_SIZE));
             }
         }
         s
+    }
+
+    /// A `BT…ET` text run showing one string at `(x, y)` in the regular face — used
+    /// for running heads and folios, resolved to glyph ids like body text.
+    fn text_op(&self, x: f32, y: f32, text: &str, size: f32) -> String {
+        self.glyph_block(x, y, size, std::iter::once((text, false, false)))
     }
 
     /// Serialize the pages and outline into the bytes of a PDF file.
@@ -902,7 +866,7 @@ impl Pdf {
         let mut objects: ObjMap = BTreeMap::new();
         // 1 catalog, 2 pages, 3 outlines, then fonts, pages+contents, outline items.
         let mut next = 4u32;
-        let font_ids = self.layout.fonts.objects(&mut next, &mut objects);
+        let font_names = self.layout.fonts.objects(&mut next, &mut objects);
         let image_names = emit_images(&self.images, &mut next, &mut objects);
         let mut page_obj = Vec::with_capacity(n_pages);
         let mut content_obj = Vec::with_capacity(n_pages);
@@ -935,10 +899,11 @@ impl Pdf {
                 .collect();
             format!(" /XObject << {entries}>>")
         };
-        let resources = format!(
-            "/Resources << /Font << /F1 {} 0 R /F2 {} 0 R /F3 {} 0 R /F4 {} 0 R >>{xobjects} >>",
-            font_ids[0], font_ids[1], font_ids[2], font_ids[3]
-        );
+        let fonts: String = font_names
+            .iter()
+            .map(|(name, id)| format!("/{name} {id} 0 R "))
+            .collect();
+        let resources = format!("/Resources << /Font << {fonts}>>{xobjects} >>");
         objects.insert(
             2,
             format!(
@@ -987,7 +952,7 @@ impl Pdf {
 }
 
 /// Where a wrapped line sits in its column.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Align {
     Left,
     Center,
@@ -997,227 +962,13 @@ enum Align {
     RightInset(f32),
 }
 
-/// A `BT…ET` text run showing one string at `(x, y)` in the regular face — used for
-/// running heads and folios.
-fn text_op(x: f32, y: f32, text: &str, size: f32) -> String {
-    format!(
-        "BT\n1 0 0 1 {} {} Tm\n/F1 {} Tf\n({}) Tj\nET\n",
-        num(x),
-        num(y),
-        num(size),
-        pdf_string(text)
-    )
-}
-
-/// Split runs into wrap-able words, preserving each run's emphasis.
-fn words_of(runs: &[(String, bool, bool)]) -> Vec<Word> {
-    let mut words = Vec::new();
-    for (text, bold, italic) in runs {
-        for w in text.split(' ').filter(|w| !w.is_empty()) {
-            words.push(Word {
-                text: w.to_string(),
-                bold: *bold,
-                italic: *italic,
-            });
-        }
-    }
-    words
-}
-
-/// Greedy line-wrap: pack words into the available width for each line, given by
-/// `width_for_line(line_index)`. Each line is returned with its content width
-/// (words + inter-word spaces), so callers can align it without re-measuring. The
-/// width-per-line callback lets one wrapper serve flush paragraphs (a narrower
-/// first line for the indent) and drop caps (narrower first lines for the initial).
-fn wrap_lines<'w>(
-    layout: &Layout,
-    words: &'w [Word],
-    size: f32,
-    width_for_line: impl Fn(usize) -> f32,
-) -> Vec<(Vec<&'w Word>, f32)> {
-    let space = layout.measure(" ", size, false, false);
-    let mut lines: Vec<(Vec<&Word>, f32)> = Vec::new();
-    let mut line: Vec<&Word> = Vec::new();
-    let mut content = 0.0; // width of the current line's words + inter-word spaces
-    for w in words {
-        let ww = layout.measure(&w.text, size, w.bold, w.italic);
-        let advance = if line.is_empty() { ww } else { space + ww };
-        if !line.is_empty() && content + advance > width_for_line(lines.len()) {
-            lines.push((std::mem::take(&mut line), content));
-            content = ww;
-            line.push(w);
-        } else {
-            content += advance;
-            line.push(w);
-        }
-    }
-    if !line.is_empty() {
-        lines.push((line, content));
-    }
-    lines
-}
-
-/// A wrapped line as drawable segments: each word carries a trailing space except
-/// the last, so `Tj` advances spell the gaps in each word's own font.
-fn segments(line: &[&Word]) -> Vec<(String, bool, bool)> {
-    let n = line.len();
-    line.iter()
-        .enumerate()
-        .map(|(i, w)| {
-            let text = if i + 1 < n {
-                format!("{} ", w.text)
-            } else {
-                w.text.clone()
-            };
-            (text, w.bold, w.italic)
-        })
-        .collect()
-}
-
 /// Format a coordinate/size compactly (drop a trailing `.00`).
-fn num(x: f32) -> String {
+pub(super) fn num(x: f32) -> String {
     if (x - x.round()).abs() < 0.005 {
         format!("{}", x.round() as i64)
     } else {
         format!("{x:.2}")
     }
-}
-
-/// Flatten an outline subtree into PDF objects under `parent_id`, returning the
-/// (first, last) child object ids. `count` accumulates the total item count.
-fn flatten_outline(
-    items: &[OutlineItem],
-    parent_id: u32,
-    next: &mut u32,
-    page_obj: &[u32],
-    page_h: f32,
-    objects: &mut ObjMap,
-    count: &mut usize,
-) -> (Option<u32>, Option<u32>) {
-    if items.is_empty() {
-        return (None, None);
-    }
-    let ids: Vec<u32> = items
-        .iter()
-        .map(|_| {
-            let id = *next;
-            *next += 1;
-            id
-        })
-        .collect();
-    *count += items.len();
-    for (k, item) in items.iter().enumerate() {
-        let id = ids[k];
-        let (first, last) =
-            flatten_outline(&item.children, id, next, page_obj, page_h, objects, count);
-        // Jump to the top of the destination page (its height varies by trim).
-        let dest = format!(
-            "[{} 0 R /XYZ null {} null]",
-            page_obj[item.page],
-            num(page_h)
-        );
-        let mut body = format!(
-            "<< /Title ({}) /Parent {parent_id} 0 R /Dest {dest}",
-            pdf_string(&item.title)
-        );
-        if k > 0 {
-            body.push_str(&format!(" /Prev {} 0 R", ids[k - 1]));
-        }
-        if k + 1 < ids.len() {
-            body.push_str(&format!(" /Next {} 0 R", ids[k + 1]));
-        }
-        if let (Some(f), Some(l)) = (first, last) {
-            body.push_str(&format!(
-                " /First {f} 0 R /Last {l} 0 R /Count {}",
-                item.children.len()
-            ));
-        }
-        body.push_str(" >>");
-        objects.insert(id, body.into_bytes());
-    }
-    (ids.first().copied(), ids.last().copied())
-}
-
-/// Emit each decoded image as a PDF image XObject (RGB samples, uncompressed) with
-/// a grayscale `/SMask` when the source had alpha, returning the (resource name,
-/// object id) pairs for the page-tree `/Resources /XObject` dictionary.
-fn emit_images(images: &[PdfImage], next: &mut u32, out: &mut ObjMap) -> Vec<(String, u32)> {
-    let mut names = Vec::new();
-    for img in images {
-        let smask = img.alpha.as_ref().map(|alpha| {
-            let id = take(next);
-            out.insert(
-                id,
-                image_xobject(img.width, img.height, "DeviceGray", alpha, None),
-            );
-            id
-        });
-        let id = take(next);
-        out.insert(
-            id,
-            image_xobject(img.width, img.height, "DeviceRGB", &img.rgb, smask),
-        );
-        names.push((img.name.clone(), id));
-    }
-    names
-}
-
-/// One image XObject: an (uncompressed) sample stream of `color`/8-bit data, with an
-/// optional soft mask reference.
-fn image_xobject(
-    width: u32,
-    height: u32,
-    color: &str,
-    samples: &[u8],
-    smask: Option<u32>,
-) -> Vec<u8> {
-    let smask = smask
-        .map(|id| format!(" /SMask {id} 0 R"))
-        .unwrap_or_default();
-    let mut v = format!(
-        "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} \
-         /ColorSpace /{color} /BitsPerComponent 8{smask} /Length {} >>\nstream\n",
-        samples.len()
-    )
-    .into_bytes();
-    v.extend_from_slice(samples);
-    v.extend_from_slice(b"\nendstream");
-    v
-}
-
-/// Allocate the next object id (shared with [`font`]).
-pub(super) fn take(next: &mut u32) -> u32 {
-    let id = *next;
-    *next += 1;
-    id
-}
-
-/// Write the objects (in id order), the xref table, and the trailer.
-fn serialize(objects: &ObjMap) -> Vec<u8> {
-    let max_id = *objects.keys().max().expect("at least the catalog");
-    let mut out: Vec<u8> = b"%PDF-1.7\n".to_vec();
-    let mut offsets = vec![0usize; (max_id + 1) as usize];
-    for id in 1..=max_id {
-        let body = objects.get(&id).expect("contiguous object ids");
-        offsets[id as usize] = out.len();
-        out.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
-        out.extend_from_slice(body);
-        out.extend_from_slice(b"\nendobj\n");
-    }
-    let xref = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n", max_id + 1).as_bytes());
-    out.extend_from_slice(b"0000000000 65535 f \n");
-    for id in 1..=max_id {
-        out.extend_from_slice(format!("{:010} {:05} n \n", offsets[id as usize], 0).as_bytes());
-    }
-    out.extend_from_slice(
-        format!(
-            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-            max_id + 1
-        )
-        .as_bytes(),
-    );
-    out
 }
 
 #[cfg(test)]

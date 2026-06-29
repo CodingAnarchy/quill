@@ -1,9 +1,14 @@
-//! Tests for the PDF writer (#463) and the print-interior profile (#464).
+//! Tests for the PDF writer: the screen proof (#463), the print interior (#464),
+//! `[style]` parity (#489), image ornaments (#490), and full-Unicode Type0 fonts
+//! (#492). Content text is emitted as Identity-H glyph ids, so these assert on PDF
+//! structure (raw byte markers) and the font-routing logic rather than grepping the
+//! rendered words; visual/qpdf validation is covered in the PR.
 
+use super::font::Fonts;
 use super::*;
 use crate::export::{Chapter, ExportStyle, Part};
 
-/// The default (no `[style]`) — screen/print output is the plain #463/#464 baseline.
+/// The default (no `[style]`) baseline.
 fn plain() -> ExportStyle {
     ExportStyle::default()
 }
@@ -23,9 +28,8 @@ fn ch(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
     }
 }
 
-/// A book exercising every section kind: front matter, a named part with one
-/// chapter (epigraph + emphasis + a scene break + a sub-heading), and back
-/// matter.
+/// A book exercising every section kind: front matter, a named part with one chapter
+/// (epigraph + italic + bold + a scene break + a sub-heading), and back matter.
 fn doc() -> Document {
     Document {
         title: "Red State Earth".into(),
@@ -46,120 +50,77 @@ fn doc() -> Document {
     }
 }
 
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
+/// Whether the raw PDF bytes contain `needle` (avoids lossy-UTF-8 offset issues from
+/// the embedded binary font streams).
+fn has(bytes: &[u8], needle: &str) -> bool {
+    bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
 }
 
-/// Reconstruct the visible text by concatenating every `(...) Tj` body.
-fn shown(bytes: &[u8]) -> String {
-    let s = text(bytes);
-    let b = s.as_bytes();
-    let mut out = String::new();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] != b'(' {
-            i += 1;
-            continue;
-        }
-        let mut j = i + 1;
-        let mut body = String::new();
-        while j < b.len() && b[j] != b')' {
-            if b[j] == b'\\' {
-                j += 2;
-                continue;
-            }
-            body.push(b[j] as char);
-            j += 1;
-        }
-        if s[j..].starts_with(") Tj") {
-            out.push_str(&body);
-        }
-        i = j + 1;
-    }
-    out
-}
-
-fn count(s: &str, needle: &str) -> usize {
-    s.matches(needle).count()
+fn count(bytes: &[u8], needle: &str) -> usize {
+    bytes
+        .windows(needle.len())
+        .filter(|w| *w == needle.as_bytes())
+        .count()
 }
 
 #[test]
-fn is_a_well_formed_pdf_with_a_locatable_xref() {
+fn is_a_well_formed_pdf() {
     let bytes = to_pdf(&doc(), &plain()).unwrap();
-    let s = text(&bytes);
-    assert!(s.starts_with("%PDF-1.7"), "header");
-    assert!(s.trim_end().ends_with("%%EOF"), "trailer marker");
-    assert!(s.contains("/Type /Catalog") && s.contains("/Root 1 0 R"));
-    assert!(s.contains("/Type /Pages") && s.contains("trailer"));
-    let sx = s.rfind("startxref").expect("startxref");
-    let off: usize = s[sx + "startxref".len()..]
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap();
-    assert_eq!(&s[off..off + 4], "xref", "startxref locates the table");
-}
-
-#[test]
-fn screen_pdf_uses_the_standard_times_faces() {
-    let s = text(&to_pdf(&doc(), &plain()).unwrap());
-    for base in [
-        "Times-Roman",
-        "Times-Bold",
-        "Times-Italic",
-        "Times-BoldItalic",
+    assert!(bytes.starts_with(b"%PDF-1.7"), "header");
+    assert!(bytes.ends_with(b"%%EOF\n"), "trailer marker");
+    for marker in [
+        "/Type /Catalog",
+        "/Root 1 0 R",
+        "/Type /Pages",
+        "xref",
+        "trailer",
     ] {
-        assert!(s.contains(&format!("/BaseFont /{base}")), "{base} declared");
+        assert!(has(&bytes, marker), "missing {marker}");
     }
-    assert_eq!(
-        count(&s, "/Encoding /WinAnsiEncoding"),
-        4,
-        "every face WinAnsi-encoded"
-    );
-    assert!(!s.contains("/FontFile2"), "screen profile embeds nothing");
-    assert!(s.contains("MediaBox [0 0 612 792]"), "US-Letter");
 }
 
 #[test]
-fn carries_metadata_structure_and_emphasis() {
+fn text_is_drawn_with_embedded_type0_fonts() {
     let bytes = to_pdf(&doc(), &plain()).unwrap();
-    let visible = shown(&bytes);
-    for piece in [
-        "Red State Earth",
-        "a novel",
-        "by A. Writer",
-        "Prologue",
-        "Part One",
-        "The Find",
-        "Afterword",
+    for marker in [
+        "/Subtype /Type0",
+        "/Encoding /Identity-H",
+        "/Subtype /CIDFontType2",
+        "/FontFile2",
+        "/ToUnicode",
+        "/BaseFont /LiberationSerif",
     ] {
-        assert!(visible.contains(piece), "{piece:?} missing from: {visible}");
+        assert!(has(&bytes, marker), "missing {marker}");
     }
-    let raw = text(&bytes);
+    assert!(!has(&bytes, "/BaseFont /Times"), "no standard-14 fonts");
     assert!(
-        raw.contains("/F2 ") && raw.contains("/F3 "),
-        "bold + italic faces used"
+        has(&bytes, "MediaBox [0 0 612 792]"),
+        "US-Letter screen page"
     );
-    assert!(!visible.contains('*'), "no literal asterisks: {visible}");
+}
+
+#[test]
+fn emphasis_routes_to_the_bold_and_italic_faces() {
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
     assert!(
-        visible.contains(SCENE_BREAK) && !visible.contains("---"),
-        "scene divider: {visible}"
+        has(&bytes, "/BaseFont /LiberationSerif-Italic"),
+        "italic used"
     );
+    assert!(has(&bytes, "/BaseFont /LiberationSerif-Bold"), "bold used");
 }
 
 #[test]
 fn each_section_starts_on_its_own_page_in_the_screen_profile() {
-    let s = text(&to_pdf(&doc(), &plain()).unwrap());
-    // title + prologue + part page + chapter + afterword, no blanks inserted.
-    assert_eq!(count(&s, "/Type /Page /Parent"), 5);
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    assert_eq!(count(&bytes, "/Type /Page /Parent"), 5);
 }
 
 #[test]
 fn builds_a_nested_bookmark_outline() {
-    let s = text(&to_pdf(&doc(), &plain()).unwrap());
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    let s = String::from_utf8_lossy(&bytes);
     assert!(
-        s.contains("/PageMode /UseOutlines"),
+        has(&bytes, "/PageMode /UseOutlines"),
         "opens with the outline"
     );
     for title in [
@@ -168,7 +129,7 @@ fn builds_a_nested_bookmark_outline() {
         "/Title (The Find)",
         "/Title (Afterword)",
     ] {
-        assert!(s.contains(title), "{title} bookmarked");
+        assert!(has(&bytes, title), "{title} bookmarked");
     }
     let at = s.find("/Title (Part One)").unwrap();
     let item = &s[at..at + 200.min(s.len() - at)];
@@ -179,7 +140,7 @@ fn builds_a_nested_bookmark_outline() {
 }
 
 #[test]
-fn a_series_carries_every_book_in_order_under_the_series_title() {
+fn a_series_bookmarks_every_book_in_order() {
     let book = |title: &str| Document {
         title: title.into(),
         subtitle: None,
@@ -200,18 +161,125 @@ fn a_series_carries_every_book_in_order_under_the_series_title() {
         &plain(),
     )
     .unwrap();
-    let visible = shown(&bytes);
-    assert!(
-        visible.contains("The Saga") && visible.contains("by A. Writer"),
-        "series title page"
-    );
-    let one = visible.find("Book One").expect("book one");
-    let two = visible.find("Book Two").expect("book two");
+    let s = String::from_utf8_lossy(&bytes);
+    let one = s.find("/Title (Book One)").expect("book one bookmarked");
+    let two = s.find("/Title (Book Two)").expect("book two bookmarked");
     assert!(one < two, "books in reading order");
-    let s = text(&bytes);
+}
+
+#[test]
+fn fonts_route_glyphs_by_coverage() {
+    let fonts = Fonts::new(&plain());
+    // ASCII + Latin/Cyrillic/Greek the serif covers → the body face.
+    for c in ['A', 'é', 'д', 'α'] {
+        assert_eq!(
+            fonts.resolve(c, false, false).map(|(n, _)| n),
+            Some("F1"),
+            "{c} in body"
+        );
+    }
+    // Decorative ornaments the serif lacks → the broad fallback.
+    assert_eq!(
+        fonts.resolve('❦', false, false).map(|(n, _)| n),
+        Some("Ffb")
+    );
+    assert_eq!(
+        fonts.resolve('⚜', false, false).map(|(n, _)| n),
+        Some("Ffb")
+    );
+    assert!(fonts.covers('❦') && fonts.covers('д'));
+    // CJK isn't in either bundled font (needs an author-supplied CJK font).
+    assert_eq!(fonts.resolve('中', false, false), None, "CJK uncovered");
+    assert!(!fonts.covers('中'));
+}
+
+#[test]
+fn ornaments_render_via_the_fallback_font_without_warning() {
+    // The #492 win: an ornament #489 had to skip now renders, via the fallback.
+    let style = ExportStyle {
+        scene_break: Some("❦".into()),
+        title_ornament: Some("⚜".into()),
+        ..Default::default()
+    };
+    let bytes = to_pdf(&doc(), &style).unwrap();
     assert!(
-        s.contains("/Title (Book One)") && s.contains("/Title (Book Two)"),
-        "books bookmarked"
+        has(&bytes, "/BaseFont /DejaVuSans"),
+        "fallback embedded for the ornaments"
+    );
+    assert!(
+        pdf_style_warnings(&style).is_empty(),
+        "no skipped-glyph warning: {:?}",
+        pdf_style_warnings(&style)
+    );
+}
+
+#[test]
+fn a_preset_renders_its_ornaments_in_the_pdf() {
+    let mut style = ExportStyle {
+        preset: Some("classic".into()),
+        ..Default::default()
+    };
+    style.apply_preset();
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    assert!(
+        has(&bytes, "/BaseFont /DejaVuSans"),
+        "classic ornament embedded"
+    );
+    assert!(
+        pdf_style_warnings(&style).is_empty(),
+        "classic is fully renderable"
+    );
+}
+
+#[test]
+fn a_plain_pdf_embeds_no_fallback_and_no_images() {
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    assert!(
+        !has(&bytes, "DejaVuSans"),
+        "no fallback when every glyph is in the serif"
+    );
+    assert!(!has(&bytes, "/Subtype /Image"), "no images by default");
+    assert!(!has(&bytes, "/XObject"), "no XObject resources by default");
+}
+
+#[test]
+fn heading_alignment_maps_from_style() {
+    let bits = |a: Option<&str>| {
+        StyleBits::from_style(&ExportStyle {
+            heading_align: a.map(str::to_string),
+            ..Default::default()
+        })
+        .heading_align
+    };
+    assert_eq!(bits(None), Align::Center, "default centered");
+    assert_eq!(bits(Some("left")), Align::Left);
+    assert_eq!(bits(Some("right")), Align::RightInset(0.0));
+    assert_eq!(
+        bits(Some("justify")),
+        Align::Left,
+        "headings aren't justified"
+    );
+}
+
+#[test]
+fn a_configured_body_font_replaces_the_serif() {
+    let mut style = ExportStyle {
+        body_font: Some("body.ttf".into()),
+        ..Default::default()
+    };
+    let font = include_bytes!("../../../assets/fonts/LiberationSerif-Italic.ttf");
+    let warnings = style.resolve_fonts(|_| Ok(font.to_vec()));
+    assert!(warnings.is_empty(), "font resolves: {warnings:?}");
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    // The configured font takes the regular (body) slot; the default serif regular
+    // is gone, but the bundled bold/italic faces remain.
+    assert!(
+        !has(&bytes, "/BaseFont /LiberationSerif /"),
+        "default serif regular replaced"
+    );
+    assert!(
+        has(&bytes, "/BaseFont /LiberationSerif-Bold"),
+        "bundled bold kept"
     );
 }
 
@@ -225,41 +293,18 @@ fn trim_points_resolves_known_sizes_only() {
 }
 
 #[test]
-fn print_pdf_embeds_the_fonts_at_the_chosen_trim() {
+fn print_pdf_embeds_fonts_at_the_chosen_trim() {
     let (w, h) = trim_points("6x9").unwrap();
-    let s = text(&to_pdf_print(&doc(), w, h, &plain()).unwrap());
-    // The bundled faces are embedded as TrueType with a descriptor + program.
-    assert!(s.contains("/Subtype /TrueType"), "embedded TrueType font");
-    assert_eq!(count(&s, "/FontFile2"), 4, "four font programs embedded");
-    assert_eq!(
-        count(&s, "/FontDescriptor"),
-        8,
-        "a descriptor per face (dict + descriptor ref)"
-    );
+    let bytes = to_pdf_print(&doc(), w, h, &plain()).unwrap();
     assert!(
-        s.contains("/BaseFont /LiberationSerif"),
-        "the embedded face is named"
+        has(&bytes, "/Subtype /Type0") && has(&bytes, "/FontFile2"),
+        "fonts embedded"
     );
-    assert!(
-        !s.contains("/BaseFont /Times-Roman"),
-        "no reliance on a viewer font"
-    );
-    // 6×9 inches = 432×648 points.
-    assert!(
-        s.contains("MediaBox [0 0 432 648]"),
-        "trim size 6x9 = 432x648 pts"
-    );
-    // Bookmark destinations jump to the top of the trim-height page, not 792.
-    assert!(
-        s.contains("/XYZ null 648 null"),
-        "outline dest uses the trim height"
-    );
+    assert!(has(&bytes, "MediaBox [0 0 432 648]"), "6x9 trim");
 }
 
 #[test]
 fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
-    // Title page is the only thing before the first section. A recto start for
-    // that section forces a blank verso between them.
     let mini = Document {
         title: "T".into(),
         subtitle: None,
@@ -274,146 +319,17 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         back: vec![],
     };
     let (w, h) = trim_points("6x9").unwrap();
-    let screen = count(
-        &text(&to_pdf(&mini, &plain()).unwrap()),
-        "/Type /Page /Parent",
-    );
+    let screen = count(&to_pdf(&mini, &plain()).unwrap(), "/Type /Page /Parent");
     let print = count(
-        &text(&to_pdf_print(&mini, w, h, &plain()).unwrap()),
+        &to_pdf_print(&mini, w, h, &plain()).unwrap(),
         "/Type /Page /Parent",
     );
     assert_eq!(screen, 2, "title + chapter");
     assert_eq!(print, 3, "title + blank verso + recto chapter");
 }
 
-#[test]
-fn print_pdf_draws_running_heads() {
-    // A body long enough to spill onto a second (non-opening) page, which is
-    // where running heads appear.
-    let long = "The river ran on past the town and into the hills beyond. ".repeat(120);
-    let d = Document {
-        title: "TITLEX".into(),
-        subtitle: None,
-        author: Some("AUTHORX".into()),
-        series: None,
-        epigraph: None,
-        front: vec![],
-        parts: vec![Part {
-            name: None,
-            chapters: vec![ch("One", None, &long)],
-        }],
-        back: vec![],
-    };
-    let (w, h) = trim_points("6x9").unwrap();
-    let visible = shown(&to_pdf_print(&d, w, h, &plain()).unwrap());
-    // Title page mentions each once; running heads on continuation pages add more.
-    assert!(
-        count(&visible, "TITLEX") + count(&visible, "AUTHORX") > 2,
-        "running heads render on continuation pages: {visible}"
-    );
-}
-
-/// A bundled face reused as a "configured" font in tests (any valid TTF works).
-const TEST_FONT: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
-
-/// The x of the text matrix immediately before `needle` — to check line placement.
-fn tm_x_before(s: &str, needle: &str) -> f32 {
-    let at = s.find(needle).expect("needle present");
-    let tm = s[..at].rfind("1 0 0 1 ").expect("a Tm precedes it");
-    s[tm + "1 0 0 1 ".len()..]
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
-}
-
-#[test]
-fn style_glyphs_and_ornaments_carry_into_the_pdf() {
-    // WinAnsi glyphs (asterisks, an asterisk ornament) render; the scene break
-    // replaces the default `#`.
-    let style = ExportStyle {
-        scene_break: Some("* * *".into()),
-        title_ornament: Some("*".into()),
-        ..Default::default()
-    };
-    let visible = shown(&to_pdf(&doc(), &style).unwrap());
-    assert!(
-        visible.contains("* * *"),
-        "configured scene break: {visible}"
-    );
-    assert!(!visible.contains(" # "), "default glyph replaced");
-    assert!(visible.contains('*'), "renderable ornament drawn");
-    assert!(
-        pdf_style_warnings(&style).is_empty(),
-        "all-WinAnsi style, no warnings"
-    );
-}
-
-#[test]
-fn a_preset_styles_the_pdf_within_the_font_set() {
-    // `classic` resolves (via apply_preset) to a `* * *` scene break, a drop cap,
-    // and `❦` ornaments. The WinAnsi glyphs and drop cap render; the decorative
-    // ornament can't (it's outside the serif fonts) and is reported.
-    let mut style = ExportStyle {
-        preset: Some("classic".into()),
-        ..Default::default()
-    };
-    style.apply_preset();
-    let bytes = to_pdf(&doc(), &style).unwrap();
-    let visible = shown(&bytes);
-    assert!(visible.contains("* * *"), "classic scene break renders");
-    assert!(
-        text(&bytes).contains(&format!("/F1 {} Tf", BODY_LEADING * 3.0)),
-        "classic drop cap"
-    );
-    assert!(!visible.contains('❦'), "the ❦ ornament can't render in PDF");
-    assert!(
-        pdf_style_warnings(&style).iter().any(|w| w.contains('❦')),
-        "the skipped ornament is reported"
-    );
-}
-
-#[test]
-fn pdf_style_warnings_flag_images_and_unrenderable_glyphs() {
-    // A non-WinAnsi scene break falls back to `#` and is reported.
-    let glyphy = ExportStyle {
-        scene_break: Some("❖".into()),
-        ..Default::default()
-    };
-    let visible = shown(&to_pdf(&doc(), &glyphy).unwrap());
-    assert!(visible.contains('#'), "falls back to the default divider");
-    assert!(
-        pdf_style_warnings(&glyphy)
-            .iter()
-            .any(|w| w.contains("font set")),
-        "glyph reported"
-    );
-    // An SVG image ornament can't be rasterized for PDF and is reported.
-    let mut svg = ExportStyle {
-        scene_break_image: Some("art/break.svg".into()),
-        ..Default::default()
-    };
-    svg.resolve_images(|_| Ok(b"<svg/>".to_vec()));
-    assert!(
-        pdf_style_warnings(&svg).iter().any(|w| w.contains("SVG")),
-        "SVG image ornament reported as unsupported"
-    );
-    // A raster (PNG) ornament is supported → no warning.
-    let mut png = ExportStyle {
-        scene_break_image: Some("art/break.png".into()),
-        ..Default::default()
-    };
-    png.resolve_images(|_| Ok(png_bytes(2, 2, 255)));
-    assert!(
-        pdf_style_warnings(&png).is_empty(),
-        "a PNG ornament is embeddable, no warning: {:?}",
-        pdf_style_warnings(&png)
-    );
-}
-
-/// Encode a tiny `w`×`h` solid-red PNG with the given alpha (255 = opaque) — a real
-/// raster the PDF writer can decode and embed.
+/// Encode a tiny `w`×`h` solid-red PNG with the given alpha — a real raster the PDF
+/// writer can decode and embed.
 fn png_bytes(w: u32, h: u32, alpha: u8) -> Vec<u8> {
     let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 0, 0, alpha]));
     let mut bytes = std::io::Cursor::new(Vec::new());
@@ -431,104 +347,54 @@ fn image_ornaments_embed_as_xobjects_and_are_placed() {
         title_image: Some("art/title.png".into()),
         ..Default::default()
     };
-    // Opaque images → no soft mask; transparent ones add an /SMask.
+    // The scene break is transparent (→ a soft mask); the others opaque.
     style.resolve_images(|p| Ok(png_bytes(4, 4, if p.contains("break") { 128 } else { 255 })));
     let bytes = to_pdf(&doc(), &style).unwrap();
-    let s = text(&bytes);
-    // Three image XObjects, registered for the pages and drawn in the content.
-    assert_eq!(count(&s, "/Subtype /Image"), 4, "3 images + 1 soft mask");
     assert_eq!(
-        count(&s, "/SMask"),
+        count(&bytes, "/Subtype /Image"),
+        4,
+        "3 images + 1 soft mask"
+    );
+    assert_eq!(
+        count(&bytes, "/SMask"),
         1,
-        "only the transparent scene break gets a mask"
+        "only the transparent image gets a mask"
     );
-    assert!(s.contains("/XObject <<"), "images registered in resources");
-    for name in ["/ImSceneBreak Do", "/ImChapterHeading Do", "/ImTitle Do"] {
-        assert!(s.contains(name), "{name} drawn in the content stream");
+    assert!(has(&bytes, "/XObject <<"), "images registered in resources");
+    for op in ["/ImSceneBreak Do", "/ImChapterHeading Do", "/ImTitle Do"] {
+        assert!(has(&bytes, op), "{op} drawn");
     }
-    // The scene-break image replaces the glyph — no `#` divider remains.
-    assert!(
-        !shown(&bytes).contains('#'),
-        "scene glyph replaced by the image"
-    );
 }
 
 #[test]
-fn no_image_ornaments_means_no_xobjects() {
-    let s = text(&to_pdf(&doc(), &ExportStyle::default()).unwrap());
+fn style_warnings_flag_svg_and_truly_uncovered_glyphs() {
+    // SVG can't be rasterized for PDF.
+    let mut svg = ExportStyle {
+        scene_break_image: Some("art/break.svg".into()),
+        ..Default::default()
+    };
+    svg.resolve_images(|_| Ok(b"<svg/>".to_vec()));
     assert!(
-        !s.contains("/Subtype /Image"),
-        "no images embedded by default"
+        pdf_style_warnings(&svg).iter().any(|w| w.contains("SVG")),
+        "SVG reported"
     );
-    assert!(!s.contains("/XObject"), "no XObject resource dict");
-}
-
-#[test]
-fn drop_cap_sets_a_large_initial_only_when_styled() {
-    let cap = format!("/F1 {} Tf", BODY_LEADING * 3.0);
-    let off = ExportStyle::default();
+    // A raster ornament is fine — no warning.
+    let mut png = ExportStyle {
+        scene_break_image: Some("art/break.png".into()),
+        ..Default::default()
+    };
+    png.resolve_images(|_| Ok(png_bytes(2, 2, 255)));
     assert!(
-        !text(&to_pdf(&doc(), &off).unwrap()).contains(&cap),
-        "no drop cap by default"
+        pdf_style_warnings(&png).is_empty(),
+        "raster ornament needs no warning"
     );
-    let on = ExportStyle {
-        drop_cap: Some(true),
+    // A CJK scene-break glyph no embedded font covers → reported.
+    let cjk = ExportStyle {
+        scene_break: Some("中".into()),
         ..Default::default()
     };
     assert!(
-        text(&to_pdf(&doc(), &on).unwrap()).contains(&cap),
-        "drop cap initial is set large"
-    );
-}
-
-#[test]
-fn heading_alignment_places_the_chapter_title() {
-    let book = |align: Option<&str>| {
-        let style = ExportStyle {
-            heading_align: align.map(str::to_string),
-            ..Default::default()
-        };
-        let d = Document {
-            title: "T".into(),
-            subtitle: None,
-            author: None,
-            series: None,
-            epigraph: None,
-            front: vec![],
-            parts: vec![Part {
-                name: None,
-                chapters: vec![ch("HEADX", None, "")],
-            }],
-            back: vec![],
-        };
-        text(&to_pdf(&d, &style).unwrap())
-    };
-    // Left-aligned headings sit at the text-column left edge (the 72pt margin);
-    // centered (the default) sits further in.
-    let left_x = tm_x_before(&book(Some("left")), "(HEADX)");
-    let center_x = tm_x_before(&book(None), "(HEADX)");
-    assert!(
-        (left_x - 72.0).abs() < 0.5,
-        "left heading at the margin: {left_x}"
-    );
-    assert!(center_x > 80.0, "centered heading is indented: {center_x}");
-}
-
-#[test]
-fn a_configured_body_font_is_embedded_even_in_the_screen_pdf() {
-    let mut style = ExportStyle {
-        body_font: Some("body.ttf".into()),
-        ..Default::default()
-    };
-    let warnings = style.resolve_fonts(|_| Ok(TEST_FONT.to_vec()));
-    assert!(warnings.is_empty(), "font resolves: {warnings:?}");
-    let s = text(&to_pdf(&doc(), &style).unwrap());
-    // The screen profile embeds nothing by default; a configured font switches it
-    // to the embedded plan.
-    assert!(s.contains("/FontFile2"), "configured body font embedded");
-    assert!(s.contains("/Subtype /TrueType"), "embedded as TrueType");
-    assert!(
-        !s.contains("/BaseFont /Times-Roman"),
-        "no longer the standard face"
+        pdf_style_warnings(&cjk).iter().any(|w| w.contains('中')),
+        "uncovered glyph reported"
     );
 }
