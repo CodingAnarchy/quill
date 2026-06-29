@@ -112,6 +112,10 @@ fn parse_document_xml(document: &str, core: Option<&str>) -> Imported {
         title,
         author,
         chapters,
+        // A `.docx` carries every body inside the single `word/document.xml`
+        // container; once that's read there's no per-body read to fail, so the
+        // analogous unreadable-body count is always 0 (see [`Imported`]).
+        unreadable_bodies: 0,
     }
 }
 
