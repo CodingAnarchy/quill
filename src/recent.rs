@@ -7,6 +7,7 @@
 //! empty browser, never an error. Entries whose `book.toml` has since vanished
 //! are pruned when the list is read, so the browser never offers a dead project.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,21 @@ pub fn list() -> Vec<RecentProject> {
     config::config_dir()
         .map(|d| list_in(&d))
         .unwrap_or_default()
+}
+
+/// Every openable project, newest-recent first then the rest of the library: the
+/// recent list (#270) followed by every project under `home` (#272) that isn't
+/// already a recent, de-duplicated by path. `home` is the configured projects
+/// home, or `None` when unset — then this is just the recent list. The single
+/// source for both the in-editor browser (Ctrl-B) and the startup chooser (#526),
+/// so the two never offer different libraries.
+pub fn openable(home: Option<&Path>) -> Vec<RecentProject> {
+    let mut projects = list();
+    if let Some(home) = home {
+        let known: HashSet<PathBuf> = projects.iter().map(|p| p.path.clone()).collect();
+        projects.extend(scan(home).into_iter().filter(|p| !known.contains(&p.path)));
+    }
+    projects
 }
 
 /// Record `root` (with display `title`) as the most-recently-opened project:
@@ -222,6 +238,48 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn openable_lists_recents_first_then_the_library_deduped() {
+        // A hermetic config dir (#528) so `list()` reads our store, not the real
+        // `~/.config`. A recent project that also lives under the library home must
+        // appear once (as a recent), with the rest of the library following.
+        let cfg = crate::testutil::scratch_dir("recent", "openable-cfg");
+        let home = crate::testutil::scratch_dir("recent", "openable-home");
+        config::set_config_dir(Some(cfg.clone()));
+
+        Project::create(home.join("shared")).unwrap();
+        Project::create(home.join("other")).unwrap();
+        let shared = home.join("shared").canonicalize().unwrap();
+        record_in(&cfg, &shared, "Shared");
+
+        let out = openable(Some(&home));
+        let paths: Vec<_> = out.iter().map(|p| p.path.clone()).collect();
+        // The recent leads; "shared" isn't duplicated by the scan; "other" follows.
+        assert_eq!(out.len(), 2, "deduped to two projects: {paths:?}");
+        assert_eq!(out[0].path, shared, "the recent comes first");
+        assert!(
+            paths.contains(&home.join("other").canonicalize().unwrap()),
+            "the library's other project is included: {paths:?}"
+        );
+
+        config::set_config_dir(None);
+        std::fs::remove_dir_all(&cfg).ok();
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn openable_with_no_home_is_just_the_recents() {
+        // No library home configured: openable is exactly the recent list.
+        let cfg = crate::testutil::scratch_dir("recent", "openable-norecents");
+        config::set_config_dir(Some(cfg.clone()));
+        assert!(
+            openable(None).is_empty(),
+            "no recents, no home → nothing to open"
+        );
+        config::set_config_dir(None);
+        std::fs::remove_dir_all(&cfg).ok();
     }
 
     #[test]

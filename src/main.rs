@@ -25,6 +25,7 @@ mod recent;
 mod recovery;
 mod report;
 mod spell;
+mod startup;
 mod syntax;
 #[cfg(test)]
 mod testutil;
@@ -85,13 +86,15 @@ fn main() -> io::Result<()> {
     }
 
     // A project lives in a directory. An explicit path opens (or creates) it
-    // there; a bare launch resolves to an existing project or a freshly named
-    // one in the projects home — never a stray project in the current folder
-    // (#423).
+    // there; a bare launch resolves to an existing project, one chosen from the
+    // library, or a freshly named one in the projects home — never a stray project
+    // in the current folder (#423/#526).
     let dir = match first_arg {
         Some(path) => PathBuf::from(path),
         None => match startup_dir() {
-            Ok(dir) => dir,
+            Ok(Some(dir)) => dir,
+            // The author quit at the startup chooser without picking anything (#526).
+            Ok(None) => return Ok(()),
             Err(e) => {
                 eprintln!("quill: {e}");
                 std::process::exit(1);
@@ -147,18 +150,55 @@ fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
     Ok((project, buffer))
 }
 
-/// The project directory for a no-path launch (#423). If the current directory is
-/// already a Quill project, open it in place (the long-standing behavior).
-/// Otherwise — rather than scattering a new project into whatever folder the
-/// shell happens to be in — ask the author what to call the new book and place it
-/// in their projects home. The freshly created project skips the in-app setup
-/// wizard (#282), matching `quill <path>`; the wizard is offered only for
-/// projects created from within the running editor (Ctrl-B → new).
-fn startup_dir() -> io::Result<PathBuf> {
+/// The project directory for a no-path launch (#423/#526), or `None` if the
+/// author quit the startup chooser without picking anything.
+///
+/// If the current directory is already a Quill project, open it in place (the
+/// long-standing behavior). Otherwise, when there are projects to open — recents
+/// or a configured library — offer a chooser: create a new book or open an
+/// existing one (#526). With nothing to open, the chooser would be a dead end, so
+/// it degrades straight to the new-project prompt. Creating a new book asks the
+/// author what to call it and places it in their projects home, never scattering a
+/// project into whatever folder the shell happens to be in.
+///
+/// The freshly created project skips the in-app setup wizard (#282), matching
+/// `quill <path>`; the wizard is offered only for projects created from within the
+/// running editor (Ctrl-B → new).
+fn startup_dir() -> io::Result<Option<PathBuf>> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if Project::manifest_path(&cwd).exists() {
-        return Ok(cwd); // already inside a project — open it
+    let in_project = Project::manifest_path(&cwd).exists();
+    let projects = recent::openable(config::ProjectsConfig::load().home_dir().as_deref());
+    match startup::decide(&cwd, in_project, projects.len()) {
+        startup::StartupAction::OpenInPlace(dir) => Ok(Some(dir)),
+        startup::StartupAction::NewProject => Ok(Some(new_project_dir()?)),
+        startup::StartupAction::Choose => choose_startup_project(&projects),
     }
+}
+
+/// Run the no-path chooser (#526) and turn the author's choice into a project
+/// directory: an existing project's path, a freshly named new project, or `None`
+/// when they quit. The chooser is a brief alternate-screen session (its own
+/// [`Tui`], restored on drop) so it matches the in-editor browser; "create new"
+/// then falls through to the plain-terminal name prompt, like before.
+fn choose_startup_project(projects: &[recent::RecentProject]) -> io::Result<Option<PathBuf>> {
+    let choice = {
+        let mut tui = Tui::new()?;
+        startup::choose(&mut tui.terminal, projects)?
+        // `tui` drops here, restoring the plain terminal before any stdin prompt.
+    };
+    match choice {
+        startup::Choice::Open(path) => Ok(Some(path)),
+        startup::Choice::New => Ok(Some(new_project_dir()?)),
+        startup::Choice::Quit => Ok(None),
+    }
+}
+
+/// The directory for a brand-new project on a no-path launch (#423): the projects
+/// home (with the `~/Quill` fallback, flagged so it isn't silent) joined with the
+/// name the author types at the plain-terminal prompt. Shared by the
+/// degrade-to-new path and the chooser's "create new".
+fn new_project_dir() -> io::Result<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let (base, fallback) = new_project_base(
         config::ProjectsConfig::load().home_dir(),
         std::env::var_os("HOME").map(PathBuf::from),

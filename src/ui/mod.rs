@@ -25,6 +25,7 @@ use list_overlay::{
     draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_model_manager,
     draw_palette, draw_project_browser, draw_project_search, list_row, marker, row_style,
 };
+pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
 /// itself into a given area. A custom trait rather than ratatui's `Widget`

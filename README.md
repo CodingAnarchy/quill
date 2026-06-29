@@ -331,13 +331,19 @@ Quill works on a **project directory**. Pass a path and, if the directory has a
 manifest plus a first chapter).
 
 With **no argument**, Quill doesn't scatter a project into the current folder. If
-you launch from inside an existing project it opens that one; otherwise it asks
-what to call the new book and creates it in your **projects home** (`[projects]
-home`, see [Projects](#projects-switch-without-relaunching)) — so `quill` from
-anywhere starts a tidily-filed book rather than one wherever the shell happens to
-be. With no projects home configured it falls back to a `Quill` folder in your
-home directory and tells you so (set `[projects] home` to choose where books
-live).
+you launch from inside an existing project it opens that one. Otherwise — when you
+have books to return to — it offers a **chooser**: create a new project, or open
+an existing one. *Open existing* lists your recently-opened projects together with
+every project under your **projects home** (`[projects] home`, see
+[Projects](#projects-switch-without-relaunching)); pick one and it opens. *Create
+new* asks what to call the book and files it in your projects home — so `quill`
+from anywhere starts a tidily-filed book rather than one wherever the shell
+happens to be. With no projects home configured it falls back to a `Quill` folder
+in your home directory and tells you so (set `[projects] home` to choose where
+books live).
+
+When you have nothing to open yet — no recent projects and no projects home — the
+chooser would be empty, so Quill skips it and goes straight to naming a new book.
 
 ## Project & file format
 

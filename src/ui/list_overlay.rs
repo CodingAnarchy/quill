@@ -211,6 +211,64 @@ pub(super) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
     draw_list_overlay(frame, area, &title, &help, rows, Some(palette.selected));
 }
 
+/// Render the no-path startup chooser (#526): a two-row list — create a new
+/// project, or open an existing one — over the whole screen. Reuses the list
+/// overlay so it matches the in-editor browsers. `open_existing` is false when
+/// there are no openable projects (the row is then absent and the caller skips
+/// straight to new-project), but the chooser is only shown when it's true.
+pub fn draw_startup_chooser(frame: &mut Frame, area: Rect, selected: usize) {
+    let rows = vec![
+        list_row(
+            selected == 0,
+            "Create a new project".to_string(),
+            Some("name it and start a fresh book".to_string()),
+        ),
+        list_row(
+            selected == 1,
+            "Open an existing project".to_string(),
+            Some("pick from your recent projects and library".to_string()),
+        ),
+    ];
+    draw_list_overlay(
+        frame,
+        area,
+        " Quill ",
+        "Quill — ↑↓ move · enter choose · esc quit",
+        rows,
+        Some(selected),
+    );
+}
+
+/// Render the startup project picker (#526): the openable projects as a navigable
+/// list, full-screen (there's no editor behind it yet). Same rows as the
+/// in-editor browser, minus the "(open)" marker since nothing is open.
+pub fn draw_startup_browser(
+    frame: &mut Frame,
+    area: Rect,
+    projects: &[crate::recent::RecentProject],
+    selected: usize,
+) {
+    let rows = projects
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            list_row(
+                i == selected,
+                p.title.clone(),
+                Some(p.path.display().to_string()),
+            )
+        })
+        .collect();
+    draw_list_overlay(
+        frame,
+        area,
+        " Open a project ",
+        "Open a project — ↑↓ move · enter open · esc back",
+        rows,
+        Some(selected),
+    );
+}
+
 /// Render the recently-opened projects as a navigable list (#270). The
 /// currently-open project is marked, and each row shows the title over its path.
 pub(super) fn draw_project_browser(
