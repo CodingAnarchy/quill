@@ -238,7 +238,7 @@ fn prose_paragraph(block: &str) -> Option<String> {
         Prose::Paragraph(text) => {
             let runs: String = inline_runs(&text)
                 .into_iter()
-                .map(|(t, b, i)| run(&t, b, i, None))
+                .map(|r| run(&r.text, r.bold, r.italic, None))
                 .collect();
             para(r#"<w:ind w:firstLine="720"/>"#, runs)
         }

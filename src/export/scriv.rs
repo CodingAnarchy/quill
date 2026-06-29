@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use super::{
-    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, Part, Prose,
+    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, Part, Prose, Run,
     SCENE_BREAK,
 };
 
@@ -153,10 +153,10 @@ fn to_rtf(chapter: &Chapter) -> String {
     let mut body = String::new();
     if let Some(epigraph) = &chapter.epigraph {
         for line in epigraph.text.lines() {
-            body.push_str(&rtf_paragraph(&[(line.to_string(), false, true)]));
+            body.push_str(&rtf_paragraph(&[Run::new(line, false, true)]));
         }
         if let Some(by) = &epigraph.attribution {
-            body.push_str(&rtf_paragraph(&[(format!("— {by}"), false, true)]));
+            body.push_str(&rtf_paragraph(&[Run::new(format!("— {by}"), false, true)]));
         }
     }
     for block in body_blocks(&chapter.body) {
@@ -167,7 +167,7 @@ fn to_rtf(chapter: &Chapter) -> String {
                 body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n"))
             }
             Some(Prose::Heading(heading)) => {
-                body.push_str(&rtf_paragraph(&[(heading, true, false)]))
+                body.push_str(&rtf_paragraph(&[Run::new(heading, true, false)]))
             }
             Some(Prose::Paragraph(text)) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
             // Verbatim, monospaced (`\f1`), line breaks kept as `\line` (#522).
@@ -186,9 +186,9 @@ fn to_rtf(chapter: &Chapter) -> String {
 }
 
 /// One RTF paragraph (`\pard … \par`) from a sequence of styled runs.
-fn rtf_paragraph(runs: &[(String, bool, bool)]) -> String {
+fn rtf_paragraph(runs: &[Run]) -> String {
     let mut out = String::from("\\pard\\sa180 ");
-    for (text, bold, italic) in runs {
+    for Run { text, bold, italic } in runs {
         let escaped = rtf_escape(text);
         let tags = match (bold, italic) {
             (true, true) => "\\b\\i ",

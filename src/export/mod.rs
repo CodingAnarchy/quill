@@ -160,11 +160,33 @@ pub(crate) fn strip_repeated_title(body: &str, title: &str) -> String {
     }
 }
 
+/// A styled span of text — Quill's bold/italic "run", the unit both export's
+/// run-splitter ([`inline_runs`]) and import's RTF run-collector produce. It
+/// round-trips Quill's own export, so the type is shared rather than modeled as
+/// an untyped `(String, bool, bool)` tuple on each side (#506).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Run {
+    pub(crate) text: String,
+    pub(crate) bold: bool,
+    pub(crate) italic: bool,
+}
+
+impl Run {
+    /// A run carrying `text` with the given emphasis.
+    pub(crate) fn new(text: impl Into<String>, bold: bool, italic: bool) -> Self {
+        Run {
+            text: text.into(),
+            bold,
+            italic,
+        }
+    }
+}
+
 /// Split a line into runs by `*` (italic) and `**` (bold) markers — Quill's
 /// emphasis convention. Other text (including `_`) is taken literally. Shared by
 /// the Word and Scrivener writers, which carry emphasis through to their own
 /// run markup.
-fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
+fn inline_runs(text: &str) -> Vec<Run> {
     let mut runs = Vec::new();
     let mut cur = String::new();
     let (mut bold, mut italic) = (false, false);
@@ -190,14 +212,17 @@ fn inline_runs(text: &str) -> Vec<(String, bool, bool)> {
     // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
     // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
     if bold || italic {
-        return vec![(text.to_string(), false, false)];
+        return vec![Run::new(text, false, false)];
     }
     runs
 }
 
-fn push_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
+/// Flush the accumulated text as a [`Run`] with the current bold/italic flags.
+/// The single `mem::take`-into-a-run helper shared by the export run-splitter and
+/// the import RTF run-collector (#506).
+pub(crate) fn push_run(runs: &mut Vec<Run>, cur: &mut String, bold: bool, italic: bool) {
     if !cur.is_empty() {
-        runs.push((std::mem::take(cur), bold, italic));
+        runs.push(Run::new(std::mem::take(cur), bold, italic));
     }
 }
 
@@ -533,25 +558,25 @@ mod tests {
 
     #[test]
     fn parses_nested_and_plain_emphasis() {
-        assert_eq!(inline_runs("plain"), vec![("plain".into(), false, false)]);
+        assert_eq!(inline_runs("plain"), vec![Run::new("plain", false, false)]);
         assert_eq!(
             inline_runs("a *b* c"),
             vec![
-                ("a ".into(), false, false),
-                ("b".into(), false, true),
-                (" c".into(), false, false)
+                Run::new("a ", false, false),
+                Run::new("b", false, true),
+                Run::new(" c", false, false)
             ]
         );
-        assert_eq!(inline_runs("**bold**"), vec![("bold".into(), true, false)]);
+        assert_eq!(inline_runs("**bold**"), vec![Run::new("bold", true, false)]);
         // Underscores are literal (not emphasis), so snake_case survives.
         assert_eq!(
             inline_runs("snake_case"),
-            vec![("snake_case".into(), false, false)]
+            vec![Run::new("snake_case", false, false)]
         );
         // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
         assert_eq!(
             inline_runs("5 * 3 = 15"),
-            vec![("5 * 3 = 15".into(), false, false)]
+            vec![Run::new("5 * 3 = 15", false, false)]
         );
     }
 

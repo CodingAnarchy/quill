@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::export::SCENE_BREAK;
+use crate::export::{push_run, Run, SCENE_BREAK};
 
 use super::{
     attr_value, element_text, finalize_titles, find_open, join_paragraphs, wrap_emphasis, Imported,
@@ -175,7 +175,7 @@ fn matching_close(xml: &str, name: &str, inner_start: usize) -> Option<usize> {
 fn rtf_to_markdown(rtf: &str) -> String {
     let chars: Vec<char> = rtf.chars().collect();
     let mut paras: Vec<String> = Vec::new();
-    let mut runs: Vec<(String, bool, bool)> = Vec::new();
+    let mut runs: Vec<Run> = Vec::new();
     let mut cur = String::new();
     let (mut bold, mut italic, mut skipping) = (false, false, false);
     let mut stack: Vec<(bool, bool, bool)> = Vec::new();
@@ -183,12 +183,12 @@ fn rtf_to_markdown(rtf: &str) -> String {
     while i < chars.len() {
         match chars[i] {
             '{' => {
-                flush_run(&mut runs, &mut cur, bold, italic);
+                push_run(&mut runs, &mut cur, bold, italic);
                 stack.push((bold, italic, skipping));
                 i += 1;
             }
             '}' => {
-                flush_run(&mut runs, &mut cur, bold, italic);
+                push_run(&mut runs, &mut cur, bold, italic);
                 if let Some((b, it, sk)) = stack.pop() {
                     (bold, italic, skipping) = (b, it, sk);
                 }
@@ -217,19 +217,19 @@ fn rtf_to_markdown(rtf: &str) -> String {
                     }
                     match word.as_str() {
                         "b" => {
-                            flush_run(&mut runs, &mut cur, bold, italic);
+                            push_run(&mut runs, &mut cur, bold, italic);
                             bold = param != Some(0);
                         }
                         "i" => {
-                            flush_run(&mut runs, &mut cur, bold, italic);
+                            push_run(&mut runs, &mut cur, bold, italic);
                             italic = param != Some(0);
                         }
                         "plain" => {
-                            flush_run(&mut runs, &mut cur, bold, italic);
+                            push_run(&mut runs, &mut cur, bold, italic);
                             (bold, italic) = (false, false);
                         }
                         "par" => {
-                            flush_run(&mut runs, &mut cur, bold, italic);
+                            push_run(&mut runs, &mut cur, bold, italic);
                             paras.push(runs_to_markdown(&runs));
                             runs.clear();
                         }
@@ -292,7 +292,7 @@ fn rtf_to_markdown(rtf: &str) -> String {
             }
         }
     }
-    flush_run(&mut runs, &mut cur, bold, italic);
+    push_run(&mut runs, &mut cur, bold, italic);
     if !runs.is_empty() {
         paras.push(runs_to_markdown(&runs));
     }
@@ -306,17 +306,10 @@ fn rtf_to_markdown(rtf: &str) -> String {
 }
 
 /// Render parsed RTF runs to Markdown, each wrapped per its bold/italic flags.
-fn runs_to_markdown(runs: &[(String, bool, bool)]) -> String {
+fn runs_to_markdown(runs: &[Run]) -> String {
     runs.iter()
-        .map(|(t, b, i)| wrap_emphasis(t, *b, *i))
+        .map(|r| wrap_emphasis(&r.text, r.bold, r.italic))
         .collect()
-}
-
-/// Flush the accumulated text as a run with the current bold/italic flags.
-fn flush_run(runs: &mut Vec<(String, bool, bool)>, cur: &mut String, bold: bool, italic: bool) {
-    if !cur.is_empty() {
-        runs.push((std::mem::take(cur), bold, italic));
-    }
 }
 
 /// RTF destination groups whose text isn't document content (font/colour/style

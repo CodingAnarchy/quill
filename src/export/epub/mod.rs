@@ -15,7 +15,7 @@ use zip::{CompressionMethod, ZipWriter};
 use self::opf::{build_nav, build_ncx, build_opf, OpfMeta};
 use super::{
     body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedImage,
-    ExportStyle, FontRole, ImageRole, Prose,
+    ExportStyle, FontRole, ImageRole, Prose, Run,
 };
 use crate::frontmatter::Epigraph;
 
@@ -454,8 +454,8 @@ fn push_p(body: &mut String, class: &str, text: &str) {
 /// Render `*`/`**` runs as `<em>`/`<strong>`, escaping the text of each run.
 fn inline_xhtml(text: &str) -> String {
     let mut out = String::new();
-    for (run, bold, italic) in inline_runs(text) {
-        let esc = xml_escape(&run);
+    for Run { text, bold, italic } in inline_runs(text) {
+        let esc = xml_escape(&text);
         out.push_str(&match (bold, italic) {
             (true, true) => format!("<strong><em>{esc}</em></strong>"),
             (true, false) => format!("<strong>{esc}</strong>"),
