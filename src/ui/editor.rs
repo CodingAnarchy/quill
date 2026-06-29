@@ -316,11 +316,11 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
         }
         if header.index == 0 {
             if let Some(epigraph) = &book_epigraph {
-                block.extend(epigraph_lines(epigraph));
+                block.extend(epigraph_lines(epigraph, width));
             }
         }
         if let Some(epigraph) = &header.epigraph {
-            block.extend(epigraph_lines(epigraph));
+            block.extend(epigraph_lines(epigraph, width));
         }
         if !block.is_empty() {
             inserts.push((header.start, block));
@@ -329,29 +329,50 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
     inserts
 }
 
-/// Display-only lines for an epigraph: the quotation (indented, italic) and its
-/// attribution (`— Name`, dimmed), set off by blank lines. Never enters the
-/// buffer or any file.
-fn epigraph_lines(epigraph: &Epigraph) -> Vec<Line<'static>> {
+/// Display-only lines for an epigraph: the quotation (inset, italic) and its
+/// attribution (`— Name`, dimmed), set off by blank lines. Long lines soft-wrap to
+/// the column so nothing is cut off (#518). Never enters the buffer or any file.
+fn epigraph_lines(epigraph: &Epigraph, width: u16) -> Vec<Line<'static>> {
     let theme = theme::current();
-    let indent = "    ";
+    const INDENT: &str = "    ";
+    // Wrap within the column, leaving room for the inset on every row.
+    let wrap_width = (width as usize).saturating_sub(INDENT.len()).max(1);
+    let quote = Style::default()
+        .fg(theme.muted)
+        .add_modifier(Modifier::ITALIC);
     let mut lines = vec![Line::raw("")];
-    for line in epigraph.text.lines() {
-        lines.push(Line::from(Span::styled(
-            format!("{indent}{line}"),
-            Style::default()
-                .fg(theme.muted)
-                .add_modifier(Modifier::ITALIC),
-        )));
+    for src in epigraph.text.lines() {
+        for row in wrap_rows(src, wrap_width) {
+            lines.push(Line::from(Span::styled(format!("{INDENT}{row}"), quote)));
+        }
     }
     if let Some(attribution) = &epigraph.attribution {
-        lines.push(Line::from(Span::styled(
-            format!("{indent}— {attribution}"),
-            Style::default().fg(theme.dim),
-        )));
+        for row in wrap_rows(&format!("— {attribution}"), wrap_width) {
+            lines.push(Line::from(Span::styled(
+                format!("{INDENT}{row}"),
+                Style::default().fg(theme.dim),
+            )));
+        }
     }
     lines.push(Line::raw(""));
     lines
+}
+
+/// Soft-wrap one logical line into display rows of at most `width` cells, breaking
+/// on spaces where possible (the same wrapping the prose body uses).
+fn wrap_rows(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let starts = crate::wrap::row_starts(text, width);
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, &start)| {
+            let end = starts.get(i + 1).copied().unwrap_or(text.len());
+            text[start..end].trim_end().to_string()
+        })
+        .collect()
 }
 
 /// A centered, faint part/section header, e.g. `PART TWO`, drawn above the

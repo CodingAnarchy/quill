@@ -575,6 +575,25 @@ fn a_multiline_epigraph_renders_one_line_each() {
 }
 
 #[test]
+fn a_long_epigraph_line_wraps_within_the_column() {
+    // A single epigraph line longer than the focus column (#518): it must soft-wrap
+    // onto multiple rows, none wider than the column, rather than overflow/clip.
+    let mut app = app_with("# Chapter\n\nBody.\n");
+    let long = "telemetry ".repeat(12); // ~120 cells, well past the 72 column
+    app.buffer.front_matter_mut().set_epigraph_text(&long);
+
+    let screen = render(&app, 100, 24);
+    let rows: Vec<&str> = screen.lines().filter(|l| l.contains("telemetry")).collect();
+    assert!(rows.len() > 1, "the long epigraph wrapped:\n{screen}");
+    for row in rows {
+        assert!(
+            row.trim_end().chars().count() <= 90,
+            "epigraph row stays within the column: {row:?}"
+        );
+    }
+}
+
+#[test]
 fn editing_an_epigraph_shows_a_banner() {
     let mut app = app_with("Body.\n");
     app.on_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL)); // → Nav
