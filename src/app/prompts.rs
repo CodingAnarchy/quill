@@ -412,7 +412,7 @@ impl App {
                                     || text.ends_with(std::path::MAIN_SEPARATOR)
                                 {
                                     self.mode = closed;
-                                    self.pending_notes_folder = None;
+                                    self.pending_import_source = None;
                                     self.message = Some(
                                         "Enter a path ending in the new project's folder name."
                                             .into(),
@@ -436,7 +436,7 @@ impl App {
                                     || text.ends_with(std::path::MAIN_SEPARATOR)
                                 {
                                     self.mode = closed;
-                                    self.pending_manuscript_source = None;
+                                    self.pending_import_source = None;
                                     self.message = Some(
                                         "Enter a path ending in the new project's folder name."
                                             .into(),
@@ -458,7 +458,7 @@ impl App {
                         // workflow proposal (#232) and the new-from-notes folder
                         // (#286). Harmless no-op for the other prompts.
                         self.pending_workflow = None;
-                        self.pending_notes_folder = None;
+                        self.pending_import_source = None;
                         self.mode = closed;
                     }
                     _ => {}

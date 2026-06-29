@@ -65,6 +65,7 @@ mod vim;
 mod wizard;
 
 pub(crate) use assistant::{Assistant, Entry, Speaker};
+use imports::PendingImportSource;
 #[cfg(test)]
 pub(crate) use panes::SplitView; // the type name is only spelled in tests
 use panes::{OtherPane, Split};
@@ -283,13 +284,11 @@ pub struct App {
     /// A label for the notes import in flight (#283) — a file name or a count —
     /// shown in the summary when the pass applies; taken by `apply_import`.
     import_source: Option<String>,
-    /// The notes folder chosen for "new project from notes" (#286), held between
-    /// the folder prompt and the new-project-path prompt; taken when the project
-    /// is created and the import runs.
-    pending_notes_folder: Option<PathBuf>,
-    /// The Markdown manuscript file chosen to import (#298), held between the
-    /// source prompt and the new-project-path prompt; taken when the import runs.
-    pending_manuscript_source: Option<PathBuf>,
+    /// The source chosen for a two-step import wizard (#508): a folder of notes
+    /// to seed a new project from (#286) or a manuscript to split into chapters
+    /// (#298), held between the source prompt and the new-project-path prompt;
+    /// taken when the project is created and the import runs.
+    pending_import_source: Option<PendingImportSource>,
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
@@ -386,8 +385,7 @@ impl App {
             pending_switch: None,
             wizard_pending_setting: None,
             import_source: None,
-            pending_notes_folder: None,
-            pending_manuscript_source: None,
+            pending_import_source: None,
             sprint: None,
             message: None,
         };
