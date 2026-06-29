@@ -839,11 +839,159 @@ fn search_status(s: &Search) -> String {
     }
 }
 
+/// Save-state indicator (#409): ● when there are unsaved changes, ✓ when the
+/// buffer is on disk — so persistence is legible at a glance.
+fn dirty_marker(dirtied: bool) -> &'static str {
+    if dirtied {
+        " ●"
+    } else {
+        " ✓"
+    }
+}
+
+/// Persistent AI indicator (independent of the transient message, which clears
+/// on the next keystroke): in-flight spinner, else an enabled tag. While a
+/// request is in flight, name the backend it's actually running on (#372) —
+/// `⟳ Claude` or `⟳ local` — so a routed pass is visible.
+fn ai_tag(app: &App) -> String {
+    if app.ai_busy() {
+        format!(" · ⟳ {}", app.ai_in_flight_label())
+    } else if app.ai.enabled {
+        " · AI".to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Version-control indicator (#54/#132): a clean repo shows "git", an
+/// uncommitted one shows the changed-file count.
+fn vc_tag(app: &App) -> String {
+    match (app.under_vc, app.vc_changes) {
+        (false, _) => String::new(),
+        (true, 0) => " · git".into(),
+        (true, n) => format!(" · git ●{n}"),
+    }
+}
+
+/// A running writing sprint (#299): live countdown + net words written, always
+/// visible (independent of the transient message on the right).
+fn sprint_tag(app: &App) -> String {
+    match &app.sprint {
+        Some(s) => format!(
+            " · {}",
+            crate::app::sprint::status_segment(s.remaining(), s.words(app.project_word_count()))
+        ),
+        None => String::new(),
+    }
+}
+
+/// While browsing, the bar describes the *selected* chapter: its title, and
+/// (unless a transient message is up) its summary / POV / status.
+fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (String, String) {
+    let title = app.project.chapter_title(selected).unwrap_or("[untitled]");
+    // A quick-jump filter (#410) takes over the bar: the live query and a
+    // match count on the left, the highlighted chapter and the keys on the
+    // right. `/` enters this; Esc keeps the filter (commands now act on
+    // the narrowed list), a second Esc clears it.
+    if typing || !filter.is_empty() {
+        let n = app.nav_match_count();
+        let count = match n {
+            0 => "  no matches".to_string(),
+            1 => "  1 match".to_string(),
+            n => format!("  {n} matches"),
+        };
+        let hint = if typing {
+            "  · Enter open · Esc keep filter"
+        } else {
+            "  · Esc clears · / refine"
+        };
+        (format!(" /{filter}{count}"), format!("{title}{hint}  "))
+    } else {
+        let right = match &app.message {
+            Some(m) => format!("{m}  "),
+            None => {
+                let mut parts = Vec::new();
+                if let Some(s) = app.project.chapter_summary(selected) {
+                    parts.push(s.to_string());
+                }
+                if let Some(p) = app.project.chapter_pov(selected) {
+                    parts.push(format!("POV: {p}"));
+                }
+                if let Some(st) = app.project.chapter_status(selected) {
+                    parts.push(st.label().to_string());
+                }
+                if parts.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}  ", parts.join("  ·  "))
+                }
+            }
+        };
+        (format!(" {title}"), right)
+    }
+}
+
+/// The editor bar: the active chapter's name and save state, the persistent
+/// AI / version-control / sprint tags, and a word/line count (or a transient
+/// message) on the right.
+fn editor_status_bar(app: &App) -> (String, String) {
+    let buffer = app.edit_buffer();
+    // The chapter the cursor is in: in continuous view that's the segment
+    // under the cursor (with a marker); otherwise the single active chapter.
+    let (name, dirtied) = match &app.manuscript {
+        Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
+        // The focused buffer's own title — usually the active chapter, but
+        // a reference pane swapped into focus (#165) shows its file name.
+        None => (app.pane_title_for(buffer), buffer.dirty),
+    };
+    let dirty = dirty_marker(dirtied);
+    let right = match &app.message {
+        Some(m) => format!("{m}  "),
+        None => format!(
+            "{} words · ln {}/{}  ",
+            buffer.word_count(),
+            buffer.cursor.line + 1,
+            buffer.line_count()
+        ),
+    };
+    let left = format!(
+        " {name}{dirty}{}{}{}",
+        vc_tag(app),
+        ai_tag(app),
+        sprint_tag(app)
+    );
+    (left, right)
+}
+
+/// Vim mode (#27): a chip at the far left naming the editing mode. Only while
+/// actually in the editor (not browsing or editing a metadata field).
+fn mode_chip(app: &App) -> Option<Span<'static>> {
+    let theme = app.theme;
+    match app.mode {
+        _ if !app.vim => None, // Vim mode off: no chip
+        Mode::Insert => Some(("INSERT", theme.mode_insert)),
+        Mode::Visual {
+            linewise: false, ..
+        } => Some(("VISUAL", theme.mode_visual)),
+        Mode::Visual { linewise: true, .. } => Some(("VISUAL LINE", theme.mode_visual)),
+        Mode::Normal => Some(("NORMAL", theme.mode_normal)),
+        _ => None, // not in the editor (browsing, prompt, …)
+    }
+    .map(|(label, bg)| {
+        Span::styled(
+            format!(" {label} "),
+            Style::default()
+                .fg(theme.on_accent)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        )
+    })
+}
+
 impl Pane for StatusBar<'_> {
     fn render(&self, frame: &mut Frame, area: Rect) {
         let app = self.0;
         let theme = app.theme;
-        let buffer = app.edit_buffer();
 
         if let Mode::Prompt(prompt_state) = &app.mode {
             // Label plus any typed text (empty for y/N confirmations) — two
@@ -866,138 +1014,25 @@ impl Pane for StatusBar<'_> {
             return;
         }
 
-        // While browsing, the bar describes the *selected* chapter: its title,
-        // and (unless a transient message is up) its summary / POV / status.
         let (left, right) = if let Mode::Nav {
             selected,
             filter,
             typing,
         } = &app.mode
         {
-            let selected = *selected;
-            let title = app.project.chapter_title(selected).unwrap_or("[untitled]");
-            // A quick-jump filter (#410) takes over the bar: the live query and a
-            // match count on the left, the highlighted chapter and the keys on the
-            // right. `/` enters this; Esc keeps the filter (commands now act on
-            // the narrowed list), a second Esc clears it.
-            if *typing || !filter.is_empty() {
-                let n = app.nav_match_count();
-                let count = match n {
-                    0 => "  no matches".to_string(),
-                    1 => "  1 match".to_string(),
-                    n => format!("  {n} matches"),
-                };
-                let hint = if *typing {
-                    "  · Enter open · Esc keep filter"
-                } else {
-                    "  · Esc clears · / refine"
-                };
-                (format!(" /{filter}{count}"), format!("{title}{hint}  "))
-            } else {
-                let right = match &app.message {
-                    Some(m) => format!("{m}  "),
-                    None => {
-                        let mut parts = Vec::new();
-                        if let Some(s) = app.project.chapter_summary(selected) {
-                            parts.push(s.to_string());
-                        }
-                        if let Some(p) = app.project.chapter_pov(selected) {
-                            parts.push(format!("POV: {p}"));
-                        }
-                        if let Some(st) = app.project.chapter_status(selected) {
-                            parts.push(st.label().to_string());
-                        }
-                        if parts.is_empty() {
-                            String::new()
-                        } else {
-                            format!("{}  ", parts.join("  ·  "))
-                        }
-                    }
-                };
-                (format!(" {title}"), right)
-            }
+            nav_status_bar(app, *selected, filter, *typing)
         } else {
-            // The chapter the cursor is in: in continuous view that's the segment
-            // under the cursor (with a marker); otherwise the single active chapter.
-            let (name, dirtied) = match &app.manuscript {
-                Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
-                // The focused buffer's own title — usually the active chapter, but
-                // a reference pane swapped into focus (#165) shows its file name.
-                None => (app.pane_title_for(buffer), buffer.dirty),
-            };
-            // Save-state indicator (#409): ● when there are unsaved changes, ✓ when
-            // the buffer is on disk — so persistence is legible at a glance.
-            let dirty = if dirtied { " ●" } else { " ✓" };
-            // Persistent AI indicator (independent of the transient message, which
-            // clears on the next keystroke): in-flight spinner, else an enabled tag.
-            // While a request is in flight, name the backend it's actually running
-            // on (#372) — `⟳ Claude` or `⟳ local` — so a routed pass is visible.
-            let ai_tag = if app.ai_busy() {
-                format!(" · ⟳ {}", app.ai_in_flight_label())
-            } else if app.ai.enabled {
-                " · AI".to_string()
-            } else {
-                String::new()
-            };
-            // Version-control indicator (#54/#132): a clean repo shows "git", an
-            // uncommitted one shows the changed-file count.
-            let vc_tag = match (app.under_vc, app.vc_changes) {
-                (false, _) => String::new(),
-                (true, 0) => " · git".into(),
-                (true, n) => format!(" · git ●{n}"),
-            };
-            // A running writing sprint (#299): live countdown + net words written,
-            // always visible (independent of the transient message on the right).
-            let sprint_tag = match &app.sprint {
-                Some(s) => format!(
-                    " · {}",
-                    crate::app::sprint::status_segment(
-                        s.remaining(),
-                        s.words(app.project_word_count())
-                    )
-                ),
-                None => String::new(),
-            };
-            let right = match &app.message {
-                Some(m) => format!("{m}  "),
-                None => format!(
-                    "{} words · ln {}/{}  ",
-                    buffer.word_count(),
-                    buffer.cursor.line + 1,
-                    buffer.line_count()
-                ),
-            };
-            (format!(" {name}{dirty}{vc_tag}{ai_tag}{sprint_tag}"), right)
+            editor_status_bar(app)
         };
 
-        // Vim mode (#27): a chip at the far left naming the editing mode. Only
-        // while actually in the editor (not browsing or editing a metadata field).
-        let mode_chip = match app.mode {
-            _ if !app.vim => None, // Vim mode off: no chip
-            Mode::Insert => Some(("INSERT", theme.mode_insert)),
-            Mode::Visual {
-                linewise: false, ..
-            } => Some(("VISUAL", theme.mode_visual)),
-            Mode::Visual { linewise: true, .. } => Some(("VISUAL LINE", theme.mode_visual)),
-            Mode::Normal => Some(("NORMAL", theme.mode_normal)),
-            _ => None, // not in the editor (browsing, prompt, …)
-        }
-        .map(|(label, bg)| {
-            Span::styled(
-                format!(" {label} "),
-                Style::default()
-                    .fg(theme.on_accent)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
-            )
-        });
-        let chip_w = mode_chip.as_ref().map_or(0, |s| s.content.chars().count());
+        let chip = mode_chip(app);
+        let chip_w = chip.as_ref().map_or(0, |s| s.content.chars().count());
 
         let pad = (area.width as usize)
             .saturating_sub(chip_w + left.len() + right.len())
             .max(1);
         let mut spans = Vec::new();
-        spans.extend(mode_chip);
+        spans.extend(chip);
         spans.push(Span::styled(
             left,
             Style::default().add_modifier(Modifier::BOLD),
