@@ -134,7 +134,19 @@ keystrokes that stay out of the way.
   scenes (e.g. `scene_break = "* * *"`), and `body_font` / `heading_font` point at
   font files (paths relative to the project, `.ttf`/`.otf`/`.woff`/`.woff2`) that
   are embedded into the export and applied (only embed fonts you're licensed to
-  distribute); `heading_align` (`left`/`center`/`right`/`justify`) sets the
+  distribute). You don't have to find and license those files yourself: the
+  run-action menu (`Ctrl-k`) has **Browse & download fonts…** (`fonts:browse`),
+  which lists a curated set of open-licensed (SIL OFL) families — name, style, and
+  a sample — and, when you pick one, downloads it and sets it as your `body_font`,
+  `heading_font`, or both, with no manual path editing. Downloads land in the
+  project's `fonts/` directory as `fonts/<family>.ttf`, with the family's license
+  saved beside it as `fonts/<family>.LICENSE.txt` so the license travels with the
+  font; re-applying a font you've already downloaded is instant and offline.
+  Network access happens only on that explicit download — everything else stays
+  offline — and the chosen font embeds in the EPUB and print PDF exactly as a
+  hand-specified one does. Bringing your own font still works: just point
+  `body_font` / `heading_font` at a file path as before. `heading_align`
+  (`left`/`center`/`right`/`justify`) sets the
   chapter-heading alignment and `drop_cap = true` opens each chapter's first
   paragraph with a drop cap; `title_ornament` / `part_ornament` place a decorative
   glyph on the title page and each part divider. For artwork instead of glyphs,

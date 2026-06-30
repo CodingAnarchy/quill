@@ -289,6 +289,7 @@ impl App {
             Action::SetImageKey => self.start_set_api_key(ai::keychain::Key::Fal),
             Action::Assistant => self.open_assistant(),
             Action::InsertSnippet => self.open_snippet_picker(),
+            Action::BrowseFonts => self.open_font_browser(),
         }
     }
 
@@ -407,6 +408,8 @@ impl App {
                     Some(Command::Portrait(c)) => self.confirm_portraits(c),
                     Some(Command::SwitchBook(i)) => self.switch_book(i),
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
+                    Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
+                    Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),
                     None => {}
                 }
             }

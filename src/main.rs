@@ -15,6 +15,7 @@ mod config;
 mod datapath_tests;
 mod date;
 mod export;
+mod fonts;
 mod frontmatter;
 mod guide;
 mod history;
