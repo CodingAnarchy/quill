@@ -175,7 +175,7 @@ impl Builder {
 
     /// A series book's divider page: its title, subtitle, and epigraph.
     fn add_book_divider(&mut self, doc: &Document) -> String {
-        let mut body = format!("<h1 class=\"book-title\">{}</h1>\n", xml_escape(&doc.title));
+        let mut body = heading_with_ornament("book-title", &doc.title, None);
         if let Some(s) = &doc.subtitle {
             push_p(&mut body, "subtitle", s);
         }
@@ -206,10 +206,11 @@ impl Builder {
         for part in &doc.parts {
             match &part.name {
                 Some(name) => {
-                    let mut body = format!("<h1 class=\"part-title\">{}</h1>\n", xml_escape(name));
-                    if let Some(o) = &self.style.part_ornament {
-                        push_p(&mut body, "ornament", o);
-                    }
+                    let body = heading_with_ornament(
+                        "part-title",
+                        name,
+                        self.style.part_ornament.as_deref(),
+                    );
                     let href = self.add("part", name, body);
                     let children = part.chapters.iter().map(|c| self.add_chapter(c)).collect();
                     nav.push(Nav {
@@ -416,6 +417,18 @@ fn epigraph_xhtml(e: &Epigraph) -> String {
     ));
     out.push_str("</div>\n");
     out
+}
+
+/// A styled `<h1 class="…">` heading (text XML-escaped) followed, when one is
+/// configured, by a centered ornament paragraph — the divider idiom the book and
+/// part dividers share. Returns the `body` fragment (heading + trailing newline,
+/// then any ornament via [`push_p`]).
+fn heading_with_ornament(class: &str, text: &str, ornament: Option<&str>) -> String {
+    let mut body = format!("<h1 class=\"{class}\">{}</h1>\n", xml_escape(text));
+    if let Some(o) = ornament {
+        push_p(&mut body, "ornament", o);
+    }
+    body
 }
 
 /// `<p class="…">…</p>` with the text XML-escaped — the styled-paragraph idiom the
