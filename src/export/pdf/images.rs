@@ -28,6 +28,7 @@ pub(super) fn decode_images(style: &ExportStyle) -> Vec<PdfImage> {
         (ImageRole::SceneBreak, "ImSceneBreak"),
         (ImageRole::ChapterHeading, "ImChapterHeading"),
         (ImageRole::Title, "ImTitle"),
+        (ImageRole::Cover, "ImCover"),
     ];
     for (role, name) in roles {
         let Some(embedded) = style.image(role) else {

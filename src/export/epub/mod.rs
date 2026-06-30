@@ -47,6 +47,7 @@ pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent:
 /// [`crate::date::utc_timestamp`].
 pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
     let mut b = Builder::new(style);
+    b.add_cover_page();
     b.add_title_page(
         doc.series.as_deref(),
         &doc.title,
@@ -77,6 +78,7 @@ pub fn to_epub_series(
 ) -> std::io::Result<Vec<u8>> {
     let mut b = Builder::new(style);
     let title = series.unwrap_or("Series");
+    b.add_cover_page();
     b.add_title_page(series, title, None, author, None);
     let mut nav = Vec::new();
     for book in books {
@@ -137,6 +139,21 @@ impl Builder {
             xhtml,
         });
         href
+    }
+
+    /// The cover page (#582), when a cover image is configured: a single full-page
+    /// `<img>` made the first spine entry so storefronts and readers show it on
+    /// open. Not a TOC entry. No-op when no cover is set, leaving the package
+    /// byte-for-byte unchanged.
+    fn add_cover_page(&mut self) {
+        let Some(img) = self.style.image(ImageRole::Cover) else {
+            return;
+        };
+        let body = format!(
+            "<div class=\"cover\"><img src=\"{}\" alt=\"Cover\"/></div>\n",
+            img.href
+        );
+        self.add("cover", "Cover", body);
     }
 
     /// The title page (not itself a TOC entry): series, title, subtitle, author,
@@ -340,6 +357,12 @@ fn stylesheet(style: &ExportStyle) -> String {
             ".chapter-image, .title-image { text-align: center; text-indent: 0; margin: 1em 0; }\n",
         );
         css.push_str(".scene-break img, .chapter-image img, .title-image img { max-width: 100%; height: auto; }\n");
+    }
+    if style.image(ImageRole::Cover).is_some() {
+        // The cover fills its page: no margins, the image scaled to fit the viewport
+        // (#582).
+        css.push_str(".cover { margin: 0; padding: 0; text-align: center; }\n");
+        css.push_str(".cover img { max-width: 100%; max-height: 100%; height: auto; }\n");
     }
     css
 }

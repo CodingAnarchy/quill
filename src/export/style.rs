@@ -59,6 +59,11 @@ pub struct ExportStyle {
     /// Path to an image embedded atop the title page (#472). `None` → none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title_image: Option<String>,
+    /// Path to the book cover image (#582). `None` → no cover. Embedded in the EPUB
+    /// as the `cover-image` item (the first spine page) and rendered as a full-page
+    /// page 0 in the print/PDF.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_image: Option<String>,
     /// The images resolved from the paths above at export time (#472) — read from
     /// disk by the app, not persisted in the manifest.
     #[serde(skip)]
@@ -198,6 +203,9 @@ pub enum ImageRole {
     SceneBreak,
     ChapterHeading,
     Title,
+    /// The book cover (#582) — the first spine page in the EPUB, a full page 0 in
+    /// the PDF.
+    Cover,
 }
 
 impl ImageRole {
@@ -207,6 +215,7 @@ impl ImageRole {
             ImageRole::SceneBreak => "scene-break",
             ImageRole::ChapterHeading => "chapter-heading",
             ImageRole::Title => "title",
+            ImageRole::Cover => "cover",
         }
     }
 }
@@ -309,6 +318,7 @@ impl ExportStyle {
             scene_break_image,
             chapter_heading_image,
             title_image,
+            cover_image,
             fonts: _,
             images: _,
         } = over;
@@ -322,6 +332,7 @@ impl ExportStyle {
         self.scene_break_image = scene_break_image.or(self.scene_break_image);
         self.chapter_heading_image = chapter_heading_image.or(self.chapter_heading_image);
         self.title_image = title_image.or(self.title_image);
+        self.cover_image = cover_image.or(self.cover_image);
         self
     }
 
@@ -385,6 +396,7 @@ impl ExportStyle {
                 self.chapter_heading_image.clone(),
             ),
             (ImageRole::Title, self.title_image.clone()),
+            (ImageRole::Cover, self.cover_image.clone()),
         ];
         let (images, warnings) = resolve_assets(
             targets,

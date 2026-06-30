@@ -5,7 +5,11 @@
 //! [`super`] so `finish` calls them unqualified.
 
 use super::{Item, Nav};
-use crate::export::{xml_escape, EmbeddedFont, EmbeddedImage};
+use crate::export::{xml_escape, EmbeddedFont, EmbeddedImage, ImageRole};
+
+/// The manifest id of the cover-image item (#582) — referenced by the EPUB 2
+/// `<meta name="cover">` so older readers find the cover.
+const COVER_IMAGE_ID: &str = "cover-image";
 
 /// The OPF package: metadata (identifier, title + optional subtitle, language,
 /// author, series collection, modified time), the manifest (nav, NCX, CSS, and
@@ -59,6 +63,13 @@ pub(super) fn build_opf(
         "<meta property=\"dcterms:modified\">{}</meta>",
         book.modified
     ));
+    // The EPUB 2 cover hint (#582): older readers (and many storefronts) find the
+    // cover via this legacy `<meta name="cover">` pointing at the manifest item id.
+    if images.iter().any(|i| i.role == ImageRole::Cover) {
+        meta.push_str(&format!(
+            "<meta name=\"cover\" content=\"{COVER_IMAGE_ID}\"/>"
+        ));
+    }
 
     let mut manifest = String::new();
     manifest.push_str(&manifest_item(
@@ -83,11 +94,19 @@ pub(super) fn build_opf(
         ));
     }
     for (i, image) in images.iter().enumerate() {
+        // The cover image carries the EPUB 3 `cover-image` property and a stable id
+        // the EPUB 2 `<meta name="cover">` above references (#582); the decorative
+        // images keep their generic ids.
+        let (id, properties) = if image.role == ImageRole::Cover {
+            (COVER_IMAGE_ID.to_string(), Some("cover-image"))
+        } else {
+            (format!("img{i}"), None)
+        };
         manifest.push_str(&manifest_item(
-            &format!("img{i}"),
+            &id,
             &image.href,
             image.media_type,
-            None,
+            properties,
         ));
     }
     let mut spine = String::new();
@@ -320,6 +339,58 @@ mod tests {
             assert!(at >= last, "{id} out of order");
             last = at;
         }
+    }
+
+    #[test]
+    fn a_cover_image_is_the_first_spine_item_with_the_cover_metadata() {
+        // A configured cover image (#582) embeds with the EPUB 3 cover-image property
+        // and the EPUB 2 `<meta name="cover">`, and its page leads the spine.
+        let mut style = ExportStyle {
+            cover_image: Some("art/cover.png".into()),
+            ..Default::default()
+        };
+        style.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+        let bytes = to_epub(&doc(), MODIFIED, &style).unwrap();
+        let opf = part(&bytes, "OEBPS/content.opf");
+
+        // The image file is embedded and declared with the cover-image property.
+        let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
+        assert!(
+            zip.file_names().any(|n| n == "OEBPS/images/cover.png"),
+            "cover image embedded"
+        );
+        drop(zip);
+        assert!(
+            opf.contains(
+                "id=\"cover-image\" href=\"images/cover.png\" media-type=\"image/png\" \
+                 properties=\"cover-image\""
+            ),
+            "cover-image manifest item: {opf}"
+        );
+        // The EPUB 2 legacy cover hint points at that item.
+        assert!(
+            opf.contains("<meta name=\"cover\" content=\"cover-image\"/>"),
+            "EPUB 2 cover meta: {opf}"
+        );
+        // The cover page is the very first spine entry, ahead of the title page.
+        let spine = &opf[opf.find("<spine").unwrap()..];
+        let cover_at = spine.find("idref=\"cover0001\"").expect("cover in spine");
+        let title_at = spine.find("idref=\"title0002\"").expect("title in spine");
+        assert!(cover_at < title_at, "cover leads the spine: {spine}");
+
+        // Default style → no cover item, no cover meta.
+        let plain = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
+        assert!(
+            !plain.contains("cover-image"),
+            "no cover by default: {plain}"
+        );
+        assert!(
+            !plain.contains("name=\"cover\""),
+            "no cover meta by default"
+        );
     }
 
     #[test]

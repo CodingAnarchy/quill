@@ -471,6 +471,53 @@ fn image_ornaments_embed_as_xobjects_and_are_placed() {
 }
 
 #[test]
+fn a_cover_image_emits_a_full_page_page_zero() {
+    // A configured cover (#582) embeds as an image XObject drawn full-page on the
+    // front page, and the file is still a well-formed PDF.
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
+    let bytes = to_pdf(&doc(), &style).unwrap();
+
+    // Structural soundness (qpdf-style markers).
+    assert!(bytes.starts_with(b"%PDF-1.7"), "header");
+    assert!(bytes.ends_with(b"%%EOF\n"), "trailer marker");
+    for marker in ["/Type /Catalog", "/Type /Pages", "xref", "trailer"] {
+        assert!(has(&bytes, marker), "missing {marker}");
+    }
+    // The cover image is embedded and drawn.
+    assert!(has(&bytes, "/Subtype /Image"), "cover image XObject");
+    assert!(has(&bytes, "/ImCover Do"), "cover drawn");
+    // One extra page over the no-cover baseline: the cover page leads it.
+    let baseline = count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent");
+    let with_cover = count(&bytes, "/Type /Page /Parent");
+    assert_eq!(with_cover, baseline + 1, "cover adds a front page");
+
+    // Default style → no cover, no extra page.
+    assert!(
+        !has(&to_pdf(&doc(), &plain()).unwrap(), "/ImCover"),
+        "no cover by default"
+    );
+}
+
+#[test]
+fn a_print_pdf_emits_the_cover_full_page() {
+    // The print interior also leads with the full-page cover (#582).
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
+    let (w, h) = trim_points("6x9").unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, &style).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    assert!(has(&bytes, "/ImCover Do"), "cover drawn in the print PDF");
+    assert!(has(&bytes, "MediaBox [0 0 432 648]"), "6x9 trim");
+}
+
+#[test]
 fn style_warnings_flag_svg_and_truly_uncovered_glyphs() {
     // SVG can't be rasterized for PDF.
     let mut svg = ExportStyle {
