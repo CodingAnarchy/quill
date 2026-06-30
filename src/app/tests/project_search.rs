@@ -178,3 +178,111 @@ fn front_matter_is_not_searched_or_replaced() {
     );
     assert!(two.contains("second scene"), "body replaced: {two}");
 }
+
+// --- #570: case-sensitive and whole-word toggles, manuscript-wide ----------
+
+/// A two-chapter fixture seeded with name-lookalike prose for the toggle tests:
+/// each chapter mixes the character "Will", the verb "will", and "willing".
+/// Built from scratch (not derived from `two_chapter_app`) so the active
+/// chapter's buffer matches the seeded prose on open.
+fn will_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "Will was willing.\n").unwrap();
+    fs::write(dir.join("two.md"), "will he, Will?\n").unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn project_default_is_case_insensitive_substring() {
+    // Both toggles off: "Will" matches Will/will and the "will" in "willing"
+    // across both chapters — four substrings.
+    let (mut app, _dir) = will_app("psearch-default");
+    app.open_project_find();
+    type_str(&mut app, "Will");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.project_search().matches.len(), 4);
+}
+
+#[test]
+fn project_case_sensitive_toggle() {
+    let (mut app, _dir) = will_app("psearch-case");
+    app.open_project_find();
+    type_str(&mut app, "Will");
+    app.on_key(ctrl('c')); // case-sensitive, before running
+    app.on_key(key(KeyCode::Enter));
+    // Only the capitalized "Will" in each chapter (still substrings of nothing
+    // else here): one per chapter.
+    assert_eq!(app.project_search().matches.len(), 2);
+}
+
+#[test]
+fn project_whole_word_toggle() {
+    let (mut app, _dir) = will_app("psearch-word");
+    app.open_project_find();
+    type_str(&mut app, "will");
+    app.on_key(ctrl('w')); // whole-word
+    app.on_key(key(KeyCode::Enter));
+    // "Will" + "will" + "Will" = three standalone words; the "will" inside
+    // "willing" is excluded.
+    assert_eq!(app.project_search().matches.len(), 3);
+}
+
+#[test]
+fn project_case_sensitive_and_whole_word_together() {
+    let (mut app, _dir) = will_app("psearch-both");
+    app.open_project_find();
+    type_str(&mut app, "Will");
+    app.on_key(ctrl('c'));
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Enter));
+    // Exact case AND standalone: the leading "Will" in chapter one and the
+    // trailing "Will?" in chapter two — two matches.
+    assert_eq!(app.project_search().matches.len(), 2);
+}
+
+#[test]
+fn project_toggle_after_results_re_runs_the_search() {
+    // Toggling a mode while results are listed updates the list in place.
+    let (mut app, _dir) = will_app("psearch-retoggle");
+    app.open_project_find();
+    type_str(&mut app, "Will");
+    app.on_key(key(KeyCode::Enter)); // Results: 4 substring matches
+    assert_eq!(app.project_search().matches.len(), 4);
+    app.on_key(ctrl('w')); // whole-word re-runs in place
+    assert!(
+        matches!(app.mode, Mode::ProjectSearch(_)),
+        "overlay stays open"
+    );
+    assert_eq!(app.project_search().matches.len(), 3, "drops 'willing'");
+}
+
+#[test]
+fn project_replace_honors_whole_word_and_case() {
+    // The headline rename across the manuscript: "Will" → "Bill", leaving the
+    // verb "will" and "willing" untouched in every chapter.
+    let (mut app, dir) = will_app("psearch-replace-toggles");
+    app.open_project_find();
+    type_str(&mut app, "Will");
+    app.on_key(ctrl('c')); // case-sensitive
+    app.on_key(ctrl('w')); // whole-word
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('r'))); // → Replacement
+    type_str(&mut app, "Bill");
+    app.on_key(key(KeyCode::Enter)); // → Step
+    app.on_key(key(KeyCode::Char('a'))); // → Confirm
+    app.on_key(key(KeyCode::Char('y'))); // replace all
+
+    let _ = app.flush_active();
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert_eq!(one, "Bill was willing.\n", "only the name renamed: {one}");
+    assert_eq!(two, "will he, Bill?\n", "only the name renamed: {two}");
+}

@@ -338,15 +338,20 @@ pub(super) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &ProjectSea
     let span = ps.chapter_span();
     let matches = |n: usize| if n == 1 { "match" } else { "matches" };
     let chapters = |n: usize| if n == 1 { "chapter" } else { "chapters" };
+    // The active match modes (#570): a short tag after the query, e.g. "[Aa w]".
+    let modes = match ps.opts.label() {
+        ref m if m.is_empty() => String::new(),
+        m => format!(" {m}"),
+    };
     let help = match ps.stage {
         ProjectSearchStage::Query => {
             format!(
-                "Find across manuscript: {}_ · enter search · esc cancel",
+                "Find across manuscript: {}{modes}_ · enter search · ^C case · ^W word · esc cancel",
                 ps.query
             )
         }
         ProjectSearchStage::Results => format!(
-            "'{}' — {n} {} in {span} {} · ↑↓ move · enter jump · r replace · esc close",
+            "'{}'{modes} — {n} {} in {span} {} · ↑↓ move · enter jump · r replace · ^C case · ^W word · esc close",
             ps.query,
             matches(n),
             chapters(span),

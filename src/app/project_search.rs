@@ -14,7 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::App;
 use crate::mode::{Mode, ProjectMatch, ProjectSearch, ProjectSearchStage};
-use crate::text::match_ranges;
+use crate::text::match_ranges_opts;
 
 impl App {
     /// Open manuscript-wide find (#295). Drops to the single-chapter view so a
@@ -32,6 +32,23 @@ impl App {
             _ => return,
         };
         match (stage, key.code) {
+            // --- Toggling the match modes (#570) ---------------------------
+            // Ctrl-C / Ctrl-W flip case-sensitive / whole-word. Available while
+            // typing the query and while reviewing results (re-runs the search
+            // so the list reflects the new modes).
+            (ProjectSearchStage::Query | ProjectSearchStage::Results, KeyCode::Char('c'))
+                if ctrl =>
+            {
+                self.project_search_mut().opts.case_sensitive ^= true;
+                self.rerun_project_search_if_listed();
+            }
+            (ProjectSearchStage::Query | ProjectSearchStage::Results, KeyCode::Char('w'))
+                if ctrl =>
+            {
+                self.project_search_mut().opts.whole_word ^= true;
+                self.rerun_project_search_if_listed();
+            }
+
             // --- Typing the query ------------------------------------------
             (ProjectSearchStage::Query, KeyCode::Char(c)) if !ctrl => {
                 self.project_search_mut().query.push(c)
@@ -104,21 +121,7 @@ impl App {
             self.close_project_search();
             return;
         }
-        let _ = self.flush_active();
-        let mut matches = Vec::new();
-        for i in 0..self.chapter_count() {
-            let body = self.project.chapter_body(i);
-            let title = self.project.chapter_title(i).unwrap_or("").to_string();
-            for (start, end) in match_ranges(&body, &query) {
-                matches.push(ProjectMatch {
-                    chapter: i,
-                    start,
-                    end,
-                    title: title.clone(),
-                    context: line_context(&body, start, end),
-                });
-            }
-        }
+        let matches = self.collect_project_matches(&query);
         if matches.is_empty() {
             self.close_project_search();
             self.message = Some(format!("No matches for '{query}' across the manuscript."));
@@ -128,6 +131,46 @@ impl App {
         s.matches = matches;
         s.selected = 0;
         s.stage = ProjectSearchStage::Results;
+    }
+
+    /// Re-run the search in place after a mode toggle (#570) while results are
+    /// listed, so the list tracks the new modes. Unlike [`run_project_search`],
+    /// it keeps the overlay open even if the new modes leave nothing — the author
+    /// can toggle back rather than being kicked out — and never resets the stage.
+    fn rerun_project_search_if_listed(&mut self) {
+        if self.project_search().stage != ProjectSearchStage::Results {
+            return;
+        }
+        let query = self.project_search().query.clone();
+        let matches = self.collect_project_matches(&query);
+        let s = self.project_search_mut();
+        s.matches = matches;
+        s.selected = 0;
+    }
+
+    /// Scan every chapter body for `query` under the current modes, building the
+    /// match list (with context snippets). Reads each body on demand, one at a
+    /// time; the active chapter's pending edits are flushed first so its matches
+    /// are accurate. The shared core of [`run_project_search`] and the live
+    /// re-run after a mode toggle.
+    fn collect_project_matches(&mut self, query: &str) -> Vec<ProjectMatch> {
+        let opts = self.project_search().opts;
+        let _ = self.flush_active();
+        let mut matches = Vec::new();
+        for i in 0..self.chapter_count() {
+            let body = self.project.chapter_body(i);
+            let title = self.project.chapter_title(i).unwrap_or("").to_string();
+            for (start, end) in match_ranges_opts(&body, query, opts) {
+                matches.push(ProjectMatch {
+                    chapter: i,
+                    start,
+                    end,
+                    title: title.clone(),
+                    context: line_context(&body, start, end),
+                });
+            }
+        }
+        matches
     }
 
     /// Move the selected result by `dir` (+1 next, -1 previous), wrapping.

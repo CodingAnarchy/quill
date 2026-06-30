@@ -12,7 +12,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::App;
 use crate::buffer::TextObject;
 use crate::mode::{Mode, Search, SearchStage, VimSearch};
-use crate::text::match_ranges;
+use crate::text::{match_ranges, match_ranges_opts};
 
 impl App {
     /// Open the find prompt (Ctrl-F). Drops to the single-chapter view so search
@@ -108,6 +108,24 @@ impl App {
             _ => return,
         };
         match (stage, key.code) {
+            // --- Toggling the match modes (#570) ---------------------------
+            // Ctrl-C / Ctrl-W flip case-sensitive / whole-word and re-run the
+            // live query. Only on the Ctrl-F find (a Vim `/`/`?` keeps its plain
+            // incremental search). Allowed at the query and navigate stages so
+            // the modes can be changed before or while reviewing matches.
+            (SearchStage::Query | SearchStage::Navigate, KeyCode::Char('c'))
+                if ctrl && !self.search().from_vim =>
+            {
+                self.search_mut().opts.case_sensitive ^= true;
+                self.requery();
+            }
+            (SearchStage::Query | SearchStage::Navigate, KeyCode::Char('w'))
+                if ctrl && !self.search().from_vim =>
+            {
+                self.search_mut().opts.whole_word ^= true;
+                self.requery();
+            }
+
             // --- Typing the query ------------------------------------------
             (SearchStage::Query, KeyCode::Char(c)) if !ctrl => {
                 self.search_mut().query.push(c);
@@ -286,7 +304,7 @@ impl App {
     fn recompute_matches_from(&mut self, anchor: usize) {
         let text = self.buffer.text();
         let s = self.search_mut();
-        s.matches = match_ranges(&text, &s.query);
+        s.matches = match_ranges_opts(&text, &s.query, s.opts);
         s.current = s
             .matches
             .iter()

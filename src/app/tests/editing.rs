@@ -131,3 +131,93 @@ fn replace_is_undoable() {
         "undo restores the pre-replace text"
     );
 }
+
+// --- #570: case-sensitive and whole-word toggles in the single-chapter find -
+
+/// A one-chapter project whose only chapter holds `body`, with the same test
+/// pins as the shared fixtures. For the toggle tests, which need known text
+/// containing both a name and its lowercase / substring lookalikes.
+fn one_chapter_app(name: &str, body: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), body).unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn find_default_is_case_insensitive_substring() {
+    // Both toggles off: "Will" matches Will, will, and the "will" in "willing".
+    let (mut app, _dir) = one_chapter_app("find-default", "Will and will were willing.\n");
+    app.on_key(ctrl('f'));
+    type_str(&mut app, "Will");
+    assert_eq!(
+        search_state(&app).0,
+        3,
+        "case-insensitive substring (default)"
+    );
+}
+
+#[test]
+fn find_case_sensitive_toggle() {
+    let (mut app, _dir) = one_chapter_app("find-case", "Will and will were willing.\n");
+    app.on_key(ctrl('f'));
+    type_str(&mut app, "Will");
+    app.on_key(ctrl('c')); // case-sensitive
+    assert_eq!(
+        search_state(&app).0,
+        1,
+        "only the capitalized standalone 'Will'"
+    );
+    app.on_key(ctrl('c')); // back off — substring again
+    assert_eq!(search_state(&app).0, 3);
+}
+
+#[test]
+fn find_whole_word_toggle() {
+    let (mut app, _dir) = one_chapter_app("find-word", "Will and will were willing.\n");
+    app.on_key(ctrl('f'));
+    type_str(&mut app, "will");
+    app.on_key(ctrl('w')); // whole-word
+    assert_eq!(
+        search_state(&app).0,
+        2,
+        "'Will' and 'will', not the 'will' inside 'willing'"
+    );
+}
+
+#[test]
+fn find_case_sensitive_and_whole_word_together() {
+    let (mut app, _dir) = one_chapter_app("find-both", "Will and will were willing.\n");
+    app.on_key(ctrl('f'));
+    type_str(&mut app, "Will");
+    app.on_key(ctrl('c'));
+    app.on_key(ctrl('w'));
+    assert_eq!(search_state(&app).0, 1, "exact case AND standalone");
+}
+
+#[test]
+fn replace_honors_whole_word_and_case() {
+    // The headline rename: turn the character "Will" into "Bill" without touching
+    // the verb "will" or "willing".
+    let (mut app, _dir) = one_chapter_app("replace-toggles", "Will said he will be willing.\n");
+    app.on_key(ctrl('f'));
+    type_str(&mut app, "Will");
+    app.on_key(ctrl('c')); // case-sensitive
+    app.on_key(ctrl('w')); // whole-word
+    app.on_key(key(KeyCode::Enter)); // navigate
+    app.on_key(key(KeyCode::Char('r'))); // promote to replace
+    type_str(&mut app, "Bill");
+    app.on_key(key(KeyCode::Enter)); // step
+    app.on_key(key(KeyCode::Char('a'))); // replace all
+
+    assert_eq!(
+        app.buffer.text(),
+        "Bill said he will be willing.\n",
+        "only the standalone, capitalized 'Will' was renamed"
+    );
+}

@@ -1,7 +1,45 @@
-//! Case-insensitive substring matching over manuscript text (#155): the single
-//! definition of "what counts as a match", shared by find/replace (#144), the
-//! TODO-marker count, and character-mention counting. One folding rule (per-
-//! character Unicode lowercase) so the three features can never disagree.
+//! Substring matching over manuscript text (#155): the single definition of
+//! "what counts as a match", shared by find/replace (#144), the TODO-marker
+//! count, and character-mention counting. One folding rule (per-character
+//! Unicode lowercase) so the three features can never disagree.
+//!
+//! Find & replace can refine the rule with two toggles (#570): a case-sensitive
+//! mode (compare codepoints as typed, no folding) and a whole-word mode (match
+//! only when both boundaries are non-word characters). "Word character" is
+//! defined for prose as alphanumeric plus the apostrophe `'`, so a whole-word
+//! search for "Will" skips "willing" but a search for "don't" still matches the
+//! contraction as one word. The other callers keep the default rule
+//! (case-insensitive substring) unchanged via [`match_ranges`] / [`count_matches`].
+
+/// The two refinements find & replace can apply to the base substring rule
+/// (#570). The default — both `false` — is case-insensitive substring matching,
+/// byte-for-byte what every caller did before the toggles existed.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct MatchOpts {
+    /// Compare codepoints as typed (no Unicode lowercase folding).
+    pub case_sensitive: bool,
+    /// Match only when both boundaries are non-word characters.
+    pub whole_word: bool,
+}
+
+impl MatchOpts {
+    /// A short, stable label for the active modes, e.g. `[Aa]`, `[w]`, `[Aa w]`,
+    /// or empty when both are off — for the find prompt / overlay (#570).
+    pub fn label(self) -> String {
+        let mut parts = Vec::new();
+        if self.case_sensitive {
+            parts.push("Aa");
+        }
+        if self.whole_word {
+            parts.push("w");
+        }
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!("[{}]", parts.join(" "))
+        }
+    }
+}
 
 /// Collapse `s`'s whitespace to single spaces and trim it to `max` characters,
 /// appending `…` when shortened — a one-line snippet for prompts and list rows
@@ -15,18 +53,27 @@ pub fn ellipsize(s: &str, max: usize) -> String {
     }
 }
 
-/// Run `f(start, end)` for each non-overlapping, case-insensitive match of
-/// `needle` in `text`, as byte ranges `[start, end)`. The one place the match
-/// rule lives; [`match_ranges`] and [`count_matches`] are thin wrappers.
-fn scan(text: &str, needle: &str, mut f: impl FnMut(usize, usize)) {
+/// Run `f(start, end)` for each non-overlapping match of `needle` in `text`
+/// honoring `opts`, as byte ranges `[start, end)`. The one place the match rule
+/// lives; the public range/count helpers are thin wrappers over it.
+fn scan(text: &str, needle: &str, opts: MatchOpts, mut f: impl FnMut(usize, usize)) {
     let needle: Vec<char> = needle.chars().collect();
     if needle.is_empty() {
         return;
     }
     let hay: Vec<(usize, char)> = text.char_indices().collect();
+    let char_eq = |a: char, b: char| {
+        if opts.case_sensitive {
+            a == b
+        } else {
+            char_eq_ci(a, b)
+        }
+    };
     let mut i = 0;
     while i + needle.len() <= hay.len() {
-        if (0..needle.len()).all(|k| char_eq_ci(hay[i + k].1, needle[k])) {
+        let hit = (0..needle.len()).all(|k| char_eq(hay[i + k].1, needle[k]))
+            && (!opts.whole_word || word_bounded(&hay, i, needle.len()));
+        if hit {
             let start = hay[i].0;
             let last = &hay[i + needle.len() - 1];
             f(start, last.0 + last.1.len_utf8());
@@ -37,27 +84,48 @@ fn scan(text: &str, needle: &str, mut f: impl FnMut(usize, usize)) {
     }
 }
 
-/// Byte ranges of every case-insensitive, non-overlapping match of `needle` in
-/// `text`, in order. Empty when the needle is empty. Folding goes through each
-/// character's Unicode lowercase mapping, so "José" matches "josé" and "The"
-/// matches "the".
+/// Byte ranges of every non-overlapping match of `needle` in `text` under the
+/// default rule (case-insensitive substring), in order. Empty when the needle is
+/// empty. Folding goes through each character's Unicode lowercase mapping, so
+/// "José" matches "josé" and "The" matches "the".
 pub fn match_ranges(text: &str, needle: &str) -> Vec<(usize, usize)> {
+    match_ranges_opts(text, needle, MatchOpts::default())
+}
+
+/// Byte ranges of every non-overlapping match of `needle` in `text` honoring
+/// `opts` (#570), in order. With [`MatchOpts::default`] this is exactly
+/// [`match_ranges`].
+pub fn match_ranges_opts(text: &str, needle: &str, opts: MatchOpts) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
-    scan(text, needle, |start, end| out.push((start, end)));
+    scan(text, needle, opts, |start, end| out.push((start, end)));
     out
 }
 
-/// How many times `needle` occurs in `text` (case-insensitive, non-overlapping).
-/// Counts without allocating the range list.
+/// How many times `needle` occurs in `text` under the default rule
+/// (case-insensitive, non-overlapping). Counts without allocating the range list.
 pub fn count_matches(text: &str, needle: &str) -> usize {
     let mut n = 0;
-    scan(text, needle, |_, _| n += 1);
+    scan(text, needle, MatchOpts::default(), |_, _| n += 1);
     n
 }
 
 /// Case-insensitive single-character comparison via Unicode lowercase folding.
 fn char_eq_ci(a: char, b: char) -> bool {
     a == b || a.to_lowercase().eq(b.to_lowercase())
+}
+
+/// Whether a "word character" for prose: alphanumeric or an apostrophe, so a
+/// whole-word search treats contractions like "don't" as one word (#570).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '\''
+}
+
+/// Whether the run `hay[i..i + len]` is bounded by non-word characters (or the
+/// text edge) on both sides — the whole-word rule (#570).
+fn word_bounded(hay: &[(usize, char)], i: usize, len: usize) -> bool {
+    let before_ok = i == 0 || !is_word_char(hay[i - 1].1);
+    let after_ok = i + len >= hay.len() || !is_word_char(hay[i + len].1);
+    before_ok && after_ok
 }
 
 #[cfg(test)]
@@ -99,5 +167,82 @@ mod tests {
         let text = "xxx here, XXX there, and Xxx everywhere";
         assert_eq!(count_matches(text, "xxx"), match_ranges(text, "xxx").len());
         assert_eq!(count_matches(text, "xxx"), 3);
+    }
+
+    // --- #570: case-sensitive and whole-word toggles ---------------------
+
+    fn opts(case_sensitive: bool, whole_word: bool) -> MatchOpts {
+        MatchOpts {
+            case_sensitive,
+            whole_word,
+        }
+    }
+
+    #[test]
+    fn default_opts_match_the_plain_helpers() {
+        // The both-off path must be identical to the unflagged helpers.
+        let text = "Will, will, and willing.";
+        assert_eq!(
+            match_ranges_opts(text, "will", MatchOpts::default()),
+            match_ranges(text, "will"),
+        );
+    }
+
+    #[test]
+    fn case_sensitive_only_matches_exact_case() {
+        // Renaming the character "Will" must not touch "will"/"willing" by case.
+        let text = "Will met will while willing it.";
+        // Case-insensitive (default): Will, will, will(ing) — three substrings.
+        assert_eq!(match_ranges(text, "Will").len(), 3);
+        // Case-sensitive: only the capitalized "Will" and the "Will" in nothing
+        // else here — just the one leading "Will".
+        let m = match_ranges_opts(text, "Will", opts(true, false));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0], (0, 4));
+    }
+
+    #[test]
+    fn whole_word_only_skips_substrings() {
+        let text = "Will met will while willing it.";
+        // Whole-word, case-insensitive: "Will" and "will" (both standalone),
+        // but not the "will" inside "willing" or "while".
+        let m = match_ranges_opts(text, "will", opts(false, true));
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0], (0, 4)); // "Will"
+        assert_eq!(m[1], (9, 13)); // "will"
+    }
+
+    #[test]
+    fn case_sensitive_and_whole_word_together() {
+        let text = "Will met will while willing it.";
+        // Exact case AND standalone: only the leading "Will".
+        let m = match_ranges_opts(text, "Will", opts(true, true));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0], (0, 4));
+    }
+
+    #[test]
+    fn whole_word_keeps_contractions_intact() {
+        // The apostrophe is a word char, so "don't" is one word, not "don" + "t".
+        let text = "I don't and you don't.";
+        assert_eq!(match_ranges_opts(text, "don't", opts(false, true)).len(), 2);
+        // "don" alone is never a whole word inside "don't".
+        assert!(match_ranges_opts(text, "don", opts(false, true)).is_empty());
+    }
+
+    #[test]
+    fn whole_word_respects_punctuation_and_edges() {
+        // Boundaries at string edges and against punctuation both count.
+        let text = "cat. (cat) catnap cat";
+        let m = match_ranges_opts(text, "cat", opts(false, true));
+        assert_eq!(m.len(), 3, "the three standalone cats, not 'catnap'");
+    }
+
+    #[test]
+    fn label_reflects_active_modes() {
+        assert_eq!(MatchOpts::default().label(), "");
+        assert_eq!(opts(true, false).label(), "[Aa]");
+        assert_eq!(opts(false, true).label(), "[w]");
+        assert_eq!(opts(true, true).label(), "[Aa w]");
     }
 }
