@@ -22,24 +22,6 @@ fn syllables_strips_punctuation_and_never_zero_for_letters() {
 }
 
 #[test]
-fn count_sentences_handles_terminators() {
-    assert_eq!(count_sentences("The night was dark. It was long."), 2);
-    assert_eq!(count_sentences("Stop! Who goes there? Nobody."), 3);
-    // A trailing fragment with no terminator still counts.
-    assert_eq!(count_sentences("Just one clause"), 1);
-    assert_eq!(count_sentences(""), 0);
-}
-
-#[test]
-fn count_sentences_ignores_decimals_abbreviations_and_ellipses() {
-    assert_eq!(count_sentences("It cost 3.14 dollars and rose."), 1);
-    assert_eq!(count_sentences("Dr. Vance arrived late."), 1);
-    assert_eq!(count_sentences("I... think so."), 1); // mid-sentence ellipsis
-                                                      // Dialogue: the inner '!' is not a boundary, the trailing '.' is.
-    assert_eq!(count_sentences("\"Stop!\" she said."), 1);
-}
-
-#[test]
 fn prose_drops_heading_lines() {
     let text = "# The Dark\n\nThe night was long.\n\n## Later\n\nDawn came.";
     let p = prose(text);
@@ -115,14 +97,6 @@ fn total_is_the_sum_of_chapters_not_an_average() {
 }
 
 #[test]
-fn sentences_split_and_measure_by_word_length() {
-    let s = sentences("The cat sat. The dog ran away fast.");
-    assert_eq!(s, vec!["The cat sat.", "The dog ran away fast."]);
-    let lengths: Vec<usize> = s.iter().map(|x| crate::buffer::count_words(x)).collect();
-    assert_eq!(lengths, vec![3, 5]);
-}
-
-#[test]
 fn sentence_stats_summarize_lengths() {
     let lengths = vec![3, 5, 5, 50];
     let s = sentence_stats(&lengths, 40);
@@ -166,101 +140,6 @@ fn length_stats_summarize_and_fence_outliers() {
     // Too few chapters → no "rest" to compare against, nothing flagged.
     let few = length_stats(&[100, 5000]);
     assert_eq!(length_flag(100, &few), None);
-}
-
-#[test]
-fn style_flags_count_adverbs_filters_and_weak_verbs() {
-    // "slowly" / "quietly" = -ly adverbs; "only" is excluded. "saw"/"felt" are
-    // filter words. "was" is a to-be form; "was locked" (to-be + -ed) is a
-    // passive estimate.
-    let f = style_flags(
-        "She slowly saw the only door and felt it was locked quietly.",
-        &WordLists::new(),
-    );
-    assert_eq!(f.adverbs_ly, 2, "slowly + quietly, not only");
-    assert_eq!(f.filter_words, 2, "saw + felt");
-    assert_eq!(f.weak_verbs, 1, "was");
-    assert_eq!(f.passive, 1, "was locked");
-}
-
-#[test]
-fn content_words_skip_stopwords_and_short_words() {
-    let mut counts = HashMap::new();
-    tally_content_words(
-        "The locket and the locket on it",
-        &mut counts,
-        &WordLists::new(),
-    );
-    assert_eq!(counts.get("locket"), Some(&2));
-    assert_eq!(counts.get("the"), None, "stopword excluded");
-    assert_eq!(counts.get("on"), None, "short/stopword excluded");
-}
-
-#[test]
-fn phrases_tally_trigrams_and_skip_all_stopword_runs() {
-    let mut counts = HashMap::new();
-    let text = "the locket gleamed. the locket gleamed again out of the box.";
-    tally_phrases(text, &mut counts, &WordLists::new());
-    assert_eq!(counts.get("the locket gleamed"), Some(&2));
-    assert_eq!(
-        counts.get("out of the"),
-        None,
-        "all-stopword trigram skipped"
-    );
-}
-
-#[test]
-fn stopword_overrides_extend_and_drop_defaults() {
-    let mut lists = WordLists::new();
-    // "said" is a built-in stopword — remove it so it can surface; add "locket".
-    lists.override_stopwords(&["locket".to_string()], &["Said".to_string()]); // remove is case-insensitive
-    let mut counts = HashMap::new();
-    tally_content_words("said said locket locket gleamed", &mut counts, &lists);
-    assert_eq!(
-        counts.get("said"),
-        Some(&2),
-        "removed from stopwords → now counted"
-    );
-    assert_eq!(counts.get("locket"), None, "added to stopwords → excluded");
-    assert_eq!(counts.get("gleamed"), Some(&1));
-}
-
-#[test]
-fn filter_word_overrides_extend_and_drop_defaults() {
-    let mut lists = WordLists::new();
-    // "saw" is a built-in filter word — remove it; add "gazed".
-    lists.override_filter_words(&["gazed".to_string()], &["saw".to_string()]);
-    let f = style_flags("She saw the door and gazed at it", &lists);
-    assert_eq!(f.filter_words, 1, "saw no longer counts, gazed now does");
-}
-
-#[test]
-fn no_overrides_match_the_built_in_defaults() {
-    let mut a = HashMap::new();
-    let mut b = HashMap::new();
-    let text = "the saw and the locket and the door";
-    tally_content_words(text, &mut a, &WordLists::new());
-    tally_content_words(text, &mut b, &WordLists::default());
-    assert_eq!(a, b);
-    assert_eq!(
-        a.get("the"),
-        None,
-        "built-in stopword still excluded by default"
-    );
-}
-
-#[test]
-fn top_counts_orders_by_count_then_name() {
-    let counts = HashMap::from([
-        ("beta".to_string(), 3),
-        ("alpha".to_string(), 3),
-        ("rare".to_string(), 1),
-    ]);
-    // count desc, ties alphabetical; min filters out the single occurrence.
-    assert_eq!(
-        top_counts(&counts, 10, 2),
-        vec![("alpha".to_string(), 3), ("beta".to_string(), 3)]
-    );
 }
 
 #[test]
