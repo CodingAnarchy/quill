@@ -6,7 +6,7 @@ use super::*;
 
 use super::assist::list_move;
 use crate::ai::{self, cost, naming, router, BackendKind};
-use crate::mode::{Action, AiAction, ExportScope, PaletteRow};
+use crate::mode::{Action, AiAction, AiCost, ExportScope, PaletteRow};
 
 /// The routing decision for starting an AI action (#82/#372): run it now on a
 /// chosen backend, or confirm first (the estimate is over the threshold) — the
@@ -20,109 +20,15 @@ impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
-        let ai = |label: &str, desc: &str, a| PaletteItem::new(label, desc, Command::Ai(a));
-        let items = vec![
-            ai(
-                "Ask the manuscript",
-                "Answer a question grounded in the draft",
-                AiAction::Ask,
-            ),
-            ai(
-                "Character bible",
-                "Profiles, arcs, and drift flags",
-                AiAction::Characters,
-            ),
-            ai(
-                "Timeline & continuity",
-                "Ordered timeline + contradiction findings",
-                AiAction::Continuity,
-            ),
-            ai(
-                "Setting & worldbuilding",
-                "Setting bible + rule-violation findings",
-                AiAction::Setting,
-            ),
-            ai(
-                "Scaffold / outline",
-                "Beat outline + structural gaps",
-                AiAction::Scaffold,
-            ),
-            ai(
-                "Name & term consistency",
-                "Spelling variants (cheap pass)",
-                AiAction::Naming,
-            ),
-            ai(
-                "Prose & style",
-                "POV / tense / voice findings (analysis only)",
-                AiAction::Style,
-            ),
-            ai(
-                "Brainstorm ideas",
-                "Premises, themes & conflicts from a spark (off-manuscript)",
-                AiAction::Brainstorm,
-            ),
-            ai(
-                "Draft characters",
-                "Starter cast from a concept (no manuscript needed)",
-                AiAction::DraftCharacters,
-            ),
-            ai(
-                "Draft setting",
-                "Starter worldbuilding bible from a concept",
-                AiAction::DraftSetting,
-            ),
-            ai(
-                "Character voice",
-                "Dialogue & POV voice vs. the character bible",
-                AiAction::Voice,
-            ),
-            ai(
-                "Submission material",
-                "Synopsis, blurb & query letter (off-manuscript)",
-                AiAction::Submission,
-            ),
-            ai(
-                "Marketing copy",
-                "Blurb variants & taglines (off-manuscript)",
-                AiAction::Marketing,
-            ),
-            ai(
-                "Social posts",
-                "X / Facebook / Instagram copy (off-manuscript)",
-                AiAction::Social,
-            ),
-            ai(
-                "Ad creative",
-                "Amazon / Meta / X ad copy & targeting (off-manuscript)",
-                AiAction::AdCreative,
-            ),
-            ai(
-                "Character portraits",
-                "Portrait images from the character bible (fal.ai)",
-                AiAction::Portrait,
-            ),
-            ai(
-                "Scene illustration",
-                "Illustrate the active chapter (fal.ai)",
-                AiAction::Scene,
-            ),
-            ai(
-                "Revision triage",
-                "All findings so far, in one list (local)",
-                AiAction::Triage,
-            ),
-            ai(
-                "Word search",
-                "In-context thesaurus for a word or phrase (reference only)",
-                AiAction::Thesaurus,
-            ),
-            ai(
-                "Editorial read",
-                "Flag structural / continuity / line issues — no fixes",
-                AiAction::Editorial,
-            ),
-        ];
+        // The action *set* and its order come from the single descriptor table
+        // (#563); this only supplies each row's palette label + blurb.
+        let items = AiAction::SPECS
+            .iter()
+            .map(|s| {
+                let (label, desc) = ai_palette_entry(s.action);
+                PaletteItem::new(label, desc, Command::Ai(s.action))
+            })
+            .collect();
         self.mode = Mode::Palette(Box::new(Palette {
             title: "AI",
             items,
@@ -518,20 +424,16 @@ impl App {
 
     /// The model and output bound a network pass will send — the inputs to its
     /// cost estimate, read from the same constants the request builders use so
-    /// the estimate can't drift from the real request. `None` for the local /
-    /// interactive actions (Ask, Triage), which issue no costed pass.
+    /// the estimate can't drift from the real request. Which profile each action
+    /// carries is the descriptor's [`AiCost`] (#563); this resolves it against
+    /// live AI settings. `None` for the local / interactive / image actions
+    /// (Ask, Triage, Brainstorm, the drafts, the portraits/scene, the thesaurus),
+    /// which issue no costed whole-manuscript pass.
     fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
-        match action {
-            // No whole-manuscript estimate: Ask/Triage/Brainstorm are interactive
-            // and send no manuscript (Brainstorm sends only a premise), and the
-            // image passes (#238/#239) are billed per image with their own confirm.
-            AiAction::Ask | AiAction::Triage | AiAction::Brainstorm | AiAction::DraftCharacters
-            | AiAction::DraftSetting | AiAction::Portrait | AiAction::Scene
-            // The thesaurus sends only a word/phrase + the current line, not the
-            // manuscript, so there's nothing whole-book to estimate (#290).
-            | AiAction::Thesaurus => None,
-            AiAction::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
-            _ => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
+        match action.cost() {
+            AiCost::None => None,
+            AiCost::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
+            AiCost::Manuscript => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
         }
     }
 
@@ -566,6 +468,86 @@ impl App {
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::Editorial => self.analyze_editorial(),
         }
+    }
+}
+
+/// The AI palette's label + one-line blurb for an action. Presentation only —
+/// the action *set* and order come from [`AiAction::SPECS`] (#563), so this is an
+/// exhaustive `match` the compiler checks, not a hand-maintained list that can
+/// silently omit a variant.
+fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
+    match action {
+        AiAction::Ask => (
+            "Ask the manuscript",
+            "Answer a question grounded in the draft",
+        ),
+        AiAction::Characters => ("Character bible", "Profiles, arcs, and drift flags"),
+        AiAction::Continuity => (
+            "Timeline & continuity",
+            "Ordered timeline + contradiction findings",
+        ),
+        AiAction::Setting => (
+            "Setting & worldbuilding",
+            "Setting bible + rule-violation findings",
+        ),
+        AiAction::Scaffold => ("Scaffold / outline", "Beat outline + structural gaps"),
+        AiAction::Naming => ("Name & term consistency", "Spelling variants (cheap pass)"),
+        AiAction::Style => (
+            "Prose & style",
+            "POV / tense / voice findings (analysis only)",
+        ),
+        AiAction::Brainstorm => (
+            "Brainstorm ideas",
+            "Premises, themes & conflicts from a spark (off-manuscript)",
+        ),
+        AiAction::DraftCharacters => (
+            "Draft characters",
+            "Starter cast from a concept (no manuscript needed)",
+        ),
+        AiAction::DraftSetting => (
+            "Draft setting",
+            "Starter worldbuilding bible from a concept",
+        ),
+        AiAction::Voice => (
+            "Character voice",
+            "Dialogue & POV voice vs. the character bible",
+        ),
+        AiAction::Submission => (
+            "Submission material",
+            "Synopsis, blurb & query letter (off-manuscript)",
+        ),
+        AiAction::Marketing => (
+            "Marketing copy",
+            "Blurb variants & taglines (off-manuscript)",
+        ),
+        AiAction::Social => (
+            "Social posts",
+            "X / Facebook / Instagram copy (off-manuscript)",
+        ),
+        AiAction::AdCreative => (
+            "Ad creative",
+            "Amazon / Meta / X ad copy & targeting (off-manuscript)",
+        ),
+        AiAction::Portrait => (
+            "Character portraits",
+            "Portrait images from the character bible (fal.ai)",
+        ),
+        AiAction::Scene => (
+            "Scene illustration",
+            "Illustrate the active chapter (fal.ai)",
+        ),
+        AiAction::Triage => (
+            "Revision triage",
+            "All findings so far, in one list (local)",
+        ),
+        AiAction::Thesaurus => (
+            "Word search",
+            "In-context thesaurus for a word or phrase (reference only)",
+        ),
+        AiAction::Editorial => (
+            "Editorial read",
+            "Flag structural / continuity / line issues — no fixes",
+        ),
     }
 }
 
