@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use super::{
-    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, Part, Prose, Run,
+    inline_runs, prose_blocks, render_epigraph, xml_escape, Chapter, Document, Part, Prose, Run,
     SCENE_BREAK,
 };
 
@@ -152,26 +152,22 @@ fn text_item(chapter: &Chapter, data: &Path, n: &mut usize) -> std::io::Result<S
 fn to_rtf(chapter: &Chapter) -> String {
     let mut body = String::new();
     if let Some(epigraph) = &chapter.epigraph {
-        for line in epigraph.text.lines() {
-            body.push_str(&rtf_paragraph(&[Run::new(line, false, true)]));
-        }
-        if let Some(by) = &epigraph.attribution {
-            body.push_str(&rtf_paragraph(&[Run::new(format!("— {by}"), false, true)]));
-        }
+        body.push_str(&render_epigraph(
+            epigraph,
+            |line| rtf_paragraph(&[Run::new(line, false, true)]),
+            |by| rtf_paragraph(&[Run::new(format!("— {by}"), false, true)]),
+        ));
     }
-    for block in body_blocks(&chapter.body) {
-        match classify_block(&block) {
-            None => {}
+    for prose in prose_blocks(&chapter.body) {
+        match prose {
             // A centered scene divider, the conventional Scrivener separator.
-            Some(Prose::SceneBreak) => {
-                body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n"))
-            }
-            Some(Prose::Heading(heading)) => {
+            Prose::SceneBreak => body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n")),
+            Prose::Heading(heading) => {
                 body.push_str(&rtf_paragraph(&[Run::new(heading, true, false)]))
             }
-            Some(Prose::Paragraph(text)) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
+            Prose::Paragraph(text) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
             // Verbatim, monospaced (`\f1`), line breaks kept as `\line` (#522).
-            Some(Prose::Preformatted(code)) => {
+            Prose::Preformatted(code) => {
                 let lines: Vec<String> = code.lines().map(rtf_escape).collect();
                 body.push_str(&format!(
                     "\\pard\\sa180\\f1 {}\\f0\\par\n",

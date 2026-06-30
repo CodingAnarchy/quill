@@ -14,7 +14,7 @@ use zip::{CompressionMethod, ZipWriter};
 
 use self::opf::{build_nav, build_ncx, build_opf, OpfMeta};
 use super::{
-    body_blocks, classify_block, inline_runs, xml_escape, Chapter, Document, EmbeddedImage,
+    inline_runs, prose_blocks, render_epigraph, xml_escape, Chapter, Document, EmbeddedImage,
     ExportStyle, FontRole, ImageRole, Prose, Run,
 };
 use crate::frontmatter::Epigraph;
@@ -374,10 +374,7 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
     }
     // With drop caps on, the chapter's first prose paragraph is marked `opening`.
     let mut opened = false;
-    for block in body_blocks(&ch.body) {
-        let Some(prose) = classify_block(&block) else {
-            continue;
-        };
+    for prose in prose_blocks(&ch.body) {
         let opening = style.drop_cap() && !opened && matches!(prose, Prose::Paragraph(_));
         opened |= opening;
         out.push_str(&prose_xhtml(&prose, style, opening));
@@ -411,13 +408,12 @@ fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
 /// stylesheet), matching the other writers' epigraph fidelity.
 fn epigraph_xhtml(e: &Epigraph) -> String {
     let mut out = String::from("<div class=\"epigraph\">\n");
-    for line in e.text.lines() {
+    out.push_str(&render_epigraph(
+        e,
         // A class-less `<p>`, so not via `push_p`.
-        out.push_str(&format!("<p>{}</p>\n", xml_escape(line)));
-    }
-    if let Some(a) = &e.attribution {
-        push_p(&mut out, "attribution", &format!("— {a}"));
-    }
+        |line| format!("<p>{}</p>\n", xml_escape(line)),
+        |a| format!("{}\n", p_class("attribution", &format!("— {a}"))),
+    ));
     out.push_str("</div>\n");
     out
 }
