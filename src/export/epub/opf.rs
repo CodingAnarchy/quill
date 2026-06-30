@@ -60,28 +60,43 @@ pub(super) fn build_opf(
         book.modified
     ));
 
-    let mut manifest = String::from(concat!(
-        "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>",
-        "<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>",
-        "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>"
+    let mut manifest = String::new();
+    manifest.push_str(&manifest_item(
+        "nav",
+        "nav.xhtml",
+        "application/xhtml+xml",
+        Some("nav"),
     ));
+    manifest.push_str(&manifest_item(
+        "ncx",
+        "toc.ncx",
+        "application/x-dtbncx+xml",
+        None,
+    ));
+    manifest.push_str(&manifest_item("css", "style.css", "text/css", None));
     for (i, font) in fonts.iter().enumerate() {
-        manifest.push_str(&format!(
-            "<item id=\"font{i}\" href=\"{}\" media-type=\"{}\"/>",
-            font.href, font.media_type
+        manifest.push_str(&manifest_item(
+            &format!("font{i}"),
+            &font.href,
+            font.media_type,
+            None,
         ));
     }
     for (i, image) in images.iter().enumerate() {
-        manifest.push_str(&format!(
-            "<item id=\"img{i}\" href=\"{}\" media-type=\"{}\"/>",
-            image.href, image.media_type
+        manifest.push_str(&manifest_item(
+            &format!("img{i}"),
+            &image.href,
+            image.media_type,
+            None,
         ));
     }
     let mut spine = String::new();
     for it in items {
-        manifest.push_str(&format!(
-            "<item id=\"{}\" href=\"{}\" media-type=\"application/xhtml+xml\"/>",
-            it.id, it.href
+        manifest.push_str(&manifest_item(
+            &it.id,
+            &it.href,
+            "application/xhtml+xml",
+            None,
         ));
         spine.push_str(&format!("<itemref idref=\"{}\"/>", it.id));
     }
@@ -98,6 +113,24 @@ pub(super) fn build_opf(
         meta = meta,
         manifest = manifest,
         spine = spine,
+    )
+}
+
+/// One OPF manifest `<item/>`: id, href, media type, and optional `properties`
+/// (e.g. `nav` for the navigation document). Every manifest entry routes through
+/// here so attribute order and escaping stay uniform — `id`/`href` are
+/// XML-escaped even though current package-internal values have no special
+/// characters.
+fn manifest_item(id: &str, href: &str, media_type: &str, properties: Option<&str>) -> String {
+    let props = match properties {
+        Some(p) => format!(" properties=\"{}\"", xml_escape(p)),
+        None => String::new(),
+    };
+    format!(
+        "<item id=\"{}\" href=\"{}\" media-type=\"{}\"{props}/>",
+        xml_escape(id),
+        xml_escape(href),
+        xml_escape(media_type),
     )
 }
 
