@@ -108,7 +108,7 @@ impl Palette {
 
 /// A command reachable from a palette — the AI menu (Ctrl-A), the version-control
 /// menu (Ctrl-V), and the export menu (Ctrl-E) share one palette mechanism.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum Command {
     Ai(AiAction),
     Git(GitAction),
@@ -636,12 +636,47 @@ pub(crate) enum ExportFormat {
     PdfPrint,
 }
 
-/// What an export covers (#332): just the active book, or the whole multi-book
-/// series. A standalone novel only ever exports its one book.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What an export covers: the whole active book (#332), the whole multi-book
+/// series (#332), or a *sample* of the active book (#584) — a single chapter, a
+/// part, or a contiguous chapter range. The sample scopes carry manifest chapter
+/// indices and feed a filtered chapter set to the same writers; only the chapters
+/// compiled (and the output filename) differ. A standalone novel only ever
+/// exports its one book.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ExportScope {
     ActiveBook,
     Series,
+    /// A single body chapter of the active book, by manifest chapter index (#584).
+    Chapter(usize),
+    /// A part of the active book (#584): its index into the manifest's parts and
+    /// its display name (for the sample filename), plus the inclusive manifest
+    /// chapter-index range the part spans.
+    Part {
+        name: String,
+        start: usize,
+        end: usize,
+    },
+    /// A contiguous range of body chapters of the active book (#584), by inclusive
+    /// manifest chapter index.
+    Range {
+        start: usize,
+        end: usize,
+    },
+}
+
+impl ExportScope {
+    /// The inclusive manifest chapter-index range a *sample* scope (#584) covers,
+    /// or `None` for a whole-book / whole-series export. The single place the three
+    /// sample scopes resolve to a chapter span — the export loop filters by it.
+    pub(crate) fn chapter_span(&self) -> Option<std::ops::RangeInclusive<usize>> {
+        match self {
+            ExportScope::ActiveBook | ExportScope::Series => None,
+            ExportScope::Chapter(i) => Some(*i..=*i),
+            ExportScope::Part { start, end, .. } | ExportScope::Range { start, end } => {
+                Some(*start..=*end)
+            }
+        }
+    }
 }
 
 /// The AI actions reachable from the AI palette.
