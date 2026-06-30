@@ -84,12 +84,26 @@ books live). Passing an explicit path — `quill path/to/book` — always opens 
 creates that project directly, with no chooser.
 
 Run "Book details" from the Ctrl-K menu to set the book's title, subtitle,
-author, and series — the fields that flow into every export's title block. Quill
-walks them in turn, each prompt prefilled with its current value: press Enter to
-keep a field and move to the next, type to change it, or Esc to stop. The title
-keeps its current value if you leave it blank; a blank subtitle, author, or
-series clears it. (These are the same fields the chapter browser sets one at a
-time with "t", "b", "w", and "e"; either way writes the same manifest.)
+author, and series — the fields that flow into every export's title block —
+followed by its publishing metadata: ISBN, publisher, publication date, language,
+and the rights/copyright line. Quill walks them in turn, each prompt prefilled
+with its current value: press Enter to keep a field and move to the next, type to
+change it, or Esc to stop. The title keeps its current value if you leave it
+blank; every other field clears when you leave it blank. (The title, subtitle,
+author, and series are the same fields the chapter browser sets one at a time
+with "t", "b", "w", and "e"; either way writes the same manifest.)
+
+The publishing metadata rides into the exports a published book needs. In the
+EPUB OPF it becomes the `dc:identifier` (your ISBN when set, otherwise a stable
+minted id), `dc:publisher`, `dc:date`, and `dc:rights`, and the language drives
+`dc:language` and the `xml:lang` markup throughout (defaulting to `en` when you
+leave it unset — set it for a non-English book). When any of the rights line,
+publisher, publication date, or ISBN is set, Quill renders a copyright page as
+front matter — after the cover and title page, before the body — in the EPUB,
+PDF, and Word (manuscript) exports. All of these round-trip through `book.toml`,
+so they survive a reopen and an export. The publication date accepts a year
+(`2026`) or a full date (`2026-06-30`); the language is a BCP-47 tag (`en`,
+`fr`, `es-419`, …).
 
 To make the project's folder match its title, run "Rename project folder" from
 the Ctrl-K menu: it's prefilled with the book title, the folder moves without

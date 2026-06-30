@@ -143,6 +143,11 @@ impl App {
             MetaField::Series => self.set_book_meta(|m| m.series = optional),
             MetaField::BookEpigraph => self.set_book_meta(|m| m.epigraph = optional),
             MetaField::BookEpigraphBy => self.set_book_meta(|m| m.epigraph_by = optional),
+            MetaField::Isbn => self.set_book_meta(|m| m.isbn = optional),
+            MetaField::Publisher => self.set_book_meta(|m| m.publisher = optional),
+            MetaField::PubDate => self.set_book_meta(|m| m.pub_date = optional),
+            MetaField::Language => self.set_book_meta(|m| m.language = optional),
+            MetaField::Rights => self.set_book_meta(|m| m.rights = optional),
         }
         None // only a role change re-sorts the list
     }
@@ -269,6 +274,11 @@ impl App {
             BookField::Subtitle => m.subtitle.clone().unwrap_or_default(),
             BookField::Author => m.author.clone().unwrap_or_default(),
             BookField::Series => m.series.clone().unwrap_or_default(),
+            BookField::Isbn => m.isbn.clone().unwrap_or_default(),
+            BookField::Publisher => m.publisher.clone().unwrap_or_default(),
+            BookField::PubDate => m.pub_date.clone().unwrap_or_default(),
+            BookField::Language => m.language.clone().unwrap_or_default(),
+            BookField::Rights => m.rights.clone().unwrap_or_default(),
         }
     }
 
@@ -432,15 +442,21 @@ fn next_goal_field(field: GoalField) -> Option<GoalField> {
     }
 }
 
-/// The next field in the book-details flow (#571): title → subtitle → author →
-/// series, then done. Walks the same fields the chapter-browser `t`/`b`/`w`/`e`
-/// keys set, in that order.
+/// The next field in the book-details flow (#571, extended in #583): the title
+/// fields the chapter-browser `t`/`b`/`w`/`e` keys also set — title → subtitle →
+/// author → series — then the publishing metadata (#583) — ISBN → publisher →
+/// publication date → language → rights — then done.
 fn next_book_field(field: BookField) -> Option<BookField> {
     match field {
         BookField::Title => Some(BookField::Subtitle),
         BookField::Subtitle => Some(BookField::Author),
         BookField::Author => Some(BookField::Series),
-        BookField::Series => None,
+        BookField::Series => Some(BookField::Isbn),
+        BookField::Isbn => Some(BookField::Publisher),
+        BookField::Publisher => Some(BookField::PubDate),
+        BookField::PubDate => Some(BookField::Language),
+        BookField::Language => Some(BookField::Rights),
+        BookField::Rights => None,
     }
 }
 

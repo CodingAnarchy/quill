@@ -14,8 +14,8 @@ use zip::{CompressionMethod, ZipWriter};
 
 use self::opf::{build_nav, build_ncx, build_opf, OpfMeta};
 use super::{
-    inline_runs, prose_blocks, render_epigraph, xml_escape, Chapter, Document, EmbeddedImage,
-    ExportStyle, FontRole, ImageRole, Prose, Run,
+    copyright_lines, inline_runs, prose_blocks, render_epigraph, xml_escape, Chapter, Document,
+    EmbeddedImage, ExportStyle, FontRole, ImageRole, Prose, PubMeta, Run,
 };
 use crate::frontmatter::Epigraph;
 
@@ -36,6 +36,8 @@ h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 .title-page .title { font-size: 2em; font-weight: bold; margin: 0.5em 0; }
 .title-page .subtitle { font-style: italic; }
 .title-page .series { letter-spacing: 0.15em; text-transform: uppercase; }
+.copyright-page { text-align: center; margin-top: 30%; font-size: 0.9em; }
+.copyright-page p { text-indent: 0; margin: 0.4em 0; }
 .epigraph { margin: 2em 10%; font-style: italic; }
 .epigraph .attribution { text-align: right; }
 .scene-break { text-align: center; margin: 1.5em 0; }
@@ -46,7 +48,7 @@ pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent:
 /// `dcterms:modified` UTC timestamp (`YYYY-MM-DDThh:mm:ssZ`); callers pass
 /// [`crate::date::utc_timestamp`].
 pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
-    let mut b = Builder::new(style);
+    let mut b = Builder::new(style, &doc.publishing);
     b.add_cover_page();
     b.add_title_page(
         doc.series.as_deref(),
@@ -55,6 +57,7 @@ pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::
         doc.author.as_deref(),
         doc.epigraph.as_ref(),
     );
+    b.add_copyright_page();
     let nav = b.book_sections(doc);
     b.finish(
         &doc.title,
@@ -76,10 +79,17 @@ pub fn to_epub_series(
     modified: &str,
     style: &ExportStyle,
 ) -> std::io::Result<Vec<u8>> {
-    let mut b = Builder::new(style);
+    let mut b = Builder::new(
+        style,
+        &books
+            .first()
+            .map(|d| d.publishing.clone())
+            .unwrap_or_default(),
+    );
     let title = series.unwrap_or("Series");
     b.add_cover_page();
     b.add_title_page(series, title, None, author, None);
+    b.add_copyright_page();
     let mut nav = Vec::new();
     for book in books {
         let href = b.add_book_divider(book);
@@ -115,14 +125,18 @@ struct Builder {
     items: Vec<Item>,
     /// The styling that shapes the rendered XHTML (scene-break ornament, …).
     style: ExportStyle,
+    /// Publishing metadata (#583): drives the OPF `dc:*`, the per-document
+    /// `xml:lang`/`lang`, and the copyright page.
+    publishing: PubMeta,
 }
 
 impl Builder {
-    fn new(style: &ExportStyle) -> Self {
+    fn new(style: &ExportStyle, publishing: &PubMeta) -> Self {
         Builder {
             seq: 0,
             items: Vec::new(),
             style: style.clone(),
+            publishing: publishing.clone(),
         }
     }
 
@@ -132,7 +146,7 @@ impl Builder {
         self.seq += 1;
         let id = format!("{prefix}{:04}", self.seq);
         let href = format!("{id}.xhtml");
-        let xhtml = xhtml_doc(head_title, &body);
+        let xhtml = xhtml_doc(head_title, &body, self.publishing.language());
         self.items.push(Item {
             id,
             href: href.clone(),
@@ -188,6 +202,24 @@ impl Builder {
             body.push_str(&epigraph_xhtml(e));
         }
         self.add("title", title, body);
+    }
+
+    /// The copyright page (#583), when publishing metadata warrants one: the
+    /// rights line, publisher, publication date, and ISBN, each centered. Slots
+    /// into the conventional front-matter order after the title page (cover →
+    /// title → copyright → body). Not a TOC entry. No-op when no metadata is set,
+    /// leaving the package unchanged.
+    fn add_copyright_page(&mut self) {
+        let lines = copyright_lines(&self.publishing);
+        if lines.is_empty() {
+            return;
+        }
+        let mut body = String::from("<div class=\"copyright-page\">\n");
+        for line in lines {
+            push_p(&mut body, "copyright", &line);
+        }
+        body.push_str("</div>\n");
+        self.add("copyright", "Copyright", body);
     }
 
     /// A series book's divider page: its title, subtitle, and epigraph.
@@ -260,7 +292,12 @@ impl Builder {
         modified: &str,
         nav: Vec<Nav>,
     ) -> std::io::Result<Vec<u8>> {
-        let id = identifier(title, series);
+        // A real ISBN is the `dc:identifier` when set (#583); otherwise fall back
+        // to the stable minted `urn:quill:` slug so re-exports keep their id.
+        let id = match &self.publishing.isbn {
+            Some(isbn) if !isbn.trim().is_empty() => isbn.trim().to_string(),
+            _ => identifier(title, series),
+        };
         let meta = OpfMeta {
             id: &id,
             title,
@@ -268,9 +305,10 @@ impl Builder {
             author,
             series,
             modified,
+            publishing: &self.publishing,
         };
         let opf = build_opf(&meta, &self.items, &self.style.fonts, &self.style.images);
-        let nav_doc = build_nav(&nav);
+        let nav_doc = build_nav(&nav, self.publishing.language());
         let ncx = build_ncx(&id, title, &nav);
 
         let mut parts: Vec<(String, Vec<u8>)> = vec![
@@ -369,16 +407,18 @@ fn stylesheet(style: &ExportStyle) -> String {
 
 /// Wrap an XHTML `body` in the document shell (XHTML namespace, the shared
 /// stylesheet, an escaped `<title>`).
-fn xhtml_doc(title: &str, body: &str) -> String {
+fn xhtml_doc(title: &str, body: &str, lang: &str) -> String {
+    let lang = xml_escape(lang);
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
             "<!DOCTYPE html>\n",
-            "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\">",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{lang}\" lang=\"{lang}\">",
             "<head><meta charset=\"utf-8\"/><title>{title}</title>",
             "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head>",
             "<body>\n{body}</body></html>"
         ),
+        lang = lang,
         title = xml_escape(title),
         body = body,
     )
@@ -558,6 +598,7 @@ mod tests {
             subtitle: Some("a novel".into()),
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
+            publishing: Default::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -663,6 +704,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -692,6 +734,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -723,6 +766,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -763,6 +807,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -829,6 +874,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {

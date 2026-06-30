@@ -558,10 +558,25 @@ impl App {
             subtitle: m.subtitle.clone(),
             author: m.author.clone(),
             series: m.series.clone(),
+            publishing: self.publishing_meta(),
             epigraph: m.epigraph(),
             front,
             parts: body_parts,
             back,
+        }
+    }
+
+    /// The book-level publishing metadata (#583) read from the manifest, for the
+    /// export tree — the OPF `dc:*`, the copyright page, and the PDF/DOCX. Shared
+    /// by the active-book and per-book document builders so both carry it.
+    fn publishing_meta(&self) -> export::PubMeta {
+        let m = &self.project.manifest;
+        export::PubMeta {
+            isbn: m.isbn.clone(),
+            publisher: m.publisher.clone(),
+            date: m.pub_date.clone(),
+            lang: m.language.clone(),
+            rights: m.rights.clone(),
         }
     }
 
@@ -652,6 +667,9 @@ impl App {
             author: self.project.manifest.author.clone(),
             // The series title is carried once by the series writer, not per book.
             series: None,
+            // Publishing metadata is series-level (one ISBN/publisher per project
+            // manifest); each book in a series carries the same.
+            publishing: self.publishing_meta(),
             epigraph: self.project.book_epigraph(b),
             front,
             parts: body_parts,
@@ -671,6 +689,7 @@ fn style_preview_document() -> Document {
         subtitle: Some("A Style Preview".into()),
         author: Some("Your Name".into()),
         series: Some("The Sample Series".into()),
+        publishing: export::PubMeta::default(),
         epigraph: Some(Epigraph {
             text: "A book opens on an epigraph.".into(),
             attribution: Some("Anon.".into()),

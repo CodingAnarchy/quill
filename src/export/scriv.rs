@@ -273,6 +273,7 @@ mod tests {
             subtitle: None,
             author: Some("A. Writer".into()),
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -355,6 +356,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -439,6 +441,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {

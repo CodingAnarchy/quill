@@ -36,6 +36,7 @@ fn doc() -> Document {
         subtitle: Some("a novel".into()),
         author: Some("A. Writer".into()),
         series: Some("The Cycle".into()),
+        publishing: Default::default(),
         epigraph: Some(ep("In the beginning.", Some("Anon"))),
         front: vec![ch("Prologue", None, "Before it all.")],
         parts: vec![Part {
@@ -88,6 +89,7 @@ fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
         subtitle: None,
         author: None,
         series: None,
+        publishing: Default::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -115,6 +117,7 @@ fn a_fenced_block_renders_in_the_embedded_monospace_face() {
         subtitle: None,
         author: None,
         series: None,
+        publishing: Default::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -233,6 +236,7 @@ fn a_series_bookmarks_every_book_in_order() {
         subtitle: None,
         author: None,
         series: None,
+        publishing: Default::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -414,6 +418,7 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         subtitle: None,
         author: Some("Auth".into()),
         series: None,
+        publishing: Default::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -515,6 +520,35 @@ fn a_print_pdf_emits_the_cover_full_page() {
     assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
     assert!(has(&bytes, "/ImCover Do"), "cover drawn in the print PDF");
     assert!(has(&bytes, "MediaBox [0 0 432 648]"), "6x9 trim");
+}
+
+#[test]
+fn a_copyright_page_adds_a_front_matter_page() {
+    // Publishing metadata (#583) renders a copyright page after the title page:
+    // one extra page over the no-metadata baseline, in a still-valid PDF.
+    let mut d = doc();
+    d.publishing = PubMeta {
+        publisher: Some("Quill & Co.".into()),
+        date: Some("2026".into()),
+        rights: Some("© 2026 A. Writer".into()),
+        ..Default::default()
+    };
+    let bytes = to_pdf(&d, &plain()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    let baseline = count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent");
+    let with_copyright = count(&bytes, "/Type /Page /Parent");
+    assert_eq!(
+        with_copyright,
+        baseline + 1,
+        "copyright adds a front-matter page"
+    );
+
+    // No publishing metadata → no extra page (default output unchanged).
+    assert_eq!(
+        count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent"),
+        baseline,
+        "no copyright page by default"
+    );
 }
 
 #[test]

@@ -11,7 +11,8 @@ use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 use super::{
-    inline_runs, prose_blocks, render_epigraph, xml_escape, Block, Document, Prose, SCENE_BREAK,
+    copyright_lines, inline_runs, prose_blocks, render_epigraph, xml_escape, Block, Document,
+    Prose, PubMeta, SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -77,6 +78,9 @@ pub fn to_docx_series(
                 run(&format!("by {author}"), false, false, None),
             ));
         }
+        if let Some(first) = books.first() {
+            body.push_str(&copyright_page(&first.publishing));
+        }
     }
     for book in books {
         body.push_str(&book_heading(&book.title, profile));
@@ -116,9 +120,33 @@ fn document_xml(doc: &Document, profile: Profile) -> String {
     let mut body = String::new();
     if profile == Profile::Manuscript {
         body.push_str(&title_page(doc));
+        body.push_str(&copyright_page(&doc.publishing));
     }
     body.push_str(&book_body(doc, profile));
     wrap_document(&body)
+}
+
+/// The copyright page (#583), when publishing metadata warrants one: the rights
+/// line, publisher, publication date, and ISBN, each centered on its own page
+/// after the title page (cover → title → copyright → body). Manuscript profile
+/// only — Vellum applies its own front matter and splits on Heading 1. Empty when
+/// no metadata is set, leaving the output unchanged.
+fn copyright_page(publishing: &PubMeta) -> String {
+    let lines = copyright_lines(publishing);
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        // The first line opens a fresh page; the rest stack centered beneath it.
+        let ppr = if i == 0 {
+            r#"<w:pageBreakBefore/><w:spacing w:before="2400"/><w:jc w:val="center"/>"#
+        } else {
+            r#"<w:jc w:val="center"/>"#
+        };
+        out.push_str(&para(ppr, run(line, false, false, None)));
+    }
+    out
 }
 
 /// A book's title page (manuscript profile): series line, big bold title,
@@ -322,6 +350,7 @@ mod tests {
             subtitle: None,
             author: Some("A. Writer".into()),
             series: None,
+            publishing: Default::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![],
             parts: vec![crate::export::Part {
@@ -352,6 +381,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![crate::export::Part {
@@ -379,6 +409,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![crate::export::Part {
@@ -410,6 +441,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![crate::export::Part {
@@ -490,6 +522,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![crate::export::Part {
@@ -514,6 +547,49 @@ mod tests {
             .expect("# divider");
         let two = xml.find("Scene two.").unwrap();
         assert!(one < hash && hash < two, "divider between scenes: {xml}");
+    }
+
+    #[test]
+    fn a_copyright_page_renders_after_the_title_page() {
+        // Publishing metadata (#583) renders a copyright page after the title page,
+        // in reading order, carrying the rights line and publisher.
+        let mut d = doc();
+        d.publishing = PubMeta {
+            publisher: Some("Quill & Co.".into()),
+            date: Some("2026".into()),
+            rights: Some("© 2026 A. Writer".into()),
+            ..Default::default()
+        };
+        let xml = part(
+            &to_docx(&d, Profile::Manuscript).unwrap(),
+            "word/document.xml",
+        );
+        let author_at = xml.find("by A. Writer").expect("title page");
+        let rights_at = xml.find("© 2026 A. Writer").expect("rights line");
+        let body_at = xml.find("The Find").expect("first chapter");
+        assert!(
+            author_at < rights_at && rights_at < body_at,
+            "copyright between title page and body: {xml}"
+        );
+        assert!(
+            xml.contains("Published by Quill &amp; Co."),
+            "publisher escaped: {xml}"
+        );
+        assert!(xml.contains("First published 2026"), "date line");
+
+        // No publishing metadata → no copyright page (default output unchanged).
+        let plain = part(
+            &to_docx(&doc(), Profile::Manuscript).unwrap(),
+            "word/document.xml",
+        );
+        assert!(!plain.contains("Published by"), "no copyright by default");
+
+        // Vellum applies its own front matter → no generated copyright page.
+        let vellum = part(&to_docx(&d, Profile::Vellum).unwrap(), "word/document.xml");
+        assert!(
+            !vellum.contains("Published by"),
+            "no copyright page in the Vellum profile"
+        );
     }
 
     #[test]

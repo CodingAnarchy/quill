@@ -41,6 +41,11 @@ fn walking_the_flow_persists_every_field_to_the_manifest() {
     enter(&mut app, "La Belle Sauvage"); // subtitle
     enter(&mut app, "Philip Pullman"); // author
     enter(&mut app, "His Dark Materials"); // series
+    enter(&mut app, "978-0-375-81530-0"); // ISBN
+    enter(&mut app, "Knopf"); // publisher
+    enter(&mut app, "2017"); // publication date
+    enter(&mut app, "en-GB"); // language
+    enter(&mut app, "© 2017 Philip Pullman"); // rights
 
     // The in-memory manifest carries every value.
     assert_eq!(app.project.manifest.title, "Book of Dust");
@@ -56,6 +61,17 @@ fn walking_the_flow_persists_every_field_to_the_manifest() {
         app.project.manifest.series.as_deref(),
         Some("His Dark Materials")
     );
+    assert_eq!(
+        app.project.manifest.isbn.as_deref(),
+        Some("978-0-375-81530-0")
+    );
+    assert_eq!(app.project.manifest.publisher.as_deref(), Some("Knopf"));
+    assert_eq!(app.project.manifest.pub_date.as_deref(), Some("2017"));
+    assert_eq!(app.project.manifest.language.as_deref(), Some("en-GB"));
+    assert_eq!(
+        app.project.manifest.rights.as_deref(),
+        Some("© 2017 Philip Pullman")
+    );
 
     // And the manifest on disk re-opens identically.
     let reopened = Project::open(&dir).unwrap();
@@ -68,6 +84,14 @@ fn walking_the_flow_persists_every_field_to_the_manifest() {
     assert_eq!(
         reopened.manifest.series.as_deref(),
         Some("His Dark Materials")
+    );
+    assert_eq!(reopened.manifest.isbn.as_deref(), Some("978-0-375-81530-0"));
+    assert_eq!(reopened.manifest.publisher.as_deref(), Some("Knopf"));
+    assert_eq!(reopened.manifest.pub_date.as_deref(), Some("2017"));
+    assert_eq!(reopened.manifest.language.as_deref(), Some("en-GB"));
+    assert_eq!(
+        reopened.manifest.rights.as_deref(),
+        Some("© 2017 Philip Pullman")
     );
 
     // The flow finishes back in the editor with a confirmation.
