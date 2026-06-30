@@ -221,8 +221,9 @@ fn delta_line(momentum: &Momentum) -> Line<'static> {
 }
 
 /// A net word count as a signed, colored span: green with a `+` for a gain, red
-/// for a loss. Shared by the delta line, the per-part rows, and the daily goal.
-fn colored_net_span(net: i64) -> Span<'static> {
+/// for a loss. Shared by the delta line, the per-part rows, the daily goal, and
+/// the writing-history view (#586).
+pub(crate) fn colored_net_span(net: i64) -> Span<'static> {
     let theme = theme::current();
     let color = if net >= 0 { theme.added } else { theme.removed };
     let signed = if net >= 0 {

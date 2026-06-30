@@ -178,6 +178,26 @@ fn run_progress_report_action_opens_the_overlay() {
 }
 
 #[test]
+fn run_writing_history_action_opens_the_overlay() {
+    // The view reads the recorded history log; seed one in the project's .quill
+    // so the overlay has content to render (#586).
+    let (mut app, _dir) = two_chapter_app("action-history");
+    crate::history::persist(
+        &app.project.root,
+        &crate::history::Snapshot {
+            date: "2026-06-16".into(),
+            words: 1000,
+            added: 400,
+            removed: 10,
+            ..Default::default()
+        },
+    )
+    .ok();
+    app.run_action(Action::WritingHistory, false);
+    assert!(app.overlay.is_some(), "the writing-history overlay opens");
+}
+
+#[test]
 fn run_export_action_compiles_the_manuscript() {
     let (mut app, dir) = two_chapter_app("action-export");
     app.run_action(Action::Export(ExportFormat::Markdown), false);
