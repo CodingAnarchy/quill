@@ -101,6 +101,24 @@ impl ChapterEntry {
     }
 }
 
+/// Read a file that is expected to exist, ahead of a write derived from its
+/// contents (#565). A missing file is the legitimate "starts empty" case and
+/// yields `""`; any other read error (permissions, an I/O fault, the path being
+/// a directory) is propagated so the caller aborts rather than splicing its new
+/// content onto an empty base — which would durably destroy the real data while
+/// reporting success (the shape of #511). "File is empty" (`Ok("")`) stays
+/// distinct from "read failed" (`Err`).
+///
+/// Shared with the other splice-then-write manifest/chapter paths outside this
+/// module (the font `[style]` writer, the AI marker inserter).
+pub(crate) fn read_existing(path: &Path) -> std::io::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e),
+    }
+}
+
 /// Read `entry`'s file under `root` and refresh its cached word count and
 /// front-matter metadata (#331). Shared by the active book's caching and the
 /// other books of a series, so every book's counts/roles are populated at open
@@ -769,7 +787,9 @@ impl Project {
         f: impl FnOnce(&mut FrontMatter),
     ) -> std::io::Result<()> {
         let path = self.chapter_path(index);
-        let text = fs::read_to_string(&path).unwrap_or_default();
+        // A failed read must abort: splicing onto an empty body would blank the
+        // chapter's prose while reporting success (#565).
+        let text = read_existing(&path)?;
         let (front, body) = frontmatter::split(&text);
         let mut fm = front.map(FrontMatter::from_raw).unwrap_or_default();
         f(&mut fm);
@@ -792,9 +812,11 @@ impl Project {
         index: usize,
         ranges: &[(usize, usize)],
         replacement: &str,
-    ) {
+    ) -> std::io::Result<()> {
         let path = self.chapter_path(index);
-        let text = self.read_chapter(index);
+        // A failed read must abort: splicing onto an empty body would wipe the
+        // chapter's prose while the replace reported success (#565).
+        let text = read_existing(&path)?;
         let (front, body) = frontmatter::split(&text);
         let mut body = body.to_string();
         let mut ranges = ranges.to_vec();
@@ -806,9 +828,9 @@ impl Project {
         }
         let front = front.map(FrontMatter::from_raw);
         let content = frontmatter::join(front.as_ref().map(FrontMatter::as_str), &body);
-        if atomic::write(&path, content.as_bytes()).is_ok() {
-            self.read_chapter_cache(index); // refresh the cached word count
-        }
+        atomic::write(&path, content.as_bytes())?;
+        self.read_chapter_cache(index); // refresh the cached word count
+        Ok(())
     }
 
     /// Whether `word` is in the project's custom dictionary (#358),
@@ -825,17 +847,22 @@ impl Project {
     /// accept-flagged-word action and #303's "add these names" path.
     pub fn accept_word(&mut self, word: &str) -> std::io::Result<bool> {
         let key = word.trim().to_lowercase();
-        if key.is_empty() || !self.dictionary.insert(key) {
+        if key.is_empty() || self.dictionary.contains(&key) {
             return Ok(false);
         }
         let path = self.root.join(DICTIONARY_NAME);
-        let mut existing = fs::read_to_string(&path).unwrap_or_default();
+        // Read before touching in-memory state: a failed read must abort, since
+        // appending onto an empty base would shrink the dictionary to just this
+        // word while reporting success (#565). The in-memory set stays in sync
+        // with disk because the insert only happens after a successful write.
+        let mut existing = read_existing(&path)?;
         if !existing.is_empty() && !existing.ends_with('\n') {
             existing.push('\n');
         }
         existing.push_str(word.trim());
         existing.push('\n');
         atomic::write(&path, existing.as_bytes())?;
+        self.dictionary.insert(key);
         Ok(true)
     }
 
@@ -948,7 +975,10 @@ impl Project {
             return self.save_manifest();
         }
         let path = Self::manifest_path(&self.root);
-        let existing = fs::read_to_string(&path).unwrap_or_default();
+        // A failed read must abort: splicing the one `[goals]` key onto an empty
+        // base would overwrite the entire manifest (title, author, the whole
+        // chapter list) while reporting success (#565).
+        let existing = read_existing(&path)?;
         let updated = match value {
             Some(n) => config::set_value(&existing, "goals", field.key(), &n.to_string()),
             None => config::strip_value(&existing, "goals", field.key()).0,

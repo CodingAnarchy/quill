@@ -69,13 +69,26 @@ pub fn config_path() -> Option<PathBuf> {
     Some(config_dir()?.join("config.toml"))
 }
 
+/// Read the config file ahead of an in-place splice + rewrite. A missing file is
+/// the legitimate first-run case (`""`, the splice creates it); any other read
+/// error is propagated so the rewrite aborts rather than overwriting the user's
+/// hand-maintained config with just the spliced entry (#565). "Empty" stays
+/// distinct from "read failed".
+fn read_existing_config(path: &std::path::Path) -> io::Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e),
+    }
+}
+
 /// Add a `[workflows]` entry to the home config file (#232), creating the file /
 /// directory if needed. Inserts only the one line, preserving everything else in
 /// the file (other sections, comments, formatting) — so it's safe to write a
 /// config the author hand-maintains. Returns the path written.
 pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<PathBuf> {
     let path = config_path().ok_or_else(|| io::Error::other("no config directory"))?;
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = read_existing_config(&path)?;
     let updated = upsert_workflow(&existing, name, steps);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -116,7 +129,7 @@ fn toml_key(name: &str) -> String {
 /// (e.g. `true`, `64`, `"#1e1e24"`). Creates the file/section if absent.
 pub fn set_values(changes: &[(String, String, String)]) -> io::Result<PathBuf> {
     let path = config_path().ok_or_else(|| io::Error::other("no config directory"))?;
-    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut text = read_existing_config(&path)?;
     for (section, key, value) in changes {
         text = set_value(&text, section, key, value);
     }

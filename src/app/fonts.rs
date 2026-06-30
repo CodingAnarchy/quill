@@ -21,7 +21,7 @@ use super::App;
 use crate::config;
 use crate::fonts::{self, FontFamily};
 use crate::mode::{Command, FontTarget, Mode, Palette, PaletteItem};
-use crate::project::Project;
+use crate::project::{read_existing, Project};
 
 /// The project subdirectory downloaded fonts live in — also the prefix of the
 /// relative path stored in `[style]`, so the export resolver finds them.
@@ -139,7 +139,9 @@ impl App {
         // Persist the path(s) as a targeted splice into `[style]`, preserving the
         // rest of the manifest (mirrors how #550 writes `[goals]`).
         let path = Project::manifest_path(&self.project.root);
-        let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+        // A failed read must abort: splicing `[style]` onto an empty base would
+        // overwrite the whole manifest while reporting success (#565).
+        let mut text = read_existing(&path)?;
         let quoted = toml::Value::String(rel_path.to_string()).to_string();
         if matches!(target, FontTarget::Body | FontTarget::Both) {
             text = config::set_value(&text, "style", "body_font", &quoted);

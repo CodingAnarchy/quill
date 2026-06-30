@@ -169,7 +169,11 @@ impl App {
             return;
         };
         let replacement = self.project_search().replacement.clone();
-        self.apply_body_replacements(chapter, &[(start, end)], &replacement);
+        if let Err(e) = self.apply_body_replacements(chapter, &[(start, end)], &replacement) {
+            self.mode = self.editing_mode();
+            self.message = Some(format!("Could not replace in that chapter: {e}"));
+            return;
+        }
 
         let delta = replacement.len() as isize - (end - start) as isize;
         let s = self.project_search_mut();
@@ -202,21 +206,43 @@ impl App {
                 _ => by_chapter.push((m.chapter, vec![(m.start, m.end)])),
             }
         }
-        let total = self.project_search().matches.len();
         let chapters = by_chapter.len();
+        // Tally only the chapters that actually wrote: a read failure aborts that
+        // chapter's rewrite (it would otherwise wipe its prose, #565), and the
+        // count must reflect what was really replaced, not what was attempted.
+        let mut replaced_here = 0;
+        let mut done_chapters = 0;
+        let mut failure = None;
         for (chapter, ranges) in by_chapter {
-            self.apply_body_replacements(chapter, &ranges, &replacement);
+            match self.apply_body_replacements(chapter, &ranges, &replacement) {
+                Ok(()) => {
+                    replaced_here += ranges.len();
+                    done_chapters += 1;
+                }
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+            }
         }
         // The active chapter was edited in its buffer (so it's undoable); persist
         // it too, so every affected chapter is on disk after the bulk replace.
         let _ = self.flush_active();
-        let replaced = self.project_search().replaced + total;
+        let replaced = self.project_search().replaced + replaced_here;
         self.mode = self.editing_mode();
-        self.message = Some(format!(
-            "Replaced {replaced} occurrence{} across {chapters} chapter{}.",
-            if replaced == 1 { "" } else { "s" },
-            if chapters == 1 { "" } else { "s" },
-        ));
+        self.message = Some(match failure {
+            Some(e) => format!(
+                "Replaced {replaced} occurrence{} across {done_chapters} chapter{}; \
+                 stopped on a read failure: {e}",
+                if replaced == 1 { "" } else { "s" },
+                if done_chapters == 1 { "" } else { "s" },
+            ),
+            None => format!(
+                "Replaced {replaced} occurrence{} across {chapters} chapter{}.",
+                if replaced == 1 { "" } else { "s" },
+                if chapters == 1 { "" } else { "s" },
+            ),
+        });
     }
 
     /// Apply `ranges` (byte ranges into the chapter's body) to chapter
@@ -229,7 +255,7 @@ impl App {
         chapter: usize,
         ranges: &[(usize, usize)],
         replacement: &str,
-    ) {
+    ) -> std::io::Result<()> {
         if chapter == self.project.active_index() {
             let mut ranges = ranges.to_vec();
             ranges.sort_by_key(|&(s, _)| s);
@@ -237,9 +263,12 @@ impl App {
                 self.buffer.replace_byte_range(start, end, replacement);
             }
             self.cache_focus_words();
+            Ok(())
         } else {
+            // A read failure here is propagated, not swallowed: rewriting from an
+            // empty base would wipe the chapter's prose (#565).
             self.project
-                .replace_chapter_body(chapter, ranges, replacement);
+                .replace_chapter_body(chapter, ranges, replacement)
         }
     }
 

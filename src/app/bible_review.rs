@@ -13,6 +13,7 @@ use ratatui::text::Line;
 use crate::ai::bible;
 use crate::buffer::Buffer;
 use crate::mode::{BibleConflict, BibleReview, Finding, Findings, Mode};
+use crate::project::read_existing;
 
 use super::assist::list_move;
 use super::assist::write_failure_message;
@@ -413,7 +414,12 @@ impl App {
             }
         }
         let path = self.project.chapter_path(i);
-        let mut body = std::fs::read_to_string(&path).unwrap_or_default();
+        // A failed read must abort: appending onto an empty base would replace the
+        // chapter's prose with just the marker while reporting success (#565).
+        let Ok(mut body) = read_existing(&path) else {
+            self.message = Some("Failed to read chapter; marker not written".into());
+            return;
+        };
         body.push_str(&marker);
         if std::fs::write(&path, body).is_err() {
             self.message = Some("Failed to write marker".into());

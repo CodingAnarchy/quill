@@ -103,14 +103,31 @@ fn store_path(config_dir: &Path) -> PathBuf {
     config_dir.join(FILE)
 }
 
-fn list_in(config_dir: &Path) -> Vec<RecentProject> {
-    let text = std::fs::read_to_string(store_path(config_dir)).unwrap_or_default();
+/// Read the stored list. A missing file is the legitimate empty case; any other
+/// read error is surfaced as `Err` so the recorder can abort its rewrite rather
+/// than overwrite a list it couldn't read with just the one new entry (#565).
+fn read_store(config_dir: &Path) -> std::io::Result<Vec<RecentProject>> {
+    let text = match std::fs::read_to_string(store_path(config_dir)) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
     let mut items: Vec<RecentProject> = serde_json::from_str(&text).unwrap_or_default();
     items.retain(|r| Project::manifest_path(&r.path).exists());
-    items
+    Ok(items)
+}
+
+fn list_in(config_dir: &Path) -> Vec<RecentProject> {
+    // Best-effort for the browser: an unreadable list is an empty one.
+    read_store(config_dir).unwrap_or_default()
 }
 
 fn record_in(config_dir: &Path, root: &Path, title: &str) {
+    // A failed read of the existing list aborts: rewriting from an empty base
+    // would discard every other remembered project, keeping only this one (#565).
+    let Ok(existing) = read_store(config_dir) else {
+        return;
+    };
     // Canonicalize so the same project reached by different paths (".", a
     // relative dir, a symlink) is recognized as one entry.
     let path = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
@@ -118,7 +135,7 @@ fn record_in(config_dir: &Path, root: &Path, title: &str) {
         path,
         title: title.to_string(),
     };
-    let updated = promote(list_in(config_dir), entry);
+    let updated = promote(existing, entry);
 
     let _ = std::fs::create_dir_all(config_dir);
     if let Ok(json) = serde_json::to_string_pretty(&updated) {
