@@ -172,8 +172,9 @@ pub(crate) enum StylePicker {
 }
 
 /// A free-text `[style]` knob the in-app setter edits through a prompt (#569) —
-/// the divider glyph and the title/part ornaments, each a short string the writers
-/// render verbatim. (The font/image paths have their own browser, #494.)
+/// the divider glyph, the title/part ornaments, and the cover-image path (#582),
+/// each a short string the writers render / embed verbatim. (The font/decorative
+/// image paths have their own browser, #494.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StyleTextKnob {
     /// The scene-break divider glyph (`scene_break`).
@@ -182,6 +183,8 @@ pub(crate) enum StyleTextKnob {
     TitleOrnament,
     /// The part-divider ornament (`part_ornament`).
     PartOrnament,
+    /// The book cover-image path (`cover_image`, #582).
+    CoverImage,
 }
 
 impl StyleTextKnob {
@@ -191,6 +194,7 @@ impl StyleTextKnob {
             StyleTextKnob::SceneBreak => "scene_break",
             StyleTextKnob::TitleOrnament => "title_ornament",
             StyleTextKnob::PartOrnament => "part_ornament",
+            StyleTextKnob::CoverImage => "cover_image",
         }
     }
 
@@ -200,6 +204,7 @@ impl StyleTextKnob {
             StyleTextKnob::SceneBreak => "scene-break glyph",
             StyleTextKnob::TitleOrnament => "title ornament",
             StyleTextKnob::PartOrnament => "part ornament",
+            StyleTextKnob::CoverImage => "cover image",
         }
     }
 }

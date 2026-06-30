@@ -122,8 +122,8 @@ keystrokes that stay out of the way.
   require. Set the trim from the **Set export style…** menu (below) or in a
   `[print]` table in `book.toml` (`trim = "6x9"`; also `5x8`, `5.5x8.5`; default
   `6x9`). Current limitations: those three trim
-  sizes only, no bleed, and no cover/spine (a cover is a separate artifact);
-  Latin-1 text as above. The default 6×9 interior (0.875″ inside, 0.5″ outside,
+  sizes only, no bleed, and no spine artwork (the cover is a full-page page 0, not
+  a wrap-around spread); Latin-1 text as above. The default 6×9 interior (0.875″ inside, 0.5″ outside,
   0.75″ top/bottom margins) clears KDP's published minimums; validate the file in
   your service's preview before ordering a proof.
   For a multi-book **series**, the menu offers each format twice — the whole
@@ -153,7 +153,11 @@ keystrokes that stay out of the way.
   glyph on the title page and each part divider. For artwork instead of glyphs,
   `scene_break_image` / `chapter_heading_image` / `title_image` point at image
   files (paths relative to the project, `.png`/`.jpg`/`.gif`/`.svg`/`.webp`)
-  embedded into the EPUB (the scene-break image replaces its glyph). To start
+  embedded into the EPUB (the scene-break image replaces its glyph). `cover_image`
+  sets the **book cover** — every storefront requires one: it embeds in the EPUB as
+  the `cover-image` item (the first spine page, plus the EPUB 2 `<meta name="cover">`
+  legacy hint older readers use) and renders as a full-page page 0 in the print PDF
+  (raster formats only there — an SVG cover is reported and skipped). To start
   from a coordinated look instead of setting each key, `preset` selects a
   built-in bundle of these settings, and any explicit `[style]` key you also set
   overrides just that part of the preset. The library:
@@ -168,8 +172,9 @@ keystrokes that stay out of the way.
   You don't have to hand-edit `book.toml` to choose any of this. The export menu
   (`Ctrl-e`) leads with **Set export style…** (also the `style:set` run-action),
   a menu of the common knobs — each showing its current value — where you pick a
-  preset, set the scene-break glyph, heading alignment, drop caps, and the
-  title/part ornaments, and choose the print trim size from its allowed set. Each
+  preset, set the scene-break glyph, heading alignment, drop caps, the
+  title/part ornaments, and the cover-image path, and choose the print trim size
+  from its allowed set. Each
   choice is spliced straight into the `[style]` / `[print]` tables, leaving the
   rest of the manifest (other sections, comments, formatting) byte-for-byte, and
   takes effect on the next export and in the preview with no restart. Hand-editing
@@ -178,7 +183,8 @@ keystrokes that stay out of the way.
   hand). With no `[style]`, the output is exactly the plain default. Both designed formats
   read `[style]`; the plain formats (Markdown, Word, Scrivener, Vellum) ignore it.
   The PDF honors the fonts, scene-break glyph (including decorative ornaments like
-  `❦`/`⚜`, via the fallback font), heading alignment, drop caps, presets, and raster
+  `❦`/`⚜`, via the fallback font), heading alignment, drop caps, presets, the
+  full-page cover, and raster
   image ornaments (PNG/JPEG/GIF/WebP, transparency included). One PDF-only gap is
   reported when configured: `.svg` image ornaments (the PDF takes raster only); a
   glyph no embedded font covers is skipped (a scene break falls back to `#`). To see a look before committing to a full export, the export

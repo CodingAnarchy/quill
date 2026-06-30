@@ -62,6 +62,7 @@ pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
         (ImageRole::SceneBreak, "scene break"),
         (ImageRole::ChapterHeading, "chapter heading"),
         (ImageRole::Title, "title"),
+        (ImageRole::Cover, "cover"),
     ]
     .into_iter()
     .filter(|(role, _)| {
@@ -157,6 +158,7 @@ pub fn to_pdf_series_print(
 fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
     let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
+    pdf.cover_page();
     pdf.title_page(
         doc.series.as_deref(),
         &doc.title,
@@ -180,6 +182,7 @@ fn render_series(
     let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     let title = series.unwrap_or("Series");
     pdf.set_heads(title, author.unwrap_or(title));
+    pdf.cover_page();
     pdf.title_page(None, title, None, author, None);
     let mut outline = Vec::new();
     for book in books {
@@ -371,6 +374,35 @@ impl Pdf {
         if self.y - height < self.layout.text_bottom() {
             self.start_page();
         }
+    }
+
+    /// The book cover (#582), when a cover image is configured: a full-page page 0
+    /// holding the cover image, scaled to fill the page (aspect preserved) and
+    /// centered. The page carries no running head or folio. No-op when no cover is
+    /// set, leaving the output unchanged.
+    fn cover_page(&mut self) {
+        let Some((name, w, h)) = self
+            .image(ImageRole::Cover)
+            .map(|i| (i.name.clone(), i.width as f32, i.height as f32))
+        else {
+            return;
+        };
+        self.start_page();
+        // No running head or folio on the cover.
+        self.meta.last_mut().unwrap().blank = true;
+        let (page_w, page_h) = (self.layout.page_w, self.layout.page_h);
+        // Scale to fill the whole page, keeping the aspect ratio, and center.
+        let scale = (page_w / w).min(page_h / h);
+        let (dw, dh) = (w * scale, h * scale);
+        let x = (page_w - dw) / 2.0;
+        let y = (page_h - dh) / 2.0;
+        self.cur().push_str(&format!(
+            "q {} 0 0 {} {} {} cm /{name} Do Q\n",
+            num(dw),
+            num(dh),
+            num(x),
+            num(y)
+        ));
     }
 
     /// The book title page: series, title, subtitle, author, and the book epigraph,

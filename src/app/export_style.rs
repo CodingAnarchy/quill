@@ -62,6 +62,11 @@ impl App {
                 Command::EditStyleText(StyleTextKnob::PartOrnament),
             ),
             PaletteItem::new(
+                "Cover image",
+                format!("Currently: {}", opt_label(style.cover_image.as_deref())),
+                Command::EditStyleText(StyleTextKnob::CoverImage),
+            ),
+            PaletteItem::new(
                 "Print trim size",
                 format!("Currently: {trim}"),
                 Command::OpenStylePicker(StylePicker::Trim),
@@ -194,6 +199,7 @@ impl App {
                 StyleTextKnob::SceneBreak => &mut style.scene_break,
                 StyleTextKnob::TitleOrnament => &mut style.title_ornament,
                 StyleTextKnob::PartOrnament => &mut style.part_ornament,
+                StyleTextKnob::CoverImage => &mut style.cover_image,
             } = v;
         }) {
             Ok(()) => {
@@ -286,6 +292,7 @@ impl App {
             StyleTextKnob::SceneBreak => style.scene_break.clone(),
             StyleTextKnob::TitleOrnament => style.title_ornament.clone(),
             StyleTextKnob::PartOrnament => style.part_ornament.clone(),
+            StyleTextKnob::CoverImage => style.cover_image.clone(),
         }
     }
 
@@ -445,8 +452,8 @@ mod tests {
         let Mode::Palette(p) = &app.mode else {
             panic!("the setter opens a palette");
         };
-        // Preset, scene break, alignment, drop caps, two ornaments, trim.
-        assert_eq!(p.items.len(), 7);
+        // Preset, scene break, alignment, drop caps, two ornaments, cover, trim.
+        assert_eq!(p.items.len(), 8);
         assert_eq!(p.title, "Export style");
     }
 
@@ -598,6 +605,85 @@ mod tests {
             .unwrap()
             .scene_break
             .is_none());
+    }
+
+    #[test]
+    fn setting_the_cover_image_splices_the_path_and_exports_it() {
+        // Setting the cover via the in-app style flow (#582) splices `cover_image`
+        // into `[style]` and the resolved cover embeds in the EPUB. Hermetic: a
+        // scratch project plus a tiny PNG written to disk.
+        use crate::export::epub::to_epub;
+        use crate::export::ImageRole;
+
+        let (mut app, dir) = style_app("style-cover");
+        // A small real PNG the export pipeline reads from the project root.
+        let png = image::RgbaImage::from_pixel(4, 6, image::Rgba([10, 20, 30, 255]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(png)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(dir.join("cover.png"), buf.into_inner()).unwrap();
+
+        app.apply_style_text(StyleTextKnob::CoverImage, "cover.png");
+
+        // In-memory + persisted into [style].
+        assert_eq!(
+            app.project
+                .manifest
+                .style
+                .as_ref()
+                .unwrap()
+                .cover_image
+                .as_deref(),
+            Some("cover.png")
+        );
+        let toml = manifest_text(&dir);
+        assert!(
+            toml.contains("[style]") && toml.contains("cover_image = \"cover.png\""),
+            "{toml}"
+        );
+
+        // Resolve it from disk (as the exporter does) and embed in an EPUB.
+        let mut style = app.project.manifest.style.clone().unwrap();
+        let warnings = style.resolve_images(|p| std::fs::read(dir.join(p)));
+        assert!(warnings.is_empty(), "cover resolves: {warnings:?}");
+        assert!(style.image(ImageRole::Cover).is_some(), "cover resolved");
+        let bytes = to_epub(
+            &crate::export::Document {
+                title: "Book".into(),
+                subtitle: None,
+                author: None,
+                series: None,
+                epigraph: None,
+                front: vec![],
+                parts: vec![crate::export::Part {
+                    name: None,
+                    chapters: vec![crate::export::Chapter {
+                        title: "One".into(),
+                        epigraph: None,
+                        body: "Prose.".into(),
+                    }],
+                }],
+                back: vec![],
+            },
+            "2026-06-30T00:00:00Z",
+            &style,
+        )
+        .unwrap();
+        let opf = read_zip_entry(&bytes, "OEBPS/content.opf");
+        assert!(opf.contains("properties=\"cover-image\""), "{opf}");
+        assert!(opf.contains("<meta name=\"cover\""), "{opf}");
+    }
+
+    /// Read one zip entry's text by name — for inspecting the EPUB the cover test
+    /// builds.
+    fn read_zip_entry(bytes: &[u8], name: &str) -> String {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
+        let mut file = zip.by_name(name).unwrap();
+        let mut s = String::new();
+        file.read_to_string(&mut s).unwrap();
+        s
     }
 
     #[test]
