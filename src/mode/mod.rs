@@ -488,6 +488,9 @@ pub(crate) enum Action {
     SeriesTree,
     /// Rename the open project's folder, matching it to the book title (#424).
     RenameProject,
+    /// Set or change the project's writing goals — target words, target chapters,
+    /// and the daily word target (#550).
+    SetGoals,
     /// Refresh the whole series' story bible, book by book (#340).
     RefreshSeriesBible,
     /// Find & replace across every chapter in the project (#295).
@@ -533,6 +536,7 @@ impl Action {
         Action::SwitchBook,
         Action::SeriesTree,
         Action::RenameProject,
+        Action::SetGoals,
         Action::ImportNotes,
         Action::NewProjectFromNotes,
         Action::ImportManuscript,
@@ -634,6 +638,7 @@ impl Action {
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
             Action::RenameProject => "project:rename",
+            Action::SetGoals => "goals:set",
             Action::RefreshSeriesBible => "bible:series",
             Action::ProjectFind => "find:project",
             Action::DescribeConfig => "config:describe",
@@ -664,6 +669,7 @@ impl Action {
             | Action::SwitchBook
             | Action::SeriesTree
             | Action::RenameProject
+            | Action::SetGoals
             | Action::ImportNotes
             | Action::NewProjectFromNotes
             | Action::ImportManuscript => "Project",
@@ -732,6 +738,7 @@ impl Action {
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
             Action::RenameProject => "Rename project folder",
+            Action::SetGoals => "Set writing goals",
             Action::RefreshSeriesBible => "Refresh series bible",
             Action::ProjectFind => "Find across manuscript",
             Action::DescribeConfig => "Configure by description",
@@ -1006,6 +1013,12 @@ pub(crate) enum Pending {
     /// manifest). One variant for every text-valued metadata field, so adding a
     /// field is a new [`MetaField`] case rather than new prompt control flow.
     SetMeta(MetaField),
+    /// Numeric input setting one project goal (#550): target words, target
+    /// chapters, the daily target, or words-per-page. Persisted to the `[goals]`
+    /// table of `book.toml`. The goal prompts chain (`goals:set` walks the
+    /// required fields then offers the optional daily target); a blank entry
+    /// clears the optional daily goal and is rejected for the required ones.
+    SetGoal(crate::project::GoalField),
     /// Text input: an API key to store in the OS keychain (#530), for the given
     /// provider. On Enter the key is written to the keychain (never the config
     /// file); a blank entry cancels. The provider determines the keychain entry

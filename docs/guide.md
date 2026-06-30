@@ -123,10 +123,17 @@ but doesn't run on_save workflows.
 REPORTS
 
 Ctrl-R opens the progress report: completion against your goals, a projected
-final length and finish date from your writing pace, and today's word delta
-(set goals and a start date in book.toml). Ctrl-T opens the analysis report:
-per-chapter readability, pacing, sentence lengths, and overused words and
-phrases. Both are scrollable; any other key closes them.
+final length and finish date from your writing pace, and today's word delta.
+Set your goals without leaving Quill: run "Set writing goals" from the Ctrl-K
+menu (or "goals:set"). It walks you through the target word count, the target
+chapter count, the daily word target, and the words-per-page used for the page
+counts — each prefilled with its current value. Type a positive number to set
+one; leave the daily target blank to clear it (the report's daily line then
+disappears). The changes are written to the [goals] table of book.toml and the
+report reflects them immediately. The report itself shows the same hint at the
+bottom, so you can change a goal right after reading where you stand. Ctrl-T
+opens the analysis report: per-chapter readability, pacing, sentence lengths, and
+overused words and phrases. Both are scrollable; any other key closes them.
 
 
 EXPORT

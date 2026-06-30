@@ -60,6 +60,7 @@ mod chapters_sections;
 mod configure;
 mod editing;
 mod export_styling;
+mod goals;
 mod imports;
 mod models;
 mod panes;

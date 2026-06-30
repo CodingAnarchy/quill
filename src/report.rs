@@ -68,10 +68,14 @@ pub fn lines(
         out.push(Line::raw(""));
     }
 
-    let Some(goals) = &manifest.goals else {
+    let Some(goals) = manifest
+        .goals
+        .as_ref()
+        .filter(|g| g.words > 0 || g.chapters > 0)
+    else {
         out.push(Line::raw("No writing goals set."));
         out.push(Line::raw(
-            "Add a [goals] block to book.toml (words, chapters).",
+            "Set them in-app: Ctrl-K → \"goals:set\" (target words, chapters, daily).",
         ));
         return out;
     };
@@ -176,6 +180,13 @@ pub fn lines(
             )));
         }
     }
+
+    // A discoverable affordance for changing the goals these numbers track (#550).
+    out.push(Line::raw(""));
+    out.push(Line::styled(
+        "Change goals: Ctrl-K → \"goals:set\".",
+        Style::default().fg(theme::current().dim),
+    ));
 
     out
 }

@@ -24,7 +24,7 @@ use crate::mode::{
     BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode, Overlay,
     Palette, PaletteItem, Pending, RefFiles, VimState,
 };
-use crate::project::{Manifest, Project};
+use crate::project::{GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
 use crate::typography;
