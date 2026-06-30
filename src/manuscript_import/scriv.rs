@@ -9,8 +9,8 @@ use std::path::Path;
 use crate::export::{push_run, Run, SCENE_BREAK};
 
 use super::{
-    attr_value, element_text, finalize_titles, for_each_child, join_paragraphs, wrap_emphasis,
-    Imported, ImportedChapter,
+    attr_value, element_text, fallback_chapter, finalize_titles, for_each_child, join_paragraphs,
+    wrap_emphasis, Imported, ImportedChapter,
 };
 
 /// Parse a Scrivener `.scriv` bundle directory: read its `.scrivx` binder for the
@@ -55,13 +55,8 @@ fn parse_binder(
     if let Some(draft) = draft_folder(scrivx).and_then(children_group) {
         collect_items(draft, &read_rtf, &mut chapters, &mut unreadable_bodies);
     }
-    if chapters.is_empty() {
-        let only = title.clone().unwrap_or_else(|| "Manuscript".into());
-        chapters.push(ImportedChapter {
-            title: only,
-            body: String::new(),
-        });
-    }
+    // No draft documents → one empty fallback chapter (`.scriv` has no preamble).
+    fallback_chapter(&mut chapters, &title, String::new());
     finalize_titles(&mut chapters);
     Imported {
         title,

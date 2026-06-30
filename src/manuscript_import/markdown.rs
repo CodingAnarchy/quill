@@ -4,64 +4,36 @@
 
 use crate::frontmatter;
 
-use super::{finalize_titles, Imported, ImportedChapter};
+use super::{assemble, fallback_chapter, finalize_titles, mine_preamble, Imported};
 
 /// Parse a single-Markdown-file manuscript (#298).
 pub fn parse_markdown(source: &str) -> Imported {
     // Book-level YAML front matter (if any) → title/author; the rest is the body.
     let (front, body) = frontmatter::split(source);
-    let mut title = yaml_field(front, "title");
-    let mut author = yaml_field(front, "author");
+    let title = yaml_field(front, "title");
+    let author = yaml_field(front, "author");
 
     let level = chapter_level(body);
 
-    // Walk the lines, splitting at each chapter-level heading. Lines before the
-    // first such heading are the preamble (a title page, in the export shape).
-    let mut chapters: Vec<ImportedChapter> = Vec::new();
-    let mut preamble: Vec<&str> = Vec::new();
-    let mut cur_title: Option<&str> = None;
-    let mut cur_body: Vec<&str> = Vec::new();
-    let mut in_fence = false;
-    for line in body.lines() {
-        if is_fence(line) {
-            in_fence = !in_fence;
-        } else if !in_fence && heading_level(line) == Some(level) {
-            match cur_title.take() {
-                Some(t) => chapters.push(ImportedChapter {
-                    title: t.into(),
-                    body: clean(&cur_body),
-                }),
-                None => preamble = std::mem::take(&mut cur_body),
-            }
-            cur_body.clear();
-            cur_title = Some(heading_text(line));
-            continue;
-        }
-        cur_body.push(line);
-    }
-    match cur_title {
-        Some(t) => chapters.push(ImportedChapter {
-            title: t.into(),
-            body: clean(&cur_body),
-        }),
-        // No chapter heading was ever seen — the whole body is the preamble.
-        None => preamble = cur_body,
-    }
+    // Split at each chapter-level heading; lines before the first such heading
+    // are the preamble (a title page, in the export shape). A `Line` carries its
+    // pre-classified heading-ness so the split is fence-aware in one pass.
+    let (mut chapters, preamble) = assemble(
+        classify_lines(body, level),
+        |line| line.heading,
+        |line| heading_text(line.text).to_string(),
+        |lines| clean(&lines.iter().map(|l| l.text).collect::<Vec<_>>()),
+    );
+    let preamble: Vec<&str> = preamble.iter().map(|l| l.text).collect();
 
     // Mine the preamble (the title page) for anything the front matter didn't give.
-    if title.is_none() {
-        title = preamble_title(&preamble, level);
-    }
-    if author.is_none() {
-        author = preamble_author(&preamble);
-    }
+    let has_chapters = !chapters.is_empty();
+    let (title, author) = mine_preamble(&preamble, title, author, has_chapters, |p| {
+        preamble_title(p, level)
+    });
 
     // No headings at all → the whole manuscript is a single chapter.
-    if chapters.is_empty() {
-        let body = clean(&preamble);
-        let only = title.clone().unwrap_or_else(|| "Manuscript".into());
-        chapters.push(ImportedChapter { title: only, body });
-    }
+    fallback_chapter(&mut chapters, &title, clean(&preamble));
 
     finalize_titles(&mut chapters);
 
@@ -98,6 +70,35 @@ fn chapter_level(body: &str) -> usize {
     } else {
         2
     }
+}
+
+/// One source line, pre-classified for the shared assembler: its text and
+/// whether it's a chapter-level heading (a heading inside a code fence isn't).
+struct Line<'a> {
+    text: &'a str,
+    heading: bool,
+}
+
+/// Classify each body line as a chapter-level heading or not, tracking fenced
+/// code blocks so a `#` inside a fence stays in the prose. Feeds [`assemble`].
+fn classify_lines(body: &str, level: usize) -> Vec<Line<'_>> {
+    let mut in_fence = false;
+    body.lines()
+        .map(|text| {
+            if is_fence(text) {
+                in_fence = !in_fence;
+                Line {
+                    text,
+                    heading: false,
+                }
+            } else {
+                Line {
+                    text,
+                    heading: !in_fence && heading_level(text) == Some(level),
+                }
+            }
+        })
+        .collect()
 }
 
 /// The ATX heading level of a line (number of leading `#`, 1–6, followed by a
@@ -143,21 +144,6 @@ fn preamble_title(preamble: &[&str], level: usize) -> Option<String> {
         .iter()
         .find(|l| heading_level(l) == Some(1))
         .map(|l| heading_text(l).to_string())
-}
-
-/// A "by …" attribution line on the title page (Quill's export writes one),
-/// ignoring surrounding emphasis markers.
-pub(super) fn preamble_author(preamble: &[&str]) -> Option<String> {
-    for line in preamble {
-        let s = line.trim().trim_matches(|c| c == '*' || c == '_').trim();
-        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("by ")) {
-            let a = s[3..].trim();
-            if !a.is_empty() {
-                return Some(a.to_string());
-            }
-        }
-    }
-    None
 }
 
 /// A scalar value for `key` in a YAML front-matter block (`key: value`, quotes
