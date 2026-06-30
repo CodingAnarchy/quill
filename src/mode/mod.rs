@@ -321,6 +321,13 @@ pub(crate) enum Pending {
     Quit,
     /// y/N: delete the chapter at `at`.
     Delete { at: usize },
+    /// y/N: merge the chapter at `at` into the one above it (#585).
+    Merge { at: usize },
+    /// Text input: title for the new tail chapter when splitting the active
+    /// chapter at the cursor (#585); the chapter being split is at `at`.
+    SplitChapter { at: usize },
+    /// Text input: title for the copy when duplicating the chapter at `at` (#585).
+    Duplicate { at: usize },
     /// Text input: title for a new chapter to insert at `at`.
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.

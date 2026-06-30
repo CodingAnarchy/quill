@@ -8,18 +8,79 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{ChapterEntry, Project};
+use crate::atomic;
+use crate::frontmatter::{self, FrontMatter};
+
+use super::{read_existing, ChapterEntry, Project};
 
 impl Project {
     /// Insert a new empty chapter titled `title` at position `at` (clamped to
     /// the end). Its file is created on disk.
     pub fn add_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
+        self.insert_chapter_with_body(at, title, "")
+    }
+
+    /// Insert a new chapter titled `title` at position `at` (clamped to the end)
+    /// whose file holds `body` (a plain prose body, no front matter), then read
+    /// its cache back so the new chapter's word count is populated like any other
+    /// (#585 — the tail half of a split). The file is written first, then the
+    /// manifest entry, then the save, keeping the add-a-chapter invariant.
+    pub fn insert_chapter_with_body(
+        &mut self,
+        at: usize,
+        title: &str,
+        body: &str,
+    ) -> std::io::Result<()> {
         let at = at.min(self.manifest.chapters.len());
         let file = self.unique_chapter_file();
-        fs::write(self.root.join(&file), "")?;
+        atomic::write(&self.root.join(&file), body.as_bytes())?;
         self.manifest
             .chapters
             .insert(at, ChapterEntry::new(title.to_string(), file));
+        self.read_chapter_cache(at);
+        self.save_manifest()
+    }
+
+    /// Duplicate chapter `from`, inserting the copy titled `title` immediately
+    /// after it (#585). The copy is a verbatim file copy — front matter included —
+    /// so it opens identically; its cache is read back so its word count and
+    /// metadata match the original. The source is read through [`read_existing`]
+    /// so a failed read aborts rather than writing an empty copy (#565).
+    pub fn duplicate_chapter(&mut self, from: usize, title: &str) -> std::io::Result<()> {
+        let text = read_existing(&self.chapter_path(from))?;
+        let at = from + 1;
+        let file = self.unique_chapter_file();
+        atomic::write(&self.root.join(&file), text.as_bytes())?;
+        self.manifest
+            .chapters
+            .insert(at, ChapterEntry::new(title.to_string(), file));
+        self.read_chapter_cache(at);
+        self.save_manifest()
+    }
+
+    /// Append `body` to the prose of chapter `target` (#585 — the surviving half
+    /// of a merge), preserving the target's front matter, and refresh its cached
+    /// word count. A blank line separates the existing body from the appended
+    /// text so the two chapters' prose doesn't run together. The file is read
+    /// through [`read_existing`] first so a failed read aborts rather than
+    /// blanking the chapter (#565).
+    pub fn append_to_chapter(&mut self, target: usize, body: &str) -> std::io::Result<()> {
+        let path = self.chapter_path(target);
+        let text = read_existing(&path)?;
+        let (front, existing) = frontmatter::split(&text);
+        let existing = existing.trim_end_matches(['\n', '\r']);
+        let appended = body.trim_start_matches(['\n', '\r']);
+        let merged = if existing.is_empty() {
+            appended.to_string()
+        } else if appended.is_empty() {
+            existing.to_string()
+        } else {
+            format!("{existing}\n\n{appended}")
+        };
+        let front = front.map(FrontMatter::from_raw);
+        let content = frontmatter::join(front.as_ref().map(FrontMatter::as_str), &merged);
+        atomic::write(&path, content.as_bytes())?;
+        self.read_chapter_cache(target);
         self.save_manifest()
     }
 

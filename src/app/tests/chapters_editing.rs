@@ -500,3 +500,146 @@ fn an_unknown_section_role_is_rejected_without_changing_it() {
         "an unknown role leaves it a body chapter"
     );
 }
+
+// --- Split / merge / duplicate (#585) ----------------------------------------
+
+/// The active chapter "first chapter" splits at the cursor: the head stays, the
+/// tail becomes a new chapter inserted right after, each with the right body and
+/// word count, and the manifest persists the new order.
+#[test]
+fn split_active_chapter_at_the_cursor_makes_two() {
+    let (mut app, dir) = two_chapter_app("split"); // ch0 "first chapter\n"
+                                                   // Place the cursor after "first " (6 graphemes) so the seam is mid-body.
+    for _ in 0..6 {
+        app.on_key(key(KeyCode::Right));
+    }
+    app.on_key(ctrl('g')); // browse, selection on the active chapter 0
+    app.on_key(key(KeyCode::Char('x')));
+    assert!(matches!(app.mode, Mode::Prompt(_)));
+    type_str(&mut app, "Tail");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(titles(&app), vec!["One", "Tail", "Two"]);
+    // The browser selects the new tail chapter.
+    assert_eq!(nav_sel(&app), 1);
+    // Head and tail bodies, on disk and in the cached counts.
+    let reopened = Project::open(&dir).unwrap();
+    assert_eq!(project_titles(&reopened), vec!["One", "Tail", "Two"]);
+    assert_eq!(reopened.chapter_body(0).trim(), "first");
+    assert_eq!(reopened.chapter_body(1).trim(), "chapter");
+    assert_eq!(reopened.chapter_words(0), 1);
+    assert_eq!(reopened.chapter_words(1), 1);
+    // The two halves still total the original two words, booked as neither added
+    // nor removed — a split is a structural move, not writing.
+    app.on_idle();
+    assert_eq!(app.added, 0);
+    assert_eq!(app.removed, 0);
+}
+
+/// Splitting with nothing after the cursor is refused (there's no tail to make).
+#[test]
+fn split_with_an_empty_tail_is_refused() {
+    let (mut app, _dir) = two_chapter_app("split-empty"); // ch0 "first chapter\n"
+                                                          // Cursor at the very end (End-of-buffer): everything is head, no tail.
+    for _ in 0..20 {
+        app.on_key(key(KeyCode::Right));
+    }
+    for _ in 0..5 {
+        app.on_key(key(KeyCode::Down)); // past the last line, lands at the end
+    }
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Char('x')));
+    type_str(&mut app, "Tail");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(titles(&app), vec!["One", "Two"], "no chapter was added");
+}
+
+/// Splitting only applies to the open chapter; choosing a different one in the
+/// browser explains that rather than prompting for a title that can't apply.
+#[test]
+fn split_a_non_active_chapter_is_refused() {
+    let (mut app, _dir) = two_chapter_app("split-nonactive");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1, which is not active
+    app.on_key(key(KeyCode::Char('x')));
+    assert!(matches!(app.mode, Mode::Nav { .. }), "no prompt opened");
+    assert_eq!(titles(&app), vec!["One", "Two"]);
+}
+
+/// Merging chapter 1 into chapter 0 combines their bodies into the first file,
+/// retires the merged file to `unused/`, and leaves the manuscript's words intact
+/// (nothing booked as removed — the prose only moved).
+#[test]
+fn merge_combines_into_the_chapter_above_and_keeps_the_words() {
+    let (mut app, dir) = two_chapter_app("merge");
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1 ("Two")
+    app.on_key(key(KeyCode::Char('M')));
+    assert!(matches!(app.mode, Mode::Prompt(_)));
+    app.on_key(key(KeyCode::Char('y'))); // confirm
+
+    assert_eq!(titles(&app), vec!["One"]);
+    assert_eq!(nav_sel(&app), 0);
+    assert!(dir.join("unused").join("two.md").exists());
+    let reopened = Project::open(&dir).unwrap();
+    let body = reopened.chapter_body(0);
+    assert!(body.contains("first chapter"), "{body:?}");
+    assert!(body.contains("second chapter"), "{body:?}");
+    // All four words survive in the combined chapter; none are booked as removed.
+    assert_eq!(reopened.chapter_words(0), 4);
+    app.on_idle();
+    assert_eq!(app.removed, 0);
+    assert_eq!(
+        app.moved_to_unused, 0,
+        "a merge keeps the prose in the book"
+    );
+}
+
+/// Merging the active chapter into the one above reloads the combined chapter
+/// into the buffer so the editor shows the merged result.
+#[test]
+fn merge_reloads_the_buffer_when_the_active_chapter_is_involved() {
+    let (mut app, _dir) = two_chapter_app("merge-active");
+    app.on_key(ctrl('n')); // make chapter 1 active
+    assert_eq!(app.project.active_index(), 1);
+    app.on_key(ctrl('g')); // selection follows to chapter 1
+    app.on_key(key(KeyCode::Char('M')));
+    app.on_key(key(KeyCode::Char('y')));
+
+    assert_eq!(titles(&app), vec!["One"]);
+    assert_eq!(app.project.active_index(), 0);
+    let text = app.buffer.text();
+    assert!(text.contains("first chapter"), "{text:?}");
+    assert!(text.contains("second chapter"), "{text:?}");
+}
+
+/// The first chapter has nothing above it to merge into; the key is refused.
+#[test]
+fn merge_the_first_chapter_is_refused() {
+    let (mut app, _dir) = two_chapter_app("merge-first");
+    app.on_key(ctrl('g')); // selection on chapter 0
+    app.on_key(key(KeyCode::Char('M')));
+    assert!(matches!(app.mode, Mode::Nav { .. }), "no prompt opened");
+    assert_eq!(titles(&app), vec!["One", "Two"]);
+}
+
+/// Duplicating a chapter inserts a verbatim copy right after it, with the typed
+/// title, and the copy carries the same body and word count.
+#[test]
+fn duplicate_adds_a_copy_after_the_original() {
+    let (mut app, dir) = two_chapter_app("dup");
+    app.on_key(ctrl('g')); // selection on chapter 0 ("One", "first chapter")
+    app.on_key(key(KeyCode::Char('c')));
+    assert_eq!(prompt_input(&app), "One (copy)"); // prefilled
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(titles(&app), vec!["One", "One (copy)", "Two"]);
+    assert_eq!(nav_sel(&app), 1);
+    let reopened = Project::open(&dir).unwrap();
+    assert_eq!(project_titles(&reopened), vec!["One", "One (copy)", "Two"]);
+    assert_eq!(reopened.chapter_body(1).trim(), "first chapter");
+    assert_eq!(reopened.chapter_words(1), 2);
+    // A structural copy isn't authored prose — not booked as words added.
+    app.on_idle();
+    assert_eq!(app.added, 0);
+}
