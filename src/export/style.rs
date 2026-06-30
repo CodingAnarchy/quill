@@ -66,8 +66,9 @@ pub struct ExportStyle {
 }
 
 /// The CSS `text-align` values a heading may use (#470) — an allowlist, since the
-/// value is interpolated into the stylesheet.
-const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
+/// value is interpolated into the stylesheet. Public so the in-app style setter
+/// (#569) offers exactly the values the writers honor.
+pub const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
 
 /// The built-in preset names (#473, #482), in the order shown to authors. The
 /// single source of truth: [`preset_base`] resolves each one and the unknown-preset
@@ -144,6 +145,22 @@ fn preset_base(name: &str) -> Option<ExportStyle> {
         },
         _ => return None,
     })
+}
+
+/// A one-line description of a built-in preset's look (#569), for the in-app
+/// preset picker — the same library [`PRESET_NAMES`] enumerates. Returns an empty
+/// string for an unknown name (which the picker never passes).
+pub(crate) fn preset_blurb(name: &str) -> &'static str {
+    match name {
+        "classic" => "* * * scene breaks, drop caps, ❦ title/part ornaments",
+        "modern" => "left-aligned headings, • scene breaks",
+        "literary" => "⁂ asterism scene breaks and drop caps, no ornaments",
+        "romance" => "❀ scene breaks, drop caps, ❦ ornaments",
+        "thriller" => "left-aligned headings, em-dash (—) scene breaks, spare",
+        "fantasy" => "❖ scene breaks, drop caps, ⚜ fleur-de-lis ornaments",
+        "minimalist" => "left-aligned headings, a single centered mid-dot (·)",
+        _ => "",
+    }
 }
 
 /// Which text a [`EmbeddedFont`] styles.
@@ -645,6 +662,19 @@ mod tests {
                 "preset '{name}' should style something"
             );
         }
+    }
+
+    #[test]
+    fn every_preset_has_a_picker_blurb() {
+        // The in-app picker (#569) shows a blurb per preset; guard against a name
+        // being added to PRESET_NAMES without a matching `preset_blurb` arm.
+        for name in PRESET_NAMES {
+            assert!(
+                !preset_blurb(name).is_empty(),
+                "preset '{name}' should have a picker blurb"
+            );
+        }
+        assert!(preset_blurb("nope").is_empty());
     }
 
     #[test]

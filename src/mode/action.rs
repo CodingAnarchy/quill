@@ -137,6 +137,71 @@ pub(crate) enum Command {
     /// Download the font family at this index and set it for `target` in the
     /// project's `[style]` (#494).
     ApplyFont(usize, FontTarget),
+    /// Open one of the export-style sub-pickers (#569) — preset, heading
+    /// alignment, drop caps, or print trim — from the style setter menu.
+    OpenStylePicker(StylePicker),
+    /// Set (or clear) the `[style]` preset (#569): the index into the preset
+    /// library, or `None` to clear it back to no preset.
+    SetStylePreset(Option<usize>),
+    /// Set (or clear) `[style] heading_align` (#569): the index into the
+    /// alignment allowlist, or `None` for the default (centered).
+    SetStyleAlign(Option<usize>),
+    /// Set (or clear) `[style] drop_cap` (#569): `Some` to write it, `None` to
+    /// clear back to the default (off).
+    SetStyleDropCap(Option<bool>),
+    /// Set the `[print] trim` size (#569): the index into the trim-size list.
+    SetStyleTrim(usize),
+    /// Open the text prompt for a free-text `[style]` knob (#569) — the scene-break
+    /// glyph or a title/part ornament.
+    EditStyleText(StyleTextKnob),
+}
+
+/// One of the export-style setter's discrete sub-pickers (#569) — a small list the
+/// menu opens, each emitting a `Set…` command on Enter. (The free-text knobs use a
+/// prompt instead; see [`StyleTextKnob`].)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StylePicker {
+    /// The built-in preset library (or "(none)").
+    Preset,
+    /// The heading-alignment allowlist (or "(default)").
+    Align,
+    /// On / off / default for drop caps.
+    DropCap,
+    /// The supported print trim sizes.
+    Trim,
+}
+
+/// A free-text `[style]` knob the in-app setter edits through a prompt (#569) —
+/// the divider glyph and the title/part ornaments, each a short string the writers
+/// render verbatim. (The font/image paths have their own browser, #494.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StyleTextKnob {
+    /// The scene-break divider glyph (`scene_break`).
+    SceneBreak,
+    /// The title-page ornament (`title_ornament`).
+    TitleOrnament,
+    /// The part-divider ornament (`part_ornament`).
+    PartOrnament,
+}
+
+impl StyleTextKnob {
+    /// The `[style]` key this knob is stored under in `book.toml`.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            StyleTextKnob::SceneBreak => "scene_break",
+            StyleTextKnob::TitleOrnament => "title_ornament",
+            StyleTextKnob::PartOrnament => "part_ornament",
+        }
+    }
+
+    /// A human label for the menu row, prompt, and status message.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            StyleTextKnob::SceneBreak => "scene-break glyph",
+            StyleTextKnob::TitleOrnament => "title ornament",
+            StyleTextKnob::PartOrnament => "part ornament",
+        }
+    }
 }
 
 /// Which `[style]` font slot(s) a chosen curated font fills (#494) — picked after
@@ -239,6 +304,10 @@ pub(crate) enum Action {
     /// Browse the curated open-licensed font library, download a font into the
     /// project, and set it for the designed exports' `[style]` (#494).
     BrowseFonts,
+    /// Open the export-style setter — pick a preset and the common `[style]` knobs
+    /// (scene break, drop caps, heading alignment, ornaments) and the `[print]`
+    /// trim size, persisting each to `book.toml` (#569).
+    SetExportStyle,
 }
 
 impl Action {
@@ -265,6 +334,7 @@ impl Action {
         Action::Export(ExportFormat::Pdf),
         Action::Export(ExportFormat::PdfPrint),
         Action::BrowseFonts,
+        Action::SetExportStyle,
         // Reports
         Action::ProgressReport,
         Action::AnalysisReport,
@@ -355,6 +425,7 @@ impl Action {
             Action::Assistant => "assistant",
             Action::InsertSnippet => "snippet",
             Action::BrowseFonts => "fonts:browse",
+            Action::SetExportStyle => "style:set",
         }
     }
 
@@ -373,7 +444,7 @@ impl Action {
             | Action::ImportNotes
             | Action::NewProjectFromNotes
             | Action::ImportManuscript => "Project",
-            Action::Export(_) | Action::BrowseFonts => "Export",
+            Action::Export(_) | Action::BrowseFonts | Action::SetExportStyle => "Export",
             Action::ProgressReport | Action::AnalysisReport => "Reports",
             Action::Ai(_)
             | Action::RefreshSeriesBible
@@ -456,6 +527,7 @@ impl Action {
             Action::Assistant => "Authorial assistant",
             Action::InsertSnippet => "Insert snippet…",
             Action::BrowseFonts => "Browse & download fonts…",
+            Action::SetExportStyle => "Set export style…",
         }
     }
 

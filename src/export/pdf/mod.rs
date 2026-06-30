@@ -35,7 +35,7 @@ use super::{
 };
 use crate::frontmatter::Epigraph;
 
-pub use self::layout::{trim_points, PrintConfig, DEFAULT_TRIM};
+pub use self::layout::{trim_points, PrintConfig, DEFAULT_TRIM, TRIM_NAMES};
 
 // Type sizes and vertical rhythm, shared by both profiles (in points).
 pub(super) const BODY_SIZE: f32 = 12.0;

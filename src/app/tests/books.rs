@@ -462,12 +462,13 @@ fn a_standalone_export_menu_lists_the_preview_then_each_format_once() {
     let Mode::Palette(p) = &app.mode else {
         panic!("export palette")
     };
-    // The style preview leads, then the seven formats once each (no series/book
-    // scope duplication for a standalone novel).
-    assert_eq!(p.items.len(), 8);
-    assert_eq!(p.items[0].label, "Preview style…");
-    assert_eq!(p.items[1].label, "Manuscript (Markdown)");
-    assert_eq!(p.items[7].label, "PDF (print interior)");
+    // The style setter and preview lead (#569), then the seven formats once each
+    // (no series/book scope duplication for a standalone novel).
+    assert_eq!(p.items.len(), 9);
+    assert_eq!(p.items[0].label, "Set export style…");
+    assert_eq!(p.items[1].label, "Preview style…");
+    assert_eq!(p.items[2].label, "Manuscript (Markdown)");
+    assert_eq!(p.items[8].label, "PDF (print interior)");
 }
 
 fn report_text(app: &App) -> String {

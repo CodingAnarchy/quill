@@ -119,8 +119,9 @@ keystrokes that stay out of the way.
   gutter, running heads (book title on the left page, author on the right), page
   numbers at the outer corner, chapters starting on a right-hand (recto) page,
   and the body fonts **embedded** — what services like KDP and IngramSpark
-  require. Set the trim in a `[print]` table in `book.toml` (`trim = "6x9"`;
-  also `5x8`, `5.5x8.5`; default `6x9`). Current limitations: those three trim
+  require. Set the trim from the **Set export style…** menu (below) or in a
+  `[print]` table in `book.toml` (`trim = "6x9"`; also `5x8`, `5.5x8.5`; default
+  `6x9`). Current limitations: those three trim
   sizes only, no bleed, and no cover/spine (a cover is a separate artifact);
   Latin-1 text as above. The default 6×9 interior (0.875″ inside, 0.5″ outside,
   0.75″ top/bottom margins) clears KDP's published minimums; validate the file in
@@ -164,7 +165,17 @@ keystrokes that stay out of the way.
   - `fantasy` — `❖` scene breaks, drop caps, `⚜` (fleur-de-lis) ornaments
   - `minimalist` — left-aligned headings, a single centered mid-dot (`·`)
 
-  With no `[style]`, the output is exactly the plain default. Both designed formats
+  You don't have to hand-edit `book.toml` to choose any of this. The export menu
+  (`Ctrl-e`) leads with **Set export style…** (also the `style:set` run-action),
+  a menu of the common knobs — each showing its current value — where you pick a
+  preset, set the scene-break glyph, heading alignment, drop caps, and the
+  title/part ornaments, and choose the print trim size from its allowed set. Each
+  choice is spliced straight into the `[style]` / `[print]` tables, leaving the
+  rest of the manifest (other sections, comments, formatting) byte-for-byte, and
+  takes effect on the next export and in the preview with no restart. Hand-editing
+  the manifest still works and round-trips; setting the style from the app is for a
+  standalone novel (a multi-book series sets `[style]` / `[print]` per book by
+  hand). With no `[style]`, the output is exactly the plain default. Both designed formats
   read `[style]`; the plain formats (Markdown, Word, Scrivener, Vellum) ignore it.
   The PDF honors the fonts, scene-break glyph (including decorative ornaments like
   `❦`/`⚜`, via the fallback font), heading alignment, drop caps, presets, and raster

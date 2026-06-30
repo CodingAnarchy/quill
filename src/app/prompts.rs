@@ -258,6 +258,7 @@ impl App {
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
             | Pending::SetGoal(_)
+            | Pending::SetStyleText(_)
             | Pending::AskAi
             | Pending::Thesaurus
             | Pending::Commit
@@ -319,6 +320,12 @@ impl App {
                                 // next goal field (or re-prompt on a bad value). The
                                 // flow drives the mode itself, so don't reset it here.
                                 self.apply_goal(field, text);
+                            }
+                            Pending::SetStyleText(knob) => {
+                                // Splice the `[style]` knob (blank clears it). The
+                                // setter re-opens the style menu itself, so don't
+                                // reset the mode here.
+                                self.apply_style_text(knob, text);
                             }
                             Pending::Annotate { start, end } => {
                                 // Back to editing; the note anchors to its range (#302).

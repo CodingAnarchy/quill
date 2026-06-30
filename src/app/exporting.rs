@@ -7,7 +7,7 @@ use super::*;
 
 use crate::export::{self, Chapter, Document, ExportStyle, Part};
 use crate::frontmatter::{Band, Epigraph};
-use crate::mode::{Command, ExportFormat, ExportScope, Palette, PaletteItem};
+use crate::mode::{Action, Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
 
 /// The export formats with their menu label and description.
@@ -58,6 +58,11 @@ impl App {
             PaletteItem::new(label, desc, Command::Export(format, scope))
         };
         let mut items = Vec::new();
+        items.push(PaletteItem::new(
+            "Set export style…",
+            "Pick a style preset, the common knobs, and the print trim size (#569)",
+            Command::Run(Action::SetExportStyle),
+        ));
         items.push(PaletteItem::new(
             "Preview style…",
             "Open a styled sample of your [style] settings in your EPUB reader",
