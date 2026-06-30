@@ -5,7 +5,7 @@
 //! editor state and key dispatch (a child module, so it keeps access to `App`'s
 //! private fields). See `docs/ai-features.md`.
 
-use super::bible_review::Staged;
+use super::bible_review::{Staged, StagedTally};
 use super::worker::bible_tracker;
 use super::*;
 use crate::theme;
@@ -460,35 +460,23 @@ impl App {
 
         let dir = self.project.root.join("bible").join("characters");
         let today = date::iso(date::today());
-        let mut written = 0;
-        let mut drift = 0;
-        let mut conflicts = Vec::new();
-        let mut failures = Vec::new();
-        for c in &chars {
-            drift += c.drift.len();
+        let drift: usize = chars.iter().map(|c| c.drift.len()).sum();
+        let tally = StagedTally::from(chars.iter().map(|c| {
             let path = dir.join(format!("{}.md", bible::slug(&c.name)));
-            match self.stage_bible(path, &c.name, |notes| {
+            self.stage_bible(path, &c.name, |notes| {
                 character::render_profile(c, notes, &today)
-            }) {
-                Staged::Wrote => written += 1,
-                Staged::Conflict(conflict) => conflicts.push(conflict),
-                Staged::Failed(msg) => failures.push(msg),
-            }
-        }
+            })
+        }));
 
-        if !failures.is_empty() {
-            self.message = Some(write_failure_message(&failures));
-        } else if conflicts.is_empty() {
-            self.record_pass_state(); // the bible now reflects this manuscript state (#90)
-            self.show_ai(character_summary_lines(chars.len(), written, drift));
-        } else {
-            let pending = conflicts.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview {
-                conflicts,
-                editing: None,
-            }));
-            self.message = Some(format!("Wrote {written} · {pending} need review"));
-        }
+        let count = chars.len();
+        self.resolve_staged(
+            tally,
+            |written, pending| format!("Wrote {written} · {pending} need review"),
+            |app, written| {
+                app.record_pass_state(); // the bible now reflects this manuscript state (#90)
+                app.show_ai(character_summary_lines(count, written, drift));
+            },
+        );
     }
 
     /// Count a character's name/alias mentions across the manuscript and record
@@ -738,42 +726,46 @@ impl App {
     ) {
         self.overlay = None;
         let today = date::iso(date::today());
-        let mut written = Vec::new();
-        let mut conflicts = Vec::new();
-        let mut failures = Vec::new();
-        for (kind, file, text) in artifacts {
+        // `Staged::Wrote` carries no path, so capture each successful write's
+        // label as we stage, for the clean-success listing below.
+        let mut written_paths = Vec::new();
+        let tally = StagedTally::from(artifacts.into_iter().map(|(kind, file, text)| {
             let path = self.project.root.join(subdir).join(file);
             let title = format!("title: {kind}\n");
-            match self.stage_bible(path, kind, |notes| {
+            let staged = self.stage_bible(path, kind, |notes| {
                 bible::render(&title, &text, notes, &today)
-            }) {
-                Staged::Wrote => written.push(format!("{subdir}/{file}")),
-                Staged::Conflict(c) => conflicts.push(c),
-                Staged::Failed(msg) => failures.push(msg),
+            });
+            if matches!(staged, Staged::Wrote) {
+                written_paths.push(format!("{subdir}/{file}"));
             }
-        }
+            staged
+        }));
 
-        if !failures.is_empty() {
-            self.message = Some(write_failure_message(&failures));
-        } else if written.is_empty() && conflicts.is_empty() {
-            self.message = Some(format!("{label}: nothing generated"));
-        } else if conflicts.is_empty() {
-            let mut lines = vec![Line::raw(format!("{label} written:")), Line::raw("")];
-            lines.extend(written.into_iter().map(|w| Line::raw(format!("  {w}"))));
-            lines.push(Line::raw(""));
-            lines.push(Line::raw(
-                "Off-manuscript drafts — edit freely; never part of the novel.",
-            ));
-            self.show_ai(lines);
-        } else {
-            let pending = conflicts.len();
-            let n = written.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview {
-                conflicts,
-                editing: None,
-            }));
-            self.message = Some(format!("Wrote {n} · {pending} need review"));
-        }
+        let label = label.to_string();
+        // Every `Staged::Wrote` pushed one label, so `written` (the tally count)
+        // equals `written_paths.len()`; use it so only the clean closure owns the
+        // list, leaving the conflict closure free of a competing borrow.
+        self.resolve_staged(
+            tally,
+            |written, pending| format!("Wrote {written} · {pending} need review"),
+            |app, _written| {
+                if written_paths.is_empty() {
+                    app.message = Some(format!("{label}: nothing generated"));
+                    return;
+                }
+                let mut lines = vec![Line::raw(format!("{label} written:")), Line::raw("")];
+                lines.extend(
+                    written_paths
+                        .into_iter()
+                        .map(|w| Line::raw(format!("  {w}"))),
+                );
+                lines.push(Line::raw(""));
+                lines.push(Line::raw(
+                    "Off-manuscript drafts — edit freely; never part of the novel.",
+                ));
+                app.show_ai(lines);
+            },
+        );
     }
 
     /// Whether an AI request is currently in flight (for the status indicator).

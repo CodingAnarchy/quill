@@ -5,7 +5,7 @@
 //! child module, so it keeps access to `App`'s private fields.
 
 use super::assist::write_failure_message;
-use super::bible_review::Staged;
+use super::bible_review::{Staged, StagedTally};
 use super::*;
 use crate::ai::scaffold;
 
@@ -313,38 +313,26 @@ impl App {
             );
         }
 
-        let mut conflicts = Vec::new();
-        let mut failures = Vec::new();
-        let mut written = 0;
-        for result in staged {
-            match result {
-                Staged::Wrote => written += 1,
-                Staged::Conflict(x) => conflicts.push(x),
-                Staged::Failed(m) => failures.push(m),
-            }
-        }
+        let tally = StagedTally::from(staged.into_iter());
 
-        if !failures.is_empty() {
-            self.message = Some(write_failure_message(&failures));
-        } else if conflicts.is_empty() {
-            self.show_ai(import_summary_lines(
-                &source,
-                chars.len(),
-                setting_has,
-                timeline_has,
-                outline_has,
-                written,
-            ));
-        } else {
-            let pending = conflicts.len();
-            self.mode = Mode::BibleReview(Box::new(BibleReview {
-                conflicts,
-                editing: None,
-            }));
-            self.message = Some(format!(
-                "Imported {source}: wrote {written} · {pending} need review"
-            ));
-        }
+        let count = chars.len();
+        let summary_source = source.clone();
+        self.resolve_staged(
+            tally,
+            |written, pending| {
+                format!("Imported {source}: wrote {written} · {pending} need review")
+            },
+            |app, written| {
+                app.show_ai(import_summary_lines(
+                    &summary_source,
+                    count,
+                    setting_has,
+                    timeline_has,
+                    outline_has,
+                    written,
+                ));
+            },
+        );
     }
 }
 

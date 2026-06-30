@@ -21,8 +21,8 @@ use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BibleReview, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode, Overlay,
-    Palette, PaletteItem, Pending, RefFiles, VimState,
+    Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode, Overlay, Palette,
+    PaletteItem, Pending, RefFiles, VimState,
 };
 use crate::project::{Manifest, Project};
 use crate::recovery;
