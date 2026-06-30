@@ -309,6 +309,18 @@ fn fenced_code(block: &str) -> Option<String> {
     Some(inner.join("\n"))
 }
 
+/// The classified prose blocks of a chapter body, in order. Splits on blank
+/// lines (a fenced code block kept whole) and classifies each block, dropping
+/// empties — the shared body-segmentation seam every format writer renders from,
+/// so a change to segmentation lands in one place. Each writer maps the yielded
+/// [`Prose`] to its own markup; any per-format state (the EPUB drop-cap
+/// `opening` flag) is computed by the caller from the yielded variant.
+fn prose_blocks(body: &str) -> impl Iterator<Item = Prose> {
+    body_blocks(body)
+        .into_iter()
+        .filter_map(|block| classify_block(&block))
+}
+
 /// Classify one body block (already split via [`body_blocks`]), or `None` when
 /// it's empty.
 fn classify_block(block: &str) -> Option<Prose> {
@@ -348,20 +360,40 @@ fn is_thematic_break(block: &str) -> bool {
     marks.len() >= 3 && matches!(marks[0], '-' | '_' | '*') && marks.iter().all(|&c| c == marks[0])
 }
 
+/// Shared epigraph driver: render each text line through `line_fn` and, when an
+/// attribution is present, render it through `attribution_fn` (which receives the
+/// bare attribution, prefixing the conventional `— ` itself). One place owns the
+/// line/attribution ordering; each format supplies only its per-line and
+/// attribution markup.
+fn render_epigraph(
+    epigraph: &Epigraph,
+    line_fn: impl Fn(&str) -> String,
+    attribution_fn: impl Fn(&str) -> String,
+) -> String {
+    let mut out = String::new();
+    for line in epigraph.text.lines() {
+        out.push_str(&line_fn(line));
+    }
+    if let Some(attribution) = &epigraph.attribution {
+        out.push_str(&attribution_fn(attribution));
+    }
+    out
+}
+
 /// An epigraph as a Markdown block quote — each line prefixed `> `, the
 /// attribution on its own dimmed line — set apart from the surrounding prose.
 fn epigraph_block(epigraph: &Epigraph) -> String {
-    let mut out = String::new();
-    for line in epigraph.text.lines() {
-        if line.is_empty() {
-            out.push_str(">\n");
-        } else {
-            out.push_str(&format!("> {line}\n"));
-        }
-    }
-    if let Some(attribution) = &epigraph.attribution {
-        out.push_str(&format!(">\n> — {attribution}\n"));
-    }
+    let mut out = render_epigraph(
+        epigraph,
+        |line| {
+            if line.is_empty() {
+                ">\n".to_string()
+            } else {
+                format!("> {line}\n")
+            }
+        },
+        |attribution| format!(">\n> — {attribution}\n"),
+    );
     out.push('\n');
     out
 }

@@ -11,7 +11,7 @@ use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 use super::{
-    body_blocks, classify_block, inline_runs, xml_escape, Block, Document, Prose, SCENE_BREAK,
+    inline_runs, prose_blocks, render_epigraph, xml_escape, Block, Document, Prose, SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -165,10 +165,8 @@ fn book_body(doc: &Document, profile: Profile) -> String {
                 if let Some(epigraph) = &chapter.epigraph {
                     body.push_str(&epigraph_paras(epigraph));
                 }
-                for prose_block in body_blocks(&chapter.body) {
-                    if let Some(p) = prose_paragraph(&prose_block) {
-                        body.push_str(&p);
-                    }
+                for prose in prose_blocks(&chapter.body) {
+                    body.push_str(&prose_paragraph(&prose));
                 }
             }
         }
@@ -221,22 +219,22 @@ fn heading(title: &str, profile: Profile) -> String {
     }
 }
 
-/// One body block → a paragraph, or `None` for an empty block. A scene break
-/// becomes a centered divider; a heading line (`#`…) a centered bold line;
-/// otherwise a double-spaced, first-line-indented paragraph with `*`/`**`
-/// emphasis as italic/bold runs.
-fn prose_paragraph(block: &str) -> Option<String> {
-    Some(match classify_block(block)? {
+/// One classified body block → a paragraph. A scene break becomes a centered
+/// divider; a heading line (`#`…) a centered bold line; otherwise a
+/// double-spaced, first-line-indented paragraph with `*`/`**` emphasis as
+/// italic/bold runs.
+fn prose_paragraph(prose: &Prose) -> String {
+    match prose {
         Prose::SceneBreak => para(
             r#"<w:spacing w:before="120" w:after="120" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
             run(SCENE_BREAK, false, false, None),
         ),
         Prose::Heading(heading) => para(
             r#"<w:spacing w:before="120" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
-            run(&heading, true, false, None),
+            run(heading, true, false, None),
         ),
         Prose::Paragraph(text) => {
-            let runs: String = inline_runs(&text)
+            let runs: String = inline_runs(text)
                 .into_iter()
                 .map(|r| run(&r.text, r.bold, r.italic, None))
                 .collect();
@@ -245,9 +243,9 @@ fn prose_paragraph(block: &str) -> Option<String> {
         // Verbatim monospace: line breaks preserved, no indent or emphasis (#522).
         Prose::Preformatted(code) => para(
             r#"<w:spacing w:line="240" w:lineRule="auto"/>"#,
-            mono_run(&code),
+            mono_run(code),
         ),
-    })
+    }
 }
 
 /// A single monospaced run carrying a preformatted block — its lines separated by
@@ -266,17 +264,11 @@ fn mono_run(code: &str) -> String {
 /// attribution on its own line.
 fn epigraph_paras(epigraph: &Epigraph) -> String {
     let ppr = r#"<w:ind w:left="1440"/><w:spacing w:line="240" w:lineRule="auto"/>"#;
-    let mut out = String::new();
-    for line in epigraph.text.lines() {
-        out.push_str(&para(ppr, run(line, false, true, None)));
-    }
-    if let Some(attribution) = &epigraph.attribution {
-        out.push_str(&para(
-            ppr,
-            run(&format!("— {attribution}"), false, true, None),
-        ));
-    }
-    out
+    render_epigraph(
+        epigraph,
+        |line| para(ppr, run(line, false, true, None)),
+        |attribution| para(ppr, run(&format!("— {attribution}"), false, true, None)),
+    )
 }
 
 /// A `<w:p>` with the given paragraph properties (omitted when empty) and runs.
