@@ -24,6 +24,10 @@ pub struct Document {
     pub subtitle: Option<String>,
     pub author: Option<String>,
     pub series: Option<String>,
+    /// Book-level publishing metadata (#583) — ISBN, publisher, publication date,
+    /// language, and rights — emitted into the EPUB OPF / PDF / DOCX and the
+    /// generated copyright page.
+    pub publishing: PubMeta,
     /// The book epigraph, rendered at the start.
     pub epigraph: Option<Epigraph>,
     /// Front-matter sections (foreword, prologue, …), in order.
@@ -33,6 +37,69 @@ pub struct Document {
     pub parts: Vec<Part>,
     /// Back-matter sections (epilogue, appendix, …), in order.
     pub back: Vec<Chapter>,
+}
+
+/// Book-level publishing metadata (#583): the fields a published book carries
+/// beyond its title block — ISBN, publisher, publication date, language, and the
+/// rights/copyright line. Each is optional; absent fields are simply omitted from
+/// the OPF, the copyright page, and the PDF/DOCX. `language` is the BCP-47 tag the
+/// EPUB drives `dc:language`/`xml:lang` from; [`PubMeta::language`] supplies the
+/// `en` fallback when unset (replacing the old hardcoded `en`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PubMeta {
+    pub isbn: Option<String>,
+    pub publisher: Option<String>,
+    /// Publication date (`YYYY` or `YYYY-MM-DD`).
+    pub date: Option<String>,
+    /// BCP-47 language tag (e.g. `en`, `fr`, `es-419`). Read via [`Self::language`].
+    pub lang: Option<String>,
+    /// The rights / copyright line (e.g. `© 2026 A. Writer. All rights reserved.`).
+    pub rights: Option<String>,
+}
+
+impl PubMeta {
+    /// The BCP-47 language tag, falling back to `en` when unset — the single place
+    /// the EPUB `dc:language`/`xml:lang` default lives (#583), no longer hardcoded.
+    pub fn language(&self) -> &str {
+        self.lang.as_deref().unwrap_or("en")
+    }
+
+    /// Whether a copyright page should be rendered: true once any field that
+    /// belongs on it (publisher, date, ISBN, or an explicit rights line) is set.
+    /// A book with no publishing metadata gets no copyright page, so the default
+    /// output is unchanged.
+    fn has_copyright_page(&self) -> bool {
+        self.rights.is_some()
+            || self.publisher.is_some()
+            || self.date.is_some()
+            || self.isbn.is_some()
+    }
+}
+
+/// The lines of the generated copyright page (#583), in order, for a book whose
+/// publishing metadata warrants one — the rights line, then publisher, the
+/// publication-date line, and the ISBN. Each writer renders these lines in its own
+/// markup (centered/italic prose), the way [`render_epigraph`] is shared. Returns
+/// an empty vector when no copyright page is warranted, so callers can skip the
+/// section entirely.
+pub(crate) fn copyright_lines(meta: &PubMeta) -> Vec<String> {
+    if !meta.has_copyright_page() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    if let Some(rights) = &meta.rights {
+        lines.push(rights.clone());
+    }
+    if let Some(publisher) = &meta.publisher {
+        lines.push(format!("Published by {publisher}"));
+    }
+    if let Some(date) = &meta.date {
+        lines.push(format!("First published {date}"));
+    }
+    if let Some(isbn) = &meta.isbn {
+        lines.push(format!("ISBN: {isbn}"));
+    }
+    lines
 }
 
 /// A named (or unnamed) grouping of body chapters.
@@ -423,6 +490,7 @@ mod tests {
             subtitle: Some("a novel".into()),
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
+            publishing: Default::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -444,6 +512,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -499,6 +568,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -526,6 +596,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -649,6 +720,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -671,6 +743,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: Some(epigraph("Roses are red\n\nViolets are blue", None)),
             front: vec![],
             parts: vec![],

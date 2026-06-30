@@ -56,6 +56,12 @@ keystrokes that stay out of the way.
   (portable, and your other keys are preserved), with status shown in the pane.
 - **Book & series metadata** — title, subtitle, author, and series, stored in
   the `book.toml` manifest and shown as a header above the chapter list.
+- **Publishing metadata & copyright page** — ISBN, publisher, publication date,
+  language (BCP-47), and a rights/copyright line, set via "Book details" and
+  stored in `book.toml`. They flow into the EPUB OPF (`dc:identifier` from the
+  ISBN, `dc:publisher`/`dc:date`/`dc:rights`, and `dc:language`/`xml:lang` from
+  the language), and a copyright page renders as front matter in EPUB, PDF, and
+  Word exports.
 - **Multi-book series & tree navigation** — a project can hold a whole series
   (a `[[books]]` array, each book with its own parts and chapters) or a single
   standalone novel, unchanged. **Switch book** (Ctrl-K) moves the editor, pane,

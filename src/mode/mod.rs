@@ -475,6 +475,13 @@ pub(crate) enum MetaField {
     Series,
     BookEpigraph,
     BookEpigraphBy,
+    /// Publishing metadata (#583): ISBN, publisher, publication date, language tag,
+    /// and the rights/copyright line — all optional, clearing on blank.
+    Isbn,
+    Publisher,
+    PubDate,
+    Language,
+    Rights,
 }
 
 impl MetaField {
@@ -503,6 +510,13 @@ pub(crate) enum BookField {
     Subtitle,
     Author,
     Series,
+    /// Publishing metadata (#583), appended to the chained flow after the title
+    /// fields: ISBN, publisher, publication date, language, and the rights line.
+    Isbn,
+    Publisher,
+    PubDate,
+    Language,
+    Rights,
 }
 
 impl BookField {
@@ -515,6 +529,11 @@ impl BookField {
             BookField::Subtitle => MetaField::Subtitle,
             BookField::Author => MetaField::Author,
             BookField::Series => MetaField::Series,
+            BookField::Isbn => MetaField::Isbn,
+            BookField::Publisher => MetaField::Publisher,
+            BookField::PubDate => MetaField::PubDate,
+            BookField::Language => MetaField::Language,
+            BookField::Rights => MetaField::Rights,
         }
     }
 
@@ -525,6 +544,11 @@ impl BookField {
             BookField::Subtitle => "Subtitle",
             BookField::Author => "Author",
             BookField::Series => "Series",
+            BookField::Isbn => "ISBN",
+            BookField::Publisher => "Publisher",
+            BookField::PubDate => "Publication date (YYYY or YYYY-MM-DD)",
+            BookField::Language => "Language (BCP-47 tag, e.g. en, fr)",
+            BookField::Rights => "Rights / copyright line",
         }
     }
 }

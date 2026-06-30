@@ -210,6 +210,40 @@ fn book_metadata_persists_and_old_manifests_still_parse() {
 }
 
 #[test]
+fn publishing_metadata_persists_and_round_trips() {
+    // Publishing metadata (#583) — ISBN, publisher, publication date, language,
+    // and rights — writes to the manifest and survives a reopen; absent fields
+    // aren't written back, so old manifests still parse.
+    let dir = temp_dir("publishing-meta");
+    let mut project = Project::create(&dir).unwrap();
+    assert_eq!(project.manifest.isbn, None);
+    assert_eq!(project.manifest.language, None);
+
+    project.manifest.isbn = Some("978-0-00-000000-0".into());
+    project.manifest.publisher = Some("Quill & Co.".into());
+    project.manifest.pub_date = Some("2026-06-30".into());
+    project.manifest.language = Some("fr".into());
+    project.manifest.rights = Some("© 2026 A. Writer".into());
+    project.save_manifest().unwrap();
+
+    let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+    assert!(toml.contains("isbn = "), "isbn written:\n{toml}");
+    assert!(toml.contains("language = \"fr\""), "language written");
+
+    let reopened = Project::open(&dir).unwrap();
+    assert_eq!(reopened.manifest.isbn.as_deref(), Some("978-0-00-000000-0"));
+    assert_eq!(reopened.manifest.publisher.as_deref(), Some("Quill & Co."));
+    assert_eq!(reopened.manifest.pub_date.as_deref(), Some("2026-06-30"));
+    assert_eq!(reopened.manifest.language.as_deref(), Some("fr"));
+    assert_eq!(
+        reopened.manifest.rights.as_deref(),
+        Some("© 2026 A. Writer")
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn book_epigraph_persists_and_builds() {
     let dir = temp_dir("book-epigraph");
     let mut project = Project::create(&dir).unwrap();

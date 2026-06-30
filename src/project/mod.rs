@@ -167,6 +167,21 @@ pub struct Manifest {
     pub epigraph: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epigraph_by: Option<String>,
+    /// Publishing metadata (#583): the ISBN (the EPUB `dc:identifier` when set),
+    /// publisher, publication date (`YYYY` or `YYYY-MM-DD`), BCP-47 language tag
+    /// (drives the EPUB `dc:language`/`xml:lang`, defaulting to `en`), and the
+    /// rights/copyright line. Each rides into the EPUB OPF / PDF / DOCX and the
+    /// generated copyright page; all optional and unset fields aren't written back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isbn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pub_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rights: Option<String>,
     /// Date the project was started (`YYYY-MM-DD`), anchoring the progress
     /// report's "days since start" and writing rate.
     #[serde(default, skip_serializing_if = "Option::is_none")]

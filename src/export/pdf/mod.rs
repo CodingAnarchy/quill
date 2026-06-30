@@ -30,8 +30,8 @@ use self::layout::Layout;
 use self::wrap::{segments, words_of, wrap_lines};
 use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
-    body_blocks, classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose,
-    Run, SCENE_BREAK,
+    body_blocks, classify_block, copyright_lines, inline_runs, Chapter, Document, ExportStyle,
+    ImageRole, Prose, PubMeta, Run, SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -166,6 +166,7 @@ fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
         doc.author.as_deref(),
         doc.epigraph.as_ref(),
     );
+    pdf.copyright_page(&doc.publishing);
     pdf.outline = book_outline(&mut pdf, doc);
     pdf.finish()
 }
@@ -184,6 +185,9 @@ fn render_series(
     pdf.set_heads(title, author.unwrap_or(title));
     pdf.cover_page();
     pdf.title_page(None, title, None, author, None);
+    if let Some(first) = books.first() {
+        pdf.copyright_page(&first.publishing);
+    }
     let mut outline = Vec::new();
     for book in books {
         pdf.set_heads(&book.title, author.unwrap_or(&book.title));
@@ -449,6 +453,24 @@ impl Pdf {
         if let Some(e) = epigraph {
             self.y -= BODY_LEADING * 3.0;
             self.epigraph(e);
+        }
+    }
+
+    /// The copyright page (#583), when publishing metadata warrants one: the rights
+    /// line, publisher, publication date, and ISBN, centered low on a fresh page.
+    /// Slots into the conventional front-matter order after the title page (cover →
+    /// title → copyright → body). No-op when no metadata is set, leaving the output
+    /// unchanged. Not a bookmark.
+    fn copyright_page(&mut self, publishing: &PubMeta) {
+        let lines = copyright_lines(publishing);
+        if lines.is_empty() {
+            return;
+        }
+        self.open_section();
+        // Set the block low on the page, the conventional copyright-page placement.
+        self.y = self.layout.page_h * 0.3;
+        for line in lines {
+            self.centered(&line, false, false, EPIGRAPH_SIZE, EPIGRAPH_LEADING);
         }
     }
 

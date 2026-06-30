@@ -5,7 +5,7 @@
 //! [`super`] so `finish` calls them unqualified.
 
 use super::{Item, Nav};
-use crate::export::{xml_escape, EmbeddedFont, EmbeddedImage, ImageRole};
+use crate::export::{xml_escape, EmbeddedFont, EmbeddedImage, ImageRole, PubMeta};
 
 /// The manifest id of the cover-image item (#582) — referenced by the EPUB 2
 /// `<meta name="cover">` so older readers find the cover.
@@ -23,6 +23,9 @@ pub(super) struct OpfMeta<'a> {
     pub author: Option<&'a str>,
     pub series: Option<&'a str>,
     pub modified: &'a str,
+    /// Publishing metadata (#583): drives `dc:publisher`/`dc:date`/`dc:rights` and
+    /// the `dc:language`/`xml:lang` (its `en` fallback when unset).
+    pub publishing: &'a PubMeta,
 }
 
 pub(super) fn build_opf(
@@ -48,9 +51,24 @@ pub(super) fn build_opf(
         ));
         meta.push_str("<meta refines=\"#subtitle\" property=\"title-type\">subtitle</meta>");
     }
-    meta.push_str("<dc:language>en</dc:language>");
+    // The language drives `dc:language` (and the package `xml:lang` below), the
+    // `en` fallback now living in `PubMeta::language` rather than hardcoded (#583).
+    meta.push_str(&format!(
+        "<dc:language>{}</dc:language>",
+        xml_escape(book.publishing.language())
+    ));
     if let Some(a) = book.author {
         meta.push_str(&format!("<dc:creator>{}</dc:creator>", xml_escape(a)));
+    }
+    // Publishing metadata (#583): publisher, publication date, and the rights line.
+    if let Some(p) = &book.publishing.publisher {
+        meta.push_str(&format!("<dc:publisher>{}</dc:publisher>", xml_escape(p)));
+    }
+    if let Some(d) = &book.publishing.date {
+        meta.push_str(&format!("<dc:date>{}</dc:date>", xml_escape(d)));
+    }
+    if let Some(r) = &book.publishing.rights {
+        meta.push_str(&format!("<dc:rights>{}</dc:rights>", xml_escape(r)));
     }
     if let Some(s) = book.series {
         meta.push_str(&format!(
@@ -124,11 +142,12 @@ pub(super) fn build_opf(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
             "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" ",
-            "unique-identifier=\"bookid\" xml:lang=\"en\">",
+            "unique-identifier=\"bookid\" xml:lang=\"{lang}\">",
             "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">{meta}</metadata>",
             "<manifest>{manifest}</manifest>",
             "<spine toc=\"ncx\">{spine}</spine></package>"
         ),
+        lang = xml_escape(book.publishing.language()),
         meta = meta,
         manifest = manifest,
         spine = spine,
@@ -153,17 +172,20 @@ fn manifest_item(id: &str, href: &str, media_type: &str, properties: Option<&str
     )
 }
 
-/// The EPUB 3 navigation document — a nested `<ol>` table of contents.
-pub(super) fn build_nav(entries: &[Nav]) -> String {
+/// The EPUB 3 navigation document — a nested `<ol>` table of contents. `lang` is
+/// the book language (#583), driving the `xml:lang`/`lang` (default `en`).
+pub(super) fn build_nav(entries: &[Nav], lang: &str) -> String {
+    let lang = xml_escape(lang);
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
             "<!DOCTYPE html>\n",
             "<html xmlns=\"http://www.w3.org/1999/xhtml\" ",
-            "xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"en\" lang=\"en\">",
+            "xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{lang}\" lang=\"{lang}\">",
             "<head><meta charset=\"utf-8\"/><title>Contents</title></head>",
             "<body><nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1>\n{ol}</nav></body></html>"
         ),
+        lang = lang,
         ol = nav_ol(entries),
     )
 }
@@ -236,7 +258,7 @@ mod tests {
     use std::io::{Cursor, Read};
 
     use crate::export::epub::{to_epub, to_epub_series};
-    use crate::export::{Chapter, Document, ExportStyle, Part};
+    use crate::export::{Chapter, Document, ExportStyle, Part, PubMeta};
     use crate::frontmatter::Epigraph;
 
     const MODIFIED: &str = "2026-06-27T00:00:00Z";
@@ -262,6 +284,7 @@ mod tests {
             subtitle: Some("a novel".into()),
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
+            publishing: Default::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -319,6 +342,98 @@ mod tests {
                 "spine {id} in manifest"
             );
         }
+    }
+
+    #[test]
+    fn opf_emits_publishing_metadata_and_drives_language() {
+        // With publishing metadata set (#583): the ISBN is the identifier, the
+        // language drives `dc:language` + `xml:lang`, and publisher/date/rights
+        // ride into the OPF.
+        let mut d = doc();
+        d.publishing = PubMeta {
+            isbn: Some("978-0-00-000000-0".into()),
+            publisher: Some("Quill & Co.".into()),
+            date: Some("2026-06-30".into()),
+            lang: Some("fr".into()),
+            rights: Some("© 2026 A. Writer".into()),
+        };
+        let opf = part(
+            &to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
+        assert!(
+            opf.contains("<dc:identifier id=\"bookid\">978-0-00-000000-0</dc:identifier>"),
+            "ISBN is the identifier: {opf}"
+        );
+        assert!(
+            !opf.contains("urn:quill:"),
+            "minted id not used when ISBN set"
+        );
+        assert!(opf.contains("<dc:language>fr</dc:language>"), "dc:language");
+        assert!(opf.contains("xml:lang=\"fr\""), "package xml:lang");
+        assert!(
+            opf.contains("<dc:publisher>Quill &amp; Co.</dc:publisher>"),
+            "publisher escaped: {opf}"
+        );
+        assert!(opf.contains("<dc:date>2026-06-30</dc:date>"), "date");
+        assert!(
+            opf.contains("<dc:rights>© 2026 A. Writer</dc:rights>"),
+            "rights"
+        );
+
+        // Default (no publishing metadata) → the minted id and the `en` fallback,
+        // exactly as before (#583 fallback).
+        let plain = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
+        assert!(
+            plain.contains("urn:quill:"),
+            "minted id by default: {plain}"
+        );
+        assert!(
+            plain.contains("<dc:language>en</dc:language>"),
+            "en default"
+        );
+        assert!(plain.contains("xml:lang=\"en\""), "en xml:lang default");
+        assert!(!plain.contains("<dc:publisher>"), "no publisher by default");
+        assert!(!plain.contains("<dc:rights>"), "no rights by default");
+    }
+
+    #[test]
+    fn a_copyright_page_follows_the_title_page_in_the_spine() {
+        // A book with publishing metadata gets a copyright page after the title
+        // page (cover → title → copyright → body), carrying the rights line.
+        let mut d = doc();
+        d.publishing = PubMeta {
+            publisher: Some("Quill & Co.".into()),
+            rights: Some("© 2026 A. Writer".into()),
+            ..Default::default()
+        };
+        let bytes = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+        let opf = part(&bytes, "OEBPS/content.opf");
+        let spine = &opf[opf.find("<spine").unwrap()..];
+        let title_at = spine.find("idref=\"title0001\"").expect("title in spine");
+        let copy_at = spine
+            .find("idref=\"copyright0002\"")
+            .expect("copyright in spine");
+        assert!(title_at < copy_at, "copyright follows title: {spine}");
+        // The copyright XHTML carries the rights line and publisher.
+        let page = part(&bytes, "OEBPS/copyright0002.xhtml");
+        assert!(page.contains("© 2026 A. Writer"), "rights line: {page}");
+        assert!(page.contains("Published by Quill &amp; Co."), "publisher");
+
+        // No publishing metadata → no copyright page (default output unchanged).
+        let plain = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
+        let names: Vec<String> = zip::ZipArchive::new(Cursor::new(plain))
+            .unwrap()
+            .file_names()
+            .map(str::to_string)
+            .collect();
+        assert!(
+            !names.iter().any(|n| n.contains("copyright")),
+            "no copyright page by default"
+        );
     }
 
     #[test]
@@ -425,6 +540,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
+            publishing: Default::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {

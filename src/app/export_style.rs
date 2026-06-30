@@ -654,6 +654,7 @@ mod tests {
                 subtitle: None,
                 author: None,
                 series: None,
+                publishing: Default::default(),
                 epigraph: None,
                 front: vec![],
                 parts: vec![crate::export::Part {

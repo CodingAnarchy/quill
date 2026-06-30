@@ -377,6 +377,7 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
         subtitle: None,
         author: None,
         series: None,
+        publishing: Default::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -447,6 +448,7 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
         subtitle: None,
         author: None,
         series: None,
+        publishing: Default::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
