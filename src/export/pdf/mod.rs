@@ -14,18 +14,20 @@
 //! glyphs used (#495), so files stay small. Designed typography (font choice,
 //! ornaments) is the styling epic; cover/bleed are a separate artifact.
 
+mod draw;
 mod font;
 mod images;
+mod layout;
 mod wrap;
 mod write;
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
-
-use self::font::{glyph_run, glyph_run_mono, Fonts, GidMap, ObjMap};
+use self::draw::{mono_wrap, num};
+use self::font::{Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
-use self::wrap::{segments, words_of, wrap_lines, Word};
+use self::layout::Layout;
+use self::wrap::{segments, words_of, wrap_lines};
 use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
     body_blocks, classify_block, inline_runs, Chapter, Document, ExportStyle, ImageRole, Prose,
@@ -33,10 +35,12 @@ use super::{
 };
 use crate::frontmatter::Epigraph;
 
+pub use self::layout::{trim_points, PrintConfig, DEFAULT_TRIM};
+
 // Type sizes and vertical rhythm, shared by both profiles (in points).
-const BODY_SIZE: f32 = 12.0;
-const BODY_LEADING: f32 = 15.0;
-const INDENT: f32 = 18.0; // first-line paragraph indent (~1.5em)
+pub(super) const BODY_SIZE: f32 = 12.0;
+pub(super) const BODY_LEADING: f32 = 15.0;
+pub(super) const INDENT: f32 = 18.0; // first-line paragraph indent (~1.5em)
 const HEADING_SIZE: f32 = 17.0;
 const HEADING_LEADING: f32 = 21.0;
 const TITLE_SIZE: f32 = 26.0;
@@ -44,31 +48,9 @@ const PART_SIZE: f32 = 20.0;
 const EPIGRAPH_SIZE: f32 = 11.0;
 const EPIGRAPH_LEADING: f32 = 14.0;
 const EPIGRAPH_INSET: f32 = 36.0; // left/right inset for the set-apart block
-const MONO_SIZE: f32 = 10.5; // fixed-width face for fenced blocks (#524)
+pub(super) const MONO_SIZE: f32 = 10.5; // fixed-width face for fenced blocks (#524)
 const MONO_LEADING: f32 = 13.0;
 const HEAD_SIZE: f32 = 10.0; // running heads + folios in the print profile
-
-/// The default print trim, used when a project sets no `[print] trim`.
-pub const DEFAULT_TRIM: &str = "6x9";
-
-/// Opt-in print-interior settings (#464), read from the manifest `[print]` table.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
-pub struct PrintConfig {
-    /// The book trim size, e.g. `"6x9"` (see [`trim_points`]). Absent → 6×9.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trim: Option<String>,
-}
-
-/// A named trim size in PDF points (1/72"), or `None` if unrecognized.
-pub fn trim_points(name: &str) -> Option<(f32, f32)> {
-    let (w, h) = match name {
-        "6x9" => (6.0, 9.0),
-        "5x8" => (5.0, 8.0),
-        "5.5x8.5" => (5.5, 8.5),
-        _ => return None,
-    };
-    Some((w * 72.0, h * 72.0))
-}
 
 /// Warnings for `[style]` settings the PDF writers can't honor (#490/#492), to
 /// surface alongside the export: SVG image ornaments can't be embedded (PDF takes
@@ -245,112 +227,6 @@ fn book_outline(pdf: &mut Pdf, doc: &Document) -> Vec<OutlineItem> {
         items.push(OutlineItem::new(ch.title.clone(), pdf.chapter(ch)));
     }
     items
-}
-
-/// The page geometry and font plan of one render — the only difference between the
-/// screen and print profiles.
-struct Layout {
-    page_w: f32,
-    page_h: f32,
-    margin_top: f32,
-    margin_bottom: f32,
-    /// The binding-side and outer margins. Equal for the screen profile; mirrored
-    /// by page parity for print (inside = the gutter side).
-    margin_inside: f32,
-    margin_outside: f32,
-    /// Flip inside/outside by page parity (the binding gutter) — print only.
-    mirrored: bool,
-    /// Draw verso/recto running heads — print only.
-    running_heads: bool,
-    /// Begin each section on a recto (odd) page, inserting a blank verso if needed.
-    recto_starts: bool,
-    /// The embedded Type0 fonts (body faces + broad fallback) — both profiles embed
-    /// (#492), so the PDF renders the full Unicode its fonts cover.
-    fonts: Fonts,
-}
-
-impl Layout {
-    /// The screen proof (#463): US-Letter, uniform 1" margins; the body serif (or a
-    /// configured font) and the fallback embedded (#492).
-    fn screen(style: &ExportStyle) -> Self {
-        Layout {
-            page_w: 612.0,
-            page_h: 792.0,
-            margin_top: 72.0,
-            margin_bottom: 72.0,
-            margin_inside: 72.0,
-            margin_outside: 72.0,
-            mirrored: false,
-            running_heads: false,
-            recto_starts: false,
-            fonts: Fonts::new(style),
-        }
-    }
-
-    /// The print interior (#464) at `trim_w`×`trim_h` points: generous top/bottom
-    /// margins, a wider binding (inside) margin than outside for the gutter, with
-    /// running heads, recto starts, and embedded fonts. Margins clear KDP's minimums
-    /// for a typical book.
-    fn print(trim_w: f32, trim_h: f32, style: &ExportStyle) -> Self {
-        Layout {
-            page_w: trim_w,
-            page_h: trim_h,
-            margin_top: 54.0,     // 0.75"
-            margin_bottom: 54.0,  // 0.75"
-            margin_inside: 63.0,  // 0.875" (0.5" outside + 0.375" gutter)
-            margin_outside: 36.0, // 0.5"
-            mirrored: true,
-            running_heads: true,
-            recto_starts: true,
-            fonts: Fonts::new(style),
-        }
-    }
-
-    fn text_top(&self) -> f32 {
-        self.page_h - self.margin_top
-    }
-
-    fn text_bottom(&self) -> f32 {
-        self.margin_bottom
-    }
-
-    fn text_w(&self) -> f32 {
-        self.page_w - self.margin_inside - self.margin_outside
-    }
-
-    /// The left edge of the text column on page `idx`. Recto pages are even (page 1
-    /// is the first, a recto); on a mirrored layout the binding (inside) margin sits
-    /// on the left of a recto and the right of a verso.
-    fn left(&self, idx: usize) -> f32 {
-        if self.mirrored && idx % 2 == 1 {
-            self.margin_outside
-        } else {
-            self.margin_inside
-        }
-    }
-
-    /// The rendered width of `text` at `size` for the given face, in points.
-    fn measure(&self, text: &str, size: f32, bold: bool, italic: bool) -> f32 {
-        text.chars()
-            .map(|c| self.fonts.advance_em(c, bold, italic))
-            .sum::<f32>()
-            / 1000.0
-            * size
-    }
-
-    /// The rendered width of `text` at `size` in the monospace face, in points (#524).
-    fn measure_mono(&self, text: &str, size: f32) -> f32 {
-        text.chars()
-            .map(|c| self.fonts.advance_mono(c))
-            .sum::<f32>()
-            / 1000.0
-            * size
-    }
-
-    /// Whether the fonts can render every character of `glyph`.
-    fn renders(&self, glyph: &str) -> bool {
-        glyph.chars().all(|c| self.fonts.covers(c))
-    }
 }
 
 /// What a page is, for decoration: a section opener and blank pages get no running
@@ -625,20 +501,6 @@ impl Pdf {
         self.y -= BODY_LEADING * 0.5;
     }
 
-    /// A normal body paragraph: first-line indented, left-aligned, with `*`/`**`
-    /// emphasis as italic/bold runs.
-    fn paragraph(&mut self, runs: &[Run]) {
-        let words = words_of(runs);
-        self.flow(
-            &words,
-            self.layout.text_w(),
-            INDENT,
-            BODY_SIZE,
-            BODY_LEADING,
-            Align::Left,
-        );
-    }
-
     /// The scene-break divider — the configured glyph, centered. A glyph the PDF
     /// fonts can't show (a decorative ornament outside WinAnsi) falls back to the
     /// default `#` so a divider still appears (the fallback is warned about in
@@ -754,110 +616,6 @@ impl Pdf {
                 Align::RightInset(EPIGRAPH_INSET),
             );
         }
-    }
-
-    /// A single centered line (titles, headings, scene breaks) followed by a gap.
-    fn centered(&mut self, text: &str, bold: bool, italic: bool, size: f32, leading: f32) {
-        let words = words_of(&[Run::new(text, bold, italic)]);
-        self.flow(
-            &words,
-            self.layout.text_w(),
-            0.0,
-            size,
-            leading,
-            Align::Center,
-        );
-    }
-
-    /// Wrap `words` into `max_width` and emit each line at `size`/`leading`,
-    /// paginating as needed. `first_indent` indents only the first line (left
-    /// alignment); `align` places each line within the text column.
-    fn flow(
-        &mut self,
-        words: &[Word],
-        max_width: f32,
-        first_indent: f32,
-        size: f32,
-        leading: f32,
-        align: Align,
-    ) {
-        let col = self.layout.text_w();
-        // The first line is narrowed by the indent; the rest run the full width.
-        let lines = wrap_lines(&self.layout, words, size, |i| {
-            if i == 0 {
-                max_width - first_indent
-            } else {
-                max_width
-            }
-        });
-        for (i, (line, line_w)) in lines.into_iter().enumerate() {
-            self.need(leading);
-            let left = self.left();
-            let indent = if i == 0 { first_indent } else { 0.0 };
-            let x = match align {
-                Align::Left => left + indent,
-                Align::Center => left + (col - line_w) / 2.0,
-                Align::LeftInset(pad) => left + pad,
-                Align::RightInset(pad) => left + col - pad - line_w,
-            };
-            let segs = segments(&line);
-            self.draw_line(x, self.y, &segs, size);
-            self.y -= leading;
-        }
-    }
-
-    /// Emit one positioned line of styled segments into the current page's content.
-    /// Each segment's text is resolved to glyph ids (body face, or the fallback for
-    /// glyphs it lacks) and shown as Identity-H hex runs.
-    fn draw_line(&mut self, x: f32, y: f32, segs: &[Run], size: f32) {
-        let block = self.glyph_block(
-            x,
-            y,
-            size,
-            segs.iter().map(|r| (r.text.as_str(), r.bold, r.italic)),
-        );
-        self.cur().push_str(&block);
-    }
-
-    /// Emit one positioned line of monospace text into the current page's content,
-    /// resolved through the fixed-width face (mono→fallback) and shown as Identity-H
-    /// hex runs (#524).
-    fn draw_mono_line(&mut self, x: f32, y: f32, text: &str) {
-        let mut s = format!("BT\n1 0 0 1 {} {} Tm\n", num(x), num(y));
-        let mut cur_font = "";
-        for (name, hex) in glyph_run_mono(&self.layout.fonts, text) {
-            if name != cur_font {
-                s.push_str(&format!("/{name} {} Tf\n", num(MONO_SIZE)));
-                cur_font = name;
-            }
-            s.push_str(&format!("<{hex}> Tj\n"));
-        }
-        s.push_str("ET\n");
-        self.cur().push_str(&s);
-    }
-
-    /// A `BT…ET` text block at `(x, y)`: each `(text, bold, italic)` segment resolved
-    /// to glyph-id hex runs (`/Fn` font switches between body faces and the fallback).
-    fn glyph_block<'a>(
-        &self,
-        x: f32,
-        y: f32,
-        size: f32,
-        segments: impl Iterator<Item = (&'a str, bool, bool)>,
-    ) -> String {
-        let mut s = format!("BT\n1 0 0 1 {} {} Tm\n", num(x), num(y));
-        let mut cur_font = "";
-        for (text, bold, italic) in segments {
-            for (name, hex) in glyph_run(&self.layout.fonts, text, bold, italic) {
-                if name != cur_font {
-                    s.push_str(&format!("/{name} {} Tf\n", num(size)));
-                    cur_font = name;
-                }
-                s.push_str(&format!("<{hex}> Tj\n"));
-            }
-        }
-        s.push_str("ET\n");
-        s
     }
 
     /// The running head + folio for page `i` (the screen profile centers the folio;
@@ -1021,42 +779,5 @@ enum Align {
     /// Flush to a right edge inset by this many points (epigraph attribution).
     RightInset(f32),
 }
-
-/// Wrap one preformatted line to the text column at character boundaries (#524).
-/// The face is fixed-width, so breaking on whole characters keeps columns aligned;
-/// a line that fits returns unchanged. Leading whitespace (indentation) is preserved
-/// on the first piece, and a continuation that itself overflows is broken again, so
-/// nothing runs off the page edge. An empty line yields one empty piece.
-fn mono_wrap(layout: &Layout, line: &str, width: f32) -> Vec<String> {
-    if layout.measure_mono(line, MONO_SIZE) <= width {
-        return vec![line.to_string()];
-    }
-    let mut pieces = Vec::new();
-    let mut cur = String::new();
-    let mut cur_w = 0.0;
-    for c in line.chars() {
-        let cw = layout.measure_mono(&c.to_string(), MONO_SIZE);
-        if !cur.is_empty() && cur_w + cw > width {
-            pieces.push(std::mem::take(&mut cur));
-            cur_w = 0.0;
-        }
-        cur.push(c);
-        cur_w += cw;
-    }
-    if !cur.is_empty() {
-        pieces.push(cur);
-    }
-    pieces
-}
-
-/// Format a coordinate/size compactly (drop a trailing `.00`).
-pub(super) fn num(x: f32) -> String {
-    if (x - x.round()).abs() < 0.005 {
-        format!("{}", x.round() as i64)
-    } else {
-        format!("{x:.2}")
-    }
-}
-
 #[cfg(test)]
 mod tests;
