@@ -5,10 +5,9 @@
 
 use std::io::{Cursor, Read};
 
-use super::markdown::preamble_author;
 use super::{
-    attr_value, decode_entities, element_text, finalize_titles, for_each_element, join_paragraphs,
-    tag_attrs, wrap_emphasis, Imported, ImportedChapter,
+    assemble, attr_value, decode_entities, element_text, fallback_chapter, finalize_titles,
+    for_each_element, join_paragraphs, mine_preamble, tag_attrs, wrap_emphasis, Imported,
 };
 
 /// Parse a Word `.docx` manuscript: read `word/document.xml` (and the core
@@ -48,64 +47,36 @@ struct Para {
 
 /// The pure core of [`parse_docx`]: turn the body XML (and optional core-property
 /// XML) into the same [`Imported`] shape the Markdown importer produces. Splits
-/// on Heading 1 paragraphs; the preamble before the first heading is a title page
-/// (mined for title/author only when the core properties don't supply them).
+/// on Heading 1 paragraphs via the shared [`assemble`]; the preamble before the
+/// first heading is a title page, mined for any title/author the core properties
+/// didn't supply under the one shared [`mine_preamble`] policy.
 fn parse_document_xml(document: &str, core: Option<&str>) -> Imported {
-    let mut title = core.and_then(|c| element_text(c, "dc:title"));
-    let mut author = core.and_then(|c| element_text(c, "dc:creator"));
+    let title = core.and_then(|c| element_text(c, "dc:title"));
+    let author = core.and_then(|c| element_text(c, "dc:creator"));
 
-    let mut chapters: Vec<ImportedChapter> = Vec::new();
-    let mut preamble: Vec<String> = Vec::new();
-    let mut cur_title: Option<String> = None;
-    let mut cur_body: Vec<String> = Vec::new();
-    for para in paragraphs(document) {
-        if para.heading {
-            match cur_title.take() {
-                Some(t) => chapters.push(ImportedChapter {
-                    title: t,
-                    body: join_paragraphs(&cur_body),
-                }),
-                None => preamble = std::mem::take(&mut cur_body),
-            }
-            cur_body.clear();
-            cur_title = Some(para.text);
-        } else {
-            cur_body.push(para.text);
-        }
-    }
-    match cur_title {
-        Some(t) => chapters.push(ImportedChapter {
-            title: t,
-            body: join_paragraphs(&cur_body),
-        }),
-        None => preamble = cur_body,
-    }
+    // Split on Heading 1 paragraphs; the run before the first heading is a title
+    // page. Each `Para` is pre-classified, so the shared assembler just flushes.
+    let (mut chapters, preamble) = assemble(
+        paragraphs(document),
+        |para| para.heading,
+        |para| para.text.clone(),
+        |paras| join_paragraphs(&body_texts(paras)),
+    );
+    let preamble: Vec<String> = preamble.into_iter().map(|p| p.text).collect();
 
-    // A title page (the preamble before the first heading) fills in anything the
-    // core properties didn't — the first non-empty line as the title, a "by …"
-    // line as the author. Only when there are real chapters, so a heading-less
-    // document keeps its whole text as the one chapter's body.
-    if !chapters.is_empty() {
-        if title.is_none() {
-            title = preamble
-                .iter()
-                .map(|l| l.trim())
-                .find(|l| !l.is_empty())
-                .map(str::to_string);
-        }
-        if author.is_none() {
-            let refs: Vec<&str> = preamble.iter().map(String::as_str).collect();
-            author = preamble_author(&refs);
-        }
-    }
+    // The title page fills in anything the core properties didn't — the first
+    // non-empty line as the title, a "by …" line as the author (#501: mined with
+    // the same unconditional policy the Markdown path uses).
+    let has_chapters = !chapters.is_empty();
+    let (title, author) = mine_preamble(&preamble, title, author, has_chapters, |p| {
+        p.iter()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .map(str::to_string)
+    });
 
-    if chapters.is_empty() {
-        let only = title.clone().unwrap_or_else(|| "Manuscript".into());
-        chapters.push(ImportedChapter {
-            title: only,
-            body: join_paragraphs(&preamble),
-        });
-    }
+    // A heading-less document keeps its whole text as the one chapter's body.
+    fallback_chapter(&mut chapters, &title, join_paragraphs(&preamble));
     finalize_titles(&mut chapters);
 
     Imported {
@@ -117,6 +88,11 @@ fn parse_document_xml(document: &str, core: Option<&str>) -> Imported {
         // analogous unreadable-body count is always 0 (see [`Imported`]).
         unreadable_bodies: 0,
     }
+}
+
+/// The texts of a run of body paragraphs, for [`join_paragraphs`].
+fn body_texts(paras: &[Para]) -> Vec<String> {
+    paras.iter().map(|p| p.text.clone()).collect()
 }
 
 /// Walk the `<w:p>` paragraphs of `word/document.xml`, in order.
@@ -289,6 +265,40 @@ mod tests {
         assert_eq!(out.chapters.len(), 1);
         assert_eq!(out.chapters[0].title, "Manuscript");
         assert_eq!(out.chapters[0].body, "Just prose, no headings.\n");
+    }
+
+    /// #501 consistency fix: a heading-less manuscript with a "by …" attribution
+    /// line mines the author the same way in both formats. Previously Markdown
+    /// mined the preamble unconditionally while `.docx` mined only when real
+    /// chapters existed, so this exact input gave `.docx` no author and Markdown
+    /// one. Both now mine it (one shared policy), and neither invents a chapter
+    /// title from the body — the heading-less doc stays "Manuscript".
+    #[test]
+    fn heading_less_preamble_mining_matches_across_formats() {
+        use super::super::parse_markdown;
+
+        // The same title page, no chapter heading, expressed in each format.
+        let md = "by A. Writer\n\nThe night was long.\n";
+        let docx_body = format!(
+            "{}{}",
+            "<w:p><w:r><w:t>by A. Writer</w:t></w:r></w:p>",
+            "<w:p><w:r><w:t>The night was long.</w:t></w:r></w:p>",
+        );
+
+        let md_out = parse_markdown(md);
+        let docx_out = parse_document_xml(&document(&docx_body), None);
+
+        // Same author policy: the by-line is mined even with no chapters.
+        assert_eq!(md_out.author.as_deref(), Some("A. Writer"));
+        assert_eq!(docx_out.author.as_deref(), Some("A. Writer"));
+        assert_eq!(md_out.author, docx_out.author, "author policy is unified");
+        // Same chapter shape: one fallback chapter, no title invented from prose.
+        assert_eq!(md_out.title, None);
+        assert_eq!(docx_out.title, None);
+        assert_eq!(md_out.chapters.len(), 1);
+        assert_eq!(docx_out.chapters.len(), 1);
+        assert_eq!(md_out.chapters[0].title, "Manuscript");
+        assert_eq!(docx_out.chapters[0].title, "Manuscript");
     }
 
     #[test]

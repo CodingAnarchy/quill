@@ -91,6 +91,124 @@ pub struct ImportedChapter {
     pub body: String,
 }
 
+/// The shared chapter-assembly state machine. Walk a format's token stream once,
+/// splitting into chapters at each heading: the run of items before the first
+/// heading is the preamble; each heading opens a chapter whose body is the items
+/// up to the next heading (or EOF). Returns the chapters and the preamble items.
+///
+/// The three importers differ only in item type (`&str` Markdown lines vs the
+/// `.docx` paragraphs) and how a chapter body is built from its items (`clean`
+/// vs [`join_paragraphs`]), so those are parameters:
+///
+/// - `is_heading` — does this item open a new chapter? (and is it the heading,
+///   not body)
+/// - `title_of` — the chapter title for a heading item.
+/// - `join_bodies` — assemble a chapter body from its (non-heading) items.
+///
+/// This is the single source of truth for the flush-on-heading / stash-preamble /
+/// flush-at-EOF contract; the empty-chapters fallback and the [`finalize_titles`]
+/// tail are applied by the caller (they synthesize different bodies per format).
+fn assemble<T>(
+    items: impl IntoIterator<Item = T>,
+    is_heading: impl Fn(&T) -> bool,
+    title_of: impl Fn(&T) -> String,
+    join_bodies: impl Fn(&[T]) -> String,
+) -> (Vec<ImportedChapter>, Vec<T>) {
+    let mut chapters: Vec<ImportedChapter> = Vec::new();
+    let mut preamble: Vec<T> = Vec::new();
+    let mut cur_title: Option<String> = None;
+    let mut cur_body: Vec<T> = Vec::new();
+    for item in items {
+        if is_heading(&item) {
+            match cur_title.take() {
+                Some(title) => chapters.push(ImportedChapter {
+                    title,
+                    body: join_bodies(&cur_body),
+                }),
+                // Items before the first heading are the preamble.
+                None => preamble = std::mem::take(&mut cur_body),
+            }
+            cur_body.clear();
+            cur_title = Some(title_of(&item));
+        } else {
+            cur_body.push(item);
+        }
+    }
+    match cur_title {
+        Some(title) => chapters.push(ImportedChapter {
+            title,
+            body: join_bodies(&cur_body),
+        }),
+        // No heading was ever seen — the whole stream is the preamble.
+        None => preamble = cur_body,
+    }
+    (chapters, preamble)
+}
+
+/// Mine the preamble (the run of items before the first chapter heading) for any
+/// title/author the format's own metadata didn't already supply, then return it.
+///
+/// One policy across formats (the divergence #501 fixes):
+///
+/// - The **author** "by …" line is mined *unconditionally* — even a heading-less
+///   document, whose whole body is the preamble, has its by-line read. Previously
+///   Markdown did this but `.docx` mined only when real chapters existed, so the
+///   same heading-less input gave a different author by format.
+/// - The **title** is mined only when there *are* real chapters (`has_chapters`),
+///   i.e. the preamble is a genuine title page rather than the whole manuscript —
+///   so a heading-less document keeps its prose as a chapter body and falls back
+///   to the `"Manuscript"` title rather than promoting its first line. (Markdown
+///   already had this shape: its title-page `#` only appears above chapters.)
+///
+/// `title_from` is the format's title-page title extractor (Markdown's `#`
+/// heading vs the `.docx` first non-empty line); the author rule is shared.
+fn mine_preamble<S: AsRef<str>>(
+    preamble: &[S],
+    mut title: Option<String>,
+    mut author: Option<String>,
+    has_chapters: bool,
+    title_from: impl FnOnce(&[S]) -> Option<String>,
+) -> (Option<String>, Option<String>) {
+    if title.is_none() && has_chapters {
+        title = title_from(preamble);
+    }
+    if author.is_none() {
+        author = preamble_author(preamble);
+    }
+    (title, author)
+}
+
+/// A "by …" attribution line on the title page (Quill's export writes one),
+/// ignoring surrounding emphasis markers. Shared by every format's preamble
+/// mining (over Markdown lines or `.docx` paragraphs alike).
+fn preamble_author<S: AsRef<str>>(preamble: &[S]) -> Option<String> {
+    for line in preamble {
+        let s = line
+            .as_ref()
+            .trim()
+            .trim_matches(|c| c == '*' || c == '_')
+            .trim();
+        if s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("by ")) {
+            let a = s[3..].trim();
+            if !a.is_empty() {
+                return Some(a.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The shared empty-stream fallback: when a parse produced no chapters, the
+/// source still becomes one chapter — titled the mined book title (or
+/// `"Manuscript"`), with `body` (the preamble's text for the file formats, empty
+/// for `.scriv`). Centralizes the synthesize-one-chapter rule every parse shares.
+fn fallback_chapter(chapters: &mut Vec<ImportedChapter>, title: &Option<String>, body: String) {
+    if chapters.is_empty() {
+        let only = title.clone().unwrap_or_else(|| "Manuscript".into());
+        chapters.push(ImportedChapter { title: only, body });
+    }
+}
+
 /// Give every chapter a usable, trimmed title — a bare or blank heading falls
 /// back to `Chapter N`. Shared final step of every parse.
 fn finalize_titles(chapters: &mut [ImportedChapter]) {
