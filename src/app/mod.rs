@@ -21,7 +21,7 @@ use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode, Overlay, Palette,
+    BookField, Command, Finding, Findings, GitAction, MetaEdit, MetaField, Mode, Overlay, Palette,
     PaletteItem, Pending, RefFiles, VimState,
 };
 use crate::project::{GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
