@@ -12,12 +12,14 @@ use std::borrow::Cow;
 ///
 /// Front matter is recognized only by the conventional fences: the file must
 /// begin with a `---` line and have a later `---` line closing the block. The
+/// fence newline may be either LF (`---\n`) or CRLF (`---\r\n`), so a chapter
+/// imported or edited on Windows splits the same as a native LF file. The
 /// returned front matter is the verbatim text *between* the fences (each line
-/// including its trailing newline); `None` when there is no such block, in which
-/// case the whole text is the body. A leading `---` with no closing fence (e.g.
-/// a Markdown thematic break) is left in the body.
+/// including its trailing newline, CRLF and all); `None` when there is no such
+/// block, in which case the whole text is the body. A leading `---` with no
+/// closing fence (e.g. a Markdown thematic break) is left in the body.
 pub fn split(text: &str) -> (Option<&str>, &str) {
-    let Some(rest) = text.strip_prefix("---\n") else {
+    let Some(rest) = strip_open_fence(text) else {
         return (None, text);
     };
     let mut offset = 0;
@@ -33,15 +35,52 @@ pub fn split(text: &str) -> (Option<&str>, &str) {
     (None, text)
 }
 
+/// Strip the opening `---` fence and its newline, tolerating an optional `\r`
+/// (so `---\r\n` is accepted alongside `---\n`); `None` when `text` doesn't
+/// open with a fence line.
+fn strip_open_fence(text: &str) -> Option<&str> {
+    text.strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"))
+}
+
 /// Re-attach a front matter block above `body`, inverting [`split`]. With no
 /// front matter the body is returned borrowed (no copy); `inner` is expected to
 /// already end in a newline (as [`split`] returns it) so the closing fence sits
-/// on its own line.
+/// on its own line. The fences match the block's own line ending — CRLF when the
+/// split-off block used CRLF — so a CRLF chapter round-trips byte-for-byte just
+/// like an LF one.
 pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
     match front {
-        Some(inner) => Cow::Owned(format!("---\n{inner}---\n{body}")),
+        Some(inner) => {
+            let nl = fence_newline(inner, body);
+            Cow::Owned(format!("---{nl}{inner}---{nl}{body}"))
+        }
         None => Cow::Borrowed(body),
     }
+}
+
+/// The newline the reconstructed fences should use: CRLF when the chapter uses
+/// CRLF line endings, else LF, mirroring what [`split`] saw so a conforming file
+/// round-trips byte-for-byte (a CRLF chapter's fences come back as CRLF, an LF
+/// chapter's stay LF). The body is the authority — it carries the bulk of the
+/// chapter's convention — and the block is the fallback for a body-less chapter
+/// (a stub with metadata but no prose yet); LF is the final default.
+fn fence_newline(inner: &str, body: &str) -> &'static str {
+    let crlf = uses_crlf(body)
+        .or_else(|| uses_crlf(inner))
+        .unwrap_or(false);
+    if crlf {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+/// Whether `text`'s first line ends in CRLF (`Some(true)`) or LF (`Some(false)`),
+/// or `None` when it has no line ending to judge by.
+fn uses_crlf(text: &str) -> Option<bool> {
+    let line = text.split_inclusive('\n').next()?;
+    line.ends_with('\n').then(|| line.ends_with("\r\n"))
 }
 
 /// An epigraph: a quotation with an optional attribution, shown above a book or
@@ -410,9 +449,11 @@ impl FrontMatter {
 /// Indent for the lines of a `|` literal block scalar.
 const BLOCK_INDENT: &str = "  ";
 
-/// A line without its trailing newline.
+/// A line without its trailing newline (LF or CRLF), so a `---\r\n` fence line
+/// compares equal to `---` just like a `---\n` one.
 fn bare(line: &str) -> &str {
-    line.strip_suffix('\n').unwrap_or(line)
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    line.strip_suffix('\r').unwrap_or(line)
 }
 
 /// Whether `segment` continues a block scalar: an indented line, or a blank
@@ -496,6 +537,31 @@ mod tests {
     fn split_then_join_round_trips() {
         let text = "---\nstatus: draft\n---\nThe body.\n";
         let (front, body) = split(text);
+        assert_eq!(&*join(front, body), text);
+    }
+
+    #[test]
+    fn splits_a_crlf_fenced_block_and_round_trips() {
+        // A chapter imported or edited on Windows: CRLF fences and CRLF inside
+        // the block. It must split (YAML off, prose in the body) and re-join
+        // byte-for-byte, never leaking the YAML into the prose.
+        let text = "---\r\nstatus: draft\r\npov: Mara\r\n---\r\n# Chapter\r\n\r\nProse.\r\n";
+        let (front, body) = split(text);
+        assert_eq!(front, Some("status: draft\r\npov: Mara\r\n"));
+        assert_eq!(body, "# Chapter\r\n\r\nProse.\r\n");
+        // The YAML block does not leak into the body.
+        assert!(!body.contains("status:"));
+        // Save reproduces the original chapter exactly, CRLF fences and all.
+        assert_eq!(&*join(front, body), text);
+    }
+
+    #[test]
+    fn an_empty_crlf_block_round_trips() {
+        // With no inner lines the fence newline is read from the body.
+        let text = "---\r\n---\r\nBody only.\r\n";
+        let (front, body) = split(text);
+        assert_eq!(front, Some(""));
+        assert_eq!(body, "Body only.\r\n");
         assert_eq!(&*join(front, body), text);
     }
 

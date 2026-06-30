@@ -130,14 +130,28 @@ proptest! {
     }
 
     /// A chapter file with front matter round-trips byte-for-byte: the verbatim
-    /// block is split off on load and re-attached unchanged on save.
+    /// block is split off on load and re-attached unchanged on save. Both line-
+    /// ending conventions are exercised — `crlf` builds the whole chapter with
+    /// CRLF fences and bodies (the Windows/imported case from #568), `false`
+    /// builds it with LF — and each must come back unchanged, with the front
+    /// matter never leaking into the prose. Key values and body segments exclude
+    /// raw `\r`/`\n` so the chosen ending is the only line ending in the file.
     #[test]
     fn front_matter_round_trips_byte_for_byte(
-        keys in prop::collection::vec("[a-z]{1,8}: [^\n]{0,20}", 1..5),
-        body in "[^\n]{0,40}(\n[^\n]{0,40}){0,8}",
+        keys in prop::collection::vec("[a-z]{1,8}: [^\r\n]{0,20}", 1..5),
+        segments in prop::collection::vec("[^\r\n]{0,40}", 1..9),
+        crlf in any::<bool>(),
     ) {
-        let inner: String = keys.iter().map(|k| format!("{k}\n")).collect();
-        let original = format!("---\n{inner}---\n{}", normalize_trailing_newline(&body));
+        let nl = if crlf { "\r\n" } else { "\n" };
+        let inner: String = keys.iter().map(|k| format!("{k}{nl}")).collect();
+        // A conforming body: lines joined by the file's ending, ending in exactly
+        // one newline (no trailing blanks), so save's trailing-newline
+        // normalization is a no-op and the round-trip is a fixed point.
+        let body = match segments.iter().filter(|s| !s.is_empty()).count() {
+            0 => String::new(),
+            _ => format!("{}{nl}", segments.join(nl).trim_end_matches(['\r', '\n'])),
+        };
+        let original = format!("---{nl}{inner}---{nl}{body}");
 
         let src = scratch("fm", "c.md");
         fs::write(&src, &original).unwrap();
@@ -164,7 +178,10 @@ proptest! {
         match front {
             None => prop_assert_eq!(body, s.as_str(), "no block ⇒ the input is the body"),
             Some(inner) => {
-                prop_assert!(s.starts_with("---\n"), "a block is only recognized after an opening fence");
+                prop_assert!(
+                    s.starts_with("---\n") || s.starts_with("---\r\n"),
+                    "a block is only recognized after an opening fence (LF or CRLF)"
+                );
                 prop_assert!(s.ends_with(body), "the body must be a suffix slice of the input");
                 prop_assert!(s.contains(inner), "the front matter is a verbatim slice of the input");
             }
