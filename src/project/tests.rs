@@ -257,6 +257,56 @@ fn goals_round_trip_through_the_manifest() {
 }
 
 #[test]
+fn set_goal_splices_into_goals_preserving_comments_and_clears_optional_keys() {
+    // A hand-maintained manifest with a comment and another section.
+    let dir = temp_dir("set-goal-splice");
+    let mut project = Project::create(&dir).unwrap();
+    let path = Project::manifest_path(&dir);
+    fs::write(
+        &path,
+        "# my book\ntitle = \"Book\"\nauthor = \"Ada\"\n\n\
+         [analysis]\nstopwords_add = [\"foo\"]\n\n\
+         [[chapters]]\ntitle = \"Chapter 1\"\nfile = \"chapter-1.md\"\n",
+    )
+    .unwrap();
+
+    // Set each goal; every write is a targeted splice that leaves the rest intact.
+    project.set_goal(GoalField::Words, Some(80_000)).unwrap();
+    project.set_goal(GoalField::Chapters, Some(30)).unwrap();
+    project.set_goal(GoalField::Daily, Some(1_000)).unwrap();
+
+    let toml = fs::read_to_string(&path).unwrap();
+    assert!(toml.contains("# my book"), "comment preserved:\n{toml}");
+    assert!(
+        toml.contains("author = \"Ada\""),
+        "scalar preserved:\n{toml}"
+    );
+    assert!(
+        toml.contains("[analysis]") && toml.contains("stopwords_add = [\"foo\"]"),
+        "other section preserved:\n{toml}"
+    );
+    assert!(
+        toml.contains("words = 80000")
+            && toml.contains("chapters = 30")
+            && toml.contains("daily = 1000"),
+        "goals spliced:\n{toml}"
+    );
+
+    // Clearing the optional daily goal removes the key, not writes a zero.
+    project.set_goal(GoalField::Daily, None).unwrap();
+    let toml = fs::read_to_string(&path).unwrap();
+    assert!(!toml.contains("daily"), "daily key removed:\n{toml}");
+    assert_eq!(project.goals().unwrap().daily, None);
+
+    // Everything still round-trips on a fresh open.
+    let reopened = Project::open(&dir).unwrap();
+    let g = reopened.goals().unwrap();
+    assert_eq!((g.words, g.chapters, g.daily), (80_000, 30, None));
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn parts_round_trip_and_map_chapters_to_ranges() {
     let dir = temp_dir("parts");
     let mut project = Project::create(&dir).unwrap(); // 1 starter chapter

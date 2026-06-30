@@ -257,6 +257,7 @@ impl App {
             Pending::NewChapter { .. }
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
+            | Pending::SetGoal(_)
             | Pending::AskAi
             | Pending::Thesaurus
             | Pending::Commit
@@ -312,6 +313,12 @@ impl App {
                                 // follow the chapter to its new index (#180).
                                 let moved = self.apply_meta(field, text);
                                 self.select(moved.unwrap_or(fallback));
+                            }
+                            Pending::SetGoal(field) => {
+                                // Validate, persist to `[goals]`, and chain to the
+                                // next goal field (or re-prompt on a bad value). The
+                                // flow drives the mode itself, so don't reset it here.
+                                self.apply_goal(field, text);
                             }
                             Pending::Annotate { start, end } => {
                                 // Back to editing; the note anchors to its range (#302).

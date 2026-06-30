@@ -147,6 +147,95 @@ impl App {
         None // only a role change re-sorts the list
     }
 
+    // --- Project goals (#550) ----------------------------------------------
+    //
+    // Mirrors the chapter word-goal flow (a numeric prompt with the current value
+    // prefilled), but walks the project's goals in turn: target words, target
+    // chapters, then the optional daily target. Each is persisted to the `[goals]`
+    // table of `book.toml` as it's entered, so the progress report (Ctrl-R)
+    // reflects it immediately.
+
+    /// Start the goal-setting flow (`goals:set`, #550): prompt for the first goal
+    /// field, prefilled with its current value. Enter on each saves it and chains
+    /// to the next; Esc stops the chain.
+    pub(crate) fn start_set_goals(&mut self) {
+        self.prompt_goal(GoalField::Words);
+    }
+
+    /// Open the numeric prompt for one goal field, prefilled with the current
+    /// value (blank when unset). The required fields say their value must be
+    /// positive; the optional daily target says blank clears it.
+    pub(crate) fn prompt_goal(&mut self, field: GoalField) {
+        let current = self.current_goal(field);
+        let prefill = current.map(|n| n.to_string()).unwrap_or_default();
+        let hint = if field.is_optional() {
+            "blank clears it"
+        } else {
+            "a positive number"
+        };
+        let label = format!("{} ({hint}): ", capitalize(field.label()));
+        self.open_prompt(Pending::SetGoal(field), label, &prefill, None);
+    }
+
+    /// The current value of goal `field` for prefilling the prompt. Words and
+    /// chapters read 0 (unset) as absent, so a brand-new project starts blank;
+    /// words-per-page prefills its current value or the standard default (250), so
+    /// it's a single Enter to keep. The daily target prefills only when set.
+    fn current_goal(&self, field: GoalField) -> Option<usize> {
+        let goals = self.project.goals();
+        match field {
+            GoalField::Words => goals.map(|g| g.words).filter(|&n| n > 0),
+            GoalField::Chapters => goals.map(|g| g.chapters).filter(|&n| n > 0),
+            GoalField::WordsPerPage => {
+                Some(goals.map_or(DEFAULT_WORDS_PER_PAGE, |g| g.words_per_page))
+            }
+            GoalField::Daily => goals.and_then(|g| g.daily),
+        }
+    }
+
+    /// Apply one goal prompt's input (#550): clear an optional goal on blank,
+    /// reject a blank/non-positive/non-numeric value for a required one, else
+    /// persist it. On success, chain to the next field in the flow; on a rejected
+    /// value, re-open the same prompt with the message shown.
+    pub(crate) fn apply_goal(&mut self, field: GoalField, text: &str) {
+        let text = text.trim();
+        let value = if text.is_empty() {
+            if !field.is_optional() {
+                self.message = Some(format!(
+                    "{} must be a positive number.",
+                    capitalize(field.label())
+                ));
+                self.prompt_goal(field);
+                return;
+            }
+            None // blank clears the optional daily target
+        } else {
+            match text.parse::<usize>() {
+                Ok(n) if n > 0 => Some(n),
+                _ => {
+                    self.message = Some(format!(
+                        "{} must be a positive whole number — got '{text}'.",
+                        capitalize(field.label())
+                    ));
+                    self.prompt_goal(field);
+                    return;
+                }
+            }
+        };
+        if let Err(e) = self.project.set_goal(field, value) {
+            self.message = Some(format!("Couldn't save goals: {e}"));
+            self.mode = self.editing_mode();
+            return;
+        }
+        match next_goal_field(field) {
+            Some(next) => self.prompt_goal(next),
+            None => {
+                self.mode = self.editing_mode();
+                self.message = Some("Writing goals updated.".into());
+            }
+        }
+    }
+
     /// The current epigraph of chapter `index`: from the live buffer if it's the
     /// active chapter (latest unsaved edits), otherwise read from its file.
     pub(crate) fn chapter_epigraph(&self, index: usize) -> Option<Epigraph> {
@@ -278,5 +367,27 @@ impl App {
             _ => return,
         };
         self.mode = self.closed_mode(nav_return);
+    }
+}
+
+/// The next field in the goal-setting flow (#550): the three motivating goals
+/// first (words → chapters → daily), then words-per-page last (rarely changed,
+/// prefilled with its current/default value, so it's a single Enter to keep).
+fn next_goal_field(field: GoalField) -> Option<GoalField> {
+    match field {
+        GoalField::Words => Some(GoalField::Chapters),
+        GoalField::Chapters => Some(GoalField::Daily),
+        GoalField::Daily => Some(GoalField::WordsPerPage),
+        GoalField::WordsPerPage => None,
+    }
+}
+
+/// Capitalize the first character of a label for a prompt / message
+/// (e.g. "target words" → "Target words").
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }

@@ -134,7 +134,11 @@ pub fn set_values(changes: &[(String, String, String)]) -> io::Result<PathBuf> {
 /// The line is spliced verbatim, so both sides must already be TOML-encoded:
 /// `value` a ready-to-write literal (e.g. `true`, `"#1e1e24"`), and `key` either
 /// a constant bare key or, for a user-supplied name, run through [`toml_key`].
-fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
+///
+/// Pure (no I/O), so the same splice serves both the home config file and a
+/// project's `book.toml` (#550): the manifest's `[goals]` table is updated in
+/// place this way, leaving the rest of the manifest byte-for-byte.
+pub(crate) fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
     let entry = format!("{key} = {value}");
     let header = format!("[{section}]");
     let mut lines: Vec<String> = existing.lines().map(String::from).collect();
@@ -193,7 +197,11 @@ pub fn remove_value(section: &str, key: &str) -> io::Result<bool> {
 /// text and whether a line was removed. Pure (no I/O), so the splice is testable
 /// without a file on disk, like [`set_value`]. Everything else is left
 /// byte-for-byte; the section header stays even if it ends up empty.
-fn strip_value(existing: &str, section: &str, key: &str) -> (String, bool) {
+///
+/// Pure (no I/O), so it also serves project `book.toml` edits (#550): clearing an
+/// optional goal (e.g. the daily target) removes its key from `[goals]` rather
+/// than writing a zero.
+pub(crate) fn strip_value(existing: &str, section: &str, key: &str) -> (String, bool) {
     let header = format!("[{section}]");
     let mut lines: Vec<String> = existing.lines().map(String::from).collect();
     let trailing_nl = existing.is_empty() || existing.ends_with('\n');
