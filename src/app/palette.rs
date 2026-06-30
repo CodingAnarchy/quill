@@ -196,6 +196,7 @@ impl App {
             Action::Assistant => self.open_assistant(),
             Action::InsertSnippet => self.open_snippet_picker(),
             Action::BrowseFonts => self.open_font_browser(),
+            Action::SetExportStyle => self.open_export_style_menu(),
         }
     }
 
@@ -316,6 +317,12 @@ impl App {
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
                     Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
                     Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),
+                    Some(Command::OpenStylePicker(p)) => self.open_style_picker(p),
+                    Some(Command::SetStylePreset(i)) => self.set_style_preset(i),
+                    Some(Command::SetStyleAlign(i)) => self.set_style_align(i),
+                    Some(Command::SetStyleDropCap(v)) => self.set_style_drop_cap(v),
+                    Some(Command::SetStyleTrim(i)) => self.set_style_trim(i),
+                    Some(Command::EditStyleText(k)) => self.prompt_style_text(k),
                     None => {}
                 }
             }

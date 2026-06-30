@@ -11,6 +11,11 @@ use super::ExportStyle;
 /// The default print trim, used when a project sets no `[print] trim`.
 pub const DEFAULT_TRIM: &str = "6x9";
 
+/// The print trim sizes the writer supports (#464), in the order the in-app
+/// picker (#569) and the unknown-trim warning list them. The single source of
+/// truth: every name here resolves through [`trim_points`] (a test asserts it).
+pub const TRIM_NAMES: [&str; 3] = ["6x9", "5x8", "5.5x8.5"];
+
 /// Opt-in print-interior settings (#464), read from the manifest `[print]` table.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct PrintConfig {

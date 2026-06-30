@@ -36,6 +36,7 @@ mod assist;
 mod assistant;
 mod bible_review;
 mod editing;
+mod export_style;
 mod exporting;
 mod fonts;
 mod images;

@@ -91,17 +91,25 @@ fn style_preview_does_not_touch_the_project() {
 }
 
 #[test]
-fn the_export_menu_offers_a_style_preview() {
+fn the_export_menu_offers_the_style_setter_and_preview() {
     let (mut app, _dir) = two_chapter_app("preview-style-menu");
     app.open_export_palette();
     let Mode::Palette(p) = &app.mode else {
         panic!("export palette open");
     };
+    // The style setter (#569) leads, then the preview — both before the formats.
     assert!(
         matches!(
             p.items.first().map(|it| it.command),
+            Some(Command::Run(crate::mode::Action::SetExportStyle))
+        ),
+        "the style setter is the first export-menu entry"
+    );
+    assert!(
+        matches!(
+            p.items.get(1).map(|it| it.command),
             Some(Command::PreviewStyle)
         ),
-        "the preview is the first export-menu entry"
+        "the preview is the second export-menu entry"
     );
 }

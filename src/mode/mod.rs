@@ -415,6 +415,11 @@ pub(crate) enum Pending {
     /// required fields then offers the optional daily target); a blank entry
     /// clears the optional daily goal and is rejected for the required ones.
     SetGoal(crate::project::GoalField),
+    /// Text input setting one free-text `[style]` knob (#569): the scene-break
+    /// glyph or a title/part ornament. Persisted to the `[style]` table of
+    /// `book.toml`; a blank entry clears the key. On save the setter re-opens the
+    /// style menu so more knobs can be tweaked in one sitting.
+    SetStyleText(StyleTextKnob),
     /// Text input: an API key to store in the OS keychain (#530), for the given
     /// provider. On Enter the key is written to the keychain (never the config
     /// file); a blank entry cancels. The provider determines the keychain entry

@@ -139,10 +139,27 @@ overused words and phrases. Both are scrollable; any other key closes them.
 EXPORT
 
 Ctrl-E opens the export menu: Markdown (one compiled document), Word (.docx in
-standard manuscript format), Scrivener (a .scriv bundle), or Vellum (a .docx
-tuned for Vellum import). Files land under export/. For a multi-book series, each
-format is offered twice — the whole series (books in reading order, delimited per
-format) or just the active book.
+standard manuscript format), Scrivener (a .scriv bundle), Vellum (a .docx tuned
+for Vellum import), EPUB, and PDF (screen and print-interior). Files land under
+export/. For a multi-book series, each format is offered twice — the whole series
+(books in reading order, delimited per format) or just the active book.
+
+The export menu also leads with "Set export style…" and "Preview style…". The
+designed exports (EPUB and print PDF) can be lightly styled, and you no longer
+have to hand-edit book.toml to do it: "Set export style…" (also the "style:set"
+run-action) opens a menu of the common knobs, each showing its current value —
+pick a built-in look from the preset library (classic, modern, literary, romance,
+thriller, fantasy, minimalist), set the scene-break glyph, heading alignment, drop
+caps, and the title/part ornaments, and choose the print-interior trim size (6x9,
+5x8, or 5.5x8.5). Each choice is written straight into the [style] / [print]
+tables of book.toml, leaving the rest of the file (other sections, comments,
+formatting) untouched, and takes effect on the next export and in the preview with
+no restart. "Preview style…" renders a fixed sample book through your current
+[style] and opens it in your system EPUB reader, so you can see a look before
+committing. Hand-editing book.toml still works and round-trips; for fonts and
+image ornaments, set a file path by hand or use "Browse & download fonts…" for the
+curated open-licensed library. (Setting the style from the app is for a standalone
+novel; a multi-book series sets [style] / [print] per book by hand.)
 
 
 AI ASSISTANCE (opt-in)
