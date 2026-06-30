@@ -480,6 +480,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "export:pdf-print",
         "report:progress",
         "report:analysis",
+        "report:history",
         "guide",
         "dict:accept",
         "spell:next",

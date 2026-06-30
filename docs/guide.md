@@ -144,6 +144,15 @@ bottom, so you can change a goal right after reading where you stand. Ctrl-T
 opens the analysis report: per-chapter readability, pacing, sentence lengths, and
 overused words and phrases. Both are scrollable; any other key closes them.
 
+Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
+recorded per-day history Quill keeps as you write: your current and longest
+writing streak (a day counts when its net words are positive; a streak survives a
+single day off but lapses after that), your best day, the totals across every
+recorded day, and a sparkline graph of daily net words — green bars for gaining
+days, red for losing ones — under the date range it spans. It only reads the
+history log; nothing new is recorded. Like the other reports, it's scrollable and
+any other key closes it.
+
 
 EXPORT
 

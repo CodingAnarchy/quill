@@ -17,6 +17,15 @@ impl App {
         self.overlay = Some(Overlay::report("analysis", self.analysis_lines()));
     }
 
+    /// Open the writing-history view overlay (the run-action menu, #586): the
+    /// daily net-words graph, the current and longest streak, and the totals,
+    /// built from the recorded per-day log — read-only, no new persistence.
+    pub(crate) fn open_writing_history(&mut self) {
+        let snaps = crate::history::load(&self.project.root);
+        let lines = crate::history_view::lines(&snaps, date::today());
+        self.overlay = Some(Overlay::report("history", lines));
+    }
+
     /// Open the built-in user's guide overlay (F1, and the run-action menu) (#281).
     pub(crate) fn open_guide(&mut self) {
         let lines = crate::guide::TEXT

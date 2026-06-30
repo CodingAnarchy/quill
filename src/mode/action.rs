@@ -245,6 +245,9 @@ pub(crate) enum Action {
     ProgressReport,
     /// Open the local analysis report (Ctrl-T).
     AnalysisReport,
+    /// Open the writing-history view — daily net-words graph, streaks, and
+    /// totals from the recorded per-day log (#586).
+    WritingHistory,
     /// Run an AI pass / open an AI view (Ctrl-A).
     Ai(AiAction),
     /// Open the built-in user's guide (F1) (#281).
@@ -342,6 +345,7 @@ impl Action {
         // Reports
         Action::ProgressReport,
         Action::AnalysisReport,
+        Action::WritingHistory,
         // AI
         Action::Ai(AiAction::Ask),
         Action::Ai(AiAction::Characters),
@@ -400,6 +404,7 @@ impl Action {
             Action::Export(ExportFormat::PdfPrint) => "export:pdf-print",
             Action::ProgressReport => "report:progress",
             Action::AnalysisReport => "report:analysis",
+            Action::WritingHistory => "report:history",
             // The AI slugs are the single source in `AiAction::SPECS` (#563).
             Action::Ai(a) => a.slug(),
             Action::UserGuide => "guide",
@@ -451,7 +456,7 @@ impl Action {
             | Action::NewProjectFromNotes
             | Action::ImportManuscript => "Project",
             Action::Export(_) | Action::BrowseFonts | Action::SetExportStyle => "Export",
-            Action::ProgressReport | Action::AnalysisReport => "Reports",
+            Action::ProgressReport | Action::AnalysisReport | Action::WritingHistory => "Reports",
             Action::Ai(_)
             | Action::RefreshSeriesBible
             | Action::DescribeConfig
@@ -486,6 +491,7 @@ impl Action {
             Action::Export(ExportFormat::PdfPrint) => "Export → PDF (print interior)",
             Action::ProgressReport => "Progress report",
             Action::AnalysisReport => "Analysis report",
+            Action::WritingHistory => "Writing history",
             Action::Ai(AiAction::Ask) => "AI · Ask the manuscript",
             Action::Ai(AiAction::Characters) => "AI · Character bible",
             Action::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
@@ -572,6 +578,7 @@ impl Action {
                 | Action::Export(_)
                 | Action::ProgressReport
                 | Action::AnalysisReport
+                | Action::WritingHistory
                 | Action::UserGuide
                 | Action::AcceptWord
                 | Action::NextMisspelling

@@ -19,6 +19,7 @@ mod fonts;
 mod frontmatter;
 mod guide;
 mod history;
+mod history_view;
 mod manuscript;
 mod manuscript_import;
 mod mode;

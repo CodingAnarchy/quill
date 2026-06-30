@@ -162,6 +162,7 @@ impl App {
             Action::Export(f) => self.run_export(f, ExportScope::ActiveBook),
             Action::ProgressReport => self.open_progress_report(),
             Action::AnalysisReport => self.open_analysis_report(),
+            Action::WritingHistory => self.open_writing_history(),
             Action::Ai(a) => self.start_ai_action(a, force),
             Action::UserGuide => self.open_guide(),
             Action::ImportNotes => self.start_import(),
