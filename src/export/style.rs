@@ -329,32 +329,27 @@ impl ExportStyle {
     /// supplies `load`, so this stays off the filesystem and is testable.
     pub fn resolve_fonts(
         &mut self,
-        mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+        load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
     ) -> Vec<String> {
-        self.fonts.clear();
-        let mut warnings = Vec::new();
         let targets = [
             (FontRole::Body, self.body_font.clone()),
             (FontRole::Heading, self.heading_font.clone()),
         ];
-        for (role, path) in targets {
-            let Some(path) = path else { continue };
-            match load_asset(&path, font_media_type, &mut load) {
-                Ok((media_type, ext, bytes)) => self.fonts.push(EmbeddedFont {
-                    role,
-                    family: font_family(&path),
-                    href: format!("fonts/{}.{ext}", role.slug()),
-                    media_type,
-                    bytes,
-                }),
-                Err(AssetError::Unsupported) => warnings.push(format!(
-                    "style: unsupported font '{path}' (use .ttf/.otf/.woff/.woff2)"
-                )),
-                Err(AssetError::Read(e)) => {
-                    warnings.push(format!("style: couldn't read font '{path}': {e}"))
-                }
-            }
-        }
+        let (fonts, warnings) = resolve_assets(
+            targets,
+            font_media_type,
+            "font",
+            ".ttf/.otf/.woff/.woff2",
+            load,
+            |role, path, media_type, ext, bytes| EmbeddedFont {
+                role,
+                family: font_family(path),
+                href: format!("fonts/{}.{ext}", role.slug()),
+                media_type,
+                bytes,
+            },
+        );
+        self.fonts = fonts;
         warnings
     }
 
@@ -364,10 +359,8 @@ impl ExportStyle {
     /// can't be read or has an unsupported type. Mirrors [`Self::resolve_fonts`].
     pub fn resolve_images(
         &mut self,
-        mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+        load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
     ) -> Vec<String> {
-        self.images.clear();
-        let mut warnings = Vec::new();
         let targets = [
             (ImageRole::SceneBreak, self.scene_break_image.clone()),
             (
@@ -376,25 +369,53 @@ impl ExportStyle {
             ),
             (ImageRole::Title, self.title_image.clone()),
         ];
-        for (role, path) in targets {
-            let Some(path) = path else { continue };
-            match load_asset(&path, image_media_type, &mut load) {
-                Ok((media_type, ext, bytes)) => self.images.push(EmbeddedImage {
-                    role,
-                    href: format!("images/{}.{ext}", role.slug()),
-                    media_type,
-                    bytes,
-                }),
-                Err(AssetError::Unsupported) => warnings.push(format!(
-                    "style: unsupported image '{path}' (use .png/.jpg/.jpeg/.gif/.svg/.webp)"
-                )),
-                Err(AssetError::Read(e)) => {
-                    warnings.push(format!("style: couldn't read image '{path}': {e}"))
-                }
-            }
-        }
+        let (images, warnings) = resolve_assets(
+            targets,
+            image_media_type,
+            "image",
+            ".png/.jpg/.jpeg/.gif/.svg/.webp",
+            load,
+            |role, _path, media_type, ext, bytes| EmbeddedImage {
+                role,
+                href: format!("images/{}.{ext}", role.slug()),
+                media_type,
+                bytes,
+            },
+        );
+        self.images = images;
         warnings
     }
+}
+
+/// Resolve a set of configured `(role, Option<path>)` asset targets into embedded
+/// structs, returning them alongside one warning per asset that couldn't be read
+/// or had an unsupported type. The shared body of [`ExportStyle::resolve_fonts`]
+/// and [`ExportStyle::resolve_images`] (#504): `media` looks up the (media type,
+/// extension); `kind`/`exts` shape the warning text (`unsupported {kind}` lists
+/// `{exts}`); `load` reads the bytes; `embed` builds the role-specific struct.
+fn resolve_assets<Role, Asset, const N: usize>(
+    targets: [(Role, Option<String>); N],
+    media: impl Fn(&str) -> Option<(&'static str, &'static str)>,
+    kind: &str,
+    exts: &str,
+    mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+    mut embed: impl FnMut(Role, &str, &'static str, &'static str, Vec<u8>) -> Asset,
+) -> (Vec<Asset>, Vec<String>) {
+    let mut assets = Vec::new();
+    let mut warnings = Vec::new();
+    for (role, path) in targets {
+        let Some(path) = path else { continue };
+        match load_asset(&path, &media, &mut load) {
+            Ok((media_type, ext, bytes)) => assets.push(embed(role, &path, media_type, ext, bytes)),
+            Err(AssetError::Unsupported) => {
+                warnings.push(format!("style: unsupported {kind} '{path}' (use {exts})"))
+            }
+            Err(AssetError::Read(e)) => {
+                warnings.push(format!("style: couldn't read {kind} '{path}': {e}"))
+            }
+        }
+    }
+    (assets, warnings)
 }
 
 /// The OPF media type and canonical extension for a font path, or `None` for an
