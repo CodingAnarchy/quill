@@ -20,13 +20,66 @@ use crate::atomic;
 const DIR: &str = ".quill";
 const FILE: &str = "recovery.json";
 
-/// The unsaved work captured for recovery: the active chapter's file (relative
-/// to the project root) and its prose body as of the last cadence write. Front
-/// matter is not captured — it is re-attached from the chapter file on save.
+/// One chapter's unsaved prose captured for recovery: its file (relative to the
+/// project root) and the prose body as of the last cadence write. Front matter
+/// is not captured — it is re-attached from the chapter file on save.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Chapter {
+    pub chapter_file: String,
+    pub body: String,
+}
+
+/// The unsaved work captured for recovery. The single-chapter view captures one
+/// chapter; the continuous view captures every dirty segment in its window, each
+/// attributed to its own chapter file (#566). At least one chapter is present
+/// whenever a sidecar exists.
+///
+/// The on-disk JSON stays backward-compatible with the original single-chapter
+/// sidecar: `chapter_file`/`body` carry the first (or only) chapter, and any
+/// further dirty chapters go in `extra`, which is omitted entirely when there
+/// are none — so a single-chapter sidecar is byte-for-byte what it was (#263).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Recovery {
     pub chapter_file: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<Chapter>,
+}
+
+impl Recovery {
+    /// A single-chapter recovery record (the single-chapter view's snapshot).
+    pub fn single(chapter_file: String, body: String) -> Self {
+        Recovery {
+            chapter_file,
+            body,
+            extra: Vec::new(),
+        }
+    }
+
+    /// Build a record from one or more dirty chapters (the continuous view's
+    /// snapshot). Returns `None` for an empty list — nothing to recover. The
+    /// first chapter fills the legacy fields; the rest go in `extra`.
+    pub fn from_chapters(mut chapters: Vec<Chapter>) -> Option<Self> {
+        if chapters.is_empty() {
+            return None;
+        }
+        let first = chapters.remove(0);
+        Some(Recovery {
+            chapter_file: first.chapter_file,
+            body: first.body,
+            extra: chapters,
+        })
+    }
+
+    /// Every captured chapter in order — the legacy first chapter followed by any
+    /// extras — so single- and multi-chapter records restore uniformly.
+    pub fn chapters(&self) -> impl Iterator<Item = Chapter> + '_ {
+        std::iter::once(Chapter {
+            chapter_file: self.chapter_file.clone(),
+            body: self.body.clone(),
+        })
+        .chain(self.extra.iter().cloned())
+    }
 }
 
 fn path(root: &Path) -> PathBuf {
@@ -64,10 +117,7 @@ mod tests {
     }
 
     fn sample() -> Recovery {
-        Recovery {
-            chapter_file: "one.md".into(),
-            body: "unsaved prose\n".into(),
-        }
+        Recovery::single("one.md".into(), "unsaved prose\n".into())
     }
 
     #[test]
@@ -75,6 +125,59 @@ mod tests {
         let dir = tmpdir("round_trip");
         write(&dir, &sample()).unwrap();
         assert_eq!(read(&dir), Some(sample()));
+    }
+
+    #[test]
+    fn a_multi_chapter_record_round_trips_and_lists_every_chapter() {
+        let dir = tmpdir("multi_round_trip");
+        let rec = Recovery::from_chapters(vec![
+            Chapter {
+                chapter_file: "one.md".into(),
+                body: "edit A\n".into(),
+            },
+            Chapter {
+                chapter_file: "two.md".into(),
+                body: "edit B\n".into(),
+            },
+        ])
+        .unwrap();
+        write(&dir, &rec).unwrap();
+        let back = read(&dir).expect("a multi-chapter sidecar round-trips");
+        assert_eq!(back, rec);
+        let files: Vec<_> = back.chapters().map(|c| c.chapter_file).collect();
+        assert_eq!(files, vec!["one.md", "two.md"]);
+    }
+
+    #[test]
+    fn from_chapters_is_none_for_an_empty_list() {
+        assert!(Recovery::from_chapters(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn a_single_chapter_sidecar_serializes_without_the_extra_key() {
+        // Backward compatibility: a one-chapter record must produce exactly the
+        // legacy JSON shape, so an old reader still parses it (#263/#566).
+        let json = serde_json::to_string(&sample()).unwrap();
+        assert!(
+            !json.contains("extra"),
+            "no empty `extra` array leaks: {json}"
+        );
+    }
+
+    #[test]
+    fn a_legacy_single_chapter_sidecar_still_parses() {
+        let dir = tmpdir("legacy");
+        fs::create_dir_all(dir.join(DIR)).unwrap();
+        // The exact bytes the pre-#566 sidecar wrote (no `extra` field).
+        fs::write(
+            path(&dir),
+            r#"{"chapter_file":"one.md","body":"old work\n"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read(&dir),
+            Some(Recovery::single("one.md".into(), "old work\n".into()))
+        );
     }
 
     #[test]
@@ -126,10 +229,7 @@ mod tests {
         let dir = tmpdir("preserve");
         write(&dir, &sample()).unwrap();
 
-        let doomed = Recovery {
-            chapter_file: "two.md".into(),
-            body: "half-written\n".into(),
-        };
+        let doomed = Recovery::single("two.md".into(), "half-written\n".into());
         atomic::fail_point::arm_pre_rename_failure();
         assert!(write(&dir, &doomed).is_err());
 

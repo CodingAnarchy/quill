@@ -61,21 +61,36 @@ impl App {
         let _ = history::persist(&self.project.root, &snapshot);
     }
 
-    /// Capture or clear the recovery sidecar on the idle cadence. Only the
+    /// Capture or clear the recovery sidecar on the idle cadence. The
     /// single-chapter view maps the buffer 1:1 to a file; the continuous view
-    /// writes back per chapter on its own transitions and is out of scope here.
-    /// The sidecar is written while the buffer is dirty and removed once it goes
-    /// clean — tracked by `recovery_written`, so a clean buffer issues at most
-    /// one remove rather than one per idle tick.
+    /// captures every dirty segment in its window, each attributed to its chapter
+    /// (#566). The sidecar is written while there are unsaved edits and removed
+    /// once everything is clean — tracked by `recovery_written`, so a clean
+    /// buffer issues at most one remove rather than one per idle tick.
     pub(super) fn capture_recovery(&mut self) {
-        if self.manuscript.is_some() {
-            return;
-        }
-        if self.buffer.dirty {
-            let rec = recovery::Recovery {
-                chapter_file: self.project.active_file().to_string(),
-                body: self.buffer.text(),
-            };
+        let rec = match &self.manuscript {
+            // Continuous view: snapshot each dirty segment's in-memory prose,
+            // attributing it to that segment's chapter file.
+            Some(m) => {
+                let chapters = m
+                    .dirty_segments()
+                    .into_iter()
+                    .map(|(index, body)| recovery::Chapter {
+                        chapter_file: self.project.chapter_file(index).to_string(),
+                        body,
+                    })
+                    .collect();
+                recovery::Recovery::from_chapters(chapters)
+            }
+            // Single-chapter view: the active chapter's buffer, 1:1 to its file.
+            None => self.buffer.dirty.then(|| {
+                recovery::Recovery::single(
+                    self.project.active_file().to_string(),
+                    self.buffer.text(),
+                )
+            }),
+        };
+        if let Some(rec) = rec {
             if recovery::write(&self.project.root, &rec).is_ok() {
                 self.recovery_written = true;
             }
@@ -92,46 +107,77 @@ impl App {
     }
 
     /// At launch, offer back any unsaved work a previous session left behind.
-    /// A sidecar whose chapter is gone, or whose body already matches what's on
-    /// disk (so nothing was actually lost), is stale and silently cleared.
+    /// A captured chapter that's gone, or whose body already matches what's on
+    /// disk (so nothing was actually lost), is dropped; a record left with no
+    /// recoverable chapter is stale and silently cleared. Continuous-view records
+    /// can carry several chapters at once (#566).
     pub fn offer_recovery(&mut self) {
         let Some(rec) = recovery::read(&self.project.root) else {
             return;
         };
-        let Some(index) = self.project.index_of_file(&rec.chapter_file) else {
-            recovery::clear(&self.project.root);
+        // Keep only the chapters that still exist and actually differ from disk.
+        let live: Vec<recovery::Chapter> = rec
+            .chapters()
+            .filter(|c| match self.project.index_of_file(&c.chapter_file) {
+                Some(index) => {
+                    let disk = self.project.chapter_body(index);
+                    buffer::normalize_trailing_newline(&disk)
+                        != buffer::normalize_trailing_newline(&c.body)
+                }
+                None => false,
+            })
+            .collect();
+        let Some(pruned) = recovery::Recovery::from_chapters(live) else {
+            recovery::clear(&self.project.root); // nothing left to recover
             return;
         };
-        let disk_body = self.project.chapter_body(index);
-        if buffer::normalize_trailing_newline(&disk_body)
-            == buffer::normalize_trailing_newline(&rec.body)
-        {
-            recovery::clear(&self.project.root); // already saved — nothing was lost
-            return;
-        }
-        let title = self
-            .project
-            .chapter_title(index)
-            .unwrap_or("a chapter")
-            .to_string();
-        self.pending_recovery = Some(rec);
+        let descriptor = self.recovery_descriptor(&pruned);
+        self.pending_recovery = Some(pruned);
         self.open_prompt(
             Pending::ConfirmRecovery,
             format!(
-                "Unsaved work for \"{title}\" from a previous session — restore (y), discard (d), or keep for later (Esc)"
+                "Unsaved work for {descriptor} from a previous session — restore (y), discard (d), or keep for later (Esc)"
             ),
             "",
             None,
         );
     }
 
-    /// Restore the unsaved work the recovery prompt offered: make its chapter
-    /// active and load the recovered prose into the buffer. The buffer is now
-    /// dirty, so a save persists it and the sidecar keeps protecting it meanwhile.
+    /// How the recovery prompt names what it found: one chapter by title, or a
+    /// count when several chapters from the continuous view were captured (#566).
+    fn recovery_descriptor(&self, rec: &recovery::Recovery) -> String {
+        let count = rec.chapters().count();
+        if count == 1 {
+            let title = self
+                .project
+                .index_of_file(&rec.chapter_file)
+                .and_then(|i| self.project.chapter_title(i))
+                .unwrap_or("a chapter");
+            format!("\"{title}\"")
+        } else {
+            format!("{count} chapters")
+        }
+    }
+
+    /// Restore the unsaved work the recovery prompt offered. A single captured
+    /// chapter loads into the single-chapter buffer; several chapters (from the
+    /// continuous view) open the continuous view and overlay their recovered
+    /// prose onto the loaded window (#566). Either way the recovered work lands in
+    /// the editable buffer, dirty, so a save persists it and the sidecar keeps
+    /// protecting it meanwhile — files are never rewritten behind the author.
     pub(super) fn restore_recovery(&mut self) {
         let Some(rec) = self.pending_recovery.take() else {
             return;
         };
+        if rec.extra.is_empty() {
+            self.restore_single_recovery(rec);
+        } else {
+            self.restore_continuous_recovery(rec);
+        }
+    }
+
+    /// Restore a single captured chapter into the single-chapter view.
+    fn restore_single_recovery(&mut self, rec: recovery::Recovery) {
         let Some(index) = self.project.index_of_file(&rec.chapter_file) else {
             self.clear_recovery();
             self.message = Some("Could not recover: that chapter no longer exists.".into());
@@ -146,5 +192,41 @@ impl App {
             self.recovery_written = true; // the sidecar already matches; a save clears it
             self.message = Some("Recovered unsaved work — review and save.".into());
         }
+    }
+
+    /// Restore several captured chapters into the continuous view: center the
+    /// window on the first recovered chapter, then overlay each recovered body
+    /// onto its segment, leaving them dirty for review and save (#566).
+    fn restore_continuous_recovery(&mut self, rec: recovery::Recovery) {
+        // Resolve the captured chapters to manifest indices that still exist.
+        let chapters: Vec<(usize, String)> = rec
+            .chapters()
+            .filter_map(|c| {
+                self.project
+                    .index_of_file(&c.chapter_file)
+                    .map(|i| (i, c.body))
+            })
+            .collect();
+        let Some(&(first, _)) = chapters.first() else {
+            self.clear_recovery();
+            self.message = Some("Could not recover: those chapters no longer exist.".into());
+            return;
+        };
+        // Open the continuous view centered on the first recovered chapter, then
+        // overlay the recovered prose. `enter_continuous` already flushes and
+        // sets up the window; do nothing if it couldn't open (a chapter read).
+        self.project.set_active(first);
+        self.enter_continuous();
+        let Some(m) = self.manuscript.as_mut() else {
+            self.message = Some("Could not open continuous view to recover.".into());
+            return;
+        };
+        let restored = m.restore_bodies(&chapters);
+        self.clear_annotation_history();
+        self.recovery_written = true; // the sidecar already matches; a save clears it
+        self.message = Some(format!(
+            "Recovered unsaved work in {} chapters — review and save.",
+            restored.len()
+        ));
     }
 }
