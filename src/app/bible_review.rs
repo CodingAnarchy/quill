@@ -32,6 +32,36 @@ pub(super) enum Staged {
     Failed(String),
 }
 
+/// The tallied outcome of staging a batch of generated files (#503): how many
+/// were written, the hand-edit conflicts to review, and any I/O failures. The
+/// character pass, the off-manuscript writer, and the notes import all stage a
+/// batch then make the same failures → conflicts → clean decision; this collects
+/// the counts so that decision lives in one place ([`App::resolve_staged`]).
+pub(super) struct StagedTally {
+    pub(super) written: usize,
+    pub(super) conflicts: Vec<BibleConflict>,
+    pub(super) failures: Vec<String>,
+}
+
+impl StagedTally {
+    /// Tally a batch of staged results into write count, conflicts, and failures.
+    pub(super) fn from(staged: impl Iterator<Item = Staged>) -> Self {
+        let mut tally = StagedTally {
+            written: 0,
+            conflicts: Vec::new(),
+            failures: Vec::new(),
+        };
+        for result in staged {
+            match result {
+                Staged::Wrote => tally.written += 1,
+                Staged::Conflict(c) => tally.conflicts.push(c),
+                Staged::Failed(msg) => tally.failures.push(msg),
+            }
+        }
+        tally
+    }
+}
+
 pub(super) fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
     TextDiff::from_lines(current, proposed)
         .iter_all_changes()
@@ -94,6 +124,38 @@ impl App {
             .unwrap_or(path)
             .display()
             .to_string()
+    }
+
+    /// Make the shared three-way decision after staging a batch (#503): a failed
+    /// write is reported and wins (nothing is claimed saved); otherwise any
+    /// hand-edit conflicts open a single review with a caller-supplied summary
+    /// line (`conflict_message`, given the write count and pending count); a
+    /// clean batch runs `on_clean` for the caller's success summary. The handoff
+    /// shape — `BibleReview { conflicts, editing: None }` — and the failure
+    /// message live here so a change touches one place, not three.
+    pub(super) fn resolve_staged(
+        &mut self,
+        tally: StagedTally,
+        conflict_message: impl FnOnce(usize, usize) -> String,
+        on_clean: impl FnOnce(&mut Self, usize),
+    ) {
+        let StagedTally {
+            written,
+            conflicts,
+            failures,
+        } = tally;
+        if !failures.is_empty() {
+            self.message = Some(write_failure_message(&failures));
+        } else if conflicts.is_empty() {
+            on_clean(self, written);
+        } else {
+            let pending = conflicts.len();
+            self.mode = Mode::BibleReview(Box::new(BibleReview {
+                conflicts,
+                editing: None,
+            }));
+            self.message = Some(conflict_message(written, pending));
+        }
     }
 
     /// Open a findings-only result (analysis passes that write no bible file):
@@ -369,5 +431,46 @@ impl App {
         // reads bodies live, and leaving the word cache untouched keeps an
         // AI-inserted note out of the author's word tally.
         self.message = Some(format!("Marked xxx in '{title}'"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Staged, StagedTally};
+    use crate::mode::BibleConflict;
+    use std::path::PathBuf;
+
+    fn conflict(name: &str) -> BibleConflict {
+        BibleConflict {
+            path: PathBuf::from(format!("{name}.md")),
+            name: name.into(),
+            proposed: String::new(),
+            diff: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn tally_sorts_each_staged_kind() {
+        let tally = StagedTally::from(
+            [
+                Staged::Wrote,
+                Staged::Conflict(conflict("a")),
+                Staged::Wrote,
+                Staged::Failed("oops".into()),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(tally.written, 2);
+        assert_eq!(tally.conflicts.len(), 1);
+        assert_eq!(tally.conflicts[0].name, "a");
+        assert_eq!(tally.failures, vec!["oops".to_string()]);
+    }
+
+    #[test]
+    fn empty_batch_tallies_to_zero() {
+        let tally = StagedTally::from(std::iter::empty());
+        assert_eq!(tally.written, 0);
+        assert!(tally.conflicts.is_empty());
+        assert!(tally.failures.is_empty());
     }
 }
