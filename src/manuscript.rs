@@ -278,6 +278,70 @@ impl Manuscript {
         Ok(())
     }
 
+    // --- Recovery ----------------------------------------------------------
+
+    /// Each dirty segment's `(manifest index, prose body)`, snapshotting the
+    /// in-memory buffer — not the on-disk files (#566). The body is normalized
+    /// the same way [`save`](Self::save) computes it, with front matter left out
+    /// (recovery captures prose only, re-attaching front matter on save), so a
+    /// recovered body compares cleanly against the chapter's on-disk prose.
+    ///
+    /// Runs on the idle cadence, so it does only buffer slicing over the loaded
+    /// window — no file reads, no work proportional to the novel.
+    pub fn dirty_segments(&self) -> Vec<(usize, String)> {
+        let mut out = Vec::new();
+        let mut start = 0;
+        for s in &self.segments {
+            let end = start + s.lines;
+            if s.dirty {
+                let raw = self.buffer.line_range_text(start, end);
+                out.push((s.index, normalize_trailing_newline(&raw)));
+            }
+            start = end;
+        }
+        out
+    }
+
+    /// Overlay recovered prose onto the loaded window (#566): for each
+    /// `(manifest index, body)` whose chapter is currently loaded, replace that
+    /// segment's text with the recovered body and mark it dirty, so the recovered
+    /// work sits in the editable buffer for review and a save persists it — never
+    /// writing files behind the author's back, mirroring single-chapter restore.
+    /// Returns the indices actually restored (those still in the window). The
+    /// cursor lands at the start of the first restored chapter.
+    pub fn restore_bodies(&mut self, chapters: &[(usize, String)]) -> Vec<usize> {
+        let mut restored = Vec::new();
+        let mut text = String::new();
+        let mut first_start_line: Option<usize> = None;
+        let mut start_line = 0;
+        for s in &mut self.segments {
+            let recovered = chapters.iter().find(|(idx, _)| *idx == s.index);
+            let mut content = match recovered {
+                Some((_, body)) => normalize_trailing_newline(body),
+                None => {
+                    let end = start_line + s.lines;
+                    self.buffer.line_range_text(start_line, end)
+                }
+            };
+            start_line += s.lines;
+            if content.is_empty() {
+                content.push('\n');
+            }
+            if recovered.is_some() {
+                s.dirty = true;
+                restored.push(s.index);
+                first_start_line.get_or_insert(text.matches('\n').count());
+            }
+            s.lines = content.matches('\n').count();
+            text.push_str(&content);
+        }
+        self.buffer = Buffer::from_text(&text);
+        let line = first_start_line.unwrap_or(0);
+        self.buffer.cursor.line = line.min(self.buffer.line_count().saturating_sub(1));
+        self.buffer.cursor.col = 0;
+        restored
+    }
+
     // --- Windowing ---------------------------------------------------------
 
     /// Re-center the window on the chapter the cursor is now in, paging chapters
