@@ -5,15 +5,17 @@
 //! discard — clears it.
 //!
 //! Where atomic save (#262) protects what's *saved*, this protects what *isn't*.
-//! The sidecar is a best-effort safety copy, not a source of truth, so it is
-//! written cheaply (a temp file + rename, no `fsync`): the rename keeps a crash
-//! mid-write from truncating a previous good sidecar, while skipping the
-//! per-write disk flush that would be wasteful on every idle tick.
+//! The sidecar is a best-effort safety copy, not a source of truth, but it is
+//! still written through the audited atomic path (#262/#567): a crash mid-write
+//! must never leave a torn or zero-length sidecar over a previous good one,
+//! which would defeat recovery exactly when it is needed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::atomic;
 
 const DIR: &str = ".quill";
 const FILE: &str = "recovery.json";
@@ -31,15 +33,14 @@ fn path(root: &Path) -> PathBuf {
     root.join(DIR).join(FILE)
 }
 
-/// Write the sidecar (best-effort), creating `.quill/` if needed. Staged through
-/// a sibling temp file and renamed into place so an interrupted write can't
-/// leave a torn sidecar over a previous good one.
+/// Write the sidecar (best-effort), creating `.quill/` if needed. Goes through
+/// [`atomic::write`] — a PID-keyed sibling temp file, `fsync`ed and renamed into
+/// place — so an interrupted write can't leave a torn or empty sidecar over a
+/// previous good one, and concurrent processes never collide on the temp name.
 pub fn write(root: &Path, rec: &Recovery) -> std::io::Result<()> {
     let json = serde_json::to_string(rec).map_err(std::io::Error::other)?;
     fs::create_dir_all(root.join(DIR))?;
-    let tmp = path(root).with_extension("json.tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(&tmp, path(root))
+    atomic::write(&path(root), json.as_bytes())
 }
 
 /// The recorded unsaved work, if a parseable sidecar is present. A missing or
@@ -103,11 +104,36 @@ mod tests {
     fn write_leaves_no_temp_file_behind() {
         let dir = tmpdir("clean");
         write(&dir, &sample()).unwrap();
+        // The sidecar itself must be the only file in `.quill/` — no fixed-name
+        // (`recovery.json.tmp`) nor PID-keyed (`.recovery.json.<pid>.tmp`) temp
+        // staged by the atomic path may linger after a clean write.
         let strays: Vec<_> = fs::read_dir(dir.join(DIR))
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(strays.is_empty(), "temp file left behind: {strays:?}");
+        // And the file that does land is a readable, parseable sidecar.
+        assert_eq!(read(&dir), Some(sample()));
+    }
+
+    // A failed write must not clobber a previously good sidecar: routing through
+    // the atomic path means an interruption after staging but before the rename
+    // leaves the prior sidecar byte-for-byte intact (#567). We drive the same
+    // fault-injection seam `atomic` uses for its own crash test (#265).
+    #[test]
+    fn failed_write_preserves_previous_sidecar() {
+        let dir = tmpdir("preserve");
+        write(&dir, &sample()).unwrap();
+
+        let doomed = Recovery {
+            chapter_file: "two.md".into(),
+            body: "half-written\n".into(),
+        };
+        atomic::fail_point::arm_pre_rename_failure();
+        assert!(write(&dir, &doomed).is_err());
+
+        // The first, good sidecar must still be the one on disk.
+        assert_eq!(read(&dir), Some(sample()));
     }
 }
