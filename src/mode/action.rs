@@ -131,6 +131,24 @@ pub(crate) enum Command {
     SwitchBook(usize),
     /// Insert the author-defined snippet at this index in `App::snippets` (#411).
     InsertSnippet(usize),
+    /// Open the role picker for the curated font family at this index in
+    /// [`crate::fonts::FAMILIES`] (#494) — body, heading, or both.
+    PickFontRole(usize),
+    /// Download the font family at this index and set it for `target` in the
+    /// project's `[style]` (#494).
+    ApplyFont(usize, FontTarget),
+}
+
+/// Which `[style]` font slot(s) a chosen curated font fills (#494) — picked after
+/// the family, before the download.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FontTarget {
+    /// Set `body_font` only.
+    Body,
+    /// Set `heading_font` only.
+    Heading,
+    /// Set both `body_font` and `heading_font` to this family.
+    Both,
 }
 
 /// Which character(s) a portrait pass should generate (#244), chosen from the
@@ -218,6 +236,9 @@ pub(crate) enum Action {
     Assistant,
     /// Open the snippet picker to insert an author-defined snippet (#411).
     InsertSnippet,
+    /// Browse the curated open-licensed font library, download a font into the
+    /// project, and set it for the designed exports' `[style]` (#494).
+    BrowseFonts,
 }
 
 impl Action {
@@ -243,6 +264,7 @@ impl Action {
         Action::Export(ExportFormat::Epub),
         Action::Export(ExportFormat::Pdf),
         Action::Export(ExportFormat::PdfPrint),
+        Action::BrowseFonts,
         // Reports
         Action::ProgressReport,
         Action::AnalysisReport,
@@ -350,6 +372,7 @@ impl Action {
             Action::SetImageKey => "image:set-key",
             Action::Assistant => "assistant",
             Action::InsertSnippet => "snippet",
+            Action::BrowseFonts => "fonts:browse",
         }
     }
 
@@ -368,7 +391,7 @@ impl Action {
             | Action::ImportNotes
             | Action::NewProjectFromNotes
             | Action::ImportManuscript => "Project",
-            Action::Export(_) => "Export",
+            Action::Export(_) | Action::BrowseFonts => "Export",
             Action::ProgressReport | Action::AnalysisReport => "Reports",
             Action::Ai(_)
             | Action::RefreshSeriesBible
@@ -450,6 +473,7 @@ impl Action {
             Action::SetImageKey => "Set image API key (keychain)",
             Action::Assistant => "Authorial assistant",
             Action::InsertSnippet => "Insert snippet…",
+            Action::BrowseFonts => "Browse & download fonts…",
         }
     }
 
