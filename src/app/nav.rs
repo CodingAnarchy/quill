@@ -72,6 +72,50 @@ impl App {
                     Some(sel),
                 );
             }
+            // Split the active chapter at the cursor into two (#585). Only the
+            // open chapter can be split — its live cursor is the seam — so point
+            // the author at it rather than prompting for a title that won't apply.
+            KeyCode::Char('x') => {
+                if sel == self.project.active_index() {
+                    self.open_prompt(
+                        Pending::SplitChapter { at: sel },
+                        "Title for the new chapter after the cursor: ",
+                        "",
+                        Some(sel),
+                    );
+                } else {
+                    self.message = Some("Open a chapter (Enter) before splitting it.".into());
+                }
+            }
+            // Merge the selected chapter into the one above it (#585).
+            KeyCode::Char('M') => {
+                if sel == 0 {
+                    self.message = Some("No chapter above to merge into.".into());
+                } else {
+                    let title = self.project.manifest.chapters[sel].title.clone();
+                    let above = self
+                        .project
+                        .chapter_title(sel - 1)
+                        .unwrap_or("the chapter above")
+                        .to_string();
+                    self.open_prompt(
+                        Pending::Merge { at: sel },
+                        format!("Merge '{title}' into '{above}'? (y/N)"),
+                        "",
+                        Some(sel),
+                    );
+                }
+            }
+            // Duplicate the selected chapter (#585), prefilling a "(copy)" title.
+            KeyCode::Char('c') => {
+                let title = self.project.manifest.chapters[sel].title.clone();
+                self.open_prompt(
+                    Pending::Duplicate { at: sel },
+                    "Title for the duplicate: ",
+                    &format!("{title} (copy)"),
+                    Some(sel),
+                );
+            }
             // Chapter metadata (front matter): status, summary, POV, epigraph.
             KeyCode::Char('s') => self.cycle_status(sel),
             KeyCode::Char('m') => {

@@ -139,6 +139,13 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            Pending::Merge { at } => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    let selected = self.merge_chapter(at);
+                    self.select(selected);
+                }
+                _ => self.mode = closed,
+            },
             Pending::ConfirmAi {
                 action,
                 force,
@@ -255,6 +262,8 @@ impl App {
             },
             // The text prompts share the editing keys; only Enter differs.
             Pending::NewChapter { .. }
+            | Pending::SplitChapter { .. }
+            | Pending::Duplicate { .. }
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
             | Pending::SetGoal(_)
@@ -305,6 +314,22 @@ impl App {
                                     self.rename_chapter(at, text);
                                 }
                                 self.select(fallback);
+                            }
+                            Pending::SplitChapter { at } => {
+                                let sel = if text.is_empty() {
+                                    fallback
+                                } else {
+                                    self.split_chapter(at, text)
+                                };
+                                self.select(sel);
+                            }
+                            Pending::Duplicate { at } => {
+                                let sel = if text.is_empty() {
+                                    fallback
+                                } else {
+                                    self.duplicate_chapter(at, text)
+                                };
+                                self.select(sel);
                             }
                             Pending::SetMeta(field) => {
                                 // Single-line metadata prompts (summary, POV,
