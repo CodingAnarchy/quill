@@ -575,19 +575,26 @@ fn search_status(s: &Search) -> String {
     } else {
         format!("  {}/{}", s.current + 1, s.matches.len())
     };
+    // The active match modes (#570): a short tag after the query, e.g. "[Aa w]".
+    let modes = match s.opts.label() {
+        ref m if m.is_empty() => String::new(),
+        m => format!(" {m}"),
+    };
     match s.stage {
         // Vim search (#206) shows its `/` / `?` prompt; the Ctrl-F find labels itself.
         SearchStage::Query if s.from_vim => {
             format!(" {}{}{count}", if s.backward { '?' } else { '/' }, s.query)
         }
-        SearchStage::Query => format!(" Find: {}{count}", s.query),
+        SearchStage::Query => format!(" Find: {}{modes}{count}  · ^C case · ^W word", s.query),
         SearchStage::Navigate => {
             format!(
-                " Find: {}{count}  · n next · N prev · r replace · Esc done",
+                " Find: {}{modes}{count}  · n next · N prev · r replace · ^C case · ^W word · Esc done",
                 s.query
             )
         }
-        SearchStage::Replacement => format!(" Replace '{}' with: {}", s.query, s.replacement),
+        SearchStage::Replacement => {
+            format!(" Replace '{}'{modes} with: {}", s.query, s.replacement)
+        }
         SearchStage::Step => format!(
             " Replace '{}' → '{}'?{count}  · y · n skip · a all · Esc done ({} done)",
             s.query, s.replacement, s.replaced

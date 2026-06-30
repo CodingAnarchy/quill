@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 use crate::buffer::Buffer;
+use crate::text::MatchOpts;
 
 use super::{MetaField, Pending};
 
@@ -106,6 +107,9 @@ pub struct Search {
     /// records the search for `n`/`N`, rather than entering the find/replace
     /// navigation. Esc restores the cursor to the origin.
     pub(crate) from_vim: bool,
+    /// Case-sensitive / whole-word toggles (#570). Default (both off) is the
+    /// historic case-insensitive substring rule, byte-for-byte unchanged.
+    pub(crate) opts: MatchOpts,
 }
 
 impl Search {
@@ -122,6 +126,7 @@ impl Search {
             replaced: 0,
             backward,
             from_vim,
+            opts: MatchOpts::default(),
         }
     }
 
@@ -148,6 +153,8 @@ pub struct ProjectSearch {
     pub(crate) selected: usize,
     /// How many occurrences have been replaced, reported when the flow ends.
     pub(crate) replaced: usize,
+    /// Case-sensitive / whole-word toggles (#570), same default as [`Search`].
+    pub(crate) opts: MatchOpts,
 }
 
 impl ProjectSearch {
@@ -159,6 +166,7 @@ impl ProjectSearch {
             matches: Vec::new(),
             selected: 0,
             replaced: 0,
+            opts: MatchOpts::default(),
         }
     }
 
