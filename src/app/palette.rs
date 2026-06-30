@@ -300,7 +300,7 @@ impl App {
                         p.set_collapsed(group, !*collapsed);
                         return;
                     }
-                    Some(PaletteRow::Item(i)) => Some(p.items[*i].command),
+                    Some(PaletteRow::Item(i)) => Some(p.items[*i].command.clone()),
                     None => None,
                 };
                 let force = matches!(key.code, KeyCode::Char('R'));

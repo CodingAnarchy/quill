@@ -10,6 +10,15 @@ use crate::frontmatter::{Band, Epigraph};
 use crate::mode::{Action, Command, ExportFormat, ExportScope, Palette, PaletteItem};
 use crate::project::{front_chapter_count, part_at_body_position};
 
+/// The collapsible group headers the sample-export entries (#584) sit under in the
+/// export palette — static so they can key the palette's collapsed set.
+const SAMPLE_CHAPTERS: &str = "Sample · one chapter";
+const SAMPLE_PARTS: &str = "Sample · one part";
+const SAMPLE_RANGE: &str = "Sample · a range";
+
+/// The set of sample-export group headers to collapse by default.
+type SampleGroups = std::collections::HashSet<&'static str>;
+
 /// The export formats with their menu label and description.
 const FORMATS: [(ExportFormat, &str, &str); 7] = [
     (
@@ -90,12 +99,91 @@ impl App {
                 items.push(item(label.to_string(), desc, f, ExportScope::ActiveBook));
             }
         }
+        // Sample exports (#584): a single chapter, a part, or a contiguous range of
+        // the active book, in any format — for a beta reader or a submission. Each
+        // sits under a collapsed group so the everyday whole-book formats stay up
+        // top; the labels carry the chapter/part name, the (static) headers don't.
+        let collapsed = self.append_sample_export_items(&mut items);
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Export",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed,
         }));
+    }
+
+    /// Append the per-chapter / per-part / range sample-export entries (#584) to the
+    /// export palette and return the set of group headers to collapse by default.
+    /// Only the active book's body chapters are offered (front/back matter and the
+    /// other books of a series are never sampled); a range entry needs at least
+    /// three body chapters to be a meaningful "first chapters" sample.
+    fn append_sample_export_items(&self, items: &mut Vec<PaletteItem>) -> SampleGroups {
+        let item = |label: String, desc: String, format, scope| {
+            PaletteItem::new(label, desc, Command::Export(format, scope))
+        };
+        let body: Vec<usize> = (0..self.chapter_count())
+            .filter(|&i| self.project.chapter_band(i) == Band::Body)
+            .collect();
+        let mut collapsed = SampleGroups::new();
+        // One chapter.
+        for &i in &body {
+            let title = self
+                .project
+                .chapter_title(i)
+                .unwrap_or("Untitled")
+                .to_string();
+            for (f, label, _) in FORMATS {
+                items.push(
+                    item(
+                        format!("Chapter: {title} → {label}"),
+                        format!("Just this chapter as {label}"),
+                        f,
+                        ExportScope::Chapter(i),
+                    )
+                    .in_group(SAMPLE_CHAPTERS),
+                );
+            }
+            collapsed.insert(SAMPLE_CHAPTERS);
+        }
+        // One part (each part's chapter range).
+        for (name, range) in self.part_ranges() {
+            if range.is_empty() {
+                continue;
+            }
+            for (f, label, _) in FORMATS {
+                items.push(
+                    item(
+                        format!("Part: {name} → {label}"),
+                        format!("This part as {label}"),
+                        f,
+                        ExportScope::Part {
+                            name: name.clone(),
+                            start: range.start,
+                            end: range.end - 1,
+                        },
+                    )
+                    .in_group(SAMPLE_PARTS),
+                );
+            }
+            collapsed.insert(SAMPLE_PARTS);
+        }
+        // The first three chapters — the classic submission sample.
+        if body.len() >= 3 {
+            let (start, end) = (body[0], body[2]);
+            for (f, label, _) in FORMATS {
+                items.push(
+                    item(
+                        format!("First three chapters → {label}"),
+                        format!("A submission sample as {label}"),
+                        f,
+                        ExportScope::Range { start, end },
+                    )
+                    .in_group(SAMPLE_RANGE),
+                );
+            }
+            collapsed.insert(SAMPLE_RANGE);
+        }
+        collapsed
     }
 
     /// Compile the manuscript and write it under `export/<slug>.<ext>` in the
@@ -110,19 +198,42 @@ impl App {
             self.message = Some("Leave the continuous view (Ctrl-l) before exporting.".into());
             return;
         }
-        match scope {
-            ExportScope::ActiveBook => {
-                let doc = self.export_document();
-                let name = bible::slug(&self.project.manifest.title);
-                self.write_book(format, &doc, &name);
-            }
+        match &scope {
             ExportScope::Series => {
                 let docs = self.export_series_documents();
                 let series = self.project.series_title().map(str::to_string);
                 let name = bible::slug(series.as_deref().unwrap_or("series"));
                 self.write_series(format, &docs, series.as_deref(), &name);
             }
+            // The active book whole (#7) or a sample of it (#584) — both compile one
+            // [`Document`] from the active book, differing only in which chapters
+            // the loop keeps (`chapter_span`) and the output filename.
+            _ => {
+                let doc = self.export_document(scope.chapter_span());
+                let name = self.export_name(&scope);
+                self.write_book(format, &doc, &name);
+            }
         }
+    }
+
+    /// The output base name (sans extension) for a scoped export. A whole-book
+    /// export is named for the book; a *sample* (#584) appends a scope tag — the
+    /// chapter or part slug, or `chapters-N-M` for a range — so a sample never
+    /// overwrites the full export sitting beside it.
+    fn export_name(&self, scope: &ExportScope) -> String {
+        let book = bible::slug(&self.project.manifest.title);
+        let tag = match scope {
+            ExportScope::Chapter(i) => self
+                .project
+                .chapter_title(*i)
+                .map(bible::slug)
+                .unwrap_or_else(|| format!("chapter-{}", i + 1)),
+            ExportScope::Part { name, .. } => bible::slug(name),
+            // 1-based, inclusive — what an author counting chapters expects.
+            ExportScope::Range { start, end } => format!("chapters-{}-{}", start + 1, end + 1),
+            ExportScope::ActiveBook | ExportScope::Series => return book,
+        };
+        format!("{book}-{tag}")
     }
 
     /// Write one book's [`Document`] in `format` to `export/<name>.<ext>`.
@@ -397,7 +508,12 @@ impl App {
     /// front matter, the body grouped into parts, and the back matter — each
     /// chapter with its epigraph and prose (active chapter live from its buffer,
     /// the rest from disk; front matter stripped; a repeated title heading dropped).
-    fn export_document(&self) -> Document {
+    ///
+    /// `span` is `None` for a whole-book export (every chapter); a *sample* (#584)
+    /// passes an inclusive manifest chapter-index range, which keeps only the body
+    /// chapters in it — front and back matter are dropped from a sample, and the
+    /// kept body chapters still group under their part headings.
+    fn export_document(&self, span: Option<std::ops::RangeInclusive<usize>>) -> Document {
         let m = &self.project.manifest;
         let parts = self.part_ranges(); // (name, body-chapter index range), in order
         let mut front = Vec::new();
@@ -409,6 +525,10 @@ impl App {
         // first body chapter always opens one).
         let mut prev: Option<Option<usize>> = None;
         for i in 0..self.chapter_count() {
+            // A sample keeps only its chapters; the rest of the book is skipped.
+            if span.as_ref().is_some_and(|s| !s.contains(&i)) {
+                continue;
+            }
             let chapter = self.export_chapter(i);
             match self.project.chapter_band(i) {
                 Band::Front => front.push(chapter),
@@ -468,7 +588,7 @@ impl App {
         (0..self.project.book_count())
             .map(|b| {
                 let mut doc = if b == self.project.active_book() {
-                    self.export_document()
+                    self.export_document(None)
                 } else {
                     self.export_book_document(b)
                 };
