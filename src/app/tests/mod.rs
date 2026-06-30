@@ -51,6 +51,7 @@ mod analysis;
 mod annotations;
 mod assistant;
 mod autosave;
+mod book_details;
 mod books;
 mod chapters_continuous;
 mod chapters_counts_and_perf;

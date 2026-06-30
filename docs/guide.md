@@ -81,10 +81,19 @@ your home directory, and Quill says so (set `[projects] home` to choose where
 books live). Passing an explicit path — `quill path/to/book` — always opens or
 creates that project directly, with no chooser.
 
+Run "Book details" from the Ctrl-K menu to set the book's title, subtitle,
+author, and series — the fields that flow into every export's title block. Quill
+walks them in turn, each prompt prefilled with its current value: press Enter to
+keep a field and move to the next, type to change it, or Esc to stop. The title
+keeps its current value if you leave it blank; a blank subtitle, author, or
+series clears it. (These are the same fields the chapter browser sets one at a
+time with "t", "b", "w", and "e"; either way writes the same manifest.)
+
 To make the project's folder match its title, run "Rename project folder" from
 the Ctrl-K menu: it's prefilled with the book title, the folder moves without
 quitting, and the project keeps saving to the new location. Renaming the folder
-is separate from the title (set with "t" in the chapter browser).
+is separate from the title (set with "Book details" in the Ctrl-K menu, or "t"
+in the chapter browser).
 
 A project can hold a series of books. When it does, Quill opens the first book;
 run "Switch book" from the run-action menu (Ctrl-K) to move to another — the

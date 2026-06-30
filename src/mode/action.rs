@@ -266,6 +266,9 @@ pub(crate) enum Action {
     SeriesTree,
     /// Rename the open project's folder, matching it to the book title (#424).
     RenameProject,
+    /// Set the book's title, subtitle, author, and series — the manifest fields
+    /// also reachable from the chapter browser's single-letter keys (#571).
+    BookDetails,
     /// Set or change the project's writing goals — target words, target chapters,
     /// and the daily word target (#550).
     SetGoals,
@@ -321,6 +324,7 @@ impl Action {
         Action::SwitchBook,
         Action::SeriesTree,
         Action::RenameProject,
+        Action::BookDetails,
         Action::SetGoals,
         Action::ImportNotes,
         Action::NewProjectFromNotes,
@@ -407,6 +411,7 @@ impl Action {
             Action::SwitchBook => "book:switch",
             Action::SeriesTree => "tree",
             Action::RenameProject => "project:rename",
+            Action::BookDetails => "book:details",
             Action::SetGoals => "goals:set",
             Action::RefreshSeriesBible => "bible:series",
             Action::ProjectFind => "find:project",
@@ -440,6 +445,7 @@ impl Action {
             | Action::SwitchBook
             | Action::SeriesTree
             | Action::RenameProject
+            | Action::BookDetails
             | Action::SetGoals
             | Action::ImportNotes
             | Action::NewProjectFromNotes
@@ -509,6 +515,7 @@ impl Action {
             Action::SwitchBook => "Switch book",
             Action::SeriesTree => "Project tree",
             Action::RenameProject => "Rename project folder",
+            Action::BookDetails => "Book details…",
             Action::SetGoals => "Set writing goals",
             Action::RefreshSeriesBible => "Refresh series bible",
             Action::ProjectFind => "Find across manuscript",

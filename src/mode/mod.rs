@@ -415,6 +415,13 @@ pub(crate) enum Pending {
     /// required fields then offers the optional daily target); a blank entry
     /// clears the optional daily goal and is rejected for the required ones.
     SetGoal(crate::project::GoalField),
+    /// Text input setting one book-details field (#571): title, subtitle, author,
+    /// or series. Persisted to the manifest through the shared metadata setter, so
+    /// it reads back identical to the chapter-browser single-letter keys. The
+    /// prompts chain (`book:details` walks title → subtitle → author → series);
+    /// Esc stops the chain. The required title keeps its current value on blank;
+    /// the optional fields clear on blank.
+    SetBookField(BookField),
     /// Text input setting one free-text `[style]` knob (#569): the scene-break
     /// glyph or a title/part ornament. Persisted to the `[style]` table of
     /// `book.toml`; a blank entry clears the key. On save the setter re-opens the
@@ -476,5 +483,41 @@ impl MetaField {
                 | MetaField::BookEpigraph
                 | MetaField::BookEpigraphBy
         )
+    }
+}
+
+/// One book-level field the "Book details…" run-action (#571) walks in turn —
+/// title, subtitle, author, series. Each maps to the [`MetaField`] the manifest
+/// stores it under, so the chained-prompt flow and the chapter-browser
+/// single-letter keys persist (and read back) through the one shared setter.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum BookField {
+    Title,
+    Subtitle,
+    Author,
+    Series,
+}
+
+impl BookField {
+    /// The [`MetaField`] this book field is stored as — the single mapping that
+    /// keeps the run-action flow and the single-letter keys writing to the same
+    /// manifest slot.
+    pub(crate) fn meta(self) -> MetaField {
+        match self {
+            BookField::Title => MetaField::BookTitle,
+            BookField::Subtitle => MetaField::Subtitle,
+            BookField::Author => MetaField::Author,
+            BookField::Series => MetaField::Series,
+        }
+    }
+
+    /// The prompt label for this field (matching the chapter-browser key labels).
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            BookField::Title => "Book title",
+            BookField::Subtitle => "Subtitle",
+            BookField::Author => "Author",
+            BookField::Series => "Series",
+        }
     }
 }

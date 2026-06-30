@@ -236,6 +236,56 @@ impl App {
         }
     }
 
+    // --- Book details (#571) -----------------------------------------------
+    //
+    // Mirrors the chained goal flow (#550): a first-class "Book details…"
+    // run-action walks the book-level manifest fields in turn — title → subtitle
+    // → author → series — each persisted as it's entered, so the same fields the
+    // chapter-browser single-letter keys (`t`/`b`/`w`/`e`) set are now reachable
+    // (and discoverable) from the run-action palette. Each step routes through the
+    // shared [`apply_meta`] setter, so an app-set field reads back identical to a
+    // single-letter-key one.
+
+    /// Start the book-details flow (`book:details`, #571): prompt for the first
+    /// field (title), prefilled with its current value. Enter on each saves it and
+    /// chains to the next; Esc stops the chain.
+    pub(crate) fn start_book_details(&mut self) {
+        self.prompt_book_field(BookField::Title);
+    }
+
+    /// Open the text prompt for one book-details field, prefilled with the current
+    /// manifest value (blank when unset).
+    pub(crate) fn prompt_book_field(&mut self, field: BookField) {
+        let current = self.current_book_field(field);
+        let label = format!("{}: ", field.label());
+        self.open_prompt(Pending::SetBookField(field), label, &current, None);
+    }
+
+    /// The current manifest value of book `field`, for prefilling the prompt.
+    fn current_book_field(&self, field: BookField) -> String {
+        let m = &self.project.manifest;
+        match field {
+            BookField::Title => m.title.clone(),
+            BookField::Subtitle => m.subtitle.clone().unwrap_or_default(),
+            BookField::Author => m.author.clone().unwrap_or_default(),
+            BookField::Series => m.series.clone().unwrap_or_default(),
+        }
+    }
+
+    /// Apply one book-details prompt's input (#571): persist it through the shared
+    /// metadata setter (so it stores and reads back exactly like the chapter-browser
+    /// single-letter keys), then chain to the next field — or finish on the last.
+    pub(crate) fn apply_book_field(&mut self, field: BookField, text: &str) {
+        self.apply_meta(field.meta(), text);
+        match next_book_field(field) {
+            Some(next) => self.prompt_book_field(next),
+            None => {
+                self.mode = self.editing_mode();
+                self.message = Some("Book details updated.".into());
+            }
+        }
+    }
+
     /// The current epigraph of chapter `index`: from the live buffer if it's the
     /// active chapter (latest unsaved edits), otherwise read from its file.
     pub(crate) fn chapter_epigraph(&self, index: usize) -> Option<Epigraph> {
@@ -379,6 +429,18 @@ fn next_goal_field(field: GoalField) -> Option<GoalField> {
         GoalField::Chapters => Some(GoalField::Daily),
         GoalField::Daily => Some(GoalField::WordsPerPage),
         GoalField::WordsPerPage => None,
+    }
+}
+
+/// The next field in the book-details flow (#571): title → subtitle → author →
+/// series, then done. Walks the same fields the chapter-browser `t`/`b`/`w`/`e`
+/// keys set, in that order.
+fn next_book_field(field: BookField) -> Option<BookField> {
+    match field {
+        BookField::Title => Some(BookField::Subtitle),
+        BookField::Subtitle => Some(BookField::Author),
+        BookField::Author => Some(BookField::Series),
+        BookField::Series => None,
     }
 }
 

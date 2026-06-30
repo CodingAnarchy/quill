@@ -258,6 +258,7 @@ impl App {
             | Pending::Rename { .. }
             | Pending::SetMeta(_)
             | Pending::SetGoal(_)
+            | Pending::SetBookField(_)
             | Pending::SetStyleText(_)
             | Pending::AskAi
             | Pending::Thesaurus
@@ -320,6 +321,13 @@ impl App {
                                 // next goal field (or re-prompt on a bad value). The
                                 // flow drives the mode itself, so don't reset it here.
                                 self.apply_goal(field, text);
+                            }
+                            Pending::SetBookField(field) => {
+                                // Persist this book field (title keeps its current
+                                // value on blank; the optional fields clear), then
+                                // chain to the next. The flow drives the mode
+                                // itself, so don't reset it here.
+                                self.apply_book_field(field, text);
                             }
                             Pending::SetStyleText(knob) => {
                                 // Splice the `[style]` knob (blank clears it). The

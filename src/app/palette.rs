@@ -172,6 +172,7 @@ impl App {
             Action::SwitchBook => self.open_book_switcher(),
             Action::SeriesTree => self.open_tree(),
             Action::RenameProject => self.prompt_rename_project(),
+            Action::BookDetails => self.start_book_details(),
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::ProjectFind => self.open_project_find(),
