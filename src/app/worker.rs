@@ -150,9 +150,13 @@ pub(super) struct BibleTracker {
 /// The bible tracker behind a costed AI action, or `None` for findings-only and
 /// interactive actions (which send the whole manuscript or nothing).
 pub(super) fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
+    // The bible key is the descriptor's single source (#563); read it once here so
+    // the incremental cache and the series-rollup label can never point at
+    // different on-disk files.
+    let key = action.bible_key()?;
     match action {
         AiAction::Characters => Some(BibleTracker {
-            key: "characters",
+            key,
             source: BibleSource::Dir("characters"),
             full_msg: "⟳ Analyzing characters…",
             incr_msg: "⟳ Updating characters from changed chapters…",
@@ -161,7 +165,7 @@ pub(super) fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
             finish: |r| Outcome::Characters(r.and_then(|resp| character::parse(&resp.text))),
         }),
         AiAction::Continuity => Some(BibleTracker {
-            key: "timeline",
+            key,
             source: BibleSource::File("timeline.md"),
             full_msg: "⟳ Checking continuity…",
             incr_msg: "⟳ Updating the timeline from changed chapters…",
@@ -170,7 +174,7 @@ pub(super) fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
             finish: |r| Outcome::Continuity(r.and_then(|resp| continuity::parse(&resp.text))),
         }),
         AiAction::Setting => Some(BibleTracker {
-            key: "setting",
+            key,
             source: BibleSource::File("setting.md"),
             full_msg: "⟳ Building setting bible…",
             incr_msg: "⟳ Updating the setting bible from changed chapters…",

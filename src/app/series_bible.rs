@@ -211,11 +211,10 @@ impl App {
     }
 }
 
+/// The progress label for a bible tracker — its on-disk bible key, from the
+/// single descriptor source (#563), so this can't drift from the incremental
+/// cache key in `worker.rs`. Non-bible actions never reach the series queue, but
+/// fall back to the generic "bible".
 fn tracker_label(action: AiAction) -> &'static str {
-    match action {
-        AiAction::Characters => "characters",
-        AiAction::Continuity => "timeline",
-        AiAction::Setting => "setting",
-        _ => "bible",
-    }
+    action.bible_key().unwrap_or("bible")
 }

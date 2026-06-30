@@ -326,26 +326,8 @@ impl Action {
             Action::Export(ExportFormat::PdfPrint) => "export:pdf-print",
             Action::ProgressReport => "report:progress",
             Action::AnalysisReport => "report:analysis",
-            Action::Ai(AiAction::Ask) => "ai:ask",
-            Action::Ai(AiAction::Characters) => "ai:characters",
-            Action::Ai(AiAction::Continuity) => "ai:continuity",
-            Action::Ai(AiAction::Setting) => "ai:setting",
-            Action::Ai(AiAction::Scaffold) => "ai:scaffold",
-            Action::Ai(AiAction::Naming) => "ai:naming",
-            Action::Ai(AiAction::Style) => "ai:style",
-            Action::Ai(AiAction::Brainstorm) => "ai:brainstorm",
-            Action::Ai(AiAction::DraftCharacters) => "ai:draft-characters",
-            Action::Ai(AiAction::DraftSetting) => "ai:draft-setting",
-            Action::Ai(AiAction::Voice) => "ai:voice",
-            Action::Ai(AiAction::Submission) => "ai:submission",
-            Action::Ai(AiAction::Marketing) => "ai:marketing",
-            Action::Ai(AiAction::Social) => "ai:social",
-            Action::Ai(AiAction::AdCreative) => "ai:ad-creative",
-            Action::Ai(AiAction::Portrait) => "ai:portrait",
-            Action::Ai(AiAction::Scene) => "ai:scene",
-            Action::Ai(AiAction::Triage) => "triage",
-            Action::Ai(AiAction::Thesaurus) => "ai:thesaurus",
-            Action::Ai(AiAction::Editorial) => "ai:editorial",
+            // The AI slugs are the single source in `AiAction::SPECS` (#563).
+            Action::Ai(a) => a.slug(),
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
@@ -579,7 +561,7 @@ pub(crate) enum ExportScope {
 }
 
 /// The AI actions reachable from the AI palette.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AiAction {
     Ask,
     Characters,
@@ -613,6 +595,191 @@ pub(crate) enum AiAction {
     Thesaurus,
     /// Editorial read — flag structural / continuity / line issues, no fixes (#293).
     Editorial,
+}
+
+/// What a network pass costs (#82/#372) — the *data* side of the cost estimate,
+/// kept provider-agnostic here so the dispatch ([`crate::app::App::cost_profile`])
+/// resolves it to a concrete `(model, max_tokens)` against live settings. `None`
+/// is for the local / interactive / image actions that issue no costed
+/// whole-manuscript pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AiCost {
+    /// No costed whole-manuscript pass (interactive, local, or per-image).
+    None,
+    /// The cheap name/term-consistency pass, billed with its own fixed model.
+    Naming,
+    /// A standard manuscript pass on the configured model + default output bound.
+    Manuscript,
+}
+
+/// The single source of truth for an [`AiAction`]'s parallel data (#563): its
+/// stable slug, its cost profile, and — for the three persistent-bible passes —
+/// the on-disk bible key. The palette registry, [`Action::name`], the cost gate,
+/// and the bible trackers all derive from this table rather than re-encoding the
+/// set, so a new or renamed action is described in exactly one place.
+pub(crate) struct AiActionSpec {
+    pub(crate) action: AiAction,
+    /// The stable token the run-action registry and workflows reference — the AI
+    /// half of [`Action::name`]. Never change without a config migration.
+    pub(crate) slug: &'static str,
+    pub(crate) cost: AiCost,
+    /// The story-bible key this pass tracks (the incremental cache key and the
+    /// series-rollup label), or `None` for the non-bible passes.
+    pub(crate) bible_key: Option<&'static str>,
+}
+
+impl AiAction {
+    /// The descriptor table — every [`AiAction`] with its slug, cost profile, and
+    /// bible key, in palette order. The single place the action set is enumerated.
+    pub(crate) const SPECS: &'static [AiActionSpec] = &[
+        AiActionSpec {
+            action: AiAction::Ask,
+            slug: "ai:ask",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Characters,
+            slug: "ai:characters",
+            cost: AiCost::Manuscript,
+            bible_key: Some("characters"),
+        },
+        AiActionSpec {
+            action: AiAction::Continuity,
+            slug: "ai:continuity",
+            cost: AiCost::Manuscript,
+            bible_key: Some("timeline"),
+        },
+        AiActionSpec {
+            action: AiAction::Setting,
+            slug: "ai:setting",
+            cost: AiCost::Manuscript,
+            bible_key: Some("setting"),
+        },
+        AiActionSpec {
+            action: AiAction::Scaffold,
+            slug: "ai:scaffold",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Naming,
+            slug: "ai:naming",
+            cost: AiCost::Naming,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Style,
+            slug: "ai:style",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Brainstorm,
+            slug: "ai:brainstorm",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::DraftCharacters,
+            slug: "ai:draft-characters",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::DraftSetting,
+            slug: "ai:draft-setting",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Voice,
+            slug: "ai:voice",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Submission,
+            slug: "ai:submission",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Marketing,
+            slug: "ai:marketing",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Social,
+            slug: "ai:social",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::AdCreative,
+            slug: "ai:ad-creative",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Portrait,
+            slug: "ai:portrait",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Scene,
+            slug: "ai:scene",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Triage,
+            slug: "triage",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Thesaurus,
+            slug: "ai:thesaurus",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::Editorial,
+            slug: "ai:editorial",
+            cost: AiCost::Manuscript,
+            bible_key: None,
+        },
+    ];
+
+    /// This action's descriptor — its single source of slug / cost / bible key.
+    pub(crate) fn spec(self) -> &'static AiActionSpec {
+        AiAction::SPECS
+            .iter()
+            .find(|s| s.action == self)
+            .expect("every AiAction has a descriptor in AiAction::SPECS")
+    }
+
+    /// The stable run-action slug for this AI action.
+    pub(crate) fn slug(self) -> &'static str {
+        self.spec().slug
+    }
+
+    /// This pass's cost profile — the data the cost gate resolves against live AI
+    /// settings.
+    pub(crate) fn cost(self) -> AiCost {
+        self.spec().cost
+    }
+
+    /// The on-disk story-bible key this pass tracks, or `None` for non-bible
+    /// passes. The one place the `Characters→characters` / `Continuity→timeline` /
+    /// `Setting→setting` mapping is written; both the incremental cache (#90,
+    /// `worker.rs`) and the series-rollup label (#340, `series_bible.rs`) read it.
+    pub(crate) fn bible_key(self) -> Option<&'static str> {
+        self.spec().bible_key
+    }
 }
 
 /// The version-control actions reachable from the Git palette (#54).
