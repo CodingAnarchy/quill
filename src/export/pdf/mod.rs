@@ -922,18 +922,21 @@ impl Pdf {
         );
         // The first LINES lines are inset by the cap width; the rest run full width.
         let full = self.layout.text_w();
-        let lines = wrap_lines(&self.layout, &words, BODY_SIZE, |i| {
-            if i < LINES {
-                full - cap_w
-            } else {
-                full
-            }
-        });
+        let line_w = |i: usize| if i < LINES { full - cap_w } else { full };
+        let lines = wrap_lines(&self.layout, &words, BODY_SIZE, line_w);
+        let last = lines.len().saturating_sub(1);
         for (i, (line, _w)) in lines.into_iter().enumerate() {
             self.need(BODY_LEADING);
-            let x = self.left() + if i < LINES { cap_w } else { 0.0 };
-            let segs = segments(&line);
-            self.draw_line(x, self.y, &segs, BODY_SIZE);
+            let inset = if i < LINES { cap_w } else { 0.0 };
+            let x = self.left() + inset;
+            // Justify like a normal paragraph (#650): every line but the last, and never
+            // a one-word line. The target is the line's own (possibly cap-inset) width.
+            if i != last && line.len() > 1 {
+                self.draw_justified_line(x, self.y, &line, BODY_SIZE, line_w(i));
+            } else {
+                let segs = segments(&line);
+                self.draw_line(x, self.y, &segs, BODY_SIZE);
+            }
             self.y -= BODY_LEADING;
         }
     }
@@ -1129,6 +1132,10 @@ impl Pdf {
 enum Align {
     Left,
     Center,
+    /// Body text justified to both margins (#650): each line but the last stretches
+    /// its inter-word spaces to fill the column; the last line is flush-left. Headings
+    /// and inset/preformatted blocks never use this.
+    Justify,
     /// Flush to a left edge inset by this many points (epigraph body).
     LeftInset(f32),
     /// Flush to a right edge inset by this many points (epigraph attribution).
