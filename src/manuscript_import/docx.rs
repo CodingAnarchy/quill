@@ -6,8 +6,9 @@
 use std::io::{Cursor, Read};
 
 use super::{
-    assemble, attr_value, decode_entities, element_text, fallback_chapter, finalize_titles,
-    for_each_element, join_paragraphs, mine_preamble, tag_attrs, wrap_emphasis, Imported,
+    assemble, attr_value, count_elements, decode_entities, element_text, fallback_chapter,
+    finalize_titles, for_each_element, join_paragraphs, mine_preamble, tag_attrs, wrap_emphasis,
+    Dropped, Imported,
 };
 
 /// Parse a Word `.docx` manuscript: read `word/document.xml` (and the core
@@ -54,10 +55,20 @@ fn parse_document_xml(document: &str, core: Option<&str>) -> Imported {
     let title = core.and_then(|c| element_text(c, "dc:title"));
     let author = core.and_then(|c| element_text(c, "dc:creator"));
 
+    // Tally structural content the flat prose model can't carry (#646). Footnotes
+    // and endnotes are converted to inline `[^N]` markers as paragraphs are read;
+    // images/tables/comments are counted here so the caller can warn on the drop.
+    // (Tables are `<w:tbl>` siblings of paragraphs, so they're counted at the
+    // document level, not per-paragraph.)
+    let mut dropped = Dropped {
+        tables: count_elements(document, "w:tbl"),
+        ..Dropped::default()
+    };
+
     // Split on Heading 1 paragraphs; the run before the first heading is a title
     // page. Each `Para` is pre-classified, so the shared assembler just flushes.
     let (mut chapters, preamble) = assemble(
-        paragraphs(document),
+        paragraphs(document, &mut dropped),
         |para| para.heading,
         |para| para.text.clone(),
         |paras| join_paragraphs(&body_texts(paras)),
@@ -87,6 +98,7 @@ fn parse_document_xml(document: &str, core: Option<&str>) -> Imported {
         // container; once that's read there's no per-body read to fail, so the
         // analogous unreadable-body count is always 0 (see [`Imported`]).
         unreadable_bodies: 0,
+        dropped,
     }
 }
 
@@ -95,12 +107,14 @@ fn body_texts(paras: &[Para]) -> Vec<String> {
     paras.iter().map(|p| p.text.clone()).collect()
 }
 
-/// Walk the `<w:p>` paragraphs of `word/document.xml`, in order.
-fn paragraphs(document: &str) -> Vec<Para> {
+/// Walk the `<w:p>` paragraphs of `word/document.xml`, in order, tallying dropped
+/// structural content into `dropped` and converting footnote/endnote references
+/// to inline `[^N]` markers as it goes.
+fn paragraphs(document: &str, dropped: &mut Dropped) -> Vec<Para> {
     let mut out = Vec::new();
     for_each_element(document, "w:p", |inner| {
         out.push(match inner {
-            Some(p) => parse_paragraph(p),
+            Some(p) => parse_paragraph(p, dropped),
             None => Para {
                 heading: false,
                 text: String::new(),
@@ -112,8 +126,9 @@ fn paragraphs(document: &str) -> Vec<Para> {
 
 /// One paragraph's inner XML → a [`Para`]. A Heading 1 paragraph is a chapter
 /// title (plain text); any other is a body paragraph with bold/italic runs
-/// converted to `**`/`*`.
-fn parse_paragraph(inner: &str) -> Para {
+/// converted to `**`/`*` and footnote/endnote references converted to inline
+/// `[^N]` markers. Images/comments in the paragraph are tallied in `dropped`.
+fn parse_paragraph(inner: &str, dropped: &mut Dropped) -> Para {
     if is_heading_one(inner) {
         return Para {
             heading: true,
@@ -123,7 +138,7 @@ fn parse_paragraph(inner: &str) -> Para {
     let mut text = String::new();
     for_each_element(inner, "w:r", |run| {
         if let Some(run) = run {
-            text.push_str(&run_markdown(run));
+            text.push_str(&run_markdown(run, dropped));
         }
     });
     Para {
@@ -156,14 +171,33 @@ fn is_heading_one(inner: &str) -> bool {
         == Some("0")
 }
 
-/// One run's inner XML → Markdown (its `<w:t>` text wrapped per its bold/italic
-/// run properties).
-fn run_markdown(run: &str) -> String {
-    wrap_emphasis(
+/// One run's inner XML → Markdown: its `<w:t>` text wrapped per its bold/italic
+/// run properties, then any footnote/endnote reference in the run appended as an
+/// inline `[^N]` / `[^eN]` marker (#646). Images and comments in the run are
+/// tallied in `dropped` (they have no place in the flat prose model).
+fn run_markdown(run: &str, dropped: &mut Dropped) -> String {
+    let mut out = wrap_emphasis(
         &run_text(run),
         run_toggle(run, "w:b"),
         run_toggle(run, "w:i"),
-    )
+    );
+    // A footnote/endnote reference becomes an inline marker rather than vanishing.
+    for _ in 0..count_elements(run, "w:footnoteReference") {
+        dropped.footnotes += 1;
+        out.push_str(&format!("[^{}]", dropped.footnotes));
+    }
+    for _ in 0..count_elements(run, "w:endnoteReference") {
+        dropped.endnotes += 1;
+        out.push_str(&format!("[^e{}]", dropped.endnotes));
+    }
+    // Images/drawings and comment references have no flat-prose equivalent; count
+    // the drop so the caller can warn. `<w:pict>` is the legacy VML image form;
+    // `<w:object>` an embedded object (an equation, an OLE image).
+    dropped.images += count_elements(run, "w:drawing")
+        + count_elements(run, "w:pict")
+        + count_elements(run, "w:object");
+    dropped.comments += count_elements(run, "w:commentReference");
+    out
 }
 
 /// All `<w:t>` text within `xml`, concatenated and entity-decoded.
@@ -355,5 +389,75 @@ mod tests {
     #[test]
     fn parse_docx_rejects_a_non_docx() {
         assert!(parse_docx(b"this is not a zip").is_err());
+    }
+
+    #[test]
+    fn docx_clean_document_reports_nothing_dropped() {
+        let body = format!("{}{}", heading("One"), heading("Two"));
+        let out = parse_document_xml(&document(&body), None);
+        assert_eq!(
+            out.dropped,
+            Dropped::default(),
+            "a clean document drops nothing"
+        );
+    }
+
+    #[test]
+    fn docx_footnotes_become_inline_markers_and_are_counted() {
+        // Two footnote references in the prose (the note bodies live in
+        // word/footnotes.xml, which the scanner doesn't read).
+        let body = format!(
+            "{}{}",
+            heading("One"),
+            "<w:p><w:r><w:t xml:space=\"preserve\">First claim</w:t></w:r>\
+             <w:r><w:footnoteReference w:id=\"1\"/></w:r>\
+             <w:r><w:t xml:space=\"preserve\"> and a second</w:t></w:r>\
+             <w:r><w:footnoteReference w:id=\"2\"/></w:r>\
+             <w:r><w:t>.</w:t></w:r></w:p>",
+        );
+        let out = parse_document_xml(&document(&body), None);
+        // Footnotes are converted to inline `[^N]` markers in reading order, not
+        // dropped.
+        assert_eq!(out.chapters[0].body, "First claim[^1] and a second[^2].\n");
+        assert_eq!(out.dropped.footnotes, 2);
+        assert_eq!(out.dropped.notes(), 2);
+        assert_eq!(out.dropped.lost(), 0, "footnotes are converted, not lost");
+    }
+
+    #[test]
+    fn docx_endnotes_become_inline_markers_and_are_counted() {
+        let body = format!(
+            "{}{}",
+            heading("One"),
+            "<w:p><w:r><w:t xml:space=\"preserve\">A point</w:t></w:r>\
+             <w:r><w:endnoteReference w:id=\"1\"/></w:r>\
+             <w:r><w:t>.</w:t></w:r></w:p>",
+        );
+        let out = parse_document_xml(&document(&body), None);
+        assert_eq!(out.chapters[0].body, "A point[^e1].\n");
+        assert_eq!(out.dropped.endnotes, 1);
+    }
+
+    #[test]
+    fn docx_images_tables_and_comments_are_counted_as_dropped() {
+        let body = format!(
+            "{}{}{}{}",
+            heading("One"),
+            // An inline image (a drawing) and a comment reference in a paragraph.
+            "<w:p><w:r><w:t>See figure</w:t></w:r>\
+             <w:r><w:drawing><wp:inline/></w:drawing></w:r>\
+             <w:r><w:commentReference w:id=\"0\"/></w:r></w:p>",
+            // A one-cell table (its cell paragraph text still leaks through, as
+            // before — but the table itself is now counted as dropped).
+            "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>",
+            // A legacy VML image.
+            "<w:p><w:r><w:pict><v:shape/></w:pict></w:r></w:p>",
+        );
+        let out = parse_document_xml(&document(&body), None);
+        assert_eq!(out.dropped.images, 2, "the drawing and the VML pict");
+        assert_eq!(out.dropped.tables, 1);
+        assert_eq!(out.dropped.comments, 1);
+        assert_eq!(out.dropped.footnotes, 0);
+        assert_eq!(out.dropped.lost(), 4, "2 images + 1 table + 1 comment");
     }
 }

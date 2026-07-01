@@ -4,7 +4,7 @@
 
 use crate::frontmatter;
 
-use super::{assemble, fallback_chapter, finalize_titles, mine_preamble, Imported};
+use super::{assemble, fallback_chapter, finalize_titles, mine_preamble, Dropped, Imported};
 
 /// Parse a single-Markdown-file manuscript (#298).
 pub fn parse_markdown(source: &str) -> Imported {
@@ -43,6 +43,8 @@ pub fn parse_markdown(source: &str) -> Imported {
         chapters,
         // Markdown is infallible: there's no per-chapter I/O to fail.
         unreadable_bodies: 0,
+        // Plain Markdown carries no footnotes/images/tables to drop (#646).
+        dropped: Dropped::default(),
     }
 }
 

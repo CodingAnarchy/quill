@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::frontmatter;
 
-use super::{fallback_chapter, finalize_titles, Imported, ImportedChapter};
+use super::{fallback_chapter, finalize_titles, Dropped, Imported, ImportedChapter};
 
 /// Parse a folder of per-chapter `.md` files (#593): one [`ImportedChapter`] per
 /// `.md` file directly inside `folder`, in filename order. Reads only; the folder
@@ -57,6 +57,8 @@ pub fn parse_markdown_folder(folder: &Path) -> std::io::Result<Imported> {
         author: None,
         chapters,
         unreadable_bodies,
+        // Per-file Markdown carries no footnotes/images/tables to drop (#646).
+        dropped: Dropped::default(),
     })
 }
 
