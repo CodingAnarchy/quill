@@ -81,13 +81,29 @@ impl App {
         })
     }
 
-    /// Handle a key while a full-screen overlay is open: scroll on the navigation
-    /// keys, close on anything else (so it stays "press a key to dismiss").
+    /// Handle a key while a full-screen overlay is open: `s` saves a report
+    /// snapshot to a file (#601), the navigation keys scroll, anything else closes
+    /// it (so it stays "press a key to dismiss").
     pub(crate) fn on_key_overlay(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // `s` on a report overlay saves the rendered report to `export/`, leaving
+        // the overlay open so the author can keep reading — it's the one key the
+        // report overlay handles beyond scrolling. (`s` is free: it isn't a scroll
+        // key, and the AI/guide overlays return `None` from `report_label`.)
+        if !ctrl
+            && key.code == KeyCode::Char('s')
+            && self
+                .overlay
+                .as_ref()
+                .and_then(Overlay::report_label)
+                .is_some()
+        {
+            self.save_report();
+            return;
+        }
         let max = self.overlay_max_scroll();
         let page = self.viewport_height.saturating_sub(3).max(1); // keep a line of context
         let cur = self.overlay_scroll();
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         // `Some(row)` scrolls to `row`; a non-scroll key dismisses the overlay.
         match super::scroll_target(key.code, ctrl, cur, max, page) {
             Some(row) => {
@@ -97,6 +113,25 @@ impl App {
             }
             None => self.overlay = None,
         }
+    }
+
+    /// Write the open report overlay's rendered text to a dated file under the
+    /// project's `export/` dir (#601): `export/<label>-<date>.md`, where `label`
+    /// is the report's kind ("progress", "analysis", …) and `date` is today's ISO
+    /// stamp. Reuses the on-screen lines verbatim (via [`Overlay::plain_text`]), so
+    /// the file matches what the author is looking at, and the same
+    /// [`write_export`](Self::write_export) path the manuscript exports use.
+    /// A no-op for a non-report overlay.
+    pub(crate) fn save_report(&mut self) {
+        let Some((label, body)) = self
+            .overlay
+            .as_ref()
+            .and_then(|o| Some((o.report_label()?, o.plain_text())))
+        else {
+            return;
+        };
+        let name = format!("{label}-{}", date::iso(date::today()));
+        self.write_export(&name, "md", body.as_bytes());
     }
 
     /// The analysis report's rows (readability per chapter + overall), computed

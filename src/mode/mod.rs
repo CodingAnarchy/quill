@@ -64,6 +64,32 @@ impl Overlay {
             scroll: 0,
         }
     }
+
+    /// The report label if this is a [`OverlayKind::Report`] overlay (e.g.
+    /// "progress", "analysis") — the base name a saved snapshot (#601) is written
+    /// under. `None` for the AI panel and the guide, which don't save to a file.
+    pub fn report_label(&self) -> Option<&'static str> {
+        match self.kind {
+            OverlayKind::Report(label) => Some(label),
+            OverlayKind::AiPanel | OverlayKind::Guide => None,
+        }
+    }
+
+    /// The overlay's rendered rows as plain text, one line per row — the styled
+    /// spans flattened to their content. This is what a saved report snapshot
+    /// (#601) writes, so the file matches what's shown on screen.
+    pub fn plain_text(&self) -> String {
+        self.lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// Editor modes. Each variant carries the transient state that only makes sense
