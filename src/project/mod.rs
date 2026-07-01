@@ -155,7 +155,8 @@ pub struct Part {
 /// For a multi-book series (#328), this holds the *active* book's structure;
 /// `title` is then the active book's title, `series` is the series title, and the
 /// full book list lives on [`Project`].
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+// Not `Eq`: the print config carries a float bleed allowance (#652).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Manifest {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

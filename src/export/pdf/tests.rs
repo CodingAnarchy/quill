@@ -516,7 +516,7 @@ fn trim_points_resolves_known_sizes_only() {
 #[test]
 fn print_pdf_embeds_fonts_at_the_chosen_trim() {
     let (w, h) = trim_points("6x9").unwrap();
-    let bytes = to_pdf_print(&doc(), w, h, &plain()).unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, 0.0, &plain()).unwrap();
     assert!(
         has(&bytes, "/Subtype /Type0") && has(&bytes, "/FontFile2"),
         "fonts embedded"
@@ -543,7 +543,7 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
     let (w, h) = trim_points("6x9").unwrap();
     let screen = count(&to_pdf(&mini, &plain()).unwrap(), "/Type /Page /Parent");
     let print = count(
-        &to_pdf_print(&mini, w, h, &plain()).unwrap(),
+        &to_pdf_print(&mini, w, h, 0.0, &plain()).unwrap(),
         "/Type /Page /Parent",
     );
     // A one-entry Contents page joins the front matter (#603): title + contents +
@@ -631,10 +631,91 @@ fn a_print_pdf_emits_the_cover_full_page() {
     };
     style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
     let (w, h) = trim_points("6x9").unwrap();
-    let bytes = to_pdf_print(&doc(), w, h, &style).unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, 0.0, &style).unwrap();
     assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
     assert!(has(&bytes, "/ImCover Do"), "cover drawn in the print PDF");
     assert!(has(&bytes, "MediaBox [0 0 432 648]"), "6x9 trim");
+}
+
+#[test]
+fn bleed_extends_the_media_box_by_the_allowance_on_each_side() {
+    // With `[print] bleed`, the media box grows by the bleed on every side (#652), so
+    // full-bleed art has room to run past the trim. 0.125" = 9pt → 6x9 (432×648)
+    // becomes 450×666; no bleed leaves the media box exactly the trim.
+    let bleed = 0.125 * 72.0; // 9pt
+    let (w, h) = trim_points("6x9").unwrap();
+    let bled = to_pdf_print(&doc(), w, h, bleed, &plain()).unwrap();
+    assert!(
+        has(&bled, "MediaBox [0 0 450 666]"),
+        "trim + 9pt bleed each side"
+    );
+
+    let plain_box = to_pdf_print(&doc(), w, h, 0.0, &plain()).unwrap();
+    assert!(
+        has(&plain_box, "MediaBox [0 0 432 648]"),
+        "no bleed = the trim"
+    );
+}
+
+#[test]
+fn bleed_lets_the_cover_fill_to_the_bleed_edge() {
+    // The cover fills the whole media box (trim + bleed) — clipped to the media box so
+    // a mismatched aspect crops rather than leaving a white border (#652). The image is
+    // 600×900 (aspect 0.667); at 6x9+9pt (450×666) it covers by scaling ×0.75 to
+    // 450×675, centered → the placement `450 0 0 675 0 -4.50 cm`, clipped to 450×666.
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
+    let bleed = 0.125 * 72.0; // 9pt
+    let (w, h) = trim_points("6x9").unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, bleed, &style).unwrap();
+    assert!(
+        has(&bytes, "MediaBox [0 0 450 666]"),
+        "media box = trim + bleed"
+    );
+    // The cover fills to the bleed edge (height 675 > media 666 → overflow), clipped.
+    assert!(
+        has(&bytes, "0 0 450 666 re W n"),
+        "cover clipped to the media box"
+    );
+    assert!(
+        has(&bytes, "450 0 0 675 0 -4.50 cm /ImCover Do"),
+        "cover scaled to cover the media box and centered"
+    );
+}
+
+#[test]
+fn bleed_leaves_the_body_margins_measured_from_the_trim() {
+    // Only full-bleed art bleeds; the text column keeps its trim-relative margins
+    // (#652). Adding a 9pt bleed enlarges the media box but the column width is
+    // unchanged, and the column's left/top shift by exactly the bleed (the trim is
+    // inset by the bleed within the media box) — not by more.
+    let (w, h) = trim_points("6x9").unwrap();
+    let no_bleed = Layout::print(w, h, 0.0, &plain());
+    let bleed = 9.0;
+    let bled = Layout::print(w, h, bleed, &plain());
+
+    assert_eq!(no_bleed.text_w(), bled.text_w(), "column width unchanged");
+    assert_eq!(
+        bled.left(0) - no_bleed.left(0),
+        bleed,
+        "column left shifts by exactly the bleed"
+    );
+    assert_eq!(
+        bled.text_top() - no_bleed.text_top(),
+        bleed,
+        "column top shifts by exactly the bleed"
+    );
+    assert_eq!(
+        bled.text_bottom() - no_bleed.text_bottom(),
+        bleed,
+        "column bottom shifts by exactly the bleed"
+    );
+    // The media box grew by twice the bleed; the trim didn't.
+    assert_eq!(bled.media_w() - no_bleed.media_w(), 2.0 * bleed);
+    assert_eq!(bled.media_h() - no_bleed.media_h(), 2.0 * bleed);
 }
 
 #[test]
@@ -751,7 +832,7 @@ fn a_long_contents_flows_onto_a_second_page() {
     };
     let (w, h) = trim_points("6x9").unwrap();
     let mut pdf = Pdf::new(
-        Layout::print(w, h, &plain()),
+        Layout::print(w, h, 0.0, &plain()),
         StyleBits::from_style(&plain()),
         vec![],
     );
@@ -772,7 +853,7 @@ fn a_long_contents_flows_onto_a_second_page() {
         "one folio line per entry across the pages"
     );
     // And the whole book still serializes to a well-formed PDF.
-    let bytes = to_pdf_print(&d, w, h, &plain()).unwrap();
+    let bytes = to_pdf_print(&d, w, h, 0.0, &plain()).unwrap();
     assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
 }
 
@@ -804,7 +885,7 @@ fn roman_numerals_render_the_conventional_forms() {
 fn laid_out(d: &Document) -> (Pdf, Vec<Option<usize>>) {
     let (w, h) = trim_points("6x9").unwrap();
     let mut pdf = Pdf::new(
-        Layout::print(w, h, &plain()),
+        Layout::print(w, h, 0.0, &plain()),
         StyleBits::from_style(&plain()),
         vec![],
     );
@@ -881,7 +962,7 @@ fn blank_and_cover_pages_carry_no_folio() {
     style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
     let (w, h) = trim_points("6x9").unwrap();
     let mut pdf = Pdf::new(
-        Layout::print(w, h, &style),
+        Layout::print(w, h, 0.0, &style),
         StyleBits::from_style(&style),
         decode_images(&style),
     );
@@ -963,7 +1044,7 @@ fn body_lines_are_justified_flush_to_the_right_margin() {
     let style = plain();
     let (w, h) = trim_points("6x9").unwrap();
     let mut pdf = Pdf::new(
-        Layout::print(w, h, &style),
+        Layout::print(w, h, 0.0, &style),
         StyleBits::from_style(&style),
         vec![],
     );

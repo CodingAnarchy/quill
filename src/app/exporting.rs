@@ -272,8 +272,9 @@ impl App {
                 let ((w, h), trim_warning) = self.print_trim();
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
+                let bleed = self.print_bleed();
                 self.write_built(
-                    export::pdf::to_pdf_print(doc, w, h, &style),
+                    export::pdf::to_pdf_print(doc, w, h, bleed, &style),
                     name,
                     "print.pdf",
                 );
@@ -286,6 +287,17 @@ impl App {
                 self.report_export(&path, result);
             }
         }
+    }
+
+    /// The print bleed allowance in points (#652) from the manifest `[print] bleed`,
+    /// or `0` when unset. A full-bleed cover extends past the trim by this much.
+    fn print_bleed(&self) -> f32 {
+        self.project
+            .manifest
+            .print
+            .as_ref()
+            .map(|p| p.bleed_points())
+            .unwrap_or(0.0)
     }
 
     /// The print trim (in points) from the manifest `[print]` table, with a warning
@@ -447,8 +459,17 @@ impl App {
                 let ((w, h), trim_warning) = self.print_trim();
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
+                let bleed = self.print_bleed();
                 self.write_built(
-                    export::pdf::to_pdf_series_print(docs, series, author.as_deref(), w, h, &style),
+                    export::pdf::to_pdf_series_print(
+                        docs,
+                        series,
+                        author.as_deref(),
+                        w,
+                        h,
+                        bleed,
+                        &style,
+                    ),
                     name,
                     "print.pdf",
                 );
