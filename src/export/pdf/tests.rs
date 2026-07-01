@@ -6,7 +6,7 @@
 
 use super::font::Fonts;
 use super::*;
-use crate::export::{Chapter, ExportStyle, Part};
+use crate::export::{Chapter, EmbeddedFont, ExportStyle, FontRole, Part};
 
 /// The default (no `[style]`) baseline.
 fn plain() -> ExportStyle {
@@ -263,26 +263,21 @@ fn a_series_bookmarks_every_book_in_order() {
 #[test]
 fn fonts_route_glyphs_by_coverage() {
     let fonts = Fonts::new(&plain());
-    // ASCII + Latin/Cyrillic/Greek the serif covers → the body face.
+    let reg = FontStyle::REGULAR;
+    // ASCII + Latin/Cyrillic/Greek the serif covers → the regular body face.
     for c in ['A', 'é', 'д', 'α'] {
         assert_eq!(
-            fonts.resolve(c, false, false).map(|(n, _)| n),
+            fonts.resolve(c, reg, false).map(|(n, _)| n),
             Some("F1"),
             "{c} in body"
         );
     }
     // Decorative ornaments the serif lacks → the broad fallback.
-    assert_eq!(
-        fonts.resolve('❦', false, false).map(|(n, _)| n),
-        Some("Ffb")
-    );
-    assert_eq!(
-        fonts.resolve('⚜', false, false).map(|(n, _)| n),
-        Some("Ffb")
-    );
+    assert_eq!(fonts.resolve('❦', reg, false).map(|(n, _)| n), Some("Ffb"));
+    assert_eq!(fonts.resolve('⚜', reg, false).map(|(n, _)| n), Some("Ffb"));
     assert!(fonts.covers('❦') && fonts.covers('д'));
     // CJK isn't in either bundled font (needs an author-supplied CJK font).
-    assert_eq!(fonts.resolve('中', false, false), None, "CJK uncovered");
+    assert_eq!(fonts.resolve('中', reg, false), None, "CJK uncovered");
     assert!(!fonts.covers('中'));
 }
 
@@ -374,6 +369,121 @@ fn a_configured_body_font_replaces_the_serif() {
         has(&bytes, "/BaseFont /LiberationSerif-Bold"),
         "bundled bold kept"
     );
+}
+
+/// A resolved [`EmbeddedFont`] for `role`/`italic` with `family` and `bytes` — the
+/// shape `resolve_fonts` fills, built directly so a face-routing test needn't touch
+/// the filesystem (#638, hermetic per #531).
+fn embedded(role: FontRole, italic: bool, family: &str, bytes: &[u8]) -> EmbeddedFont {
+    EmbeddedFont {
+        role,
+        family: family.into(),
+        italic,
+        href: format!(
+            "fonts/{}{}.ttf",
+            if role == FontRole::Body {
+                "body"
+            } else {
+                "heading"
+            },
+            if italic { "-italic" } else { "" }
+        ),
+        media_type: "font/ttf",
+        bytes: bytes.to_vec(),
+    }
+}
+
+#[test]
+fn all_four_body_styles_and_the_heading_resolve_to_the_chosen_families() {
+    // The #638 fix, end to end through the font plan: a body family with a real
+    // italic sibling and a *distinct* heading family. Each of the four body styles
+    // resolves to a body face (never the bundled Liberation fallback, never the
+    // heading font), true italics use the italic file, and the heading is its own
+    // face — not conflated with body-bold.
+    let body_up = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
+    let body_it = include_bytes!("../../../assets/fonts/LiberationSerif-Italic.ttf");
+    let head = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
+    let style = ExportStyle {
+        fonts: vec![
+            embedded(FontRole::Body, false, "BookBody", body_up),
+            embedded(FontRole::Body, true, "BookBody", body_it),
+            embedded(FontRole::Heading, false, "DisplayHead", head),
+        ],
+        ..Default::default()
+    };
+    let fonts = Fonts::new(&style);
+
+    // The four body styles land in the four distinct body slots F1..F4.
+    let name = |s, heading| fonts.resolve('a', s, heading).map(|(n, _)| n);
+    assert_eq!(name(FontStyle::REGULAR, false), Some("F1"));
+    assert_eq!(name(FontStyle::BOLD, false), Some("F2"));
+    assert_eq!(name(FontStyle::ITALIC, false), Some("F3"));
+    assert_eq!(name(FontStyle::BOLD_ITALIC, false), Some("F4"));
+    // The heading resolves to its own faces, distinct from the body slots.
+    assert_eq!(name(FontStyle::BOLD, true), Some("Fh2"));
+    assert_eq!(name(FontStyle::REGULAR, true), Some("Fh1"));
+
+    // Italic body styles use a real italic file, so no synthetic slant is applied.
+    assert!(
+        !fonts.is_synthetic_oblique(FontStyle::ITALIC, false),
+        "true italic, not synthesized"
+    );
+    assert!(!fonts.is_synthetic_oblique(FontStyle::BOLD_ITALIC, false));
+
+    // And in the emitted PDF the body italic is the chosen family, the heading is
+    // the display family, and no Liberation face leaks into a body slot.
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    assert!(has(&bytes, "/BaseFont /BookBody"), "body family embedded");
+    assert!(
+        has(&bytes, "/BaseFont /DisplayHead"),
+        "heading family embedded and distinct from body"
+    );
+    assert!(
+        !has(&bytes, "/BaseFont /LiberationSerif-Italic"),
+        "no bundled italic fallback in body — the chosen italic is used"
+    );
+}
+
+#[test]
+fn an_italic_style_without_a_true_italic_file_is_synthesized() {
+    // A body font with no `-italic` sibling (#638): italic styles fall back to the
+    // upright file, drawn with a synthetic slant — never the bundled Liberation
+    // italic, never a different family.
+    let body_up = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
+    let style = ExportStyle {
+        fonts: vec![embedded(FontRole::Body, false, "OnlyUpright", body_up)],
+        ..Default::default()
+    };
+    let fonts = Fonts::new(&style);
+    // Every style resolves to a body slot (the upright file backs the italic slots).
+    for s in [
+        FontStyle::REGULAR,
+        FontStyle::BOLD,
+        FontStyle::ITALIC,
+        FontStyle::BOLD_ITALIC,
+    ] {
+        let n = fonts.resolve('a', s, false).map(|(n, _)| n);
+        assert!(
+            matches!(n, Some("F1" | "F2" | "F3" | "F4")),
+            "{s:?} → a body slot, got {n:?}"
+        );
+    }
+    // The italic slots are synthetically obliqued; upright ones are not.
+    assert!(fonts.is_synthetic_oblique(FontStyle::ITALIC, false));
+    assert!(fonts.is_synthetic_oblique(FontStyle::BOLD_ITALIC, false));
+    assert!(!fonts.is_synthetic_oblique(FontStyle::REGULAR, false));
+
+    // The PDF carries the chosen family and a sheared text matrix, and no bundled
+    // italic fallback.
+    let bytes = to_pdf(&doc(), &style).unwrap();
+    assert!(has(&bytes, "/BaseFont /OnlyUpright"), "chosen family used");
+    assert!(
+        !has(&bytes, "/BaseFont /LiberationSerif-Italic"),
+        "no bundled italic — the slope is synthesized on the chosen family"
+    );
+    // The oblique shear appears in a text matrix (`1 0 0.21 1 …  Tm`).
+    let s = String::from_utf8_lossy(&bytes);
+    assert!(s.contains("1 0 0.21 1"), "synthetic oblique shear in a Tm");
 }
 
 #[test]

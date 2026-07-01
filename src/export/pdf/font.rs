@@ -17,10 +17,28 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use subsetter::GlyphRemapper;
+use subsetter::{GlyphRemapper, Tag};
 use ttf_parser::{Face, GlyphId};
 
-use crate::export::{ExportStyle, FontRole};
+use crate::export::{ExportStyle, FontRole, FontStyle};
+
+/// The bold weight the PDF pins for the bold slots (#638). A variable-`[wght]`
+/// body/heading font is instanced at this weight for bold text, so bold body prose
+/// is a genuinely heavier face — not the default weight reused, and not the heading
+/// font leaking into the bold slot.
+const BOLD_WGHT: f32 = 700.0;
+
+/// The `wght` (weight) variation axis tag.
+fn wght_tag() -> Tag {
+    Tag::new(b"wght")
+}
+
+/// The synthetic-oblique shear (a slant of ~12°, `tan ≈ 0.21`) applied only as a
+/// last resort — when an italic style is wanted but the family shipped no true
+/// italic file (#638). Curated families always ship a real italic, so this is a
+/// fallback for a hand-specified single upright file. Kept in step with the
+/// `-12` `/ItalicAngle` the descriptor reports for a synthesized face.
+pub(super) const OBLIQUE_SHEAR: f32 = 0.21;
 
 /// PDF object bodies keyed by id — shared with the layout module. Bodies are bytes
 /// because embedded font programs (`/FontFile2`) are binary.
@@ -39,14 +57,19 @@ const BOLD_ITALIC: &[u8] = include_bytes!("../../../assets/fonts/LiberationSerif
 const FALLBACK: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
 const MONO: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSansMono.ttf");
 
-/// The `/F1`…`/F4` resource names for the four body faces, plus `/Ffb` for the broad
-/// fallback and `/Fmo` for the monospace face — the order [`Fonts`] lays them out in.
-const FACE_NAMES: [&str; 4] = ["F1", "F2", "F3", "F4"];
+/// The `/F1`…`/F4` resource names for the four body faces (regular/bold/italic/
+/// bold-italic), `/Fh1`/`/Fh2` for the heading faces (regular/bold), `/Ffb` for the
+/// broad fallback, and `/Fmo` for the monospace face — the order [`Fonts`] lays
+/// them out in.
+const BODY_NAMES: [&str; 4] = ["F1", "F2", "F3", "F4"];
+const HEADING_NAMES: [&str; 2] = ["Fh1", "Fh2"];
 const FALLBACK_NAME: &str = "Ffb";
 const MONO_NAME: &str = "Fmo";
 
-fn face_index(bold: bool, italic: bool) -> usize {
-    match (bold, italic) {
+/// The body-face slot index for a `(bold, italic)` style: regular, bold, italic,
+/// bold-italic.
+fn body_index(style: FontStyle) -> usize {
+    match (style.bold, style.italic) {
         (false, false) => 0,
         (true, false) => 1,
         (false, true) => 2,
@@ -54,52 +77,103 @@ fn face_index(bold: bool, italic: bool) -> usize {
     }
 }
 
-/// The render's fonts: four body faces (regular/bold/italic/bold-italic) and one
-/// broad fallback, each embeddable as a Type0 composite.
+/// The render's fonts: four body faces (regular/bold/italic/bold-italic), two
+/// heading faces (regular/bold) resolved separately so the heading font never
+/// leaks into body-bold (#638), one broad fallback, and the monospace face — each
+/// embeddable as a Type0 composite.
 pub(super) struct Fonts {
-    faces: [CidFont; 4],
+    body: [CidFont; 4],
+    heading: [CidFont; 2],
     fallback: CidFont,
     /// The fixed-width face for fenced preformatted blocks (#524).
     mono: CidFont,
 }
 
 impl Fonts {
-    /// Build the font set: the bundled Liberation Serif faces (or a `[style]`
-    /// body/heading font in the regular/bold slots) plus the DejaVu Sans fallback.
+    /// Build the font set (#638): the four body faces and two heading faces, each
+    /// from the configured `[style]` font when present (its true-italic file for
+    /// the italic slots, `wght`-instanced for the bold slots) or the bundled
+    /// Liberation Serif faces otherwise, plus the DejaVu Sans fallback and mono.
     pub(super) fn new(style: &ExportStyle) -> Fonts {
-        let body = |role: FontRole, default: &'static [u8], base: &str| match style.font(role) {
-            Some(f) => CidFont::load(leak(&f.bytes), &pdf_name(&f.family), true),
-            None => CidFont::load(default, base, true),
+        let body = |s: FontStyle, default: &'static [u8], base: &str| {
+            body_face(style, FontRole::Body, s, default, base)
         };
         Fonts {
-            faces: [
-                body(FontRole::Body, REGULAR, "LiberationSerif"),
-                body(FontRole::Heading, BOLD, "LiberationSerif-Bold"),
-                CidFont::load(ITALIC, "LiberationSerif-Italic", true),
-                CidFont::load(BOLD_ITALIC, "LiberationSerif-BoldItalic", true),
+            body: [
+                body(FontStyle::REGULAR, REGULAR, "LiberationSerif"),
+                body(FontStyle::BOLD, BOLD, "LiberationSerif-Bold"),
+                body(FontStyle::ITALIC, ITALIC, "LiberationSerif-Italic"),
+                body(
+                    FontStyle::BOLD_ITALIC,
+                    BOLD_ITALIC,
+                    "LiberationSerif-BoldItalic",
+                ),
+            ],
+            heading: [
+                // Headings are upright; the writer renders them bold, but keep a
+                // regular slot for completeness. Both come from the heading font
+                // (its own family), never the body font.
+                body_face(
+                    style,
+                    FontRole::Heading,
+                    FontStyle::REGULAR,
+                    REGULAR,
+                    "LiberationSerif",
+                ),
+                body_face(
+                    style,
+                    FontRole::Heading,
+                    FontStyle::BOLD,
+                    BOLD,
+                    "LiberationSerif-Bold",
+                ),
             ],
             fallback: CidFont::load(FALLBACK, "DejaVuSans", false),
             mono: CidFont::load(MONO, "DejaVuSansMono", false),
         }
     }
 
-    /// Resolve `c` for the `(bold, italic)` face to a `(resource name, glyph id)`,
-    /// recording the glyph for embedding. Falls back to DejaVu for glyphs the body
-    /// face lacks; `None` if no font has the glyph.
-    pub(super) fn resolve(&self, c: char, bold: bool, italic: bool) -> Option<(&'static str, u16)> {
-        let idx = face_index(bold, italic);
-        if let Some(gid) = self.faces[idx].record(c) {
-            return Some((FACE_NAMES[idx], gid));
+    /// The `(face, resource name)` for a body or heading style — the single place
+    /// the two families' slotting is decided.
+    fn face_of(&self, style: FontStyle, heading: bool) -> (&CidFont, &'static str) {
+        if heading {
+            let idx = style.bold as usize;
+            (&self.heading[idx], HEADING_NAMES[idx])
+        } else {
+            let idx = body_index(style);
+            (&self.body[idx], BODY_NAMES[idx])
+        }
+    }
+
+    /// Resolve `c` for the `style` face (body or `heading`) to a `(resource name,
+    /// glyph id)`, recording the glyph for embedding. Falls back to DejaVu for
+    /// glyphs the face lacks; `None` if no font has the glyph.
+    pub(super) fn resolve(
+        &self,
+        c: char,
+        style: FontStyle,
+        heading: bool,
+    ) -> Option<(&'static str, u16)> {
+        let (face, name) = self.face_of(style, heading);
+        if let Some(gid) = face.record(c) {
+            return Some((name, gid));
         }
         self.fallback.record(c).map(|gid| (FALLBACK_NAME, gid))
     }
 
-    /// One character's advance for the `(bold, italic)` face (em units / 1000),
-    /// using the same body→fallback resolution as drawing. 0 if unrenderable.
-    pub(super) fn advance_em(&self, c: char, bold: bool, italic: bool) -> f32 {
-        let idx = face_index(bold, italic);
-        if let Some(gid) = self.faces[idx].gid(c) {
-            return self.faces[idx].advance_em(gid);
+    /// Whether the `style` face (body or `heading`) is synthetically obliqued —
+    /// i.e. an italic style with no true-italic file, drawn sheared (#638). The
+    /// draw layer skews the text matrix for such runs.
+    pub(super) fn is_synthetic_oblique(&self, style: FontStyle, heading: bool) -> bool {
+        self.face_of(style, heading).0.synthetic_oblique
+    }
+
+    /// One character's advance for the `style` face (em units / 1000), using the
+    /// same face→fallback resolution as drawing. 0 if unrenderable.
+    pub(super) fn advance_em(&self, c: char, style: FontStyle, heading: bool) -> f32 {
+        let (face, _) = self.face_of(style, heading);
+        if let Some(gid) = face.gid(c) {
+            return face.advance_em(gid);
         }
         self.fallback
             .gid(c)
@@ -131,7 +205,9 @@ impl Fonts {
 
     /// Whether any font can render `c`.
     pub(super) fn covers(&self, c: char) -> bool {
-        self.faces.iter().any(|f| f.gid(c).is_some()) || self.fallback.gid(c).is_some()
+        self.body.iter().any(|f| f.gid(c).is_some())
+            || self.heading.iter().any(|f| f.gid(c).is_some())
+            || self.fallback.gid(c).is_some()
     }
 
     /// Emit the objects for every face that was used, returning per face its resource
@@ -143,10 +219,16 @@ impl Fonts {
         out: &mut ObjMap,
     ) -> Vec<(&'static str, u32, GidMap)> {
         let mut map = Vec::new();
-        for (i, face) in self.faces.iter().enumerate() {
+        for (i, face) in self.body.iter().enumerate() {
             if face.is_used() {
                 let (id, gids) = face.emit(next, out);
-                map.push((FACE_NAMES[i], id, gids));
+                map.push((BODY_NAMES[i], id, gids));
+            }
+        }
+        for (i, face) in self.heading.iter().enumerate() {
+            if face.is_used() {
+                let (id, gids) = face.emit(next, out);
+                map.push((HEADING_NAMES[i], id, gids));
             }
         }
         if self.fallback.is_used() {
@@ -161,21 +243,89 @@ impl Fonts {
     }
 }
 
+/// Build one body/heading face for `role` at `style` (#638): use the configured
+/// font's true-italic file for italic slots when present (else the upright file,
+/// synthetically obliqued), pin the `wght` axis to bold for bold slots when the
+/// font is variable, and fall back to the bundled `default` serif when no font is
+/// configured for the role.
+fn body_face(
+    style: &ExportStyle,
+    role: FontRole,
+    want: FontStyle,
+    default: &'static [u8],
+    base: &str,
+) -> CidFont {
+    match style.font_face(role, want) {
+        Some(f) => {
+            let program = leak(&f.bytes);
+            // Only pin the weight when the file actually has a `wght` axis; a static
+            // per-weight file (or the bundled defaults) already carries its weight.
+            let bold_weight = want.bold && has_wght_axis(program);
+            // Synthesize the slope only when italic is wanted but this file isn't a
+            // true italic (no `-italic` sibling shipped).
+            let synthetic_oblique = want.italic && !f.italic;
+            CidFont::new(
+                program,
+                &pdf_name(&f.family),
+                true,
+                bold_weight,
+                synthetic_oblique,
+            )
+        }
+        None => CidFont::new(default, base, true, false, false),
+    }
+}
+
+/// Whether `program` is a variable font carrying a `wght` (weight) axis, so it can
+/// be instanced to a genuine bold (#638).
+fn has_wght_axis(program: &[u8]) -> bool {
+    Face::parse(program, 0)
+        .map(|f| {
+            f.variation_axes()
+                .into_iter()
+                .any(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght"))
+        })
+        .unwrap_or(false)
+}
+
 /// One font embedded as a Type0/Identity-H composite over a TrueType program: the
 /// parsed face (for glyph ids + advances) and the set of glyphs actually used (for
-/// `/W` and `/ToUnicode`).
+/// `/W` and `/ToUnicode`). A variable font is instanced to `bold_weight` at embed
+/// time; a face wanting italic with no true-italic file is drawn `synthetic_oblique`
+/// (sheared by the draw layer) (#638).
 struct CidFont {
     base: String,
     program: &'static [u8],
     face: Face<'static>,
     scale: f32, // 1000 / units-per-em
     serif: bool,
+    /// Pin the `wght` axis to [`BOLD_WGHT`] when embedding (variable fonts only).
+    bold_weight: bool,
+    /// Draw this face sheared to fake italics — the last-resort slope (#638).
+    synthetic_oblique: bool,
     used: RefCell<BTreeMap<u16, char>>,
 }
 
 impl CidFont {
+    /// Load a face with no instancing or synthesis (the fallback and mono faces).
     fn load(program: &'static [u8], base: &str, serif: bool) -> CidFont {
-        let face = Face::parse(program, 0).expect("font parses");
+        CidFont::new(program, base, serif, false, false)
+    }
+
+    fn new(
+        program: &'static [u8],
+        base: &str,
+        serif: bool,
+        bold_weight: bool,
+        synthetic_oblique: bool,
+    ) -> CidFont {
+        let mut face = Face::parse(program, 0).expect("font parses");
+        // Match the instancing done at embed time (#638): pin the parsed face to the
+        // bold weight too, so measured advances/metrics reflect the heavier outline
+        // the subset carries — keeping layout and rendering consistent.
+        if bold_weight {
+            face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), BOLD_WGHT);
+        }
         let scale = 1000.0 / face.units_per_em() as f32;
         CidFont {
             base: base.to_string(),
@@ -183,6 +333,8 @@ impl CidFont {
             face,
             scale,
             serif,
+            bold_weight,
+            synthetic_oblique,
             used: RefCell::new(BTreeMap::new()),
         }
     }
@@ -215,8 +367,20 @@ impl CidFont {
         // with identity ids if subsetting fails (shouldn't for our valid fonts).
         let old_gids: Vec<u16> = used.keys().copied().collect();
         let remapper = GlyphRemapper::new_from_glyphs(&old_gids);
-        let (program, gids): (Vec<u8>, GidMap) = match subsetter::subset(self.program, 0, &remapper)
-        {
+        // A variable font is instanced to the bold weight while subsetting, so the
+        // embedded program carries a genuinely heavier outline — not the default
+        // instance reused for every weight (#638).
+        let subset = if self.bold_weight {
+            subsetter::subset_with_variations(
+                self.program,
+                0,
+                &[(wght_tag(), BOLD_WGHT)],
+                &remapper,
+            )
+        } else {
+            subsetter::subset(self.program, 0, &remapper)
+        };
+        let (program, gids): (Vec<u8>, GidMap) = match subset {
             Ok(sub) => (
                 sub,
                 old_gids
@@ -240,9 +404,19 @@ impl CidFont {
             .capital_height()
             .map(s)
             .unwrap_or((ascent as f32 * 0.7) as i32);
-        // Nonsymbolic (uses a standard charset), serif bit for the body faces.
-        let flags = 0x20 | if self.serif { 0x02 } else { 0 };
-        let angle = self.face.italic_angle();
+        // Nonsymbolic (uses a standard charset), serif bit for the body faces, and
+        // the italic bit (0x40) when the face is slanted — a true italic or a
+        // synthetically obliqued one (#638).
+        let italic =
+            self.synthetic_oblique || self.face.is_italic() || self.face.italic_angle() != 0.0;
+        let flags = 0x20 | if self.serif { 0x02 } else { 0 } | if italic { 0x40 } else { 0 };
+        // Report the synthetic slant so a viewer knows the run is italic; else the
+        // face's own angle.
+        let angle = if self.synthetic_oblique {
+            -12.0
+        } else {
+            self.face.italic_angle()
+        };
         let descriptor = take(next);
         out.insert(
             descriptor,
@@ -330,18 +504,18 @@ fn utf16be_hex(c: char) -> String {
         .collect()
 }
 
-/// Glyph ids for `text` in the given face (body→fallback resolved), as a content
-/// hex string (`<48656C…>`) and its total advance in em/1000-scaled width at
-/// `size`. Unrenderable characters are dropped.
+/// Glyph ids for `text` in the `style` face (body or `heading`), face→fallback
+/// resolved, as content hex runs grouped by resource name (`<48656C…>`).
+/// Unrenderable characters are dropped (#638).
 pub(super) fn glyph_run(
     fonts: &Fonts,
     text: &str,
-    bold: bool,
-    italic: bool,
+    style: FontStyle,
+    heading: bool,
 ) -> Vec<(&'static str, String)> {
     let mut runs: Vec<(&'static str, String)> = Vec::new();
     for c in text.chars() {
-        let Some((name, gid)) = fonts.resolve(c, bold, italic) else {
+        let Some((name, gid)) = fonts.resolve(c, style, heading) else {
             continue;
         };
         match runs.last_mut() {

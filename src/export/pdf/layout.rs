@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::font::Fonts;
-use super::ExportStyle;
+use super::{ExportStyle, FontStyle};
 
 /// The default print trim, used when a project sets no `[print] trim`.
 pub const DEFAULT_TRIM: &str = "6x9";
@@ -117,10 +117,11 @@ impl Layout {
         }
     }
 
-    /// The rendered width of `text` at `size` for the given face, in points.
-    pub(super) fn measure(&self, text: &str, size: f32, bold: bool, italic: bool) -> f32 {
+    /// The rendered width of `text` at `size` for the `style` face (body, or the
+    /// heading family when `heading`), in points (#638).
+    pub(super) fn measure(&self, text: &str, size: f32, style: FontStyle, heading: bool) -> f32 {
         text.chars()
-            .map(|c| self.fonts.advance_em(c, bold, italic))
+            .map(|c| self.fonts.advance_em(c, style, heading))
             .sum::<f32>()
             / 1000.0
             * size

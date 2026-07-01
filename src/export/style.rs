@@ -168,7 +168,10 @@ pub(crate) fn preset_blurb(name: &str) -> &'static str {
     }
 }
 
-/// Which text a [`EmbeddedFont`] styles.
+/// Which family an [`EmbeddedFont`] belongs to (#638): the body text or the
+/// headings. Each family resolves to up to two physical files — an upright and a
+/// true-italic face — and each file covers both a regular and a bold weight (via
+/// the `[wght]` axis for a variable font, pinned at embed time).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FontRole {
     Body,
@@ -176,7 +179,8 @@ pub enum FontRole {
 }
 
 impl FontRole {
-    /// The in-package file slug for this role (`fonts/<slug>.<ext>`).
+    /// The in-package file-name stem for this role (`fonts/<slug>.<ext>`); the
+    /// italic face appends `-italic` (see [`ExportStyle::resolve_fonts`]).
     fn slug(self) -> &'static str {
         match self {
             FontRole::Body => "body",
@@ -185,13 +189,54 @@ impl FontRole {
     }
 }
 
-/// A font file embedded into a designed export (#469): its CSS family name, the
+/// A designed export's four synthesizable text styles (#638): the combinations of
+/// weight (regular/bold) and slope (upright/italic) prose can take. Emphasis is
+/// pervasive in fiction, so all four must render in the chosen family — not just
+/// regular and a heading-derived bold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FontStyle {
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl FontStyle {
+    pub const REGULAR: FontStyle = FontStyle {
+        bold: false,
+        italic: false,
+    };
+    pub const BOLD: FontStyle = FontStyle {
+        bold: true,
+        italic: false,
+    };
+    pub const ITALIC: FontStyle = FontStyle {
+        bold: false,
+        italic: true,
+    };
+    pub const BOLD_ITALIC: FontStyle = FontStyle {
+        bold: true,
+        italic: true,
+    };
+}
+
+/// A font file embedded into a designed export (#469, #638): its CSS family name,
+/// the family [`FontRole`] it fills, whether it is the true-italic face, the
 /// in-package href, the OPF manifest media type, and the bytes. Resolved by the
 /// app from the `[style]` font paths; not part of the persisted config.
+///
+/// One configured path resolves to up to two `EmbeddedFont`s per role: the upright
+/// file and — when a sibling `<stem>-italic.<ext>` exists — the true-italic file.
+/// Each file covers both a regular and a bold weight: for a variable `[wght]` font
+/// the PDF writer pins the weight at embed time and the EPUB `@font-face` rules
+/// carry the matching `font-weight`, so bold body text is a real heavier weight,
+/// never the heading font leaking into the bold slot (#638).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmbeddedFont {
     pub role: FontRole,
     pub family: String,
+    /// The true-italic face for its family (a `<stem>-italic` sibling file); the
+    /// upright file when `false`. Body text resolves italic/bold-italic to the
+    /// italic file and regular/bold to the upright file.
+    pub italic: bool,
     pub href: String,
     pub media_type: &'static str,
     pub bytes: Vec<u8>,
@@ -256,9 +301,22 @@ impl ExportStyle {
         self.scene_break.as_deref().unwrap_or(SCENE_BREAK)
     }
 
-    /// The resolved font for `role`, if one was configured and loaded.
+    /// The resolved upright file for `role`, if one was configured and loaded —
+    /// the face that carries the family name and CSS `font-family` (#469).
     pub fn font(&self, role: FontRole) -> Option<&EmbeddedFont> {
-        self.fonts.iter().find(|f| f.role == role)
+        self.fonts.iter().find(|f| f.role == role && !f.italic)
+    }
+
+    /// The resolved font face `role` uses for `style` (#638): the true-italic file
+    /// for an italic style when one was loaded, else the upright file (whose slope
+    /// the writer synthesizes as a last resort). `None` when no font is configured
+    /// for the role. Weight (regular/bold) rides the same file — pinned at embed
+    /// time — so it isn't part of the file selection.
+    pub fn font_face(&self, role: FontRole, style: FontStyle) -> Option<&EmbeddedFont> {
+        let want_italic = style.italic && self.fonts.iter().any(|f| f.role == role && f.italic);
+        self.fonts
+            .iter()
+            .find(|f| f.role == role && f.italic == want_italic)
     }
 
     /// The resolved image for `role`, if one was configured and loaded.
@@ -355,28 +413,63 @@ impl ExportStyle {
     /// (a relative path → its bytes), filling [`Self::fonts`]. Returns a warning
     /// for each font that can't be read or has an unsupported type. The caller
     /// supplies `load`, so this stays off the filesystem and is testable.
+    /// Resolve the configured font paths into [`EmbeddedFont`]s using `load`
+    /// (a relative path → its bytes), filling [`Self::fonts`]. Returns a warning
+    /// for each configured font that can't be read or has an unsupported type. The
+    /// caller supplies `load`, so this stays off the filesystem and is testable.
+    ///
+    /// Each configured role resolves to its upright file plus, when a sibling
+    /// `<stem>-italic.<ext>` loads, a true-italic file (#638) — so italic and
+    /// bold-italic body text render in the chosen family rather than the bundled
+    /// fallback. A missing italic sibling is silent (the writer synthesizes the
+    /// slope); only a *configured* path that can't be read or is an unsupported
+    /// type warns.
     pub fn resolve_fonts(
         &mut self,
-        load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
+        mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
     ) -> Vec<String> {
+        let mut fonts = Vec::new();
+        let mut warnings = Vec::new();
         let targets = [
             (FontRole::Body, self.body_font.clone()),
             (FontRole::Heading, self.heading_font.clone()),
         ];
-        let (fonts, warnings) = resolve_assets(
-            targets,
-            font_media_type,
-            "font",
-            ".ttf/.otf/.woff/.woff2",
-            load,
-            |role, path, media_type, ext, bytes| EmbeddedFont {
-                role,
-                family: font_family(path),
-                href: format!("fonts/{}.{ext}", role.slug()),
-                media_type,
-                bytes,
-            },
-        );
+        for (role, path) in targets {
+            let Some(path) = path else { continue };
+            // The upright file — the configured path itself. A read/type failure
+            // here is the one the author must hear about.
+            match load_asset(&path, font_media_type, &mut load) {
+                Ok((media_type, ext, bytes)) => fonts.push(EmbeddedFont {
+                    role,
+                    family: font_family(&path),
+                    italic: false,
+                    href: format!("fonts/{}.{ext}", role.slug()),
+                    media_type,
+                    bytes,
+                }),
+                Err(AssetError::Unsupported) => warnings.push(format!(
+                    "style: unsupported font '{path}' (use .ttf/.otf/.woff/.woff2)"
+                )),
+                Err(AssetError::Read(e)) => {
+                    warnings.push(format!("style: couldn't read font '{path}': {e}"))
+                }
+            }
+            // The optional true-italic sibling — best-effort, no warning if absent.
+            if let Some(italic_path) = italic_sibling(&path) {
+                if let Ok((media_type, ext, bytes)) =
+                    load_asset(&italic_path, font_media_type, &mut load)
+                {
+                    fonts.push(EmbeddedFont {
+                        role,
+                        family: font_family(&path),
+                        italic: true,
+                        href: format!("fonts/{}-italic.{ext}", role.slug()),
+                        media_type,
+                        bytes,
+                    });
+                }
+            }
+        }
         self.fonts = fonts;
         warnings
     }
@@ -481,6 +574,27 @@ fn image_media_type(path: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
+/// The conventional true-italic sibling of a configured upright font path (#638):
+/// `fonts/eb-garamond.ttf` → `fonts/eb-garamond-italic.ttf`. The curated
+/// downloader writes the italic face at exactly this name, and a hand-specified
+/// font can drop one beside it to gain real italics. `None` when the path has no
+/// recognizable extension. A path that already ends in `-italic` isn't doubled.
+fn italic_sibling(path: &str) -> Option<String> {
+    let p = std::path::Path::new(path);
+    let stem = p.file_stem()?.to_str()?;
+    if stem.to_ascii_lowercase().ends_with("-italic") {
+        return None;
+    }
+    let ext = p.extension()?.to_str()?;
+    let parent = p.parent().and_then(|d| d.to_str()).unwrap_or("");
+    let file = format!("{stem}-italic.{ext}");
+    Some(if parent.is_empty() {
+        file
+    } else {
+        format!("{parent}/{file}")
+    })
+}
+
 /// A CSS-safe family name derived from a font file's stem (`Fonts/Georgia.ttf` →
 /// `Georgia`). Restricted to letters, digits, spaces, hyphens, and underscores so
 /// it can't break out of the quoted `font-family` / `@font-face` string it's
@@ -546,6 +660,94 @@ mod tests {
         assert!(style.font(FontRole::Heading).is_none());
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("unsupported"), "{warnings:?}");
+    }
+
+    #[test]
+    fn resolve_fonts_picks_up_a_true_italic_sibling_for_all_four_styles() {
+        // A body font with a `-italic` sibling on disk (#638): the resolver loads
+        // both files and `font_face` routes upright styles to the upright file and
+        // italic styles to the true-italic file — all in the same family.
+        let mut style = ExportStyle {
+            body_font: Some("fonts/eb-garamond.ttf".into()),
+            ..Default::default()
+        };
+        let warnings = style.resolve_fonts(|path| match path {
+            "fonts/eb-garamond.ttf" => Ok(b"upright".to_vec()),
+            "fonts/eb-garamond-italic.ttf" => Ok(b"italic".to_vec()),
+            other => Err(std::io::Error::other(format!("no {other}"))),
+        });
+        assert!(warnings.is_empty(), "both files load: {warnings:?}");
+
+        // Two embedded files, distinct hrefs, one shared family.
+        assert_eq!(style.fonts.len(), 2, "upright + italic");
+        let upright = style.font(FontRole::Body).expect("upright");
+        assert_eq!(upright.href, "fonts/body.ttf");
+        assert!(!upright.italic);
+        let italic = style
+            .fonts
+            .iter()
+            .find(|f| f.role == FontRole::Body && f.italic)
+            .expect("italic");
+        assert_eq!(italic.href, "fonts/body-italic.ttf");
+        assert_eq!(italic.family, upright.family, "same CSS family");
+        assert_eq!(italic.bytes, b"italic");
+
+        // The four styles resolve to the right file — italics to the italic face,
+        // regular/bold (weight rides the same upright file) to the upright.
+        let face = |s| style.font_face(FontRole::Body, s).unwrap();
+        assert!(!face(FontStyle::REGULAR).italic);
+        assert!(!face(FontStyle::BOLD).italic);
+        assert!(face(FontStyle::ITALIC).italic, "italic → true-italic file");
+        assert!(
+            face(FontStyle::BOLD_ITALIC).italic,
+            "bold-italic → true-italic file"
+        );
+    }
+
+    #[test]
+    fn resolve_fonts_without_an_italic_sibling_falls_back_to_the_upright_file() {
+        // A single upright file, no `-italic` sibling (a hand-specified font, #638):
+        // no warning, and italic styles fall back to the upright file (the writer
+        // synthesizes the slope) — never a different family.
+        let mut style = ExportStyle {
+            body_font: Some("fonts/only.ttf".into()),
+            ..Default::default()
+        };
+        let warnings = style.resolve_fonts(|path| match path {
+            "fonts/only.ttf" => Ok(b"upright".to_vec()),
+            other => Err(std::io::Error::other(format!("no {other}"))),
+        });
+        assert!(
+            warnings.is_empty(),
+            "a missing italic sibling is silent: {warnings:?}"
+        );
+        assert_eq!(style.fonts.len(), 1, "just the upright file");
+        // Every style resolves to the one upright file.
+        for s in [
+            FontStyle::REGULAR,
+            FontStyle::BOLD,
+            FontStyle::ITALIC,
+            FontStyle::BOLD_ITALIC,
+        ] {
+            let f = style.font_face(FontRole::Body, s).expect("resolves");
+            assert!(!f.italic, "{s:?} → the upright file");
+            assert_eq!(f.href, "fonts/body.ttf");
+        }
+    }
+
+    #[test]
+    fn italic_sibling_derivation_is_conventional() {
+        assert_eq!(
+            italic_sibling("fonts/eb-garamond.ttf").as_deref(),
+            Some("fonts/eb-garamond-italic.ttf")
+        );
+        assert_eq!(
+            italic_sibling("Georgia.otf").as_deref(),
+            Some("Georgia-italic.otf")
+        );
+        // An already-italic path isn't doubled; an extension-less path has no sibling.
+        assert_eq!(italic_sibling("fonts/body-italic.ttf"), None);
+        assert_eq!(italic_sibling("fonts/noext"), None);
     }
 
     #[test]

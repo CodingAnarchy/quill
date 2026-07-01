@@ -29,8 +29,15 @@ pub struct FontFamily {
     /// A one-line pangram-ish sample so the author gets a feel for the face
     /// without a glyph preview the terminal can't render in the real typeface.
     pub sample: &'static str,
-    /// Raw URL of the regular-weight `.ttf` to embed.
+    /// Raw URL of the upright `.ttf` to embed. Every curated family ships this as a
+    /// variable `[wght]`/`[opsz,wght]` file, so its regular *and* bold weights come
+    /// from one file — the PDF pins the weight per style and the EPUB `@font-face`
+    /// carries a `400 700` weight range (#638).
     pub ttf_url: &'static str,
+    /// Raw URL of the true-italic `.ttf` (the `-Italic[wght]` file), embedded as the
+    /// `<slug>-italic.ttf` sibling so italic and bold-italic body prose render in a
+    /// real italic face rather than the bundled fallback (#638).
+    pub italic_ttf_url: &'static str,
     /// Raw URL of the family's `OFL.txt` license, downloaded alongside the font so
     /// the license travels with the file.
     pub license_url: &'static str,
@@ -76,13 +83,15 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Serif · classic book face",
         sample: "The quick brown fox jumps over the lazy dog.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/ebgaramond/EBGaramond%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/ebgaramond/EBGaramond-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/ebgaramond/OFL.txt",
     },
     FontFamily {
         name: "Libre Baskerville",
         style: "Serif · readable, traditional",
         sample: "Sphinx of black quartz, judge my vow.",
-        ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/librebaskerville/LibreBaskerville-Regular.ttf",
+        ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/librebaskerville/LibreBaskerville%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/librebaskerville/LibreBaskerville-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/librebaskerville/OFL.txt",
     },
     FontFamily {
@@ -90,6 +99,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Serif · contemporary, warm",
         sample: "Pack my box with five dozen liquor jugs.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/lora/Lora-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/lora/OFL.txt",
     },
     FontFamily {
@@ -97,6 +107,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Serif · sturdy for long text",
         sample: "How vexingly quick daft zebras jump!",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/merriweather/Merriweather%5Bopsz,wdth,wght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/merriweather/Merriweather-Italic%5Bopsz,wdth,wght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/merriweather/OFL.txt",
     },
     FontFamily {
@@ -104,6 +115,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Serif · clean, modern",
         sample: "The five boxing wizards jump quickly.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/sourceserif4/SourceSerif4%5Bopsz,wght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/sourceserif4/SourceSerif4-Italic%5Bopsz,wght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/sourceserif4/OFL.txt",
     },
     FontFamily {
@@ -111,6 +123,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Serif · old-style, elegant",
         sample: "Jackdaws love my big sphinx of quartz.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/crimsonpro/CrimsonPro%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/crimsonpro/CrimsonPro-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/crimsonpro/OFL.txt",
     },
     FontFamily {
@@ -118,6 +131,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Sans · modern UI / headings",
         sample: "Waltz, bad nymph, for quick jigs vex.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter-Italic%5Bopsz,wght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt",
     },
     FontFamily {
@@ -125,6 +139,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Sans · geometric, for headings",
         sample: "The jay, pig, fox, zebra and my wolves quack!",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/OFL.txt",
     },
     FontFamily {
@@ -132,6 +147,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Display serif · for title pages",
         sample: "Bright vixens jump; dozy fowl quack.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/CormorantGaramond-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond/OFL.txt",
     },
     FontFamily {
@@ -139,6 +155,7 @@ pub const FAMILIES: &[FontFamily] = &[
         style: "Display serif · high-contrast",
         sample: "Quick zephyrs blow, vexing daft Jim.",
         ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf",
+        italic_ttf_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay-Italic%5Bwght%5D.ttf",
         license_url: "https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/OFL.txt",
     },
 ];
@@ -169,6 +186,20 @@ mod tests {
                 "{} has an OFL .ttf url: {}",
                 f.name,
                 f.ttf_url
+            );
+            // The true-italic file (#638): an OFL `.ttf`, distinct from the upright,
+            // and named for an italic face so it embeds as the `-italic` sibling.
+            assert!(
+                f.italic_ttf_url.contains("/ofl/") && f.italic_ttf_url.ends_with(".ttf"),
+                "{} has an OFL italic .ttf url: {}",
+                f.name,
+                f.italic_ttf_url
+            );
+            assert!(
+                f.italic_ttf_url.contains("Italic") && f.italic_ttf_url != f.ttf_url,
+                "{} italic url is a distinct italic face: {}",
+                f.name,
+                f.italic_ttf_url
             );
             assert!(
                 f.license_url.ends_with("OFL.txt"),

@@ -27,11 +27,11 @@ use self::draw::{mono_wrap, num};
 use self::font::{Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::layout::Layout;
-use self::wrap::{segments, words_of, wrap_lines};
+use self::wrap::{segments, words_of, wrap_lines, Seg};
 use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
     body_blocks, classify_block, copyright_lines, inline_runs, Chapter, Document, ExportStyle,
-    ImageRole, Prose, PubMeta, Run, SCENE_BREAK,
+    FontStyle, ImageRole, Prose, PubMeta, Run, SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -283,7 +283,7 @@ fn doc_toc_titles(doc: &Document) -> Vec<(String, bool)> {
 struct TocLine {
     page: usize,
     y: f32,
-    runs: Vec<Run>,
+    runs: Vec<Seg>,
     size: f32,
     folio_entry: Option<usize>,
 }
@@ -295,9 +295,9 @@ struct TocPlan {
     lines: Vec<TocLine>,
 }
 
-/// Borrow drawable segments as `glyph_block`'s `(text, bold, italic)` tuples.
-fn run_refs(runs: &[Run]) -> impl Iterator<Item = (&str, bool, bool)> {
-    runs.iter().map(|r| (r.text.as_str(), r.bold, r.italic))
+/// Borrow drawable segments as `glyph_block`'s `(text, style, heading)` tuples.
+fn seg_refs(segs: &[Seg]) -> impl Iterator<Item = (&str, FontStyle, bool)> {
+    segs.iter().map(|s| (s.text.as_str(), s.style, s.heading))
 }
 
 /// Flatten the built outline into per-entry folios, depth-first so a part precedes the
@@ -511,14 +511,29 @@ impl Pdf {
             self.y = self.layout.page_h * 0.62;
         }
         if let Some(s) = series {
-            self.centered(s, false, false, BODY_SIZE, BODY_LEADING * 2.0);
+            self.centered(s, false, false, false, BODY_SIZE, BODY_LEADING * 2.0);
         }
-        self.centered(title, true, false, TITLE_SIZE, TITLE_SIZE * 1.4);
+        // The book title uses the heading font (#638).
+        self.centered(title, true, false, true, TITLE_SIZE, TITLE_SIZE * 1.4);
         if let Some(s) = subtitle {
-            self.centered(s, false, true, EPIGRAPH_SIZE + 3.0, BODY_LEADING * 1.6);
+            self.centered(
+                s,
+                false,
+                true,
+                false,
+                EPIGRAPH_SIZE + 3.0,
+                BODY_LEADING * 1.6,
+            );
         }
         if let Some(a) = author {
-            self.centered(&format!("by {a}"), false, false, BODY_SIZE, BODY_LEADING);
+            self.centered(
+                &format!("by {a}"),
+                false,
+                false,
+                false,
+                BODY_SIZE,
+                BODY_LEADING,
+            );
         }
         if let Some(o) = self
             .bits
@@ -526,7 +541,7 @@ impl Pdf {
             .clone()
             .filter(|o| self.layout.renders(o))
         {
-            self.centered(&o, false, false, HEADING_SIZE, BODY_LEADING);
+            self.centered(&o, false, false, false, HEADING_SIZE, BODY_LEADING);
         }
         if let Some(e) = epigraph {
             self.y -= BODY_LEADING * 3.0;
@@ -548,7 +563,7 @@ impl Pdf {
         // Set the block low on the page, the conventional copyright-page placement.
         self.y = self.layout.page_h * 0.3;
         for line in lines {
-            self.centered(&line, false, false, EPIGRAPH_SIZE, EPIGRAPH_LEADING);
+            self.centered(&line, false, false, false, EPIGRAPH_SIZE, EPIGRAPH_LEADING);
         }
     }
 
@@ -576,7 +591,7 @@ impl Pdf {
                     leading: f32,
                     width: f32,
                     entry: Option<usize>| {
-            let words = words_of(&[Run::new(text, bold, false)]);
+            let words = words_of(&[Run::new(text, bold, false)], false);
             let wrapped = wrap_lines(&self.layout, &words, size, |_| width);
             for (i, (line, _w)) in wrapped.into_iter().enumerate() {
                 if *y - leading < bottom {
@@ -660,14 +675,16 @@ impl Pdf {
         for line in &plan.lines {
             let idx = plan.start + line.page;
             let left = self.layout.left(idx);
-            let mut block = self.glyph_block(left, line.y, line.size, run_refs(&line.runs));
+            let mut block = self.glyph_block(left, line.y, line.size, seg_refs(&line.runs));
             // The right-aligned folio on the entry's first line.
             if let Some(folio) = line
                 .folio_entry
                 .and_then(|i| folios.get(i).copied().flatten())
             {
                 let label = (folio + 1).to_string();
-                let w = self.layout.measure(&label, line.size, false, false);
+                let w = self
+                    .layout
+                    .measure(&label, line.size, FontStyle::REGULAR, false);
                 let x = left + col - w;
                 block.push_str(&self.text_op(x, line.y, &label, line.size));
             }
@@ -688,7 +705,7 @@ impl Pdf {
         self.y = self.layout.page_h * 0.5;
         self.heading_line(title, size, size * 1.4, align);
         if let Some(o) = ornament.filter(|o| self.layout.renders(o)) {
-            self.centered(o, false, false, HEADING_SIZE, BODY_LEADING);
+            self.centered(o, false, false, false, HEADING_SIZE, BODY_LEADING);
         }
         page
     }
@@ -778,7 +795,7 @@ impl Pdf {
         } else {
             SCENE_BREAK.to_string()
         };
-        self.centered(&glyph, false, false, BODY_SIZE, BODY_LEADING * 1.5);
+        self.centered(&glyph, false, false, false, BODY_SIZE, BODY_LEADING * 1.5);
     }
 
     /// A body sub-heading (`##` …), bold, honoring the heading alignment.
@@ -789,9 +806,10 @@ impl Pdf {
         self.heading_line(h, BODY_SIZE, BODY_LEADING, align);
     }
 
-    /// A bold heading line at `align` (chapter/part titles, sub-headings).
+    /// A bold heading line at `align` (chapter/part titles, sub-headings), drawn in
+    /// the heading font (#638).
     fn heading_line(&mut self, text: &str, size: f32, leading: f32, align: Align) {
-        let words = words_of(&[Run::new(text, true, false)]);
+        let words = words_of(&[Run::new(text, true, false)], true);
         self.flow(&words, self.layout.text_w(), 0.0, size, leading, align);
     }
 
@@ -800,7 +818,7 @@ impl Pdf {
     /// clear it (#489 / mirrors the EPUB `.opening` first-letter treatment).
     fn dropped_paragraph(&mut self, runs: &[Run]) {
         const LINES: usize = 3;
-        let mut words = words_of(runs);
+        let mut words = words_of(runs, false);
         let Some(first_word) = words.first_mut() else {
             return;
         };
@@ -815,7 +833,7 @@ impl Pdf {
         let cap_size = BODY_LEADING * LINES as f32;
         let cap_w = self
             .layout
-            .measure(&initial.to_string(), cap_size, false, false)
+            .measure(&initial.to_string(), cap_size, FontStyle::REGULAR, false)
             + 2.0;
         // Reserve the cap block so the initial and its first lines stay together.
         self.need(BODY_LEADING * LINES as f32);
@@ -824,7 +842,11 @@ impl Pdf {
         self.draw_line(
             left,
             cap_baseline,
-            &[Run::new(initial.to_string(), false, false)],
+            &[Seg {
+                text: initial.to_string(),
+                style: FontStyle::REGULAR,
+                heading: false,
+            }],
             cap_size,
         );
         // The first LINES lines are inset by the cap width; the rest run full width.
@@ -850,7 +872,7 @@ impl Pdf {
     fn epigraph(&mut self, e: &Epigraph) {
         let width = self.layout.text_w() - 2.0 * EPIGRAPH_INSET;
         for line in e.text.lines() {
-            let words = words_of(&[Run::new(line, false, true)]);
+            let words = words_of(&[Run::new(line, false, true)], false);
             self.flow(
                 &words,
                 width,
@@ -861,7 +883,7 @@ impl Pdf {
             );
         }
         if let Some(by) = &e.attribution {
-            let words = words_of(&[Run::new(format!("— {by}"), false, true)]);
+            let words = words_of(&[Run::new(format!("— {by}"), false, true)], false);
             self.flow(
                 &words,
                 width,
@@ -892,7 +914,7 @@ impl Pdf {
             } else {
                 BODY_SIZE
             };
-            let w = self.layout.measure(&label, size, false, false);
+            let w = self.layout.measure(&label, size, FontStyle::REGULAR, false);
             let x = if self.layout.running_heads {
                 if recto {
                     left + col - w
@@ -908,7 +930,9 @@ impl Pdf {
         if self.layout.running_heads && i > 0 && !m.opener {
             let head = if recto { &m.recto } else { &m.verso };
             if !head.is_empty() {
-                let w = self.layout.measure(head, HEAD_SIZE, false, false);
+                let w = self
+                    .layout
+                    .measure(head, HEAD_SIZE, FontStyle::REGULAR, false);
                 let x = left + (col - w) / 2.0;
                 let y = self.layout.page_h - self.layout.margin_top * 0.5;
                 s.push_str(&self.text_op(x, y, head, HEAD_SIZE));
@@ -920,7 +944,12 @@ impl Pdf {
     /// A `BT…ET` text run showing one string at `(x, y)` in the regular face — used
     /// for running heads and folios, resolved to glyph ids like body text.
     fn text_op(&self, x: f32, y: f32, text: &str, size: f32) -> String {
-        self.glyph_block(x, y, size, std::iter::once((text, false, false)))
+        self.glyph_block(
+            x,
+            y,
+            size,
+            std::iter::once((text, FontStyle::REGULAR, false)),
+        )
     }
 
     /// Serialize the pages and outline into the bytes of a PDF file.

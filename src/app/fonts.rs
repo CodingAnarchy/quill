@@ -153,10 +153,13 @@ impl App {
     }
 }
 
-/// Ensure `family`'s `.ttf` (and its license) are in the project's `fonts/` dir,
+/// Ensure `family`'s fonts (and its license) are in the project's `fonts/` dir,
 /// downloading them if absent, and return the relative `fonts/<slug>.ttf` path the
-/// manifest stores. A cache hit (the file already on disk) makes no network call,
-/// so re-applying a font is instant and offline.
+/// manifest stores. The upright `[wght]` file lands at `<slug>.ttf` and the
+/// true-italic file beside it at `<slug>-italic.ttf` — the sibling the export
+/// resolver picks up so italic and bold-italic body prose render in a real italic
+/// face (#638). A cache hit on the upright file (already on disk) makes no network
+/// call, so re-applying a font is instant and offline.
 fn ensure_font_downloaded(root: &std::path::Path, family: &FontFamily) -> std::io::Result<String> {
     let slug = family.slug();
     let rel_path = format!("{FONTS_DIR}/{slug}.ttf");
@@ -168,6 +171,11 @@ fn ensure_font_downloaded(root: &std::path::Path, family: &FontFamily) -> std::i
     std::fs::create_dir_all(&dir)?;
     let bytes = fetch(family.ttf_url)?;
     std::fs::write(&ttf_path, &bytes)?;
+    // The true-italic sibling is best-effort: a fetch failure leaves the upright
+    // font fully usable (the writer synthesizes the slope), so it doesn't abort.
+    if let Ok(italic) = fetch(family.italic_ttf_url) {
+        let _ = std::fs::write(dir.join(format!("{slug}-italic.ttf")), italic);
+    }
     // The license travels with the font; a license fetch failure is non-fatal (the
     // font is still usable) but worth surfacing only if the font itself failed.
     if let Ok(license) = fetch(family.license_url) {
