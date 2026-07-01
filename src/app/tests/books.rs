@@ -442,6 +442,156 @@ fn a_stuck_series_bible_pass_times_out() {
     );
 }
 
+// --- Refresh all bibles: one combined confirm (#655) ------------------------
+
+/// Enable AI on the always-ready local backend so the bible-refresh command gets
+/// past the readiness gate without a key or network — hermetic (#531).
+fn enable_local_ai(app: &mut App) {
+    app.ai.enabled = true;
+    app.ai.backend = crate::ai::BackendKind::Local;
+}
+
+#[test]
+fn refresh_all_bibles_plans_the_four_trackers_over_every_book() {
+    use crate::mode::AiAction;
+    let (app, _dir) = series_app("bible-all-plan");
+    let queue = app.bible_refresh_queue_for_test();
+    // Four trackers × two books = eight passes, each tracker walking the books in
+    // reading order so book two builds on book one.
+    assert_eq!(
+        queue,
+        vec![
+            (AiAction::Characters, 0),
+            (AiAction::Characters, 1),
+            (AiAction::Continuity, 0),
+            (AiAction::Continuity, 1),
+            (AiAction::Setting, 0),
+            (AiAction::Setting, 1),
+            (AiAction::Plot, 0),
+            (AiAction::Plot, 1),
+        ]
+    );
+}
+
+#[test]
+fn refresh_all_bibles_works_for_a_standalone_novel() {
+    use crate::mode::AiAction;
+    let (app, _dir) = two_chapter_app("bible-all-standalone");
+    // A standalone novel refreshes its one book's four trackers under the one
+    // command — unlike the series refresh, it isn't gated off for a single book.
+    assert_eq!(
+        app.bible_refresh_queue_for_test(),
+        vec![
+            (AiAction::Characters, 0),
+            (AiAction::Continuity, 0),
+            (AiAction::Setting, 0),
+            (AiAction::Plot, 0),
+        ]
+    );
+}
+
+#[test]
+fn refresh_all_bibles_estimate_sums_the_four_passes() {
+    let (app, _dir) = two_chapter_app("bible-all-sum");
+    // With no bible yet, each of the four passes rebuilds from the whole book, so
+    // the combined estimate covers four whole-book passes' worth of input — the sum
+    // of the parts, one figure to confirm rather than four separate ones.
+    let combined = app.bibles_refresh_estimate_for_test(false);
+    let whole = app.manuscript_text().len();
+    let expected =
+        crate::ai::cost::estimate(whole * 4, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model);
+    assert_eq!(
+        combined.tokens, expected.tokens,
+        "combined input = four whole-book passes summed"
+    );
+    // And it's four times a single whole-book pass, up to token truncation.
+    let one_pass = crate::ai::cost::estimate(whole, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model);
+    assert!(
+        combined.tokens >= one_pass.tokens * 4,
+        "at least four passes' input: {} vs {}",
+        combined.tokens,
+        one_pass.tokens * 4,
+    );
+    assert!(
+        combined.dollars > one_pass.dollars,
+        "the batch costs more than one pass"
+    );
+}
+
+#[test]
+fn one_confirm_gates_the_whole_batch_then_seeds_every_pass() {
+    let (mut app, _dir) = series_app("bible-all-confirm");
+    enable_local_ai(&mut app);
+    app.ai.cost_threshold = 0.0; // any non-empty manuscript is over
+
+    app.start_refresh_bibles(false);
+    // Exactly one confirm opens — not four, not 4×books.
+    match &app.mode {
+        Mode::Prompt(s) => {
+            assert!(
+                matches!(s.pending, Pending::ConfirmRefreshBibles { .. }),
+                "the single combined confirm opens"
+            );
+            assert!(s.label.contains("Refresh all bibles"), "{}", s.label);
+        }
+        _ => panic!("expected the combined cost confirm"),
+    }
+    // Nothing has been seeded or spawned until the author confirms.
+    assert!(!app.has_series_bible_run(), "no run before confirm");
+    assert!(!app.ai_task.is_busy(), "nothing sent before confirm");
+
+    // Confirming runs the batch as one sequenced run over all eight passes. On this
+    // hermetic build the local backend isn't compiled, so every pass is skipped and
+    // the run drains synchronously — but it ran as a *single* batch (one summary),
+    // never eight separate confirms.
+    app.on_key(key(KeyCode::Char('y')));
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "confirming closes the single prompt — no further confirms"
+    );
+    // The batch that ran was the full eight-pass plan.
+    assert_eq!(app.bible_refresh_queue_for_test().len(), 8);
+}
+
+#[test]
+fn a_cheap_batch_skips_the_confirm() {
+    let (mut app, _dir) = series_app("bible-all-cheap");
+    enable_local_ai(&mut app);
+    app.ai.cost_threshold = 1_000.0; // nothing this small could exceed it
+    app.start_refresh_bibles(false);
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no confirm for a batch under the threshold"
+    );
+    // It went straight to seeding/driving the batch rather than prompting.
+}
+
+#[test]
+fn declining_the_batch_confirm_cancels_it() {
+    let (mut app, _dir) = series_app("bible-all-decline");
+    enable_local_ai(&mut app);
+    app.ai.cost_threshold = 0.0;
+    app.start_refresh_bibles(false);
+    assert!(matches!(app.mode, Mode::Prompt(_)));
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(!app.has_series_bible_run(), "nothing runs after declining");
+    assert!(!app.ai_task.is_busy(), "nothing was sent");
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("cancelled"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn refresh_all_bibles_needs_a_ready_backend() {
+    let (mut app, _dir) = series_app("bible-all-gate");
+    app.ai.enabled = false; // AI off
+    app.start_refresh_bibles(false);
+    assert!(!app.has_series_bible_run(), "gated off when AI isn't ready");
+    assert!(matches!(app.mode, Mode::Insert), "no confirm prompt opens");
+}
+
 // --- Cross-book findings (#341) ---------------------------------------------
 
 #[test]

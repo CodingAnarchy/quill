@@ -98,6 +98,9 @@ impl App {
                 Some("this project has only one book".into())
             }
             Action::RefreshSeriesBible => self.ai.check_ready().err().map(|e| e.to_string()),
+            // The all-bibles refresh (#655) spawns the four bible passes, so it
+            // needs a ready AI backend, but works for a standalone novel too.
+            Action::RefreshBibles => self.ai.check_ready().err().map(|e| e.to_string()),
             // Describe-to-config needs the AI to propose the settings (#303).
             Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
             // The assistant pane is a single-chapter-view feature, like the splits.
@@ -196,6 +199,7 @@ impl App {
                     | AiAction::NameGen
                     | AiAction::Editorial
             ) | Action::RefreshSeriesBible
+                | Action::RefreshBibles
                 | Action::DescribeConfig
         )
     }
@@ -226,6 +230,7 @@ impl App {
             Action::BookDetails => self.start_book_details(),
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
+            Action::RefreshBibles => self.start_refresh_bibles(force),
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),
             Action::AcceptWord => self.accept_word_at_cursor(),
