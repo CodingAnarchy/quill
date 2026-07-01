@@ -224,6 +224,14 @@ impl App {
                     self.mode = closed;
                 }
             },
+            Pending::ConfirmDeleteProject => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => self.delete_browser_project(),
+                _ => {
+                    // Cancel: drop the stashed target, back to the browser (#612).
+                    self.pending_manage = None;
+                    self.reopen_project_browser();
+                }
+            },
             Pending::WizardStart => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.wizard_open(Some(WizardStep::Goals))
@@ -284,6 +292,7 @@ impl App {
             | Pending::DraftSetting
             | Pending::NewProject
             | Pending::RenameProject
+            | Pending::RenameBrowserProject
             | Pending::Wizard(_)
             | Pending::ImportNotes
             | Pending::NewFromNotesSource
@@ -473,6 +482,12 @@ impl App {
                                 // reports; a blank name is rejected there (#424).
                                 self.rename_project(text);
                             }
+                            Pending::RenameBrowserProject => {
+                                // rename_browser_project moves the stashed folder
+                                // and re-lists the browser; a blank name is
+                                // rejected there (#612).
+                                self.rename_browser_project(text);
+                            }
                             Pending::Wizard(step) => {
                                 // Apply this step (blank = skip), then move to the
                                 // next one — or finish (#282).
@@ -565,11 +580,19 @@ impl App {
                     }
                     KeyCode::Esc => {
                         // Cancelling discards any prompt-scoped staging: the AI
-                        // workflow proposal (#232) and the new-from-notes folder
-                        // (#286). Harmless no-op for the other prompts.
+                        // workflow proposal (#232), the new-from-notes folder
+                        // (#286), and the browser rename target (#612). Harmless
+                        // no-op for the other prompts.
                         self.pending_workflow = None;
                         self.pending_import_source = None;
-                        self.mode = closed;
+                        // A cancelled browser rename returns to the library, not
+                        // the editor, so the author stays where they were (#612).
+                        if matches!(pending, Pending::RenameBrowserProject) {
+                            self.pending_manage = None;
+                            self.reopen_project_browser();
+                        } else {
+                            self.mode = closed;
+                        }
                     }
                     _ => {}
                 }

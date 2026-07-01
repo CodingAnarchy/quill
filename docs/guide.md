@@ -58,6 +58,17 @@ changes). Press "b" to browse the filesystem for a project that isn't listed
 yet, or "n" to create a brand-new one — type its path and Quill makes the
 folder, manifest, and first chapter, then opens it.
 
+At library scale the list can grow long, so "/" filters it the way the chapter
+browser does: type to narrow to the projects whose title or folder path matches,
+the arrows move within the matches, and Enter opens the highlighted one. Esc
+leaves the filter in place (so the arrows still act on the narrowed list); a
+second Esc clears it. You can also prune the library from here: "r" renames the
+selected project's folder (Quill moves it and updates your recents), and "d"
+deletes it after a confirmation — that removes the folder and all its files, so
+it asks first. The project you currently have open is never deleted from the
+browser (switch to another first), and renaming the open project routes through
+the in-place rename so the editor follows the folder.
+
 Point Quill at the folder where you keep your books, in
 ~/.config/quill/config.toml, for a complete library view:
 

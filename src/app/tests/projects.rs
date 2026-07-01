@@ -584,3 +584,218 @@ fn renaming_updates_recents_to_the_new_path() {
 
     fs::remove_dir_all(&new_root).ok();
 }
+
+// --- Browser filter, rename, and delete (#612) ----------------------------
+
+/// Select the project row whose title equals `title` in the open browser.
+fn select_project(app: &mut App, title: &str) {
+    if let Mode::ProjectBrowser(s) = &mut app.mode {
+        s.selected = s
+            .projects
+            .iter()
+            .position(|p| p.title == title)
+            .expect("project present");
+    } else {
+        panic!("not in the project browser");
+    }
+}
+
+/// The browser's selected title, and its live filter string.
+fn browser_selection(app: &App) -> (String, String) {
+    match &app.mode {
+        Mode::ProjectBrowser(s) => (
+            s.projects
+                .get(s.selected)
+                .map(|p| p.title.clone())
+                .unwrap_or_default(),
+            s.filter.clone(),
+        ),
+        _ => panic!("not in the project browser"),
+    }
+}
+
+#[test]
+fn slash_filter_narrows_movement_to_matching_projects() {
+    isolate("filter");
+    let lib = books_dir("filter-lib");
+    project_in(&lib, "alpha", "Alpha", "a\n");
+    project_in(&lib, "beta", "Beta", "b\n");
+    project_in(&lib, "gamma", "Gamma", "g\n");
+    set_projects_home(&lib);
+
+    let other = make_project("filter-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+
+    // `/` enters the filter sub-mode; typing narrows to titles/paths matching.
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "bet");
+    let (selected, filter) = browser_selection(&app);
+    assert_eq!(filter, "bet", "the query built as typed");
+    assert_eq!(
+        selected, "Beta",
+        "the selection snapped onto the only match"
+    );
+
+    // Down stays on the sole match (no non-matching row is reachable).
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(browser_selection(&app).0, "Beta");
+
+    // Esc leaves input keeping the filter; a second Esc clears it and stays in
+    // the browser with the full list reachable again.
+    app.on_key(key(KeyCode::Esc));
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(
+        browser_selection(&app).1,
+        "",
+        "second Esc clears the filter"
+    );
+    assert!(
+        matches!(app.mode, Mode::ProjectBrowser(_)),
+        "clearing the filter stays in the browser"
+    );
+}
+
+#[test]
+fn renaming_from_the_browser_moves_the_folder_and_updates_recents() {
+    isolate("browser-rename");
+    let lib = books_dir("browser-rename-lib");
+    let alpha = project_in(&lib, "alpha", "Alpha", "a\n");
+    project_in(&lib, "beta", "Beta", "b\n");
+    set_projects_home(&lib);
+
+    // Open a different project so `alpha` is browsed, not the open one.
+    let other = make_project("browser-rename-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+    select_project(&mut app, "Alpha");
+
+    let new_root = lib.join("Renamed Alpha");
+    let _ = fs::remove_dir_all(&new_root);
+    app.on_key(key(KeyCode::Char('r')));
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::RenameBrowserProject)),
+        "r opens the browser rename prompt"
+    );
+    // Clear the prefilled folder name, then type the new one.
+    if let Mode::Prompt(s) = &mut app.mode {
+        s.input.clear();
+    }
+    type_str(&mut app, "Renamed Alpha");
+    app.on_key(key(KeyCode::Enter));
+
+    assert!(!alpha.exists(), "the old folder was moved away");
+    assert!(
+        Project::manifest_path(&new_root).exists(),
+        "the folder now lives at the new path"
+    );
+    // The open project is untouched.
+    assert_eq!(app.project.manifest.title, "Other");
+    // The browser re-listed and recents point at the new path.
+    let paths: Vec<PathBuf> = recent::list().into_iter().map(|r| r.path).collect();
+    assert!(
+        paths.contains(&new_root.canonicalize().unwrap()),
+        "the new path is recorded: {paths:?}"
+    );
+    assert!(
+        matches!(app.mode, Mode::ProjectBrowser(_)),
+        "back in the browser after the rename"
+    );
+
+    fs::remove_dir_all(&new_root).ok();
+}
+
+#[test]
+fn deleting_from_the_browser_removes_it_from_the_list() {
+    isolate("browser-delete");
+    let lib = books_dir("browser-delete-lib");
+    let alpha = project_in(&lib, "alpha", "Alpha", "a\n");
+    project_in(&lib, "beta", "Beta", "b\n");
+    set_projects_home(&lib);
+
+    let other = make_project("browser-delete-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+    select_project(&mut app, "Alpha");
+
+    app.on_key(key(KeyCode::Char('d')));
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmDeleteProject)),
+        "d opens the delete confirm"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+
+    assert!(!alpha.exists(), "the folder was removed from disk");
+    let titles = browser_titles(&app);
+    assert!(
+        !titles.contains(&"Alpha".to_string()) && titles.contains(&"Beta".to_string()),
+        "Alpha dropped from the list, Beta remains: {titles:?}"
+    );
+}
+
+#[test]
+fn cancelling_delete_leaves_the_project_intact() {
+    isolate("browser-delete-cancel");
+    let lib = books_dir("browser-delete-cancel-lib");
+    let alpha = project_in(&lib, "alpha", "Alpha", "a\n");
+    set_projects_home(&lib);
+
+    let other = make_project("browser-delete-cancel-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+    select_project(&mut app, "Alpha");
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('n'))); // anything but y cancels
+
+    assert!(alpha.exists(), "the folder is untouched on cancel");
+    assert!(
+        browser_titles(&app).contains(&"Alpha".to_string()),
+        "still listed"
+    );
+}
+
+#[test]
+fn deleting_the_open_project_is_refused() {
+    isolate("browser-delete-open");
+    let lib = books_dir("browser-delete-open-lib");
+    let alpha = project_in(&lib, "alpha", "Alpha", "a\n");
+    set_projects_home(&lib);
+    recent::record(&alpha, "Alpha");
+
+    // Open Alpha itself, then try to delete it from the browser.
+    let mut app = open_app(&alpha);
+    app.on_key(ctrl('b'));
+    select_project(&mut app, "Alpha");
+    app.on_key(key(KeyCode::Char('d')));
+
+    assert!(
+        !matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmDeleteProject)),
+        "no delete confirm for the open project"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("is open"),
+        "a clear refusal message: {:?}",
+        app.message
+    );
+    assert!(alpha.exists(), "the open project's folder is untouched");
+}
+
+#[test]
+fn renaming_the_open_project_from_the_browser_routes_to_the_in_place_rename() {
+    isolate("browser-rename-open");
+    let lib = books_dir("browser-rename-open-lib");
+    let alpha = project_in(&lib, "alpha", "Alpha", "a\n");
+    set_projects_home(&lib);
+    recent::record(&alpha, "Alpha");
+
+    let mut app = open_app(&alpha);
+    app.on_key(ctrl('b'));
+    select_project(&mut app, "Alpha");
+    app.on_key(key(KeyCode::Char('r')));
+
+    // The open project routes to the in-place rename (#424), which reopens it.
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::RenameProject)),
+        "the open project uses the in-place rename prompt"
+    );
+}

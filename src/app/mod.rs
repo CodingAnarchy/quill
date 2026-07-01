@@ -295,6 +295,11 @@ pub struct App {
     /// The project the author chose in the browser, held while the unsaved-
     /// changes confirm is open (#270); taken when they confirm the switch.
     pending_switch: Option<PathBuf>,
+    /// The project a browser rename / delete prompt targets (#612), held while
+    /// the folder-name input or the delete confirm is open; taken when the action
+    /// runs. Distinct from `pending_switch` (the switch target) so a manage
+    /// action never disturbs a pending switch.
+    pending_manage: Option<PathBuf>,
     /// A setup-wizard setting concept (#282) deferred until the characters draft
     /// finishes — only one AI pass runs at a time, so the second is queued here
     /// and fired by `poll_ai` when the first completes.
@@ -412,6 +417,7 @@ impl App {
             pending_recovery: None,
             recovery_written: false,
             pending_switch: None,
+            pending_manage: None,
             wizard_pending_setting: None,
             import_source: None,
             pending_import_source: None,

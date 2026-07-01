@@ -272,6 +272,8 @@ pub fn draw_startup_browser(
 
 /// Render the recently-opened projects as a navigable list (#270). The
 /// currently-open project is marked, and each row shows the title over its path.
+/// A `/`-filter (#612) narrows the list to titles/paths matching the query; the
+/// help line shows the query while typing and the match count when filtered.
 pub(super) fn draw_project_browser(
     frame: &mut Frame,
     area: Rect,
@@ -279,28 +281,47 @@ pub(super) fn draw_project_browser(
     current: &Path,
 ) {
     let current = current.canonicalize();
-    let rows = browser
+    let query = browser.filter.to_lowercase();
+    let matches = |p: &crate::recent::RecentProject| {
+        query.is_empty()
+            || p.title.to_lowercase().contains(&query)
+            || p.path.to_string_lossy().to_lowercase().contains(&query)
+    };
+    // Filter to matching projects, keeping the original index so the selection
+    // marker lands on the right row; the row that renders selected is the one
+    // whose original index is `browser.selected`.
+    let visible: Vec<(usize, &crate::recent::RecentProject)> = browser
         .projects
         .iter()
         .enumerate()
+        .filter(|(_, p)| matches(p))
+        .collect();
+    let selected_pos = visible.iter().position(|(i, _)| *i == browser.selected);
+    let rows = visible
+        .iter()
         .map(|(i, p)| {
             let here = current.as_ref().map(|c| c == &p.path).unwrap_or(false);
             let tag = if here { "  (open)" } else { "" };
             list_row(
-                i == browser.selected,
+                *i == browser.selected,
                 format!("{}{tag}", p.title),
                 Some(p.path.display().to_string()),
             )
         })
         .collect();
-    draw_list_overlay(
-        frame,
-        area,
-        " Projects ",
-        "Projects — ↑↓ move · enter open · b browse files · n new project · esc cancel",
-        rows,
-        Some(browser.selected),
-    );
+    let help = if browser.typing {
+        format!("Filter: {}_", browser.filter)
+    } else if browser.filter.is_empty() {
+        "Projects — ↑↓ move · enter open · / filter · r rename · d delete · b browse files · n new · esc cancel".to_string()
+    } else {
+        format!(
+            "Filter “{}” — {} match{} · esc clears · r rename · d delete",
+            browser.filter,
+            visible.len(),
+            if visible.len() == 1 { "" } else { "es" }
+        )
+    };
+    draw_list_overlay(frame, area, " Projects ", &help, rows, selected_pos);
 }
 
 /// Render the filesystem navigator (#271): the current directory's subfolders,
