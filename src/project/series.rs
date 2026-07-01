@@ -8,11 +8,15 @@
 //! code path here is unchanged (the empty-`books` branch).
 
 use std::fs;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic;
 use crate::frontmatter::{self, Epigraph, FrontMatter};
 
+use super::io::cache_chapter;
+use super::structure::unique_dest;
 use super::{ChapterEntry, Goals, Manifest, Part, Project};
 
 /// One book within a multi-book series (#276/#328). Holds the same per-book
@@ -204,6 +208,176 @@ impl Project {
             .chapters
             .first()
             .map_or(String::new(), |c| c.file.clone());
+    }
+
+    /// Convert a standalone novel into a multi-book series (#648): the current
+    /// single book becomes book one, and `series_title` names the series. A no-op
+    /// (returning `Ok(())`) if the project is already a series. Persists the new
+    /// `[[books]]` manifest.
+    ///
+    /// The existing book keeps its chapters, files, and every per-book field; only
+    /// the on-disk shape changes (flat manifest → `[[books]]`). The active book
+    /// stays the current one, so the live buffer and selection are untouched.
+    pub fn convert_to_series(&mut self, series_title: &str) -> std::io::Result<()> {
+        if !self.books.is_empty() {
+            return Ok(()); // already a series
+        }
+        // Hoist the live single book into the series list as book one, and record
+        // the series title on the manifest (the series-level `title` on save).
+        self.manifest.series = Some(series_title.trim().to_string());
+        self.books = vec![self.manifest.to_book()];
+        self.active_book = 0;
+        self.save_manifest()
+    }
+
+    /// Add a new book titled `title` to the series (#648), with one empty starter
+    /// chapter so it's immediately editable, and make it the active book. Returns
+    /// the index of the new book. Errors if the project isn't a series yet — the
+    /// caller converts first. Persists the `[[books]]` manifest and the starter
+    /// chapter file.
+    ///
+    /// The new book's chapter lives in its own uniquely-named file at the project
+    /// root, so it never collides with another book's chapters. The switch mirrors
+    /// [`set_active_book`]: the outgoing live book is folded back first.
+    pub fn add_book(&mut self, title: &str) -> std::io::Result<usize> {
+        debug_assert!(
+            !self.books.is_empty(),
+            "add_book on a standalone novel — convert_to_series first"
+        );
+        // Fold the live active book back before we append, so its buffered
+        // structural state is captured in the series list (mirrors set_active_book).
+        self.books[self.active_book] = self.manifest.to_book();
+        let file = self.unique_book_chapter_file();
+        atomic::write(&self.root.join(&file), b"")?;
+        let mut chapter = ChapterEntry::new("Chapter 1".to_string(), file);
+        cache_chapter(&self.root, &mut chapter);
+        let index = self.books.len();
+        self.books.push(Book {
+            title: title.trim().to_string(),
+            chapters: vec![chapter],
+            ..Default::default()
+        });
+        // Hoist the new book into the active manifest so the editor opens on it.
+        self.manifest.load_book(&self.books[index]);
+        self.active_book = index;
+        self.words_changed.clear();
+        self.active = self
+            .manifest
+            .chapters
+            .first()
+            .map_or(String::new(), |c| c.file.clone());
+        self.save_manifest()?;
+        Ok(index)
+    }
+
+    /// Remove book `index` from the series (#648), retiring its chapter files to
+    /// the project's `unused/` directory (never deleting them, so nothing the
+    /// author wrote is lost — the same guarantee [`remove_chapter`] gives).
+    /// Guarded: the last remaining book of a series can't be removed (a series
+    /// always has at least one book), and an out-of-range index is a no-op.
+    ///
+    /// The active book stays consistent: removing a book before the active one
+    /// shifts the active index down; removing the active book itself activates the
+    /// book that shifts into its place (clamped to the new last book). Persists the
+    /// manifest, and returns whether the active book changed (so the caller can
+    /// reload the editor).
+    pub fn remove_book(&mut self, index: usize) -> std::io::Result<bool> {
+        if index >= self.books.len() || self.books.len() <= 1 {
+            return Ok(false);
+        }
+        // Fold the live active book back so a non-active removal keeps its edits.
+        self.books[self.active_book] = self.manifest.to_book();
+        // Retire the removed book's chapter files to `unused/` rather than deleting.
+        // A book's chapters may live in a per-book subdirectory (e.g. `b2/one.md`);
+        // retire them by base name so they land directly in `unused/` (never a
+        // never-created nested subdir), matching `remove_chapter`'s flat retirement.
+        let unused = self.root.join("unused");
+        for chapter in &self.books[index].chapters {
+            let src = self.root.join(&chapter.file);
+            if src.exists() {
+                fs::create_dir_all(&unused)?;
+                let base = Path::new(&chapter.file)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| chapter.file.clone());
+                let dest = unique_dest(&unused, &base);
+                fs::rename(&src, &dest)?;
+            }
+        }
+        self.books.remove(index);
+        // Keep the active book pointing at the right book. Removing one before it
+        // shifts it down; removing the active one lands on whatever took its slot
+        // (clamped to the last book).
+        let was_active = index == self.active_book;
+        if index < self.active_book {
+            self.active_book -= 1;
+        } else if was_active {
+            self.active_book = self.active_book.min(self.books.len() - 1);
+        }
+        // If the active book moved, hoist the new one into the manifest.
+        let active_changed = was_active;
+        if active_changed {
+            self.manifest.load_book(&self.books[self.active_book]);
+            self.words_changed.clear();
+            for i in 0..self.manifest.chapters.len() {
+                self.read_chapter_cache(i);
+            }
+            self.reorder_by_band();
+            self.active = self
+                .manifest
+                .chapters
+                .first()
+                .map_or(String::new(), |c| c.file.clone());
+        }
+        self.save_manifest()?;
+        Ok(active_changed)
+    }
+
+    /// Move book `index` one place toward the front (`up`) or back of the series
+    /// (#648), just reordering the `[[books]]` list — no files move. A no-op at the
+    /// ends or for an out-of-range index. Keeps the active book pointing at the
+    /// same book (its index follows the swap), so the live buffer is untouched.
+    /// Persists the manifest and returns whether a swap happened.
+    pub fn move_book(&mut self, index: usize, up: bool) -> std::io::Result<bool> {
+        if index >= self.books.len() {
+            return Ok(false);
+        }
+        let Some(target) = (if up {
+            index.checked_sub(1)
+        } else {
+            (index + 1 < self.books.len()).then_some(index + 1)
+        }) else {
+            return Ok(false);
+        };
+        // Fold the live active book back so its edits ride along with the reorder.
+        self.books[self.active_book] = self.manifest.to_book();
+        self.books.swap(index, target);
+        // The active book keeps its identity: follow it to its new slot.
+        if self.active_book == index {
+            self.active_book = target;
+        } else if self.active_book == target {
+            self.active_book = index;
+        }
+        self.save_manifest()?;
+        Ok(true)
+    }
+
+    /// The smallest `chapter-{n}.md` name free across *every* book of the series
+    /// and on disk (#648) — a series-wide version of the single-book
+    /// `unique_chapter_file`, so a new book's starter chapter never collides with
+    /// another book's file.
+    fn unique_book_chapter_file(&self) -> String {
+        let used: std::collections::HashSet<&str> = self
+            .books
+            .iter()
+            .flat_map(|b| b.chapters.iter())
+            .map(|c| c.file.as_str())
+            .chain(self.manifest.chapters.iter().map(|c| c.file.as_str()))
+            .collect();
+        (1..)
+            .map(|n| format!("chapter-{n}.md"))
+            .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())
+            .expect("an unbounded range always yields a free name")
     }
 
     /// The title of book `i`. The active book's live title comes from the
@@ -566,6 +740,146 @@ file = \"b2/one.md\"
         assert_eq!(project.active_book(), 1);
         assert_eq!(project.manifest.chapters.len(), per_book);
         assert!(dt.as_millis() < 500, "book switch took {dt:?}");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Converting a standalone novel into a series (#648) turns its single book
+    /// into book one and writes the `[[books]]` manifest, without disturbing the
+    /// book's chapters, files, or the active selection. Reopening reads it back as
+    /// a two-index-capable series.
+    #[test]
+    fn convert_to_series_hoists_the_single_book() {
+        let dir = temp_dir("series-convert");
+        let mut project = Project::create(&dir).unwrap(); // flat single-book manifest
+        let book_title = project.manifest.title.clone();
+        assert_eq!(project.book_count(), 1);
+
+        project.convert_to_series("The Chronicles").unwrap();
+        assert_eq!(project.book_count(), 1); // still one book, now in the series list
+        assert_eq!(project.series_title(), Some("The Chronicles"));
+        assert_eq!(project.book_title(0), Some(book_title.as_str()));
+
+        // The manifest is now the `[[books]]` shape, and reopens as a series.
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("[[books]]"), "series shape:\n{toml}");
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.series_title(), Some("The Chronicles"));
+
+        // Converting again is a no-op (already a series).
+        project.convert_to_series("Ignored").unwrap();
+        assert_eq!(project.series_title(), Some("The Chronicles"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Adding a book (#648) appends it with a starter chapter file, makes it
+    /// active, and persists to the `[[books]]` manifest; reopening sees both books.
+    #[test]
+    fn add_book_appends_and_activates() {
+        let dir = temp_dir("series-add");
+        write_series(&dir);
+        let mut project = Project::open(&dir).unwrap();
+        assert_eq!(project.book_count(), 2);
+
+        let index = project.add_book("Book Three").unwrap();
+        assert_eq!(index, 2);
+        assert_eq!(project.book_count(), 3);
+        assert_eq!(project.active_book(), 2);
+        assert_eq!(project.book_title(2), Some("Book Three"));
+        // The starter chapter file exists and is the active chapter.
+        assert_eq!(project.manifest.chapters.len(), 1);
+        let file = project.manifest.chapters[0].file.clone();
+        assert!(dir.join(&file).exists(), "starter chapter file created");
+
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("Book Three"), "new book persisted:\n{toml}");
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.book_count(), 3);
+        assert_eq!(reopened.book_title(2), Some("Book Three"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Removing a book (#648) is guarded (the last book can't go), retires its
+    /// chapter files to `unused/` rather than deleting them, and keeps the active
+    /// book consistent.
+    #[test]
+    fn remove_book_is_guarded_and_retires_files() {
+        let dir = temp_dir("series-remove");
+        write_series(&dir);
+        let mut project = Project::open(&dir).unwrap();
+
+        // Remove the inactive second book: active book (0) is unchanged.
+        let active_changed = project.remove_book(1).unwrap();
+        assert!(!active_changed);
+        assert_eq!(project.book_count(), 1);
+        assert_eq!(project.active_book(), 0);
+        assert_eq!(project.book_title(0), Some("Book One"));
+        // Book two's chapter file was retired, not deleted.
+        assert!(!dir.join("b2/one.md").exists(), "chapter moved out");
+        assert!(dir.join("unused/one.md").exists(), "retired to unused/");
+
+        // A one-book series refuses to remove its last book.
+        assert!(!project.remove_book(0).unwrap());
+        assert_eq!(project.book_count(), 1);
+
+        // The manifest persisted the removal.
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.book_count(), 1);
+        assert_eq!(reopened.book_title(0), Some("Book One"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Removing the *active* book (#648) activates a neighbour and signals the
+    /// change so the caller can reload the editor.
+    #[test]
+    fn remove_active_book_reactivates_a_neighbour() {
+        let dir = temp_dir("series-remove-active");
+        write_series(&dir);
+        let mut project = Project::open(&dir).unwrap();
+        assert_eq!(project.active_book(), 0);
+
+        let active_changed = project.remove_book(0).unwrap();
+        assert!(
+            active_changed,
+            "removing the active book changes the active"
+        );
+        assert_eq!(project.book_count(), 1);
+        assert_eq!(project.active_book(), 0);
+        assert_eq!(project.book_title(0), Some("Book Two"));
+        // The manifest was hoisted to the surviving book.
+        assert_eq!(project.manifest.title, "Book Two");
+        assert_eq!(project.active_file(), "b2/one.md");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Reordering books (#648) swaps their series order without moving files, and
+    /// keeps the active book pointing at the same book. Persists to `[[books]]`.
+    #[test]
+    fn move_book_reorders_and_keeps_the_active_book() {
+        let dir = temp_dir("series-reorder");
+        write_series(&dir);
+        let mut project = Project::open(&dir).unwrap();
+        assert_eq!(project.active_book(), 0); // Book One is active
+
+        // Move Book One down: order becomes [Book Two, Book One]; the active book
+        // (Book One) follows to index 1, and the live manifest is untouched.
+        assert!(project.move_book(0, false).unwrap());
+        assert_eq!(project.book_title(0), Some("Book Two"));
+        assert_eq!(project.book_title(1), Some("Book One"));
+        assert_eq!(project.active_book(), 1, "active follows the moved book");
+        assert_eq!(project.manifest.title, "Book One");
+
+        // No-op at the ends.
+        assert!(!project.move_book(0, true).unwrap());
+        assert!(!project.move_book(1, false).unwrap());
+
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.book_title(0), Some("Book Two"));
+        assert_eq!(reopened.book_title(1), Some("Book One"));
 
         fs::remove_dir_all(&dir).ok();
     }

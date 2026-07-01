@@ -489,6 +489,18 @@ pub(crate) enum Pending {
     /// it and drops it from the list, anything else cancels. Guarded — the
     /// currently-open project is refused before the prompt ever opens.
     ConfirmDeleteProject,
+    /// Text input: the series title when converting a standalone novel into a
+    /// multi-book series (#648). The current book becomes book one; a blank entry
+    /// uses the book's own title as the series name. On Enter the `[[books]]`
+    /// manifest is written and the add-a-book prompt chains after it.
+    ConvertToSeries,
+    /// Text input: the title for a new book appended to the series (#648). On Enter
+    /// the book is created with a starter chapter and made active. Blank re-prompts.
+    AddBook,
+    /// y/N: remove book `index` from the series (#648), retiring its chapters to
+    /// `unused/`. `y` removes it (and re-activates a neighbour if it was active);
+    /// anything else cancels. Guarded — a series always keeps at least one book.
+    ConfirmRemoveBook { index: usize },
     /// y/N: offer the new-project setup wizard (#282). `y` starts it at the first
     /// step; anything else lands in the editor.
     WizardStart,

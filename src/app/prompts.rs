@@ -246,6 +246,16 @@ impl App {
                     self.mode = closed;
                 }
             },
+            Pending::ConfirmRemoveBook { index } => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.remove_book(index);
+                }
+                _ => {
+                    self.mode = closed;
+                    self.message = Some("Book kept.".into());
+                }
+            },
             Pending::ConfirmDeleteProject => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => self.delete_browser_project(),
                 _ => {
@@ -314,6 +324,8 @@ impl App {
             | Pending::DraftCharacters
             | Pending::DraftSetting
             | Pending::NewProject
+            | Pending::ConvertToSeries
+            | Pending::AddBook
             | Pending::RenameProject
             | Pending::RenameBrowserProject
             | Pending::Wizard(_)
@@ -512,6 +524,17 @@ impl App {
                                 } else {
                                     self.create_project_at(PathBuf::from(text));
                                 }
+                            }
+                            Pending::ConvertToSeries => {
+                                // convert_to_series persists the series and chains
+                                // to the add-a-book prompt itself (#648), so don't
+                                // reset the mode here.
+                                self.convert_to_series(text);
+                            }
+                            Pending::AddBook => {
+                                // add_book creates the book and restores the editing
+                                // mode; a blank title re-prompts there (#648).
+                                self.add_book(text);
                             }
                             Pending::RenameProject => {
                                 // rename_project restores the editing mode and

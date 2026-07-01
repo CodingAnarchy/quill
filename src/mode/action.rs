@@ -129,6 +129,18 @@ pub(crate) enum Command {
     Portrait(PortraitChoice),
     /// Make the book at this index the active book (#329).
     SwitchBook(usize),
+    /// Add a new book to the series (#648) — the manage-books palette's entry that
+    /// prompts for the new book's title.
+    AddBook,
+    /// Remove the book at this index from the series (#648) — opens a y/N confirm
+    /// before its chapters are retired to `unused/`.
+    RemoveBook(usize),
+    /// Move the book at this index one place up (`up`) or down in the series order
+    /// (#648) — a pure reorder of the `[[books]]` list, no files move.
+    MoveBook {
+        index: usize,
+        up: bool,
+    },
     /// Create the pending new project (its path stashed in `App::pending_manage`)
     /// with the structure template at this index in [`crate::project::TEMPLATES`]
     /// (#611).
@@ -390,6 +402,9 @@ pub(crate) enum Action {
     StopSprint,
     /// Switch the active book of a multi-book series (#329).
     SwitchBook,
+    /// Create a series / add / remove / reorder books (#648) — the book-management
+    /// palette. For a standalone novel it starts a series (convert + add a book).
+    ManageBooks,
     /// Open the series tree navigator (#330).
     SeriesTree,
     /// Rename the open project's folder, matching it to the book title (#424).
@@ -469,6 +484,7 @@ impl Action {
         Action::Save,
         Action::ProjectFind,
         Action::SwitchBook,
+        Action::ManageBooks,
         Action::SeriesTree,
         Action::RenameProject,
         Action::BookDetails,
@@ -571,6 +587,7 @@ impl Action {
             Action::StartSprint => "sprint:start",
             Action::StopSprint => "sprint:stop",
             Action::SwitchBook => "book:switch",
+            Action::ManageBooks => "book:manage",
             Action::SeriesTree => "tree",
             Action::RenameProject => "project:rename",
             Action::BookDetails => "book:details",
@@ -609,6 +626,7 @@ impl Action {
             Action::Save
             | Action::ProjectFind
             | Action::SwitchBook
+            | Action::ManageBooks
             | Action::SeriesTree
             | Action::RenameProject
             | Action::BookDetails
@@ -694,6 +712,7 @@ impl Action {
             Action::StartSprint => "Start a writing sprint",
             Action::StopSprint => "Stop the writing sprint",
             Action::SwitchBook => "Switch book",
+            Action::ManageBooks => "Manage books (series)…",
             Action::SeriesTree => "Project tree",
             Action::RenameProject => "Rename project folder",
             Action::BookDetails => "Book details…",
