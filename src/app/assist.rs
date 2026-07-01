@@ -22,9 +22,10 @@ use crate::ai::workflow_gen::{self, GeneratedWorkflow};
 use crate::mode::AiAction;
 use crate::text::count_matches;
 
-/// One entry in the session "Ask the manuscript" history (#609): the question,
-/// its grounded answer (prose + cited chapter titles), and the token usage of the
-/// request. Session-only recall — never persisted.
+/// One entry in the "Ask the manuscript" history (#609): the question and its
+/// grounded answer (prose + cited chapter titles). Persisted per project (#654)
+/// via [`qa_store`](super::qa_store) so a past lookup and its citations reload on
+/// open — analysis recall within the AI boundary, never manuscript prose.
 #[derive(Clone)]
 pub(crate) struct QaEntry {
     /// The question as asked. Empty when the answer arrived without a recorded
@@ -694,11 +695,14 @@ impl App {
         };
         let answer = ai::parse_answer(&resp.text);
         // Record the ask before rendering, so the log always reflects it even if the
-        // author dismisses the overlay immediately (#609).
-        self.qa_log.push(QaEntry {
+        // author dismisses the overlay immediately (#609). Append to the durable
+        // store too, so the lookup and its citations survive a restart (#654).
+        let entry = QaEntry {
             question,
             answer: answer.clone(),
-        });
+        };
+        self.qa_store.append(&self.project.root, &entry);
+        self.qa_log.push(entry);
         self.present_qa(&answer, &resp.usage);
     }
 

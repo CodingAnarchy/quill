@@ -219,6 +219,53 @@ fn qa_log_records_asks_and_is_browsable() {
 }
 
 #[test]
+fn qa_log_persists_across_reload_with_citations() {
+    // Ask once (injected result, no network), then reopen the same project dir:
+    // the Q&A log — question, answer, citations — reloads from `bible/qa-log.toml`
+    // instead of rebuilding empty (#654).
+    let (mut app, dir) = two_chapter_app("ai-log-persist");
+    answer_with_citations(
+        &mut app,
+        "what did I establish about the locket?",
+        r#"{"answer":"It changes color across chapters One and Two.","citations":["One","Two"]}"#,
+    );
+    assert_eq!(app.qa_log.len(), 1, "the ask is logged in-session");
+    drop(app); // close the editor; the store stays on disk
+
+    // Reopen the project from the same directory: the persisted ask comes back.
+    let reopened = open_test_app(&dir);
+    assert_eq!(reopened.qa_log.len(), 1, "the ask reloaded from disk");
+    let entry = &reopened.qa_log[0];
+    assert_eq!(entry.question, "what did I establish about the locket?");
+    assert!(
+        entry.answer.answer.contains("changes color"),
+        "{}",
+        entry.answer.answer
+    );
+    assert_eq!(
+        entry.answer.citations,
+        vec!["One".to_string(), "Two".to_string()],
+        "citations survive the reload"
+    );
+
+    // The reloaded history is browsable and its citations re-jump — one row per
+    // cited chapter.
+    let mut reopened = reopened;
+    reopened.open_qa_history();
+    match &reopened.mode {
+        Mode::Findings(f) => {
+            assert_eq!(f.items.len(), 2, "one jumpable row per cited chapter");
+            assert!(
+                f.items[0].summary.contains("what did I establish"),
+                "{}",
+                f.items[0].summary
+            );
+        }
+        _ => panic!("reloaded history should open a jumpable findings list"),
+    }
+}
+
+#[test]
 fn qa_history_is_empty_before_any_ask() {
     let (mut app, _dir) = two_chapter_app("ai-log-empty");
     app.open_qa_history();
