@@ -231,19 +231,96 @@ fn export_action_unavailable_in_the_continuous_view() {
     );
 }
 
-/// A network AI action with the backend off reports how to enable it (the same
-/// guard the AI palette gates on), and sends nothing.
+/// A network AI action with the backend off opens the in-app enable on-ramp
+/// (#602) rather than a dead-end message, and sends nothing before the author acts.
 #[test]
-fn ai_action_unavailable_when_ai_is_off() {
+fn ai_action_when_ai_is_off_offers_to_enable() {
     let (mut app, _dir) = two_chapter_app("action-ai-off");
     app.ai = ai::Settings::default(); // off, deterministic regardless of env/config
     app.run_action(Action::Ai(AiAction::Characters), false);
     assert!(!app.ai_task.is_busy(), "nothing sent when AI is off");
+    match &app.mode {
+        Mode::Prompt(s) => assert!(
+            matches!(
+                s.pending,
+                Pending::ConfirmEnableAi {
+                    resume: Some(AiAction::Characters)
+                }
+            ),
+            "the enable prompt carries the action to resume"
+        ),
+        _ => panic!("expected the enable-AI prompt to open"),
+    }
+}
+
+/// Declining the enable prompt leaves AI off and writes nothing — the opt-in
+/// default is preserved (#602).
+#[test]
+fn declining_the_enable_prompt_leaves_ai_off() {
+    let (mut app, _dir) = two_chapter_app("action-ai-enable-decline");
+    isolate("enable-decline");
+    app.ai = ai::Settings::default();
+    app.run_action(Action::Ai(AiAction::Characters), false);
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(!app.ai.enabled, "AI stays off after declining");
+    assert!(!app.ai_task.is_busy(), "nothing sent");
+    // No config file written (or, if one exists, no enabled = true).
+    let cfg = crate::config::config_path().and_then(|p| std::fs::read_to_string(p).ok());
     assert!(
-        app.message.is_some(),
-        "the reason is surfaced: {:?}",
-        app.message
+        cfg.is_none_or(|t| !t.contains("enabled = true")),
+        "nothing enabled in the config"
     );
+}
+
+/// Confirming the enable prompt writes `[ai] enabled = true` to the hermetic
+/// config, applies it live, and — with no key set — chains into the Set-key flow
+/// (#602). No live AI call is made.
+#[test]
+fn confirming_the_enable_prompt_writes_the_flag_and_chains_to_the_key() {
+    let (mut app, _dir) = two_chapter_app("action-ai-enable-confirm");
+    isolate("enable-confirm");
+    app.ai = ai::Settings::default();
+    app.run_action(Action::Ai(AiAction::Characters), false);
+    app.on_key(key(KeyCode::Char('y')));
+    // The flag is spliced into the config and applied to the running app.
+    assert!(app.ai.enabled, "AI enabled live");
+    let text = std::fs::read_to_string(crate::config::config_path().unwrap()).unwrap();
+    assert!(text.contains("enabled = true"), "flag persisted: {text}");
+    // No key is set (tests never touch the keychain), so it chains to the key flow.
+    match &app.mode {
+        Mode::Prompt(s) => assert!(
+            matches!(s.pending, Pending::SetApiKey(Key::Anthropic)),
+            "chains into the Set-key prompt"
+        ),
+        _ => panic!("expected the set-key prompt"),
+    }
+    assert!(!app.ai_task.is_busy(), "no AI call made");
+}
+
+/// The plain "Enable AI assistance" run-action opens the same enable prompt with
+/// no pass to resume, and is listed only while AI is off (#602).
+#[test]
+fn enable_ai_action_is_registered_and_gated() {
+    assert!(matches!(
+        Action::from_name("ai:enable"),
+        Some(Action::EnableAi)
+    ));
+    assert_eq!(Action::EnableAi.group(), "AI");
+
+    let (mut app, _dir) = two_chapter_app("action-enable-plain");
+    app.ai = ai::Settings::default(); // off → available
+    assert!(app.action_status(Action::EnableAi).is_none());
+    app.run_action(Action::EnableAi, false);
+    match &app.mode {
+        Mode::Prompt(s) => assert!(
+            matches!(s.pending, Pending::ConfirmEnableAi { resume: None }),
+            "plain action enables without resuming a pass"
+        ),
+        _ => panic!("expected the enable-AI prompt"),
+    }
+    // Once AI is on, the plain action is no longer offered.
+    app.ai.enabled = true;
+    assert!(app.action_status(Action::EnableAi).is_some());
 }
 
 /// Triage is local aggregation, so it stays available with the AI backend off —

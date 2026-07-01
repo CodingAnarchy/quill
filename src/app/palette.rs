@@ -79,6 +79,9 @@ impl App {
                 self.image_backend_spec().err().map(|e| e.to_string())
             }
             Action::Ai(_) => self.ai_startable(),
+            // The in-app on-ramp (#602) only makes sense while AI is off; once it's
+            // enabled the switch, key, and backend actions cover the rest.
+            Action::EnableAi if self.ai.enabled => Some("AI is already enabled".into()),
             // Export compiles per-chapter files; the continuous view holds an
             // unsaved window, so leave it first.
             Action::Export(_) if self.manuscript.is_some() => {
@@ -146,11 +149,53 @@ impl App {
     /// kind, after checking [`action_status`](App::action_status). `force` rebuilds
     /// a bible from the full manuscript for the AI passes that support it.
     pub(crate) fn run_action(&mut self, action: Action, force: bool) {
+        // When AI is off (the default) and the author reaches for an AI action,
+        // offer to enable it in-app instead of the dead-end "set enabled = true"
+        // message (#602) — the prompt writes `[ai] enabled = true`, then chains
+        // into the key flow, and re-runs the action they wanted.
+        if self.wants_ai_but_off(action) {
+            self.offer_enable_ai(resume_action(action));
+            return;
+        }
         if let Some(reason) = self.action_status(action) {
             self.message = Some(format!("{}: {reason}", action.label()));
             return;
         }
         self.dispatch_action(action, force);
+    }
+
+    /// Whether `action` needs the AI backend but AI is off (#602) — the case the
+    /// in-app enable on-ramp intercepts. Triage is local aggregation and the image
+    /// passes carry their own opt-in, so neither counts; a keyed-but-off setup
+    /// still routes here (the enable confirm chains to the key flow only when a key
+    /// is missing). `EnableAi` itself is excluded so its own dispatch runs.
+    fn wants_ai_but_off(&self, action: Action) -> bool {
+        if self.ai.enabled {
+            return false;
+        }
+        matches!(
+            action,
+            Action::Ai(
+                AiAction::Ask
+                    | AiAction::Characters
+                    | AiAction::Continuity
+                    | AiAction::Setting
+                    | AiAction::Scaffold
+                    | AiAction::Naming
+                    | AiAction::Style
+                    | AiAction::Brainstorm
+                    | AiAction::DraftCharacters
+                    | AiAction::DraftSetting
+                    | AiAction::Voice
+                    | AiAction::Submission
+                    | AiAction::Marketing
+                    | AiAction::Social
+                    | AiAction::AdCreative
+                    | AiAction::Thesaurus
+                    | AiAction::Editorial
+            ) | Action::RefreshSeriesBible
+                | Action::DescribeConfig
+        )
     }
 
     /// Run an action's effect, its availability already checked by
@@ -164,6 +209,7 @@ impl App {
             Action::AnalysisReport => self.open_analysis_report(),
             Action::WritingHistory => self.open_writing_history(),
             Action::Ai(a) => self.start_ai_action(a, force),
+            Action::EnableAi => self.offer_enable_ai(None),
             Action::UserGuide => self.open_guide(),
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
@@ -577,6 +623,17 @@ fn snippet_preview(text: &str) -> String {
         format!("{}…", one_line.chars().take(40).collect::<String>())
     } else {
         one_line
+    }
+}
+
+/// The AI action to re-run after the enable on-ramp finishes (#602): the pass the
+/// author reached for, so confirming enable lands them in the flow they wanted.
+/// `None` for the AI-powered helpers (series bible, describe-config) and the plain
+/// "Enable AI assistance" action — those just enable and stop.
+fn resume_action(action: Action) -> Option<AiAction> {
+    match action {
+        Action::Ai(a) => Some(a),
+        _ => None,
     }
 }
 

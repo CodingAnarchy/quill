@@ -534,6 +534,12 @@ pub(crate) enum Pending {
     /// strip it from the config file (#530). `y` removes it; anything else leaves
     /// it (where it stays the lowest-precedence fallback).
     StripPlaintextKey(crate::ai::keychain::Key),
+    /// y/N: AI is off — enable it in-app (#602). `y` writes `[ai] enabled = true`
+    /// via the config splicer, applies it live, and chains into the Set-key flow
+    /// (Claude with no key needs one); anything else leaves AI off. `resume` is the
+    /// AI action the author was reaching for, re-run once AI is enabled and keyed,
+    /// or `None` for the plain "Enable AI assistance" action.
+    ConfirmEnableAi { resume: Option<AiAction> },
 }
 
 /// Which metadata field a [`Pending::SetMeta`] prompt writes. Chapter fields

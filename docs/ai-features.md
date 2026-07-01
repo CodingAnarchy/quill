@@ -20,6 +20,17 @@ prose). The prose is the author's. Off-manuscript artifacts like a synopsis,
 query letter, or marketing blurb are the only prose the AI produces, and never
 inside the manuscript.
 
+## Turning AI on
+
+AI stays off until you explicitly turn it on. The easiest way is **in-app**
+(#602): open the AI palette with `Ctrl-A`, or run any AI action from the `Ctrl-K`
+menu, and — with AI off — Quill offers a `y`/`N` prompt to enable it. Confirming
+writes `[ai] enabled = true` for you and chains straight into the **Set Claude API
+key** flow (you can also run **Enable AI assistance** from `Ctrl-K` directly). The
+flag applies live, no restart. Declining leaves AI off — nothing is written.
+
+You can still enable it by hand in the config file below (`enabled = true`).
+
 ## Configuration
 
 AI is configured in a per-user file **outside the project** —
@@ -179,7 +190,8 @@ runs — never whether it can touch manuscript prose.
 
 With AI enabled, **Ctrl-A** opens the **AI command palette** (#98) — one entry
 point listing every AI action; arrow to one and Enter runs it. (When AI is off,
-Ctrl-A explains how to enable it.) The status line shows a persistent `AI` tag
+Ctrl-A — or reaching for any AI action — offers to enable it in-app, #602.) The
+status line shows a persistent `AI` tag
 when enabled and `⟳ Claude` while a request is in flight; requests run on a worker
 thread so the editor never blocks (the first local request also loads the model
 there, so it can't freeze the UI).

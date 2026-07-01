@@ -483,7 +483,9 @@ impl Settings {
     pub fn ready_for(&self, backend: BackendKind) -> Result<(), AiError> {
         if !self.enabled {
             return Err(AiError::NotConfigured(
-                "AI is off — set `enabled = true` under [ai] in ~/.config/quill/config.toml".into(),
+                "AI is off — run \"Enable AI assistance\" from the run-action menu (Ctrl-K), \
+                 or set `enabled = true` under [ai] in ~/.config/quill/config.toml"
+                    .into(),
             ));
         }
         match backend {
