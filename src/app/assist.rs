@@ -178,6 +178,10 @@ fn describe_setting(f: &setting::RuleFinding) -> (String, Vec<String>) {
     (format!("{}: {}", f.rule, f.violation), f.chapters.clone())
 }
 
+fn describe_plot(f: &plot::ThreadFinding) -> (String, Vec<String>) {
+    (format!("{}: {}", f.thread, f.issue), f.chapters.clone())
+}
+
 fn describe_scaffold(g: &scaffold::Gap) -> (String, Vec<String>) {
     (format!("gap: {}", g.detail), vec![g.chapter.clone()])
 }
@@ -272,6 +276,11 @@ fn recheck_parser(action: AiAction) -> fn(&str, AiAction, Option<usize>) -> Vec<
         AiAction::Voice => |text, a, book| {
             voice::parse(text)
                 .map(|v| findings_from(&v.findings, book, a, describe_voice))
+                .unwrap_or_default()
+        },
+        AiAction::Plot => |text, a, book| {
+            plot::parse(text)
+                .map(|p| findings_from(&p.findings, book, a, describe_plot))
                 .unwrap_or_default()
         },
         // Non-finding actions never reach here (`recheck_request` returns `None`).
@@ -845,9 +854,7 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = findings_from(&plot.findings, book, AiAction::Plot, |f| {
-            (format!("{}: {}", f.thread, f.issue), f.chapters.clone())
-        });
+        let findings = findings_from(&plot.findings, book, AiAction::Plot, describe_plot);
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("plot.md");
         self.apply_bible_with_findings(
@@ -1174,6 +1181,10 @@ impl App {
             AiAction::Characters => {
                 let prior = bible::raw_dir(root, "characters");
                 character::build_incremental_request(&prior, &scoped, &model)
+            }
+            AiAction::Plot => {
+                let prior = bible::raw_file(root, "plot.md");
+                plot::build_incremental_request(&prior, &scoped, &model)
             }
             AiAction::Style => style::build_request(scoped, &model),
             AiAction::Scaffold => scaffold::build_request(scoped, &model),
