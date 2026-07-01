@@ -35,16 +35,32 @@ pub enum StartupAction {
 }
 
 /// Decide what a no-path launch does (#526), from whether the current directory is
-/// already a project (`in_project`) and how many openable projects exist
-/// (`openable_count` — recents + library). Pure: no I/O, no terminal.
+/// already a project (`in_project`), how many openable projects exist
+/// (`openable_count` — recents + library), and the opt-in reopen-last preference
+/// (#613): `open_last` set (`[projects] open_last = true`) together with the
+/// `most_recent` project's path, if any. Pure: no I/O, no terminal.
 ///
 /// - Inside a project → open it in place, no chooser.
+/// - Not inside a project, `open_last` set, a most-recent project → open that
+///   project directly, skipping the chooser (#613).
 /// - Not inside a project, something to open → the chooser.
 /// - Not inside a project, nothing to open → straight to the new-project prompt,
 ///   rather than an empty picker.
-pub fn decide(cwd: &Path, in_project: bool, openable_count: usize) -> StartupAction {
+pub fn decide(
+    cwd: &Path,
+    in_project: bool,
+    openable_count: usize,
+    open_last: bool,
+    most_recent: Option<&Path>,
+) -> StartupAction {
     if in_project {
         StartupAction::OpenInPlace(cwd.to_path_buf())
+    } else if let Some(recent) = most_recent.filter(|_| open_last) {
+        // The opt-in shortcut (#613): reopen the most-recent project straight
+        // away rather than showing the chooser. Only when there *is* one — with
+        // no recents this falls through to the usual chooser/degrade below, so
+        // the flag never turns into an empty picker or a dead end.
+        StartupAction::OpenInPlace(recent.to_path_buf())
     } else if openable_count > 0 {
         StartupAction::Choose
     } else {
@@ -174,22 +190,43 @@ mod tests {
 
     #[test]
     fn inside_a_project_opens_in_place_with_no_chooser() {
-        // Already in a project: open it, regardless of how many others exist.
+        // Already in a project: open it, regardless of how many others exist —
+        // and regardless of the reopen-last preference (#613).
         let cwd = Path::new("/books/current");
         assert_eq!(
-            decide(cwd, true, 5),
+            decide(cwd, true, 5, false, None),
             StartupAction::OpenInPlace(cwd.to_path_buf())
         );
         assert_eq!(
-            decide(cwd, true, 0),
+            decide(cwd, true, 0, false, None),
+            StartupAction::OpenInPlace(cwd.to_path_buf())
+        );
+        // Even with `open_last` set and a recent, an in-project launch opens the
+        // *current* directory, not the recent — in-project is unaffected.
+        assert_eq!(
+            decide(cwd, true, 5, true, Some(Path::new("/books/other"))),
             StartupAction::OpenInPlace(cwd.to_path_buf())
         );
     }
 
     #[test]
     fn not_in_a_project_with_openable_projects_offers_the_chooser() {
-        assert_eq!(decide(Path::new("/tmp"), false, 1), StartupAction::Choose);
-        assert_eq!(decide(Path::new("/tmp"), false, 20), StartupAction::Choose);
+        // Default (unset) behavior: the chooser, regardless of a most-recent
+        // project being available.
+        assert_eq!(
+            decide(Path::new("/tmp"), false, 1, false, None),
+            StartupAction::Choose
+        );
+        assert_eq!(
+            decide(
+                Path::new("/tmp"),
+                false,
+                20,
+                false,
+                Some(Path::new("/books/last"))
+            ),
+            StartupAction::Choose
+        );
     }
 
     #[test]
@@ -197,7 +234,33 @@ mod tests {
         // The graceful-degradation case (#526): no recents, no library — straight
         // to the new-project prompt, never an empty picker.
         assert_eq!(
-            decide(Path::new("/tmp"), false, 0),
+            decide(Path::new("/tmp"), false, 0, false, None),
+            StartupAction::NewProject
+        );
+    }
+
+    #[test]
+    fn open_last_reopens_the_most_recent_project_directly() {
+        // Opt-in (#613): `open_last` set + a most-recent project → open it in
+        // place, skipping the chooser even though there's plenty to choose from.
+        let last = Path::new("/books/last");
+        assert_eq!(
+            decide(Path::new("/tmp"), false, 5, true, Some(last)),
+            StartupAction::OpenInPlace(last.to_path_buf())
+        );
+    }
+
+    #[test]
+    fn open_last_with_no_recents_is_unchanged() {
+        // The flag never becomes a dead end (#613): with no most-recent project it
+        // falls through to the usual behavior — the chooser when there's a library
+        // to browse, the new-project degrade when there's nothing at all.
+        assert_eq!(
+            decide(Path::new("/tmp"), false, 3, true, None),
+            StartupAction::Choose
+        );
+        assert_eq!(
+            decide(Path::new("/tmp"), false, 0, true, None),
             StartupAction::NewProject
         );
     }

@@ -391,6 +391,12 @@ books live).
 When you have nothing to open yet — no recent projects and no projects home — the
 chooser would be empty, so Quill skips it and goes straight to naming a new book.
 
+If you always return to the same book, set `open_last = true` under `[projects]`
+and a bare `quill` reopens your most-recently-opened project directly, skipping
+the chooser. It applies only to a no-argument launch from outside a project; an
+explicit path and in-project launches are unaffected, and with no recent project
+to reopen it falls back to the usual chooser (or new-book prompt).
+
 ## Project & file format
 
 A project is a directory: a root `book.toml` manifest records the chapter order

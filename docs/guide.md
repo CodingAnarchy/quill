@@ -84,6 +84,12 @@ your home directory, and Quill says so (set `[projects] home` to choose where
 books live). Passing an explicit path — `quill path/to/book` — always opens or
 creates that project directly, with no chooser.
 
+If you always return to the same book, set open_last = true under [projects] and a
+bare `quill` reopens your most-recently-opened project directly instead of showing
+the chooser. It only affects a no-path launch from outside a project; an explicit
+path and in-project launches are unchanged, and with no recent project to reopen it
+falls back to the usual chooser (or new-book prompt).
+
 Run "Book details" from the Ctrl-K menu to set the book's title, subtitle,
 author, and series — the fields that flow into every export's title block —
 followed by its publishing metadata: ISBN, publisher, publication date, language,
