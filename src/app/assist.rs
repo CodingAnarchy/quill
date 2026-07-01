@@ -53,6 +53,7 @@ fn qa_citation_findings(answer: &ai::Answer) -> Vec<Finding> {
             summary: format!("cited: {title}"),
             chapters: vec![title.to_string()],
             book: None,
+            action: None, // a Q&A citation isn't a re-runnable analysis finding (#608)
         });
     }
     out
@@ -71,6 +72,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
             summary: l.to_string(),
             chapters: Vec::new(),
             book: None,
+            action: None,
         })
         .collect();
     if !rows.is_empty() {
@@ -78,6 +80,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
             summary: String::new(),
             chapters: Vec::new(),
             book: None,
+            action: None,
         });
     }
     rows
@@ -107,6 +110,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                 summary: format!("{label} — (no chapter cited)"),
                 chapters: Vec::new(),
                 book: None,
+                action: None,
             });
         } else {
             for title in cited {
@@ -115,6 +119,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                     summary: format!("{label} → {title}"),
                     chapters: vec![title.to_string()],
                     book: None,
+                    action: None,
                 });
             }
         }
@@ -132,12 +137,15 @@ pub(super) fn write_failure_message(failures: &[String]) -> String {
 }
 
 /// Map a pass's typed findings into UI [`Finding`]s, attributing each to `book`
-/// (`None` for an active-book pass). `describe` yields the one-line summary and
-/// the chapters for one item — the single place the analysis applies share, so a
-/// change to `Finding` touches here, not seven handlers (#425).
+/// (`None` for an active-book pass) and to the `action` that produced it (so a
+/// single finding can be rechecked by re-running its pass, #608). `describe`
+/// yields the one-line summary and the chapters for one item — the single place
+/// the analysis applies share, so a change to `Finding` touches here, not seven
+/// handlers (#425).
 fn findings_from<T>(
     items: &[T],
     book: Option<usize>,
+    action: AiAction,
     describe: impl Fn(&T) -> (String, Vec<String>),
 ) -> Vec<Finding> {
     items
@@ -148,9 +156,127 @@ fn findings_from<T>(
                 summary,
                 chapters,
                 book,
+                action: Some(action),
             }
         })
         .collect()
+}
+
+// --- Per-pass finding descriptions (#425/#608) ------------------------------
+//
+// The one-line summary + chapters for one typed finding of each pass. Shared by
+// the apply handlers (which surface a fresh pass's findings) and the single-
+// finding re-check (#608, which re-parses a scoped re-run into the same findings),
+// so both produce byte-identical summaries — the finding's content key, which the
+// re-check depends on to recognize the finding it just re-ran.
+
+fn describe_continuity(f: &continuity::Finding) -> (String, Vec<String>) {
+    (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
+}
+
+fn describe_setting(f: &setting::RuleFinding) -> (String, Vec<String>) {
+    (format!("{}: {}", f.rule, f.violation), f.chapters.clone())
+}
+
+fn describe_scaffold(g: &scaffold::Gap) -> (String, Vec<String>) {
+    (format!("gap: {}", g.detail), vec![g.chapter.clone()])
+}
+
+fn describe_naming(f: &naming::NameFinding) -> (String, Vec<String>) {
+    let summary = if f.variants.is_empty() {
+        f.name.clone()
+    } else {
+        format!("{} — also: {}", f.name, f.variants.join(", "))
+    };
+    (summary, f.chapters.clone())
+}
+
+fn describe_style(f: &style::StyleFinding) -> (String, Vec<String>) {
+    (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
+}
+
+fn describe_editorial(n: &ai::editorial::Note) -> (String, Vec<String>) {
+    let at = n
+        .location
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
+        .unwrap_or_default();
+    (
+        format!("{}: {}{at}", n.focus, n.concern),
+        n.chapters.clone(),
+    )
+}
+
+fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
+    let summary = if f.character.is_empty() {
+        format!("{}: {}", f.kind, f.detail)
+    } else {
+        format!("{} ({}): {}", f.kind, f.character, f.detail)
+    };
+    (summary, f.chapters.clone())
+}
+
+/// Bundle a built re-check request with the parser that turns its response into
+/// the UI findings the pass now produces (#608), so both move into the worker
+/// closure together.
+struct RecheckRequest {
+    request: ai::Request,
+    to_findings: fn(&str, AiAction, Option<usize>) -> Vec<Finding>,
+}
+
+/// The parser for a re-check of `action` (#608): parse the response with the
+/// pass's own parser and map it to UI findings with the same `describe_*` the
+/// apply handler uses, so a re-run's findings share the original's content key. A
+/// parse error yields no findings — the re-check then treats the flagged finding
+/// as gone; that's acceptable (a later full pass re-surfaces it if it truly
+/// persists). Attributes each to `action` and `book`.
+fn recheck_parser(action: AiAction) -> fn(&str, AiAction, Option<usize>) -> Vec<Finding> {
+    match action {
+        AiAction::Continuity => |text, a, book| {
+            continuity::parse(text)
+                .map(|c| findings_from(&c.findings, book, a, describe_continuity))
+                .unwrap_or_default()
+        },
+        AiAction::Setting => |text, a, book| {
+            setting::parse(text)
+                .map(|s| findings_from(&s.findings, book, a, describe_setting))
+                .unwrap_or_default()
+        },
+        AiAction::Characters => |text, a, book| {
+            // A character re-check surfaces no findings of its own (the pass writes
+            // profiles, not flags), so a clean re-parse clears the finding.
+            let _ = (text, a, book);
+            Vec::new()
+        },
+        AiAction::Scaffold => |text, a, book| {
+            scaffold::parse(text)
+                .map(|s| findings_from(&s.gaps, book, a, describe_scaffold))
+                .unwrap_or_default()
+        },
+        AiAction::Naming => |text, a, book| {
+            naming::parse(text)
+                .map(|n| findings_from(&n.findings, book, a, describe_naming))
+                .unwrap_or_default()
+        },
+        AiAction::Style => |text, a, book| {
+            style::parse(text)
+                .map(|s| findings_from(&s.findings, book, a, describe_style))
+                .unwrap_or_default()
+        },
+        AiAction::Editorial => |text, a, book| {
+            ai::editorial::parse(text)
+                .map(|notes| findings_from(&notes, book, a, describe_editorial))
+                .unwrap_or_default()
+        },
+        AiAction::Voice => |text, a, book| {
+            voice::parse(text)
+                .map(|v| findings_from(&v.findings, book, a, describe_voice))
+                .unwrap_or_default()
+        },
+        // Non-finding actions never reach here (`recheck_request` returns `None`).
+        _ => |_, _, _| Vec::new(),
+    }
 }
 
 impl App {
@@ -671,9 +797,12 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = findings_from(&cont.findings, book, |f| {
-            (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
-        });
+        let findings = findings_from(
+            &cont.findings,
+            book,
+            AiAction::Continuity,
+            describe_continuity,
+        );
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("timeline.md");
         self.apply_bible_with_findings(
@@ -691,9 +820,7 @@ impl App {
             return;
         };
         let book = self.current_series_bible_book();
-        let findings = findings_from(&setting.findings, book, |f| {
-            (format!("{}: {}", f.rule, f.violation), f.chapters.clone())
-        });
+        let findings = findings_from(&setting.findings, book, AiAction::Setting, describe_setting);
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("setting.md");
         self.apply_bible_with_findings(
@@ -761,9 +888,7 @@ impl App {
         let Some(scaffold) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&scaffold.gaps, None, |g| {
-            (format!("gap: {}", g.detail), vec![g.chapter.clone()])
-        });
+        let findings = findings_from(&scaffold.gaps, None, AiAction::Scaffold, describe_scaffold);
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("outline.md");
         self.apply_bible_with_findings(
@@ -780,14 +905,7 @@ impl App {
         let Some(naming) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&naming.findings, None, |f| {
-            let summary = if f.variants.is_empty() {
-                f.name.clone()
-            } else {
-                format!("{} — also: {}", f.name, f.variants.join(", "))
-            };
-            (summary, f.chapters.clone())
-        });
+        let findings = findings_from(&naming.findings, None, AiAction::Naming, describe_naming);
         self.show_findings(findings);
     }
 
@@ -797,9 +915,7 @@ impl App {
         let Some(style) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&style.findings, None, |f| {
-            (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
-        });
+        let findings = findings_from(&style.findings, None, AiAction::Style, describe_style);
         self.show_findings(findings);
     }
 
@@ -813,18 +929,7 @@ impl App {
         let Some(notes) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&notes, None, |n| {
-            let at = n
-                .location
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
-                .unwrap_or_default();
-            (
-                format!("{}: {}{at}", n.focus, n.concern),
-                n.chapters.clone(),
-            )
-        });
+        let findings = findings_from(&notes, None, AiAction::Editorial, describe_editorial);
         self.show_findings(findings);
     }
 
@@ -834,15 +939,182 @@ impl App {
         let Some(voice) = self.ok_or_report(result) else {
             return;
         };
-        let findings = findings_from(&voice.findings, None, |f| {
-            let summary = if f.character.is_empty() {
-                format!("{}: {}", f.kind, f.detail)
-            } else {
-                format!("{} ({}): {}", f.kind, f.character, f.detail)
-            };
-            (summary, f.chapters.clone())
-        });
+        let findings = findings_from(&voice.findings, None, AiAction::Voice, describe_voice);
         self.show_findings(findings);
+    }
+
+    // --- Re-check a single finding (#608) ---------------------------------
+
+    /// Re-check the finding at `index` in the open findings overlay (#608): re-run
+    /// its originating pass scoped to just the finding's chapters, then clear it if
+    /// it's gone or keep it if it's still flagged — so verifying one fix doesn't
+    /// cost a whole-manuscript sweep. A no-op (with a status) for a finding that
+    /// carries no re-runnable pass (a Q&A citation, or one restored from disk) or
+    /// no chapters to scope to. Stays within the AI boundary: it re-runs analysis
+    /// on a subset and updates a flag; it writes no prose and no bible file.
+    pub(crate) fn recheck_finding(&mut self, index: usize) {
+        if self.ai_busy() {
+            self.message = Some("An AI request is already in flight…".into());
+            return;
+        }
+        let Some(finding) = self.finding_at(index).cloned() else {
+            return;
+        };
+        let Some(action) = finding.action else {
+            self.message = Some("Nothing to re-check for this finding".into());
+            return;
+        };
+        if finding.chapters.is_empty() {
+            self.message = Some("This finding has no chapter to re-check".into());
+            return;
+        }
+        let files = self.finding_chapter_files(&finding);
+        if files.is_empty() {
+            self.message = Some("Couldn't locate this finding's chapters".into());
+            return;
+        }
+        let Some(req) = self.recheck_request(action, finding.book, &files) else {
+            self.message = Some("Nothing to re-check for this finding".into());
+            return;
+        };
+        // The book a re-produced finding is attributed to, so its content key
+        // matches the finding being re-checked (titles can repeat across books).
+        let book = finding.book;
+        self.spawn_outcome("⟳ Re-checking this finding…", move |backend| {
+            Outcome::Recheck(
+                backend
+                    .complete(&req.request)
+                    .map(|r| (req.to_findings)(&r.text, action, book)),
+            )
+        });
+        // Track which finding is in flight so [`apply_recheck`] can update just it.
+        // Set after the spawn so a not-ready gate (which returns early inside
+        // `spawn_outcome`) doesn't leave a stale pending recheck.
+        if self.ai_busy() {
+            self.pending_recheck = Some(finding);
+        }
+    }
+
+    /// The chapter *files* (project-relative) for a finding's chapter titles,
+    /// within the finding's book (#608). Titles can repeat across books, so the
+    /// lookup is scoped to the finding's own book. Unknown titles are dropped.
+    fn finding_chapter_files(&self, finding: &Finding) -> Vec<String> {
+        let book = self.finding_book(finding);
+        let chapters = self.project.book_chapters(book);
+        finding
+            .chapters
+            .iter()
+            .filter_map(|title| {
+                chapters
+                    .iter()
+                    .find(|c| &c.title == title)
+                    .map(|c| c.file.clone())
+            })
+            .collect()
+    }
+
+    /// The book index a finding belongs to — its own book, or the active book for a
+    /// finding not attributed to one (#608).
+    fn finding_book(&self, finding: &Finding) -> usize {
+        finding.book.unwrap_or_else(|| self.project.active_book())
+    }
+
+    /// Build the scoped re-check request for `action` over `files` (the finding's
+    /// chapters), plus a parser turning the response into the UI findings that pass
+    /// now produces (#608). Bible passes revise from the existing bible + the
+    /// changed chapters (the incremental path); findings-only passes analyze just
+    /// those chapters. `None` for an action that produces no re-runnable findings.
+    fn recheck_request(
+        &self,
+        action: AiAction,
+        book: Option<usize>,
+        files: &[String],
+    ) -> Option<RecheckRequest> {
+        let b = book.unwrap_or_else(|| self.project.active_book());
+        let scoped = self.book_render_files(b, files);
+        let model = self.ai.model.clone();
+        let root = &self.project.root;
+        let request = match action {
+            AiAction::Continuity => {
+                let prior = bible::raw_file(root, "timeline.md");
+                continuity::build_incremental_request(&prior, &scoped, &model)
+            }
+            AiAction::Setting => {
+                let prior = bible::raw_file(root, "setting.md");
+                setting::build_incremental_request(&prior, &scoped, &model)
+            }
+            AiAction::Characters => {
+                let prior = bible::raw_dir(root, "characters");
+                character::build_incremental_request(&prior, &scoped, &model)
+            }
+            AiAction::Style => style::build_request(scoped, &model),
+            AiAction::Scaffold => scaffold::build_request(scoped, &model),
+            AiAction::Editorial => ai::editorial::build_request(scoped, &model),
+            AiAction::Naming => {
+                let entities = self.known_entities();
+                naming::build_request(scoped, &entities)
+            }
+            AiAction::Voice => {
+                let notes = bible::raw_dir(root, "characters");
+                voice::build_request(scoped, &notes, &model)
+            }
+            _ => return None,
+        };
+        Some(RecheckRequest {
+            request,
+            to_findings: recheck_parser(action),
+        })
+    }
+
+    /// The scoped re-check request a finding would send (#608) — for tests to
+    /// assert the request carries only the finding's chapters, without spawning a
+    /// worker thread or a live backend.
+    #[cfg(test)]
+    pub(crate) fn recheck_request_for(&self, finding: &Finding) -> Option<ai::Request> {
+        let action = finding.action?;
+        let files = self.finding_chapter_files(finding);
+        self.recheck_request(action, finding.book, &files)
+            .map(|r| r.request)
+    }
+
+    /// Parse a mock re-check `response` into the UI findings the finding's pass
+    /// produces (#608) — the real parse+map the worker runs, for tests to drive
+    /// `apply_recheck` end-to-end without a live backend or a thread.
+    #[cfg(test)]
+    pub(crate) fn recheck_findings_from(&self, finding: &Finding, response: &str) -> Vec<Finding> {
+        let Some(action) = finding.action else {
+            return Vec::new();
+        };
+        recheck_parser(action)(response, action, finding.book)
+    }
+
+    /// Apply a completed single-finding re-check (#608). The response is the
+    /// finding's pass re-run over its chapters, parsed to the findings that pass
+    /// now produces. If the re-checked finding is no longer among them, the fix
+    /// held — clear it from triage and the overlay; if it's still there, keep it
+    /// and say so. New findings the scoped run surfaced are accumulated into triage
+    /// but don't pop the overlay (this is a verification, not a fresh sweep).
+    pub(crate) fn apply_recheck(&mut self, result: Result<Vec<Finding>, ai::AiError>) {
+        let Some(rechecked) = self.pending_recheck.take() else {
+            return;
+        };
+        let Some(fresh) = self.ok_or_report(result) else {
+            return;
+        };
+        // Any newly-surfaced finding in these chapters enters durable triage, but
+        // silently — the author asked to verify one fix, not to run a full sweep.
+        self.accumulate_triage(&fresh);
+        if fresh.contains(&rechecked) {
+            // Still flagged: the fix didn't clear it. Leave it in place.
+            self.message = Some("Still flagged — re-check found the issue again".into());
+        } else {
+            // Cleared: the scoped re-run no longer produces it. Drop its record so a
+            // later full pass may surface it afresh if it recurs, and remove it from
+            // the overlay + triage list.
+            self.resolve_finding(&rechecked);
+            self.remove_finding_from_overlay(&rechecked);
+            self.message = Some("Cleared — the fix resolved this finding".into());
+        }
     }
 
     /// Apply a submission pass: write the synopsis / blurb / query to

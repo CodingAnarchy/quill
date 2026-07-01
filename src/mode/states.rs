@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::buffer::Buffer;
 use crate::text::MatchOpts;
 
-use super::{MetaField, Pending};
+use super::{AiAction, MetaField, Pending};
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.
 pub struct Findings {
@@ -26,7 +26,7 @@ pub struct History {
 
 /// One triageable finding (a continuity contradiction, style note, …). UI-shaped
 /// — the AI layer maps its typed findings into this for display.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Finding {
     /// One-line summary shown in the list (e.g. "object: the locket …").
     pub(crate) summary: String,
@@ -38,6 +38,23 @@ pub struct Finding {
     /// books). `None` targets the active book — every standalone-novel and
     /// active-book pass, unchanged.
     pub(crate) book: Option<usize>,
+    /// The pass that produced this finding, so the author can re-check just this
+    /// one after a fix by re-running its originating pass scoped to `chapters`
+    /// (#608). `None` for findings not tied to a re-runnable pass — Q&A citations
+    /// and history rows — and for findings restored from the durable store, which
+    /// records content, not the pass (a fresh pass re-attributes them).
+    pub(crate) action: Option<AiAction>,
+}
+
+/// Identity is the finding's *content* — summary, chapters, and book — not the
+/// originating pass (#608). This mirrors the durable store's content key
+/// ([`crate::app`]): a re-produced finding is the same finding, and a finding
+/// restored from disk (which carries no `action`) still matches the one a fresh
+/// pass produces, so triage dedup and dismiss-matching stay intact.
+impl PartialEq for Finding {
+    fn eq(&self, other: &Self) -> bool {
+        self.summary == other.summary && self.chapters == other.chapters && self.book == other.book
+    }
 }
 
 /// State for an open [`Mode::BibleReview`]: the queue of conflicting bible files

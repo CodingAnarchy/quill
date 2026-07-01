@@ -62,6 +62,9 @@ impl Record {
             summary: self.summary.clone(),
             chapters: self.chapters.clone(),
             book: self.book,
+            // The store records content, not the originating pass, so a restored
+            // finding can't be rechecked until a fresh pass re-attributes it (#608).
+            action: None,
         }
     }
 }
@@ -161,6 +164,7 @@ mod tests {
             summary: summary.into(),
             chapters: vec!["One".into()],
             book: None,
+            action: None,
         }
     }
 

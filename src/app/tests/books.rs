@@ -394,6 +394,7 @@ fn jumping_to_a_cross_book_finding_switches_books() {
         summary: "object: the locket".into(),
         chapters: vec!["Dusk".into()],
         book: Some(1),
+        action: None,
     });
     app.open_triage();
     assert!(matches!(app.mode, Mode::Findings(_)));

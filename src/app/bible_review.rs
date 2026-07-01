@@ -466,8 +466,34 @@ impl App {
                     }
                 }
             }
+            // Re-check just this finding (#608): re-run its originating pass scoped
+            // to its chapters and clear or keep it by the result, so verifying one
+            // fix doesn't cost a whole-manuscript sweep.
+            KeyCode::Char('r') => {
+                let selected = f.selected;
+                self.recheck_finding(selected);
+            }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
+        }
+    }
+
+    /// The finding at `index` in the open findings overlay, if any (#608).
+    pub(super) fn finding_at(&self, index: usize) -> Option<&Finding> {
+        match &self.mode {
+            Mode::Findings(f) => f.items.get(index),
+            _ => None,
+        }
+    }
+
+    /// Remove `finding` from the open findings overlay by content (#608), closing
+    /// the overlay when the list empties and clamping the selection otherwise. Used
+    /// by the re-check, which knows the finding it cleared but not its current row.
+    pub(super) fn remove_finding_from_overlay(&mut self, finding: &Finding) {
+        if let Mode::Findings(f) = &mut self.mode {
+            if let Some(i) = f.items.iter().position(|it| it == finding) {
+                self.drop_finding_from_overlay(i);
+            }
         }
     }
 
@@ -481,8 +507,9 @@ impl App {
 
     /// Resolve a finding (#591): the author marked it `xxx`, so drop its record
     /// from the store entirely and from the triage list. A recurrence in a later
-    /// manuscript is a fresh finding that a new pass may surface again.
-    fn resolve_finding(&mut self, finding: &Finding) {
+    /// manuscript is a fresh finding that a new pass may surface again. Also used by
+    /// the single-finding re-check (#608) when a fix clears a finding.
+    pub(super) fn resolve_finding(&mut self, finding: &Finding) {
         let root = self.project.root.clone();
         self.findings_store.resolve(&root, finding);
         self.triage.retain(|f| f != finding);
