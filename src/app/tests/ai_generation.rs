@@ -126,7 +126,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, _dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 21, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 23, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
 }
@@ -155,6 +155,84 @@ fn applying_word_search_results_opens_the_overlay() {
     assert!(
         app.overlay.is_some(),
         "candidates are shown in the AI overlay"
+    );
+}
+
+// --- AI: name generator (#610) ---------------------------------------------
+
+#[test]
+fn name_generator_opens_the_kind_picker() {
+    let (mut app, _dir) = two_chapter_app("namegen-kinds");
+    app.start_namegen();
+    match &app.mode {
+        Mode::Palette(p) => assert_eq!(
+            p.items.len(),
+            crate::ai::namegen::Kind::ALL.len(),
+            "character / place / term"
+        ),
+        _ => panic!("name generator should open the kind picker"),
+    }
+}
+
+#[test]
+fn picking_a_kind_opens_the_constraints_prompt() {
+    let (mut app, _dir) = two_chapter_app("namegen-prompt");
+    app.prompt_namegen(crate::ai::namegen::Kind::Place);
+    match &app.mode {
+        Mode::Prompt(s) => assert!(
+            matches!(s.pending, Pending::NameGen(crate::ai::namegen::Kind::Place)),
+            "the prompt carries the chosen kind"
+        ),
+        _ => panic!("picking a kind should open the constraints prompt"),
+    }
+}
+
+#[test]
+fn applying_name_results_opens_a_pickable_list() {
+    let (mut app, _dir) = two_chapter_app("namegen-apply");
+    let names = crate::ai::namegen::parse(
+        r#"{"names":[
+            {"text":"Aldric","note":"old ruler","syllables":2,"origin":"Old English"},
+            {"text":"Bramwen","note":"raven-fair"}
+        ]}"#,
+    )
+    .unwrap();
+    app.apply_namegen(Ok(names));
+    match &app.mode {
+        Mode::Palette(p) => {
+            assert_eq!(p.items.len(), 2, "one row per candidate name");
+            assert!(matches!(
+                &p.items[0].command,
+                crate::mode::Command::InsertName(n) if n == "Aldric"
+            ));
+        }
+        _ => panic!("candidates should show as a pickable list"),
+    }
+}
+
+#[test]
+fn empty_name_results_report_instead_of_opening_a_list() {
+    let (mut app, _dir) = two_chapter_app("namegen-empty");
+    app.apply_namegen(Ok(vec![]));
+    assert!(
+        !matches!(app.mode, Mode::Palette(_)),
+        "no list opens for zero candidates"
+    );
+    assert!(
+        app.message.is_some(),
+        "the author is told to loosen constraints"
+    );
+}
+
+#[test]
+fn picking_a_name_places_it_at_the_cursor() {
+    let (mut app, _dir) = two_chapter_app("namegen-place");
+    let before = app.buffer.text();
+    app.insert_name("Aldric");
+    let after = app.buffer.text();
+    assert!(
+        after.contains("Aldric") && !before.contains("Aldric"),
+        "the chosen name is placed verbatim at the cursor"
     );
 }
 

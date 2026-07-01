@@ -15,10 +15,11 @@ use crate::mode::AiAction;
 /// The bible trackers a series refresh runs, each accumulated across the books in
 /// reading order. The bibles are independent, so the order between trackers is
 /// free; within a tracker the books must go in order so each builds on the last.
-const TRACKERS: [AiAction; 3] = [
+const TRACKERS: [AiAction; 4] = [
     AiAction::Characters,
     AiAction::Continuity,
     AiAction::Setting,
+    AiAction::Plot,
 ];
 
 /// A series-bible refresh in progress (#340): the queue of `(tracker, book)`

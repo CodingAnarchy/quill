@@ -135,6 +135,12 @@ pub(crate) enum Command {
     NewProjectTemplate(usize),
     /// Insert the author-defined snippet at this index in `App::snippets` (#411).
     InsertSnippet(usize),
+    /// Run the name generator for the chosen kind (#610) — picked from the small
+    /// kind menu, this opens the constraints prompt.
+    PickNameKind(crate::ai::namegen::Kind),
+    /// Place the chosen candidate name at the cursor (#610) — the pick step of the
+    /// name generator's option list, mirroring [`Command::InsertSnippet`].
+    InsertName(String),
     /// Open the role picker for the curated font family at this index in
     /// [`crate::fonts::FAMILIES`] (#494) — body, heading, or both.
     PickFontRole(usize),
@@ -472,6 +478,7 @@ impl Action {
         Action::Ai(AiAction::Characters),
         Action::Ai(AiAction::Continuity),
         Action::Ai(AiAction::Setting),
+        Action::Ai(AiAction::Plot),
         Action::Ai(AiAction::Scaffold),
         Action::Ai(AiAction::Naming),
         Action::Ai(AiAction::Style),
@@ -488,6 +495,7 @@ impl Action {
         Action::Ai(AiAction::Triage),
         Action::Ai(AiAction::AskHistory),
         Action::Ai(AiAction::Thesaurus),
+        Action::Ai(AiAction::NameGen),
         Action::Ai(AiAction::Editorial),
         Action::RefreshSeriesBible,
         Action::DescribeConfig,
@@ -634,6 +642,7 @@ impl Action {
             Action::Ai(AiAction::Characters) => "AI · Character bible",
             Action::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
             Action::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
+            Action::Ai(AiAction::Plot) => "AI · Plot & arc tracker",
             Action::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
             Action::Ai(AiAction::Naming) => "AI · Name & term consistency",
             Action::Ai(AiAction::Style) => "AI · Prose & style",
@@ -650,6 +659,7 @@ impl Action {
             Action::Ai(AiAction::Triage) => "Revision triage",
             Action::Ai(AiAction::AskHistory) => "AI · Ask history",
             Action::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
+            Action::Ai(AiAction::NameGen) => "AI · Name generator",
             Action::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
             Action::EnableAi => "Enable AI assistance",
             Action::UserGuide => "User's guide",
@@ -736,6 +746,7 @@ impl Action {
                     AiAction::Characters
                         | AiAction::Continuity
                         | AiAction::Setting
+                        | AiAction::Plot
                         | AiAction::Scaffold
                         | AiAction::Naming
                         | AiAction::Style
@@ -834,6 +845,9 @@ pub(crate) enum AiAction {
     Characters,
     Continuity,
     Setting,
+    /// Plot-thread / arc tracker — subplot setup→payoff status + dangling-thread
+    /// findings, a fourth persistent bible pass (#606).
+    Plot,
     Scaffold,
     Naming,
     Style,
@@ -863,6 +877,9 @@ pub(crate) enum AiAction {
     AskHistory,
     /// In-context thesaurus / word search for a word or phrase (#290).
     Thesaurus,
+    /// Name generator — candidate character / place / term names by constraints,
+    /// an option-list lookup the author picks from (#610).
+    NameGen,
     /// Editorial read — flag structural / continuity / line issues, no fixes (#293).
     Editorial,
 }
@@ -925,6 +942,12 @@ impl AiAction {
             slug: "ai:setting",
             cost: AiCost::Manuscript,
             bible_key: Some("setting"),
+        },
+        AiActionSpec {
+            action: AiAction::Plot,
+            slug: "ai:plot",
+            cost: AiCost::Manuscript,
+            bible_key: Some("plot"),
         },
         AiActionSpec {
             action: AiAction::Scaffold,
@@ -1019,6 +1042,12 @@ impl AiAction {
         AiActionSpec {
             action: AiAction::Thesaurus,
             slug: "ai:thesaurus",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::NameGen,
+            slug: "ai:name",
             cost: AiCost::None,
             bible_key: None,
         },

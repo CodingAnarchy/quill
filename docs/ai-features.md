@@ -238,12 +238,26 @@ The palette actions:
   it returns only candidates for the requested slot and never rewrites the line
   or any other prose. Sends just the word + line (no manuscript), so it's cheap
   and skips the cost confirm.
+- **Name generator** (#610) — the naming counterpart to the word search: pick what
+  needs a name (character, place, or invented term), then give plain-language
+  constraints (origin/language, syllable count, tone, era). Returns a *pickable
+  list* of candidate names — each with a brief note and any syllable/origin/
+  pronunciation tags — and the one you choose is placed at the cursor. An
+  **option-list lookup, not a co-writer**: names only, never prose or a rewrite of
+  the surrounding text; the author picks and Quill places. Sends no manuscript, so
+  it's cheap and skips the cost confirm.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to
   `bible/characters/<slug>.md`.
 - **Timeline & continuity** (#75) — an ordered timeline (`bible/timeline.md`) plus
   contradiction findings.
 - **Setting & worldbuilding** (#77) — a categorized setting bible
   (`bible/setting.md`) + a place/term gazetteer + rule-violation findings.
+- **Plot & arc tracker** (#606) — a persistent plot-thread tracker
+  (`bible/plot.md`): each subplot / thematic throughline with a status, its
+  setup, its payoff (empty until it lands), the chapter it was last advanced in,
+  and notes, plus **dangling-thread** findings (a setup with no payoff, an
+  abandoned subplot) surfaced in revision triage. Incrementally updated like the
+  other bibles; tracking and flags only, never prose.
 - **Scaffold / outline** (#76) — a structural beat outline (`bible/outline.md`) +
   structural-gap findings (no prose).
 - **Name & term consistency** (#78) — a cheap Haiku scan for spelling variants,
@@ -467,8 +481,8 @@ question, brainstorm from a premise, or draft a character / setting bible from a
 concept. Each tool's input schema is derived from the action itself (the single
 source from #306), so the model supplies the argument and the action runs with it
 instead of opening a prompt the assistant couldn't answer; a Q&A answer comes back
-in the conversation. (The thesaurus and image passes stay out — they need cursor
-context the assistant has no way to give.) Because a
+in the conversation. (The thesaurus, name generator, and image passes stay out —
+they need cursor context the assistant has no way to give.) Because a
 pass costs money, the same cost gate applies: when the estimate exceeds the
 threshold the assistant asks for a `y` / skip confirmation **in the conversation**
 (not a modal, which would fight the pane for keys).
@@ -574,6 +588,22 @@ can edit any bible entry; edits are treated as ground truth on the next pass.
   rule the author (or a prior pass) recorded ("magic requires a focus, but ch.
   14 casts without one").
 - Keeps a place/term gazetteer used by naming-consistency (below).
+
+### 5. Plot & arc tracker (#606)
+
+- A fourth persistent, incrementally-updated bible pass (`bible/plot.md`)
+  alongside characters, timeline, and setting: it tracks the manuscript's
+  **plot threads and thematic throughlines** — subplots, promises, mysteries,
+  recurring themes — as structured entries.
+- Each thread records a **status** (setup / open / developing / resolved /
+  abandoned), its **setup**, its **payoff** (empty until it lands), the chapter
+  it was **last seen** advancing in, and free notes.
+- **Dangling-thread checks** — flags a setup with no payoff, an unanswered
+  promise or mystery, or a subplot abandoned mid-book, surfaced as findings in
+  the shared revision triage (author-editable like the other bibles).
+- Reuses the incremental-scoping machinery (#90) and the shared bible file
+  format: a full rebuild the first time, then revised from only the changed
+  chapters. Tracking and flags only — it never writes or suggests prose.
 
 ### Additional features worth adding
 
