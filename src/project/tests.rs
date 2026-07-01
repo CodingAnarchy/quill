@@ -846,6 +846,56 @@ fn a_failed_import_write_preserves_the_originals() {
     fs::remove_dir_all(&dir).ok();
 }
 
+/// Creating a project writes its starter chapter file to disk (empty body),
+/// alongside the manifest — the create path materializes the chapter, not just
+/// the manifest entry.
+#[test]
+fn create_writes_the_starter_chapter_file() {
+    let dir = temp_dir("starter-chapter");
+    let project = Project::create(&dir).unwrap();
+
+    let path = dir.join(&project.manifest.chapters[0].file);
+    assert!(path.exists(), "starter chapter file must be created");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "",
+        "starter chapter is created with an empty body"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// The starter chapter is written through the atomic-write layer, not a bare
+/// `fs::write` — so a crash mid-write can never leave a truncated file (#661).
+/// We prove the path by arming the atomic layer's pre-rename fault: if the
+/// write goes through `atomic::write`, the injected failure surfaces and the
+/// file is left uncreated; a bare `fs::write` would ignore the fault entirely.
+#[test]
+fn starter_chapter_is_written_atomically() {
+    let dir = temp_dir("starter-atomic");
+    fs::create_dir_all(&dir).unwrap();
+
+    crate::atomic::fail_point::arm_pre_rename_failure();
+    let result = Project::create(&dir);
+
+    assert!(
+        result.is_err(),
+        "the injected atomic-write failure must surface, proving the atomic path"
+    );
+    assert!(
+        !dir.join("chapter-1.md").exists(),
+        "a failed atomic write leaves no partial starter chapter file"
+    );
+    let strays: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(strays.is_empty(), "staging temp left behind: {strays:?}");
+
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// Performance guard (run with `cargo test --release -- --ignored
 /// --nocapture`). Opening a project reads and parses every chapter file once
 /// (word count + front matter); even a large novel must open near-instantly.
