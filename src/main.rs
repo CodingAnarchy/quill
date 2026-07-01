@@ -8,6 +8,7 @@ mod ai;
 mod analysis;
 mod annotation;
 mod app;
+mod archive;
 mod atomic;
 mod buffer;
 mod config;

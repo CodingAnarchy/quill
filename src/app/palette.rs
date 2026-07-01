@@ -168,6 +168,8 @@ impl App {
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
             Action::ImportManuscript => self.start_import_manuscript(),
+            Action::ArchiveProject => self.start_archive_project(),
+            Action::RestoreArchive => self.start_restore_archive(),
             Action::StartSprint => self.start_sprint(),
             Action::StopSprint => self.stop_sprint(),
             Action::SwitchBook => self.open_book_switcher(),

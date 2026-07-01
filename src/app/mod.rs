@@ -32,6 +32,7 @@ use crate::typography;
 /// Shown when the author tries to delete a project's last remaining chapter.
 mod annotations;
 mod api_keys;
+mod archive;
 mod assist;
 mod assistant;
 mod bible_review;
@@ -304,6 +305,10 @@ pub struct App {
     /// (#298), held between the source prompt and the new-project-path prompt;
     /// taken when the project is created and the import runs.
     pending_import_source: Option<PendingImportSource>,
+    /// The `.zip` archive chosen to restore a project from (#594), held between
+    /// the source prompt and the new-folder-path prompt; taken when the folder is
+    /// entered and the archive is unpacked.
+    pending_archive_source: Option<PathBuf>,
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
@@ -408,6 +413,7 @@ impl App {
             wizard_pending_setting: None,
             import_source: None,
             pending_import_source: None,
+            pending_archive_source: None,
             sprint: None,
             message: None,
         };

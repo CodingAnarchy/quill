@@ -264,6 +264,11 @@ pub(crate) enum Action {
     NewProjectFromNotes,
     /// Import an existing Markdown manuscript as a new project (#298).
     ImportManuscript,
+    /// Write a timestamped `.zip` backup of the whole project — an offline,
+    /// no-remote archive of the manuscript, bible, and side files (#594).
+    ArchiveProject,
+    /// Restore a project from a `.zip` archive into a new folder (#594).
+    RestoreArchive,
     /// Start a timed writing sprint (#299).
     StartSprint,
     /// Stop the active writing sprint (#299).
@@ -337,6 +342,8 @@ impl Action {
         Action::ImportNotes,
         Action::NewProjectFromNotes,
         Action::ImportManuscript,
+        Action::ArchiveProject,
+        Action::RestoreArchive,
         // Export
         Action::Export(ExportFormat::Markdown),
         Action::Export(ExportFormat::Docx),
@@ -416,6 +423,8 @@ impl Action {
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
             Action::ImportManuscript => "import:manuscript",
+            Action::ArchiveProject => "archive",
+            Action::RestoreArchive => "archive:restore",
             Action::StartSprint => "sprint:start",
             Action::StopSprint => "sprint:stop",
             Action::SwitchBook => "book:switch",
@@ -459,7 +468,9 @@ impl Action {
             | Action::SetGoals
             | Action::ImportNotes
             | Action::NewProjectFromNotes
-            | Action::ImportManuscript => "Project",
+            | Action::ImportManuscript
+            | Action::ArchiveProject
+            | Action::RestoreArchive => "Project",
             Action::Export(_) | Action::BrowseFonts | Action::SetExportStyle => "Export",
             Action::ProgressReport | Action::AnalysisReport | Action::WritingHistory => "Reports",
             Action::Ai(_)
@@ -521,6 +532,8 @@ impl Action {
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",
             Action::ImportManuscript => "Import a manuscript → new project",
+            Action::ArchiveProject => "Archive project… (.zip backup)",
+            Action::RestoreArchive => "Restore project from archive…",
             Action::StartSprint => "Start a writing sprint",
             Action::StopSprint => "Stop the writing sprint",
             Action::SwitchBook => "Switch book",

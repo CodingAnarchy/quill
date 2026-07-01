@@ -49,6 +49,7 @@ mod ai_prose;
 mod ai_qa_trackers;
 mod analysis;
 mod annotations;
+mod archive;
 mod assistant;
 mod autosave;
 mod book_details;

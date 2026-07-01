@@ -394,6 +394,15 @@ pub(crate) enum Pending {
     ImportManuscriptSource,
     /// Text input: the path for the new project created from a manuscript (#298).
     ImportManuscriptDest,
+    /// Text input: the destination path for a project archive (#594). On Enter a
+    /// timestamped `.zip` of the whole project is written there.
+    ArchiveProjectDest,
+    /// Text input: the `.zip` archive to restore a project from (#594). On Enter
+    /// the archive is validated and the new-project destination is asked for.
+    RestoreArchiveSource,
+    /// Text input: the folder to unpack a restored archive into (#594). On Enter
+    /// the archive is unpacked there and the new project is opened.
+    RestoreArchiveDest,
     /// Text input: how many minutes a writing sprint should run (#299).
     SprintDuration,
     /// Text input: the remote URL to back the project up to (#134).
