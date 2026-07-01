@@ -126,7 +126,7 @@ fn palette_opens_with_the_ai_actions() {
     let (mut app, _dir) = two_chapter_app("palette");
     app.open_ai_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), 20, "all AI actions listed"),
+        Mode::Palette(p) => assert_eq!(p.items.len(), 21, "all AI actions listed"),
         _ => panic!("expected the palette to open"),
     }
 }

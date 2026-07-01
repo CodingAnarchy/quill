@@ -477,6 +477,7 @@ impl Action {
         Action::Ai(AiAction::Portrait),
         Action::Ai(AiAction::Scene),
         Action::Ai(AiAction::Triage),
+        Action::Ai(AiAction::AskHistory),
         Action::Ai(AiAction::Thesaurus),
         Action::Ai(AiAction::Editorial),
         Action::RefreshSeriesBible,
@@ -636,6 +637,7 @@ impl Action {
             Action::Ai(AiAction::Portrait) => "AI · Character portraits",
             Action::Ai(AiAction::Scene) => "AI · Scene illustration",
             Action::Ai(AiAction::Triage) => "Revision triage",
+            Action::Ai(AiAction::AskHistory) => "AI · Ask history",
             Action::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
             Action::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
             Action::UserGuide => "User's guide",
@@ -687,7 +689,8 @@ impl Action {
     /// local aggregation, so it counts as synchronous.
     pub(crate) fn is_sync(self) -> bool {
         match self {
-            Action::Ai(AiAction::Triage) => true,
+            // Local, no network request — like Triage, these run synchronously.
+            Action::Ai(AiAction::Triage | AiAction::AskHistory) => true,
             Action::Ai(_) => false,
             _ => true,
         }
@@ -843,6 +846,9 @@ pub(crate) enum AiAction {
     Scene,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
+    /// Browse the session's "Ask the manuscript" history — past asks, answers, and
+    /// their jumpable citations (local; no request) (#609).
+    AskHistory,
     /// In-context thesaurus / word search for a word or phrase (#290).
     Thesaurus,
     /// Editorial read — flag structural / continuity / line issues, no fixes (#293).
@@ -989,6 +995,12 @@ impl AiAction {
         AiActionSpec {
             action: AiAction::Triage,
             slug: "triage",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: AiAction::AskHistory,
+            slug: "ai:ask-history",
             cost: AiCost::None,
             bible_key: None,
         },

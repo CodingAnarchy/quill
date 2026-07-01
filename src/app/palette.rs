@@ -71,8 +71,9 @@ impl App {
     /// layer; this only covers the up-front "can't start" cases.
     pub(crate) fn action_status(&self, action: Action) -> Option<String> {
         match action {
-            // Triage is local aggregation — it works with the AI backend off.
-            Action::Ai(AiAction::Triage) => None,
+            // Triage and the Ask history are local — they work with the AI backend
+            // off (browsing already-collected findings / past answers, #609).
+            Action::Ai(AiAction::Triage | AiAction::AskHistory) => None,
             // Image generation has its own opt-in / key, separate from the text AI
             // (and its own "local not compiled" fail-fast).
             Action::Ai(AiAction::Portrait | AiAction::Scene) => {
@@ -483,6 +484,7 @@ impl App {
             AiAction::Portrait => self.start_portrait(),
             AiAction::Scene => self.start_scene(),
             AiAction::Triage => self.open_triage(),
+            AiAction::AskHistory => self.open_qa_history(),
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::Editorial => self.analyze_editorial(),
         }
@@ -557,6 +559,10 @@ fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Triage => (
             "Revision triage",
             "All findings so far, in one list (local)",
+        ),
+        AiAction::AskHistory => (
+            "Ask history",
+            "Re-open a past Ask — answer + jumpable citations (local)",
         ),
         AiAction::Thesaurus => (
             "Word search",

@@ -211,8 +211,13 @@ The palette actions:
   review. Sections the notes don't cover are omitted, not fabricated. Available
   (for source preservation) even with AI off. Off-manuscript, never prose. Run it
   from the Ctrl-K menu ("Import notes → story bible").
-- **Ask the manuscript** (#73) — a grounded question, answered with chapter
-  citations in an overlay.
+- **Ask the manuscript** (#73, #609) — a grounded question, answered from the
+  draft. The reply is structured: the answer prose plus the exact chapter titles
+  it drew from, surfaced as **jumpable citations** (Enter jumps to the cited
+  chapter, exactly like a revision finding). Each ask is kept in a short
+  in-session **Q&A history**, browsable (and re-jumpable) from the AI menu's "Ask
+  history" — no re-asking, no new request. Retrieval + citations only; the AI
+  answers *about* the manuscript, never writes into it.
 - **Word search** (#290) — an in-context thesaurus: name a word or phrase (the
   word under the cursor is prefilled) plus optional plain-language constraints
   (count, closeness, syllable count, language of origin, rarity); the current
