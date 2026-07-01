@@ -4,7 +4,7 @@
 //! navigation document, and the EPUB 2 NCX for older readers. Re-exported into
 //! [`super`] so `finish` calls them unqualified.
 
-use super::{Item, Nav};
+use super::{Item, Landmarks, Nav};
 use crate::export::{xml_escape, EmbeddedFont, EmbeddedImage, ImageRole, PubMeta};
 
 /// The manifest id of the cover-image item (#582) — referenced by the EPUB 2
@@ -127,7 +127,10 @@ pub(super) fn build_opf(
             properties,
         ));
     }
-    let mut spine = String::new();
+    // The nav doc rides the spine as a non-linear entry (#604) so the `landmarks`
+    // "Table of Contents" reference resolves to a spine item (an epubcheck
+    // requirement) without inserting the TOC into the linear reading order.
+    let mut spine = String::from("<itemref idref=\"nav\" linear=\"no\"/>");
     for it in items {
         manifest.push_str(&manifest_item(
             &it.id,
@@ -172,9 +175,12 @@ fn manifest_item(id: &str, href: &str, media_type: &str, properties: Option<&str
     )
 }
 
-/// The EPUB 3 navigation document — a nested `<ol>` table of contents. `lang` is
-/// the book language (#583), driving the `xml:lang`/`lang` (default `en`).
-pub(super) fn build_nav(entries: &[Nav], lang: &str) -> String {
+/// The EPUB 3 navigation document — a nested `<ol>` table of contents plus a
+/// `landmarks` nav (#604) pointing at the cover, title page, table of contents,
+/// and the start of the body matter ("Begin Reading"), the reference points
+/// Apple Books / Kobo use to jump around the book. `lang` is the book language
+/// (#583), driving the `xml:lang`/`lang` (default `en`).
+pub(super) fn build_nav(entries: &[Nav], landmarks: &Landmarks, lang: &str) -> String {
     let lang = xml_escape(lang);
     format!(
         concat!(
@@ -183,11 +189,38 @@ pub(super) fn build_nav(entries: &[Nav], lang: &str) -> String {
             "<html xmlns=\"http://www.w3.org/1999/xhtml\" ",
             "xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{lang}\" lang=\"{lang}\">",
             "<head><meta charset=\"utf-8\"/><title>Contents</title></head>",
-            "<body><nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1>\n{ol}</nav></body></html>"
+            "<body><nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1>\n{ol}</nav>\n{landmarks}</body></html>"
         ),
         lang = lang,
         ol = nav_ol(entries),
+        landmarks = nav_landmarks(landmarks),
     )
+}
+
+/// The hidden `landmarks` nav (#604): one `<li>` per reference point, each an
+/// anchor carrying its own `epub:type`. The `toc` landmark points back at this
+/// document's `toc` nav; the cover, title page, and body-matter start point at
+/// their content docs when present.
+fn nav_landmarks(landmarks: &Landmarks) -> String {
+    let mut lis = String::new();
+    let mut li = |kind: &str, href: &str, label: &str| {
+        lis.push_str(&format!(
+            "<li><a epub:type=\"{kind}\" href=\"{}\">{}</a></li>\n",
+            href,
+            xml_escape(label),
+        ));
+    };
+    if let Some(href) = &landmarks.cover {
+        li("cover", href, "Cover");
+    }
+    if let Some(href) = &landmarks.titlepage {
+        li("titlepage", href, "Title Page");
+    }
+    li("toc", "nav.xhtml#toc", "Table of Contents");
+    if let Some(href) = &landmarks.bodymatter {
+        li("bodymatter", href, "Begin Reading");
+    }
+    format!("<nav epub:type=\"landmarks\" hidden=\"hidden\"><h2>Landmarks</h2>\n<ol>\n{lis}</ol>\n</nav>")
 }
 
 fn nav_ol(entries: &[Nav]) -> String {
@@ -530,6 +563,73 @@ mod tests {
         assert!(
             ncx.contains("dtb:depth\" content=\"2\""),
             "two-level depth: {ncx}"
+        );
+    }
+
+    #[test]
+    fn nav_emits_a_landmarks_nav_pointing_at_the_reference_points() {
+        // With a cover image and publishing metadata, the front matter is cover →
+        // title → copyright, and the landmarks nav (#604) points at the cover, the
+        // title page, the toc, and the first body-matter section ("Begin Reading").
+        let mut style = ExportStyle {
+            cover_image: Some("art/cover.png".into()),
+            ..Default::default()
+        };
+        style.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+        let mut d = doc();
+        d.publishing = PubMeta {
+            rights: Some("© 2026 A. Writer".into()),
+            ..Default::default()
+        };
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+        let nav = part(&bytes, "OEBPS/nav.xhtml");
+
+        let lm = &nav[nav
+            .find("epub:type=\"landmarks\"")
+            .expect("landmarks nav present")..];
+        assert!(lm.contains("hidden"), "landmarks nav is hidden: {lm}");
+        // cover0001 → title0002 → (copyright0003) → the prologue is the first
+        // body... actually the prologue is front matter, so the first bodymatter
+        // section is the part divider. The Prologue is frontmatter.
+        assert!(
+            lm.contains("epub:type=\"cover\" href=\"cover0001.xhtml\""),
+            "cover landmark: {lm}"
+        );
+        assert!(
+            lm.contains("epub:type=\"titlepage\" href=\"title0002.xhtml\""),
+            "titlepage landmark: {lm}"
+        );
+        assert!(
+            lm.contains("epub:type=\"toc\" href=\"nav.xhtml#toc\""),
+            "toc landmark: {lm}"
+        );
+        // The Prologue (front) is frontmatter; the part divider is the first
+        // body-matter section, so it is the "Begin Reading" target.
+        assert!(
+            lm.contains("epub:type=\"bodymatter\" href=\"part0005.xhtml\""),
+            "bodymatter landmark points at the first body section: {lm}"
+        );
+
+        // Without a cover or copyright page, the landmarks nav drops those entries
+        // but keeps toc + the body-matter start (here the Prologue leads, and it is
+        // front matter, so the part divider is still the body start).
+        let plain = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/nav.xhtml",
+        );
+        let plm = &plain[plain.find("epub:type=\"landmarks\"").expect("landmarks")..];
+        assert!(
+            !plm.contains("epub:type=\"cover\""),
+            "no cover landmark: {plm}"
+        );
+        assert!(plm.contains("epub:type=\"toc\""), "toc landmark present");
+        assert!(
+            plm.contains("epub:type=\"titlepage\""),
+            "titlepage landmark present"
+        );
+        assert!(
+            plm.contains("epub:type=\"bodymatter\""),
+            "bodymatter landmark present"
         );
     }
 
