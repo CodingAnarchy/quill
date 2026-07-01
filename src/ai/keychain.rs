@@ -28,7 +28,7 @@
 //! `cfg(test)`, mirroring the config-dir override and the test-build env gate.
 //! With no env var and no keychain, [`super::Settings::resolved_key`] returns
 //! `None` by default in the suite. The precedence logic itself is pure
-//! ([`resolve`]) and unit-tested without any store.
+//! ([`resolve_lazy`]) and unit-tested without any store.
 
 /// The keyring service name under which Quill's keys are filed. Stable — changing
 /// it would orphan already-stored keys. Only read by the real-keyring code path,
@@ -56,20 +56,34 @@ impl Key {
     }
 }
 
-/// The single precedence rule, kept pure so it's tested without any real store:
-/// env var → keychain → plaintext config. The first non-empty (trimmed) source
-/// wins. Each argument is the already-resolved value from that source (`None`
-/// when absent). Returns the chosen key, or `None` when every source is empty.
-pub fn resolve<'a>(
-    env: Option<&'a str>,
-    keychain: Option<&'a str>,
-    plaintext: Option<&'a str>,
-) -> Option<&'a str> {
-    [env, keychain, plaintext]
-        .into_iter()
-        .flatten()
+/// Resolve a key by precedence — env var → OS keychain → plaintext config, the
+/// first non-empty (trimmed) source winning — reading the keychain **lazily**:
+/// `keychain` is only consulted when the env var doesn't already supply a key.
+/// This keeps the documented escape hatch real — a configured `ANTHROPIC_API_KEY`
+/// / `FAL_KEY` resolves without ever touching (or prompting for) the OS keychain,
+/// which matters for headless / CI runs with no session to unlock the store and
+/// for a freshly-built dev binary, whose changed code signature makes macOS
+/// re-prompt on keychain access and would otherwise hang a non-interactive run.
+/// `keychain` is a thunk so the read is genuinely skipped, not just ignored; kept
+/// pure (the store is injected) so the precedence is unit-tested without a store.
+pub fn resolve_lazy(
+    env: Option<&str>,
+    keychain: impl FnOnce() -> Option<String>,
+    plaintext: Option<&str>,
+) -> Option<String> {
+    if let Some(k) = env.map(str::trim).filter(|k| !k.is_empty()) {
+        return Some(k.to_string());
+    }
+    if let Some(k) = keychain()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
+        return Some(k);
+    }
+    plaintext
         .map(str::trim)
-        .find(|k| !k.is_empty())
+        .filter(|k| !k.is_empty())
+        .map(str::to_string)
 }
 
 /// Read `key` from the OS keychain, or `None` when it isn't stored (or the store
@@ -127,39 +141,78 @@ pub fn set(key: Key, secret: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    // The keychain source is injected as a thunk, so precedence + trimming are
+    // tested without any real store (and the thunk lets us assert it's skipped).
     #[test]
     fn env_wins_over_keychain_and_plaintext() {
-        assert_eq!(resolve(Some("env"), Some("kc"), Some("plain")), Some("env"));
+        let k = resolve_lazy(Some("env"), || Some("kc".into()), Some("plain"));
+        assert_eq!(k.as_deref(), Some("env"));
     }
 
     #[test]
     fn keychain_wins_over_plaintext_when_no_env() {
-        assert_eq!(resolve(None, Some("kc"), Some("plain")), Some("kc"));
+        let k = resolve_lazy(None, || Some("kc".into()), Some("plain"));
+        assert_eq!(k.as_deref(), Some("kc"));
     }
 
     #[test]
     fn plaintext_is_the_last_resort() {
-        assert_eq!(resolve(None, None, Some("plain")), Some("plain"));
+        let k = resolve_lazy(None, || None, Some("plain"));
+        assert_eq!(k.as_deref(), Some("plain"));
     }
 
     #[test]
     fn all_empty_resolves_to_none() {
-        assert_eq!(resolve(None, None, None), None);
+        assert_eq!(resolve_lazy(None, || None, None), None);
         // Blank / whitespace-only sources are treated as absent and skipped.
-        assert_eq!(resolve(Some("  "), Some(""), Some("\t")), None);
+        assert_eq!(
+            resolve_lazy(Some("  "), || Some("".into()), Some("\t")),
+            None
+        );
     }
 
     #[test]
     fn a_blank_higher_source_falls_through_to_the_next() {
         // An empty env var doesn't shadow a real keychain key.
-        assert_eq!(resolve(Some(""), Some("kc"), None), Some("kc"));
+        let via_kc = resolve_lazy(Some(""), || Some("kc".into()), None);
+        assert_eq!(via_kc.as_deref(), Some("kc"));
         // An empty keychain entry falls through to the plaintext key.
-        assert_eq!(resolve(None, Some("  "), Some("plain")), Some("plain"));
+        let via_plain = resolve_lazy(None, || Some("  ".into()), Some("plain"));
+        assert_eq!(via_plain.as_deref(), Some("plain"));
     }
 
     #[test]
     fn the_chosen_key_is_trimmed() {
-        assert_eq!(resolve(None, Some("  kc  "), None), Some("kc"));
+        let k = resolve_lazy(None, || Some("  kc  ".into()), None);
+        assert_eq!(k.as_deref(), Some("kc"));
+    }
+
+    #[test]
+    fn resolve_lazy_skips_the_keychain_when_env_is_set() {
+        // The escape hatch: a configured env key must resolve WITHOUT reading the
+        // keychain, so headless/CI runs and freshly-built dev binaries never prompt
+        // for keychain access. The thunk panics if consulted.
+        let key = resolve_lazy(
+            Some("env-key"),
+            || panic!("keychain must not be read"),
+            None,
+        );
+        assert_eq!(key.as_deref(), Some("env-key"));
+    }
+
+    #[test]
+    fn resolve_lazy_reads_the_keychain_only_when_env_is_absent() {
+        let mut reads = 0;
+        let key = resolve_lazy(
+            None,
+            || {
+                reads += 1;
+                Some("kc".into())
+            },
+            Some("plain"),
+        );
+        assert_eq!(key.as_deref(), Some("kc"));
+        assert_eq!(reads, 1, "the keychain is consulted exactly once");
     }
 
     #[test]

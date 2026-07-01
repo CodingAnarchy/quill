@@ -202,19 +202,20 @@ pub(crate) fn is_ok(status: u16) -> bool {
 }
 
 /// Resolve a provider's API key by precedence — env var → OS keychain → the
-/// plaintext `api_key` in config (#530) — via the pure [`keychain::resolve`]. The
-/// env var is read by the caller (gated out of test builds), the keychain by
-/// [`keychain::get`] (a no-op `None` in test builds), and `plaintext` is the
-/// trimmed config field. Shared by the text [`Settings`] and image
-/// [`image::ImageSettings`]; returns an owned key since it may come from the
-/// keychain rather than the borrowed config. `None` when every source is empty.
+/// plaintext `api_key` in config (#530) — via [`keychain::resolve_lazy`]. The
+/// keychain is read **lazily**: a configured env var (read by the caller, gated
+/// out of test builds) short-circuits before [`keychain::get`] is ever called, so
+/// the headless/CI escape hatch never touches (or prompts for) the OS store. This
+/// is called on the gating path (e.g. building the run-action palette), so it must
+/// not do keychain I/O when it doesn't have to. Shared by the text [`Settings`]
+/// and image [`image::ImageSettings`]; returns an owned key. `None` when every
+/// source is empty.
 pub(crate) fn resolved_key(
     env: Option<&str>,
     which: keychain::Key,
     plaintext: &Option<String>,
 ) -> Option<String> {
-    let keychain = keychain::get(which);
-    keychain::resolve(env, keychain.as_deref(), plaintext.as_deref()).map(str::to_string)
+    keychain::resolve_lazy(env, || keychain::get(which), plaintext.as_deref())
 }
 
 /// Render a list of items as numbered Markdown sections (`## {label} N`), each
