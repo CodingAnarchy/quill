@@ -8,7 +8,7 @@
 //! convention (#562) — a pure move, no behavior change.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::atomic;
 use crate::buffer::count_words;
@@ -34,6 +34,16 @@ pub(crate) fn read_existing(path: &Path) -> std::io::Result<String> {
     }
 }
 
+/// A hidden staging path under `root` for a chapter file being imported (#600),
+/// so the new set can be written durably before any original is touched. Hidden
+/// (dot-prefixed) and process-keyed so a leftover never shows up as a stray
+/// chapter and parallel test processes can't collide. It sits in `root` — the
+/// same directory as the final file — so the swap into place is a same-filesystem
+/// rename.
+fn import_staging_path(root: &Path, file: &str) -> PathBuf {
+    root.join(format!(".import.{file}.{}.tmp", std::process::id()))
+}
+
 /// Read `entry`'s file under `root` and refresh its cached word count and
 /// front-matter metadata (#331). Shared by the active book's caching and the
 /// other books of a series, so every book's counts/roles are populated at open
@@ -48,26 +58,64 @@ pub(crate) fn cache_chapter(root: &Path, entry: &mut ChapterEntry) {
 impl Project {
     /// Replace this project's chapters with an imported manuscript (#298): write
     /// each chapter body to its own file, rebuild the manifest in reading order,
-    /// and set the book title / author when the source supplied them. Existing
-    /// chapter files (e.g. the starter from [`create`](Self::create)) are removed
-    /// first. Writes go through the atomic-save path; the source is never touched.
+    /// and set the book title / author when the source supplied them.
+    ///
+    /// Safe under a mid-operation failure (#600): the new files are staged to
+    /// hidden temp paths first, and only once the whole new set is durably on
+    /// disk are they swapped into place and any orphaned old files removed. A
+    /// staging failure (disk full, permissions) leaves the originals and the
+    /// manifest untouched — the same durability the atomic-write layer gives a
+    /// single file, extended across the multi-file replacement. Each stage/swap
+    /// goes through the atomic-save path; the source is never touched.
     pub fn import_chapters(
         &mut self,
         title: Option<&str>,
         author: Option<&str>,
         chapters: &[(String, String)],
     ) -> std::io::Result<()> {
-        for c in &self.manifest.chapters {
-            let _ = fs::remove_file(self.root.join(&c.file)); // best effort
+        // Stage every new file to a hidden temp path first. Nothing destructive
+        // happens here, so a failure returns with the originals still on disk and
+        // `self` unmodified — we clean up whatever we already staged.
+        let staged: Vec<(String, PathBuf)> = (1..=chapters.len())
+            .map(|n| {
+                let file = format!("chapter-{n}.md");
+                let path = import_staging_path(&self.root, &file);
+                (file, path)
+            })
+            .collect();
+        for (i, ((_, staged_path), (_, body))) in staged.iter().zip(chapters).enumerate() {
+            if let Err(e) = atomic::write(staged_path, body.as_bytes()) {
+                for (_, done) in &staged[..i] {
+                    let _ = fs::remove_file(done); // best-effort cleanup
+                }
+                return Err(e);
+            }
         }
+
+        // The full new set is durable. From here the swap is the destructive
+        // step, but every original it overwrites has an equivalent already
+        // staged, so the manifest never points at a file that isn't on disk.
+        let old_files: Vec<String> = self
+            .manifest
+            .chapters
+            .iter()
+            .map(|c| c.file.clone())
+            .collect();
         self.manifest.chapters.clear();
-        for (i, (ctitle, body)) in chapters.iter().enumerate() {
-            let file = format!("chapter-{}.md", i + 1);
-            atomic::write(&self.root.join(&file), body.as_bytes())?;
+        for ((file, staged_path), (ctitle, _)) in staged.iter().zip(chapters) {
+            fs::rename(staged_path, self.root.join(file))?;
             self.manifest
                 .chapters
-                .push(ChapterEntry::new(ctitle.clone(), file));
+                .push(ChapterEntry::new(ctitle.clone(), file.clone()));
         }
+        // Remove old chapter files the new set didn't overwrite (a shorter
+        // import, or differently named originals) — orphans only, after the swap.
+        for old in &old_files {
+            if !staged.iter().any(|(file, _)| file == old) {
+                let _ = fs::remove_file(self.root.join(old)); // best effort
+            }
+        }
+
         if let Some(t) = title.map(str::trim).filter(|t| !t.is_empty()) {
             self.manifest.title = t.to_string();
         }
