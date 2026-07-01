@@ -5,7 +5,7 @@
 //! machine and the title-page mining every format shares. See the crate module
 //! doc for the shared contract.
 
-use super::{assemble, fallback_chapter, finalize_titles, mine_preamble, Imported};
+use super::{assemble, fallback_chapter, finalize_titles, mine_preamble, Dropped, Imported};
 
 /// Parse a plain-text manuscript (#593). Splits on `Chapter N` heading lines when
 /// the file has any; otherwise on wide blank-line gaps. With neither, the whole
@@ -56,6 +56,8 @@ pub fn parse_text(source: &str) -> Imported {
         author,
         chapters,
         unreadable_bodies: 0,
+        // Plain text carries no footnotes/images/tables to drop (#646).
+        dropped: Dropped::default(),
     }
 }
 

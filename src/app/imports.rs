@@ -156,8 +156,10 @@ impl App {
         };
         // Some documents may have been listed but unreadable (e.g. a corrupt
         // `.scriv` bundle): the body comes in empty and the parser counts it, so
-        // we can warn the author rather than report a clean success (#511).
-        let unreadable = parsed.unreadable_bodies;
+        // we can warn the author rather than report a clean success (#511). The
+        // scanners also tally structural content they can't carry — footnotes
+        // (converted to inline markers), images, tables, comments (#646).
+        let warning = import_warning_suffix(parsed.unreadable_bodies, parsed.dropped);
         let chapters: Vec<(String, String)> = parsed
             .chapters
             .into_iter()
@@ -170,13 +172,8 @@ impl App {
         match built {
             Ok(n) => {
                 self.switch_to(dest); // open the finished project fresh from disk
-                let dropped = if unreadable > 0 {
-                    format!(" ({unreadable} bodies unreadable)")
-                } else {
-                    String::new()
-                };
                 self.message = Some(format!(
-                    "Imported {n} chapters{dropped} from {}",
+                    "Imported {n} chapters{warning} from {}",
                     source.display()
                 ));
             }
@@ -364,6 +361,48 @@ fn read_manuscript(path: &std::path::Path) -> std::io::Result<crate::manuscript_
     }
 }
 
+/// A parenthetical warning suffix for the import success message when the source
+/// listed content the scanner couldn't fully carry (#511/#646): unreadable bodies
+/// (`.scriv`), plus footnotes/endnotes converted to inline markers and
+/// images/tables/comments dropped (`.docx`/`.scriv`). Empty when the import was
+/// clean, so a clean document reports no warning.
+fn import_warning_suffix(
+    unreadable_bodies: usize,
+    dropped: crate::manuscript_import::Dropped,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if unreadable_bodies > 0 {
+        parts.push(format!("{unreadable_bodies} bodies unreadable"));
+    }
+    let notes = dropped.notes();
+    if notes > 0 {
+        parts.push(format!(
+            "{notes} note{} kept as markers",
+            if notes == 1 { "" } else { "s" }
+        ));
+    }
+    let mut lost: Vec<String> = Vec::new();
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    if dropped.images > 0 {
+        lost.push(plural(dropped.images, "image", "images"));
+    }
+    if dropped.tables > 0 {
+        lost.push(plural(dropped.tables, "table", "tables"));
+    }
+    if dropped.comments > 0 {
+        lost.push(plural(dropped.comments, "comment", "comments"));
+    }
+    if !lost.is_empty() {
+        parts.push(format!("{} dropped", lost.join(", ")));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join("; "))
+    }
+}
+
 /// The Markdown files to import from `path` (#283): the file itself if it's a
 /// `.md` file, or every `.md` directly inside it if it's a folder (sorted), so a
 /// folder imports its notes collectively. Empty when the path is neither.
@@ -414,4 +453,65 @@ fn import_summary_lines(
         "The original notes are preserved under bible/sources/.",
     ));
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_warning_suffix;
+    use crate::manuscript_import::Dropped;
+
+    #[test]
+    fn clean_import_has_no_warning_suffix() {
+        assert_eq!(import_warning_suffix(0, Dropped::default()), "");
+    }
+
+    #[test]
+    fn unreadable_bodies_alone_are_reported() {
+        assert_eq!(
+            import_warning_suffix(2, Dropped::default()),
+            " (2 bodies unreadable)"
+        );
+    }
+
+    #[test]
+    fn dropped_elements_are_summarized_with_notes_kept() {
+        let dropped = Dropped {
+            footnotes: 3,
+            endnotes: 0,
+            images: 2,
+            tables: 1,
+            comments: 0,
+        };
+        assert_eq!(
+            import_warning_suffix(0, dropped),
+            " (3 notes kept as markers; 2 images, 1 table dropped)"
+        );
+    }
+
+    #[test]
+    fn singular_element_labels_are_not_pluralized() {
+        let dropped = Dropped {
+            footnotes: 1,
+            images: 1,
+            tables: 0,
+            comments: 1,
+            endnotes: 0,
+        };
+        assert_eq!(
+            import_warning_suffix(0, dropped),
+            " (1 note kept as markers; 1 image, 1 comment dropped)"
+        );
+    }
+
+    #[test]
+    fn unreadable_and_dropped_combine_in_one_suffix() {
+        let dropped = Dropped {
+            tables: 1,
+            ..Dropped::default()
+        };
+        assert_eq!(
+            import_warning_suffix(1, dropped),
+            " (1 bodies unreadable; 1 table dropped)"
+        );
+    }
 }

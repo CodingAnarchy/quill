@@ -10,7 +10,7 @@ use crate::export::{push_run, Run, SCENE_BREAK};
 
 use super::{
     attr_value, element_text, fallback_chapter, finalize_titles, for_each_child, join_paragraphs,
-    wrap_emphasis, Imported, ImportedChapter,
+    wrap_emphasis, Dropped, Imported, ImportedChapter,
 };
 
 /// Parse a Scrivener `.scriv` bundle directory: read its `.scrivx` binder for the
@@ -52,8 +52,15 @@ fn parse_binder(
 ) -> Imported {
     let mut chapters = Vec::new();
     let mut unreadable_bodies = 0;
+    let mut dropped = Dropped::default();
     if let Some(draft) = draft_folder(scrivx).and_then(children_group) {
-        collect_items(draft, &read_rtf, &mut chapters, &mut unreadable_bodies);
+        collect_items(
+            draft,
+            &read_rtf,
+            &mut chapters,
+            &mut unreadable_bodies,
+            &mut dropped,
+        );
     }
     // No draft documents → one empty fallback chapter (`.scriv` has no preamble).
     fallback_chapter(&mut chapters, &title, String::new());
@@ -63,6 +70,7 @@ fn parse_binder(
         author: None,
         chapters,
         unreadable_bodies,
+        dropped,
     }
 }
 
@@ -91,13 +99,14 @@ fn collect_items(
     read_rtf: &impl Fn(&str) -> Option<String>,
     out: &mut Vec<ImportedChapter>,
     unreadable: &mut usize,
+    dropped: &mut Dropped,
 ) {
     for_each_child(children, "BinderItem", |attrs, inner| {
         let Some(inner) = inner else { return };
         if attr_value(attrs, "Type").as_deref() == Some("Text") {
             let uuid = attr_value(attrs, "UUID").unwrap_or_default();
             let body = match read_rtf(&uuid) {
-                Some(rtf) => rtf_to_markdown(&rtf),
+                Some(rtf) => rtf_to_markdown(&rtf, dropped),
                 None => {
                     *unreadable += 1;
                     String::new()
@@ -110,7 +119,7 @@ fn collect_items(
         }
         // Recurse into any children (a folder's documents, or a text item's own).
         if let Some(grandchildren) = children_group(inner) {
-            collect_items(grandchildren, read_rtf, out, unreadable);
+            collect_items(grandchildren, read_rtf, out, unreadable, dropped);
         }
     });
 }
@@ -131,12 +140,21 @@ fn children_group(item: &str) -> Option<&str> {
 /// the centered scene-break glyph becomes a `---` thematic break. Best-effort: it
 /// skips font/colour/style tables and unknown control words, decodes `\uN`/`\'XX`,
 /// and otherwise emits text — enough for prose RTF (round-trips Quill's export).
-fn rtf_to_markdown(rtf: &str) -> String {
+///
+/// Structural content that has no place in the flat prose model is tallied in
+/// `dropped` rather than silently lost (#646): footnotes (`\footnote`) convert to
+/// inline `[^N]` markers (their body text is skipped), and images (`\pict`) and
+/// tables (`\trowd`/`\intbl` rows) are counted as dropped.
+fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
     let chars: Vec<char> = rtf.chars().collect();
     let mut paras: Vec<String> = Vec::new();
     let mut runs: Vec<Run> = Vec::new();
     let mut cur = String::new();
     let (mut bold, mut italic, mut skipping) = (false, false, false);
+    // Table rows (`\intbl`/`\row`) come in contiguous runs; count each contiguous
+    // block as one table, resetting the flag when a plain paragraph (`\pard`) ends
+    // the table's cells.
+    let mut in_table = false;
     let mut stack: Vec<(bool, bool, bool)> = Vec::new();
     let mut i = 0;
     while i < chars.len() {
@@ -191,6 +209,29 @@ fn rtf_to_markdown(rtf: &str) -> String {
                             push_run(&mut runs, &mut cur, bold, italic);
                             paras.push(runs_to_markdown(&runs));
                             runs.clear();
+                        }
+                        // A plain paragraph reset ends any table we were inside.
+                        "pard" => in_table = false,
+                        // Table cells: count each contiguous run of table rows as
+                        // one dropped table (the cell text isn't carried through).
+                        "intbl" | "trowd" => {
+                            if !in_table {
+                                in_table = true;
+                                dropped.tables += 1;
+                            }
+                        }
+                        // A footnote becomes an inline marker; its body is skipped.
+                        "footnote" => {
+                            push_run(&mut runs, &mut cur, bold, italic);
+                            dropped.footnotes += 1;
+                            runs.push(Run::new(format!("[^{}]", dropped.footnotes), false, false));
+                            skipping = true;
+                        }
+                        // An embedded image/object is dropped; count it, then skip
+                        // its (binary) group content like any skip destination.
+                        "pict" | "object" => {
+                            dropped.images += 1;
+                            skipping = true;
                         }
                         "line" | "tab" => {
                             if !skipping {
@@ -282,8 +323,6 @@ fn is_skip_destination(word: &str) -> bool {
             | "info"
             | "header"
             | "footer"
-            | "pict"
-            | "object"
             | "pgdsctbl"
             | "listtable"
             | "listoverridetable"
@@ -305,17 +344,23 @@ mod tests {
         format!("{{\\rtf1\\ansi\\deff0{{\\fonttbl{{\\f0\\froman Times New Roman;}}}}\n\\f0\\fs24\n\\pard\\sa180 {body}\\par\n}}")
     }
 
+    /// Convert RTF to Markdown, discarding the dropped-element tally — for the
+    /// tests that only care about the prose.
+    fn md(rtf: &str) -> String {
+        rtf_to_markdown(rtf, &mut Dropped::default())
+    }
+
     #[test]
     fn rtf_converts_emphasis_paragraphs_and_unicode() {
         let body = "The locket {\\i gleamed} and felt {\\b heavy}. caf\\u233 ?";
-        let out = rtf_to_markdown(&rtf(body));
+        let out = md(&rtf(body));
         assert_eq!(out, "The locket *gleamed* and felt **heavy**. café\n");
     }
 
     #[test]
     fn rtf_skips_the_font_table_and_decodes_escapes() {
         // The fonttbl text ("Times New Roman;") must not leak into the body.
-        let out = rtf_to_markdown(&rtf("a \\{brace\\} and 5 \\\\ slash"));
+        let out = md(&rtf("a \\{brace\\} and 5 \\\\ slash"));
         assert_eq!(out, "a {brace} and 5 \\ slash\n");
         assert!(
             !out.contains("Times New Roman"),
@@ -328,8 +373,53 @@ mod tests {
         let body = format!(
             "{{\\rtf1\\ansi\\deff0\n\\pard\\sa180 Scene one.\\par\n\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n\\pard\\sa180 Scene two.\\par\n}}"
         );
-        let out = rtf_to_markdown(&body);
+        let out = md(&body);
         assert_eq!(out, "Scene one.\n\n---\n\nScene two.\n");
+    }
+
+    #[test]
+    fn rtf_clean_document_reports_nothing_dropped() {
+        let mut dropped = Dropped::default();
+        rtf_to_markdown(&rtf("Just clean prose."), &mut dropped);
+        assert_eq!(dropped, Dropped::default());
+    }
+
+    #[test]
+    fn rtf_footnote_becomes_inline_marker_and_is_counted() {
+        // A Word-style footnote: the reference mark, then the footnote body group
+        // (whose text must not leak into the prose).
+        let body = "A claim{\\super \\chftn}{\\footnote \\pard\\plain \\chftn The source.} stands.";
+        let mut dropped = Dropped::default();
+        let out = rtf_to_markdown(&rtf(body), &mut dropped);
+        assert_eq!(out, "A claim[^1] stands.\n", "footnote body is not inlined");
+        assert!(!out.contains("The source"), "footnote text is skipped");
+        assert_eq!(dropped.footnotes, 1);
+        assert_eq!(dropped.notes(), 1);
+        assert_eq!(dropped.lost(), 0, "a footnote is converted, not lost");
+    }
+
+    #[test]
+    fn rtf_image_is_counted_as_dropped() {
+        let body = "Before {\\pict\\pngblip 89504e47} after.";
+        let mut dropped = Dropped::default();
+        let out = rtf_to_markdown(&rtf(body), &mut dropped);
+        assert!(!out.contains("89504e47"), "image bytes are skipped: {out}");
+        assert_eq!(dropped.images, 1);
+        assert_eq!(dropped.lost(), 1);
+    }
+
+    #[test]
+    fn rtf_table_is_counted_once_per_contiguous_block() {
+        // Two rows of one table, then a plain paragraph, then a second table.
+        let body = "{\\rtf1\\ansi\n\
+             \\trowd\\intbl a\\cell\\row\n\
+             \\trowd\\intbl b\\cell\\row\n\
+             \\pard Prose.\\par\n\
+             \\trowd\\intbl c\\cell\\row\n\
+             }";
+        let mut dropped = Dropped::default();
+        rtf_to_markdown(body, &mut dropped);
+        assert_eq!(dropped.tables, 2, "two contiguous table blocks");
     }
 
     #[test]

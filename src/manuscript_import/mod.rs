@@ -61,6 +61,47 @@ pub use markdown::parse_markdown;
 pub use scriv::parse_scriv;
 pub use text::parse_text;
 
+/// A tally of structural elements the scanners recognized but couldn't carry
+/// into Quill's flat prose model, so the caller can warn the author rather than
+/// let them vanish silently (#646).
+///
+/// The `.docx`/`.scriv` scanners extract paragraph text and bold/italic runs;
+/// footnotes, endnotes, images, tables, and comments have no home in the chapter
+/// body. Counting them keeps the "surface it, never silently drop it" contract
+/// (see [`Imported`]) for structural content the way [`unreadable_bodies`] does
+/// for unreadable bodies. Footnotes and endnotes are the one exception: the
+/// scanners convert them to inline `[^N]` markers rather than dropping them, so a
+/// non-zero note count is a "converted", not "lost", tally.
+///
+/// [`unreadable_bodies`]: Imported::unreadable_bodies
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Dropped {
+    /// Footnotes seen — converted to inline `[^N]` markers, not dropped.
+    pub footnotes: usize,
+    /// Endnotes seen — converted to inline `[^N]` markers, not dropped.
+    pub endnotes: usize,
+    /// Images/drawings dropped (no place in the flat prose model).
+    pub images: usize,
+    /// Tables dropped.
+    pub tables: usize,
+    /// Comments/annotations dropped.
+    pub comments: usize,
+}
+
+impl Dropped {
+    /// How many notes were converted to inline markers (footnotes + endnotes).
+    pub fn notes(&self) -> usize {
+        self.footnotes + self.endnotes
+    }
+
+    /// How many elements were lost outright — everything but footnotes/endnotes,
+    /// which are converted to inline markers. Zero for a clean document.
+    #[cfg(test)]
+    pub fn lost(&self) -> usize {
+        self.images + self.tables + self.comments
+    }
+}
+
 /// A manuscript parsed into book metadata and chapters.
 ///
 /// # Unreadable-content policy
@@ -79,7 +120,17 @@ pub use text::parse_text;
 ///   than swallow that into an empty chapter, [`parse_scriv`] counts those drops
 ///   in [`unreadable_bodies`] so the caller can warn the author.
 ///
+/// # Dropped-element policy (#646)
+///
+/// The same surface-it contract extends to structural content the scanners can
+/// recognize but not represent — footnotes, endnotes, images, tables, comments.
+/// The `.docx`/`.scriv` scanners tally these in [`dropped`] (footnotes/endnotes
+/// are converted to inline `[^N]` markers, the rest are lost) so the caller can
+/// warn rather than report a clean success. The other formats leave it default
+/// (zero): plain text and per-file Markdown carry no such structure.
+///
 /// [`unreadable_bodies`]: Imported::unreadable_bodies
+/// [`dropped`]: Imported::dropped
 #[derive(Debug, PartialEq, Eq)]
 pub struct Imported {
     /// The book title, from front matter or the title-page `#` heading.
@@ -93,6 +144,10 @@ pub struct Imported {
     /// the caller so a partially-unreadable import isn't reported as a clean
     /// success.
     pub unreadable_bodies: usize,
+    /// Structural elements the scanner recognized but couldn't carry into the
+    /// flat prose model (only `.docx`/`.scriv`; default/zero for the others).
+    /// Surfaced by the caller alongside `unreadable_bodies` (#646).
+    pub dropped: Dropped,
 }
 
 /// One imported chapter: its heading text and its prose body.
@@ -348,6 +403,20 @@ fn for_each_child<'a>(xml: &'a str, name: &str, mut f: impl FnMut(&'a str, Optio
 /// open/find-close/advance bookkeeping the paragraph, run, and text scans share.
 fn for_each_element(xml: &str, name: &str, mut f: impl FnMut(Option<&str>)) {
     for_each_child(xml, name, |_attrs, inner| f(inner));
+}
+
+/// How many `<name …>` opening tags appear in `xml` (self-closing or not),
+/// counting every occurrence regardless of nesting. Used by the `.docx` scanner
+/// to tally dropped structural elements (images, tables, comments) it can't
+/// carry into the flat prose model (#646).
+fn count_elements(xml: &str, name: &str) -> usize {
+    let mut count = 0;
+    let mut pos = 0;
+    while let Some((_, gt, _)) = find_open(xml, pos, name) {
+        count += 1;
+        pos = gt + 1;
+    }
+    count
 }
 
 /// The byte index of the `</name>` that closes the element whose content starts at
