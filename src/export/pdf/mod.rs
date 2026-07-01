@@ -28,7 +28,7 @@ use self::font::{Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::layout::Layout;
 use self::wrap::{segments, words_of, wrap_lines, Seg};
-use self::write::{flatten_outline, remap_glyph_ids, serialize, OutlineItem};
+use self::write::{flate_stream, flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
     body_blocks, classify_block, copyright_lines, inline_runs, Chapter, Document, ExportStyle,
     FontStyle, ImageRole, Prose, PubMeta, Run, SCENE_BREAK,
@@ -1113,14 +1113,9 @@ impl Pdf {
             let mut content = std::mem::take(&mut self.pages[i]);
             content.push_str(&decorations[i]);
             let content = remap_glyph_ids(&content, &maps);
-            objects.insert(
-                content_obj[i],
-                format!(
-                    "<< /Length {} >>\nstream\n{content}\nendstream",
-                    content.len()
-                )
-                .into_bytes(),
-            );
+            // FlateDecode-compress the page content stream (#662); the helper adds
+            // `/Filter /FlateDecode` and the compressed `/Length`.
+            objects.insert(content_obj[i], flate_stream(content.as_bytes(), ""));
         }
         let outlines = if item_count == 0 {
             "<< /Type /Outlines /Count 0 >>".to_string()
