@@ -9,7 +9,7 @@ use std::io::Read;
 use flate2::read::ZlibDecoder;
 
 use super::font::Fonts;
-use super::wrap::{words_of, wrap_lines, Word};
+use super::wrap::{words_of, wrap_lines, Hyphenate, Word};
 use super::*;
 use crate::export::{Chapter, EmbeddedFont, ExportStyle, FontRole, Part};
 
@@ -1086,10 +1086,10 @@ fn body_lines_are_justified_flush_to_the_right_margin() {
         )],
         false,
     );
-    let lines = wrap_lines(&pdf.layout, &words, BODY_SIZE, |_| full);
+    let lines = wrap_lines(&pdf.layout, &words, BODY_SIZE, Hyphenate::Off, |_| full);
     assert!(lines.len() >= 2, "the sample wraps to multiple lines");
     let (first, _) = &lines[0];
-    let first: Vec<&Word> = first.clone();
+    let first: Vec<Word> = first.clone();
     let left = pdf.left();
     pdf.draw_justified_line(left, pdf.y, &first, BODY_SIZE, full);
 
@@ -1212,6 +1212,105 @@ fn a_paragraph_does_not_widow_its_last_line_at_a_page_top() {
         None,
         "≥2 lines each side"
     );
+}
+
+/// Concatenate every word's text across all wrapped lines (a hyphenated head keeps its
+/// trailing `-`), so a test can look for a break point and reconstruct the whole word.
+fn wrapped_texts(lines: &[(Vec<Word>, f32)]) -> Vec<String> {
+    lines
+        .iter()
+        .flat_map(|(line, _)| line.iter().map(|w| w.text.clone()))
+        .collect()
+}
+
+#[test]
+fn a_long_word_hyphenates_at_a_justified_line_break() {
+    // A justified body line that can't fit a long word whole breaks it at a valid en-US
+    // point: the head ends with a hyphen on one line and the tail continues on the next,
+    // tightening the fill instead of forcing a loose gap (#678).
+    let layout = Layout::screen(&plain());
+    let words = words_of(
+        &[Run::new(
+            "The complicated extraordinary machinery",
+            false,
+            false,
+        )],
+        false,
+    );
+    // A column just wide enough that "extraordinary" overflows after "complicated" and
+    // must break to keep the line full.
+    let width = layout.measure(
+        "The complicated extra",
+        BODY_SIZE,
+        FontStyle::REGULAR,
+        false,
+    );
+    let lines = wrap_lines(&layout, &words, BODY_SIZE, Hyphenate::On, |_| width);
+    let texts = wrapped_texts(&lines);
+    // Some fragment ends in a hyphen (a taken break), and no fragment overflows the
+    // column — the head was chosen to fit.
+    assert!(
+        texts.iter().any(|t| t.ends_with('-')),
+        "a long word was hyphenated: {texts:?}"
+    );
+    for t in &texts {
+        assert!(
+            layout.measure(t, BODY_SIZE, FontStyle::REGULAR, false) <= width + 0.01,
+            "no fragment overflows the column: {t:?}"
+        );
+    }
+    // Stripping the break hyphens reconstructs the original words in order (nothing lost).
+    let joined: String = texts
+        .iter()
+        .map(|t| t.strip_suffix('-').unwrap_or(t))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // The head/tail of a split are adjacent words with no space, so collapse the pair.
+    assert!(
+        joined.replace("- ", "").contains("extraordinary") || joined.contains("extraordinary"),
+        "the split word round-trips: {joined:?}"
+    );
+}
+
+#[test]
+fn hyphenation_is_off_for_non_justified_flows() {
+    // Headings/epigraphs pass `Hyphenate::Off`, so even a long word that overflows a
+    // narrow width is never broken — it moves whole to the next line (#678).
+    let layout = Layout::screen(&plain());
+    let words = words_of(&[Run::new("The extraordinary heading", true, false)], true);
+    let width = layout.measure("The extra", HEADING_SIZE, FontStyle::REGULAR, true);
+    let lines = wrap_lines(&layout, &words, HEADING_SIZE, Hyphenate::Off, |_| width);
+    let texts = wrapped_texts(&lines);
+    assert!(
+        !texts.iter().any(|t| t.ends_with('-')),
+        "no heading word is hyphenated: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t == "extraordinary"),
+        "the long word stays whole: {texts:?}"
+    );
+}
+
+#[test]
+fn short_words_and_stub_fragments_are_never_hyphenated() {
+    // A short word (below the minimum) and one whose only breaks would leave a stub are
+    // left whole even when hyphenation is on — a broken stub reads worse than a gap.
+    let layout = Layout::screen(&plain());
+    // "rivers" has no en-US pattern break; "cat" is too short. Neither breaks.
+    for word in ["cat", "rivers", "the"] {
+        let words = words_of(
+            &[Run::new(format!("A {word} here now"), false, false)],
+            false,
+        );
+        // A width so tight each word wraps to its own line, forcing the break attempt.
+        let width = layout.measure("A r", BODY_SIZE, FontStyle::REGULAR, false);
+        let lines = wrap_lines(&layout, &words, BODY_SIZE, Hyphenate::On, |_| width);
+        let texts = wrapped_texts(&lines);
+        assert!(
+            texts.iter().any(|t| t == word),
+            "{word:?} stays whole: {texts:?}"
+        );
+    }
 }
 
 #[test]

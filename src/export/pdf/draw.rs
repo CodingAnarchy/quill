@@ -6,7 +6,7 @@
 
 use super::font::{glyph_run, glyph_run_mono, OBLIQUE_SHEAR};
 use super::layout::Layout;
-use super::wrap::{segments, words_of, wrap_lines, Seg, Word};
+use super::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg, Word};
 use super::{Align, FontStyle, Pdf, Run, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
 
 impl Pdf {
@@ -60,8 +60,15 @@ impl Pdf {
         align: Align,
     ) {
         let col = self.layout.text_w();
+        // Hyphenate only justified body paragraphs (#678); centered/inset flows
+        // (headings, epigraphs, ornaments) never break words.
+        let hyphenate = if align == Align::Justify {
+            Hyphenate::On
+        } else {
+            Hyphenate::Off
+        };
         // The first line is narrowed by the indent; the rest run the full width.
-        let lines = wrap_lines(&self.layout, words, size, |i| {
+        let lines = wrap_lines(&self.layout, words, size, hyphenate, |i| {
             if i == 0 {
                 max_width - first_indent
             } else {
@@ -154,7 +161,7 @@ impl Pdf {
         &mut self,
         x: f32,
         y: f32,
-        line: &[&Word],
+        line: &[Word],
         size: f32,
         target: f32,
     ) {
