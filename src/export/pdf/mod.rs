@@ -179,6 +179,8 @@ fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
     // so the body lands on the right pages; fill them once the folios are known.
     let titles = doc_toc_titles(doc);
     let toc = pdf.reserve_contents(&titles);
+    // Everything laid out so far is front matter (roman folios); the body starts here.
+    pdf.begin_body();
     pdf.outline = book_outline(&mut pdf, doc);
     let entries = toc_entries(&pdf.outline);
     pdf.fill_contents(toc, &entries);
@@ -209,6 +211,8 @@ fn render_series(
         titles.extend(doc_toc_titles(book).into_iter().map(|(t, _)| (t, false)));
     }
     let toc = pdf.reserve_contents(&titles);
+    // The series/title/copyright/Contents are front matter (roman); books are the body.
+    pdf.begin_body();
     let mut outline = Vec::new();
     for book in books {
         pdf.set_heads(&book.title, author.unwrap_or(&book.title));
@@ -323,6 +327,34 @@ struct PageMeta {
     blank: bool,
 }
 
+/// The lowercase roman numeral for `n` (1 → "i", 4 → "iv", 2026 → "mmxxvi"). Used to
+/// number front-matter folios by convention (#651); a zero yields the empty string.
+fn roman(mut n: usize) -> String {
+    const UNITS: [(usize, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut s = String::new();
+    for (value, glyph) in UNITS {
+        while n >= value {
+            s.push_str(glyph);
+            n -= value;
+        }
+    }
+    s
+}
+
 /// The non-font `[style]` settings the layout consults (#489): the scene-break
 /// glyph, heading alignment, drop cap, and ornament glyphs. Fonts live in the
 /// `Layout`'s [`FontPlan`]; a default `StyleBits` reproduces the plain output.
@@ -363,6 +395,10 @@ struct Pdf {
     outline: Vec<OutlineItem>,
     head_verso: String,
     head_recto: String,
+    /// The first body page index (#651): pages before it are front matter, numbered
+    /// in lowercase roman; the body from here is Arabic starting at 1. `usize::MAX`
+    /// until the body begins, so every page laid out so far counts as front matter.
+    body_start: usize,
 }
 
 impl Pdf {
@@ -377,7 +413,40 @@ impl Pdf {
             outline: Vec::new(),
             head_verso: String::new(),
             head_recto: String::new(),
+            body_start: usize::MAX,
         }
+    }
+
+    /// Mark the body as beginning at the next page to be started (#651): everything
+    /// laid out so far (cover/title/copyright/Contents) is front matter, numbered in
+    /// roman; from here folios run Arabic from 1. Called once, before the body.
+    fn begin_body(&mut self) {
+        self.body_start = self.pages.len();
+    }
+
+    /// The printed folio label for page `i` under the roman-front/Arabic-body scheme
+    /// (#651), or `None` when the page carries no folio (blank/cover pages, and the
+    /// unnumbered opening title page). Front-matter pages are counted in roman from the
+    /// first numbered front page; body pages in Arabic from 1. Both count only
+    /// non-blank pages, so inserted blank versos don't consume a folio.
+    fn folio_label(&self, i: usize) -> Option<String> {
+        if self.meta[i].blank {
+            return None;
+        }
+        if i >= self.body_start {
+            // Arabic, counting non-blank pages since the body began.
+            let n = (self.body_start..=i)
+                .filter(|&j| !self.meta[j].blank)
+                .count();
+            return Some(n.to_string());
+        }
+        // Roman, counting non-blank front-matter pages. The very first numbered front
+        // page is the title page, which by convention shows no folio though it counts.
+        let n = (0..=i).filter(|&j| !self.meta[j].blank).count();
+        if n <= 1 {
+            return None;
+        }
+        Some(roman(n))
     }
 
     /// The decoded image ornament for `role`, if one was configured and decodable.
@@ -660,7 +729,8 @@ impl Pdf {
 
     /// Fill the reserved Contents page(s) with the planned lines, drawing each title
     /// and the right-aligned folio of the entry it heads (the folio label matches the
-    /// page decoration: page index + 1). Runs after the body so folios are final.
+    /// page decoration's roman-front/Arabic-body scheme, #651). Runs after the body so
+    /// folios are final.
     fn fill_contents(&mut self, plan: Option<TocPlan>, folios: &[Option<usize>]) {
         let Some(plan) = plan else { return };
         debug_assert_eq!(
@@ -676,12 +746,13 @@ impl Pdf {
             let idx = plan.start + line.page;
             let left = self.layout.left(idx);
             let mut block = self.glyph_block(left, line.y, line.size, seg_refs(&line.runs));
-            // The right-aligned folio on the entry's first line.
-            if let Some(folio) = line
+            // The right-aligned folio on the entry's first line, labeled under the
+            // same scheme the page decoration uses (#651).
+            if let Some(label) = line
                 .folio_entry
                 .and_then(|i| folios.get(i).copied().flatten())
+                .and_then(|folio| self.folio_label(folio))
             {
-                let label = (folio + 1).to_string();
                 let w = self
                     .layout
                     .measure(&label, line.size, FontStyle::REGULAR, false);
@@ -906,9 +977,9 @@ impl Pdf {
         let recto = i.is_multiple_of(2);
         let left = self.layout.left(i);
         let col = self.layout.text_w();
-        // Folio (the title page, index 0, is unnumbered). Number = physical page.
-        if i > 0 {
-            let label = (i + 1).to_string();
+        // Folio under the roman-front/Arabic-body scheme (#651). The title page and
+        // blank/cover pages carry no folio (`folio_label` returns `None`).
+        if let Some(label) = self.folio_label(i) {
             let size = if self.layout.running_heads {
                 HEAD_SIZE
             } else {

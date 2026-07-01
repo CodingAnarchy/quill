@@ -776,6 +776,171 @@ fn a_long_contents_flows_onto_a_second_page() {
 }
 
 #[test]
+fn roman_numerals_render_the_conventional_forms() {
+    // The front-matter folio converter (#651): the compact subtractive forms.
+    for (n, s) in [
+        (1, "i"),
+        (2, "ii"),
+        (3, "iii"),
+        (4, "iv"),
+        (5, "v"),
+        (9, "ix"),
+        (10, "x"),
+        (14, "xiv"),
+        (40, "xl"),
+        (49, "xlix"),
+        (90, "xc"),
+        (2026, "mmxxvi"),
+    ] {
+        assert_eq!(roman(n), s, "{n} → {s}");
+    }
+    assert_eq!(roman(0), "", "zero has no numeral");
+}
+
+/// Lay out `d` the way `render_book` does — title, copyright, reserved Contents, then
+/// the body — so `folio_label` reflects the real front/body split (#651). Returns the
+/// laid-out `Pdf` and the per-entry folio page indices the Contents shows.
+fn laid_out(d: &Document) -> (Pdf, Vec<Option<usize>>) {
+    let (w, h) = trim_points("6x9").unwrap();
+    let mut pdf = Pdf::new(
+        Layout::print(w, h, &plain()),
+        StyleBits::from_style(&plain()),
+        vec![],
+    );
+    pdf.title_page(
+        d.series.as_deref(),
+        &d.title,
+        d.subtitle.as_deref(),
+        d.author.as_deref(),
+        d.epigraph.as_ref(),
+    );
+    pdf.copyright_page(&d.publishing);
+    pdf.reserve_contents(&doc_toc_titles(d));
+    pdf.begin_body();
+    pdf.outline = book_outline(&mut pdf, d);
+    let folios = toc_entries(&pdf.outline);
+    (pdf, folios)
+}
+
+#[test]
+fn front_matter_folios_are_roman_and_the_body_restarts_at_arabic_one() {
+    // The #651 scheme: the title page is unnumbered, the following front-matter pages
+    // (copyright, Contents) carry roman folios, and the first body page is Arabic "1".
+    let mut d = doc();
+    d.publishing = PubMeta {
+        rights: Some("© 2026 A. Writer".into()),
+        ..Default::default()
+    };
+    let (pdf, _) = laid_out(&d);
+    // Page 0 is the title page (opener, non-blank): counted but unnumbered.
+    assert_eq!(pdf.folio_label(0), None, "title page unnumbered");
+    // The pages before the body are all roman (or unnumbered), never Arabic.
+    for i in 0..pdf.body_start {
+        if let Some(label) = pdf.folio_label(i) {
+            assert!(
+                label.chars().all(|c| "ivxlcdm".contains(c)),
+                "front-matter folio {label:?} at page {i} is roman"
+            );
+        }
+    }
+    // At least one front-matter page actually shows a roman folio (copyright/Contents).
+    assert!(
+        (0..pdf.body_start).any(|i| pdf.folio_label(i).as_deref() == Some("ii")),
+        "a front-matter page is folio ii"
+    );
+    // The first numbered body page (a recto start may insert a blank verso first) is
+    // Arabic 1.
+    let first_body = (pdf.body_start..pdf.meta.len())
+        .find(|&i| !pdf.meta[i].blank)
+        .expect("a body page");
+    assert_eq!(
+        pdf.folio_label(first_body),
+        Some("1".to_string()),
+        "the body starts at Arabic 1"
+    );
+    // No body page carries a roman folio.
+    for i in pdf.body_start..pdf.meta.len() {
+        if let Some(label) = pdf.folio_label(i) {
+            assert!(
+                label.chars().all(|c| c.is_ascii_digit()),
+                "body folio {label:?} at page {i} is Arabic"
+            );
+        }
+    }
+}
+
+#[test]
+fn blank_and_cover_pages_carry_no_folio() {
+    // Recto starts insert blank versos, and a cover leads page 0 (#651/#582): none of
+    // those pages take a folio, and skipping them keeps the count contiguous.
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(png_bytes(600, 900, 255)));
+    let (w, h) = trim_points("6x9").unwrap();
+    let mut pdf = Pdf::new(
+        Layout::print(w, h, &style),
+        StyleBits::from_style(&style),
+        decode_images(&style),
+    );
+    let d = doc();
+    pdf.cover_page();
+    pdf.title_page(None, &d.title, None, d.author.as_deref(), None);
+    pdf.copyright_page(&d.publishing);
+    pdf.reserve_contents(&doc_toc_titles(&d));
+    pdf.begin_body();
+    pdf.outline = book_outline(&mut pdf, &d);
+    // Every blank page (cover + inserted blank versos) is unnumbered.
+    for (i, m) in pdf.meta.iter().enumerate() {
+        if m.blank {
+            assert_eq!(pdf.folio_label(i), None, "blank page {i} unnumbered");
+        }
+    }
+    // The Arabic body folios are contiguous (1, 2, 3, …) despite the blank versos.
+    let body: Vec<String> = (pdf.body_start..pdf.meta.len())
+        .filter_map(|i| pdf.folio_label(i))
+        .collect();
+    let expected: Vec<String> = (1..=body.len()).map(|n| n.to_string()).collect();
+    assert_eq!(body, expected, "body folios run 1,2,3,… skipping blanks");
+}
+
+#[test]
+fn contents_folios_use_the_body_scheme() {
+    // The printed Contents lists each entry's folio under the same scheme as the page
+    // decoration (#651): body chapters land on Arabic labels, not physical indices.
+    let (pdf, folios) = laid_out(&doc());
+    let labels: Vec<String> = folios
+        .iter()
+        .filter_map(|f| f.and_then(|i| pdf.folio_label(i)))
+        .collect();
+    // Prologue, chapter, afterword each get a folio (the part heading doesn't).
+    assert_eq!(labels.len(), 3, "three entries carry a folio");
+    // Every Contents folio is Arabic (the body), matching the decoration scheme.
+    for label in &labels {
+        assert!(
+            label.chars().all(|c| c.is_ascii_digit()),
+            "Contents folio {label:?} is Arabic"
+        );
+    }
+    // The prologue (first body section) is folio 1, and the folios ascend.
+    assert_eq!(labels[0], "1", "the first body entry is folio 1");
+    let nums: Vec<usize> = labels.iter().map(|l| l.parse().unwrap()).collect();
+    assert!(
+        nums.windows(2).all(|w| w[0] < w[1]),
+        "Contents folios ascend, got {nums:?}"
+    );
+    // The label matches what the page itself is numbered.
+    for (entry, label) in folios.iter().flatten().zip(&labels) {
+        assert_eq!(
+            pdf.folio_label(*entry).as_deref(),
+            Some(label.as_str()),
+            "Contents folio matches the page's own folio"
+        );
+    }
+}
+
+#[test]
 fn style_warnings_flag_svg_and_truly_uncovered_glyphs() {
     // SVG can't be rasterized for PDF.
     let mut svg = ExportStyle {
