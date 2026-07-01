@@ -12,13 +12,14 @@
 //! not scratch. Restore refuses to clobber an existing project, so a stray path
 //! can't overwrite one.
 
-use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::fs::{self, File};
+use std::io::{Cursor, Read};
 use std::path::{Component, Path, PathBuf};
 
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+use crate::atomic;
 use crate::project::MANIFEST_NAME;
 
 /// The default file name for a project's archive: `<project>-<stamp>.zip`, where
@@ -98,6 +99,12 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<(
 /// stored under its project-relative path so restore reproduces the layout. The
 /// destination's parent directory is created if needed. Returns the number of
 /// files written.
+///
+/// The zip streams straight to a sibling temp file, which is `sync_all`ed and
+/// renamed over `dest` ([`atomic::write_with`]), so the whole compressed project
+/// never sits in memory and a failed or colliding write (e.g. two same-second
+/// backups) leaves any prior archive at `dest` intact rather than truncated
+/// (#658).
 pub fn write_archive(root: &Path, dest: &Path) -> std::io::Result<usize> {
     let files = archived_files(root)?;
     if let Some(parent) = dest.parent() {
@@ -105,23 +112,25 @@ pub fn write_archive(root: &Path, dest: &Path) -> std::io::Result<usize> {
             fs::create_dir_all(parent)?;
         }
     }
-    let bytes = build_zip(root, &files)?;
-    fs::write(dest, bytes)?;
+    atomic::write_with(dest, |file| stream_zip(root, &files, file))?;
     Ok(files.len())
 }
 
-/// Build the archive's bytes: one deflate-compressed entry per file, keyed by its
-/// forward-slash relative path (the portable zip separator).
-fn build_zip(root: &Path, files: &[PathBuf]) -> std::io::Result<Vec<u8>> {
-    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+/// Stream the archive into `sink`: one deflate-compressed entry per file, keyed
+/// by its forward-slash relative path (the portable zip separator). Each file's
+/// bytes are copied through a small buffer rather than read whole, so a large
+/// chapter never lands in memory in full.
+fn stream_zip(root: &Path, files: &[PathBuf], sink: &mut File) -> std::io::Result<()> {
+    let mut zip = ZipWriter::new(sink);
     let opts = SimpleFileOptions::default();
     for rel in files {
         let name = zip_name(rel);
         zip.start_file(name, opts).map_err(std::io::Error::other)?;
-        let data = fs::read(root.join(rel))?;
-        zip.write_all(&data)?;
+        let mut src = File::open(root.join(rel))?;
+        std::io::copy(&mut src, &mut zip)?;
     }
-    Ok(zip.finish().map_err(std::io::Error::other)?.into_inner())
+    zip.finish().map_err(std::io::Error::other)?;
+    Ok(())
 }
 
 /// A relative path as a forward-slash zip entry name, so archives read the same
@@ -259,6 +268,44 @@ mod tests {
         assert!(!names.iter().any(|n| n.starts_with("export/")));
         assert!(!names.contains(&"bible/.state.toml".to_string()));
         assert!(!names.contains(&".DS_Store".to_string()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_prior_archive_intact() {
+        let dir = scratch_dir("archive", "atomic");
+        let root = dir.join("book");
+        seed_project(&root);
+        let zip = dir.join("out.zip");
+
+        // A first, good archive at the destination.
+        write_archive(&root, &zip).unwrap();
+        let before = fs::read(&zip).unwrap();
+        assert!(ZipArchive::new(Cursor::new(before.clone())).is_ok());
+
+        // A second write to the same name that fails after the temp is written
+        // but before the rename — the collision case a same-second backup hits.
+        crate::atomic::fail_point::arm_pre_rename_failure();
+        let err = write_archive(&root, &zip).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+
+        // The prior archive is byte-for-byte intact — not truncated or replaced
+        // by a half-written zip — and still opens.
+        let after = fs::read(&zip).unwrap();
+        assert_eq!(
+            after, before,
+            "the prior archive must survive a failed write"
+        );
+        assert!(ZipArchive::new(Cursor::new(after)).is_ok());
+
+        // No temp file left behind.
+        let strays: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(strays.is_empty(), "temp file left behind: {strays:?}");
 
         let _ = fs::remove_dir_all(&dir);
     }
