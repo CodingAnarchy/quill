@@ -128,6 +128,19 @@ struct Builder {
     /// Publishing metadata (#583): drives the OPF `dc:*`, the per-document
     /// `xml:lang`/`lang`, and the copyright page.
     publishing: PubMeta,
+    /// The landmark hrefs (#604), captured as the front matter and the first body
+    /// section are added, so [`Builder::finish`] can build the `landmarks` nav.
+    landmarks: Landmarks,
+}
+
+/// The `landmarks` nav targets (#604): the cover page, the title page, and the
+/// first body-matter section ("Begin Reading"). Each is captured the first time
+/// its section is added; the `toc` landmark points at the nav doc itself.
+#[derive(Default)]
+struct Landmarks {
+    cover: Option<String>,
+    titlepage: Option<String>,
+    bodymatter: Option<String>,
 }
 
 impl Builder {
@@ -137,16 +150,19 @@ impl Builder {
             items: Vec::new(),
             style: style.clone(),
             publishing: publishing.clone(),
+            landmarks: Landmarks::default(),
         }
     }
 
     /// Add a content document (XHTML `body`), returning its href. Files are added
-    /// in reading order, so the items list doubles as the spine order.
-    fn add(&mut self, prefix: &str, head_title: &str, body: String) -> String {
+    /// in reading order, so the items list doubles as the spine order. `epub_type`
+    /// tags the `<body>` with EPUB 3 structural semantics (#604) — `cover`,
+    /// `titlepage`, `frontmatter`, `bodymatter`, `backmatter`.
+    fn add(&mut self, prefix: &str, head_title: &str, epub_type: &str, body: String) -> String {
         self.seq += 1;
         let id = format!("{prefix}{:04}", self.seq);
         let href = format!("{id}.xhtml");
-        let xhtml = xhtml_doc(head_title, &body, self.publishing.language());
+        let xhtml = xhtml_doc(head_title, epub_type, &body, self.publishing.language());
         self.items.push(Item {
             id,
             href: href.clone(),
@@ -167,7 +183,8 @@ impl Builder {
             "<div class=\"cover\"><img src=\"{}\" alt=\"Cover\"/></div>\n",
             img.href
         );
-        self.add("cover", "Cover", body);
+        let href = self.add("cover", "Cover", "cover", body);
+        self.landmarks.cover = Some(href);
     }
 
     /// The title page (not itself a TOC entry): series, title, subtitle, author,
@@ -201,7 +218,8 @@ impl Builder {
         if let Some(e) = epigraph {
             body.push_str(&epigraph_xhtml(e));
         }
-        self.add("title", title, body);
+        let href = self.add("title", title, "titlepage", body);
+        self.landmarks.titlepage = Some(href);
     }
 
     /// The copyright page (#583), when publishing metadata warrants one: the
@@ -219,10 +237,11 @@ impl Builder {
             push_p(&mut body, "copyright", &line);
         }
         body.push_str("</div>\n");
-        self.add("copyright", "Copyright", body);
+        self.add("copyright", "Copyright", "copyright-page", body);
     }
 
-    /// A series book's divider page: its title, subtitle, and epigraph.
+    /// A series book's divider page: its title, subtitle, and epigraph. Body
+    /// matter (#604) — the first divider is the "Begin Reading" landmark.
     fn add_book_divider(&mut self, doc: &Document) -> String {
         let mut body = heading_with_ornament("book-title", &doc.title, None);
         if let Some(s) = &doc.subtitle {
@@ -231,12 +250,24 @@ impl Builder {
         if let Some(e) = &doc.epigraph {
             body.push_str(&epigraph_xhtml(e));
         }
-        self.add("book", &doc.title, body)
+        let href = self.add("book", &doc.title, "bodymatter", body);
+        self.landmarks
+            .bodymatter
+            .get_or_insert_with(|| href.clone());
+        href
     }
 
     /// One chapter or section as its own XHTML document, returning its TOC entry.
-    fn add_chapter(&mut self, ch: &Chapter) -> Nav {
-        let href = self.add("chap", &ch.title, chapter_body(ch, &self.style));
+    /// `epub_type` is the structural role (#604): `frontmatter` for front chapters,
+    /// `bodymatter` for the body, `backmatter` for the back; the first body-matter
+    /// section becomes the "Begin Reading" landmark.
+    fn add_chapter(&mut self, ch: &Chapter, epub_type: &str) -> Nav {
+        let href = self.add("chap", &ch.title, epub_type, chapter_body(ch, &self.style));
+        if epub_type == "bodymatter" {
+            self.landmarks
+                .bodymatter
+                .get_or_insert_with(|| href.clone());
+        }
         Nav {
             label: ch.title.clone(),
             href,
@@ -250,7 +281,7 @@ impl Builder {
     fn book_sections(&mut self, doc: &Document) -> Vec<Nav> {
         let mut nav = Vec::new();
         for ch in &doc.front {
-            nav.push(self.add_chapter(ch));
+            nav.push(self.add_chapter(ch, "frontmatter"));
         }
         for part in &doc.parts {
             match &part.name {
@@ -260,8 +291,17 @@ impl Builder {
                         name,
                         self.style.part_ornament.as_deref(),
                     );
-                    let href = self.add("part", name, body);
-                    let children = part.chapters.iter().map(|c| self.add_chapter(c)).collect();
+                    // The part divider begins the body matter (#604) — a candidate
+                    // "Begin Reading" landmark ahead of its chapters.
+                    let href = self.add("part", name, "bodymatter", body);
+                    self.landmarks
+                        .bodymatter
+                        .get_or_insert_with(|| href.clone());
+                    let children = part
+                        .chapters
+                        .iter()
+                        .map(|c| self.add_chapter(c, "bodymatter"))
+                        .collect();
                     nav.push(Nav {
                         label: name.clone(),
                         href,
@@ -270,13 +310,13 @@ impl Builder {
                 }
                 None => {
                     for ch in &part.chapters {
-                        nav.push(self.add_chapter(ch));
+                        nav.push(self.add_chapter(ch, "bodymatter"));
                     }
                 }
             }
         }
         for ch in &doc.back {
-            nav.push(self.add_chapter(ch));
+            nav.push(self.add_chapter(ch, "backmatter"));
         }
         nav
     }
@@ -308,7 +348,7 @@ impl Builder {
             publishing: &self.publishing,
         };
         let opf = build_opf(&meta, &self.items, &self.style.fonts, &self.style.images);
-        let nav_doc = build_nav(&nav, self.publishing.language());
+        let nav_doc = build_nav(&nav, &self.landmarks, self.publishing.language());
         let ncx = build_ncx(&id, title, &nav);
 
         let mut parts: Vec<(String, Vec<u8>)> = vec![
@@ -405,21 +445,26 @@ fn stylesheet(style: &ExportStyle) -> String {
     css
 }
 
-/// Wrap an XHTML `body` in the document shell (XHTML namespace, the shared
-/// stylesheet, an escaped `<title>`).
-fn xhtml_doc(title: &str, body: &str, lang: &str) -> String {
+/// Wrap an XHTML `body` in the document shell (XHTML + EPUB namespaces, the
+/// shared stylesheet, an escaped `<title>`). `epub_type` tags the `<body>` with
+/// the EPUB 3 structural semantics (#604) — `cover`, `titlepage`, `frontmatter`,
+/// `bodymatter`, `backmatter` — so readers and the `landmarks` nav can classify
+/// the section.
+fn xhtml_doc(title: &str, epub_type: &str, body: &str, lang: &str) -> String {
     let lang = xml_escape(lang);
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
             "<!DOCTYPE html>\n",
-            "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{lang}\" lang=\"{lang}\">",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\" ",
+            "xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{lang}\" lang=\"{lang}\">",
             "<head><meta charset=\"utf-8\"/><title>{title}</title>",
             "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head>",
-            "<body>\n{body}</body></html>"
+            "<body epub:type=\"{epub_type}\">\n{body}</body></html>"
         ),
         lang = lang,
         title = xml_escape(title),
+        epub_type = xml_escape(epub_type),
         body = body,
     )
 }
@@ -1052,6 +1097,43 @@ mod tests {
         let plain = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
         assert!(!names(&plain).iter().any(|n| n.starts_with("OEBPS/images/")));
         assert!(!part(&plain, "OEBPS/chap0004.xhtml").contains("<img"));
+    }
+
+    #[test]
+    fn content_docs_carry_epub_type_structural_semantics() {
+        // With a cover image and publishing metadata: cover → title → copyright →
+        // front (Prologue) → part divider → chapter → back (Afterword). Each body
+        // carries its EPUB 3 structural role (#604) and declares the epub namespace.
+        let mut style = ExportStyle {
+            cover_image: Some("art/cover.png".into()),
+            ..Default::default()
+        };
+        style.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+        let mut d = doc();
+        d.publishing = PubMeta {
+            rights: Some("© 2026 A. Writer".into()),
+            ..Default::default()
+        };
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+
+        let carries = |file: &str, kind: &str| {
+            let x = part(&bytes, file);
+            assert!(
+                x.contains("xmlns:epub=\"http://www.idpf.org/2007/ops\""),
+                "{file} declares the epub namespace: {x}"
+            );
+            assert!(
+                x.contains(&format!("<body epub:type=\"{kind}\">")),
+                "{file} is {kind}: {x}"
+            );
+        };
+        carries("OEBPS/cover0001.xhtml", "cover");
+        carries("OEBPS/title0002.xhtml", "titlepage");
+        carries("OEBPS/copyright0003.xhtml", "copyright-page");
+        carries("OEBPS/chap0004.xhtml", "frontmatter"); // Prologue
+        carries("OEBPS/part0005.xhtml", "bodymatter"); // Part One divider
+        carries("OEBPS/chap0006.xhtml", "bodymatter"); // The Find
+        carries("OEBPS/chap0007.xhtml", "backmatter"); // Afterword
     }
 
     #[test]
