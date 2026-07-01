@@ -84,6 +84,11 @@ pub(crate) mod fail_point {
 
     thread_local! {
         static FAIL_BEFORE_RENAME: Cell<bool> = const { Cell::new(false) };
+        // Countdown to a one-shot failure on the Nth write: each write decrements
+        // it, and it fires (once) when it reaches 1. `0` means disarmed, so a
+        // multi-write operation can be failed at a chosen step without arming
+        // between the internal writes it doesn't expose.
+        static FAIL_ON_NTH: Cell<usize> = const { Cell::new(0) };
     }
 
     /// Arm a one-shot failure that fires inside the next [`super::write`] on this
@@ -92,10 +97,33 @@ pub(crate) mod fail_point {
         FAIL_BEFORE_RENAME.with(|f| f.set(true));
     }
 
+    /// Arm a one-shot failure that fires on the `n`th [`super::write`] on this
+    /// thread (1-based), after that write's temp file is written but before its
+    /// rename. Lets a test fault a specific step of a multi-write operation
+    /// (e.g. [`Project::import_chapters`](crate::project::Project::import_chapters))
+    /// without arming between the writes it performs internally.
+    pub(crate) fn arm_pre_rename_failure_on_nth(n: usize) {
+        FAIL_ON_NTH.with(|f| f.set(n));
+    }
+
     /// Whether the current write should fail before its rename, consuming the
-    /// armed flag (so it fires exactly once).
+    /// one-shot arming (either the next-write flag or the Nth-write countdown) so
+    /// it fires exactly once.
     pub(crate) fn should_fail_before_rename() -> bool {
-        FAIL_BEFORE_RENAME.with(|f| f.replace(false))
+        if FAIL_BEFORE_RENAME.with(|f| f.replace(false)) {
+            return true;
+        }
+        FAIL_ON_NTH.with(|f| match f.get() {
+            0 => false,
+            1 => {
+                f.set(0);
+                true
+            }
+            n => {
+                f.set(n - 1);
+                false
+            }
+        })
     }
 }
 
