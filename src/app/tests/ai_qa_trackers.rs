@@ -111,6 +111,127 @@ fn qa_error_sets_a_message_not_a_panel() {
     );
 }
 
+/// Drive a structured Q&A reply (JSON with citations) through `apply_qa_result`
+/// like the async path does, recording the question first as `ask_ai` would.
+fn answer_with_citations(app: &mut App, question: &str, json: &str) {
+    let backend = MockBackend {
+        result: Ok(json.to_string()),
+    };
+    let req = ai::build_qa_request(app.manuscript_text(), question, &app.ai.model);
+    app.pending_qa_question = Some(question.to_string());
+    app.apply_qa_result(backend.complete(&req));
+}
+
+#[test]
+fn qa_answer_with_citations_renders_jumpable_entries() {
+    let (mut app, _dir) = two_chapter_app("ai-cite");
+    answer_with_citations(
+        &mut app,
+        "where is the locket?",
+        r#"{"answer":"The locket appears in chapter Two.","citations":["Two"]}"#,
+    );
+    match &app.mode {
+        Mode::Findings(f) => {
+            // The answer prose leads as non-jumpable context …
+            let text: String = f.items.iter().map(|i| i.summary.clone()).collect();
+            assert!(text.contains("appears in chapter Two"), "{text}");
+            let context = &f.items[f.selected.min(1).saturating_sub(1)];
+            assert!(
+                context.chapters.is_empty(),
+                "answer rows aren't jump targets"
+            );
+            // … and the selected entry is the jumpable citation for the cited chapter.
+            let jump = &f.items[f.selected];
+            assert_eq!(jump.chapters, vec!["Two".to_string()]);
+            assert!(jump.summary.contains("Two"), "{}", jump.summary);
+        }
+        _ => panic!("citations should open a jumpable findings list"),
+    }
+}
+
+#[test]
+fn qa_citation_jump_opens_the_cited_chapter() {
+    let (mut app, _dir) = two_chapter_app("ai-cite-jump");
+    answer_with_citations(
+        &mut app,
+        "where is the locket?",
+        r#"{"answer":"See chapter Two.","citations":["Two"]}"#,
+    );
+    app.on_key(key(KeyCode::Enter)); // jump to the cited chapter
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(app.project.active_index(), 1, "jumped to chapter Two");
+}
+
+#[test]
+fn qa_answer_without_citations_stays_a_plain_overlay() {
+    let (mut app, _dir) = two_chapter_app("ai-cite-none");
+    answer_with_citations(
+        &mut app,
+        "is there a dragon?",
+        r#"{"answer":"The manuscript never mentions a dragon.","citations":[]}"#,
+    );
+    assert!(app.overlay.is_some(), "the answer still shows");
+    assert!(
+        !matches!(app.mode, Mode::Findings(_)),
+        "no citations → no jumpable list"
+    );
+}
+
+#[test]
+fn qa_log_records_asks_and_is_browsable() {
+    let (mut app, _dir) = two_chapter_app("ai-log");
+    answer_with_citations(
+        &mut app,
+        "who is in chapter one?",
+        r#"{"answer":"Mara, in chapter One.","citations":["One"]}"#,
+    );
+    answer_with_citations(
+        &mut app,
+        "and chapter two?",
+        r#"{"answer":"Nobody new.","citations":["Two"]}"#,
+    );
+    assert_eq!(app.qa_log.len(), 2, "both asks are logged");
+    assert_eq!(app.qa_log[0].question, "who is in chapter one?");
+    assert_eq!(app.qa_log[1].answer.citations, vec!["Two".to_string()]);
+
+    // Browsing the history opens a jumpable list of every past ask's citations,
+    // newest first, labeled with the question.
+    app.open_qa_history();
+    match &app.mode {
+        Mode::Findings(f) => {
+            assert_eq!(f.items.len(), 2, "one row per cited chapter, both asks");
+            assert!(
+                f.items[0].summary.contains("and chapter two?"),
+                "newest ask first: {}",
+                f.items[0].summary
+            );
+            assert_eq!(f.items[0].chapters, vec!["Two".to_string()]);
+        }
+        _ => panic!("history should open a jumpable findings list"),
+    }
+    app.on_key(key(KeyCode::Enter)); // jump from the history
+    assert_eq!(
+        app.project.active_index(),
+        1,
+        "jumped to the cited chapter Two"
+    );
+}
+
+#[test]
+fn qa_history_is_empty_before_any_ask() {
+    let (mut app, _dir) = two_chapter_app("ai-log-empty");
+    app.open_qa_history();
+    assert!(!matches!(app.mode, Mode::Findings(_)), "nothing to browse");
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No questions"),
+        "{:?}",
+        app.message
+    );
+}
+
 // --- AI: character tracking + story bible -----------------------------------
 
 #[test]

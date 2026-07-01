@@ -94,7 +94,7 @@ pub struct Request {
     pub max_tokens: u32,
     /// When set, the backend constrains the reply to this JSON Schema and the
     /// response text is guaranteed-valid JSON for the caller to deserialize.
-    /// `None` for free-form replies (Q&A).
+    /// `None` for a free-form reply.
     pub json_schema: Option<serde_json::Value>,
 }
 
@@ -502,12 +502,38 @@ impl Settings {
 
 /// System prompt for grounded manuscript Q&A.
 const QA_SYSTEM: &str = "You are a writing assistant answering questions about a \
-novel manuscript supplied by the user. Answer only from the manuscript, and cite \
-the chapter titles you draw your answer from. If the manuscript does not contain \
-the answer, say so plainly rather than guessing.";
+novel manuscript supplied by the user. Answer only from the manuscript. Put the \
+answer prose in `answer`, and list in `citations` the exact chapter titles you \
+drew the answer from (so the author can jump to them) — an empty list when the \
+answer names no chapter or the manuscript does not contain the answer. If the \
+manuscript does not contain the answer, say so plainly in `answer` rather than \
+guessing.";
+
+/// A grounded Q&A reply (#609): the answer prose plus the chapter titles it was
+/// drawn from, so the author can jump to each cited chapter (like a
+/// [`Finding`](crate::mode::Finding)). The AI answers *about* the manuscript — it
+/// never writes into it; `citations` are retrieval, not prose.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct Answer {
+    /// The answer prose, grounded in the manuscript.
+    pub answer: String,
+    /// Chapter titles the answer draws from — jumpable citations. May be empty.
+    #[serde(default)]
+    pub citations: Vec<String>,
+}
+
+/// The JSON Schema for a grounded Q&A reply (#609): the answer prose plus the
+/// cited chapter titles.
+pub fn qa_schema() -> serde_json::Value {
+    object_schema(
+        vec![("answer", string_field()), ("citations", string_array())],
+        &["answer", "citations"],
+    )
+}
 
 /// Build a Q&A request: the manuscript as the cacheable context, `question` as
-/// the prompt.
+/// the prompt, constrained to the [`qa_schema`] so the reply carries jumpable
+/// chapter citations (#609).
 pub fn build_qa_request(manuscript: String, question: &str, model: &str) -> Request {
     Request {
         system: Some(QA_SYSTEM.to_string()),
@@ -515,15 +541,27 @@ pub fn build_qa_request(manuscript: String, question: &str, model: &str) -> Requ
         user: question.to_string(),
         model: model.to_string(),
         max_tokens: 1024,
-        json_schema: None,
+        json_schema: Some(qa_schema()),
     }
 }
 
-/// Render a completion as overlay lines: the answer, then a dimmed usage line.
-/// Long lines are wrapped by the renderer (the overlay enables wrapping).
-pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
-    let mut out: Vec<Line> = resp
-        .text
+/// Parse a Q&A reply into an [`Answer`] (#609). The schema guarantees the JSON
+/// shape, but a backend that ignores it (or a mock returning free text) falls
+/// back to treating the whole reply as the answer with no citations, so the Q&A
+/// flow never hard-fails on a well-meaning but unstructured reply.
+pub fn parse_answer(text: &str) -> Answer {
+    serde_json::from_str::<Answer>(text).unwrap_or_else(|_| Answer {
+        answer: text.to_string(),
+        citations: Vec::new(),
+    })
+}
+
+/// Render a Q&A answer's prose as overlay lines: the answer, then a dimmed usage
+/// line. Long lines are wrapped by the renderer (the overlay enables wrapping).
+/// Citations are surfaced separately as jumpable entries (#609).
+pub fn answer_to_lines(answer: &Answer, usage: &Usage) -> Vec<Line<'static>> {
+    let mut out: Vec<Line> = answer
+        .answer
         .lines()
         .map(|l| Line::raw(l.to_string()))
         .collect();
@@ -531,11 +569,10 @@ pub fn answer_to_lines(resp: &Response) -> Vec<Line<'static>> {
         out.push(Line::raw("(no answer)"));
     }
     out.push(Line::raw(""));
-    let u = &resp.usage;
     out.push(Line::from(Span::styled(
         format!(
             "{} tokens in ({} cached) · {} out",
-            u.input_tokens, u.cache_read_tokens, u.output_tokens
+            usage.input_tokens, usage.cache_read_tokens, usage.output_tokens
         ),
         Style::default().fg(theme::current().dim),
     )));
@@ -679,19 +716,39 @@ mod tests {
         assert_eq!(req.user, "where is the locket?");
         assert_eq!(req.model, "claude-opus-4-8");
         assert!(req.system.is_some());
+        // The reply is now schema-constrained so it carries jumpable citations (#609).
+        let schema = req.json_schema.expect("Q&A is now structured");
+        assert_eq!(
+            schema["required"],
+            serde_json::json!(["answer", "citations"])
+        );
+    }
+
+    #[test]
+    fn parse_answer_reads_structured_reply_and_falls_back() {
+        // Structured reply: answer prose plus cited chapter titles (#609).
+        let a = parse_answer(r#"{"answer":"In Chapter One.","citations":["One","Two"]}"#);
+        assert_eq!(a.answer, "In Chapter One.");
+        assert_eq!(a.citations, vec!["One".to_string(), "Two".to_string()]);
+        // A non-JSON reply (a mock, or a backend that ignores the schema) is taken
+        // whole as the answer with no citations, so the flow never hard-fails.
+        let plain = parse_answer("Just some prose.");
+        assert_eq!(plain.answer, "Just some prose.");
+        assert!(plain.citations.is_empty());
     }
 
     #[test]
     fn answer_to_lines_renders_answer_and_usage() {
-        let resp = Response {
-            text: "Chapter One introduces the locket.".into(),
-            usage: Usage {
-                input_tokens: 1200,
-                output_tokens: 30,
-                cache_read_tokens: 1000,
-            },
+        let answer = Answer {
+            answer: "Chapter One introduces the locket.".into(),
+            citations: vec!["One".into()],
         };
-        let lines = answer_to_lines(&resp);
+        let usage = Usage {
+            input_tokens: 1200,
+            output_tokens: 30,
+            cache_read_tokens: 1000,
+        };
+        let lines = answer_to_lines(&answer, &usage);
         let text: String = lines
             .iter()
             .map(|l| {

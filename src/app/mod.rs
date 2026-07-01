@@ -319,6 +319,15 @@ pub struct App {
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
+    /// The in-session "Ask the manuscript" history (#609), newest last: each ask,
+    /// its grounded answer, and the chapters it cited. Lets the author re-open a
+    /// past lookup (and re-jump its citations) without re-asking. Never persisted
+    /// — it's a session recall, not a stored artifact.
+    pub(crate) qa_log: Vec<assist::QaEntry>,
+    /// The question of the "Ask the manuscript" request in flight (#609), captured
+    /// when it's sent so the answer can be filed under it in [`qa_log`](Self::qa_log);
+    /// taken when the answer applies, `None` when no ask is pending.
+    pub(crate) pending_qa_question: Option<String>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
 }
@@ -423,6 +432,8 @@ impl App {
             pending_import_source: None,
             pending_archive_source: None,
             sprint: None,
+            qa_log: Vec::new(),
+            pending_qa_question: None,
             message: None,
         };
         // Baselines + per-part counters for the daily word tally (sized to the

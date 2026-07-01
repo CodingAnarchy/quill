@@ -631,7 +631,14 @@ impl App {
             return Some(format!("error: {e}"));
         }
         if let super::Outcome::Answer(Ok(resp)) = outcome {
-            return Some(resp.text.clone());
+            // The Q&A reply is structured (#609); hand the assistant the answer prose
+            // (plus any cited chapters), not the raw JSON envelope.
+            let answer = crate::ai::parse_answer(&resp.text);
+            let mut summary = answer.answer;
+            if !answer.citations.is_empty() {
+                summary.push_str(&format!("\n\nCited: {}", answer.citations.join(", ")));
+            }
+            return Some(summary);
         }
         Some(format!("Done — {label}. The result is in the editor."))
     }
