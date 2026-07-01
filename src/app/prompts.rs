@@ -270,6 +270,7 @@ impl App {
             | Pending::SetGoal(_)
             | Pending::SetBookField(_)
             | Pending::SetStyleText(_)
+            | Pending::SetSettingText(_)
             | Pending::AskAi
             | Pending::Thesaurus
             | Pending::Commit
@@ -382,6 +383,13 @@ impl App {
                                 // setter re-opens the style menu itself, so don't
                                 // reset the mode here.
                                 self.apply_style_text(knob, text);
+                            }
+                            Pending::SetSettingText(knob) => {
+                                // Validate + persist the numeric / list Settings
+                                // knob, apply it live, and re-open the Settings
+                                // menu. The setter drives the mode itself, so don't
+                                // reset it here.
+                                self.apply_setting_text(knob, text);
                             }
                             Pending::Annotate { start, end } => {
                                 // Back to editing; the note anchors to its range (#302).

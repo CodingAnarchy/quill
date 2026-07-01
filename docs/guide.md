@@ -318,7 +318,30 @@ KEY REFERENCE
 
 Smart typography is on by default: as you type, straight quotes become curly,
 -- becomes an em-dash, and ... becomes an ellipsis. For plain ASCII punctuation,
-set [editor] smart_typography = false in your config.
+turn it off in Settings (below) or set [editor] smart_typography = false.
 
-Vim-style modal editing is available, off by default; enable it with
-[editor] vim = true in your config.
+Vim-style modal editing is available, off by default; enable it in Settings or
+with [editor] vim = true.
+
+
+SETTINGS
+
+Run "Settings…" from the Ctrl-K menu (or the "settings" action) to change the
+everyday preferences without hand-editing config or turning on AI. The menu
+shows each setting's current value; pick a row to change it:
+
+  Theme               dark or light (applies immediately)
+  Column width        the centered text column, 32–160 characters
+  Smart typography    curly quotes / em-dashes / ellipses as you type
+  Vim mode            modal editing
+  Autosave interval   seconds of idle before an automatic save (0 is off)
+  Typewriter scrolling pin the cursor's line to the page centre
+  Focus mode          dim every paragraph but the one under the cursor
+  Analysis stopwords  extra words to exclude from the analysis report's
+                      most-used-words list (space-separated; blank clears them)
+
+Changes apply live — no restart. The editor/theme settings are written to your
+~/.config/quill/config.toml (preserving the rest of the file); the analysis
+stopwords are written to the project's book.toml. If you'd rather describe the
+change in words and let the AI map it (AI required), "Configure by description"
+does the same thing conversationally.

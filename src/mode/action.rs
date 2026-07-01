@@ -154,6 +154,91 @@ pub(crate) enum Command {
     /// Open the text prompt for a free-text `[style]` knob (#569) — the scene-break
     /// glyph or a title/part ornament.
     EditStyleText(StyleTextKnob),
+    /// Open one of the plain Settings menu's sub-pickers (#592) — the theme name
+    /// or a boolean toggle — from the Settings menu.
+    OpenSettingPicker(SettingPicker),
+    /// Set a boolean `[editor]` knob from the Settings menu (#592): Vim mode,
+    /// smart typography, typewriter scrolling, or focus mode.
+    SetSettingBool(SettingBool, bool),
+    /// Set the `[theme] name` from the Settings menu (#592): the index into the
+    /// built-in theme list.
+    SetSettingTheme(usize),
+    /// Open the text prompt for a free-text / numeric Settings knob (#592) — the
+    /// column width, the autosave interval, or the analysis stopwords.
+    EditSettingText(SettingTextKnob),
+}
+
+/// One of the plain Settings menu's discrete sub-pickers (#592) — a small list the
+/// menu opens, each emitting a `Set…` command on Enter. (The numeric / list knobs
+/// use a prompt instead; see [`SettingTextKnob`].)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SettingPicker {
+    /// The built-in color-theme list (dark / light).
+    Theme,
+    /// An on/off picker for one boolean `[editor]` knob.
+    Bool(SettingBool),
+}
+
+/// A boolean `[editor]` knob the plain Settings menu toggles (#592). Each maps to a
+/// dotted config key validated through the shared vocabulary (`editor.vim`, …).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SettingBool {
+    /// Vim-style modal editing (`editor.vim`).
+    Vim,
+    /// Smart typography as you type (`editor.smart_typography`).
+    SmartTypography,
+    /// Typewriter scrolling (`editor.typewriter`).
+    Typewriter,
+    /// Focus mode (`editor.focus_mode`).
+    FocusMode,
+}
+
+impl SettingBool {
+    /// The dotted config key this knob writes, matched by the shared validator.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            SettingBool::Vim => "editor.vim",
+            SettingBool::SmartTypography => "editor.smart_typography",
+            SettingBool::Typewriter => "editor.typewriter",
+            SettingBool::FocusMode => "editor.focus_mode",
+        }
+    }
+
+    /// A human label for the menu row, picker title, and status message.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            SettingBool::Vim => "Vim mode",
+            SettingBool::SmartTypography => "Smart typography",
+            SettingBool::Typewriter => "Typewriter scrolling",
+            SettingBool::FocusMode => "Focus mode",
+        }
+    }
+}
+
+/// A numeric / free-text Settings knob the plain menu edits through a prompt (#592):
+/// the centered column width, the autosave interval, and the analysis stopwords.
+/// The two `[editor]` knobs validate through the shared vocabulary and persist via
+/// the config splicer; the stopwords splice into `book.toml`'s `[analysis]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SettingTextKnob {
+    /// The centered text column width (`editor.column_width`).
+    ColumnWidth,
+    /// The autosave interval in seconds (`editor.autosave_interval_secs`).
+    AutosaveSecs,
+    /// The words added to the analysis report's stopword list
+    /// (`[analysis] stopwords_add` in `book.toml`).
+    Stopwords,
+}
+
+impl SettingTextKnob {
+    /// A human label for the menu row, prompt, and status message.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            SettingTextKnob::ColumnWidth => "column width",
+            SettingTextKnob::AutosaveSecs => "autosave interval (seconds)",
+            SettingTextKnob::Stopwords => "analysis stopwords",
+        }
+    }
 }
 
 /// One of the export-style setter's discrete sub-pickers (#569) — a small list the
@@ -335,6 +420,10 @@ pub(crate) enum Action {
     /// (scene break, drop caps, heading alignment, ornaments) and the `[print]`
     /// trim size, persisting each to `book.toml` (#569).
     SetExportStyle,
+    /// Open the plain Settings menu — set the everyday `[editor]`/`[theme]` knobs
+    /// (theme, column width, smart typography, Vim mode, autosave, typewriter /
+    /// focus) and the `[analysis]` stopwords, no AI required (#592).
+    Settings,
 }
 
 impl Action {
@@ -411,6 +500,7 @@ impl Action {
         Action::ToggleTypewriter,
         Action::ToggleFocus,
         Action::Corkboard,
+        Action::Settings,
         // Help
         Action::UserGuide,
     ];
@@ -465,6 +555,7 @@ impl Action {
             Action::InsertSnippet => "snippet",
             Action::BrowseFonts => "fonts:browse",
             Action::SetExportStyle => "style:set",
+            Action::Settings => "settings",
         }
     }
 
@@ -505,7 +596,10 @@ impl Action {
             | Action::InsertSnippet
             | Action::StartSprint
             | Action::StopSprint => "Editing",
-            Action::ToggleTypewriter | Action::ToggleFocus | Action::Corkboard => "View",
+            Action::ToggleTypewriter
+            | Action::ToggleFocus
+            | Action::Corkboard
+            | Action::Settings => "View",
             Action::UserGuide => "Help",
         }
     }
@@ -577,6 +671,7 @@ impl Action {
             Action::InsertSnippet => "Insert snippet…",
             Action::BrowseFonts => "Browse & download fonts…",
             Action::SetExportStyle => "Set export style…",
+            Action::Settings => "Settings…",
         }
     }
 

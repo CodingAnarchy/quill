@@ -143,14 +143,16 @@ impl App {
     }
 
     /// Re-read the just-written config and apply it to the running editor (#303),
-    /// so a settings change takes effect without a restart.
-    fn apply_config_live(&mut self) {
+    /// so a settings change takes effect without a restart. Shared by the
+    /// describe-config path and the plain Settings menu (#592).
+    pub(crate) fn apply_config_live(&mut self) {
         let editor = config::EditorConfig::load();
         self.vim = editor.vim;
         self.smart_typography = editor.smart_typography;
         self.focus_width = editor.column_width;
         self.typewriter = editor.typewriter;
         self.focus_mode = editor.focus_mode;
+        self.autosave_interval_secs = editor.autosave_interval_secs;
         let (theme, _) = config::load_theme();
         self.theme = theme;
         theme::set_current(theme);
@@ -159,10 +161,11 @@ impl App {
     }
 }
 
-/// The settings the AI may propose (#303): a closed vocabulary of real keys, each
+/// The settings the AI may propose (#303) — also the vocabulary the plain
+/// Settings menu (#592) validates against: a closed vocabulary of real keys, each
 /// with a human description (with allowed values) for the model to map against.
 /// The keys are dotted `section.field`, matching the config file's layout.
-fn settings_vocab() -> Vec<(String, String)> {
+pub(crate) fn settings_vocab() -> Vec<(String, String)> {
     let mut v = vec![
         ("editor.vim".to_string(), "Vim-style modal editing — true or false".to_string()),
         (
@@ -172,6 +175,18 @@ fn settings_vocab() -> Vec<(String, String)> {
         (
             "editor.column_width".to_string(),
             "Width of the centered text column, in characters (32–160; e.g. 64 is narrow, 90 is wide)".to_string(),
+        ),
+        (
+            "editor.typewriter".to_string(),
+            "Typewriter scrolling — pin the cursor's line to the page centre — true or false".to_string(),
+        ),
+        (
+            "editor.focus_mode".to_string(),
+            "Focus mode — dim every paragraph but the one under the cursor — true or false".to_string(),
+        ),
+        (
+            "editor.autosave_interval_secs".to_string(),
+            "Autosave interval in seconds after you stop typing (0 turns autosave off; up to 3600)".to_string(),
         ),
         ("theme.name".to_string(), "Base color theme — dark or light".to_string()),
     ];
@@ -200,17 +215,23 @@ fn settings_vocab() -> Vec<(String, String)> {
 /// quoted via the toml serializer so escaping always matches what the loader parses.
 /// The one exception is `dictionary.add`, which returns the bare word (not a TOML
 /// literal) — it's written to the project dictionary, not the config file.
-fn validate_change(key: &str, value: &str) -> Result<String, String> {
+pub(crate) fn validate_change(key: &str, value: &str) -> Result<String, String> {
     let bad = |why: &str| Err(format!("{key} ({why})"));
     let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
     match key {
-        "editor.vim" | "editor.smart_typography" => match parse_bool(value) {
-            Some(b) => Ok(b.to_string()),
-            None => bad("expected true/false"),
-        },
+        "editor.vim" | "editor.smart_typography" | "editor.typewriter" | "editor.focus_mode" => {
+            match parse_bool(value) {
+                Some(b) => Ok(b.to_string()),
+                None => bad("expected true/false"),
+            }
+        }
         "editor.column_width" => match value.trim().parse::<u16>() {
             Ok(w) if (32..=160).contains(&w) => Ok(w.to_string()),
             _ => bad("expected a width 32–160"),
+        },
+        "editor.autosave_interval_secs" => match value.trim().parse::<u64>() {
+            Ok(s) if s <= 3600 => Ok(s.to_string()),
+            _ => bad("expected 0–3600 seconds"),
         },
         "theme.name" => match value.trim().to_ascii_lowercase().as_str() {
             n @ ("dark" | "light") => Ok(quote(n)),
