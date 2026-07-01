@@ -21,19 +21,32 @@ fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
 }
 
 #[test]
-fn undo_is_guarded_in_the_continuous_view() {
+fn undo_works_in_the_continuous_view() {
+    // #649: undo/redo used to be refused here; now it reverts the edit and never
+    // shows the old "isn't available in the continuous view" message.
     let (mut app, _dir) = two_chapter_app("undo-continuous");
     app.on_key(ctrl('l')); // enter the continuous-manuscript view
     assert!(app.manuscript.is_some());
+
+    let original = app.edit_buffer().line(0);
+    type_str(&mut app, "ZZZ");
+    app.on_idle(); // seal the typing burst into one undo group
+
     app.on_key(ctrl('z'));
+    assert_eq!(app.edit_buffer().line(0), original, "undo reverted the edit");
     assert!(
-        app.message
+        !app
+            .message
             .as_deref()
             .unwrap_or("")
             .contains("continuous view"),
-        "{:?}",
+        "undo was performed, not refused: {:?}",
         app.message
     );
+
+    // With the history exhausted, a further undo reports the ordinary message.
+    app.on_key(ctrl('z'));
+    assert_eq!(app.message.as_deref(), Some("Nothing to undo."));
 }
 
 /// A key event carrying a modifier — for the Ctrl-←/→ / Ctrl-Backspace

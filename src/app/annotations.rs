@@ -127,11 +127,12 @@ impl App {
 
     /// Snapshot the current annotations when a new undo group has opened (#370),
     /// so the app's annotation history stays one-entry-per-group aligned with the
-    /// buffer's undo stack. Skipped in the continuous view (no per-buffer
-    /// annotation undo there yet); the flag is still consumed so it can't leak.
+    /// buffer's undo stack. Works in the continuous view too (#649): its notes are
+    /// buffer-absolute [`Live`] ranges, so a snapshot restores them the same way an
+    /// undo restores the rope, keeping them anchored across the windowed buffer.
     pub(crate) fn note_annotation_undo_point(&mut self) {
         let opened = self.edit_buffer_mut().take_checkpointed();
-        if !opened || self.manuscript.is_some() {
+        if !opened {
             return;
         }
         self.anno_undo.push_back(self.annotations.clone());

@@ -57,6 +57,14 @@ impl Buffer {
         self.group_open = false;
     }
 
+    /// Whether an edit group is currently open. The continuous view reads this
+    /// around each edit to snapshot its per-chapter bookkeeping in lockstep with
+    /// the buffer's rope stack (#649): a `false → true` transition means a new
+    /// group just opened and a fresh segment snapshot belongs on the stack.
+    pub fn group_open(&self) -> bool {
+        self.group_open
+    }
+
     /// Revert to the state before the most recent edit group. Returns `false`
     /// when there's nothing to undo.
     pub fn undo(&mut self) -> bool {
