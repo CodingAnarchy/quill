@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
+use crate::atomic;
 use crate::theme::Theme;
 
 /// Quill's config directory: `$XDG_CONFIG_HOME/quill`, else `$HOME/.config/quill`.
@@ -93,7 +94,7 @@ pub fn add_workflow(name: &str, steps: &[String]) -> io::Result<PathBuf> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, updated)?;
+    atomic::write(&path, updated.as_bytes())?;
     Ok(path)
 }
 
@@ -136,7 +137,7 @@ pub fn set_values(changes: &[(String, String, String)]) -> io::Result<PathBuf> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, text)?;
+    atomic::write(&path, text.as_bytes())?;
     Ok(path)
 }
 
@@ -201,7 +202,7 @@ pub fn remove_value(section: &str, key: &str) -> io::Result<bool> {
     };
     let (updated, removed) = strip_value(&existing, section, key);
     if removed {
-        std::fs::write(&path, updated)?;
+        atomic::write(&path, updated.as_bytes())?;
     }
     Ok(removed)
 }
@@ -685,5 +686,74 @@ mod tests {
             1,
             "no duplicate entry: {out}"
         );
+    }
+
+    // The config writers route through the atomic layer (#644), so an interrupted
+    // rewrite leaves the user's hand-maintained config byte-for-byte intact rather
+    // than truncating it. We drive the same pre-rename fault seam `atomic` uses for
+    // its own crash test (#265), hermetically (#528/#531) against a scratch config
+    // dir. Each writer (splice/batch/key-removal) is a distinct on-disk path.
+    #[test]
+    fn a_failed_config_write_preserves_the_previous_file() {
+        let dir = crate::testutil::scratch_dir("config", "atomic-preserve");
+        set_config_dir(Some(dir.clone()));
+        let path = config_path().unwrap();
+
+        // Seed a good config the writers must not clobber on a failed rewrite.
+        let good = "[editor]\nvim = true\ncolumn_width = 80\n";
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, good).unwrap();
+
+        // set_values (batch splice): armed to fail before the rename.
+        atomic::fail_point::arm_pre_rename_failure();
+        let changes = [("theme".into(), "name".into(), "\"light\"".into())];
+        assert!(
+            set_values(&changes).is_err(),
+            "the doomed write reports err"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            good,
+            "the previous config survives a failed set_values"
+        );
+
+        // add_workflow (single splice): same guarantee.
+        atomic::fail_point::arm_pre_rename_failure();
+        assert!(add_workflow("revise", &[String::from("save")]).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), good);
+
+        // remove_value (key removal): the removed line must not be lost when the
+        // rewrite is interrupted.
+        atomic::fail_point::arm_pre_rename_failure();
+        assert!(remove_value("editor", "vim").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), good);
+
+        set_config_dir(None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // The happy path is unchanged by routing through the atomic layer: each writer
+    // still produces exactly the spliced/removed result on disk (#644).
+    #[test]
+    fn config_writers_still_produce_the_expected_file_on_success() {
+        let dir = crate::testutil::scratch_dir("config", "atomic-success");
+        set_config_dir(Some(dir.clone()));
+        let path = config_path().unwrap();
+
+        set_values(&[("editor".into(), "vim".into(), "true".into())]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[editor]\nvim = true\n"
+        );
+
+        let removed = remove_value("editor", "vim").unwrap();
+        assert!(removed, "the key was there to remove");
+        assert!(
+            !std::fs::read_to_string(&path).unwrap().contains("vim"),
+            "the key is gone after remove_value"
+        );
+
+        set_config_dir(None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

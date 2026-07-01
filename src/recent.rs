@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic;
 use crate::config;
 use crate::project::{Manifest, Project};
 
@@ -139,7 +140,7 @@ fn record_in(config_dir: &Path, root: &Path, title: &str) {
 
     let _ = std::fs::create_dir_all(config_dir);
     if let Ok(json) = serde_json::to_string_pretty(&updated) {
-        let _ = std::fs::write(store_path(config_dir), json);
+        let _ = atomic::write(&store_path(config_dir), json.as_bytes());
     }
 }
 
@@ -204,6 +205,39 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].title, "My Book");
         assert_eq!(listed[0].path, proj.canonicalize().unwrap());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // The store write routes through the atomic layer (#644), so an interrupted
+    // record leaves the previously saved list byte-for-byte intact rather than
+    // blanking the library view. We drive the same pre-rename fault seam `atomic`
+    // uses for its own crash test (#265), hermetically against a scratch dir.
+    #[test]
+    fn a_failed_record_preserves_the_previous_list() {
+        let dir = crate::testutil::scratch_dir("recent", "atomic-preserve");
+        // Two real projects so both survive the existence prune on read-back.
+        let first = dir.join("first");
+        let second = dir.join("second");
+        Project::create(&first).unwrap();
+        Project::create(&second).unwrap();
+
+        record_in(&dir, &first, "First");
+        let before = std::fs::read_to_string(store_path(&dir)).unwrap();
+
+        // The next record is armed to fail before its rename; the stored list must
+        // be untouched, not truncated or emptied.
+        atomic::fail_point::arm_pre_rename_failure();
+        record_in(&dir, &second, "Second");
+        assert_eq!(
+            std::fs::read_to_string(store_path(&dir)).unwrap(),
+            before,
+            "the previous recent list survives a failed record"
+        );
+        // And the good list still reads back as the single first project.
+        let listed = list_in(&dir);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title, "First");
 
         std::fs::remove_dir_all(&dir).ok();
     }
