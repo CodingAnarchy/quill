@@ -35,6 +35,7 @@ pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 use io::cache_chapter;
 pub(crate) use io::read_existing;
 use series::Book;
+pub(crate) use structure::unique_dest;
 pub use template::{ProjectTemplate, TEMPLATES};
 
 /// The manifest file at the root of every project.

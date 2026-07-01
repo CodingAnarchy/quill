@@ -91,6 +91,32 @@ fn the_notes_step_writes_notes_md_and_finishes() {
 }
 
 #[test]
+fn the_notes_step_never_clobbers_an_existing_notes_md() {
+    let (mut app, _t) = app_at_new_project("wiz-notes-keep");
+    // An author already has a notes.md (e.g. hand-created before setup).
+    let existing = app.project.root.join("notes.md");
+    fs::write(&existing, "# Notes\n\nthe original locket\n").unwrap();
+
+    app.on_key(key(KeyCode::Char('y')));
+    app.on_key(key(KeyCode::Enter)); // skip goals → Notes (AI off)
+    assert!(at_step(&app, WizardStep::Notes));
+    type_str(&mut app, "a brand-new note");
+    app.on_key(key(KeyCode::Enter));
+
+    // The original is untouched; the new note lands in a unique file.
+    assert_eq!(
+        fs::read_to_string(&existing).unwrap(),
+        "# Notes\n\nthe original locket\n",
+        "the pre-existing notes.md is preserved verbatim"
+    );
+    let fresh = fs::read_to_string(app.project.root.join("notes-1.md")).unwrap();
+    assert!(
+        fresh.contains("a brand-new note"),
+        "the wizard's note is written to a unique name"
+    );
+}
+
+#[test]
 fn esc_dismisses_the_rest_of_the_wizard() {
     let (mut app, _t) = app_at_new_project("wiz-esc");
     app.on_key(key(KeyCode::Char('y'))); // → Goals
@@ -181,6 +207,42 @@ fn importing_a_directory_preserves_all_markdown_collectively() {
         !srcdir.join("ignore.txt").exists(),
         "non-markdown is skipped"
     );
+}
+
+#[test]
+fn importing_a_second_source_with_a_colliding_name_keeps_both() {
+    isolate("import-collide"); // AI off → sources preserved, no generation
+    let cur = make_project("import-collide-cur", "Book", "c\n");
+    let mut app = open_app(&cur);
+
+    // Two separate folders each with a characters.md — keying only by filename
+    // would let the second silently overwrite the first.
+    let first = std::env::temp_dir().join(format!("quill-collide-{}-a", std::process::id()));
+    let second = std::env::temp_dir().join(format!("quill-collide-{}-b", std::process::id()));
+    for d in [&first, &second] {
+        let _ = fs::remove_dir_all(d);
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::write(first.join("characters.md"), "# Mara\n\nfirst folder\n").unwrap();
+    fs::write(second.join("characters.md"), "# Bram\n\nsecond folder\n").unwrap();
+
+    app.import_notes(first.to_str().unwrap());
+    app.import_notes(second.to_str().unwrap());
+
+    let srcdir = app.project.root.join("bible").join("sources");
+    assert_eq!(
+        fs::read_to_string(srcdir.join("characters.md")).unwrap(),
+        "# Mara\n\nfirst folder\n",
+        "the first source is left intact"
+    );
+    assert_eq!(
+        fs::read_to_string(srcdir.join("characters-1.md")).unwrap(),
+        "# Bram\n\nsecond folder\n",
+        "the colliding second source is preserved under a unique name"
+    );
+
+    let _ = fs::remove_dir_all(&first);
+    let _ = fs::remove_dir_all(&second);
 }
 
 #[test]

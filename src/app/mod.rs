@@ -25,7 +25,7 @@ use crate::mode::{
     BookField, Command, Finding, Findings, GitAction, History, MetaEdit, MetaField, Mode, Overlay,
     Palette, PaletteItem, Pending, RefFiles, VimState,
 };
-use crate::project::{GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
+use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::recovery;
 use crate::report::{self, Momentum, PartDelta};
 use crate::typography;

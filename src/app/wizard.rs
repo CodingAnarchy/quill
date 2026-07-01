@@ -2,7 +2,7 @@
 //! seed the bible, draining queued AI drafts. Extracted from `mod.rs` (#314).
 
 use crate::mode::{Pending, WizardStep};
-use crate::project::Goals;
+use crate::project::{unique_dest, Goals};
 
 use super::App;
 
@@ -95,10 +95,13 @@ impl App {
                 }
             }
             WizardStep::Notes => {
-                let path = self.project.root.join("notes.md");
+                // Never clobber an existing notes.md — the author's guarantee is
+                // that Quill doesn't lose their words. Write a unique name when
+                // one already exists (notes-1.md, notes-2.md, …).
+                let path = unique_dest(&self.project.root, "notes.md");
                 let body = format!("# Notes\n\n{text}\n");
                 self.message = match crate::atomic::write(&path, body.as_bytes()) {
-                    Ok(()) => Some("Saved notes.md.".into()),
+                    Ok(()) => Some(format!("Saved {}.", self.display_path(&path))),
                     Err(e) => Some(format!("Couldn't save notes: {e}")),
                 };
             }

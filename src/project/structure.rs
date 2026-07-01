@@ -129,7 +129,7 @@ impl Project {
 
 /// A path inside `dir` for `file`, appending `-1`, `-2`, … to the stem if a file
 /// of that name already exists there (so moving to `unused/` never clobbers).
-fn unique_dest(dir: &Path, file: &str) -> PathBuf {
+pub(crate) fn unique_dest(dir: &Path, file: &str) -> PathBuf {
     let candidate = dir.join(file);
     if !candidate.exists() {
         return candidate;

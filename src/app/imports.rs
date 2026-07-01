@@ -214,7 +214,11 @@ impl App {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "notes.md".into());
-            if let Err(msg) = self.write_file(&dest_dir.join(&name), &text) {
+            // Two imported folders can each hold a `characters.md`; keying only by
+            // filename would let the second silently overwrite the first. Give
+            // colliding names unique destinations so no source is lost.
+            let dest = unique_dest(&dest_dir, &name);
+            if let Err(msg) = self.write_file(&dest, &text) {
                 failures.push(msg);
                 continue;
             }
