@@ -447,11 +447,42 @@ impl App {
                 Some("No reference files yet — add notes or a bible under the project.".into());
             return;
         }
-        self.mode = Mode::RefFiles(Box::new(RefFiles { files, selected: 0 }));
+        self.mode = Mode::RefFiles(Box::new(RefFiles {
+            files,
+            selected: 0,
+            bible_only: false,
+        }));
     }
 
-    /// Navigate the reference-file browser (#165): arrows move, Enter opens the
-    /// selected file in a side pane, `f`/Esc return to the chapter browser.
+    /// Open the story-bible browser (#590): the `bible/`-only view of the reference
+    /// browser, reached from the Ctrl-K "Browse story bible" run-action. Enter
+    /// opens the selected bible file in an editable pane (the shared #165 flow), so
+    /// the author can read and edit it — the characters, timeline, setting, and
+    /// outline the AI tracks — and save it back with Ctrl-S. Reports when the
+    /// project has no bible yet, rather than opening an empty list.
+    pub(super) fn open_bible_files(&mut self) {
+        let files = self.project.bible_files();
+        if files.is_empty() {
+            self.message =
+                Some("No story bible yet — run an AI tracking pass (Ctrl-A) to build one.".into());
+            return;
+        }
+        // The browser draws in the outline strip (like the chapter browser), so
+        // reveal it; remember when we opened it so Esc puts the view back (#529).
+        self.leave_continuous();
+        self.browser_opened_outline = !self.outline_visible;
+        self.outline_visible = true;
+        self.mode = Mode::RefFiles(Box::new(RefFiles {
+            files,
+            selected: 0,
+            bible_only: true,
+        }));
+    }
+
+    /// Navigate the reference-file browser (#165/#590): arrows move, Enter opens
+    /// the selected file in an editable side pane. In the all-files view (#165)
+    /// `f`/Esc return to the chapter browser; in the bible-only view (#590) Esc
+    /// returns to the editor.
     pub(super) fn on_key_reffiles(&mut self, key: KeyEvent) {
         let Mode::RefFiles(state) = &mut self.mode else {
             return;
@@ -460,6 +491,7 @@ impl App {
             state.selected = s;
             return;
         }
+        let bible_only = state.bible_only;
         match key.code {
             KeyCode::Enter => {
                 let path = state.files[state.selected].clone();
@@ -467,7 +499,11 @@ impl App {
                 self.browser_opened_outline = false;
                 self.mode = self.editing_mode();
             }
-            // Back to the chapter browser.
+            // The bible view (#590) is entered from the editor — Esc drops back
+            // there, restoring the outline strip if this browser revealed it. The
+            // all-files view (#165) is a sub-mode of the chapter browser, so
+            // `f`/Esc return there.
+            KeyCode::Esc if bible_only => self.leave_browser(),
             KeyCode::Char('f') | KeyCode::Esc => self.select(self.project.active_index()),
             _ => {}
         }

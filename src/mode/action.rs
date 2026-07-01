@@ -315,6 +315,11 @@ pub(crate) enum Action {
     SetImageKey,
     /// Open the authorial assistant pane (#399), the same as `Ctrl-W a`.
     Assistant,
+    /// Browse the story bible (#590): list the files under `bible/` — characters,
+    /// timeline, setting, outline — and open a selected one in an editable buffer
+    /// that saves back to disk. Navigation/editing of the AI's tracking artifacts,
+    /// within the AI boundary (the AI authors nothing).
+    BrowseBible,
     /// Open the snippet picker to insert an author-defined snippet (#411).
     InsertSnippet,
     /// Browse the curated open-licensed font library, download a font into the
@@ -386,6 +391,7 @@ impl Action {
         Action::SetClaudeKey,
         Action::SetImageKey,
         Action::Assistant,
+        Action::BrowseBible,
         // Editing
         Action::AcceptWord,
         Action::NextMisspelling,
@@ -447,6 +453,7 @@ impl Action {
             Action::SetClaudeKey => "ai:set-key",
             Action::SetImageKey => "image:set-key",
             Action::Assistant => "assistant",
+            Action::BrowseBible => "bible:browse",
             Action::InsertSnippet => "snippet",
             Action::BrowseFonts => "fonts:browse",
             Action::SetExportStyle => "style:set",
@@ -480,7 +487,8 @@ impl Action {
             | Action::ManageModels
             | Action::SetClaudeKey
             | Action::SetImageKey
-            | Action::Assistant => "AI",
+            | Action::Assistant
+            | Action::BrowseBible => "AI",
             Action::AcceptWord
             | Action::NextMisspelling
             | Action::PrevMisspelling
@@ -556,6 +564,7 @@ impl Action {
             Action::SetClaudeKey => "Set Claude API key (keychain)",
             Action::SetImageKey => "Set image API key (keychain)",
             Action::Assistant => "Authorial assistant",
+            Action::BrowseBible => "Browse story bible",
             Action::InsertSnippet => "Insert snippet…",
             Action::BrowseFonts => "Browse & download fonts…",
             Action::SetExportStyle => "Set export style…",

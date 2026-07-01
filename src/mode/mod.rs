@@ -134,8 +134,10 @@ pub enum Mode {
     /// [`Search`]. Boxed (carries the query, replacement, and the match list).
     ProjectSearch(Box<ProjectSearch>),
     /// Browsing the project's reference files — the story bible and loose notes
-    /// (#165). Reached with `f` from the chapter browser; Enter opens the selected
-    /// file in a side pane. Boxed (carries the file list).
+    /// (#165), or the `bible/`-only view (#590). Reached with `f` from the chapter
+    /// browser (all reference files), or from the Ctrl-K "Browse story bible"
+    /// run-action (bible only). Enter opens the selected file in an editable side
+    /// pane. Boxed (carries the file list).
     RefFiles(Box<RefFiles>),
     /// The series tree navigator (#330): the whole project as a series → book →
     /// part → chapter tree, navigable with the keyboard. Enter on a chapter jumps
@@ -245,6 +247,11 @@ pub(crate) struct Find {
 pub struct RefFiles {
     pub(crate) files: Vec<std::path::PathBuf>,
     pub(crate) selected: usize,
+    /// Whether this is the `bible/`-only view (#590), opened from the Ctrl-K
+    /// "Browse story bible" run-action rather than the chapter browser's `f`. It
+    /// changes the header and where Esc returns to (the editor, not the chapter
+    /// browser) — everything else, including the editable-pane open, is shared.
+    pub(crate) bible_only: bool,
 }
 
 /// State for an open [`Mode::ProjectBrowser`] (#270): the recently-opened

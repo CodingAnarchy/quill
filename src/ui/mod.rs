@@ -340,17 +340,23 @@ fn chapter_line(
     Line::from(spans)
 }
 
-/// The reference-file browser's rows (#165): a header, then each file as its
+/// The reference-file browser's rows (#165/#590): a header, then each file as its
 /// path relative to the project root (the bible structure stays legible), the
-/// selection reversed.
+/// selection reversed. The header and hint reflect whether it's the bible-only
+/// view (#590) or the full reference list (#165).
 fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
+    let (title, hint) = if state.bible_only {
+        ("Story bible", "enter edit · esc back")
+    } else {
+        ("Reference files", "enter open · f/esc back")
+    };
     let mut lines = vec![
         Line::from(Span::styled(
-            "Reference files".to_string(),
+            title.to_string(),
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "enter open · f/esc back".to_string(),
+            hint.to_string(),
             Style::default().fg(theme::current().dim),
         )),
         Line::raw(""),
