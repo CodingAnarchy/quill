@@ -248,6 +248,9 @@ pub(crate) enum VimPending {
     /// `]` / `[` seen — awaiting `s` for the spell-flag jump (#359): `]s` next
     /// misspelling, `[s` previous. `forward` is the `]` form.
     Bracket { forward: bool },
+    /// `z` seen — awaiting `=` for the spelling-suggestions pick-list (#647),
+    /// Vim's own `z=` spell-suggest binding; any other second key cancels.
+    Z,
 }
 
 /// A Vim operator (#203): delete leaves Normal mode, change enters Insert, yank

@@ -43,6 +43,18 @@ pub fn misspellings(text: &str, accept: impl Fn(&str) -> bool) -> Vec<(usize, us
     flags
 }
 
+/// Offline correction candidates for a misspelled `word` (#647), from the same
+/// bundled dictionary the flagging uses — `spellbook`'s `Dictionary::suggest`, so
+/// there's no network and no API key. Ordered best-first by the engine; the list is
+/// empty when it finds no near match. Called only on a word the flagging already
+/// marked misspelled (the author singled it out and asked), on demand — never on
+/// the keystroke or idle path.
+pub fn suggestions(word: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    DICT.suggest(word, &mut out);
+    out
+}
+
 /// Split `text` into `(byte_offset, word)` tokens for spell-checking. A token is a
 /// run of letters/digits/apostrophes that contains at least one letter and no
 /// digit (so "3rd", "1990s", and bare numbers are skipped, not flagged);
@@ -134,6 +146,26 @@ mod tests {
     fn capitalized_real_words_pass() {
         // Hunspell handles capitalization: a sentence-start capital matches.
         assert!(misspellings("The Quick Brown Fox", nothing).is_empty());
+    }
+
+    #[test]
+    fn suggestions_offers_the_correct_spelling() {
+        // A near-miss typo should have its correct spelling among the candidates
+        // the offline engine returns (#647).
+        let candidates = suggestions("quikc");
+        assert!(!candidates.is_empty(), "a typo yields candidates");
+        assert!(
+            candidates.iter().any(|s| s == "quick"),
+            "the correction is offered: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn suggestions_for_pure_gibberish_are_bounded() {
+        // A string with no near match yields no runaway candidate list — at worst a
+        // short, best-effort set. (The correction path only ever calls this on a
+        // flagged word, so an exact-match case isn't exercised.)
+        assert!(suggestions("zzzqqqxxx").len() <= 8);
     }
 
     /// Performance guard (`cargo perf`). The idle spell pass over a window-sized

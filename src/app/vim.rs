@@ -68,6 +68,17 @@ impl App {
                 }
                 return;
             }
+            // `z=` opens the spelling-suggestions pick-list for the flagged word at
+            // the cursor (#647), Vim's own spell-suggest binding; any other second
+            // key cancels.
+            VimPending::Z => {
+                self.vim_state.pending = VimPending::None;
+                self.vim_state.count = None;
+                if c == '=' {
+                    self.suggest_word_at_cursor();
+                }
+                return;
+            }
             VimPending::None => {}
         }
 
@@ -114,6 +125,9 @@ impl App {
             // command, never as an operator motion.
             ']' if self.vim_state.op.is_none() => Some(VimPending::Bracket { forward: true }),
             '[' if self.vim_state.op.is_none() => Some(VimPending::Bracket { forward: false }),
+            // `z=` opens the spelling suggestions for the flagged word (#647) — only
+            // as a standalone command, never as an operator motion.
+            'z' if self.vim_state.op.is_none() => Some(VimPending::Z),
             _ => None,
         };
         if let Some(p) = prefix {
