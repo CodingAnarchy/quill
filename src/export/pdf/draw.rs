@@ -4,17 +4,16 @@
 //! free helpers ([`mono_wrap`], [`num`]). The document-assembly methods (title page,
 //! chapter, paragraph, …) and the public entry points stay in the parent module.
 
-use super::font::{glyph_run, glyph_run_mono};
+use super::font::{glyph_run, glyph_run_mono, OBLIQUE_SHEAR};
 use super::layout::Layout;
-use super::wrap::{segments, words_of, wrap_lines, Word};
-use super::Run;
-use super::{Align, Pdf, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
+use super::wrap::{segments, words_of, wrap_lines, Seg, Word};
+use super::{Align, FontStyle, Pdf, Run, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
 
 impl Pdf {
     /// A normal body paragraph: first-line indented, left-aligned, with `*`/`**`
     /// emphasis as italic/bold runs.
     pub(super) fn paragraph(&mut self, runs: &[Run]) {
-        let words = words_of(runs);
+        let words = words_of(runs, false);
         self.flow(
             &words,
             self.layout.text_w(),
@@ -26,15 +25,18 @@ impl Pdf {
     }
 
     /// A single centered line (titles, headings, scene breaks) followed by a gap.
+    /// `heading` routes the text through the heading font (chapter/book titles),
+    /// leaving body-family centered lines (epigraphs, ornaments) unchanged (#638).
     pub(super) fn centered(
         &mut self,
         text: &str,
         bold: bool,
         italic: bool,
+        heading: bool,
         size: f32,
         leading: f32,
     ) {
-        let words = words_of(&[Run::new(text, bold, italic)]);
+        let words = words_of(&[Run::new(text, bold, italic)], heading);
         self.flow(
             &words,
             self.layout.text_w(),
@@ -83,14 +85,14 @@ impl Pdf {
     }
 
     /// Emit one positioned line of styled segments into the current page's content.
-    /// Each segment's text is resolved to glyph ids (body face, or the fallback for
-    /// glyphs it lacks) and shown as Identity-H hex runs.
-    pub(super) fn draw_line(&mut self, x: f32, y: f32, segs: &[Run], size: f32) {
+    /// Each segment's text is resolved to glyph ids (body/heading face, or the
+    /// fallback for glyphs it lacks) and shown as Identity-H hex runs.
+    pub(super) fn draw_line(&mut self, x: f32, y: f32, segs: &[Seg], size: f32) {
         let block = self.glyph_block(
             x,
             y,
             size,
-            segs.iter().map(|r| (r.text.as_str(), r.bold, r.italic)),
+            segs.iter().map(|s| (s.text.as_str(), s.style, s.heading)),
         );
         self.cur().push_str(&block);
     }
@@ -112,25 +114,51 @@ impl Pdf {
         self.cur().push_str(&s);
     }
 
-    /// A `BT…ET` text block at `(x, y)`: each `(text, bold, italic)` segment resolved
-    /// to glyph-id hex runs (`/Fn` font switches between body faces and the fallback).
+    /// A `BT…ET` text block at `(x, y)`: each `(text, style, heading)` segment
+    /// resolved to glyph-id hex runs (`/Fn` font switches between the body/heading
+    /// faces and the fallback). A segment whose face is synthetically obliqued — an
+    /// italic style with no true-italic file — is drawn with a sheared text matrix,
+    /// the last-resort slope (#638); real italics and everything else stay upright
+    /// in the matrix. The pen advances segment to segment via each run's measured
+    /// width, so a re-set matrix (needed to change the shear) lands in the right
+    /// place.
     pub(super) fn glyph_block<'a>(
         &self,
         x: f32,
         y: f32,
         size: f32,
-        segments: impl Iterator<Item = (&'a str, bool, bool)>,
+        segments: impl Iterator<Item = (&'a str, FontStyle, bool)>,
     ) -> String {
-        let mut s = format!("BT\n1 0 0 1 {} {} Tm\n", num(x), num(y));
+        let fonts = &self.layout.fonts;
+        let mut s = String::from("BT\n");
         let mut cur_font = "";
-        for (text, bold, italic) in segments {
-            for (name, hex) in glyph_run(&self.layout.fonts, text, bold, italic) {
+        let mut pen = x;
+        let mut cur_shear = f32::NAN; // force the first Tm emission
+        for (text, style, heading) in segments {
+            let shear = if fonts.is_synthetic_oblique(style, heading) {
+                OBLIQUE_SHEAR
+            } else {
+                0.0
+            };
+            // (Re)set the text matrix when the shear changes, positioning the pen at
+            // the segment's start x. `Tm` is absolute, so this preserves placement.
+            if shear != cur_shear {
+                s.push_str(&format!(
+                    "1 0 {} 1 {} {} Tm\n",
+                    num(shear),
+                    num(pen),
+                    num(y)
+                ));
+                cur_shear = shear;
+            }
+            for (name, hex) in glyph_run(fonts, text, style, heading) {
                 if name != cur_font {
                     s.push_str(&format!("/{name} {} Tf\n", num(size)));
                     cur_font = name;
                 }
                 s.push_str(&format!("<{hex}> Tj\n"));
             }
+            pen += self.layout.measure(text, size, style, heading);
         }
         s.push_str("ET\n");
         s

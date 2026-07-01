@@ -45,7 +45,10 @@ spellbook = "0.4.2"
 # bundled fonts it embeds. ttf-parser is pure-Rust and dependency-free; it only
 # reads the font — the PDF itself is still hand-written (like docx/epub/pdf).
 ttf-parser = "0.25"
-subsetter = "0.2.6"
+# `variable-fonts` lets the subsetter instance a variable `[wght]` font to a pinned
+# weight while subsetting (#638), so bold body text embeds a genuinely heavier
+# outline rather than the default instance reused for every weight.
+subsetter = { version = "0.2.6", features = ["variable-fonts"] }
 # OS secret store for API keys (#530): keys live in the macOS Keychain / Linux
 # Secret Service / Windows Credential Manager, not plaintext in the synced config.
 # The platform-native + sync-secret-service stores cover desktop; env vars cover

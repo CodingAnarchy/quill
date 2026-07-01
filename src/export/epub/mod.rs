@@ -398,10 +398,17 @@ impl Builder {
 /// fonts configured this is exactly [`STYLE_CSS`].
 fn stylesheet(style: &ExportStyle) -> String {
     let mut css = String::from(STYLE_CSS);
+    // One `@font-face` per embedded file (#638), carrying the `font-style` and a
+    // `font-weight` range so the reader picks the upright file for regular/bold and
+    // the true-italic file for italic/bold-italic — and a variable `[wght]` file
+    // supplies both the normal and bold weights from its axis. `<em>`/`<strong>`
+    // then resolve to the right face instead of the reader faux-styling one weight.
     for font in &style.fonts {
         css.push_str(&format!(
-            "@font-face {{ font-family: \"{}\"; src: url(\"{}\"); }}\n",
-            font.family, font.href
+            "@font-face {{ font-family: \"{}\"; font-style: {}; font-weight: 400 700; src: url(\"{}\"); }}\n",
+            font.family,
+            if font.italic { "italic" } else { "normal" },
+            font.href
         ));
     }
     if let Some(f) = style.font(FontRole::Body) {
@@ -910,6 +917,67 @@ mod tests {
             "no fonts by default"
         );
         assert!(!part(&plain, "OEBPS/style.css").contains("@font-face"));
+    }
+
+    #[test]
+    fn a_true_italic_sibling_embeds_and_gets_an_italic_font_face() {
+        // A body font with a `-italic` sibling on disk (#638): both files embed, and
+        // the stylesheet declares an upright and an italic `@font-face` for the same
+        // family with a `400 700` weight range — so <em>/<strong> resolve to the
+        // right face instead of the reader faux-styling one weight.
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            publishing: Default::default(),
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("C", None, "Body *emph* and **bold**.")],
+            }],
+            back: vec![],
+        };
+        let mut style = ExportStyle {
+            body_font: Some("fonts/eb-garamond.ttf".into()),
+            ..Default::default()
+        };
+        style.resolve_fonts(|path| match path {
+            "fonts/eb-garamond.ttf" => Ok(b"upright".to_vec()),
+            "fonts/eb-garamond-italic.ttf" => Ok(b"italic".to_vec()),
+            other => Err(std::io::Error::other(format!("no {other}"))),
+        });
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+
+        // Both files embed under OEBPS/fonts/.
+        assert!(
+            names(&bytes).iter().any(|n| n == "OEBPS/fonts/body.ttf"),
+            "upright body font"
+        );
+        assert!(
+            names(&bytes)
+                .iter()
+                .any(|n| n == "OEBPS/fonts/body-italic.ttf"),
+            "true-italic body font"
+        );
+        // The OPF declares both.
+        let opf = part(&bytes, "OEBPS/content.opf");
+        assert!(opf.contains("href=\"fonts/body.ttf\""), "{opf}");
+        assert!(opf.contains("href=\"fonts/body-italic.ttf\""), "{opf}");
+        // The stylesheet has an upright and an italic @font-face, each spanning the
+        // regular→bold weight range.
+        let css = part(&bytes, "OEBPS/style.css");
+        assert!(
+            css.contains("font-style: normal; font-weight: 400 700; src: url(\"fonts/body.ttf\")"),
+            "upright face: {css}"
+        );
+        assert!(
+            css.contains(
+                "font-style: italic; font-weight: 400 700; src: url(\"fonts/body-italic.ttf\")"
+            ),
+            "italic face: {css}"
+        );
     }
 
     #[test]

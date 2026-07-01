@@ -13,7 +13,7 @@ pub mod pdf;
 pub mod scriv;
 pub mod style;
 
-pub use style::{EmbeddedFont, EmbeddedImage, ExportStyle, FontRole, ImageRole};
+pub use style::{EmbeddedFont, EmbeddedImage, ExportStyle, FontRole, FontStyle, ImageRole};
 
 /// A project compiled for export: the book's metadata and its contents as a tree
 /// — front matter, the body (grouped into parts), and back matter — so a binder
