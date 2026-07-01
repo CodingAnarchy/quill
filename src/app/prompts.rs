@@ -293,6 +293,7 @@ impl App {
             | Pending::SetSettingText(_)
             | Pending::AskAi
             | Pending::Thesaurus
+            | Pending::NameGen(_)
             | Pending::Commit
             | Pending::SetRemote
             | Pending::ExCommand
@@ -427,6 +428,12 @@ impl App {
                                 // Back to editing; the candidates arrive in the overlay.
                                 self.mode = closed;
                                 self.thesaurus(text);
+                            }
+                            Pending::NameGen(kind) => {
+                                // Back to editing; the candidate names arrive as a
+                                // pickable list overlay (#610).
+                                self.mode = closed;
+                                self.namegen(kind, text);
                             }
                             Pending::Commit => {
                                 self.mode = closed;

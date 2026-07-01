@@ -755,6 +755,107 @@ impl App {
         }
     }
 
+    // --- Name generator (#610) --------------------------------------------
+
+    /// Open the name-generator kind picker: character, place, or invented term.
+    /// Choosing one opens the constraints prompt — the deliberate, two-step lookup
+    /// the AI boundary allows (an option list the author picks from, never prose).
+    pub(crate) fn start_namegen(&mut self) {
+        let items = ai::namegen::Kind::ALL
+            .iter()
+            .map(|&k| {
+                PaletteItem::new(
+                    kind_title(k),
+                    format!("Generate {} names by constraints", k.label()),
+                    Command::PickNameKind(k),
+                )
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Name generator — what needs a name?",
+            items,
+            selected: 0,
+            collapsed: Default::default(),
+        }));
+    }
+
+    /// After the kind is chosen, prompt for the free-text constraints (origin,
+    /// syllables, tone, era) before running the lookup.
+    pub(crate) fn prompt_namegen(&mut self, kind: ai::namegen::Kind) {
+        self.open_prompt(
+            Pending::NameGen(kind),
+            format!(
+                "Name a {} \u{2014} constraints (e.g. \u{201c}Norse, 2 syllables, harsh, medieval\u{201d}): ",
+                kind.label()
+            ),
+            "",
+            None,
+        );
+    }
+
+    /// Run the name generator: the chosen kind plus the typed constraints. Off the
+    /// editor thread; the candidates arrive as a pickable list overlay. No
+    /// manuscript is attached — it's a small, off-manuscript option-list lookup.
+    pub(crate) fn namegen(&mut self, kind: ai::namegen::Kind, constraints: &str) {
+        let constraints = constraints.trim().to_string();
+        let model = self.ai.model.clone();
+        self.spawn_outcome("\u{27f3} Generating names\u{2026}", move |backend| {
+            let req = ai::namegen::build_request(kind, &constraints, &model);
+            Outcome::NameGen(
+                backend
+                    .complete(&req)
+                    .and_then(|r| ai::namegen::parse(&r.text)),
+            )
+        });
+    }
+
+    /// Show the name-generator candidates as a pickable list (#610): each row is a
+    /// candidate name with its note/tags; Enter places the chosen name at the
+    /// cursor (mirroring the snippet picker). The author picks and Quill places —
+    /// no prose is written, only the one name the author chose. Empty result → a
+    /// status telling the author to loosen the constraints.
+    pub(crate) fn apply_namegen(&mut self, result: Result<Vec<ai::namegen::Name>, ai::AiError>) {
+        let Some(names) = self.ok_or_report(result) else {
+            return;
+        };
+        let names: Vec<ai::namegen::Name> = names
+            .into_iter()
+            .filter(|n| !n.text.trim().is_empty())
+            .collect();
+        if names.is_empty() {
+            self.message = Some("No names — try loosening the constraints.".into());
+            return;
+        }
+        let items = names
+            .iter()
+            .map(|n| {
+                PaletteItem::new(
+                    n.text.clone(),
+                    namegen_desc(n),
+                    Command::InsertName(n.text.clone()),
+                )
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Pick a name to place",
+            items,
+            selected: 0,
+            collapsed: Default::default(),
+        }));
+    }
+
+    /// Place the chosen candidate name at the cursor (#610), through the normal
+    /// edit path (so it works in both views) as one undo group. Verbatim: smart
+    /// typography is bypassed, the name lands exactly as chosen.
+    pub(crate) fn insert_name(&mut self, name: &str) {
+        self.edit_buffer_mut().seal_undo_group();
+        for c in name.chars() {
+            self.edit_insert_raw(c);
+        }
+        self.edit_buffer_mut().seal_undo_group();
+        self.message = Some(format!("Placed \u{201c}{name}\u{201d}."));
+    }
+
     /// Apply a scaffolding pass: write the beat outline to `bible/outline.md` and
     /// surface the structural gaps as findings.
     pub(crate) fn apply_scaffold(&mut self, result: Result<Scaffold, ai::AiError>) {
@@ -986,6 +1087,48 @@ fn thesaurus_lines(words: &[ai::thesaurus::Word]) -> Vec<Line<'static>> {
         }
     }
     lines
+}
+
+/// The name-generator kind picker's row title (#610) — the capitalized kind.
+fn kind_title(kind: ai::namegen::Kind) -> String {
+    let label = kind.label();
+    let mut chars = label.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// A candidate name's one-line description for the pick list (#610): its note,
+/// with any syllable / origin / pronunciation tags appended.
+fn namegen_desc(name: &ai::namegen::Name) -> String {
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(s) = name.syllables {
+        tags.push(format!("{s} syl"));
+    }
+    if let Some(o) = name
+        .origin
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        tags.push(o.to_string());
+    }
+    if let Some(p) = name
+        .pronunciation
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        tags.push(format!("/{p}/"));
+    }
+    let note = name.note.trim();
+    match (note.is_empty(), tags.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => note.to_string(),
+        (true, false) => tags.join(" \u{b7} "),
+        (false, false) => format!("{note}  ({})", tags.join(" \u{b7} ")),
+    }
 }
 
 /// The summary overlay shown after a clean character pass (no conflicts).

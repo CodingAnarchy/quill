@@ -238,6 +238,14 @@ The palette actions:
   it returns only candidates for the requested slot and never rewrites the line
   or any other prose. Sends just the word + line (no manuscript), so it's cheap
   and skips the cost confirm.
+- **Name generator** (#610) — the naming counterpart to the word search: pick what
+  needs a name (character, place, or invented term), then give plain-language
+  constraints (origin/language, syllable count, tone, era). Returns a *pickable
+  list* of candidate names — each with a brief note and any syllable/origin/
+  pronunciation tags — and the one you choose is placed at the cursor. An
+  **option-list lookup, not a co-writer**: names only, never prose or a rewrite of
+  the surrounding text; the author picks and Quill places. Sends no manuscript, so
+  it's cheap and skips the cost confirm.
 - **Character bible** (#74) — a profile per character (traits, arc, drift) to
   `bible/characters/<slug>.md`.
 - **Timeline & continuity** (#75) — an ordered timeline (`bible/timeline.md`) plus
@@ -467,8 +475,8 @@ question, brainstorm from a premise, or draft a character / setting bible from a
 concept. Each tool's input schema is derived from the action itself (the single
 source from #306), so the model supplies the argument and the action runs with it
 instead of opening a prompt the assistant couldn't answer; a Q&A answer comes back
-in the conversation. (The thesaurus and image passes stay out — they need cursor
-context the assistant has no way to give.) Because a
+in the conversation. (The thesaurus, name generator, and image passes stay out —
+they need cursor context the assistant has no way to give.) Because a
 pass costs money, the same cost gate applies: when the estimate exceeds the
 threshold the assistant asks for a `y` / skip confirmation **in the conversation**
 (not a modal, which would fight the pane for keys).

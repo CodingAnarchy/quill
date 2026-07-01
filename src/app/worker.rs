@@ -648,6 +648,7 @@ impl App {
                     Outcome::Config(r) => self.apply_generated_config(r),
                     Outcome::Import(r) => self.apply_import(r),
                     Outcome::Thesaurus(r) => self.apply_thesaurus(r),
+                    Outcome::NameGen(r) => self.apply_namegen(r),
                     Outcome::Editorial(r) => self.apply_editorial(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
