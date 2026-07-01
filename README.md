@@ -495,6 +495,19 @@ goals, a starter cast and setting (with AI, when enabled), and a first note.
 Every step is skippable and the whole thing is dismissible (Esc); turn it off
 entirely with `setup_wizard = false` under `[projects]`.
 
+Want an offline backup — no git, no remote, no account? **Archive project…** (in
+the Ctrl-K menu, or `archive`) writes a single timestamped `.zip` of the whole
+project: the manifest, every chapter, the story bible, your annotations, and the
+custom dictionary. The prompt is prefilled with `<project>-<date-time>.zip` (e.g.
+`My-Novel-2026-06-30-142530.zip`) in your projects folder, so a fresh backup is
+usually one keystroke — edit the path to save it to a USB stick, a synced folder,
+anywhere. The active chapter is saved first so the archive reflects what's on
+screen, and editor scratch is left out (the `.quill/` recovery state, the
+`unused/` folder of removed chapters, `export/`, and OS cruft), mirroring what
+git ignores. To bring one back, **Restore project from archive…** (or
+`archive:restore`) unpacks a `.zip` into a new folder and opens it — it refuses
+to overwrite an existing project, so a stray path can't clobber your work.
+
 ### Smart typography
 
 A finished manuscript wants typographic punctuation, so Quill produces it as you

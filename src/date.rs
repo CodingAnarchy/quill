@@ -41,6 +41,22 @@ pub fn utc_timestamp() -> String {
     )
 }
 
+/// A filename-safe local timestamp `YYYY-MM-DD-HHMMSS` — the stamp an offline
+/// project archive (#594) carries so successive backups sort and never collide.
+/// Local time (falling back to UTC) so the name matches the author's clock.
+pub fn file_stamp() -> String {
+    let t = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+    format!(
+        "{:04}-{:02}-{:02}-{:02}{:02}{:02}",
+        t.year(),
+        t.month() as u8,
+        t.day(),
+        t.hour(),
+        t.minute(),
+        t.second()
+    )
+}
+
 /// Human form `D Mon YYYY`, e.g. `27 Jun 2026` — for the report's dates.
 pub fn human(date: Date) -> String {
     date.format(format_description!(

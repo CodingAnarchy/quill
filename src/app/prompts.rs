@@ -289,6 +289,9 @@ impl App {
             | Pending::NewFromNotesDest
             | Pending::ImportManuscriptSource
             | Pending::ImportManuscriptDest
+            | Pending::ArchiveProjectDest
+            | Pending::RestoreArchiveSource
+            | Pending::RestoreArchiveDest
             | Pending::SetApiKey(_)
             | Pending::SprintDuration => {
                 match key.code {
@@ -503,6 +506,20 @@ impl App {
                                 } else {
                                     self.finish_import_manuscript(text);
                                 }
+                            }
+                            Pending::ArchiveProjectDest => {
+                                // finish_archive_project restores the editing mode
+                                // and reports; a blank path is rejected there (#594).
+                                self.finish_archive_project(text);
+                            }
+                            Pending::RestoreArchiveSource => {
+                                // begin_restore_archive validates the archive, then
+                                // asks for the new folder (or reports and stops).
+                                self.begin_restore_archive(text);
+                            }
+                            Pending::RestoreArchiveDest => {
+                                // finish_restore_archive unpacks and opens (or reports).
+                                self.finish_restore_archive(text);
                             }
                             Pending::SprintDuration => {
                                 // begin_sprint restores the editing mode and reports.

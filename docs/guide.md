@@ -145,6 +145,26 @@ of idle (0, the default, is off); autosave uses the same atomic path as Ctrl-S
 but doesn't run on_save workflows.
 
 
+ARCHIVE & BACKUP
+
+To keep an offline backup — no git, no remote, no account — run "Archive
+project…" from the Ctrl-K menu (or "archive"). It writes a single .zip of the
+whole project: the manifest, every chapter, the story bible, your annotations,
+and the custom dictionary. The prompt is prefilled with a timestamped file name
+(your project's folder name plus the date and time, e.g. My-Novel-2026-06-30-
+142530.zip) in your projects folder, so a fresh backup is usually one Enter away;
+edit the path to save it anywhere you like — a USB stick, a synced folder,
+wherever. The active chapter is saved first, so the archive always reflects
+what's on screen. Editor scratch is left out (the .quill/ recovery state, the
+unused/ folder of removed chapters, the export/ folder, and OS cruft), so a
+backup carries the manuscript, not the leftovers.
+
+To bring one back, run "Restore project from archive…" (or "archive:restore"):
+point it at a .zip, then give it a new folder to unpack into. Quill reproduces
+the project there and opens it. It won't overwrite an existing project — pick an
+empty folder — so a stray path can never clobber work in progress.
+
+
 REPORTS
 
 Ctrl-R opens the progress report: completion against your goals, a projected
