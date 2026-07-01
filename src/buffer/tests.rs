@@ -586,3 +586,65 @@ fn backspace_participates_in_undo() {
     assert!(buf.undo());
     assert_eq!(buf.text(), "draft", "the deletions undo as one group");
 }
+
+// --- Modeless editing keys (#641) --------------------------------------
+
+#[test]
+fn delete_forward_removes_the_char_ahead_of_the_cursor() {
+    let mut buf = Buffer::from_text("abcd");
+    buf.cursor = Cursor { line: 0, col: 1 };
+    let joined = buf.delete_forward();
+    assert!(!joined);
+    assert_eq!(buf.text(), "acd", "the char ahead of the cursor is removed");
+    assert_eq!(
+        buf.cursor,
+        Cursor { line: 0, col: 1 },
+        "the cursor stays put"
+    );
+}
+
+#[test]
+fn delete_forward_at_line_end_joins_the_next_line_up() {
+    let mut buf = Buffer::from_text("one\ntwo");
+    buf.cursor = Cursor { line: 0, col: 3 }; // just past "one"
+    let joined = buf.delete_forward();
+    assert!(joined, "removing the newline reports a line join");
+    assert_eq!(buf.text(), "onetwo");
+    assert_eq!(buf.cursor, Cursor { line: 0, col: 3 });
+}
+
+#[test]
+fn delete_forward_at_document_end_is_a_no_op() {
+    let mut buf = Buffer::from_text("end");
+    buf.cursor = Cursor { line: 0, col: 3 };
+    assert!(!buf.delete_forward());
+    assert_eq!(buf.text(), "end");
+}
+
+#[test]
+fn delete_word_back_removes_the_previous_word() {
+    let mut buf = Buffer::from_text("the quick brown");
+    buf.move_line_end(); // cursor after "brown"
+    let removed = buf.delete_word_back();
+    assert_eq!(removed, 0);
+    assert_eq!(buf.text(), "the quick ", "the last word is deleted");
+    assert_eq!(buf.cursor.col, "the quick ".chars().count());
+}
+
+#[test]
+fn delete_word_back_at_document_start_is_a_no_op() {
+    let mut buf = Buffer::from_text("word");
+    buf.cursor = Cursor { line: 0, col: 0 };
+    assert_eq!(buf.delete_word_back(), 0);
+    assert_eq!(buf.text(), "word");
+}
+
+#[test]
+fn word_back_target_is_a_pure_query() {
+    let mut buf = Buffer::from_text("the quick brown");
+    buf.move_line_end();
+    let before = buf.cursor;
+    let target = buf.word_back_target();
+    assert_eq!(target.col, 10, "start of \"brown\"");
+    assert_eq!(buf.cursor, before, "the query leaves the cursor untouched");
+}

@@ -810,9 +810,19 @@ impl App {
     }
 
     fn on_key_insert(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.on_key_ctrl(key.code);
-            return;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        if ctrl || alt {
+            // The standard editing/motion combos (#641): word-wise cursor motion
+            // (Ctrl-←/→) and word-delete (Ctrl/Alt-Backspace). Everything else
+            // with Ctrl held is a Quill command (save, find, …).
+            match key.code {
+                KeyCode::Left => return self.edit_move(Buffer::move_word_backward),
+                KeyCode::Right => return self.edit_move(Buffer::move_word_forward),
+                KeyCode::Backspace => return self.edit_delete_word_back(),
+                _ if ctrl => return self.on_key_ctrl(key.code),
+                _ => return, // an Alt combo we don't bind
+            }
         }
         match key.code {
             // In Vim mode, Esc leaves Insert for Normal; without it, Esc is inert.
@@ -821,6 +831,7 @@ impl App {
             KeyCode::Char(c) => self.edit_insert_char(c),
             KeyCode::Enter => self.edit_insert_char('\n'),
             KeyCode::Backspace => self.edit_backspace(),
+            KeyCode::Delete => self.edit_delete_forward(),
             KeyCode::Tab => {
                 for _ in 0..4 {
                     self.edit_insert_char(' ');
@@ -833,6 +844,8 @@ impl App {
             KeyCode::Down => self.edit_move_wrapped(Buffer::move_down),
             KeyCode::Home => self.edit_move_wrapped(Buffer::move_home),
             KeyCode::End => self.edit_move_wrapped(Buffer::move_end),
+            KeyCode::PageUp => self.edit_page(false),
+            KeyCode::PageDown => self.edit_page(true),
 
             _ => {}
         }

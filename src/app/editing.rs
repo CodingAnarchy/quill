@@ -111,6 +111,44 @@ impl App {
         }
     }
 
+    /// Forward Delete (#641): remove the grapheme at the cursor, or join the next
+    /// line up at a line end. Like a keystroke, this only records the edit.
+    pub(super) fn edit_delete_forward(&mut self) {
+        match &mut self.manuscript {
+            Some(m) => m.delete_forward(),
+            None => {
+                self.buffer.delete_forward();
+            }
+        }
+    }
+
+    /// Delete the previous word (#641): Ctrl/Alt-Backspace.
+    pub(super) fn edit_delete_word_back(&mut self) {
+        match &mut self.manuscript {
+            Some(m) => m.delete_word_back(),
+            None => {
+                self.buffer.delete_word_back();
+            }
+        }
+    }
+
+    /// Move the cursor a screenful of visual rows up or down (#641) — PageUp /
+    /// PageDown. Pages by the editor's interior height (keeping a line of
+    /// context), reusing the wrap-aware per-row motions so it lands on a real
+    /// column and pages the continuous window if it crosses a chapter.
+    pub(super) fn edit_page(&mut self, down: bool) {
+        let rows = self.viewport_height.saturating_sub(3).max(1) as usize;
+        self.edit_move_wrapped(move |b, w| {
+            for _ in 0..rows {
+                if down {
+                    b.move_down(w);
+                } else {
+                    b.move_up(w);
+                }
+            }
+        });
+    }
+
     /// Undo / redo one edit group (#145). Scoped to the single-chapter view: the
     /// continuous view's segment bookkeeping isn't snapshotted, so history there
     /// is guarded with a message rather than a silent desync (a follow-up).
