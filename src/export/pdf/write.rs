@@ -42,8 +42,8 @@ pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String
 
 /// A bookmark: a title, the page it jumps to, and any nested entries.
 pub(super) struct OutlineItem {
-    title: String,
-    page: usize,
+    pub(super) title: String,
+    pub(super) page: usize,
     pub(super) children: Vec<OutlineItem>,
 }
 
