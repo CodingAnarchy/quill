@@ -167,6 +167,16 @@ impl App {
                     self.decline_workflow();
                 }
             },
+            Pending::ConfirmRefreshBibles { force } => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.mode = closed;
+                    self.refresh_bibles_confirmed(force);
+                }
+                _ => {
+                    self.mode = closed;
+                    self.message = Some("Bible refresh cancelled.".into());
+                }
+            },
             Pending::ConfirmRemoveModel(id) => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     self.mode = closed;

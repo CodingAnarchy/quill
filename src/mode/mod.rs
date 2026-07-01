@@ -446,6 +446,10 @@ pub(crate) enum Pending {
         force: bool,
         offer_local: bool,
     },
+    /// Confirm the all-bibles refresh (#655) — one combined cost confirm gating
+    /// the four bible passes over every book. `force` rebuilds each bible from the
+    /// whole manuscript (#176). `y` runs the batch, anything else cancels.
+    ConfirmRefreshBibles { force: bool },
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,

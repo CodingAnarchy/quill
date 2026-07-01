@@ -10,6 +10,7 @@
 use super::sequenced::{plural, Sequenced, SequencedRun};
 use super::*;
 
+use crate::ai::cost::{self, Estimate};
 use crate::mode::AiAction;
 
 /// The bible trackers a series refresh runs, each accumulated across the books in
@@ -32,14 +33,22 @@ pub(crate) struct SeriesBibleRun {
     /// The triage length when the run started, so the summary can report how many
     /// *new* cross-book findings (#341) this refresh added.
     triage_before: usize,
+    /// Force a full-manuscript rebuild for every pass (#176/#655) — the all-bibles
+    /// refresh's `R`. The series refresh always runs incrementally, so it's `false`.
+    force: bool,
 }
 
 impl SeriesBibleRun {
     fn new(queue: Vec<(AiAction, usize)>, triage_before: usize) -> Self {
+        Self::new_forced(queue, triage_before, false)
+    }
+
+    fn new_forced(queue: Vec<(AiAction, usize)>, triage_before: usize, force: bool) -> Self {
         Self {
             queue,
             seq: SequencedRun::new(),
             triage_before,
+            force,
         }
     }
 }
@@ -92,13 +101,83 @@ impl App {
             self.message = Some(e.to_string());
             return;
         }
-        let books = self.project.book_count();
-        let queue = TRACKERS
-            .iter()
-            .flat_map(|&t| (0..books).map(move |b| (t, b)))
-            .collect();
+        let queue = self.bible_refresh_queue();
         self.series_bible_run = Some(SeriesBibleRun::new(queue, self.triage.len()));
         self.run_series_bible_step();
+    }
+
+    /// The `(tracker, book)` queue a bible refresh runs — each of the four bible
+    /// trackers over every book, in reading order within a tracker so each book
+    /// builds on the last. Shared by the series refresh (#340) and the all-bibles
+    /// refresh (#655); for a standalone novel it's the four trackers over its one
+    /// book.
+    fn bible_refresh_queue(&self) -> Vec<(AiAction, usize)> {
+        let books = self.project.book_count();
+        TRACKERS
+            .iter()
+            .flat_map(|&t| (0..books).map(move |b| (t, b)))
+            .collect()
+    }
+
+    /// Start an all-bibles refresh (#655): run the four bible passes as one batch —
+    /// over every book of a series — with a single combined cost estimate/confirm
+    /// and combined progress, rather than four (or 4×books) separate confirms and
+    /// spawns. Gates on a ready backend and no other run in flight, then either
+    /// confirms the summed estimate or, when it's under the threshold, starts
+    /// straight away. `force` rebuilds each bible from the whole manuscript (#176).
+    pub(crate) fn start_refresh_bibles(&mut self, force: bool) {
+        if self.series_bible_run.is_some() || self.workflow_run.is_some() {
+            self.message = Some("A pass is already running.".into());
+            return;
+        }
+        if let Err(e) = self.ai.check_ready() {
+            self.message = Some(e.to_string());
+            return;
+        }
+        let queue = self.bible_refresh_queue();
+        // Sum the per-pass estimates into one figure the author confirms once.
+        let est = self.bibles_refresh_estimate(&queue, force);
+        if est.tokens == 0 {
+            self.message = Some("Story bibles are current — no chapters changed.".into());
+            return;
+        }
+        // One gate for the whole batch: confirm only when the combined estimate
+        // exceeds the author's threshold, mirroring the single-pass cost policy.
+        if est.dollars > self.ai.cost_threshold {
+            let label = format!(
+                "Refresh all bibles — {} — run? (y/N)",
+                cost::label(&est, &self.ai.model)
+            );
+            self.open_prompt(Pending::ConfirmRefreshBibles { force }, label, "", None);
+        } else {
+            self.refresh_bibles_confirmed(force);
+        }
+    }
+
+    /// Begin the confirmed all-bibles batch (#655): seed the shared series-bible run
+    /// with the four-tracker × book queue and drive its first pass. Reached from the
+    /// combined cost confirm, or directly when the estimate was under the threshold.
+    pub(crate) fn refresh_bibles_confirmed(&mut self, force: bool) {
+        if self.series_bible_run.is_some() || self.workflow_run.is_some() {
+            self.message = Some("A pass is already running.".into());
+            return;
+        }
+        let queue = self.bible_refresh_queue();
+        self.series_bible_run = Some(SeriesBibleRun::new_forced(queue, self.triage.len(), force));
+        self.run_series_bible_step();
+    }
+
+    /// The combined cost estimate for a bible-refresh batch (#655): the summed
+    /// input size of every queued `(tracker, book)` pass — each scoped exactly as it
+    /// will run (incremental delta, full rebuild, or up-to-date/zero) — resolved to
+    /// one token/dollar figure. A forced run bills each pass over the whole book;
+    /// an all-current batch estimates zero, so nothing is spent.
+    fn bibles_refresh_estimate(&self, queue: &[(AiAction, usize)], force: bool) -> Estimate {
+        let chars: usize = queue
+            .iter()
+            .map(|&(action, book)| self.book_pass_context_len(action, book, force))
+            .sum();
+        cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &self.ai.model)
     }
 
     /// Run queued passes until one spawns an async request (then suspend until
@@ -106,10 +185,11 @@ impl App {
     /// send, so it's counted skipped and we move straight on.
     fn run_series_bible_step(&mut self) {
         loop {
-            let (action, book) = match self.series_bible_run.as_mut() {
+            let (action, book, force) = match self.series_bible_run.as_mut() {
                 Some(run) if run.seq.index < run.queue.len() => {
                     run.seq.touch();
-                    run.queue[run.seq.index]
+                    let (action, book) = run.queue[run.seq.index];
+                    (action, book, run.force)
                 }
                 Some(_) => {
                     self.finish_series_bible(); // queue drained
@@ -117,7 +197,7 @@ impl App {
                 }
                 None => return,
             };
-            self.run_book_bible_pass(action, book, false);
+            self.run_book_bible_pass(action, book, force);
             if self.ai_task.is_busy() {
                 // The pass is in flight; show progress and wait for `poll_ai`.
                 if let Some(run) = self.series_bible_run.as_ref() {
@@ -198,6 +278,19 @@ impl App {
     /// Whether a run is recorded (test inspection).
     pub(crate) fn has_series_bible_run(&self) -> bool {
         self.series_bible_run.is_some()
+    }
+
+    /// The `(tracker, book)` batch a bible refresh would run — for tests to assert
+    /// the all-bibles command (#655) plans the four trackers over every book.
+    pub(crate) fn bible_refresh_queue_for_test(&self) -> Vec<(AiAction, usize)> {
+        self.bible_refresh_queue()
+    }
+
+    /// The combined cost estimate the all-bibles refresh (#655) would confirm — for
+    /// tests to assert it sums the queued passes.
+    pub(crate) fn bibles_refresh_estimate_for_test(&self, force: bool) -> Estimate {
+        let queue = self.bible_refresh_queue();
+        self.bibles_refresh_estimate(&queue, force)
     }
 
     /// Test seam: backdate the in-flight pass so the per-step timeout has elapsed.

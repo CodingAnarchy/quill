@@ -422,9 +422,12 @@ impl App {
     }
 
     /// The text of the active book's chapters whose files are in `files`, each
-    /// under its title heading — the changed-chapter context for a pass (#90).
+    /// under its title heading — the changed-chapter context for a pass (#90). A
+    /// thin active-book wrapper over [`book_render_files`], which the whole-series
+    /// bible estimate (#655) uses per book.
+    #[cfg(test)]
     pub(crate) fn chapters_text(&self, files: &[String]) -> String {
-        self.book_render(self.project.active_book(), Some(files))
+        self.book_render_files(self.project.active_book(), files)
     }
 
     /// The set of chapter files owned by every book *other* than `b` (#645). Used
@@ -515,18 +518,34 @@ impl App {
     /// bible + changed chapters for an incremental tracker pass, and zero when its
     /// bible is already current (so an up-to-date pass never prompts a confirm).
     pub(crate) fn pass_context_len(&self, action: AiAction, force: bool) -> usize {
+        self.book_pass_context_len(action, self.project.active_book(), force)
+    }
+
+    /// The byte length of the context a costed pass will send for a specific
+    /// `book` — the per-book form of [`pass_context_len`], so a whole-series bible
+    /// estimate (#655) can sum every book's scoped size without assuming the active
+    /// book. A non-bible pass ignores `book` (it always sends the active
+    /// manuscript). A bible pass is scoped exactly as it will run: the whole book on
+    /// a full rebuild (or forced), the bible + changed chapters incrementally, or
+    /// zero when that book's bible is already current.
+    pub(crate) fn book_pass_context_len(
+        &self,
+        action: AiAction,
+        book: usize,
+        force: bool,
+    ) -> usize {
         let Some(t) = bible_tracker(action) else {
             return self.manuscript_text().len();
         };
         if force {
-            return self.manuscript_text().len(); // a forced rebuild sends the whole book
+            return self.book_render(book, None).len(); // a forced rebuild sends the whole book
         }
-        let (scope, prior, _) = self.plan_bible_pass(&t, self.project.active_book());
+        let (scope, prior, _) = self.plan_bible_pass(&t, book);
         match scope {
             ai::incremental::Scope::UpToDate => 0,
-            ai::incremental::Scope::Full => self.manuscript_text().len(),
+            ai::incremental::Scope::Full => self.book_render(book, None).len(),
             ai::incremental::Scope::Incremental(changed) => {
-                prior.len() + self.chapters_text(&changed).len()
+                prior.len() + self.book_render(book, Some(&changed)).len()
             }
         }
     }

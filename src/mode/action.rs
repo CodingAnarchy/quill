@@ -402,6 +402,10 @@ pub(crate) enum Action {
     SetGoals,
     /// Refresh the whole series' story bible, book by book (#340).
     RefreshSeriesBible,
+    /// Refresh all four story bibles (characters, continuity, setting, plot) in one
+    /// batch — one combined cost estimate/confirm and combined progress, over every
+    /// book of a series (#655).
+    RefreshBibles,
     /// Find & replace across every chapter in the project (#295).
     ProjectFind,
     /// Describe a configuration change in words; the AI proposes settings (#303).
@@ -513,6 +517,7 @@ impl Action {
         Action::Ai(AiAction::Thesaurus),
         Action::Ai(AiAction::NameGen),
         Action::Ai(AiAction::Editorial),
+        Action::RefreshBibles,
         Action::RefreshSeriesBible,
         Action::DescribeConfig,
         Action::SwitchBackend,
@@ -571,6 +576,7 @@ impl Action {
             Action::BookDetails => "book:details",
             Action::SetGoals => "goals:set",
             Action::RefreshSeriesBible => "bible:series",
+            Action::RefreshBibles => "bible:refresh-all",
             Action::ProjectFind => "find:project",
             Action::DescribeConfig => "config:describe",
             Action::AcceptWord => "dict:accept",
@@ -616,6 +622,7 @@ impl Action {
             Action::ProgressReport | Action::AnalysisReport | Action::WritingHistory => "Reports",
             Action::Ai(_)
             | Action::EnableAi
+            | Action::RefreshBibles
             | Action::RefreshSeriesBible
             | Action::DescribeConfig
             | Action::SwitchBackend
@@ -692,6 +699,7 @@ impl Action {
             Action::BookDetails => "Book details…",
             Action::SetGoals => "Set writing goals",
             Action::RefreshSeriesBible => "Refresh series bible",
+            Action::RefreshBibles => "Refresh all bibles",
             Action::ProjectFind => "Find across manuscript",
             Action::DescribeConfig => "Configure by description",
             Action::AcceptWord => "Add word to dictionary",
