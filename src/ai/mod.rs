@@ -32,6 +32,7 @@ pub mod local_image;
 pub mod marketing;
 pub mod model_select;
 pub mod naming;
+pub mod plot;
 pub mod router;
 pub mod scaffold;
 pub mod scene_brief;
@@ -49,6 +50,7 @@ pub use character::Character;
 pub use claude::ClaudeBackend;
 pub use continuity::Continuity;
 pub use naming::Naming;
+pub use plot::Plot;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
 pub use submission::Submission;
@@ -115,6 +117,8 @@ pub enum Outcome {
     Continuity(Result<Continuity, AiError>),
     /// Setting & worldbuilding extraction + rule checks (#77).
     Setting(Result<Setting, AiError>),
+    /// Plot-thread / arc tracking + dangling-thread findings (#606).
+    Plot(Result<Plot, AiError>),
     /// Scaffolding: beat outline + structural gaps (#76).
     Scaffold(Result<Scaffold, AiError>),
     /// Naming & term consistency (#78).
@@ -161,6 +165,7 @@ impl Outcome {
             Outcome::Characters(r) => r.as_ref().err(),
             Outcome::Continuity(r) => r.as_ref().err(),
             Outcome::Setting(r) => r.as_ref().err(),
+            Outcome::Plot(r) => r.as_ref().err(),
             Outcome::Scaffold(r) => r.as_ref().err(),
             Outcome::Naming(r) => r.as_ref().err(),
             Outcome::Style(r) => r.as_ref().err(),

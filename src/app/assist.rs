@@ -300,6 +300,12 @@ impl App {
         self.run_book_bible_pass(AiAction::Setting, self.project.active_book(), force);
     }
 
+    /// Start a plot-thread / arc pass (incremental when possible, #90); the plot
+    /// tracker + dangling-thread findings are applied by [`App::poll_ai`].
+    pub(crate) fn analyze_plot(&mut self, force: bool) {
+        self.run_book_bible_pass(AiAction::Plot, self.project.active_book(), force);
+    }
+
     /// Run one persistent-bible pass (#339) for `action` scoped to `book` — the
     /// active-book passes call it with the active book; the series-bible refresh
     /// (#340) drives it per book. The tracker carries its own request builders and
@@ -700,6 +706,27 @@ impl App {
             path,
             "setting",
             |notes| setting::render(&setting, notes, &today),
+            findings,
+        );
+    }
+
+    /// Apply a plot pass (#606): write the plot-thread tracker to `bible/plot.md`
+    /// (conflict-reviewed like any bible file) and surface the dangling-thread
+    /// findings through the existing triage.
+    pub(crate) fn apply_plot(&mut self, result: Result<Plot, ai::AiError>) {
+        let Some(plot) = self.ok_or_report(result) else {
+            return;
+        };
+        let book = self.current_series_bible_book();
+        let findings = findings_from(&plot.findings, book, |f| {
+            (format!("{}: {}", f.thread, f.issue), f.chapters.clone())
+        });
+        let today = date::iso(date::today());
+        let path = self.project.root.join("bible").join("plot.md");
+        self.apply_bible_with_findings(
+            path,
+            "plot",
+            |notes| plot::render(&plot, notes, &today),
             findings,
         );
     }

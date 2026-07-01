@@ -1,6 +1,7 @@
 //! AI Q&A plus the character / continuity / setting trackers, and the mock backend harness.
 
 use super::*;
+use crate::mode::AiAction;
 use std::fs;
 
 // --- AI: "Ask the manuscript" ----------------------------------------------
@@ -601,4 +602,101 @@ fn setting_with_no_violations_summarizes() {
     assert!(dir.join("bible/setting.md").exists());
     assert!(app.overlay.is_some(), "summary overlay");
     assert!(!matches!(app.mode, Mode::Findings(_)));
+}
+
+// --- Plot-thread / arc tracker (#606) --------------------------------------
+
+/// A plot result with the given dangling-thread findings and one always-present
+/// thread, so the tracker file always has content to write.
+fn plot_with(findings: Vec<plot::ThreadFinding>) -> Plot {
+    Plot {
+        threads: vec![plot::Thread {
+            name: "The stolen locket".into(),
+            status: "open".into(),
+            setup: "Mara pockets it in ch. 1".into(),
+            payoff: String::new(),
+            last_seen: "One".into(),
+            notes: String::new(),
+        }],
+        findings,
+    }
+}
+
+#[test]
+fn plot_writes_tracker_and_opens_dangling_findings() {
+    let (mut app, dir) = two_chapter_app("plot-write");
+    app.apply_plot(Ok(plot_with(vec![plot::ThreadFinding {
+        thread: "The stolen locket".into(),
+        issue: "introduced in ch. 1, never resolved".into(),
+        chapters: vec!["One".into()],
+    }])));
+    let file = fs::read_to_string(dir.join("bible/plot.md")).expect("plot tracker written");
+    assert!(file.contains("title: Plot threads"));
+    assert!(file.contains("### The stolen locket — open"));
+    assert!(file.contains("## Dangling threads"));
+    assert!(
+        matches!(app.mode, Mode::Findings(_)),
+        "dangling-thread findings overlay opens"
+    );
+}
+
+#[test]
+fn plot_with_no_dangling_threads_summarizes() {
+    let (mut app, dir) = two_chapter_app("plot-clean");
+    app.apply_plot(Ok(plot_with(vec![])));
+    assert!(dir.join("bible/plot.md").exists());
+    assert!(
+        app.overlay.is_some(),
+        "summary overlay when nothing dangles"
+    );
+    assert!(!matches!(app.mode, Mode::Findings(_)));
+}
+
+#[test]
+fn plot_findings_flow_through_triage_deduped() {
+    let (mut app, _dir) = two_chapter_app("plot-triage");
+    let finding = plot::ThreadFinding {
+        thread: "Who burned the archive".into(),
+        issue: "opened in ch. 3, never answered".into(),
+        chapters: vec!["Two".into()],
+    };
+    app.apply_plot(Ok(plot_with(vec![finding.clone()])));
+    // A re-run with the same dangling finding must not double-count in triage.
+    app.apply_plot(Ok(plot_with(vec![finding])));
+    app.open_triage();
+    match &app.mode {
+        Mode::Findings(f) => assert_eq!(f.items.len(), 1, "one dangling finding, deduped"),
+        _ => panic!("expected the triage findings overlay"),
+    }
+}
+
+#[test]
+fn plot_pass_scopes_incrementally_and_round_trips_its_bible_key() {
+    let (mut app, dir) = two_chapter_app("plot-incr");
+    // The tracker's bible key is the single source shared by the state file, the
+    // incremental cache, and the series rollup (#563).
+    let key = AiAction::Plot.bible_key().expect("plot is a bible pass");
+    assert_eq!(key, "plot");
+    // Seed a tracker file + recorded state so the up-to-date / incremental paths
+    // are reachable, then edit one chapter and confirm only it is in the delta.
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        dir.join("bible/plot.md"),
+        "---\ntitle: Plot threads\n---\n\n<!-- generated:start -->\nthreads\n<!-- generated:end -->\n",
+    )
+    .unwrap();
+    ai::incremental::State::record(&dir, key, "2026-06-21", app.chapter_digests()).unwrap();
+    // Nothing changed → the pass is up to date and sends nothing.
+    assert_eq!(app.pass_context_len(AiAction::Plot, false), 0, "up to date");
+
+    app.on_key(ctrl('n')); // active → Two
+    type_str(&mut app, "NEWWORD");
+    app.on_key(ctrl('s'));
+    let state = ai::incremental::State::load(&dir);
+    let scope = ai::incremental::decide(state.built_from(key), &app.chapter_digests(), 5);
+    assert_eq!(
+        scope,
+        ai::incremental::Scope::Incremental(vec!["two.md".into()]),
+        "only the edited chapter is in the plot delta"
+    );
 }

@@ -13,6 +13,7 @@ use ratatui::text::{Line, Span};
 
 use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
+use crate::ai::plot::{self, Plot};
 use crate::ai::setting::{self, Setting};
 use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::analysis;

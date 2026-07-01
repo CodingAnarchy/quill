@@ -511,6 +511,7 @@ impl App {
             AiAction::Characters => self.analyze_characters(force),
             AiAction::Continuity => self.analyze_continuity(force),
             AiAction::Setting => self.analyze_setting(force),
+            AiAction::Plot => self.analyze_plot(force),
             AiAction::Scaffold => self.analyze_scaffold(),
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
@@ -556,6 +557,10 @@ fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Setting => (
             "Setting & worldbuilding",
             "Setting bible + rule-violation findings",
+        ),
+        AiAction::Plot => (
+            "Plot & arc tracker",
+            "Thread setup→payoff status + dangling-thread findings",
         ),
         AiAction::Scaffold => ("Scaffold / outline", "Beat outline + structural gaps"),
         AiAction::Naming => ("Name & term consistency", "Spelling variants (cheap pass)"),
