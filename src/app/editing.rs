@@ -248,5 +248,8 @@ impl App {
             self.clear_recovery();
         }
         self.persist_snapshot();
+        // Keep the resume point current on every save, so an unclean exit after a
+        // save still reopens where the author was working (#588).
+        self.persist_position();
     }
 }

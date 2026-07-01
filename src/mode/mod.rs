@@ -328,6 +328,11 @@ pub(crate) enum Pending {
     SplitChapter { at: usize },
     /// Text input: title for the copy when duplicating the chapter at `at` (#585).
     Duplicate { at: usize },
+    /// Text input: a chapter to jump to by number (1-based) or by a title
+    /// substring (#588) — a direct go-to that skips scrolling the browser. A
+    /// number selects that chapter; otherwise the first chapter whose title
+    /// matches (case-insensitive) is opened.
+    GoToChapter,
     /// Text input: title for a new chapter to insert at `at`.
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.

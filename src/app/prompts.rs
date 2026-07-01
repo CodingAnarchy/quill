@@ -261,7 +261,8 @@ impl App {
                 }
             },
             // The text prompts share the editing keys; only Enter differs.
-            Pending::NewChapter { .. }
+            Pending::GoToChapter
+            | Pending::NewChapter { .. }
             | Pending::SplitChapter { .. }
             | Pending::Duplicate { .. }
             | Pending::Rename { .. }
@@ -301,6 +302,25 @@ impl App {
                         let text = text.trim();
                         let fallback = nav_return.unwrap_or(0);
                         match pending {
+                            Pending::GoToChapter => {
+                                // Jump straight to a chapter by 1-based number or
+                                // title substring (#588); a blank entry or no match
+                                // returns to the browser unchanged.
+                                match self.resolve_chapter_target(text) {
+                                    Some(index) => {
+                                        self.activate_chapter(index);
+                                        self.browser_opened_outline = false;
+                                        self.mode = self.editing_mode();
+                                    }
+                                    None => {
+                                        if !text.is_empty() {
+                                            self.message =
+                                                Some(format!("No chapter matches '{text}'."));
+                                        }
+                                        self.select(fallback);
+                                    }
+                                }
+                            }
                             Pending::NewChapter { at } => {
                                 let sel = if text.is_empty() {
                                     fallback

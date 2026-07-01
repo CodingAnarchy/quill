@@ -32,7 +32,8 @@ opens it in a side pane, and "f" lists the project's reference files (the story
 bible and loose notes). Press "/" to filter the list as you type (by title,
 status, or POV) and quick-jump to a chapter; Enter opens the highlighted match,
 Esc keeps the filter for the browser's commands to act on, and a second Esc
-clears it. From the browser you can also create, rename, reorder, and delete
+clears it. Press "#" to go straight to a chapter by number (1-based) or title
+without scrolling the list. From the browser you can also create, rename, reorder, and delete
 chapters, split the open chapter at the cursor into two ("x"), merge a chapter
 into the one above it ("M"), duplicate a chapter ("c"), and set each chapter's
 status, summary, and section.
@@ -137,6 +138,12 @@ Ctrl-S saves the active chapter (or the continuous window). Saves are atomic: an
 interrupted save never corrupts a file, and the previous version always
 survives. If Quill exits unexpectedly, the next launch offers back any unsaved
 work. Ctrl-Q quits, prompting first if there are unsaved changes.
+
+On a clean save or quit, Quill also remembers where you left off — the active
+chapter and the cursor — and reopens the project there next time, rather than at
+chapter one, top of file. This is separate from crash recovery above: recovery
+restores unsaved *text* after an unexpected exit; the resume point restores your
+last *location* after a clean one. Neither changes the other.
 
 The status bar shows a save-state marker beside the chapter name: ✓ when the
 buffer is on disk, ● when you have unsaved changes. Set [editor]
