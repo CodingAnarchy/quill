@@ -50,6 +50,7 @@ mod models;
 mod nav;
 mod palette;
 mod panes;
+mod qa_store;
 mod reports;
 mod search;
 mod settings;
@@ -332,11 +333,17 @@ pub struct App {
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
-    /// The in-session "Ask the manuscript" history (#609), newest last: each ask,
-    /// its grounded answer, and the chapters it cited. Lets the author re-open a
-    /// past lookup (and re-jump its citations) without re-asking. Never persisted
-    /// — it's a session recall, not a stored artifact.
+    /// The "Ask the manuscript" history (#609), newest last: each ask, its
+    /// grounded answer, and the chapters it cited. Lets the author re-open a past
+    /// lookup (and re-jump its citations) without re-asking. Loaded from the
+    /// durable store at startup and appended to as asks return, so it survives a
+    /// restart (#654).
     pub(crate) qa_log: Vec<assist::QaEntry>,
+    /// The durable Q&A store (#654): the grounded-ask history persisted as
+    /// `bible/qa-log.toml`, mirroring [`qa_log`](Self::qa_log) so a past lookup and
+    /// its jumpable citations reload on open. Within the AI boundary — analysis
+    /// recall (questions, answers, citations), never manuscript prose.
+    qa_store: qa_store::QaStore,
     /// The question of the "Ask the manuscript" request in flight (#609), captured
     /// when it's sent so the answer can be filed under it in [`qa_log`](Self::qa_log);
     /// taken when the answer applies, `None` when no ask is pending.
@@ -373,6 +380,11 @@ impl App {
         // restart and picks up where the author left off.
         let findings_store = findings_store::FindingsStore::load(&project.root);
         let triage = findings_store.open();
+        // Restore the durable "Ask the manuscript" Q&A history (#654): the persisted
+        // asks, so a past lookup and its jumpable citations survive a restart
+        // instead of the log rebuilding empty each launch.
+        let qa_store = qa_store::QaStore::load(&project.root);
+        let qa_log = qa_store.entries();
         let mut app = Self {
             buffer,
             project,
@@ -446,7 +458,8 @@ impl App {
             pending_import_source: None,
             pending_archive_source: None,
             sprint: None,
-            qa_log: Vec::new(),
+            qa_log,
+            qa_store,
             pending_qa_question: None,
             message: None,
         };
