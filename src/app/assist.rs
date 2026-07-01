@@ -8,7 +8,6 @@
 use super::bible_review::{Staged, StagedTally};
 use super::worker::bible_tracker;
 use super::*;
-use crate::theme;
 
 use crate::ai::ad_creative::{self, AdCreative};
 use crate::ai::brainstorm::{self, Brainstorm};
@@ -906,14 +905,56 @@ impl App {
         });
     }
 
-    /// Show the word-search results in the AI overlay.
+    /// Show the word-search candidates as a pickable list (#653): each row is a
+    /// candidate word/phrase with its definition and any syllable/origin/rarity
+    /// tags; Enter places the chosen word at the cursor (mirroring the name
+    /// generator, #610). The author picks and Quill places — no prose is written,
+    /// only the one candidate the author chose for the slot they singled out. Empty
+    /// result → a status telling the author to loosen the constraints.
     pub(crate) fn apply_thesaurus(
         &mut self,
         result: Result<Vec<ai::thesaurus::Word>, ai::AiError>,
     ) {
-        if let Some(words) = self.ok_or_report(result) {
-            self.show_ai(thesaurus_lines(&words));
+        let Some(words) = self.ok_or_report(result) else {
+            return;
+        };
+        let words: Vec<ai::thesaurus::Word> = words
+            .into_iter()
+            .filter(|w| !w.text.trim().is_empty())
+            .collect();
+        if words.is_empty() {
+            self.message = Some("No matches — try loosening the constraints.".into());
+            return;
         }
+        let items = words
+            .iter()
+            .map(|w| {
+                PaletteItem::new(
+                    w.text.clone(),
+                    thesaurus_desc(w),
+                    Command::InsertWord(w.text.clone()),
+                )
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Pick a word to place",
+            items,
+            selected: 0,
+            collapsed: Default::default(),
+        }));
+    }
+
+    /// Place the chosen candidate word/phrase at the cursor (#653), through the
+    /// normal edit path (so it works in both views) as one undo group. Verbatim:
+    /// smart typography is bypassed, the word lands exactly as chosen. Mirrors
+    /// [`insert_name`](App::insert_name) / [`insert_snippet`](App::insert_snippet).
+    pub(crate) fn insert_word(&mut self, word: &str) {
+        self.edit_buffer_mut().seal_undo_group();
+        for c in word.chars() {
+            self.edit_insert_raw(c);
+        }
+        self.edit_buffer_mut().seal_undo_group();
+        self.message = Some(format!("Placed \u{201c}{word}\u{201d}."));
     }
 
     // --- Name generator (#610) --------------------------------------------
@@ -1360,43 +1401,53 @@ pub(super) fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<us
     }
 }
 
-/// Render word-search candidates for the AI overlay (#290): one block per
-/// candidate — the word/phrase and its definition, with any syllable/origin/
-/// rarity tags, and a usage note on its own dimmed line.
-fn thesaurus_lines(words: &[ai::thesaurus::Word]) -> Vec<Line<'static>> {
-    if words.is_empty() {
-        return vec![Line::raw("No matches — try loosening the constraints.")];
+/// A candidate word's one-line description for the pick list (#653): its
+/// definition, any syllable / origin / rarity tags, and a trailing usage note —
+/// everything the read-only overlay used to show, folded onto the picker row.
+/// Mirrors [`namegen_desc`] (#610).
+fn thesaurus_desc(word: &ai::thesaurus::Word) -> String {
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(s) = word.syllables {
+        tags.push(format!("{s} syl"));
     }
-    let mut lines = vec![
-        Line::raw(format!("{} candidates:", words.len())),
-        Line::raw(""),
-    ];
-    for w in words {
-        let mut tags: Vec<String> = Vec::new();
-        if let Some(s) = w.syllables {
-            tags.push(format!("{s} syl"));
-        }
-        if let Some(o) = w.origin.as_deref().filter(|s| !s.is_empty()) {
-            tags.push(o.to_string());
-        }
-        if let Some(r) = w.rarity.as_deref().filter(|s| !s.is_empty()) {
-            tags.push(r.to_string());
-        }
-        let tail = if tags.is_empty() {
-            String::new()
+    if let Some(o) = word
+        .origin
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        tags.push(o.to_string());
+    }
+    if let Some(r) = word
+        .rarity
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        tags.push(r.to_string());
+    }
+    let mut desc = word.definition.trim().to_string();
+    if !tags.is_empty() {
+        let tail = format!("({})", tags.join(" \u{b7} "));
+        desc = if desc.is_empty() {
+            tail
         } else {
-            format!("  ({})", tags.join(" \u{b7} "))
+            format!("{desc}  {tail}")
         };
-        lines.push(Line::raw(format!(
-            "{} \u{2014} {}{tail}",
-            w.text, w.definition
-        )));
-        if let Some(note) = w.note.as_deref().filter(|s| !s.is_empty()) {
-            let dim = ratatui::style::Style::default().fg(theme::current().dim);
-            lines.push(Line::from(Span::styled(format!("    {note}"), dim)));
-        }
     }
-    lines
+    if let Some(note) = word
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        desc = if desc.is_empty() {
+            note.to_string()
+        } else {
+            format!("{desc} \u{2014} {note}")
+        };
+    }
+    desc
 }
 
 /// The name-generator kind picker's row title (#610) — the capitalized kind.

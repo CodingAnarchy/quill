@@ -233,11 +233,13 @@ The palette actions:
 - **Word search** (#290) — an in-context thesaurus: name a word or phrase (the
   word under the cursor is prefilled) plus optional plain-language constraints
   (count, closeness, syllable count, language of origin, rarity); the current
-  line is sent as *context for fit only*. Returns candidate words/short phrases
-  with brief definitions in the overlay. A **reference tool, not a co-writer** —
-  it returns only candidates for the requested slot and never rewrites the line
-  or any other prose. Sends just the word + line (no manuscript), so it's cheap
-  and skips the cost confirm.
+  line is sent as *context for fit only*. Returns a *pickable list* of candidate
+  words/short phrases — each with a brief definition and any syllable/origin/
+  rarity tags — and the one you choose is placed at the cursor (#653), exactly like
+  the name generator. A **reference tool, not a co-writer** — it returns only
+  candidates for the requested slot, and the author picks and Quill places one
+  verbatim; it never rewrites the line or any other prose. Sends just the word +
+  line (no manuscript), so it's cheap and skips the cost confirm.
 - **Name generator** (#610) — the naming counterpart to the word search: pick what
   needs a name (character, place, or invented term), then give plain-language
   constraints (origin/language, syllable count, tone, era). Returns a *pickable
