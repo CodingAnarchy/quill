@@ -48,6 +48,19 @@ Ctrl-W begins a window command for split panes: split the editor, open another
 chapter or a bible entry or a docked report beside the prose, switch focus,
 resize, and close. (See docs/windows.md for the full set.)
 
+Run "Corkboard" from the Ctrl-K menu for an index-card overview of the active
+chapter's scenes — one card per ## / ### heading, in order. Arrow keys move
+between cards; Enter jumps the editor cursor to that scene. It's also a planning
+surface: press K or J to move a scene up or down (its heading and prose move
+together, and the chapter is rewritten and saved on the spot), "e" to write a
+one-line synopsis for the selected card, and "s" (or Space) to cycle its status
+— stub, draft, done. Each card shows a status badge and its synopsis (falling
+back to the scene's first line of prose until you write one). The synopsis and
+status are kept in the chapter's front matter, out of the prose, and travel with
+their scene when you reorder — so they survive reopening the project and never
+touch the manuscript text. (The corkboard is a single-chapter feature; leave the
+continuous view with Ctrl-L first.)
+
 
 PROJECTS
 

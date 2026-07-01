@@ -312,27 +312,36 @@ pub struct Tree {
     pub(crate) expanded: std::collections::HashSet<usize>,
 }
 
-/// State for the read-only corkboard (#589, Phase 1): the active chapter's scenes
-/// as index cards, plus the selected row. The cards are built once from the
-/// already-parsed `##`/`###` headings when the view opens, so navigating them
-/// never re-parses and the byte offsets stay a stable jump target. Phase 2
-/// (per-scene metadata + reorder) is a documented follow-up on #589.
+/// State for the corkboard (#589 Phase 1 / #636 Phase 2): the active chapter's
+/// scenes as index cards, plus the selected row. Phase 1's read-only view is now
+/// an editable planning surface — the author reorders scenes and annotates each
+/// with a synopsis + status. The cards are rebuilt (from the already-parsed
+/// headings and the chapter's `scenes:` front matter) when the view opens and
+/// after every edit, so the byte offsets stay a valid jump target and the
+/// metadata stays aligned with the body headings.
 pub struct Corkboard {
     pub(crate) cards: Vec<Card>,
     pub(crate) selected: usize,
 }
 
-/// One corkboard index card (#589, Phase 1): a scene heading and the first line
-/// of prose beneath it, plus the heading's byte offset in the active buffer so
-/// Enter can jump the editor cursor there.
+/// One corkboard index card (#589 / #636): a scene heading and the first line of
+/// prose beneath it, plus the heading's byte offset in the active buffer (so
+/// Enter can jump there) and the author's editable synopsis + status (Phase 2).
 pub struct Card {
     /// The scene heading text (without markers).
     pub(crate) title: String,
     /// The heading's indent level (1–6), so nested scenes read as a hierarchy.
     pub(crate) level: u8,
-    /// The first non-empty line of prose under the heading — the synopsis — or
-    /// empty when the scene has no body yet.
+    /// The first non-empty line of prose under the heading — the fallback shown
+    /// when the author hasn't written a synopsis — or empty when the scene has no
+    /// body yet.
+    pub(crate) prose_line: String,
+    /// The author's one-line synopsis (#636), from the `scenes:` front matter;
+    /// empty when none is set (the card then falls back to `prose_line`).
     pub(crate) synopsis: String,
+    /// The scene's drafting status (#636), shown as a badge and cycled from the
+    /// board.
+    pub(crate) status: crate::frontmatter::SceneStatus,
     /// Byte offset where the heading begins; Enter moves the cursor here.
     pub(crate) start: usize,
 }
@@ -515,6 +524,11 @@ pub(crate) enum Pending {
     /// Text input: the note for an inline annotation (#302) anchored to the byte
     /// range `[start, end)` of the active chapter. Enter saves it, Esc cancels.
     Annotate { start: usize, end: usize },
+    /// Text input: the one-line synopsis for the scene at card `index` on the
+    /// corkboard (#636). Enter persists it to the chapter's `scenes:` front matter
+    /// (a blank entry clears it) and re-opens the board; Esc returns without a
+    /// change.
+    SetSceneSynopsis { index: usize },
     /// y/N: remove the downloaded local model with this id from disk (#382). The
     /// id is a catalog `&'static str`, so [`Pending`] stays `Copy`.
     ConfirmRemoveModel(&'static str),

@@ -310,6 +310,7 @@ impl App {
             | Pending::ImportNotes
             | Pending::NewFromNotesSource
             | Pending::Annotate { .. }
+            | Pending::SetSceneSynopsis { .. }
             | Pending::NewFromNotesDest
             | Pending::ImportManuscriptSource
             | Pending::ImportManuscriptDest
@@ -417,6 +418,12 @@ impl App {
                                 // Back to editing; the note anchors to its range (#302).
                                 self.mode = closed;
                                 self.create_annotation(start, end, text.to_string());
+                            }
+                            Pending::SetSceneSynopsis { index } => {
+                                // Persist the synopsis (blank clears it); the setter
+                                // re-opens the corkboard itself, so don't reset the
+                                // mode here (#636).
+                                self.apply_scene_synopsis(index, text);
                             }
                             Pending::AskAi => {
                                 // Back to editing immediately; the answer arrives
