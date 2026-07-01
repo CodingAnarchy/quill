@@ -143,6 +143,15 @@ pub enum Mode {
     /// where each can be jumped to or deleted. The items are read live from
     /// `App::annotations`; this carries only the selected row.
     Annotations { selected: usize },
+    /// The focused heading outline (#657): the Ctrl-O outline made navigable.
+    /// The outline pane normally just lists the active chapter's headings and
+    /// highlights the section the cursor is in; focusing it moves a `selected`
+    /// cursor over the headings (arrows / j-k) and Enter jumps the editor cursor
+    /// to the selected heading's byte offset, then returns to editing (leaving
+    /// the pane up). Read-only over the prose. `selected` indexes the active
+    /// chapter's `headings()` in document order — the same list the pane renders
+    /// and the corkboard jumps by.
+    Outline { selected: usize },
     /// The read-only corkboard for the active chapter (#589, Phase 1): an
     /// index-card overview of the chapter's `##`/`###` scene headings — each card
     /// is a heading + its first line of prose. Navigable; Enter jumps the editor

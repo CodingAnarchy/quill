@@ -66,6 +66,7 @@ mod export_styling;
 mod goals;
 mod imports;
 mod models;
+mod outline;
 mod panes;
 mod project_search;
 mod projects;
