@@ -22,6 +22,9 @@ similar = "3.1.1"
 # Manuscript export (#7): the .docx/OOXML container is a zip; the XML is
 # hand-written. Already present transitively, so this adds no new download.
 zip = { version = "7.2", default-features = false, features = ["deflate"] }
+# Flate (zlib) compression for embedded font programs and page content streams in
+# the PDF export (#662). Already in the tree via `zip`, so this adds no download.
+flate2 = "1.1"
 # Version control (#54). https + ssh enable remote push/pull (#134); the local
 # operations need neither. vendored-openssl builds OpenSSL from source so the
 # HTTPS transport doesn't depend on a system OpenSSL install.

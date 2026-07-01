@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use subsetter::{GlyphRemapper, Tag};
 use ttf_parser::{Face, GlyphId};
 
+use super::write::flate_stream;
 use crate::export::{ExportStyle, FontRole, FontStyle};
 
 /// The bold weight the PDF pins for the bold slots (#638). A variable-`[wght]`
@@ -542,17 +543,12 @@ pub(super) fn glyph_run_mono(fonts: &Fonts, text: &str) -> Vec<(&'static str, St
     runs
 }
 
-/// A `/FontFile2` stream: the raw (uncompressed) TrueType program, with `/Length1`.
+/// A `/FontFile2` stream: the (already-subset) TrueType program, FlateDecode-
+/// compressed (#662). `/Length1` records the *uncompressed* program length (what
+/// consumers expect for a TrueType FontFile2); the shared helper adds `/Filter
+/// /FlateDecode` and the compressed `/Length`.
 fn font_file_stream(program: &[u8]) -> Vec<u8> {
-    let mut v = format!(
-        "<< /Length {} /Length1 {} >>\nstream\n",
-        program.len(),
-        program.len()
-    )
-    .into_bytes();
-    v.extend_from_slice(program);
-    v.extend_from_slice(b"\nendstream");
-    v
+    flate_stream(program, &format!(" /Length1 {}", program.len()))
 }
 
 /// A PDF name token for a font family: keep `[A-Za-z0-9-]` so it's a valid name.

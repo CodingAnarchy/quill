@@ -2,8 +2,37 @@
 //! objects → xref → trailer byte assembly. Layout produces the objects and the
 //! outline; this turns them into the file.
 
+use std::io::Write;
+
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+
 use super::font::{pdf_text_string, GidMap, ObjMap};
 use super::num;
+
+/// Build a FlateDecode-compressed stream object body: `<< /Filter /FlateDecode
+/// /Length N{extra} >>\nstream\n<zlib bytes>\nendstream`. `data` is the raw
+/// (uncompressed) stream payload; `extra` is any additional dict entries (e.g.
+/// ` /Length1 <n>` for a font program, spelling out the *uncompressed* length).
+/// Content streams and embedded font programs (#662) ship compressed to shrink
+/// the exported PDF; the bytes round-trip to `data` via zlib inflate.
+pub(super) fn flate_stream(data: &[u8], extra: &str) -> Vec<u8> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(data)
+        .expect("zlib encode to an in-memory buffer never fails");
+    let compressed = encoder
+        .finish()
+        .expect("zlib encode to an in-memory buffer never fails");
+    let mut v = format!(
+        "<< /Filter /FlateDecode /Length {}{extra} >>\nstream\n",
+        compressed.len()
+    )
+    .into_bytes();
+    v.extend_from_slice(&compressed);
+    v.extend_from_slice(b"\nendstream");
+    v
+}
 
 /// Remap the glyph ids in a content stream from the original fonts to their embedded
 /// subsets. The writer emits one op per line: a `/Fn … Tf` font switch, then glyph

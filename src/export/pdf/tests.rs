@@ -4,6 +4,10 @@
 //! structure (raw byte markers) and the font-routing logic rather than grepping the
 //! rendered words; visual/qpdf validation is covered in the PR.
 
+use std::io::Read;
+
+use flate2::read::ZlibDecoder;
+
 use super::font::Fonts;
 use super::wrap::{words_of, wrap_lines, Word};
 use super::*;
@@ -63,6 +67,21 @@ fn count(bytes: &[u8], needle: &str) -> usize {
         .windows(needle.len())
         .filter(|w| *w == needle.as_bytes())
         .count()
+}
+
+/// The concatenated, inflated page content streams as text. Content streams ship
+/// FlateDecode-compressed (#662), so tests that assert on drawing operators (`Tj`,
+/// `Tm`, `cm`, `Do`, `re W n`) inflate them first rather than grepping raw bytes.
+fn content(bytes: &[u8]) -> String {
+    let mut s = String::new();
+    for (dict, body) in flate_streams(bytes) {
+        // Content streams have a bare `<< /Filter … /Length … >>`; the font program
+        // carries `/Length1`. Skip the font so the text is real page content.
+        if !dict.contains("/Length1") {
+            s.push_str(&String::from_utf8_lossy(&body));
+        }
+    }
+    s
 }
 
 #[test]
@@ -483,8 +502,10 @@ fn an_italic_style_without_a_true_italic_file_is_synthesized() {
         "no bundled italic — the slope is synthesized on the chosen family"
     );
     // The oblique shear appears in a text matrix (`1 0 0.21 1 …  Tm`).
-    let s = String::from_utf8_lossy(&bytes);
-    assert!(s.contains("1 0 0.21 1"), "synthetic oblique shear in a Tm");
+    assert!(
+        content(&bytes).contains("1 0 0.21 1"),
+        "synthetic oblique shear in a Tm"
+    );
 }
 
 #[test]
@@ -585,8 +606,9 @@ fn image_ornaments_embed_as_xobjects_and_are_placed() {
         "only the transparent image gets a mask"
     );
     assert!(has(&bytes, "/XObject <<"), "images registered in resources");
+    let drawn = content(&bytes);
     for op in ["/ImSceneBreak Do", "/ImChapterHeading Do", "/ImTitle Do"] {
-        assert!(has(&bytes, op), "{op} drawn");
+        assert!(drawn.contains(op), "{op} drawn");
     }
 }
 
@@ -609,7 +631,7 @@ fn a_cover_image_emits_a_full_page_page_zero() {
     }
     // The cover image is embedded and drawn.
     assert!(has(&bytes, "/Subtype /Image"), "cover image XObject");
-    assert!(has(&bytes, "/ImCover Do"), "cover drawn");
+    assert!(content(&bytes).contains("/ImCover Do"), "cover drawn");
     // One extra page over the no-cover baseline: the cover page leads it.
     let baseline = count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent");
     let with_cover = count(&bytes, "/Type /Page /Parent");
@@ -633,7 +655,10 @@ fn a_print_pdf_emits_the_cover_full_page() {
     let (w, h) = trim_points("6x9").unwrap();
     let bytes = to_pdf_print(&doc(), w, h, 0.0, &style).unwrap();
     assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
-    assert!(has(&bytes, "/ImCover Do"), "cover drawn in the print PDF");
+    assert!(
+        content(&bytes).contains("/ImCover Do"),
+        "cover drawn in the print PDF"
+    );
     assert!(has(&bytes, "MediaBox [0 0 432 648]"), "6x9 trim");
 }
 
@@ -676,12 +701,13 @@ fn bleed_lets_the_cover_fill_to_the_bleed_edge() {
         "media box = trim + bleed"
     );
     // The cover fills to the bleed edge (height 675 > media 666 → overflow), clipped.
+    let drawn = content(&bytes);
     assert!(
-        has(&bytes, "0 0 450 666 re W n"),
+        drawn.contains("0 0 450 666 re W n"),
         "cover clipped to the media box"
     );
     assert!(
-        has(&bytes, "450 0 0 675 0 -4.50 cm /ImCover Do"),
+        drawn.contains("450 0 0 675 0 -4.50 cm /ImCover Do"),
         "cover scaled to cover the media box and centered"
     );
 }
@@ -1218,5 +1244,110 @@ fn style_warnings_flag_svg_and_truly_uncovered_glyphs() {
     assert!(
         pdf_style_warnings(&cjk).iter().any(|w| w.contains('中')),
         "uncovered glyph reported"
+    );
+}
+
+/// Inflate every FlateDecode stream in `bytes` and return each `(dict, inflated)`
+/// pair, where `dict` is the stream's `<< … >>` dictionary text. Walks the raw PDF
+/// object by object: each `stream\n … \nendstream` payload preceded by a dict that
+/// names `/Filter /FlateDecode` is decompressed with zlib inflate.
+fn flate_streams(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    let open = b"stream\n";
+    let close = b"\nendstream";
+    let mut i = 0;
+    while let Some(rel) = bytes[i..].windows(open.len()).position(|w| w == open) {
+        let dict_end = i + rel;
+        let payload = dict_end + open.len();
+        let end_rel = bytes[payload..]
+            .windows(close.len())
+            .position(|w| w == close)
+            .expect("every stream is terminated");
+        let dict_start = bytes[..dict_end]
+            .windows(2)
+            .rposition(|w| w == b"<<")
+            .expect("a stream has a preceding dict");
+        let dict = String::from_utf8_lossy(&bytes[dict_start..dict_end]).into_owned();
+        if dict.contains("/Filter /FlateDecode") {
+            let mut inflated = Vec::new();
+            ZlibDecoder::new(&bytes[payload..payload + end_rel])
+                .read_to_end(&mut inflated)
+                .expect("FlateDecode stream inflates");
+            out.push((dict, inflated));
+        }
+        i = payload + end_rel + close.len();
+    }
+    out
+}
+
+#[test]
+fn content_and_font_streams_are_flate_compressed() {
+    // Both the page content streams and the embedded /FontFile2 programs ship with
+    // /Filter /FlateDecode (#662); nothing is left as a raw uncompressed stream.
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    assert!(
+        has(&bytes, "/Filter /FlateDecode"),
+        "streams are compressed"
+    );
+    // A raw content stream would read "<< /Length N >>\nstream" with no filter; a
+    // font program "<< /Length N /Length1 M >>\nstream". Neither should appear.
+    assert!(
+        !has(&bytes, "/Length1") || has(&bytes, "/Filter /FlateDecode /Length"),
+        "font program carries a Flate filter"
+    );
+    let streams = flate_streams(&bytes);
+    assert!(
+        streams.iter().any(|(d, _)| d.contains("/Length1")),
+        "the embedded font program is a FlateDecode stream"
+    );
+    // At least one compressed stream inflates to a page content stream (Identity-H
+    // text runs end in `Tj`, font switches in `Tf`), proving the round-trip.
+    assert!(
+        streams.iter().any(|(_, body)| {
+            let s = String::from_utf8_lossy(body);
+            s.contains(" Tf") && s.contains("> Tj")
+        }),
+        "a content stream round-trips through inflate"
+    );
+}
+
+#[test]
+fn a_font_program_records_its_uncompressed_length1() {
+    // /Length1 is the *uncompressed* TrueType program length, and the compressed
+    // /Length is smaller — so the font program genuinely shrank.
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    let (dict, inflated) = flate_streams(&bytes)
+        .into_iter()
+        .find(|(d, _)| d.contains("/Length1"))
+        .expect("an embedded font program");
+    let field = |key: &str| -> usize {
+        let at = dict.find(key).unwrap() + key.len();
+        dict[at..]
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let length1 = field("/Length1 ");
+    let length = field("/Length ");
+    assert_eq!(length1, inflated.len(), "/Length1 is the uncompressed size");
+    assert!(
+        length < length1,
+        "compressed /Length {length} < uncompressed /Length1 {length1}"
+    );
+}
+
+#[test]
+fn compression_shrinks_a_pdf_with_an_embedded_custom_font() {
+    // A doc with a fair amount of text: the FlateDecode streams inflate back to more
+    // bytes than the whole compressed PDF, confirming a real size win from #662.
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    let inflated: usize = flate_streams(&bytes).iter().map(|(_, b)| b.len()).sum();
+    assert!(inflated > 0, "some streams are compressed");
+    assert!(
+        inflated > bytes.len() / 2,
+        "inflated stream payload ({inflated}) dwarfs the compressed PDF ({})",
+        bytes.len()
     );
 }
