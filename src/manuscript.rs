@@ -250,6 +250,56 @@ impl Manuscript {
         self.segments[seg].dirty = true;
     }
 
+    /// Delete the grapheme at the cursor (forward Delete). At a chapter's last
+    /// position it would join into the next chapter; that's a fixed seam, so it's
+    /// a no-op. A join within the chapter drops one line from its count.
+    pub fn delete_forward(&mut self) {
+        let line = self.buffer.cursor.line;
+        let seg = self.owner_of_line(line);
+        let seg_end = self.segment_start_line(seg) + self.segments[seg].lines; // one past the last line
+        let at_line_end = self.buffer.cursor.col >= self.buffer.line_len();
+
+        // On the last line of this chapter, at its end: this would pull the next
+        // chapter up. Fixed seam — refuse.
+        if at_line_end && line + 1 >= seg_end {
+            return;
+        }
+        if self.buffer.delete_forward() {
+            self.segments[seg].lines -= 1;
+        }
+        self.segments[seg].dirty = true;
+    }
+
+    /// Delete the previous word (Ctrl/Alt-Backspace). The deletion is clamped to
+    /// this chapter's start so it never reaches across the fixed seam into the
+    /// chapter above; each newline it removes drops a line from the count.
+    pub fn delete_word_back(&mut self) {
+        let line = self.buffer.cursor.line;
+        let col = self.buffer.cursor.col;
+        let seg = self.owner_of_line(line);
+        let seg_start = self.segment_start_line(seg);
+
+        // Already at this chapter's first position — a word-delete would only have
+        // the previous chapter to reach into. Fixed seam — refuse.
+        if col == 0 && line == seg_start && seg > 0 {
+            return;
+        }
+
+        let before = self.buffer.line_count();
+        if self.buffer.word_back_target().line < seg_start {
+            // The word runs back across the seam into the chapter above. Delete
+            // only down to this chapter's first position instead of crossing it.
+            while (self.buffer.cursor.line, self.buffer.cursor.col) != (seg_start, 0) {
+                self.buffer.backspace();
+            }
+        } else {
+            self.buffer.delete_word_back();
+        }
+        let removed = before.saturating_sub(self.buffer.line_count());
+        self.segments[seg].lines = self.segments[seg].lines.saturating_sub(removed);
+        self.segments[seg].dirty = true;
+    }
+
     // --- Saving ------------------------------------------------------------
 
     /// Write every chapter with unsaved edits back to its file (splitting the
@@ -701,6 +751,58 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
         assert!(!m.dirty()); // the refused edit didn't mark anything dirty...
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn forward_delete_at_a_chapter_end_is_a_fixed_seam() {
+        let (mut project, dir) = project_with("fwd-seam", &["alpha\n", "beta\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        // Cursor at the last position of chapter 0 ("alpha", line 0, col 5).
+        m.buffer.cursor = Cursor { line: 0, col: 5 };
+        m.delete_forward(); // would pull chapter 1 up — must do nothing
+        m.save(&mut project).unwrap();
+
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn forward_delete_within_a_chapter_removes_the_char_ahead() {
+        let (mut project, dir) = project_with("fwd", &["alpha\n", "beta\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        m.buffer.cursor = Cursor { line: 0, col: 0 };
+        m.delete_forward(); // drop the 'a' of "alpha"
+        m.save(&mut project).unwrap();
+
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "lpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn word_delete_back_stops_at_the_chapter_seam() {
+        let (mut project, dir) = project_with("word-seam", &["alpha\n", "beta\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        // Cursor at the first position of chapter 1 ("beta", line 1, col 0) — a
+        // word-delete here has only chapter 0 to reach back into. Must not cross.
+        m.buffer.cursor = Cursor { line: 1, col: 0 };
+        m.delete_word_back();
+        m.save(&mut project).unwrap();
+
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
+
+        // From inside chapter 1, it deletes the word within that chapter.
+        m.buffer.cursor = Cursor { line: 1, col: 4 }; // after "beta"
+        m.delete_word_back();
+        m.save(&mut project).unwrap();
+        // "beta" is gone; an emptied chapter body normalizes to an empty file.
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "");
         fs::remove_dir_all(&dir).ok();
     }
 

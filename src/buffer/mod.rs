@@ -402,6 +402,82 @@ impl Buffer {
         self.goal_x = None;
     }
 
+    /// Delete the grapheme *at* the cursor (forward Delete). At the end of a line
+    /// it removes the newline, pulling the next line up; the cursor stays put.
+    /// Returns whether a line join happened (a newline was removed) — the
+    /// continuous view uses it to keep its per-chapter line counts in step.
+    pub fn delete_forward(&mut self) -> bool {
+        let len = self.line_graphemes(self.cursor.line);
+        if self.cursor.col < len {
+            let line = self.line(self.cursor.line);
+            let (start_b, g) = line
+                .grapheme_indices(true)
+                .nth(self.cursor.col)
+                .map(|(b, g)| (b, g.to_string()))
+                .unwrap_or((line.len(), String::new()));
+            let line_start = self.rope.line_to_char(self.cursor.line);
+            let start_c = line_start + line[..start_b].chars().count();
+            let end_c = start_c + g.chars().count();
+            self.edit_remove(start_c, end_c);
+            self.dirty = true;
+            false
+        } else if self.cursor.line + 1 < self.line_count() {
+            // At the line end: remove the newline, joining the next line up. The
+            // cursor already sits at the join point, so it needs no adjustment.
+            let idx = self.rope.line_to_char(self.cursor.line + 1);
+            self.edit_remove(idx - 1, idx);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The cursor position the previous-word motion/delete lands on — the start
+    /// of the word before the cursor. Moves the cursor there and back so it's a
+    /// pure query; the continuous view uses it to clamp a word-delete to a chapter
+    /// seam before removing anything.
+    pub fn word_back_target(&mut self) -> Cursor {
+        let saved = self.cursor;
+        let saved_goal = self.goal_x;
+        self.move_word_backward();
+        let target = self.cursor;
+        self.cursor = saved;
+        self.goal_x = saved_goal;
+        target
+    }
+
+    /// Delete from the start of the previous word to the cursor (Ctrl/Alt-
+    /// Backspace). Uses the same word classification as the Vim word motions, so
+    /// it stops at the same boundaries `b` would. A no-op at the very start of the
+    /// document. Returns the number of newlines removed, so the continuous view
+    /// can adjust its per-chapter line counts.
+    pub fn delete_word_back(&mut self) -> usize {
+        let end = self.cursor_char_idx();
+        if end == 0 {
+            return 0;
+        }
+        self.move_word_backward();
+        let start = self.cursor_char_idx();
+        if start >= end {
+            // `b` didn't move off the cursor; fall back to a single Backspace so
+            // the key always makes progress.
+            self.cursor = self.cursor_at_byte(self.rope.char_to_byte(end));
+            self.backspace();
+            return 0;
+        }
+        let newlines = self
+            .rope
+            .slice(start..end)
+            .chars()
+            .filter(|&c| c == '\n')
+            .count();
+        self.edit_remove(start, end); // cursor is already at `start` from `move_word_backward`
+        self.dirty = true;
+        self.goal_x = None;
+        newlines
+    }
+
     // --- Movement ----------------------------------------------------------
 
     pub fn move_left(&mut self) {

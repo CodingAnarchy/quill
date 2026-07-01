@@ -13,6 +13,13 @@ status bar shows the live word count and your position. Editing is Unicode-
 correct — movement and deletion work on whole characters. Ctrl-Z undoes a burst
 of typing and Ctrl-Y redoes it. Ctrl-+ and Ctrl-- widen and narrow the column.
 
+The usual editing keys work in the default (non-Vim) mode: Backspace deletes the
+character behind the cursor and Delete the one ahead; Ctrl-Backspace (or
+Alt-Backspace) deletes the whole word behind it. The arrows move by character
+and line, Home/End jump to the ends of the row, Ctrl-← and Ctrl-→ move a word at
+a time, and PageUp/PageDown move a screenful. (Vim mode, if enabled, keeps its
+own bindings.)
+
 Markdown is understood as you write: emphasis (*italic*, **bold**) renders
 softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
 in-chapter outline pane.

@@ -36,6 +36,80 @@ fn undo_is_guarded_in_the_continuous_view() {
     );
 }
 
+/// A key event carrying a modifier — for the Ctrl-←/→ / Ctrl-Backspace
+/// modeless editing keys (#641).
+fn key_mod(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, mods)
+}
+
+#[test]
+fn delete_removes_the_char_ahead_in_insert_mode() {
+    let (mut app, _dir) = two_chapter_app("modeless-delete");
+    // Buffer is "first chapter"; cursor rests at the start.
+    app.on_key(key(KeyCode::Delete));
+    assert_eq!(
+        app.buffer.text().trim_end(),
+        "irst chapter",
+        "Delete removes the char ahead of the cursor"
+    );
+}
+
+#[test]
+fn ctrl_arrows_move_by_word_in_insert_mode() {
+    let (mut app, _dir) = two_chapter_app("modeless-word-motion");
+    app.on_key(key_mod(KeyCode::Right, KeyModifiers::CONTROL));
+    assert_eq!(
+        app.buffer.cursor.col, 6,
+        "Ctrl-→ moves to the start of the next word (\"chapter\")"
+    );
+    app.on_key(key_mod(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(
+        app.buffer.cursor.col, 0,
+        "Ctrl-← moves back to the start of the previous word"
+    );
+}
+
+#[test]
+fn ctrl_backspace_deletes_the_previous_word_in_insert_mode() {
+    let (mut app, _dir) = two_chapter_app("modeless-word-delete");
+    app.buffer.move_line_end(); // after "first chapter"
+    app.on_key(key_mod(KeyCode::Backspace, KeyModifiers::CONTROL));
+    assert_eq!(
+        app.buffer.text(),
+        "first \n",
+        "Ctrl-Backspace deletes the previous word, leaving the space before it"
+    );
+}
+
+#[test]
+fn page_keys_move_the_cursor_a_screen_in_insert_mode() {
+    let dir = app_scratch_dir("modeless-paging");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    // 40 short lines, one word each, so paging moves whole logical lines.
+    let body: String = (0..40).map(|i| format!("line{i}\n")).collect();
+    fs::write(dir.join("one.md"), body).unwrap();
+
+    let mut app = open_test_app(&dir);
+    app.viewport_height = 12; // a small screen: pages by ~9 rows
+    assert_eq!(app.buffer.cursor.line, 0);
+
+    app.on_key(key(KeyCode::PageDown));
+    let after_down = app.buffer.cursor.line;
+    assert!(
+        after_down >= 8,
+        "PageDown moves roughly a screenful down, got line {after_down}"
+    );
+    app.on_key(key(KeyCode::PageUp));
+    assert_eq!(
+        app.buffer.cursor.line, 0,
+        "PageUp moves a screenful back up"
+    );
+}
+
 /// Match count and current index while in search mode.
 fn search_state(app: &App) -> (usize, usize) {
     match &app.mode {
