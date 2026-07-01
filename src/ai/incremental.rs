@@ -15,7 +15,7 @@
 //! The digest is content-addressed, so it needs no version control and is immune
 //! to commit timing — a chapter counts as changed exactly when its text differs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -163,17 +163,26 @@ impl State {
     /// Merge one book's chapter digests into a tracker's record (#339), leaving
     /// the other books' entries in place — so a series refresh updates the book it
     /// just folded in without forgetting what the earlier books were built from.
-    /// (A book's deleted chapters leave a stale entry until a full rebuild; that's
-    /// the series trade-off for not re-scanning every book.)
+    ///
+    /// `preserve` is the set of files owned by the *other* books; every recorded
+    /// entry not in it belongs to the book being folded and is dropped before the
+    /// fresh `chapters` go in. Extending alone would leave a deleted chapter's
+    /// digest (and the tracked entries tied to it) stale until a full rebuild
+    /// (#645); pruning this book's slice keeps the shared bible's record honest
+    /// while still not re-scanning the other books.
     pub fn record_merge(
         root: &Path,
         tracker: &str,
         built: &str,
         chapters: Digests,
+        preserve: &BTreeSet<String>,
     ) -> std::io::Result<()> {
         let mut state = State::load(root);
         let entry = state.trackers.entry(tracker.to_string()).or_default();
         entry.built = built.to_string();
+        // Drop this book's prior entries (anything not owned by another book), so a
+        // deleted chapter doesn't linger, then fold in the book's current digests.
+        entry.chapters.retain(|f, _| preserve.contains(f));
         entry.chapters.extend(chapters);
         Self::save(root, &state)
     }
@@ -199,13 +208,25 @@ mod tests {
             .collect()
     }
 
+    fn preserve(files: &[&str]) -> BTreeSet<String> {
+        files.iter().map(|f| f.to_string()).collect()
+    }
+
     #[test]
     fn record_merge_keeps_the_other_books_entries() {
         let dir = std::env::temp_dir().join(format!("quill-merge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         // Book one records; book two folds in via merge — book one survives (#339).
+        // Book two's merge preserves book one's file ("b1/one.md").
         State::record(&dir, "characters", "d", digests(&[("b1/one.md", "a")])).unwrap();
-        State::record_merge(&dir, "characters", "e", digests(&[("b2/one.md", "b")])).unwrap();
+        State::record_merge(
+            &dir,
+            "characters",
+            "e",
+            digests(&[("b2/one.md", "b")]),
+            &preserve(&["b1/one.md"]),
+        )
+        .unwrap();
         let recorded = State::load(&dir).built_from("characters").unwrap().clone();
         assert!(
             recorded.contains_key("b1/one.md") && recorded.contains_key("b2/one.md"),
@@ -217,6 +238,49 @@ mod tests {
         assert!(
             !replaced.contains_key("b2/one.md"),
             "record replaces: {replaced:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn record_merge_prunes_this_books_deleted_chapters() {
+        let dir = std::env::temp_dir().join(format!("quill-merge-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Book one recorded two chapters; book two folded in beside it (#339).
+        State::record(
+            &dir,
+            "characters",
+            "d",
+            digests(&[("b1/one.md", "a"), ("b1/two.md", "b")]),
+        )
+        .unwrap();
+        State::record_merge(
+            &dir,
+            "characters",
+            "e",
+            digests(&[("b2/one.md", "c")]),
+            &preserve(&["b1/one.md", "b1/two.md"]),
+        )
+        .unwrap();
+        // The author deletes book two's chapter, then re-folds book two: its now-
+        // empty digest set must drop the stale "b2/one.md" entry (#645), while book
+        // one (preserved) stays intact.
+        State::record_merge(
+            &dir,
+            "characters",
+            "f",
+            digests(&[]),
+            &preserve(&["b1/one.md", "b1/two.md"]),
+        )
+        .unwrap();
+        let recorded = State::load(&dir).built_from("characters").unwrap().clone();
+        assert!(
+            !recorded.contains_key("b2/one.md"),
+            "book two's deleted chapter pruned: {recorded:?}"
+        );
+        assert!(
+            recorded.contains_key("b1/one.md") && recorded.contains_key("b1/two.md"),
+            "book one's entries survive the merge: {recorded:?}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

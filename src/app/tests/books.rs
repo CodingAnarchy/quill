@@ -256,14 +256,110 @@ fn folding_a_book_into_the_bible_keeps_the_other_books_state() {
     let (mut app, dir) = series_app("fold-keeps");
     // Book one's character pass already recorded what it was built from.
     State::record(&dir, "characters", "2026-06-24", app.book_digests(0)).unwrap();
-    // Folding book two in is a series pass: it merges, not replaces.
-    app.pending_pass = Some(("characters".into(), app.book_digests(1), true));
+    // Folding book two in is a series pass: it merges, not replaces (preserving
+    // book one's files).
+    app.pending_pass = Some((
+        "characters".into(),
+        app.book_digests(1),
+        Some(app.other_books_files(1)),
+    ));
     app.record_pass_state();
 
     let recorded = State::load(&dir).built_from("characters").unwrap().clone();
     assert!(
         recorded.contains_key("b1/one.md") && recorded.contains_key("b2/one.md"),
         "book one wasn't forgotten when book two folded in: {recorded:?}"
+    );
+}
+
+/// Book two starts with two chapters; the author deletes one. The next series
+/// pass on book two must (a) see the removal and rebuild rather than report the
+/// bible current, and (b) prune the deleted chapter from the shared state instead
+/// of leaving it stale until a full rebuild (#645) — while book one is untouched.
+#[test]
+fn deleting_a_series_book_chapter_prunes_its_stale_bible_state() {
+    use crate::ai::incremental::{Scope, State};
+    use crate::project::Project;
+    let dir = crate::testutil::scratch_dir("books", "prune-deleted");
+    for sub in ["b1", "b2"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    fs::write(dir.join("b1/one.md"), "alpha one\n").unwrap();
+    fs::write(dir.join("b2/one.md"), "beta one\n").unwrap();
+    fs::write(dir.join("b2/two.md"), "beta two\n").unwrap();
+    let two_chapter_book_two = "title = \"The Saga\"\n\n\
+         [[books]]\ntitle = \"Book One\"\n\n\
+         [[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n\
+         [[books]]\ntitle = \"Book Two\"\n\n\
+         [[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n\n\
+         [[books.chapters]]\ntitle = \"Night\"\nfile = \"b2/two.md\"\n";
+    fs::write(Project::manifest_path(&dir), two_chapter_book_two).unwrap();
+    // A non-empty bible so `plan_bible_pass` scopes off the delta rather than
+    // short-circuiting to Full on an empty bible.
+    fs::create_dir_all(dir.join("bible/characters")).unwrap();
+    fs::write(dir.join("bible/characters/mara.md"), "# Mara\n\nA hero.\n").unwrap();
+    let mut app = open_test_app(&dir);
+
+    // Book one recorded; book two (two chapters) folded in beside it (#339).
+    State::record(&dir, "characters", "2026-06-24", app.book_digests(0)).unwrap();
+    app.pending_pass = Some((
+        "characters".into(),
+        app.book_digests(1),
+        Some(app.other_books_files(1)),
+    ));
+    app.record_pass_state();
+    assert!(
+        State::load(&dir)
+            .built_from("characters")
+            .unwrap()
+            .contains_key("b2/two.md"),
+        "book two's second chapter was recorded"
+    );
+
+    // The author deletes book two's second chapter from disk and the manifest,
+    // then reopens on book two.
+    fs::remove_file(dir.join("b2/two.md")).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"The Saga\"\n\n\
+         [[books]]\ntitle = \"Book One\"\n\n\
+         [[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n\
+         [[books]]\ntitle = \"Book Two\"\n\n\
+         [[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n",
+    )
+    .unwrap();
+    let mut app = open_test_app(&dir);
+    app.switch_book(1);
+
+    // A character pass on book two now sees the removal, so it rebuilds rather
+    // than reporting the bible current…
+    let t = super::worker::bible_tracker(crate::mode::AiAction::Characters).unwrap();
+    let (scope, _prior, _current) = app.plan_bible_pass_for_test(&t, 1);
+    assert_eq!(
+        scope,
+        Scope::Full,
+        "a removal forces a rebuild for the book"
+    );
+
+    // …and folding the pass in prunes the stale entry, while book one survives.
+    app.pending_pass = Some((
+        "characters".into(),
+        app.book_digests(1),
+        Some(app.other_books_files(1)),
+    ));
+    app.record_pass_state();
+    let recorded = State::load(&dir).built_from("characters").unwrap().clone();
+    assert!(
+        !recorded.contains_key("b2/two.md"),
+        "book two's deleted chapter no longer lingers in the state: {recorded:?}"
+    );
+    assert!(
+        recorded.contains_key("b2/one.md"),
+        "book two's surviving chapter is kept: {recorded:?}"
+    );
+    assert!(
+        recorded.contains_key("b1/one.md"),
+        "book one's entry survives: {recorded:?}"
     );
 }
 

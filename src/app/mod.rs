@@ -263,9 +263,16 @@ pub struct App {
     pending_recheck: Option<Finding>,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
-    /// cleanly. `(tracker, digests, merge)` — `merge` keeps the other books'
-    /// state when folding one book of a series (#339); `None` when none pending.
-    pending_pass: Option<(String, ai::incremental::Digests, bool)>,
+    /// cleanly. `(tracker, digests, merge)` — `merge` is `Some(preserve)` for one
+    /// book of a series: it folds this book's digests in while keeping the other
+    /// books' entries (the `preserve` set) and pruning this book's stale ones,
+    /// including deleted chapters (#339, #645); `None` replaces (standalone novel).
+    /// The outer `Option` is `None` when no bible pass is pending.
+    pending_pass: Option<(
+        String,
+        ai::incremental::Digests,
+        Option<std::collections::BTreeSet<String>>,
+    )>,
     /// Author-defined workflows (#226) from the `[workflows]` config — named,
     /// ordered sequences of registry actions run as one step. Loaded once at
     /// startup, sorted by name for a stable run-workflow menu.

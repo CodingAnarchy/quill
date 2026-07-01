@@ -296,17 +296,32 @@ impl App {
             let state = ai::incremental::State::load(&self.project.root);
             // Scope the recorded digests to THIS book's files, so the other books'
             // chapters never register as "removed" and force a needless rebuild
-            // (#339). For a standalone novel every file is the one book's, so this
-            // is the same record `decide` saw before.
+            // (#339). Ownership is "not owned by another book" rather than "still in
+            // the current book", so a chapter the author deleted from THIS book stays
+            // in the scoped record and `decide` sees the removal (#645) instead of it
+            // silently vanishing from the diff. For a standalone novel there are no
+            // other books, so this is the same record `decide` saw before.
+            let others = self.other_books_files(book);
             let prior_book: Option<ai::incremental::Digests> = state.built_from(t.key).map(|d| {
                 d.iter()
-                    .filter(|(f, _)| current.contains_key(*f))
+                    .filter(|(f, _)| !others.contains(*f))
                     .map(|(f, g)| (f.clone(), g.clone()))
                     .collect()
             });
             ai::incremental::decide(prior_book.as_ref(), &current, self.ai.refresh_after_changes)
         };
         (scope, prior, current)
+    }
+
+    /// Test hook for [`plan_bible_pass`] (#645): lets the series-bible tests assert
+    /// on the scope a book's pass would take without spawning the request.
+    #[cfg(test)]
+    pub(super) fn plan_bible_pass_for_test(
+        &self,
+        t: &BibleTracker,
+        book: usize,
+    ) -> (ai::incremental::Scope, String, ai::incremental::Digests) {
+        self.plan_bible_pass(t, book)
     }
 
     /// Run a persistent-bible tracker with incremental scoping (#90): revise the
@@ -365,8 +380,12 @@ impl App {
             ),
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
-        // A series merges the book's digests into the state; a standalone replaces.
-        self.pending_pass = Some((t.key.to_string(), current, series));
+        // A series merges the book's digests into the state (carrying the other
+        // books' files to preserve, so this book's deleted chapters get pruned —
+        // #645); a standalone replaces. Snapshot the preserve set now too, since the
+        // manifest can change before the async pass lands.
+        let merge = series.then(|| self.other_books_files(book));
+        self.pending_pass = Some((t.key.to_string(), current, merge));
         let message = if batch {
             format!("{base_msg} (batch — may take a few minutes)")
         } else {
@@ -406,6 +425,19 @@ impl App {
     /// under its title heading — the changed-chapter context for a pass (#90).
     pub(crate) fn chapters_text(&self, files: &[String]) -> String {
         self.book_render(self.project.active_book(), Some(files))
+    }
+
+    /// The set of chapter files owned by every book *other* than `b` (#645). Used
+    /// to scope a book's slice of the shared incremental state: an entry that no
+    /// other book owns belongs to book `b` — including a chapter it just deleted, so
+    /// the removal is detectable and prunable rather than lost.
+    pub(crate) fn other_books_files(&self, b: usize) -> std::collections::BTreeSet<String> {
+        (0..self.project.book_count())
+            .filter(|&i| i != b)
+            .flat_map(|i| self.project.book_chapters(i))
+            .filter(|c| !c.file.is_empty())
+            .map(|c| c.file.clone())
+            .collect()
     }
 
     /// Book `b`'s `file → content-digest` map (#339): the active book's active
@@ -470,8 +502,8 @@ impl App {
         if let Some((tracker, digests, merge)) = self.pending_pass.take() {
             let today = date::iso(date::today());
             let root = &self.project.root;
-            let _ = if merge {
-                ai::incremental::State::record_merge(root, &tracker, &today, digests)
+            let _ = if let Some(preserve) = merge {
+                ai::incremental::State::record_merge(root, &tracker, &today, digests, &preserve)
             } else {
                 ai::incremental::State::record(root, &tracker, &today, digests)
             };
