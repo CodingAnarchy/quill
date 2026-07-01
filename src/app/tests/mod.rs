@@ -60,6 +60,7 @@ mod chapters_editing;
 mod chapters_filter;
 mod chapters_sections;
 mod configure;
+mod corkboard;
 mod editing;
 mod export_styling;
 mod goals;
