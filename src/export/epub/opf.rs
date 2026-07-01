@@ -81,6 +81,24 @@ pub(super) fn build_opf(
         "<meta property=\"dcterms:modified\">{}</meta>",
         book.modified
     ));
+    // Accessibility metadata (#642): storefronts (Apple Books, Kobo) and the EU
+    // Accessibility Act expect the `schema:*` a11y properties. A Quill EPUB is a
+    // reflowable, text-only novel — everything is textual, so `textual` alone is
+    // a sufficient access mode. The feature list reflects what the package
+    // actually provides: a nav TOC + landmarks (#604) and a heading structure.
+    meta.push_str("<meta property=\"schema:accessMode\">textual</meta>");
+    meta.push_str("<meta property=\"schema:accessModeSufficient\">textual</meta>");
+    meta.push_str("<meta property=\"schema:accessibilityFeature\">tableOfContents</meta>");
+    meta.push_str("<meta property=\"schema:accessibilityFeature\">structuralNavigation</meta>");
+    meta.push_str("<meta property=\"schema:accessibilityFeature\">readingOrder</meta>");
+    meta.push_str("<meta property=\"schema:accessibilityHazard\">none</meta>");
+    meta.push_str(
+        "<meta property=\"schema:accessibilitySummary\">This publication is a \
+         reflowable, text-only book. All content is presented as text, with a \
+         navigable table of contents, landmarks, and a logical heading \
+         structure. It contains no audio, video, or other content that would \
+         pose a known accessibility hazard.</meta>",
+    );
     // The EPUB 2 cover hint (#582): older readers (and many storefronts) find the
     // cover via this legacy `<meta name="cover">` pointing at the manifest item id.
     if images.iter().any(|i| i.role == ImageRole::Cover) {
@@ -375,6 +393,50 @@ mod tests {
                 "spine {id} in manifest"
             );
         }
+    }
+
+    #[test]
+    fn opf_declares_accessibility_metadata() {
+        // The OPF carries the `schema:*` accessibility metadata (#642) for a
+        // reflowable, text-only novel: textual access mode (sufficient on its
+        // own), the structural-navigation features the package provides (nav TOC
+        // + landmarks + heading structure), no known hazards, and a
+        // human-readable summary.
+        let opf = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/content.opf",
+        );
+        assert!(
+            opf.contains("<meta property=\"schema:accessMode\">textual</meta>"),
+            "accessMode textual: {opf}"
+        );
+        assert!(
+            opf.contains("<meta property=\"schema:accessModeSufficient\">textual</meta>"),
+            "accessModeSufficient textual: {opf}"
+        );
+        assert!(
+            opf.contains("<meta property=\"schema:accessibilityFeature\">tableOfContents</meta>"),
+            "tableOfContents feature: {opf}"
+        );
+        assert!(
+            opf.contains(
+                "<meta property=\"schema:accessibilityFeature\">structuralNavigation</meta>"
+            ),
+            "structuralNavigation feature: {opf}"
+        );
+        assert!(
+            opf.contains("<meta property=\"schema:accessibilityFeature\">readingOrder</meta>"),
+            "readingOrder feature: {opf}"
+        );
+        assert!(
+            opf.contains("<meta property=\"schema:accessibilityHazard\">none</meta>"),
+            "accessibilityHazard none: {opf}"
+        );
+        assert!(
+            opf.contains("<meta property=\"schema:accessibilitySummary\">")
+                && opf.contains("reflowable, text-only"),
+            "human-readable accessibilitySummary: {opf}"
+        );
     }
 
     #[test]
