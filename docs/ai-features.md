@@ -252,6 +252,12 @@ The palette actions:
   contradiction findings.
 - **Setting & worldbuilding** (#77) — a categorized setting bible
   (`bible/setting.md`) + a place/term gazetteer + rule-violation findings.
+- **Plot & arc tracker** (#606) — a persistent plot-thread tracker
+  (`bible/plot.md`): each subplot / thematic throughline with a status, its
+  setup, its payoff (empty until it lands), the chapter it was last advanced in,
+  and notes, plus **dangling-thread** findings (a setup with no payoff, an
+  abandoned subplot) surfaced in revision triage. Incrementally updated like the
+  other bibles; tracking and flags only, never prose.
 - **Scaffold / outline** (#76) — a structural beat outline (`bible/outline.md`) +
   structural-gap findings (no prose).
 - **Name & term consistency** (#78) — a cheap Haiku scan for spelling variants,
@@ -582,6 +588,22 @@ can edit any bible entry; edits are treated as ground truth on the next pass.
   rule the author (or a prior pass) recorded ("magic requires a focus, but ch.
   14 casts without one").
 - Keeps a place/term gazetteer used by naming-consistency (below).
+
+### 5. Plot & arc tracker (#606)
+
+- A fourth persistent, incrementally-updated bible pass (`bible/plot.md`)
+  alongside characters, timeline, and setting: it tracks the manuscript's
+  **plot threads and thematic throughlines** — subplots, promises, mysteries,
+  recurring themes — as structured entries.
+- Each thread records a **status** (setup / open / developing / resolved /
+  abandoned), its **setup**, its **payoff** (empty until it lands), the chapter
+  it was **last seen** advancing in, and free notes.
+- **Dangling-thread checks** — flags a setup with no payoff, an unanswered
+  promise or mystery, or a subplot abandoned mid-book, surfaced as findings in
+  the shared revision triage (author-editable like the other bibles).
+- Reuses the incremental-scoping machinery (#90) and the shared bible file
+  format: a full rebuild the first time, then revised from only the changed
+  chapters. Tracking and flags only — it never writes or suggests prose.
 
 ### Additional features worth adding
 

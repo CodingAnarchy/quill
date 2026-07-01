@@ -182,6 +182,15 @@ pub(super) fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
             incr: setting::build_incremental_request,
             finish: |r| Outcome::Setting(r.and_then(|resp| setting::parse(&resp.text))),
         }),
+        AiAction::Plot => Some(BibleTracker {
+            key,
+            source: BibleSource::File("plot.md"),
+            full_msg: "⟳ Tracking plot threads…",
+            incr_msg: "⟳ Updating the plot tracker from changed chapters…",
+            full: plot::build_request,
+            incr: plot::build_incremental_request,
+            finish: |r| Outcome::Plot(r.and_then(|resp| plot::parse(&resp.text))),
+        }),
         _ => None,
     }
 }
@@ -634,6 +643,7 @@ impl App {
                     Outcome::Characters(r) => self.apply_characters(r),
                     Outcome::Continuity(r) => self.apply_continuity(r),
                     Outcome::Setting(r) => self.apply_setting(r),
+                    Outcome::Plot(r) => self.apply_plot(r),
                     Outcome::Scaffold(r) => self.apply_scaffold(r),
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),

@@ -491,6 +491,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "ai:characters",
         "ai:continuity",
         "ai:setting",
+        "ai:plot",
         "ai:scaffold",
         "ai:naming",
         "ai:style",

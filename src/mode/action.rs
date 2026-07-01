@@ -478,6 +478,7 @@ impl Action {
         Action::Ai(AiAction::Characters),
         Action::Ai(AiAction::Continuity),
         Action::Ai(AiAction::Setting),
+        Action::Ai(AiAction::Plot),
         Action::Ai(AiAction::Scaffold),
         Action::Ai(AiAction::Naming),
         Action::Ai(AiAction::Style),
@@ -641,6 +642,7 @@ impl Action {
             Action::Ai(AiAction::Characters) => "AI · Character bible",
             Action::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
             Action::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
+            Action::Ai(AiAction::Plot) => "AI · Plot & arc tracker",
             Action::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
             Action::Ai(AiAction::Naming) => "AI · Name & term consistency",
             Action::Ai(AiAction::Style) => "AI · Prose & style",
@@ -744,6 +746,7 @@ impl Action {
                     AiAction::Characters
                         | AiAction::Continuity
                         | AiAction::Setting
+                        | AiAction::Plot
                         | AiAction::Scaffold
                         | AiAction::Naming
                         | AiAction::Style
@@ -842,6 +845,9 @@ pub(crate) enum AiAction {
     Characters,
     Continuity,
     Setting,
+    /// Plot-thread / arc tracker — subplot setup→payoff status + dangling-thread
+    /// findings, a fourth persistent bible pass (#606).
+    Plot,
     Scaffold,
     Naming,
     Style,
@@ -936,6 +942,12 @@ impl AiAction {
             slug: "ai:setting",
             cost: AiCost::Manuscript,
             bible_key: Some("setting"),
+        },
+        AiActionSpec {
+            action: AiAction::Plot,
+            slug: "ai:plot",
+            cost: AiCost::Manuscript,
+            bible_key: Some("plot"),
         },
         AiActionSpec {
             action: AiAction::Scaffold,
