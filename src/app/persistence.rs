@@ -4,6 +4,7 @@
 use crate::buffer::{self};
 use crate::date;
 use crate::history;
+use crate::lastpos;
 use crate::mode::Pending;
 use crate::recovery;
 
@@ -59,6 +60,46 @@ impl App {
             part_removed: self.part_removed.clone(),
         };
         let _ = history::persist(&self.project.root, &snapshot);
+    }
+
+    /// Record where the author is editing right now, so the next clean open can
+    /// resume here (#588). Written on a clean save and at quit — the last-position
+    /// counterpart to the crash-recovery sidecar, and separate from it: this
+    /// remembers the *location* of a saved session, not unsaved *text*. In the
+    /// single-chapter view the cursor is a byte offset into that chapter's prose;
+    /// the continuous view (a multi-chapter window) records only the active
+    /// chapter, resuming at its top. Best-effort — a failed write just means the
+    /// next open starts at the top.
+    pub fn persist_position(&self) {
+        let cursor = match &self.manuscript {
+            Some(_) => 0,
+            None => self.buffer.cursor_byte(),
+        };
+        let pos = lastpos::Position {
+            chapter_file: self.project.active_file().to_string(),
+            cursor,
+        };
+        let _ = lastpos::write(&self.project.root, &pos);
+    }
+
+    /// At launch, resume the last editing position a clean exit recorded (#588):
+    /// activate the saved chapter and place the cursor at the saved byte offset.
+    /// A record for a chapter that no longer exists is ignored (start at the top);
+    /// an offset past the current end of the file is clamped, so a chapter edited
+    /// smaller elsewhere still lands somewhere valid. Never fails loudly — with no
+    /// (or an unusable) record the open just stays at chapter 0, top of file.
+    pub fn restore_position(&mut self) {
+        let Some(pos) = lastpos::read(&self.project.root) else {
+            return;
+        };
+        let Some(index) = self.project.index_of_file(&pos.chapter_file) else {
+            return; // that chapter is gone — start at the top
+        };
+        self.activate_chapter(index); // a no-op when it's already active
+        if self.project.active_file() == pos.chapter_file {
+            let clamped = pos.cursor.min(self.buffer.len_bytes());
+            self.buffer.cursor = self.buffer.cursor_at_byte(clamped);
+        }
     }
 
     /// Capture or clear the recovery sidecar on the idle cadence. The

@@ -22,6 +22,14 @@ impl App {
         match key.code {
             // Start the type-to-filter / quick-jump query (#410).
             KeyCode::Char('/') => self.set_nav_typing(true),
+            // Go to a chapter directly by number or title (#588): a prompt that
+            // jumps without scrolling the list.
+            KeyCode::Char('#') => self.open_prompt(
+                Pending::GoToChapter,
+                "Go to chapter (number or title): ",
+                "",
+                Some(sel),
+            ),
             // Movement skips chapters filtered out of the list.
             KeyCode::Up | KeyCode::Char('k') => {
                 let s = self.nav_step(sel, false);
@@ -283,6 +291,32 @@ impl App {
             KeyCode::Char(c) => self.nav_filter_push(c),
             _ => {}
         }
+    }
+
+    /// Resolve a go-to-chapter query (#588) to a chapter index: a 1-based number
+    /// (`"12"` → index 11, in range), else the first chapter whose title contains
+    /// the query (case-insensitive). Returns `None` for a blank query, an
+    /// out-of-range number, or no title match. A purely numeric query is treated
+    /// as a number even if it would also match a title, so `#` + a chapter number
+    /// is unambiguous.
+    pub(crate) fn resolve_chapter_target(&self, query: &str) -> Option<usize> {
+        let query = query.trim();
+        if query.is_empty() {
+            return None;
+        }
+        if let Ok(number) = query.parse::<usize>() {
+            return (1..=self.chapter_count())
+                .contains(&number)
+                .then(|| number - 1);
+        }
+        let needle = query.to_lowercase();
+        (0..self.chapter_count()).find(|&i| {
+            self.project
+                .chapter_title(i)
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains(&needle)
+        })
     }
 
     /// Whether chapter `index` passes the browser's active quick-jump filter

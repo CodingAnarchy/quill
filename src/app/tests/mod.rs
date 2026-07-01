@@ -68,6 +68,7 @@ mod panes;
 mod project_search;
 mod projects;
 mod recovery;
+mod resume;
 mod snippets;
 mod spell;
 mod sprint;

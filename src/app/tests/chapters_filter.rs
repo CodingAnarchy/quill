@@ -193,3 +193,55 @@ fn filter_matches_a_status() {
     assert_eq!(match_count(&app), 1);
     assert_eq!(nav_sel(&app), 1);
 }
+
+// --- Go to chapter by number / title (#588) --------------------------------
+
+#[test]
+fn go_to_chapter_jumps_by_number() {
+    let (mut app, _dir) = browser_app("goto-num", &[("Alpha", ""), ("Beta", ""), ("Gamma", "")]);
+    app.on_key(key(KeyCode::Char('#')));
+    type_into(&mut app, "3"); // 1-based
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.active_index(), 2, "jumped to the third chapter");
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "go-to opens the chapter (leaves the browser)"
+    );
+}
+
+#[test]
+fn go_to_chapter_jumps_by_title_substring() {
+    let (mut app, _dir) = browser_app("goto-title", &[("Alpha", ""), ("Beta", ""), ("Gamma", "")]);
+    app.on_key(key(KeyCode::Char('#')));
+    type_into(&mut app, "gam"); // case-insensitive substring of "Gamma"
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.active_index(), 2);
+    assert!(matches!(app.mode, Mode::Insert));
+}
+
+#[test]
+fn go_to_chapter_rejects_an_out_of_range_number() {
+    let (mut app, _dir) = browser_app("goto-oob", &[("Alpha", ""), ("Beta", "")]);
+    app.on_key(key(KeyCode::Char('#')));
+    type_into(&mut app, "9");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.active_index(), 0, "no jump for a bad number");
+    assert!(
+        matches!(app.mode, Mode::Nav { .. }),
+        "an unresolved go-to stays in the browser"
+    );
+}
+
+#[test]
+fn go_to_chapter_with_no_title_match_stays_in_the_browser() {
+    let (mut app, _dir) = browser_app("goto-nomatch", &[("Alpha", ""), ("Beta", "")]);
+    app.on_key(key(KeyCode::Char('#')));
+    type_into(&mut app, "zzz");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.project.active_index(), 0);
+    assert!(matches!(app.mode, Mode::Nav { .. }));
+}

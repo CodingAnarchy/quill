@@ -20,6 +20,7 @@ mod frontmatter;
 mod guide;
 mod history;
 mod history_view;
+mod lastpos;
 mod manuscript;
 mod manuscript_import;
 mod mode;
@@ -171,6 +172,10 @@ fn main() -> io::Result<()> {
     let mut app = App::new(buffer, project);
     // Resume today's word-delta counters from the history log.
     app.load_history();
+    // Resume where the last clean session left off — active chapter + cursor
+    // (#588). Before offering recovery, so a crash sidecar still targets its own
+    // chapter and isn't overridden by the resume.
+    app.restore_position();
     // If a previous session left unsaved work behind (a crash), offer it back.
     app.offer_recovery();
     recent::record(&root, &title);
@@ -185,6 +190,8 @@ fn main() -> io::Result<()> {
     let result = run(&mut tui, &mut app);
     // Record today's momentum so it survives the next reopen.
     app.persist_snapshot();
+    // Remember where the author left off, to resume here next open (#588).
+    app.persist_position();
     result
 }
 
