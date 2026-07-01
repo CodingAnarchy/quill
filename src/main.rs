@@ -228,8 +228,19 @@ fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
 fn startup_dir() -> io::Result<Option<PathBuf>> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let in_project = Project::manifest_path(&cwd).exists();
-    let projects = recent::openable(config::ProjectsConfig::load().home_dir().as_deref());
-    match startup::decide(&cwd, in_project, projects.len()) {
+    let cfg = config::ProjectsConfig::load();
+    let projects = recent::openable(cfg.home_dir().as_deref());
+    // The reopen-last shortcut (#613) targets the most-recent project specifically —
+    // the head of the recents list, not a library-only project — so it never
+    // "reopens" a book the author has yet to open.
+    let most_recent = recent::list().into_iter().next().map(|p| p.path);
+    match startup::decide(
+        &cwd,
+        in_project,
+        projects.len(),
+        cfg.open_last_enabled(),
+        most_recent.as_deref(),
+    ) {
         startup::StartupAction::OpenInPlace(dir) => Ok(Some(dir)),
         startup::StartupAction::NewProject => Ok(Some(new_project_dir()?)),
         startup::StartupAction::Choose => choose_startup_project(&projects),

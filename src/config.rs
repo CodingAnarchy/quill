@@ -387,6 +387,11 @@ pub struct ProjectsConfig {
     /// Whether a newly-created project offers the setup wizard (#282). Defaults
     /// to on; set `setup_wizard = false` to never be prompted.
     pub setup_wizard: Option<bool>,
+    /// Whether a bare `quill` launch (no path, not inside a project) reopens the
+    /// most-recently-opened project directly instead of showing the create/open
+    /// chooser (#613). Off by default (absent) — the chooser still appears. Set
+    /// `open_last = true` to skip straight into the last project.
+    pub open_last: Option<bool>,
 }
 
 impl ProjectsConfig {
@@ -404,6 +409,12 @@ impl ProjectsConfig {
     /// Whether a new project should offer the setup wizard (#282); on by default.
     pub fn wizard_enabled(&self) -> bool {
         self.setup_wizard.unwrap_or(true)
+    }
+
+    /// Whether a bare launch should reopen the most-recent project directly (#613);
+    /// off by default (opt in with `open_last = true`).
+    pub fn open_last_enabled(&self) -> bool {
+        self.open_last.unwrap_or(false)
     }
 }
 
@@ -608,6 +619,16 @@ mod tests {
         assert!(ProjectsConfig::default().wizard_enabled(), "on by default");
         let off: ProjectsConfig = toml::from_str("setup_wizard = false").unwrap();
         assert!(!off.wizard_enabled(), "opt out with setup_wizard = false");
+    }
+
+    #[test]
+    fn open_last_is_off_by_default_and_opt_in() {
+        assert!(
+            !ProjectsConfig::default().open_last_enabled(),
+            "off by default"
+        );
+        let on: ProjectsConfig = toml::from_str("open_last = true").unwrap();
+        assert!(on.open_last_enabled(), "opt in with open_last = true");
     }
 
     #[test]
