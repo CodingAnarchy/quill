@@ -54,6 +54,48 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Atomically produce `path`'s contents by *streaming* into it, for a payload
+/// too large to want buffered in memory first (e.g. a project archive zip,
+/// #658).
+///
+/// Same guarantee as [`write`] — a sibling temp file in the same directory,
+/// `sync_all`ed and renamed over `path`, so a failure anywhere leaves the
+/// previous good version untouched — but instead of taking a `&[u8]`, it hands
+/// `fill` the open temp [`File`] (which is `Write + Seek`, as a zip writer
+/// wants) to write directly. The parent directory must already exist.
+pub fn write_with<F>(path: &Path, fill: F) -> io::Result<()>
+where
+    F: FnOnce(&mut File) -> io::Result<()>,
+{
+    let tmp = temp_path(path);
+
+    // Stage into the temp file, flush it durable, then swap it in — all in one
+    // fallible step so a failure anywhere leaves a single cleanup path. The
+    // inner scope drops (closes) the file before the rename.
+    let staged = (|| {
+        let mut f = File::create(&tmp)?;
+        fill(&mut f)?;
+        f.sync_all()?;
+        // Test-only seam (#265): simulate a crash after the temp is fully
+        // written but before the rename — see [`write`].
+        #[cfg(test)]
+        if fail_point::should_fail_before_rename() {
+            return Err(io::Error::other("injected pre-rename failure"));
+        }
+        fs::rename(&tmp, path)
+    })();
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    // Best-effort: fsync the directory so the rename itself is durable.
+    if let Ok(dir) = File::open(parent(path)) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
 /// The directory holding `path`, defaulting to the current directory for a bare
 /// filename (whose `parent()` is the empty path).
 fn parent(path: &Path) -> &Path {
