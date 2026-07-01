@@ -454,6 +454,14 @@ impl App {
         out
     }
 
+    /// Book `b`'s chapters named by `files`, serialized under title headings — the
+    /// scoped context for a single-finding re-check (#608). A thin public wrapper
+    /// over [`book_render`], so the re-check reuses the same serializer the bible
+    /// passes send rather than re-deriving it.
+    pub(super) fn book_render_files(&self, b: usize, files: &[String]) -> String {
+        self.book_render(b, Some(files))
+    }
+
     /// Record what the just-applied bible pass was built from (#90), so the next
     /// run only re-analyzes what changed. Best effort — a state-write failure
     /// doesn't undo the pass that already succeeded. A no-op for non-bible passes
@@ -660,6 +668,7 @@ impl App {
                     Outcome::Thesaurus(r) => self.apply_thesaurus(r),
                     Outcome::NameGen(r) => self.apply_namegen(r),
                     Outcome::Editorial(r) => self.apply_editorial(r),
+                    Outcome::Recheck(r) => self.apply_recheck(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
                 // The in-flight pass is done; a clean bible apply already recorded

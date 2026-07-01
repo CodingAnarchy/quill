@@ -711,6 +711,163 @@ fn setting_with_no_violations_summarizes() {
     assert!(!matches!(app.mode, Mode::Findings(_)));
 }
 
+// --- Re-check a single finding (#608) --------------------------------------
+
+/// A continuity UI finding on chapter `chapter`, tagged to the continuity pass so
+/// it can be re-checked. Mirrors how `apply_continuity` builds a finding's summary
+/// (`kind: detail`), so a re-run that re-parses to the same content matches it.
+fn continuity_ui_finding(chapter: &str, detail: &str) -> crate::mode::Finding {
+    crate::mode::Finding {
+        summary: format!("object: {detail}"),
+        chapters: vec![chapter.into()],
+        book: None,
+        action: Some(crate::mode::AiAction::Continuity),
+    }
+}
+
+/// A continuity result carrying one finding of `detail` on `chapter` — the JSON a
+/// scoped re-check parses, wrapped through the pass's own parser so its summary
+/// exactly matches `continuity_ui_finding`.
+fn continuity_json(chapter: &str, detail: &str) -> String {
+    format!(
+        r#"{{"events":[],"findings":[{{"kind":"object","detail":"{detail}","chapters":["{chapter}"]}}]}}"#
+    )
+}
+
+#[test]
+fn recheck_request_is_scoped_to_the_findings_chapters() {
+    let (app, _dir) = two_chapter_app("recheck-scope");
+    // A finding on chapter Two only. Its re-check request must carry Two's prose
+    // and not One's — the whole point of a scoped re-check (#608).
+    let finding = continuity_ui_finding("Two", "the locket changes color");
+    let req = app
+        .recheck_request_for(&finding)
+        .expect("a continuity finding builds a re-check request");
+    assert!(
+        req.cached_context.contains("# Two") && req.cached_context.contains("second chapter"),
+        "the finding's chapter is in the request: {}",
+        req.cached_context
+    );
+    assert!(
+        !req.cached_context.contains("first chapter"),
+        "the other chapter is not sent: {}",
+        req.cached_context
+    );
+}
+
+#[test]
+fn recheck_that_still_flags_keeps_the_finding() {
+    let (mut app, _dir) = two_chapter_app("recheck-keep");
+    // Surface a continuity finding into the overlay + triage the normal way.
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    assert!(matches!(app.mode, Mode::Findings(_)));
+    assert_eq!(app.triage.len(), 1);
+    let finding = continuity_ui_finding("One", "the locket changes color");
+
+    // The scoped re-run re-produces the same finding: the fix didn't hold. Parse
+    // the mock response through the real re-check parser, so the fresh finding's
+    // content key exactly matches the one under re-check.
+    let fresh = app.recheck_findings_from(
+        &finding,
+        &continuity_json("One", "the locket changes color"),
+    );
+    assert_eq!(
+        fresh,
+        vec![finding.clone()],
+        "parser reproduces the finding"
+    );
+    app.pending_recheck = Some(finding.clone());
+    app.apply_recheck(Ok(fresh));
+
+    assert!(app.triage.contains(&finding), "still-flagged finding stays");
+    assert!(
+        matches!(app.mode, Mode::Findings(f) if f.items.contains(&finding)),
+        "it remains in the overlay"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Still flagged"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn recheck_that_clears_drops_the_finding() {
+    let (mut app, _dir) = two_chapter_app("recheck-clear");
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    assert_eq!(app.triage.len(), 1);
+    let finding = continuity_ui_finding("One", "the locket changes color");
+
+    // The scoped re-run produces no findings: the fix resolved it.
+    app.pending_recheck = Some(finding.clone());
+    app.apply_recheck(Ok(Vec::new()));
+
+    assert!(
+        !app.triage.contains(&finding),
+        "a cleared finding leaves triage"
+    );
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "the last overlay item cleared closes the overlay"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Cleared"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn recheck_accumulates_new_findings_silently() {
+    let (mut app, _dir) = two_chapter_app("recheck-new");
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    let rechecked = continuity_ui_finding("One", "the locket changes color");
+    // The scoped re-run clears the original but surfaces a *different* one in the
+    // same chapter. The new one enters triage but doesn't re-open a fresh sweep.
+    let fresh = vec![continuity_ui_finding("One", "the candle is lit then unlit")];
+    app.pending_recheck = Some(rechecked.clone());
+    app.apply_recheck(Ok(fresh.clone()));
+
+    assert!(
+        !app.triage.contains(&rechecked),
+        "the verified finding cleared"
+    );
+    assert!(
+        app.triage.contains(&fresh[0]),
+        "the newly-surfaced finding accumulated into triage"
+    );
+}
+
+#[test]
+fn recheck_is_a_noop_for_a_finding_without_a_pass() {
+    let (mut app, _dir) = two_chapter_app("recheck-noop");
+    // A finding with no originating action (a Q&A citation, or one restored from
+    // disk) can't be re-checked — a status, no request in flight.
+    app.mode = Mode::Findings(Box::new(Findings {
+        items: vec![crate::mode::Finding {
+            summary: "cited: One".into(),
+            chapters: vec!["One".into()],
+            book: None,
+            action: None,
+        }],
+        selected: 0,
+    }));
+    app.recheck_finding(0);
+    assert!(!app.ai_task.is_busy(), "nothing is sent");
+    assert!(app.pending_recheck.is_none());
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Nothing to re-check"),
+        "{:?}",
+        app.message
+    );
+}
+
 // --- Plot-thread / arc tracker (#606) --------------------------------------
 
 /// A plot result with the given dangling-thread findings and one always-present

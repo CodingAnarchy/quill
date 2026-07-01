@@ -256,6 +256,11 @@ pub struct App {
     /// the author's dismiss decisions, persisted as `bible/findings.toml`. Mirrors
     /// dismiss / mark actions so a re-run doesn't re-surface a dismissed finding.
     findings_store: findings_store::FindingsStore,
+    /// The finding being re-checked (#608): its originating pass is re-running
+    /// scoped to its chapters, and when the result lands [`App::apply_recheck`]
+    /// clears it if it's gone or keeps it if still flagged. `Some` only while a
+    /// recheck request is in flight; taken when its result applies.
+    pending_recheck: Option<Finding>,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
     /// cleanly. `(tracker, digests, merge)` — `merge` keeps the other books'
@@ -416,6 +421,7 @@ impl App {
             pending_findings: Vec::new(),
             triage,
             findings_store,
+            pending_recheck: None,
             pending_pass: None,
             workflows: loaded.workflows,
             triggers: loaded.triggers,

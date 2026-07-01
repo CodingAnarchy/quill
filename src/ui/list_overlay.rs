@@ -453,7 +453,7 @@ pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, 
         frame,
         area,
         &title,
-        "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close",
+        "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · d dismiss · esc close",
         rows,
         Some(findings.selected),
     );

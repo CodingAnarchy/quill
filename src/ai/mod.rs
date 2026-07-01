@@ -152,6 +152,11 @@ pub enum Outcome {
     NameGen(Result<Vec<namegen::Name>, AiError>),
     /// Editorial read — fix-free flags (structural / continuity / line) (#293).
     Editorial(Result<Vec<editorial::Note>, AiError>),
+    /// Re-check of a single triage finding (#608): its originating pass re-run
+    /// scoped to the finding's chapters, parsed to the fresh UI findings that
+    /// pass now produces (so the one being rechecked is cleared if it's gone, or
+    /// kept if it's still flagged). Analysis-only — it writes no bible file.
+    Recheck(Result<Vec<crate::mode::Finding>, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -185,6 +190,7 @@ impl Outcome {
             Outcome::Thesaurus(r) => r.as_ref().err(),
             Outcome::NameGen(r) => r.as_ref().err(),
             Outcome::Editorial(r) => r.as_ref().err(),
+            Outcome::Recheck(r) => r.as_ref().err(),
             Outcome::Error(e) => Some(e),
         }
     }
