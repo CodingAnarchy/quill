@@ -201,8 +201,10 @@ fn emphasis_routes_to_the_bold_and_italic_faces() {
 
 #[test]
 fn each_section_starts_on_its_own_page_in_the_screen_profile() {
+    // Contents + prologue + part + chapter + afterword, each its own page (the title
+    // page shares no page). The Contents page is the front-matter TOC (#603).
     let bytes = to_pdf(&doc(), &plain()).unwrap();
-    assert_eq!(count(&bytes, "/Type /Page /Parent"), 5);
+    assert_eq!(count(&bytes, "/Type /Page /Parent"), 6);
 }
 
 #[test]
@@ -433,8 +435,10 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         &to_pdf_print(&mini, w, h, &plain()).unwrap(),
         "/Type /Page /Parent",
     );
-    assert_eq!(screen, 2, "title + chapter");
-    assert_eq!(print, 3, "title + blank verso + recto chapter");
+    // A one-entry Contents page joins the front matter (#603): title + contents +
+    // chapter on screen; print inserts a blank verso before each recto section start.
+    assert_eq!(screen, 3, "title + contents + chapter");
+    assert_eq!(print, 5, "title, blank+contents recto, blank+chapter recto");
 }
 
 /// Encode a tiny `w`×`h` solid-red PNG with the given alpha — a real raster the PDF
@@ -549,6 +553,116 @@ fn a_copyright_page_adds_a_front_matter_page() {
         baseline,
         "no copyright page by default"
     );
+}
+
+#[test]
+fn a_contents_page_lists_titles_with_folios() {
+    // The front matter carries a printed "Contents" page (#603): the heading, every
+    // section title, and — for chapters/front/back, not the part heading — a folio (a
+    // page label = page index + 1). Content is Identity-H glyph ids, so assert on the
+    // page count and that the outline folios the Contents shows are the real body pages.
+    let d = doc();
+    let bytes = to_pdf(&d, &plain()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+
+    // The Contents page is a real extra front-matter page: title + prologue + part +
+    // chapter + afterword = 5 section pages, plus the one Contents page = 6.
+    assert_eq!(
+        count(&bytes, "/Type /Page /Parent"),
+        6,
+        "a Contents page joins the front matter"
+    );
+
+    // The Contents folios come from the same outline the bookmarks use; reserving the
+    // TOC first makes the body land after it. Rebuild the outline the way render_book
+    // does to read the folios the Contents page shows.
+    let outline = {
+        let mut pdf = Pdf::new(
+            Layout::screen(&plain()),
+            StyleBits::from_style(&plain()),
+            vec![],
+        );
+        pdf.title_page(None, "T", None, None, None);
+        pdf.reserve_contents(&doc_toc_titles(&d));
+        book_outline(&mut pdf, &d)
+    };
+    // Four entries total (prologue, part, chapter, afterword); the part carries no
+    // folio, so three folios are shown.
+    let all = toc_entries(&outline);
+    assert_eq!(all.len(), 4, "prologue, part, chapter, afterword");
+    let folios: Vec<usize> = all.into_iter().flatten().collect();
+    assert_eq!(folios.len(), 3, "the part has no folio");
+    assert!(
+        folios.iter().all(|&p| p >= 2),
+        "the body follows the reserved front matter, got {folios:?}"
+    );
+}
+
+#[test]
+fn the_contents_page_reserves_body_pagination() {
+    // Reserving the Contents page before the body means the body's folios already
+    // account for it — the first body section starts after the reserved page.
+    let d = doc();
+    let mut pdf = Pdf::new(
+        Layout::screen(&plain()),
+        StyleBits::from_style(&plain()),
+        vec![],
+    );
+    pdf.title_page(None, "T", None, None, None);
+    let toc_start = pdf.reserve_contents(&doc_toc_titles(&d)).unwrap().start;
+    let prologue = pdf.chapter(&d.front[0]);
+    assert!(
+        prologue > toc_start,
+        "the body follows the reserved Contents page ({prologue} > {toc_start})"
+    );
+}
+
+#[test]
+fn a_long_contents_flows_onto_a_second_page() {
+    // More chapters than fit on one Contents page flow onto a second reserved page —
+    // the plan and the reservation agree on the page count, one folio line per entry.
+    let many: Vec<Chapter> = (0..60)
+        .map(|i| ch(&format!("Chapter Number {i}"), None, "Body."))
+        .collect();
+    let d = Document {
+        title: "Big".into(),
+        subtitle: None,
+        author: None,
+        series: None,
+        publishing: Default::default(),
+        epigraph: None,
+        front: vec![],
+        parts: vec![Part {
+            name: None,
+            chapters: many,
+        }],
+        back: vec![],
+    };
+    let (w, h) = trim_points("6x9").unwrap();
+    let mut pdf = Pdf::new(
+        Layout::print(w, h, &plain()),
+        StyleBits::from_style(&plain()),
+        vec![],
+    );
+    pdf.title_page(None, "Big", None, None, None);
+    let titles = doc_toc_titles(&d);
+    let plan = pdf.reserve_contents(&titles).unwrap();
+    let pages = plan.lines.iter().map(|l| l.page).max().unwrap() + 1;
+    assert!(
+        pages >= 2,
+        "60 chapters overflow one Contents page, got {pages}"
+    );
+    assert_eq!(
+        plan.lines
+            .iter()
+            .filter(|l| l.folio_entry.is_some())
+            .count(),
+        titles.len(),
+        "one folio line per entry across the pages"
+    );
+    // And the whole book still serializes to a well-formed PDF.
+    let bytes = to_pdf_print(&d, w, h, &plain()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
 }
 
 #[test]
