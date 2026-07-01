@@ -290,10 +290,17 @@ pub struct RefFiles {
 
 /// State for an open [`Mode::ProjectBrowser`] (#270): the recently-opened
 /// projects and the selected row. Captured when the browser opens, so the list
-/// is a stable target for the arrow keys.
+/// is a stable target for the arrow keys. `filter` is the type-to-filter query
+/// (#612), lifted from the chapter browser: when non-empty the list shows only
+/// projects whose title or path matches (case-insensitive substring). `typing`
+/// is the filter-input sub-mode — `/` enters it so keystrokes build the query
+/// instead of running the browser's single-key commands; Esc leaves it (keeping
+/// the filter) and a second Esc clears the filter.
 pub struct ProjectBrowser {
     pub(crate) projects: Vec<crate::recent::RecentProject>,
     pub(crate) selected: usize,
+    pub(crate) filter: String,
+    pub(crate) typing: bool,
 }
 
 /// State for the series tree navigator (#330): the selected visible row and the
@@ -443,6 +450,16 @@ pub(crate) enum Pending {
     /// Text input: the new folder name for the open project (#424). On Enter the
     /// project directory is renamed and reopened at the new path.
     RenameProject,
+    /// Text input: a new folder name for a project chosen in the browser (#612).
+    /// The target project's path waits in `App::pending_manage`; on Enter its
+    /// directory is renamed (moving the folder, updating recents) without opening
+    /// it. Distinct from [`Pending::RenameProject`], which renames the open one.
+    RenameBrowserProject,
+    /// y/N: delete the project chosen in the browser (#612), removing its folder
+    /// from disk. The target's path waits in `App::pending_manage`; `y` removes
+    /// it and drops it from the list, anything else cancels. Guarded — the
+    /// currently-open project is refused before the prompt ever opens.
+    ConfirmDeleteProject,
     /// y/N: offer the new-project setup wizard (#282). `y` starts it at the first
     /// step; anything else lands in the editor.
     WizardStart,
