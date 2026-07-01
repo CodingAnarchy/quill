@@ -15,6 +15,7 @@
 //! restructuring stays in the nav pane. The centered title dividers the renderer
 //! draws between chapters are display-only and never enter the buffer.
 
+use std::collections::VecDeque;
 use std::fs;
 
 use crate::atomic;
@@ -24,6 +25,17 @@ use crate::project::Project;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
 const WINDOW: usize = 3;
+
+/// A segment's undo/redo bookkeeping, snapshotted alongside the buffer's rope so
+/// undo/redo in the continuous view keeps per-chapter line counts and dirty flags
+/// consistent (#649). The buffer already snapshots the whole rope per edit group;
+/// this captures what the rope alone can't recover — where the chapter seams fall,
+/// since the buffer has no seam markers — for each loaded segment, in window order.
+#[derive(Clone)]
+struct SegState {
+    lines: usize,
+    dirty: bool,
+}
 
 /// One loaded chapter's span within the concatenated [`Manuscript`] buffer.
 struct Segment {
@@ -85,6 +97,13 @@ pub struct Manuscript {
     segments: Vec<Segment>,
     /// Concatenation of the window's chapters — the text actually edited.
     buffer: Buffer,
+    /// Per-segment bookkeeping snapshots that mirror the buffer's undo/redo
+    /// stacks one-for-one (#649). The buffer snapshots the rope; these snapshot
+    /// the segment `lines`/`dirty` so a restore puts the seams back where they
+    /// were. Pushed when a new edit group opens (in lockstep with the buffer),
+    /// and popped alongside the buffer's rope on undo/redo.
+    undo_states: VecDeque<Vec<SegState>>,
+    redo_states: VecDeque<Vec<SegState>>,
 }
 
 /// What the editor needs to render a chapter's header in the continuous flow.
@@ -113,6 +132,8 @@ impl Manuscript {
         let mut m = Manuscript {
             segments: Vec::new(),
             buffer: Buffer::from_text(""),
+            undo_states: VecDeque::new(),
+            redo_states: VecDeque::new(),
         };
         m.rebuild(project, lo, hi, active, 0, 0)?;
         Ok(m)
@@ -215,15 +236,56 @@ impl Manuscript {
 
     // --- Editing -----------------------------------------------------------
 
+    /// The current per-segment bookkeeping, in window order — the pre-edit state
+    /// an undo returns to (#649).
+    fn seg_states(&self) -> Vec<SegState> {
+        self.segments
+            .iter()
+            .map(|s| SegState {
+                lines: s.lines,
+                dirty: s.dirty,
+            })
+            .collect()
+    }
+
+    /// Push a pre-edit segment snapshot when the buffer just opened a new undo
+    /// group (#649). `was_open` is the buffer's group state captured *before* the
+    /// edit: a `false → true` transition means the edit opened a fresh group, so
+    /// `pre` (the state before it) belongs on the undo stack and any redo history
+    /// is now invalid. If the buffer didn't open a group — a no-op edit, or an
+    /// edit folded into an already-open group — nothing is pushed, keeping the two
+    /// stacks in exact step.
+    fn commit_checkpoint(&mut self, was_open: bool, pre: Vec<SegState>) {
+        if was_open || !self.buffer.group_open() {
+            return;
+        }
+        self.undo_states.push_back(pre);
+        while self.undo_states.len() > Buffer::MAX_UNDO_GROUPS {
+            self.undo_states.pop_front();
+        }
+        self.redo_states.clear();
+    }
+
+    /// Drop the segment undo/redo history — the buffer was rebuilt (a reslide or a
+    /// recovery restore), resetting its own stack, so the segment stacks reset too
+    /// to stay in step (#649).
+    fn clear_history(&mut self) {
+        self.undo_states.clear();
+        self.redo_states.clear();
+    }
+
     /// Insert a character at the cursor, attributing it to the chapter the
     /// cursor is in.
     pub fn insert_char(&mut self, c: char) {
         let seg = self.owner_of_line(self.buffer.cursor.line);
+        let pre = self.seg_states();
+        let was_open = self.buffer.group_open();
         self.buffer.insert_char(c);
         if c == '\n' {
             self.segments[seg].lines += 1;
         }
         self.segments[seg].dirty = true;
+        self.commit_checkpoint(was_open, pre);
     }
 
     /// Delete the grapheme before the cursor. A Backspace at a chapter's first
@@ -243,11 +305,14 @@ impl Manuscript {
         // A col-0 backspace above the segment's first line joins two lines
         // *within* this chapter (the seam guard ruled out crossing one).
         let joins_line = col == 0 && line > seg_start;
+        let pre = self.seg_states();
+        let was_open = self.buffer.group_open();
         self.buffer.backspace();
         if joins_line {
             self.segments[seg].lines -= 1;
         }
         self.segments[seg].dirty = true;
+        self.commit_checkpoint(was_open, pre);
     }
 
     /// Delete the grapheme at the cursor (forward Delete). At a chapter's last
@@ -264,10 +329,13 @@ impl Manuscript {
         if at_line_end && line + 1 >= seg_end {
             return;
         }
+        let pre = self.seg_states();
+        let was_open = self.buffer.group_open();
         if self.buffer.delete_forward() {
             self.segments[seg].lines -= 1;
         }
         self.segments[seg].dirty = true;
+        self.commit_checkpoint(was_open, pre);
     }
 
     /// Delete the previous word (Ctrl/Alt-Backspace). The deletion is clamped to
@@ -286,6 +354,8 @@ impl Manuscript {
         }
 
         let before = self.buffer.line_count();
+        let pre = self.seg_states();
+        let was_open = self.buffer.group_open();
         if self.buffer.word_back_target().line < seg_start {
             // The word runs back across the seam into the chapter above. Delete
             // only down to this chapter's first position instead of crossing it.
@@ -298,6 +368,61 @@ impl Manuscript {
         let removed = before.saturating_sub(self.buffer.line_count());
         self.segments[seg].lines = self.segments[seg].lines.saturating_sub(removed);
         self.segments[seg].dirty = true;
+        self.commit_checkpoint(was_open, pre);
+    }
+
+    // --- Undo / redo (#649) ------------------------------------------------
+
+    /// Undo the most recent edit group. Reverts the buffer's rope and restores
+    /// the per-chapter line counts / dirty flags to match, so the seams land
+    /// exactly where they were before the edit (#649). Returns `false` when
+    /// there's nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        self.history_step(true)
+    }
+
+    /// Re-apply the most recently undone group, restoring the buffer and its
+    /// segment bookkeeping together (#649). Returns `false` when there's nothing
+    /// to redo.
+    pub fn redo(&mut self) -> bool {
+        self.history_step(false)
+    }
+
+    /// Step the buffer and the segment history one entry in lockstep. The two
+    /// stacks are pushed together on every edit, so they pop together here: undo
+    /// pops the undo stacks (saving the current state for redo), redo the reverse.
+    /// The buffer's step and this one always agree on whether an entry exists, so
+    /// they never fall out of sync.
+    fn history_step(&mut self, undo: bool) -> bool {
+        let current = self.seg_states();
+        let restored = if undo {
+            self.undo_states.pop_back()
+        } else {
+            self.redo_states.pop_back()
+        };
+        let Some(states) = restored else {
+            return false;
+        };
+        // Step the rope; the two stacks are kept one-for-one, so this must succeed.
+        let stepped = if undo {
+            self.buffer.undo()
+        } else {
+            self.buffer.redo()
+        };
+        debug_assert!(stepped, "segment history out of step with the buffer");
+        if undo {
+            self.redo_states.push_back(current);
+        } else {
+            self.undo_states.push_back(current);
+        }
+        // Restore the seams: the window's segments are the same chapters in the
+        // same order (a reslide would have rebuilt and cleared history), so a
+        // positional restore of each segment's line count / dirty flag is exact.
+        for (seg, state) in self.segments.iter_mut().zip(states) {
+            seg.lines = state.lines;
+            seg.dirty = state.dirty;
+        }
+        true
     }
 
     // --- Saving ------------------------------------------------------------
@@ -386,6 +511,7 @@ impl Manuscript {
             text.push_str(&content);
         }
         self.buffer = Buffer::from_text(&text);
+        self.clear_history(); // the fresh buffer has no undo history (#649)
         let line = first_start_line.unwrap_or(0);
         self.buffer.cursor.line = line.min(self.buffer.line_count().saturating_sub(1));
         self.buffer.cursor.col = 0;
@@ -458,6 +584,10 @@ impl Manuscript {
 
         self.buffer = Buffer::from_text(&text);
         self.segments = segments;
+        // Paging the window rebuilds the buffer from disk (its undo stack resets),
+        // and the segment set changes — so undo history can't span the reslide and
+        // is dropped, keeping the two stacks in step (#649).
+        self.clear_history();
 
         // Restore the cursor: the kept chapter's start line plus the local line.
         let seg = self
@@ -857,6 +987,143 @@ mod tests {
         // The cursor still sits in chapter 2.
         assert_eq!(m.current_chapter(), 2);
 
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- Undo / redo (#649) ------------------------------------------------
+
+    /// The concatenated window text, for asserting the buffer as a whole.
+    fn flow(m: &Manuscript) -> String {
+        m.buffer.line_range_text(0, m.buffer.line_count())
+    }
+
+    #[test]
+    fn undo_and_redo_a_continuous_edit_and_save_the_right_file() {
+        let (mut project, dir) = project_with("undo", &["alpha\n", "beta\n", "gamma\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        // Type into chapter 1, then seal the group as the idle tick would.
+        m.buffer.cursor = Cursor { line: 1, col: 4 }; // after "beta"
+        for c in "!!".chars() {
+            m.insert_char(c);
+        }
+        m.buffer.seal_undo_group();
+        assert_eq!(flow(&m), "alpha\nbeta!!\ngamma\n");
+
+        // Undo reverts the edit and clears the dirty flag, so nothing is written.
+        assert!(m.undo());
+        assert_eq!(flow(&m), "alpha\nbeta\ngamma\n");
+        assert!(!m.dirty(), "undo restored the pre-edit (clean) state");
+        assert_eq!(lines_sum(&m), m.buffer.line_count() - 1);
+
+        // Redo re-applies it and re-dirties chapter 1; a save writes just that file.
+        assert!(m.redo());
+        assert_eq!(flow(&m), "alpha\nbeta!!\ngamma\n");
+        m.save(&mut project).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta!!\n");
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch2.md")).unwrap(), "gamma\n");
+
+        // Nothing left to redo.
+        assert!(!m.redo());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn undo_restores_line_counts_for_an_edit_that_added_a_line() {
+        // A newline-adding edit near a chapter seam: undo must put the seam back
+        // exactly, so the segment line counts stay consistent and the chapters
+        // never merge.
+        let (mut project, dir) = project_with("undo-seam", &["a1\na2\n", "b1\n", "c1\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        // Split chapter 0's last line by inserting a newline just before the seam
+        // into chapter 1.
+        m.buffer.cursor = Cursor { line: 1, col: 1 }; // inside "a2", chapter 0
+        m.insert_char('\n');
+        m.buffer.seal_undo_group();
+        assert_eq!(m.segments[0].lines, 3); // chapter 0 grew a line
+        assert_eq!(flow(&m), "a1\na\n2\nb1\nc1\n");
+
+        // Undo drops the added line — segment 0 is back to two lines, and the seam
+        // to chapter 1 lands where it did.
+        assert!(m.undo());
+        assert_eq!(m.segments[0].lines, 2);
+        assert_eq!(m.segments[1].index, 1);
+        assert_eq!(flow(&m), "a1\na2\nb1\nc1\n");
+        assert_eq!(lines_sum(&m), m.buffer.line_count() - 1);
+
+        // Saving after the undo leaves both chapters as they were.
+        m.save(&mut project).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "a1\na2\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "b1\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn undo_walks_back_edits_across_two_chapters_each_to_its_own_file() {
+        let (mut project, dir) = project_with("undo-two", &["alpha\n", "beta\n", "gamma\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        // First edit group: append to chapter 0.
+        m.buffer.cursor = Cursor { line: 0, col: 5 };
+        m.insert_char('0');
+        m.buffer.seal_undo_group();
+        // Second edit group: append to chapter 2.
+        m.buffer.cursor = Cursor { line: 2, col: 5 };
+        m.insert_char('2');
+        m.buffer.seal_undo_group();
+        assert_eq!(flow(&m), "alpha0\nbeta\ngamma2\n");
+        assert!(m.segments[0].dirty && m.segments[2].dirty);
+
+        // Undo peels off the chapter-2 edit only; chapter 0's edit stays.
+        assert!(m.undo());
+        assert_eq!(flow(&m), "alpha0\nbeta\ngamma\n");
+        assert!(m.segments[0].dirty, "chapter 0's edit is still pending");
+        assert!(!m.segments[2].dirty, "chapter 2 is back to clean");
+
+        // A save now writes only chapter 0's surviving edit.
+        m.save(&mut project).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha0\n");
+        assert_eq!(fs::read_to_string(dir.join("ch2.md")).unwrap(), "gamma\n");
+
+        // Undo the remaining edit: everything is back to the opened state.
+        assert!(m.undo());
+        assert_eq!(flow(&m), "alpha\nbeta\ngamma\n");
+        assert!(!m.dirty());
+        assert!(!m.undo(), "nothing left to undo");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_reslide_drops_undo_history_so_the_stacks_stay_in_step() {
+        let (mut project, dir) = project_with("undo-reslide", &["a\n", "b\n", "c\n", "d\n", "e\n"]);
+        let mut m = Manuscript::open(&project).unwrap(); // window [0,3)
+
+        m.insert_char('X'); // chapter 0 dirty
+        m.buffer.seal_undo_group();
+        // Page the window forward — the buffer is rebuilt from disk.
+        m.buffer.cursor = Cursor { line: 2, col: 0 };
+        m.reslide(&mut project).unwrap();
+
+        // The undo history is gone with the rebuilt buffer; undo is a clean no-op,
+        // never a desync against the new window.
+        assert!(!m.undo());
+        assert_eq!((m.window_lo(), m.window_hi()), (1, 4));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_refused_seam_backspace_records_no_undo_entry() {
+        // A backspace at a chapter's first position is a no-op; it must not leave a
+        // phantom undo entry that would step the buffer with nothing to revert.
+        let (project, dir) = project_with("undo-noop", &["alpha\n", "beta\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+
+        m.buffer.cursor = Cursor { line: 1, col: 0 }; // top of chapter 1 — refused
+        m.backspace();
+        assert!(!m.dirty());
+        assert!(!m.undo(), "the refused edit left nothing to undo");
         fs::remove_dir_all(&dir).ok();
     }
 }

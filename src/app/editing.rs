@@ -149,24 +149,20 @@ impl App {
         });
     }
 
-    /// Undo / redo one edit group (#145). Scoped to the single-chapter view: the
-    /// continuous view's segment bookkeeping isn't snapshotted, so history there
-    /// is guarded with a message rather than a silent desync (a follow-up).
+    /// Undo / redo one edit group (#145). Works in both views: the single-chapter
+    /// buffer steps its own rope; the continuous view steps the windowed buffer and
+    /// restores the per-chapter seam bookkeeping alongside it (#649), so an undo
+    /// reverts the edit and writes back to the right chapter file.
     pub(super) fn history_step(&mut self, redo: bool) {
         let verb = if redo { "Redo" } else { "Undo" };
-        if self.manuscript.is_some() {
-            self.message = Some(format!(
-                "{verb} isn't available in the continuous view yet — Ctrl-l to return."
-            ));
-            return;
-        }
         // Snapshot any open edit group's annotations before stepping, so the
         // undo/redo stacks are aligned with the buffer's (#370).
         self.note_annotation_undo_point();
-        let changed = if redo {
-            self.buffer.redo()
-        } else {
-            self.buffer.undo()
+        let changed = match &mut self.manuscript {
+            Some(m) if redo => m.redo(),
+            Some(m) => m.undo(),
+            None if redo => self.buffer.redo(),
+            None => self.buffer.undo(),
         };
         if changed {
             self.restore_annotation_history(redo); // swap annotations with the rope

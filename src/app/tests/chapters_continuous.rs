@@ -33,6 +33,71 @@ fn continuous_view_edits_persist_to_the_right_chapter() {
 }
 
 #[test]
+fn continuous_view_undo_and_redo_revert_an_edit() {
+    // #649: undo/redo must work in the continuous view, not be refused.
+    let (mut app, dir) = three_chapter_app("cont-undo"); // alpha / beta / gamma
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some());
+
+    // Move into chapter 1 ("beta") and append to it.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::End));
+    type_str(&mut app, "ZZ");
+    app.on_idle(); // seal the edit group as a typing pause would
+    assert!(app.edit_buffer().line(1).ends_with("betaZZ"));
+
+    // Undo reverts the edit — no "isn't available" message.
+    app.on_key(ctrl('z'));
+    assert_eq!(app.edit_buffer().line(1), "beta");
+    assert!(
+        app.message.as_deref() != Some("Undo isn't available"),
+        "undo was performed, not refused: {:?}",
+        app.message
+    );
+
+    // Redo re-applies it.
+    app.on_key(ctrl('y'));
+    assert!(app.edit_buffer().line(1).ends_with("betaZZ"));
+
+    // Leaving persists the redone edit to chapter 1's file only.
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c1.md")).unwrap(), "betaZZ\n");
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "alpha\n");
+    assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "gamma\n");
+}
+
+#[test]
+fn continuous_view_undo_of_a_second_chapters_edit_leaves_the_first_intact() {
+    // Two separate edits in the window, to two chapters. Undo peels off the most
+    // recent (chapter 2); chapter 0's edit survives and saves to its own file.
+    let (mut app, dir) = three_chapter_app("cont-undo-two");
+    app.on_key(ctrl('l'));
+
+    // Edit chapter 0 ("alpha"), then pause so it's its own undo group.
+    app.on_key(key(KeyCode::End));
+    type_str(&mut app, "0");
+    app.on_idle();
+    // Move to chapter 2 ("gamma") and edit it.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::End));
+    type_str(&mut app, "2");
+    app.on_idle();
+    assert!(app.edit_buffer().line(0).ends_with("alpha0"));
+    assert!(app.edit_buffer().line(2).ends_with("gamma2"));
+
+    // One undo reverts only the chapter-2 edit.
+    app.on_key(ctrl('z'));
+    assert!(app.edit_buffer().line(0).ends_with("alpha0"));
+    assert_eq!(app.edit_buffer().line(2), "gamma");
+
+    // Leaving saves chapter 0's surviving edit; chapter 2 is back to disk's value.
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "alpha0\n");
+    assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "gamma\n");
+}
+
+#[test]
 fn entering_continuous_flushes_the_single_chapter() {
     let (mut app, dir) = two_chapter_app("continuous-flush");
     // Edit chapter one in single view, then enter continuous without saving.
