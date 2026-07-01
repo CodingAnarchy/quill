@@ -217,7 +217,12 @@ keystrokes that stay out of the way.
   consistency; prose & style and editorial reads (findings, never fixes); an
   in-context **thesaurus** (candidate words for a slot you pick); notes import
   into the bible; "ask the manuscript" Q&A; and off-manuscript artifacts
-  (synopsis, blurb, query letter, marketing / social copy). Findings collect in a
+  (synopsis, blurb, query letter, marketing / social copy). Your hand-edits to
+  the bible are ground truth on the next pass — **Browse story bible**
+  (`bible:browse`, from the `Ctrl-K` menu) lists the files under `bible/`
+  (characters, timeline, setting, outline) and opens the selected one in an
+  editable pane that saves back to disk, so you can read and correct the AI's
+  tracking without leaving Quill. Findings collect in a
   navigable **revision triage** list, and for a multi-book series the bible and
   its findings span every book. It runs against Claude or an on-device local
   model: **switch backends from the `Ctrl-K` menu** for the session, or set a

@@ -515,6 +515,20 @@ impl Project {
         found
     }
 
+    /// The story-bible files (#590): every Markdown file under `bible/` — the
+    /// characters, timeline, setting, and outline the AI passes track and the
+    /// author edits as ground truth. The `bible/`-scoped subset of
+    /// [`reference_files`](Self::reference_files), for the bible browser that opens
+    /// one in an editable buffer. Sorted by path for a stable list; empty when the
+    /// project has no `bible/` directory yet.
+    pub fn bible_files(&self) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        // The bible holds no chapters, so nothing to exclude from the walk.
+        collect_markdown(&self.root.join("bible"), &[], &mut found);
+        found.sort();
+        found
+    }
+
     /// Make chapter `index` the active one.
     pub fn set_active(&mut self, index: usize) {
         if let Some(chapter) = self.manifest.chapters.get(index) {

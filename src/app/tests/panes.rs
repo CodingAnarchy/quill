@@ -282,6 +282,98 @@ fn a_reference_pane_saves_independently() {
     assert!(!one.contains("NOTE"), "the chapter is untouched: {one:?}");
 }
 
+// --- Story-bible browser (#590) --------------------------------------------
+
+use crate::mode::Action;
+
+/// Run the "Browse story bible" run-action, as if chosen from the Ctrl-K palette.
+fn browse_bible(app: &mut App) {
+    app.run_action(Action::BrowseBible, false);
+}
+
+#[test]
+fn the_bible_browser_lists_only_the_bible_files() {
+    let (mut app, dir) = two_chapter_app("bible-list");
+    write_bible(&dir);
+    // A loose note outside `bible/` is a reference file but not a bible file.
+    fs::write(dir.join("notes.md"), "# Notes\n\nloose\n").unwrap();
+    browse_bible(&mut app);
+    let files = match &app.mode {
+        Mode::RefFiles(state) => {
+            assert!(state.bible_only, "the bible-only view is flagged");
+            &state.files
+        }
+        _ => panic!("expected the bible browser"),
+    };
+    let names: Vec<String> = files
+        .iter()
+        .map(|p| {
+            p.strip_prefix(&dir)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert!(
+        names.contains(&"bible/characters/mara.md".to_string()),
+        "{names:?}"
+    );
+    assert!(names.contains(&"bible/setting.md".to_string()), "{names:?}");
+    assert!(
+        !names.iter().any(|n| n.ends_with("notes.md")),
+        "loose notes outside bible/ are excluded: {names:?}"
+    );
+}
+
+#[test]
+fn the_bible_browser_reports_when_there_is_no_bible() {
+    let (mut app, _dir) = two_chapter_app("bible-empty"); // no bible/ on disk
+    browse_bible(&mut app);
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "stays in the editor when there's no bible"
+    );
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("No story bible"));
+}
+
+#[test]
+fn editing_a_bible_file_round_trips_to_disk() {
+    let (mut app, dir) = two_chapter_app("bible-edit");
+    write_bible(&dir);
+    browse_bible(&mut app);
+    app.on_key(key(KeyCode::Enter)); // open the first file (bible/characters/mara.md, sorted)
+    assert!(
+        app.split_view().is_some(),
+        "the bible file opened in a pane"
+    );
+    window_cmd(&mut app, 'w'); // focus it
+    type_str(&mut app, "GROUND-TRUTH");
+    app.on_key(ctrl('s'));
+    let mara = fs::read_to_string(dir.join("bible").join("characters").join("mara.md")).unwrap();
+    assert!(
+        mara.contains("GROUND-TRUTH"),
+        "the bible edit saved back to disk: {mara:?}"
+    );
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(!one.contains("GROUND-TRUTH"), "the chapter is untouched");
+}
+
+#[test]
+fn esc_leaves_the_bible_browser_for_the_editor() {
+    let (mut app, dir) = two_chapter_app("bible-esc");
+    write_bible(&dir);
+    browse_bible(&mut app);
+    app.on_key(key(KeyCode::Esc));
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "Esc drops back to the editor"
+    );
+}
+
 // --- Resize & narrow-terminal collapse (#166) ------------------------------
 
 fn split_ratio(app: &App) -> u16 {
