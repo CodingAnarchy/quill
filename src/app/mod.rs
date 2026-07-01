@@ -48,6 +48,7 @@ mod imports;
 mod meta;
 mod models;
 mod nav;
+mod outline;
 mod palette;
 mod panes;
 mod qa_store;
@@ -775,6 +776,7 @@ impl App {
             Mode::History(_) => self.on_key_history(key),
             Mode::Annotations { .. } => self.on_key_annotations(key),
             Mode::Corkboard(_) => self.on_key_corkboard(key),
+            Mode::Outline { .. } => self.on_key_outline(key),
             Mode::ModelManager { .. } => self.on_key_model_manager(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),
@@ -847,8 +849,17 @@ impl App {
             KeyCode::Char('-') => {
                 self.focus_width = self.focus_width.saturating_sub(4).max(32);
             }
+            // Ctrl-O cycles the outline pane (#657): hidden → shown (display
+            // only) → focused (navigable). A first press reveals it, a second
+            // focuses it so its headings can be navigated and jumped to, and a
+            // press while focused hides it again — one key, the whole life-cycle.
             KeyCode::Char('o') => {
-                self.outline_visible = !self.outline_visible;
+                if !self.outline_visible {
+                    self.outline_visible = true;
+                    self.browser_opened_outline = false;
+                } else {
+                    self.focus_outline();
+                }
             }
             // Open the version-control palette (#54) — init / commit / history /
             // changes / restore, in one menu. Ctrl-v: "version control".

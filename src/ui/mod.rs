@@ -375,10 +375,13 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
 /// The active chapter's heading outline, indented by level, current section
 /// accented. `skip` omits one heading by index (used to drop a leading H1 that
 /// just repeats the chapter title) while leaving the remaining indices — and so
-/// the `current` highlight — intact.
+/// the `current` highlight — intact. `selected` is the focused-outline cursor
+/// (#657): when set, that heading is drawn reversed so the author sees which one
+/// Enter will jump to; otherwise the outline is the plain display list.
 fn heading_outline_lines(
     headings: &[Heading],
     current: Option<usize>,
+    selected: Option<usize>,
     skip: Option<usize>,
 ) -> Vec<Line<'static>> {
     headings
@@ -387,11 +390,14 @@ fn heading_outline_lines(
         .filter(|(i, _)| Some(*i) != skip)
         .map(|(i, h)| {
             let indent = "  ".repeat(h.level as usize);
-            let style = if Some(i) == current {
+            let mut style = if Some(i) == current {
                 active_style()
             } else {
                 Style::default().fg(theme::current().muted)
             };
+            if Some(i) == selected {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
             Line::from(Span::styled(format!("{indent}{}", h.title), style))
         })
         .collect()
@@ -474,6 +480,11 @@ impl Pane for NavPane<'_> {
 
         let headings = app.buffer.syntax().headings();
         let current_heading = current_section(headings, app.buffer.cursor_byte());
+        // When the outline is focused (#657), draw its selection cursor reversed.
+        let outline_selected = match &app.mode {
+            Mode::Outline { selected } => Some(*selected),
+            _ => None,
+        };
 
         // Resolve the active index once: active_index() is an O(n) scan, so
         // calling it per row would be O(n²) per frame.
@@ -547,7 +558,12 @@ impl Pane for NavPane<'_> {
             ));
             if is_active {
                 let skip = redundant_title_heading(headings, &chapter.title);
-                lines.extend(heading_outline_lines(headings, current_heading, skip));
+                lines.extend(heading_outline_lines(
+                    headings,
+                    current_heading,
+                    outline_selected,
+                    skip,
+                ));
             }
         }
 
