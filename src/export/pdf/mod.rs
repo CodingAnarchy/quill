@@ -27,7 +27,7 @@ use self::draw::{mono_wrap, num};
 use self::font::{Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::layout::Layout;
-use self::wrap::{segments, words_of, wrap_lines, Seg};
+use self::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg};
 use self::write::{flate_stream, flatten_outline, remap_glyph_ids, serialize, OutlineItem};
 use super::{
     body_blocks, classify_block, copyright_lines, inline_runs, Chapter, Document, ExportStyle,
@@ -674,7 +674,7 @@ impl Pdf {
                     width: f32,
                     entry: Option<usize>| {
             let words = words_of(&[Run::new(text, bold, false)], false);
-            let wrapped = wrap_lines(&self.layout, &words, size, |_| width);
+            let wrapped = wrap_lines(&self.layout, &words, size, Hyphenate::Off, |_| width);
             for (i, (line, _w)) in wrapped.into_iter().enumerate() {
                 if *y - leading < bottom {
                     *page += 1;
@@ -936,7 +936,7 @@ impl Pdf {
         // The first LINES lines are inset by the cap width; the rest run full width.
         let full = self.layout.text_w();
         let line_w = |i: usize| if i < LINES { full - cap_w } else { full };
-        let lines = wrap_lines(&self.layout, &words, BODY_SIZE, line_w);
+        let lines = wrap_lines(&self.layout, &words, BODY_SIZE, Hyphenate::On, line_w);
         let last = lines.len().saturating_sub(1);
         for (i, (line, _w)) in lines.into_iter().enumerate() {
             self.need(BODY_LEADING);

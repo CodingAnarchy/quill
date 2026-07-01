@@ -44,6 +44,11 @@ hf-hub = { version = "0.4", optional = true }
 # ornaments are part of the standard designed-export path.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 spellbook = "0.4.2"
+# Hyphenation for justified body text in the print PDF (#678). The `embed_en-us`
+# feature bakes the en-US Knuth-Liang patterns into the binary, so export is
+# self-contained (no runtime pattern files) and the dictionary builds once — the
+# editor never touches it, it runs only on the export path.
+hyphenation = { version = "0.8", features = ["embed_en-us"] }
 # Print-ready PDF export (#464) reads glyph metrics (advances, cmap, bbox) from the
 # bundled fonts it embeds. ttf-parser is pure-Rust and dependency-free; it only
 # reads the font — the PDF itself is still hand-written (like docx/epub/pdf).
