@@ -33,10 +33,13 @@ fn undo_works_in_the_continuous_view() {
     app.on_idle(); // seal the typing burst into one undo group
 
     app.on_key(ctrl('z'));
-    assert_eq!(app.edit_buffer().line(0), original, "undo reverted the edit");
+    assert_eq!(
+        app.edit_buffer().line(0),
+        original,
+        "undo reverted the edit"
+    );
     assert!(
-        !app
-            .message
+        !app.message
             .as_deref()
             .unwrap_or("")
             .contains("continuous view"),
