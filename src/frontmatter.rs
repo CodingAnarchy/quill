@@ -202,17 +202,21 @@ macro_rules! role_table {
 }
 
 role_table! {
-    // Front matter (sorts before the body).
+    // Front matter (sorts before the body), in conventional reading order.
+    Dedication => "dedication", "Dedication", Front;
     Foreword => "foreword", "Foreword", Front;
     Preface => "preface", "Preface", Front;
     Introduction => "introduction", "Introduction", Front;
     Prologue => "prologue", "Prologue", Front;
-    // Back matter (sorts after the body).
+    // Back matter (sorts after the body), in conventional reading order.
     Epilogue => "epilogue", "Epilogue", Back;
     Afterword => "afterword", "Afterword", Back;
     Acknowledgments => "acknowledgments" | "acknowledgements", "Acknowledgments", Back;
     Appendix => "appendix", "Appendix", Back;
     Glossary => "glossary", "Glossary", Back;
+    AlsoBy => "also-by" | "also by the author", "Also by the Author", Back;
+    AboutTheAuthor => "about-the-author" | "about the author", "About the Author", Back;
+    Colophon => "colophon", "Colophon", Back;
 }
 
 /// The three ordering bands of a manuscript (#180): front matter sorts before
@@ -657,6 +661,56 @@ mod tests {
         assert_eq!(Role::from_key("chapter"), None); // unknown → body
         assert_eq!(Role::Appendix.key(), "appendix");
         assert_eq!(Role::Appendix.label(), "Appendix");
+    }
+
+    #[test]
+    fn front_and_back_matter_roles_parse_into_the_right_band() {
+        // Dedication is a front-matter page; the "also by" / "about the author" /
+        // colophon pages are back matter (#605). Each parses (with its longhand
+        // aliases and case-insensitively) and reports the conventional band.
+        assert_eq!(Role::from_key("Dedication"), Some(Role::Dedication));
+        assert_eq!(Role::Dedication.band(), Band::Front);
+
+        assert_eq!(Role::from_key("also-by"), Some(Role::AlsoBy));
+        assert_eq!(Role::from_key("Also By The Author"), Some(Role::AlsoBy));
+        assert_eq!(Role::AlsoBy.band(), Band::Back);
+
+        assert_eq!(
+            Role::from_key("about-the-author"),
+            Some(Role::AboutTheAuthor)
+        );
+        assert_eq!(
+            Role::from_key(" About the Author "),
+            Some(Role::AboutTheAuthor)
+        );
+        assert_eq!(Role::AboutTheAuthor.band(), Band::Back);
+
+        assert_eq!(Role::from_key("COLOPHON"), Some(Role::Colophon));
+        assert_eq!(Role::Colophon.band(), Band::Back);
+
+        // Keys and labels round-trip for the manifest and the pane.
+        assert_eq!(Role::Dedication.key(), "dedication");
+        assert_eq!(Role::AboutTheAuthor.label(), "About the Author");
+    }
+
+    #[test]
+    fn new_roles_sort_into_reading_order_across_bands() {
+        // The band a file lands in is what orders it in the compiled book: front
+        // matter (dedication) before the body, back matter (also-by, about-the-
+        // author, colophon) after it. A stable sort by band preserves the
+        // author's within-band order, so the section-assembly picks these up.
+        let roles = [
+            Some(Role::AboutTheAuthor),
+            Some(Role::Dedication),
+            None, // a plain body chapter
+            Some(Role::Colophon),
+            Some(Role::AlsoBy),
+        ];
+        let mut order: Vec<usize> = (0..roles.len()).collect();
+        order.sort_by_key(|&i| Band::of(roles[i]));
+        // Dedication (front) first, body next, then the back matter in the
+        // author's declared order.
+        assert_eq!(order, vec![1, 2, 0, 3, 4]);
     }
 
     #[test]

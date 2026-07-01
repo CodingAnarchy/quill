@@ -89,10 +89,11 @@ keystrokes that stay out of the way.
   body (the book's at the start of the manuscript). The quotation is edited in
   the main editor (Ctrl-S to save, Esc to cancel) and stored readably — a YAML
   `|` block in the chapter file, a TOML `"""` block in `book.toml`.
-- **Book sections** — mark a file as front matter (foreword/preface/introduction/
-  prologue) or back matter (epilogue/afterword/acknowledgments/appendix/glossary)
-  with **S** in the chapter browser; sections sort around the body, are grouped in
-  the pane, and are kept out of the body word-count goal.
+- **Book sections** — mark a file as front matter (dedication/foreword/preface/
+  introduction/prologue) or back matter (epilogue/afterword/acknowledgments/
+  appendix/glossary/also-by/about-the-author/colophon) with **S** in the chapter
+  browser; sections sort around the body, are grouped in the pane, and are kept
+  out of the body word-count goal.
 - **Export** — **Ctrl-E** opens an export menu. *Markdown* compiles the whole
   manuscript to a single `.md` file under `export/` (chapters in reading order,
   parts and titles as headings, epigraphs set apart), ready to hand off or
@@ -726,9 +727,9 @@ and restores the full list. The filter reads only cached metadata, so it stays
 instant even at series scale.
 
 A file can be marked as a non-chapter **section** (#53) with **S**: front matter
-(`foreword`, `preface`, `introduction`, `prologue`) or back matter (`epilogue`,
-`afterword`, `acknowledgments`, `appendix`, `glossary`); blank clears it back to a
-body chapter. The role shows as a dim tag in the pane. Front matter sorts before
+(`dedication`, `foreword`, `preface`, `introduction`, `prologue`) or back matter
+(`epilogue`, `afterword`, `acknowledgments`, `appendix`, `glossary`, `also-by`,
+`about-the-author`, `colophon`); blank clears it back to a body chapter. The role shows as a dim tag in the pane. Front matter sorts before
 the body and back matter after it, reordering (J / K) stays within a band, and
 the progress report counts only body chapters toward the chapter goal. (Pane
 grouping and separate front/back word counts build on this in later work.)
