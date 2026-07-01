@@ -731,10 +731,12 @@ impl App {
             // Open the local analysis report — editing metrics. Ctrl-t: "text"
             // analysis. Scrollable (it can run past one screen); any other key closes.
             KeyCode::Char('t') => self.open_analysis_report(),
-            // Open the AI command palette (opt-in). When AI isn't ready, explain
-            // how to enable it rather than listing dead actions.
+            // Open the AI command palette (opt-in). When AI is off, offer the in-app
+            // on-ramp to enable it (#602) rather than a dead-end config instruction;
+            // when it's on but unready (no key), explain rather than list dead actions.
             KeyCode::Char('a') => match self.ai.check_ready() {
                 Ok(_) => self.open_ai_palette(),
+                Err(_) if !self.ai.enabled => self.offer_enable_ai(None),
                 Err(e) => self.message = Some(e.to_string()),
             },
             // Open the export menu (#7) — Markdown / Word. Ctrl-e.

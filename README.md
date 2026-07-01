@@ -202,7 +202,11 @@ keystrokes that stay out of the way.
   writes only a temp file and never touches your manuscript.
 
 - **AI assistance (opt-in)** — off by default; a draft only leaves the machine
-  when you enable AI and supply a key. Your **API key is kept in the OS keychain,
+  when you enable AI and supply a key. Turning it on is **in-app** (#602): press
+  `Ctrl-A` or reach for any AI action and Quill offers a `y`/`N` prompt to enable
+  it — confirming writes `[ai] enabled = true` and chains straight into setting
+  your key (or run **Enable AI assistance** from `Ctrl-K`); declining leaves AI
+  off. Your **API key is kept in the OS keychain,
   not in plaintext** (#530): run **Set Claude API key** / **Set image API key**
   from the `Ctrl-K` menu and Quill stores it in the macOS Keychain / Linux Secret
   Service / Windows Credential Manager, so a synced dotfile or backup of your

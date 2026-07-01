@@ -340,6 +340,10 @@ pub(crate) enum Action {
     WritingHistory,
     /// Run an AI pass / open an AI view (Ctrl-A).
     Ai(AiAction),
+    /// Turn on the opt-in AI features in-app (#602): write `[ai] enabled = true`
+    /// after a y/N confirm, then chain into the Set-key flow. AI stays off until
+    /// the author explicitly confirms.
+    EnableAi,
     /// Open the built-in user's guide (F1) (#281).
     UserGuide,
     /// Import a Markdown notes file (or a folder of them) into the story bible
@@ -459,6 +463,7 @@ impl Action {
         Action::AnalysisReport,
         Action::WritingHistory,
         // AI
+        Action::EnableAi,
         Action::Ai(AiAction::Ask),
         Action::Ai(AiAction::Characters),
         Action::Ai(AiAction::Continuity),
@@ -522,6 +527,7 @@ impl Action {
             Action::WritingHistory => "report:history",
             // The AI slugs are the single source in `AiAction::SPECS` (#563).
             Action::Ai(a) => a.slug(),
+            Action::EnableAi => "ai:enable",
             Action::UserGuide => "guide",
             Action::ImportNotes => "import",
             Action::NewProjectFromNotes => "new-from-notes",
@@ -580,6 +586,7 @@ impl Action {
             Action::Export(_) | Action::BrowseFonts | Action::SetExportStyle => "Export",
             Action::ProgressReport | Action::AnalysisReport | Action::WritingHistory => "Reports",
             Action::Ai(_)
+            | Action::EnableAi
             | Action::RefreshSeriesBible
             | Action::DescribeConfig
             | Action::SwitchBackend
@@ -638,6 +645,7 @@ impl Action {
             Action::Ai(AiAction::Triage) => "Revision triage",
             Action::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
             Action::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
+            Action::EnableAi => "Enable AI assistance",
             Action::UserGuide => "User's guide",
             Action::ImportNotes => "Import notes → story bible",
             Action::NewProjectFromNotes => "New project from a folder of notes",

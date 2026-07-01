@@ -233,7 +233,12 @@ novel; a multi-book series sets [style] / [print] per book by hand.)
 
 AI ASSISTANCE (opt-in)
 
-With AI enabled in your config, Ctrl-A opens the AI command palette. The
+AI is off by default. The first time you press Ctrl-A (or run any AI action from
+the Ctrl-K menu) Quill offers to enable it right there: confirm the y/N prompt and
+it writes the setting for you, then asks for your API key. You can also run
+"Enable AI assistance" from Ctrl-K. Decline and AI stays off — nothing changes.
+
+With AI enabled, Ctrl-A opens the AI command palette. The
 assistant is a helper, never a co-writer: it tracks, outlines, marks, and
 observes, but it never writes or rewrites your manuscript prose. It can build a
 story bible (characters, timeline, setting), flag continuity and naming issues,

@@ -8,11 +8,51 @@
 
 use crate::ai::keychain::Key;
 use crate::config;
-use crate::mode::Pending;
+use crate::mode::{AiAction, Pending};
 
 use super::App;
 
 impl App {
+    /// Offer to turn on the opt-in AI features in-app (#602): a y/N prompt that,
+    /// on `y`, writes `[ai] enabled = true` and chains into the Set-key flow. This
+    /// is the on-ramp shown when the author reaches for an AI action while AI is
+    /// off, and the plain "Enable AI assistance" run-action. `resume` is the AI
+    /// pass to re-run once AI is enabled and keyed, or `None` to stop after enabling.
+    /// AI stays off until the author confirms — the prompt itself changes nothing.
+    pub(crate) fn offer_enable_ai(&mut self, resume: Option<AiAction>) {
+        let label = "AI is off. Enable it (writes [ai] enabled = true)? (y/N) ".to_string();
+        self.open_prompt(Pending::ConfirmEnableAi { resume }, label, "", None);
+    }
+
+    /// Enable AI in the config (#602): splice `[ai] enabled = true`, reload the AI
+    /// settings so the running editor reflects it with no restart, then continue.
+    /// If the (now-active) backend still isn't ready because Claude has no key,
+    /// chain straight into the Set-key flow; if it's ready, re-run the `resume`
+    /// action the author reached for (or report that AI is on). A failed write
+    /// leaves AI off and reports.
+    pub(crate) fn enable_ai(&mut self, resume: Option<AiAction>) {
+        let changes = [("ai".to_string(), "enabled".to_string(), "true".to_string())];
+        if let Err(e) = config::set_values(&changes) {
+            self.message = Some(format!("Couldn't enable AI: {e}"));
+            return;
+        }
+        // Live-apply: re-read the AI section so `check_ready` and the palette see
+        // the flag without a restart.
+        self.ai = crate::ai::Settings::load();
+        match self.ai.check_ready() {
+            // Ready already (a key is set, or the local backend is active): run the
+            // pass they wanted, or just confirm AI is on for the plain action.
+            Ok(()) => match resume {
+                Some(action) => self.start_ai_action(action, false),
+                None => self.message = Some("AI enabled.".into()),
+            },
+            // Not ready yet — the only remaining gap for a fresh Claude setup is a
+            // missing key, so chain into the key flow. Once the key lands, the
+            // author re-runs the action (the key flow doesn't resume it itself).
+            Err(_) => self.start_set_api_key(Key::Anthropic),
+        }
+    }
+
     /// Start storing a provider API key (#530): open a prompt for the key value.
     /// The key is written to the OS keychain on Enter, never echoed into config.
     pub(crate) fn start_set_api_key(&mut self, key: Key) {
