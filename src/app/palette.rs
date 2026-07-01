@@ -193,6 +193,7 @@ impl App {
                     | AiAction::Social
                     | AiAction::AdCreative
                     | AiAction::Thesaurus
+                    | AiAction::NameGen
                     | AiAction::Editorial
             ) | Action::RefreshSeriesBible
                 | Action::DescribeConfig
@@ -370,6 +371,8 @@ impl App {
                     Some(Command::SwitchBook(i)) => self.switch_book(i),
                     Some(Command::NewProjectTemplate(i)) => self.create_project_with_template(i),
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
+                    Some(Command::PickNameKind(k)) => self.prompt_namegen(k),
+                    Some(Command::InsertName(n)) => self.insert_name(&n),
                     Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
                     Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),
                     Some(Command::OpenStylePicker(p)) => self.open_style_picker(p),
@@ -533,6 +536,7 @@ impl App {
             AiAction::Triage => self.open_triage(),
             AiAction::AskHistory => self.open_qa_history(),
             AiAction::Thesaurus => self.start_thesaurus(),
+            AiAction::NameGen => self.start_namegen(),
             AiAction::Editorial => self.analyze_editorial(),
         }
     }
@@ -614,6 +618,10 @@ fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Thesaurus => (
             "Word search",
             "In-context thesaurus for a word or phrase (reference only)",
+        ),
+        AiAction::NameGen => (
+            "Name generator",
+            "Candidate character / place / term names by constraints (you pick)",
         ),
         AiAction::Editorial => (
             "Editorial read",

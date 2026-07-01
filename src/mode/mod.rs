@@ -419,6 +419,10 @@ pub(crate) enum Pending {
     AskAi,
     /// Text input: a word/phrase (and optional filters) for the thesaurus (#290).
     Thesaurus,
+    /// Text input: constraints (origin, syllables, tone, era) for the name
+    /// generator (#610). The `Kind` (character / place / term) was chosen from the
+    /// picker before the prompt opened.
+    NameGen(crate::ai::namegen::Kind),
     /// Text input: a message for a version-control commit (#131).
     Commit,
     /// Confirm running an AI action whose estimated cost exceeds the threshold.
