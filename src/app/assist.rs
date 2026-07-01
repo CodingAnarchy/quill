@@ -897,7 +897,7 @@ impl App {
             let staged = self.stage_bible(path, kind, |notes| {
                 bible::render(&title, &text, notes, &today)
             });
-            if matches!(staged, Staged::Wrote) {
+            if matches!(staged, Staged::Wrote(_)) {
                 written_paths.push(format!("{subdir}/{file}"));
             }
             staged

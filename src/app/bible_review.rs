@@ -8,12 +8,14 @@ use similar::{ChangeTag, TextDiff};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use ratatui::text::Line;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 use crate::ai::bible;
 use crate::buffer::Buffer;
 use crate::mode::{BibleConflict, BibleReview, Finding, Findings, Mode};
 use crate::project::read_existing;
+use crate::theme;
 
 use super::assist::list_move;
 use super::assist::write_failure_message;
@@ -24,8 +26,11 @@ use super::App;
 /// conflict (queue for review) and from an I/O failure (surface to the author),
 /// so a failed write is never miscounted as success.
 pub(super) enum Staged {
-    /// Written to disk.
-    Wrote,
+    /// Written to disk, carrying the unified diff (current on disk → proposed),
+    /// each line prefixed with `+`/`-`/` ` (#607). Empty when the write was the
+    /// first for that file or the content was unchanged, so a caller can show the
+    /// delta on a clean revise and stay silent when nothing changed.
+    Wrote(Vec<String>),
     /// The generated block was hand-edited since the last pass; queued for review.
     Conflict(BibleConflict),
     /// The write (or its parent-directory creation) failed; carries an
@@ -54,7 +59,7 @@ impl StagedTally {
         };
         for result in staged {
             match result {
-                Staged::Wrote => tally.written += 1,
+                Staged::Wrote(_) => tally.written += 1,
                 Staged::Conflict(c) => tally.conflicts.push(c),
                 Staged::Failed(msg) => tally.failures.push(msg),
             }
@@ -73,6 +78,31 @@ pub(super) fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
                 ChangeTag::Equal => ' ',
             };
             format!("{sign}{}", change.value().trim_end_matches('\n'))
+        })
+        .collect()
+}
+
+/// A one-line `+N/-M` summary of a unified diff (#607), e.g.
+/// `Updated character/Ada: +3/-1`. Counts the added and removed lines (context
+/// lines are ignored), so the author sees the size of a clean revise at a glance.
+fn delta_summary(name: &str, diff: &[String]) -> String {
+    let added = diff.iter().filter(|l| l.starts_with('+')).count();
+    let removed = diff.iter().filter(|l| l.starts_with('-')).count();
+    format!("Updated {name}: +{added}/-{removed}")
+}
+
+/// Color a pre-rendered unified diff for the AI overlay (#607): additions green,
+/// removals red, context dimmed. Mirrors the bible-conflict diff rendering.
+fn diff_lines(diff: &[String]) -> Vec<Line<'static>> {
+    let theme = theme::current();
+    diff.iter()
+        .map(|change| {
+            let color = match change.chars().next() {
+                Some('-') => theme.removed,
+                Some('+') => theme.added,
+                _ => theme.dim,
+            };
+            Line::from(Span::styled(change.clone(), Style::default().fg(color)))
         })
         .collect()
 }
@@ -102,8 +132,16 @@ impl App {
                 });
             }
         }
+        // Diff the on-disk version against what we're about to write so a clean
+        // revise can show the delta (#607); computed before the write, since after
+        // it the file equals `proposed`. An unchanged write diffs to only context
+        // lines, which the caller treats as "nothing changed".
+        let diff = match &existing {
+            Some(current) if current != &proposed => unified_diff(current, &proposed),
+            _ => Vec::new(),
+        };
         match self.write_file(&path, &proposed) {
-            Ok(()) => Staged::Wrote,
+            Ok(()) => Staged::Wrote(diff),
             Err(msg) => Staged::Failed(msg),
         }
     }
@@ -194,7 +232,7 @@ impl App {
         self.overlay = None;
         self.stash_findings(findings);
         match self.stage_bible(path, name, render) {
-            Staged::Wrote => {
+            Staged::Wrote(diff) => {
                 self.record_pass_state(); // the bible now reflects this manuscript state (#90)
                 if self.series_bible_running() {
                     // Mid series-bible refresh (#341): the findings are already in
@@ -203,7 +241,12 @@ impl App {
                     // author to triage when the whole run finishes.
                     self.pending_findings.clear();
                 } else {
-                    self.open_findings();
+                    // Surface what the revise changed (#607) so the author can
+                    // trust or correct the AI-written entry: a `+N/-M` summary
+                    // line always, and — when there are no findings to triage —
+                    // the diff itself in the AI overlay. A no-change write (empty
+                    // diff) shows nothing.
+                    self.show_bible_delta(name, diff);
                 }
             }
             Staged::Conflict(conflict) => {
@@ -222,6 +265,32 @@ impl App {
                     self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
                 }
             }
+        }
+    }
+
+    /// After a clean revise write (#607), let the author see what the model
+    /// changed. `diff` is the unified diff of the just-written tracker (empty when
+    /// nothing changed). With findings pending, open the findings overlay and put
+    /// the `+N/-M` summary in the message line, so triage still leads. With no
+    /// findings, show the diff itself in the AI overlay so the delta isn't buried.
+    /// A no-change write (empty diff) surfaces nothing new — the plain summary.
+    fn show_bible_delta(&mut self, name: &str, diff: Vec<String>) {
+        if diff.is_empty() {
+            // Nothing changed on disk: keep the historic clean-write behavior.
+            self.open_findings();
+            return;
+        }
+        let summary = delta_summary(name, &diff);
+        if self.pending_findings.is_empty() {
+            // No triage to lead with — show the delta the author can trust or
+            // correct, as a "view changes" diff in the AI overlay.
+            let mut lines = vec![Line::raw(summary), Line::raw("")];
+            lines.extend(diff_lines(&diff));
+            self.show_ai(lines);
+        } else {
+            // Findings lead; the summary rides the message line under the overlay.
+            self.open_findings();
+            self.message = Some(summary);
         }
     }
 
@@ -496,7 +565,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{Staged, StagedTally};
+    use super::{delta_summary, unified_diff, Staged, StagedTally};
     use crate::mode::BibleConflict;
     use std::path::PathBuf;
 
@@ -513,9 +582,9 @@ mod tests {
     fn tally_sorts_each_staged_kind() {
         let tally = StagedTally::from(
             [
-                Staged::Wrote,
+                Staged::Wrote(Vec::new()),
                 Staged::Conflict(conflict("a")),
-                Staged::Wrote,
+                Staged::Wrote(Vec::new()),
                 Staged::Failed("oops".into()),
             ]
             .into_iter(),
@@ -524,6 +593,31 @@ mod tests {
         assert_eq!(tally.conflicts.len(), 1);
         assert_eq!(tally.conflicts[0].name, "a");
         assert_eq!(tally.failures, vec!["oops".to_string()]);
+    }
+
+    #[test]
+    fn delta_summary_counts_added_and_removed() {
+        // A revise that swaps one line for two: one removal, two additions; the
+        // context line is not counted.
+        let diff = unified_diff(
+            "Ada is calm.\nContext.\n",
+            "Ada is bold.\nAda is new.\nContext.\n",
+        );
+        assert_eq!(
+            delta_summary("character/Ada", &diff),
+            "Updated character/Ada: +2/-1"
+        );
+    }
+
+    #[test]
+    fn identical_content_has_no_delta() {
+        // An unchanged revise diffs to context only: +0/-0, which the write path
+        // treats as "nothing changed" and surfaces silently.
+        let diff = unified_diff("Ada is calm.\n", "Ada is calm.\n");
+        assert_eq!(
+            delta_summary("character/Ada", &diff),
+            "Updated character/Ada: +0/-0"
+        );
     }
 
     #[test]

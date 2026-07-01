@@ -359,6 +359,19 @@ regardless of the delta — the recovery path for the case an incremental revise
 can't cover (an incremental pass updates and adds bible entries but doesn't delete
 a profile file whose character vanishes only within the incremental window).
 
+**Seeing what a revise changed** (#607): a clean incremental write used to
+replace the tracker block silently — only a *hand-edit conflict* surfaced a diff.
+Now every clean revise that changes a tracker shows the delta so the author can
+trust or correct it. When the pass also produced findings, the findings overlay
+still leads and a `+N/-M` summary (e.g. `Updated timeline: +3/-1`) rides the
+message line; when there are none, the unified diff of the change opens directly
+in the AI panel (additions green, removals red). A revise that changes nothing
+surfaces nothing new — the historic clean-write summary. This stays inside the AI
+boundary: it shows a diff of an already-generated tracker file, and authors no
+prose. The diff is computed on the write path in `src/app/bible_review.rs`
+(`stage_bible` → `Staged::Wrote`), reusing the same `unified_diff` helper the
+conflict-review path uses.
+
 **Batch API** (#176): every full rebuild — automatic past the threshold or forced
 with R — runs through the Claude [Message Batches API](https://docs.anthropic.com/en/api/creating-message-batches)
 at half the per-token price. It trades latency for cost (the request runs on the
@@ -585,8 +598,11 @@ author's prose is out of scope per the assistant-not-co-writer principle above.)
 
 - **Cost/visibility** — the pre-pass cost confirm (#82), incremental scoping
   (#90), and the on-demand full rebuild + Batch API (#176) all ship; see above.
-- **Trust & provenance** — every AI-written bible entry needs a clear source
-  ("generated from ch. 1–12, edited by you") so authors can trust or correct it.
+- **Trust & provenance** — a clean revise now shows the author what the model
+  changed (#607): a `+N/-M` summary and a "view changes" diff on the clean-write
+  path, no longer only on a hand-edit conflict. Still open: a durable source line
+  on each entry ("generated from ch. 1–12, edited by you") so the provenance
+  survives past the moment of the write.
 - **Local model backend** — define the `quill-ai` trait so a future on-device
   model can satisfy the privacy-first authors who won't send drafts anywhere.
 - **Determinism** — analyses should be re-runnable and diffable; pin model
