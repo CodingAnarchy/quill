@@ -36,6 +36,7 @@ mod archive;
 mod assist;
 mod assistant;
 mod bible_review;
+mod corkboard;
 mod editing;
 mod export_style;
 mod exporting;
@@ -646,6 +647,7 @@ impl App {
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::History(_) => self.on_key_history(key),
             Mode::Annotations { .. } => self.on_key_annotations(key),
+            Mode::Corkboard(_) => self.on_key_corkboard(key),
             Mode::ModelManager { .. } => self.on_key_model_manager(key),
             Mode::Palette(_) => self.on_key_palette(key),
             Mode::Search(_) => self.on_key_search(key),

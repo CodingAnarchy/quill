@@ -18,7 +18,7 @@ use ratatui::{
 };
 
 use crate::mode::{
-    DirBrowser, Findings, History, Palette, PaletteRow, ProjectBrowser, ProjectSearch,
+    Corkboard, DirBrowser, Findings, History, Palette, PaletteRow, ProjectBrowser, ProjectSearch,
     ProjectSearchStage,
 };
 use crate::project::Project;
@@ -497,6 +497,38 @@ pub(super) fn draw_annotations(
         "Annotations — ↑↓ move · enter jump · d delete · esc close",
         rows,
         Some(selected),
+    );
+}
+
+/// Render the read-only corkboard (#589, Phase 1): the active chapter's scenes as
+/// index cards — each a scene heading over its first line of prose (the
+/// synopsis), indented by heading level so nested scenes read as a hierarchy.
+/// Navigable; Enter jumps the editor cursor to the selected scene.
+pub(super) fn draw_corkboard(frame: &mut Frame, area: Rect, board: &Corkboard) {
+    let title = format!(" Corkboard ({} scenes) ", board.cards.len());
+    let rows = board
+        .cards
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            // Indent by heading depth (level 2 is the top scene level, so subtract
+            // it) so `###` sub-scenes nest under their `##` parent.
+            let indent = "  ".repeat((c.level.saturating_sub(2)) as usize);
+            let synopsis = (!c.synopsis.is_empty()).then(|| c.synopsis.clone());
+            list_row(
+                i == board.selected,
+                format!("{indent}{}", c.title),
+                synopsis,
+            )
+        })
+        .collect();
+    draw_list_overlay(
+        frame,
+        area,
+        &title,
+        "Corkboard — ↑↓ move · enter jump to scene · esc close",
+        rows,
+        Some(board.selected),
     );
 }
 

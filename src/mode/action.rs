@@ -386,6 +386,12 @@ pub(crate) enum Action {
     ToggleTypewriter,
     /// Toggle focus mode — dim every paragraph but the current one (#301).
     ToggleFocus,
+    /// Open the read-only corkboard for the active chapter (#589, Phase 1): an
+    /// index-card overview built from the chapter's `##`/`###` scene headings —
+    /// each card is a heading + its first line of prose — navigable, Enter jumps
+    /// the editor cursor to that scene. Phase 2 (per-scene metadata + reorder,
+    /// possibly cross-chapter) is a documented follow-up on #589.
+    Corkboard,
     /// Annotate the selection (or word at the cursor) with a note (#302).
     AddAnnotation,
     /// Open the annotation review list for the active chapter (#302).
@@ -493,6 +499,7 @@ impl Action {
         // View
         Action::ToggleTypewriter,
         Action::ToggleFocus,
+        Action::Corkboard,
         Action::Settings,
         // Help
         Action::UserGuide,
@@ -536,6 +543,7 @@ impl Action {
             Action::PrevMisspelling => "spell:prev",
             Action::ToggleTypewriter => "view:typewriter",
             Action::ToggleFocus => "view:focus",
+            Action::Corkboard => "view:corkboard",
             Action::AddAnnotation => "annotate",
             Action::ReviewAnnotations => "annotate:review",
             Action::SwitchBackend => "ai:backend",
@@ -588,7 +596,10 @@ impl Action {
             | Action::InsertSnippet
             | Action::StartSprint
             | Action::StopSprint => "Editing",
-            Action::ToggleTypewriter | Action::ToggleFocus | Action::Settings => "View",
+            Action::ToggleTypewriter
+            | Action::ToggleFocus
+            | Action::Corkboard
+            | Action::Settings => "View",
             Action::UserGuide => "Help",
         }
     }
@@ -648,6 +659,7 @@ impl Action {
             Action::PrevMisspelling => "Previous misspelling",
             Action::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Action::ToggleFocus => "Focus mode (toggle)",
+            Action::Corkboard => "Corkboard (scene overview)",
             Action::AddAnnotation => "Annotate selection",
             Action::ReviewAnnotations => "Review annotations",
             Action::SwitchBackend => "Switch AI backend (Claude / local)",

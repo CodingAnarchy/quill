@@ -117,6 +117,14 @@ pub enum Mode {
     /// where each can be jumped to or deleted. The items are read live from
     /// `App::annotations`; this carries only the selected row.
     Annotations { selected: usize },
+    /// The read-only corkboard for the active chapter (#589, Phase 1): an
+    /// index-card overview of the chapter's `##`/`###` scene headings — each card
+    /// is a heading + its first line of prose. Navigable; Enter jumps the editor
+    /// cursor to the selected scene and closes the view. The cards are captured
+    /// when it opens (from the already-parsed headings), so it's a stable target
+    /// for the arrow keys. Boxed (carries the card list). Phase 2 (per-scene
+    /// metadata + reorder) is a documented follow-up on #589.
+    Corkboard(Box<Corkboard>),
     /// The local AI model manager (#379): the model catalog with characteristics,
     /// where the author toggles which to keep in their set. Reads the catalog and
     /// the configured set live from `App`; carries only the selected row.
@@ -269,6 +277,31 @@ pub struct ProjectBrowser {
 pub struct Tree {
     pub(crate) selected: usize,
     pub(crate) expanded: std::collections::HashSet<usize>,
+}
+
+/// State for the read-only corkboard (#589, Phase 1): the active chapter's scenes
+/// as index cards, plus the selected row. The cards are built once from the
+/// already-parsed `##`/`###` headings when the view opens, so navigating them
+/// never re-parses and the byte offsets stay a stable jump target. Phase 2
+/// (per-scene metadata + reorder) is a documented follow-up on #589.
+pub struct Corkboard {
+    pub(crate) cards: Vec<Card>,
+    pub(crate) selected: usize,
+}
+
+/// One corkboard index card (#589, Phase 1): a scene heading and the first line
+/// of prose beneath it, plus the heading's byte offset in the active buffer so
+/// Enter can jump the editor cursor there.
+pub struct Card {
+    /// The scene heading text (without markers).
+    pub(crate) title: String,
+    /// The heading's indent level (1–6), so nested scenes read as a hierarchy.
+    pub(crate) level: u8,
+    /// The first non-empty line of prose under the heading — the synopsis — or
+    /// empty when the scene has no body yet.
+    pub(crate) synopsis: String,
+    /// Byte offset where the heading begins; Enter moves the cursor here.
+    pub(crate) start: usize,
 }
 
 /// State for an open [`Mode::DirBrowser`] (#271): a filesystem navigator for
