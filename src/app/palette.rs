@@ -373,6 +373,12 @@ impl App {
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
                     Some(Command::PickNameKind(k)) => self.prompt_namegen(k),
                     Some(Command::InsertName(n)) => self.insert_name(&n),
+                    Some(Command::ReplaceMisspelling {
+                        start,
+                        end,
+                        word,
+                        replacement,
+                    }) => self.replace_misspelling(start, end, &word, &replacement),
                     Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
                     Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),
                     Some(Command::OpenStylePicker(p)) => self.open_style_picker(p),

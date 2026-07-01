@@ -106,6 +106,120 @@ fn navigation_reports_when_none_remain() {
 }
 
 #[test]
+fn suggesting_offers_candidates_and_picking_one_replaces_the_word() {
+    let (mut app, _dir) = two_chapter_app("spell-suggest");
+    app.buffer = Buffer::from_text("The quikc brown fox");
+    app.on_idle();
+    assert_eq!(app.spell_flags.len(), 1, "{:?}", app.spell_flags);
+
+    // Land on the flagged word and open the suggestions pick-list.
+    let (s, e) = app.spell_flags[0];
+    app.buffer.cursor = app.buffer.cursor_at_byte(s);
+    app.suggest_word_at_cursor();
+
+    // The list is a picker offering the correct spelling.
+    let Mode::Palette(picker) = &app.mode else {
+        panic!("suggestions open a picker");
+    };
+    assert!(!picker.items.is_empty(), "candidates offered");
+    let quick = picker
+        .items
+        .iter()
+        .find(|i| i.label == "quick")
+        .expect("the correction 'quick' is among the candidates");
+    let crate::mode::Command::ReplaceMisspelling {
+        start,
+        end,
+        replacement,
+        ..
+    } = quick.command.clone()
+    else {
+        panic!("a suggestion carries a replace command");
+    };
+    assert_eq!(
+        (start, end),
+        (s, e),
+        "the command targets the flagged range"
+    );
+
+    // Picking it replaces exactly the flagged word, and the flag clears.
+    app.replace_misspelling(start, end, "quikc", &replacement);
+    assert_eq!(app.buffer.text(), "The quick brown fox");
+    app.on_idle();
+    assert!(app.spell_flags.is_empty(), "the fix clears the flag");
+}
+
+#[test]
+fn suggesting_with_no_flag_at_the_cursor_says_so() {
+    let (mut app, _dir) = two_chapter_app("spell-suggest-noflag");
+    app.buffer = Buffer::from_text("all real words here");
+    app.on_idle();
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.suggest_word_at_cursor();
+    assert!(
+        matches!(app.mode, Mode::Insert | Mode::Normal),
+        "no picker without a flag"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No flagged word"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn replacing_a_stale_range_declines_rather_than_corrupting() {
+    let (mut app, _dir) = two_chapter_app("spell-suggest-stale");
+    app.buffer = Buffer::from_text("The quikc brown fox");
+    app.on_idle();
+    let (s, e) = app.spell_flags[0];
+    // The buffer changed since the list opened: the range no longer holds "quikc".
+    app.buffer = Buffer::from_text("Totally different text now");
+    app.replace_misspelling(s, e, "quikc", "quick");
+    assert_eq!(
+        app.buffer.text(),
+        "Totally different text now",
+        "a stale replace leaves the text untouched"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("changed"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn vim_z_equals_opens_the_suggestions_picker() {
+    let (mut app, _dir) = two_chapter_app("spell-suggest-vim");
+    app.vim = true;
+    app.mode = Mode::Normal;
+    app.buffer = Buffer::from_text("The quikc brown fox");
+    app.on_idle();
+    let (s, _) = app.spell_flags[0];
+    app.buffer.cursor = app.buffer.cursor_at_byte(s);
+    app.on_key(key(KeyCode::Char('z')));
+    app.on_key(key(KeyCode::Char('=')));
+    assert!(matches!(app.mode, Mode::Palette(_)), "z= opens the picker");
+}
+
+#[test]
+fn modeless_alt_equals_opens_the_suggestions_picker() {
+    let (mut app, _dir) = two_chapter_app("spell-suggest-alt");
+    app.buffer = Buffer::from_text("The quikc brown fox");
+    app.on_idle();
+    let (s, _) = app.spell_flags[0];
+    app.buffer.cursor = app.buffer.cursor_at_byte(s);
+    app.on_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::ALT));
+    assert!(
+        matches!(app.mode, Mode::Palette(_)),
+        "Alt-= opens the picker"
+    );
+}
+
+#[test]
 fn navigation_skips_a_word_thats_since_been_fixed() {
     let (mut app, _dir) = two_chapter_app("spell-nav-fixed");
     app.buffer = Buffer::from_text("quikc here");

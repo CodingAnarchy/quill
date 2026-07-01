@@ -30,8 +30,9 @@ keystrokes that stay out of the way.
   hold prose, not source code.)
 - **Spell-checking** — misspelled words are underlined as you write (a bundled
   en_US dictionary, checked off the keystroke path so typing stays instant);
-  accept invented names into a per-project dictionary, and sweep the flags from
-  the command palette or with `]s` / `[s` in Vim mode. See
+  accept invented names into a per-project dictionary, sweep the flags from
+  the command palette or with `]s` / `[s` in Vim mode, and pick an offline
+  correction from a suggestions list with `z=` / `Alt-=`. See
   [Spell-checking](#spell-checking).
 - **Project as a folder of chapters** — a `book.toml` manifest plus one
   Markdown file per chapter; create, rename, reorder, and delete chapters from
@@ -684,6 +685,8 @@ Search:
   document ends with a notice); **`*`** searches for the word under the cursor.
 - **`]s`** / **`[s`** jump to the next / previous misspelled word (the spelling
   sweep), wrapping at the ends.
+- **`z=`** opens a pick-list of spelling suggestions for the flagged word at the
+  cursor; Enter replaces the word with the one you choose.
 
 Command line:
 
@@ -800,6 +803,13 @@ a word you've since fixed or accepted is skipped, and when none are left it says
 so. In Vim mode the standard **`]s`** / **`[s`** do the same, so a spelling sweep
 is a quick repeated keystroke: jump to a flag, fix it (or accept the name), jump
 to the next.
+
+When a flag is a genuine typo, you don't have to retype it: land on the word and
+press **`z=`** (Vim mode) or **`Alt-=`** (default mode) to open a pick-list of
+spelling **suggestions** drawn from the same bundled dictionary — fully offline,
+no network or API key. Arrow keys move, Enter replaces the word with the one you
+choose, Esc cancels. Like the thesaurus and the name generator, Quill only offers
+the candidates and places the one you pick; it never rewrites your prose.
 
 ### Annotations
 

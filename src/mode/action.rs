@@ -141,6 +141,17 @@ pub(crate) enum Command {
     /// Place the chosen candidate name at the cursor (#610) — the pick step of the
     /// name generator's option list, mirroring [`Command::InsertSnippet`].
     InsertName(String),
+    /// Replace the misspelled word in the flagged byte range `[start, end)` with the
+    /// chosen correction (#647) — the pick step of the spell-suggestions list. The
+    /// author singled out the flagged word and chose from the offline candidates;
+    /// this swaps that one word, nothing else. `word` is the original, for the
+    /// status line.
+    ReplaceMisspelling {
+        start: usize,
+        end: usize,
+        word: String,
+        replacement: String,
+    },
     /// Open the role picker for the curated font family at this index in
     /// [`crate::fonts::FAMILIES`] (#494) — body, heading, or both.
     PickFontRole(usize),

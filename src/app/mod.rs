@@ -556,16 +556,7 @@ impl App {
     /// (#358): add it (persisted to `dictionary.txt`), then clear the flag. The
     /// cursor must be on (or just past) a misspelled word; otherwise it says so.
     pub(crate) fn accept_word_at_cursor(&mut self) {
-        let cursor = self.edit_buffer().cursor_byte();
-        let flag = self
-            .spell_flags
-            .iter()
-            .copied()
-            .find(|&(s, e)| cursor >= s && cursor < e)
-            // Also accept when the cursor rests just after the word (e.g. right
-            // after typing it).
-            .or_else(|| self.spell_flags.iter().copied().find(|&(_, e)| cursor == e));
-        let Some((s, e)) = flag else {
+        let Some((s, e)) = self.flagged_word_at_cursor() else {
             self.message = Some("No flagged word at the cursor.".into());
             return;
         };
@@ -578,6 +569,98 @@ impl App {
             Ok(false) => self.message = Some(format!("'{word}' is already in the dictionary.")),
             Err(err) => self.message = Some(format!("Couldn't write the dictionary: {err}")),
         }
+    }
+
+    /// The flagged misspelling at (or nearest before) the cursor: the flag the
+    /// cursor sits inside, or — right after typing the word — the one it rests just
+    /// after. `None` when the cursor isn't on a flag. Shared by the accept (#358)
+    /// and suggest (#647) paths.
+    fn flagged_word_at_cursor(&self) -> Option<(usize, usize)> {
+        let cursor = self.edit_buffer().cursor_byte();
+        self.spell_flags
+            .iter()
+            .copied()
+            .find(|&(s, e)| cursor >= s && cursor < e)
+            .or_else(|| self.spell_flags.iter().copied().find(|&(_, e)| cursor == e))
+    }
+
+    /// Open a pick-list of offline spelling suggestions for the flagged word at the
+    /// cursor (#647), and replace the word with the one the author picks. Within the
+    /// assist boundary: the author singled out a flagged word and asked for
+    /// corrections; Quill looks up candidates from the bundled dictionary and the
+    /// author picks and places one — no prose is generated. Refreshes the flags
+    /// first so a since-fixed word isn't offered; says so when the cursor isn't on a
+    /// flag or the engine has no candidate.
+    pub(crate) fn suggest_word_at_cursor(&mut self) {
+        self.refresh_spell_flags();
+        let Some((s, e)) = self.flagged_word_at_cursor() else {
+            self.message = Some("No flagged word at the cursor.".into());
+            return;
+        };
+        let word = self.edit_buffer().byte_slice(s, e);
+        let suggestions = crate::spell::suggestions(&word);
+        if suggestions.is_empty() {
+            self.message = Some(format!("No suggestions for '{word}'."));
+            return;
+        }
+        let items = suggestions
+            .into_iter()
+            .map(|sugg| {
+                PaletteItem::new(
+                    sugg.clone(),
+                    format!("Replace '{word}' with '{sugg}'"),
+                    Command::ReplaceMisspelling {
+                        start: s,
+                        end: e,
+                        word: word.clone(),
+                        replacement: sugg,
+                    },
+                )
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Spelling suggestions \u{2014} pick a correction",
+            items,
+            selected: 0,
+            collapsed: Default::default(),
+        }));
+    }
+
+    /// Replace the flagged word in byte range `[start, end)` with `replacement`
+    /// (#647), the correction picked from the suggestions list. Goes through the
+    /// normal edit path (so it works in both the single-chapter and continuous
+    /// views) as one undo group: position the cursor at the word, delete it, then
+    /// type the replacement verbatim (no typography substitution — the dictionary
+    /// word lands exactly as chosen). Refreshes the flags so the corrected word
+    /// clears at once. Guarded against a stale range (the buffer changed since the
+    /// list opened): if the slice no longer matches `word`, it declines rather than
+    /// corrupting other text.
+    pub(crate) fn replace_misspelling(
+        &mut self,
+        start: usize,
+        end: usize,
+        word: &str,
+        replacement: &str,
+    ) {
+        let buffer = self.edit_buffer();
+        if end > buffer.len_bytes() || buffer.byte_slice(start, end) != word {
+            self.message = Some("The text changed \u{2014} re-run suggestions.".into());
+            return;
+        }
+        let buffer = self.edit_buffer_mut();
+        buffer.seal_undo_group();
+        buffer.cursor = buffer.cursor_at_byte(start);
+        // Delete the flagged word, then type the correction — the same char-by-char
+        // edit path a keystroke takes, so it's undoable and works in both views.
+        for _ in word.chars() {
+            self.edit_delete_forward();
+        }
+        for c in replacement.chars() {
+            self.edit_insert_raw(c);
+        }
+        self.edit_buffer_mut().seal_undo_group();
+        self.refresh_spell_flags();
+        self.message = Some(format!("Replaced '{word}' with '{replacement}'."));
     }
 
     /// Handle a terminal event, dispatching key presses to the active mode.
@@ -820,6 +903,9 @@ impl App {
                 KeyCode::Left => return self.edit_move(Buffer::move_word_backward),
                 KeyCode::Right => return self.edit_move(Buffer::move_word_forward),
                 KeyCode::Backspace => return self.edit_delete_word_back(),
+                // Alt-= opens the spelling suggestions for the flagged word at the
+                // cursor (#647), the modeless twin of Vim's `z=`.
+                KeyCode::Char('=') if alt => return self.suggest_word_at_cursor(),
                 _ if ctrl => return self.on_key_ctrl(key.code),
                 _ => return, // an Alt combo we don't bind
             }
