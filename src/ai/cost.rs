@@ -12,14 +12,51 @@ pub struct Estimate {
     pub dollars: f64,
 }
 
-/// USD per 1M tokens (input, output) for a model. Cached pricing; defaults to
-/// the Opus tier for unknown models so the estimate never under-warns.
+/// One Claude model's published pricing: the id prefix it matches and its USD
+/// rate per 1M tokens (input, output).
+struct ModelRate {
+    /// The model-id prefix this rate applies to (e.g. `"claude-haiku"`), matched
+    /// against the request's model string.
+    prefix: &'static str,
+    /// USD per 1M input tokens.
+    input: f64,
+    /// USD per 1M output tokens.
+    output: f64,
+}
+
+/// The Claude pricing catalog — the single source of truth for per-model rates,
+/// so the cost estimate can't drift from the model lineup (#656). One row per
+/// tier, keyed by model-id prefix; [`rate`] resolves a request's model here.
+/// Update alongside the model lineup.
+const MODEL_RATES: &[ModelRate] = &[
+    ModelRate {
+        prefix: "claude-haiku",
+        input: 1.0,
+        output: 5.0,
+    },
+    ModelRate {
+        prefix: "claude-sonnet",
+        input: 3.0,
+        output: 15.0,
+    },
+    ModelRate {
+        prefix: "claude-opus",
+        input: 5.0,
+        output: 25.0,
+    },
+];
+
+/// The Opus-tier rate — the fallback for an unknown model, so the estimate never
+/// under-warns.
+const OPUS_RATE: (f64, f64) = (5.0, 25.0);
+
+/// USD per 1M tokens (input, output) for a model, resolved from [`MODEL_RATES`].
+/// Defaults to the Opus tier for unknown models so the estimate never under-warns.
 fn rate(model: &str) -> (f64, f64) {
-    match model {
-        m if m.starts_with("claude-haiku") => (1.0, 5.0),
-        m if m.starts_with("claude-sonnet") => (3.0, 15.0),
-        _ => (5.0, 25.0), // opus tier / unknown
-    }
+    MODEL_RATES
+        .iter()
+        .find(|r| model.starts_with(r.prefix))
+        .map_or(OPUS_RATE, |r| (r.input, r.output))
 }
 
 /// Estimate a request's size and cost. `input_chars` is the prompt text length
@@ -100,6 +137,20 @@ mod tests {
             estimate(4000, 100, "mystery").dollars,
             estimate(4000, 100, "claude-opus-4-8").dollars
         );
+    }
+
+    #[test]
+    fn rate_reads_the_catalog_for_known_models() {
+        // Each tier resolves to its published (input, output) per-1M rate.
+        assert_eq!(rate("claude-haiku-4-5"), (1.0, 5.0));
+        assert_eq!(rate("claude-sonnet-4-6"), (3.0, 15.0));
+        assert_eq!(rate("claude-opus-4-8"), (5.0, 25.0));
+    }
+
+    #[test]
+    fn rate_falls_back_to_the_opus_tier_for_unknown_models() {
+        assert_eq!(rate("mystery"), OPUS_RATE);
+        assert_eq!(rate("mystery"), rate("claude-opus-4-8"));
     }
 
     #[test]
