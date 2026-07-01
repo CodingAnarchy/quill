@@ -191,7 +191,9 @@ disappears). The changes are written to the [goals] table of book.toml and the
 report reflects them immediately. The report itself shows the same hint at the
 bottom, so you can change a goal right after reading where you stand. Ctrl-T
 opens the analysis report: per-chapter readability, pacing, sentence lengths, and
-overused words and phrases. Both are scrollable; any other key closes them.
+overused words and phrases. Both are scrollable; press s to save the report you're
+reading to a dated Markdown snapshot (export/progress-<date>.md or
+export/analysis-<date>.md) for your records or to share; any other key closes them.
 
 Run "Writing history" from the Ctrl-K menu (or "report:history") to see the
 recorded per-day history Quill keeps as you write: your current and longest

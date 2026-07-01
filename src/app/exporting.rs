@@ -480,8 +480,9 @@ impl App {
             .join(format!("{name}.{ext}"))
     }
 
-    /// Write the export bytes to `export/<name>.<ext>` and report the path.
-    fn write_export(&mut self, name: &str, ext: &str, bytes: &[u8]) {
+    /// Write the export bytes to `export/<name>.<ext>` and report the path. Shared
+    /// by the manuscript exports and the report snapshots (#601).
+    pub(crate) fn write_export(&mut self, name: &str, ext: &str, bytes: &[u8]) {
         let path = self.export_path(name, ext);
         let result = match path.parent() {
             Some(parent) => {

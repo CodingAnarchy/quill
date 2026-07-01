@@ -13,7 +13,9 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
     let scroll = overlay.scroll.min(max_scroll(lines.len(), area.height));
     let hint = scroll_hint(lines.len(), area.height);
     let (title, wrap) = match overlay.kind {
-        OverlayKind::Report(label) => (format!(" {book} — {label} ({hint}) "), false),
+        // A report overlay can save its snapshot to a file (#601), so its hint
+        // leads with the `s` key before the shared scroll/close hint.
+        OverlayKind::Report(label) => (format!(" {book} — {label} (s save · {hint}) "), false),
         OverlayKind::AiPanel => (format!(" AI — Claude ({hint}) "), true),
         // The guide ships pre-wrapped to a readable width; keep it unwrapped so its
         // key-reference columns stay aligned and the scroll bound stays exact.

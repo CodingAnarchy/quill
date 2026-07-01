@@ -186,6 +186,51 @@ fn the_analysis_report_scrolls_and_clamps() {
 }
 
 #[test]
+fn s_saves_the_analysis_report_to_a_dated_file() {
+    let (mut app, dir) = two_chapter_app("analysis-save");
+    app.on_key(ctrl('t'));
+    let on_screen = app.overlay.as_ref().unwrap().plain_text();
+
+    app.on_key(key(KeyCode::Char('s'))); // save the snapshot
+    assert!(
+        app.overlay.is_some(),
+        "saving leaves the report open to keep reading"
+    );
+
+    let path = dir.join("export").join(format!(
+        "analysis-{}.md",
+        crate::date::iso(crate::date::today())
+    ));
+    let written = fs::read_to_string(&path).expect("the report file was written");
+    assert_eq!(written, on_screen, "the file matches what's on screen");
+    assert!(
+        written.contains("analysis"),
+        "it's the analysis report: {written}"
+    );
+    assert!(
+        app.message.as_deref().unwrap().contains("export/analysis-"),
+        "the status names the saved file: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn s_saves_the_progress_report_to_a_dated_file() {
+    let (mut app, dir) = two_chapter_app("progress-save");
+    app.open_progress_report();
+    let on_screen = app.overlay.as_ref().unwrap().plain_text();
+
+    app.on_key(key(KeyCode::Char('s')));
+
+    let path = dir.join("export").join(format!(
+        "progress-{}.md",
+        crate::date::iso(crate::date::today())
+    ));
+    let written = fs::read_to_string(&path).expect("the progress report was written");
+    assert_eq!(written, on_screen, "the file matches what's on screen");
+}
+
+#[test]
 fn submission_never_touches_the_manuscript() {
     let (mut app, dir) = two_chapter_app("submission-safe");
     let before = fs::read_to_string(dir.join("one.md")).unwrap();
