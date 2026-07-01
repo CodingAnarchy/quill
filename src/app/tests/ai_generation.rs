@@ -145,16 +145,51 @@ fn word_search_prompt_is_prefilled_with_the_word_under_the_cursor() {
 }
 
 #[test]
-fn applying_word_search_results_opens_the_overlay() {
+fn applying_word_search_results_opens_a_pickable_list() {
     let (mut app, _dir) = two_chapter_app("thesaurus-apply");
     let words = crate::ai::thesaurus::parse(
-        r#"{"words":[{"text":"melancholy","definition":"a pensive sadness","syllables":4}]}"#,
+        r#"{"words":[
+            {"text":"melancholy","definition":"a pensive sadness","syllables":4},
+            {"text":"wistful","definition":"gently sad and longing"}
+        ]}"#,
     )
     .unwrap();
     app.apply_thesaurus(Ok(words));
+    match &app.mode {
+        Mode::Palette(p) => {
+            assert_eq!(p.items.len(), 2, "one row per candidate word");
+            assert!(matches!(
+                &p.items[0].command,
+                crate::mode::Command::InsertWord(w) if w == "melancholy"
+            ));
+        }
+        _ => panic!("candidates should show as a pickable list"),
+    }
+}
+
+#[test]
+fn empty_word_search_results_report_instead_of_opening_a_list() {
+    let (mut app, _dir) = two_chapter_app("thesaurus-empty");
+    app.apply_thesaurus(Ok(vec![]));
     assert!(
-        app.overlay.is_some(),
-        "candidates are shown in the AI overlay"
+        !matches!(app.mode, Mode::Palette(_)),
+        "no list opens for zero candidates"
+    );
+    assert!(
+        app.message.is_some(),
+        "the author is told to loosen the constraints"
+    );
+}
+
+#[test]
+fn picking_a_word_places_it_at_the_cursor() {
+    let (mut app, _dir) = two_chapter_app("thesaurus-place");
+    let before = app.buffer.text();
+    app.insert_word("melancholy");
+    let after = app.buffer.text();
+    assert!(
+        after.contains("melancholy") && !before.contains("melancholy"),
+        "the chosen word is placed verbatim at the cursor"
     );
 }
 

@@ -373,6 +373,7 @@ impl App {
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
                     Some(Command::PickNameKind(k)) => self.prompt_namegen(k),
                     Some(Command::InsertName(n)) => self.insert_name(&n),
+                    Some(Command::InsertWord(w)) => self.insert_word(&w),
                     Some(Command::ReplaceMisspelling {
                         start,
                         end,

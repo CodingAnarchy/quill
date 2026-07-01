@@ -141,6 +141,11 @@ pub(crate) enum Command {
     /// Place the chosen candidate name at the cursor (#610) — the pick step of the
     /// name generator's option list, mirroring [`Command::InsertSnippet`].
     InsertName(String),
+    /// Place the chosen candidate word/phrase at the cursor (#653) — the pick step
+    /// of the thesaurus / word-search option list, mirroring
+    /// [`Command::InsertName`]. The author singled out one slot and chose one
+    /// candidate; this inserts that word verbatim, nothing else.
+    InsertWord(String),
     /// Replace the misspelled word in the flagged byte range `[start, end)` with the
     /// chosen correction (#647) — the pick step of the spell-suggestions list. The
     /// author singled out the flagged word and chose from the offline candidates;
