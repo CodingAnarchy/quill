@@ -292,6 +292,102 @@ fn findings_dismiss_removes_and_closes_when_empty() {
     assert!(matches!(app.mode, Mode::Insert), "empty list closes");
 }
 
+// --- Persistent revision triage (#591) -------------------------------------
+
+/// A continuity result carrying a single finding with the given detail.
+fn one_finding(detail: &str) -> Continuity {
+    cont_with(vec![continuity::Finding {
+        kind: "object".into(),
+        detail: detail.into(),
+        chapters: vec!["One".into()],
+    }])
+}
+
+#[test]
+fn dismissed_finding_stays_dismissed_after_reload() {
+    let (mut app, dir) = two_chapter_app("triage-persist-dismiss");
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    assert!(matches!(app.mode, Mode::Findings(_)));
+    app.on_key(key(KeyCode::Char('d'))); // dismiss the only finding
+    assert!(
+        app.triage.is_empty(),
+        "dismissed leaves the session triage list"
+    );
+
+    // Reopen the project (a new session): the dismissed finding must not return.
+    let reopened = open_test_app(&dir);
+    assert!(
+        reopened.triage.is_empty(),
+        "a dismissed finding stays dismissed across sessions"
+    );
+    drop(dir);
+}
+
+#[test]
+fn rerun_does_not_resurface_a_dismissed_finding() {
+    let (mut app, dir) = two_chapter_app("triage-persist-rerun");
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    app.on_key(key(KeyCode::Char('d'))); // dismiss it
+    assert!(matches!(app.mode, Mode::Insert), "list emptied and closed");
+
+    // Re-run the same pass: it re-produces the identical finding, which must be
+    // filtered out rather than popping the triage overlay again.
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    assert!(
+        app.triage.is_empty(),
+        "a re-produced dismissed finding does not re-surface"
+    );
+    assert!(
+        !matches!(app.mode, Mode::Findings(_)),
+        "no overlay for an already-dismissed finding"
+    );
+    drop(dir);
+}
+
+#[test]
+fn open_triage_list_survives_a_restart() {
+    let (mut app, dir) = two_chapter_app("triage-persist-survive");
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    assert_eq!(app.triage.len(), 1);
+    app.on_key(key(KeyCode::Esc)); // leave the finding open (neither dismiss nor mark)
+
+    // A new session restores the still-open finding as a standing to-do.
+    let mut reopened = open_test_app(&dir);
+    assert_eq!(
+        reopened.triage.len(),
+        1,
+        "an un-triaged finding survives a restart"
+    );
+    reopened.open_triage();
+    assert!(
+        matches!(reopened.mode, Mode::Findings(_)),
+        "the restored finding opens in triage"
+    );
+    drop(dir);
+}
+
+#[test]
+fn marking_xxx_resolves_and_drops_the_finding() {
+    let (mut app, dir) = two_chapter_app("triage-persist-mark");
+    app.apply_continuity(Ok(one_finding("the locket changes color")));
+    assert!(matches!(app.mode, Mode::Findings(_)));
+    app.on_key(key(KeyCode::Char('i'))); // mark xxx in the chapter
+    let body = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(
+        body.contains("xxx —"),
+        "the marker is written (unchanged behavior)"
+    );
+    assert!(app.triage.is_empty(), "a resolved finding drops off triage");
+
+    // It stays gone across a restart.
+    let reopened = open_test_app(&dir);
+    assert!(
+        reopened.triage.is_empty(),
+        "a resolved finding does not return"
+    );
+    drop(dir);
+}
+
 #[test]
 fn findings_jump_activates_the_chapter() {
     let (mut app, _dir) = two_chapter_app("cont-jump");
