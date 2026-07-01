@@ -50,6 +50,7 @@ mod palette;
 mod panes;
 mod reports;
 mod search;
+mod settings;
 pub(crate) mod task; // the generic background-task runner, reused by the assistant loop (#306)
 mod vcs_actions;
 mod worker;

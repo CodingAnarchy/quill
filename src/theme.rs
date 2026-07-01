@@ -114,6 +114,10 @@ theme_colors! {
     annotation => "an inline author annotation's highlight",
 }
 
+/// The built-in color themes, in menu order — the values `[theme] name` accepts
+/// and the plain Settings theme picker (#592) offers.
+pub(crate) const THEME_NAMES: &[&str] = &["dark", "light"];
+
 impl Default for Theme {
     /// The historical palette, so a project with no `[theme]` set looks exactly
     /// as Quill always has.
@@ -167,7 +171,7 @@ impl Theme {
     }
 
     /// The built-in theme named `name` (case-insensitive), or `None` if unknown.
-    fn builtin(name: &str) -> Option<Self> {
+    pub(crate) fn builtin(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "dark" => Some(Self::dark()),
             "light" => Some(Self::light()),

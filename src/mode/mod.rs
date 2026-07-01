@@ -460,6 +460,12 @@ pub(crate) enum Pending {
     /// `book.toml`; a blank entry clears the key. On save the setter re-opens the
     /// style menu so more knobs can be tweaked in one sitting.
     SetStyleText(StyleTextKnob),
+    /// Text input setting one numeric / list Settings knob (#592): the column
+    /// width, the autosave interval (both `[editor]`, validated + spliced via the
+    /// shared config machinery), or the analysis stopwords (`[analysis]
+    /// stopwords_add` in `book.toml`). On save the Settings menu re-opens so more
+    /// knobs can be tweaked in one sitting; the `[editor]` knobs apply live.
+    SetSettingText(SettingTextKnob),
     /// Text input: an API key to store in the OS keychain (#530), for the given
     /// provider. On Enter the key is written to the keychain (never the config
     /// file); a blank entry cancels. The provider determines the keychain entry

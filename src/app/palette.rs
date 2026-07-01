@@ -202,6 +202,7 @@ impl App {
             Action::InsertSnippet => self.open_snippet_picker(),
             Action::BrowseFonts => self.open_font_browser(),
             Action::SetExportStyle => self.open_export_style_menu(),
+            Action::Settings => self.open_settings_menu(),
         }
     }
 
@@ -328,6 +329,10 @@ impl App {
                     Some(Command::SetStyleDropCap(v)) => self.set_style_drop_cap(v),
                     Some(Command::SetStyleTrim(i)) => self.set_style_trim(i),
                     Some(Command::EditStyleText(k)) => self.prompt_style_text(k),
+                    Some(Command::OpenSettingPicker(p)) => self.open_setting_picker(p),
+                    Some(Command::SetSettingBool(knob, v)) => self.set_setting_bool(knob, v),
+                    Some(Command::SetSettingTheme(i)) => self.set_setting_theme(i),
+                    Some(Command::EditSettingText(k)) => self.prompt_setting_text(k),
                     None => {}
                 }
             }

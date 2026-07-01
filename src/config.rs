@@ -328,6 +328,14 @@ pub fn load_theme() -> (Theme, Vec<String>) {
     Theme::from_config(name.as_deref(), &table)
 }
 
+/// The configured `[theme] name`, or `None` when unset (the default `dark` shows
+/// through). Read by the plain Settings menu (#592) to mark the active theme in
+/// its picker without re-parsing the whole `[theme]` table for its colors.
+pub(crate) fn theme_name() -> Option<String> {
+    let table: HashMap<String, String> = load_section("theme");
+    table.get("name").cloned()
+}
+
 /// An author-defined text snippet (#411): a `name` and the literal `text` it
 /// expands to. Configured in the `[snippets]` table and inserted verbatim from
 /// the snippet picker — no transformation, no templating.
