@@ -108,6 +108,11 @@ pub enum Mode {
     /// (open its chapter) or dismissed. Read-only over the prose. Boxed (carries
     /// the findings list).
     Findings(Box<Findings>),
+    /// Browsing the commit history (#587): a navigable list of past commits where
+    /// the selected one can be diffed against the current chapter, or the chapter
+    /// restored to it (into the editable buffer for review-and-save). Boxed (carries
+    /// the commit list).
+    History(Box<History>),
     /// Reviewing the active chapter's inline annotations (#302): a navigable list
     /// where each can be jumped to or deleted. The items are read live from
     /// `App::annotations`; this carries only the selected row.

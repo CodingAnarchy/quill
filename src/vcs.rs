@@ -43,9 +43,12 @@ pub fn init(root: &Path) -> Result<(), String> {
 }
 
 /// One commit for the history view (#133): short id, first line of the message,
-/// and the date it was made (in the commit's recorded timezone).
+/// and the date it was made (in the commit's recorded timezone). `rev` is the full
+/// object id — the unambiguous handle the diff/restore-from-a-commit actions (#587)
+/// resolve, so a chosen row addresses exactly one commit even in a large history.
 pub struct CommitMeta {
     pub id: String,
+    pub rev: String,
     pub summary: String,
     pub when: String,
 }
@@ -66,6 +69,7 @@ pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitMeta>, String> {
         let commit = repo.find_commit(oid).map_err(|e| e.to_string())?;
         out.push(CommitMeta {
             id: oid.to_string().chars().take(7).collect(),
+            rev: oid.to_string(),
             summary: commit.summary().unwrap_or("(no message)").to_string(),
             when: format_date(commit.time()),
         });
@@ -141,6 +145,78 @@ pub fn diff(root: &Path) -> Result<String, String> {
         true
     })
     .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// The contents of `rel_path` as they were at commit `rev` (a short or full id,
+/// or any revision spec `git2` can resolve). `Ok(None)` when that revision has no
+/// such file — it was added later, or lived under a different name. The basis for
+/// the in-app "diff a chapter against a past commit" and "restore a chapter to a
+/// past commit" (#587), which read a single file out of history without touching
+/// the working tree.
+pub fn show_file_at(root: &Path, rev: &str, rel_path: &str) -> Result<Option<String>, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let commit = repo
+        .revparse_single(rev)
+        .and_then(|obj| obj.peel_to_commit())
+        .map_err(|e| format!("resolve {rev}: {e}"))?;
+    let tree = commit.tree().map_err(|e| e.to_string())?;
+    let entry = match tree.get_path(Path::new(rel_path)) {
+        Ok(entry) => entry,
+        Err(_) => return Ok(None), // the file isn't in that commit
+    };
+    let blob = entry
+        .to_object(&repo)
+        .map_err(|e| e.to_string())?
+        .peel_to_blob()
+        .map_err(|e| e.to_string())?;
+    Ok(Some(String::from_utf8_lossy(blob.content()).into_owned()))
+}
+
+/// A unified diff of `rel_path` between two commits (#587): `rev_a` → `rev_b`.
+/// Empty string when the file is identical (or absent) in both. Reads only the two
+/// blobs from history, never the working tree, so it answers "this chapter then vs.
+/// then" against any past pair. Pass `"HEAD"` as one side to anchor on the last
+/// commit; the working-tree comparison the history view runs is
+/// [`diff_file_to_worktree`].
+// The commit-to-commit primitive of the pair (#587); the UI wires the
+// working-tree variant, so in this bin crate this one is reached only from tests.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn diff_file(root: &Path, rev_a: &str, rev_b: &str, rel_path: &str) -> Result<String, String> {
+    let old = show_file_at(root, rev_a, rel_path)?.unwrap_or_default();
+    let new = show_file_at(root, rev_b, rel_path)?.unwrap_or_default();
+    diff_bytes(old.as_bytes(), new.as_bytes(), rel_path)
+}
+
+/// A unified diff of `rel_path` from commit `rev` to its *current* on-disk version
+/// (#587) — what has changed in this one chapter since that commit, working-tree
+/// edits included. Empty when unchanged. The comparison the history view's "diff
+/// this chapter" runs, so a chosen commit is measured against what the author is
+/// looking at now, not the last commit. The between-two-commits variant is
+/// [`diff_file`].
+pub fn diff_file_to_worktree(root: &Path, rev: &str, rel_path: &str) -> Result<String, String> {
+    let old = show_file_at(root, rev, rel_path)?.unwrap_or_default();
+    let new = fs::read(root.join(rel_path)).unwrap_or_default();
+    diff_bytes(old.as_bytes(), &new, rel_path)
+}
+
+/// Render a unified patch for one path from `old` to `new` bytes. The shared body
+/// of the file-diff helpers, so the origin-marker handling lives in one place.
+fn diff_bytes(old: &[u8], new: &[u8], rel_path: &str) -> Result<String, String> {
+    let mut out = String::new();
+    let path = Some(Path::new(rel_path));
+    git2::Patch::from_buffers(old, path, new, path, None)
+        .map_err(|e| e.to_string())?
+        .print(&mut |_delta, _hunk, line| {
+            // Content lines need their origin marker (+/-/space) prepended; the
+            // file and hunk headers already carry their own text.
+            if matches!(line.origin(), '+' | '-' | ' ') {
+                out.push(line.origin());
+            }
+            out.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
+            true
+        })
+        .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -458,6 +534,51 @@ mod tests {
         assert_eq!(entries[1].summary, "first");
         assert_eq!(entries[0].when.len(), 10, "YYYY-MM-DD"); // "{}", entries[0].when
         assert_eq!(entries[0].id.len(), 7, "short id");
+        assert_eq!(entries[0].rev.len(), 40, "full object id");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn show_file_at_reads_a_past_version() {
+        let dir = temp_dir("show-at");
+        init(&dir).unwrap();
+        fs::write(dir.join("one.md"), "The night was dark.\n").unwrap();
+        commit(&dir, "first").unwrap();
+        fs::write(dir.join("one.md"), "The night was long.\n").unwrap();
+        commit(&dir, "second").unwrap();
+
+        let entries = log(&dir, 10).unwrap(); // [second, first]
+                                              // The older commit still holds the original line…
+        let older = show_file_at(&dir, &entries[1].rev, "one.md").unwrap();
+        assert_eq!(older.as_deref(), Some("The night was dark.\n"));
+        // …and the newer one the edit. A short id resolves the same commit.
+        let newer = show_file_at(&dir, &entries[0].id, "one.md").unwrap();
+        assert_eq!(newer.as_deref(), Some("The night was long.\n"));
+        // A file absent from that commit reads as None, not an error.
+        assert_eq!(
+            show_file_at(&dir, &entries[0].rev, "gone.md").unwrap(),
+            None
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn diff_file_compares_two_commits() {
+        let dir = temp_dir("diff-at");
+        init(&dir).unwrap();
+        fs::write(dir.join("one.md"), "The night was dark.\n").unwrap();
+        commit(&dir, "first").unwrap();
+        fs::write(dir.join("one.md"), "The night was long.\n").unwrap();
+        commit(&dir, "second").unwrap();
+
+        let entries = log(&dir, 10).unwrap(); // [second, first]
+        let patch = diff_file(&dir, &entries[1].rev, &entries[0].rev, "one.md").unwrap();
+        assert!(patch.contains("-The night was dark."), "{patch}");
+        assert!(patch.contains("+The night was long."), "{patch}");
+        // Same commit on both sides → nothing changed.
+        assert!(diff_file(&dir, &entries[0].rev, &entries[0].rev, "one.md")
+            .unwrap()
+            .is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 
