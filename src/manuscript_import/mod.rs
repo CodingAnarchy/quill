@@ -33,22 +33,33 @@
 //! model is flat), and each text document's `Files/Data/<UUID>/content.rtf`,
 //! converting RTF bold/italic runs to `**`/`*`.
 //!
+//! Plain-text `.txt` is supported (#593) via [`parse_text`]: a `.txt` has no
+//! headings, so chapters split on `Chapter N`-style lines when present, else on
+//! wide blank-line gaps. A folder of per-chapter `.md` files is supported (#593)
+//! via [`parse_markdown_folder`]: one chapter per `.md` file (in filename order),
+//! titled by its leading `#` heading or its filename.
+//!
 //! # Layout
 //!
-//! Each import format lives in its own module — [`markdown`], [`docx`], and
-//! [`scriv`] — while the shared output types ([`Imported`]/[`ImportedChapter`]),
+//! Each import format lives in its own module — [`markdown`], [`docx`], [`scriv`],
+//! [`text`], and [`folder`] — while the shared output types
+//! ([`Imported`]/[`ImportedChapter`]),
 //! the chapter-assembly helpers ([`finalize_titles`]/[`wrap_emphasis`]/
 //! [`join_paragraphs`]), and the hand-rolled XML scanner the `.docx` and `.scriv`
 //! parsers share live here. The public parse functions are re-exported, so
 //! `crate::manuscript_import::parse_*` callers are unchanged.
 
 mod docx;
+mod folder;
 mod markdown;
 mod scriv;
+mod text;
 
 pub use docx::parse_docx;
+pub use folder::parse_markdown_folder;
 pub use markdown::parse_markdown;
 pub use scriv::parse_scriv;
+pub use text::parse_text;
 
 /// A manuscript parsed into book metadata and chapters.
 ///

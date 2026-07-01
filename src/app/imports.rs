@@ -86,32 +86,39 @@ impl App {
 
     // --- New project from an existing manuscript (#298) -------------------
 
-    /// Prompt for a manuscript (Markdown / Word / Scrivener) to import as a new
-    /// project.
+    /// Prompt for a manuscript (Markdown / Word / Scrivener / plain text, or a
+    /// folder of Markdown chapters) to import as a new project.
     pub(crate) fn start_import_manuscript(&mut self) {
         self.open_prompt(
             Pending::ImportManuscriptSource,
-            "Import manuscript — Markdown (.md), Word (.docx), or Scrivener (.scriv):",
+            "Import manuscript — .md, .txt, .docx, .scriv, or a folder of .md chapters:",
             "",
             None,
         );
     }
 
-    /// Validate the chosen path is an importable manuscript (`.md` / `.docx` file,
-    /// or a `.scriv` bundle directory), then ask where to create the new project.
-    /// Shared by the file prompt and the run-action entry point.
+    /// Validate the chosen path is an importable manuscript, then ask where to
+    /// create the new project. Accepts a `.md` / `.txt` / `.docx` file, a `.scriv`
+    /// bundle directory, or a plain folder of per-chapter `.md` files. Shared by
+    /// the file prompt and the run-action entry point.
     pub(crate) fn begin_import_manuscript(&mut self, file: &str) {
         let path = std::path::Path::new(file.trim());
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        // A `.scriv` is a bundle directory; the others are single files.
+        // A `.scriv` is a bundle directory; a plain directory is importable when
+        // it holds `.md` chapters (#593); the file formats are single files.
         let importable = if ext.eq_ignore_ascii_case("scriv") {
             path.is_dir()
+        } else if path.is_dir() {
+            !collect_import_files(path).is_empty()
         } else {
-            path.is_file() && (ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("docx"))
+            path.is_file()
+                && (ext.eq_ignore_ascii_case("md")
+                    || ext.eq_ignore_ascii_case("txt")
+                    || ext.eq_ignore_ascii_case("docx"))
         };
         if !importable {
             self.message = Some(format!(
-                "Not a Markdown (.md), Word (.docx), or Scrivener (.scriv) manuscript: {}",
+                "Not an importable manuscript (.md, .txt, .docx, .scriv, or a folder of .md): {}",
                 path.display()
             ));
             self.mode = self.editing_mode();
@@ -337,18 +344,23 @@ impl App {
 }
 
 /// Read a manuscript into the shared parsed form, dispatching on extension
-/// (#401/#402): a `.docx` from its bytes, a `.scriv` bundle from its directory,
-/// anything else (a `.md`) as text. The source is read only — never altered.
+/// (#401/#402/#593): a `.docx` from its bytes, a `.scriv` bundle from its
+/// directory, a plain folder as one chapter per `.md` file, a `.txt` as plain
+/// text, anything else (a `.md`) as Markdown. The source is read only — never
+/// altered.
 fn read_manuscript(path: &std::path::Path) -> std::io::Result<crate::manuscript_import::Imported> {
+    use crate::manuscript_import as import;
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("docx") {
-        crate::manuscript_import::parse_docx(&std::fs::read(path)?)
+        import::parse_docx(&std::fs::read(path)?)
     } else if ext.eq_ignore_ascii_case("scriv") {
-        crate::manuscript_import::parse_scriv(path)
+        import::parse_scriv(path)
+    } else if path.is_dir() {
+        import::parse_markdown_folder(path)
+    } else if ext.eq_ignore_ascii_case("txt") {
+        Ok(import::parse_text(&std::fs::read_to_string(path)?))
     } else {
-        Ok(crate::manuscript_import::parse_markdown(
-            &std::fs::read_to_string(path)?,
-        ))
+        Ok(import::parse_markdown(&std::fs::read_to_string(path)?))
     }
 }
 

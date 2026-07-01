@@ -1,7 +1,8 @@
 //! Import & setup-wizard flows (#282/#283/#286/#298): the new-project setup
 //! wizard, importing a folder of notes into the bible, creating a new project
 //! from a folder of notes, and importing an existing manuscript (Markdown,
-//! `.docx`, or `.scriv`) into a chaptered project.
+//! `.txt`, `.docx`, `.scriv`, or a folder of `.md` chapters) into a chaptered
+//! project.
 
 use super::*;
 use crate::mode::WizardStep;
@@ -504,18 +505,19 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
 }
 
 #[test]
-fn importing_rejects_a_non_markdown_file() {
+fn importing_rejects_an_unsupported_file() {
     isolate("import-ms-bad");
     let cur = make_project("import-ms-bad-cur", "Current", "c\n");
     let mut app = open_app(&cur);
 
-    let txt = std::env::temp_dir().join(format!("quill-ms-bad-{}.txt", std::process::id()));
-    fs::write(&txt, "not markdown\n").unwrap();
-    app.begin_import_manuscript(txt.to_str().unwrap());
+    // A `.pdf` (an unsupported format) is rejected; `.txt` is now importable.
+    let bad = std::env::temp_dir().join(format!("quill-ms-bad-{}.pdf", std::process::id()));
+    fs::write(&bad, "not importable\n").unwrap();
+    app.begin_import_manuscript(bad.to_str().unwrap());
 
     assert!(
         !matches!(app.mode, Mode::Prompt(_)),
-        "no project-path prompt for a non-.md file"
+        "no project-path prompt for an unsupported file"
     );
     assert_eq!(
         app.project.manifest.title, "Current",
@@ -525,8 +527,88 @@ fn importing_rejects_a_non_markdown_file() {
         .message
         .as_deref()
         .unwrap_or("")
-        .contains("Not a Markdown"));
-    let _ = fs::remove_file(&txt);
+        .contains("Not an importable manuscript"));
+    let _ = fs::remove_file(&bad);
+}
+
+#[test]
+fn importing_a_txt_manuscript_splits_into_chapters() {
+    isolate("import-txt");
+    let cur = make_project("import-txt-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // A plain-text manuscript with `Chapter N` heading lines.
+    let source = std::env::temp_dir().join(format!("quill-ms-{}.txt", std::process::id()));
+    let manuscript = "Chapter 1\n\nThe sea was grey.\n\nChapter 2\n\nAnd it ended.\n";
+    fs::write(&source, manuscript).unwrap();
+    let dest = books_dir("import-txt-dest").join("Grey Sea");
+
+    app.begin_import_manuscript(source.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest)),
+        "a .txt is accepted"
+    );
+    app.finish_import_manuscript(dest.to_str().unwrap());
+
+    assert_eq!(app.project.root, dest);
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["Chapter 1", "Chapter 2"], "split on Chapter N");
+    let ch1 = fs::read_to_string(dest.join(&app.project.manifest.chapters[0].file)).unwrap();
+    assert_eq!(ch1, "The sea was grey.\n", "chapter body written");
+
+    assert_eq!(
+        fs::read_to_string(&source).unwrap(),
+        manuscript,
+        "the source is read-only"
+    );
+    let _ = fs::remove_file(&source);
+}
+
+#[test]
+fn importing_a_folder_of_markdown_makes_one_chapter_per_file() {
+    isolate("import-mdfolder");
+    let cur = make_project("import-mdfolder-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // A folder of per-chapter `.md` files: filename order, `#` heading as title.
+    let folder = std::env::temp_dir().join(format!("quill-msdir-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&folder);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("02-two.md"), "# Two\n\nSecond.\n").unwrap();
+    fs::write(folder.join("01-one.md"), "# One\n\nFirst.\n").unwrap();
+    fs::write(folder.join("notes.txt"), "not a chapter\n").unwrap();
+    let dest = books_dir("import-mdfolder-dest").join("From Folder");
+
+    app.begin_import_manuscript(folder.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest)),
+        "a folder of .md is accepted"
+    );
+    app.finish_import_manuscript(dest.to_str().unwrap());
+
+    assert_eq!(app.project.root, dest);
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["One", "Two"],
+        "one chapter per .md, in filename order, titled by its heading"
+    );
+    let ch1 = fs::read_to_string(dest.join(&app.project.manifest.chapters[0].file)).unwrap();
+    assert_eq!(ch1, "First.\n", "the heading is dropped from the body");
+
+    let _ = fs::remove_dir_all(&folder);
 }
 
 #[test]
