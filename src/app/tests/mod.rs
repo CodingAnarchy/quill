@@ -189,6 +189,25 @@ pub(super) fn open_app(dir: &Path) -> App {
     open_test_app(dir)
 }
 
+/// Pick the structure template named `name` from the create-time picker (#611),
+/// asserting the picker is open first. The Enter selection routes through the
+/// palette handler exactly as a keypress would. Shared by the new-project and
+/// setup-wizard tests, which both flow through the picker.
+pub(super) fn pick_template(app: &mut App, name: &str) {
+    let index = match &app.mode {
+        Mode::Palette(p) => p
+            .items
+            .iter()
+            .position(|i| i.label == name)
+            .unwrap_or_else(|| panic!("template {name:?} in the picker")),
+        _ => panic!("the create flow should open the structure-template picker"),
+    };
+    if let Mode::Palette(p) = &mut app.mode {
+        p.selected = index; // templates are flat/ungrouped, so item index == visible row
+    }
+    app.on_key(key(KeyCode::Enter));
+}
+
 /// A directory holding several project subdirs (and any plain ones the caller
 /// adds), for exercising the navigator and as a parent for new projects.
 pub(super) fn books_dir(tag: &str) -> PathBuf {

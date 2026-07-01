@@ -368,6 +368,7 @@ impl App {
                     Some(Command::NewWorkflowFromPrompt) => self.start_describe_workflow(),
                     Some(Command::Portrait(c)) => self.confirm_portraits(c),
                     Some(Command::SwitchBook(i)) => self.switch_book(i),
+                    Some(Command::NewProjectTemplate(i)) => self.create_project_with_template(i),
                     Some(Command::InsertSnippet(i)) => self.insert_snippet(i),
                     Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
                     Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),

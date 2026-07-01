@@ -84,6 +84,73 @@ fn create_initializes_manifest_and_first_chapter() {
 }
 
 #[test]
+fn empty_template_matches_the_historic_default() {
+    // The "Empty" template (index 0) reproduces `create` exactly: one blank
+    // starter chapter, no parts (#611).
+    let dir = temp_dir("tmpl-empty");
+    let project = Project::create_with_template(&dir, ProjectTemplate::at(0)).unwrap();
+
+    assert_eq!(project.manifest.chapters.len(), 1);
+    assert_eq!(project.active_title(), Some("Chapter 1"));
+    assert!(project.manifest.parts.is_none(), "no parts scaffolded");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn three_act_template_scaffolds_parts_and_chapter_stubs() {
+    // Find the curated three-act template by name so the test tracks the table.
+    let (index, template) = TEMPLATES
+        .iter()
+        .enumerate()
+        .find(|(_, t)| t.name == "Three-act")
+        .expect("a three-act template is offered");
+    let dir = temp_dir("tmpl-three-act");
+    let project = Project::create_with_template(&dir, ProjectTemplate::at(index)).unwrap();
+
+    // Every stub across every part became an empty chapter, in order.
+    let stub_titles: Vec<&str> = template
+        .parts
+        .iter()
+        .flat_map(|p| p.chapters.iter().copied())
+        .collect();
+    let chapter_titles: Vec<&str> = project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(chapter_titles, stub_titles);
+    // The active chapter is the first stub, so the editor opens on it.
+    assert_eq!(project.active_title(), Some(stub_titles[0]));
+
+    // The `[[parts]]` skeleton names each part and spans its stubs, contiguously.
+    let parts = project.manifest.parts.as_ref().expect("parts scaffolded");
+    assert_eq!(parts.len(), template.parts.len());
+    let mut next = 1;
+    for (part, tmpl) in parts.iter().zip(template.parts) {
+        assert_eq!(part.name.as_deref(), Some(tmpl.name));
+        let end = next + tmpl.chapters.len() - 1;
+        assert_eq!(part.chapters, [next, end]);
+        next = end + 1;
+    }
+
+    // Every stub's file exists on disk and holds no prose (empty stubs).
+    for i in 0..project.manifest.chapters.len() {
+        let path = project.chapter_path(i);
+        assert!(path.exists(), "{path:?} written");
+        assert!(
+            fs::read_to_string(&path).unwrap().trim().is_empty(),
+            "stub {i} is empty"
+        );
+    }
+
+    // The structure survives a round-trip through the manifest.
+    let reopened = Project::open(&dir).unwrap();
+    assert_eq!(reopened.manifest.parts, project.manifest.parts);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn create_then_open_round_trips_structure_and_text() {
     let dir = temp_dir("roundtrip");
 

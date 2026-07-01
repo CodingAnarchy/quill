@@ -22,6 +22,7 @@ fn app_at_new_project(tag: &str) -> (App, PathBuf) {
     let mut app = open_app(&cur);
     let target = parent.join("New Book");
     app.create_project_at(target.clone());
+    pick_template(&mut app, "Empty"); // clear the structure-template picker (#611)
     (app, target)
 }
 
@@ -112,6 +113,7 @@ fn the_wizard_can_be_disabled_in_config() {
     let cur = make_project("wiz-off-cur", "Current", "c\n");
     let mut app = open_app(&cur);
     app.create_project_at(parent.join("New Book"));
+    pick_template(&mut app, "Empty"); // the picker still shows; the wizard is what's off
 
     assert_eq!(
         app.project.manifest.title, "New Book",
