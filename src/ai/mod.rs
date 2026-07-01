@@ -58,6 +58,7 @@ pub use submission::Submission;
 // `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
 use crate::theme;
+use std::cell::OnceCell;
 use std::fmt;
 
 use ratatui::style::Style;
@@ -199,23 +200,6 @@ impl Outcome {
 /// Whether an HTTP status is 2xx — shared by the HTTP backends.
 pub(crate) fn is_ok(status: u16) -> bool {
     (200..300).contains(&status)
-}
-
-/// Resolve a provider's API key by precedence — env var → OS keychain → the
-/// plaintext `api_key` in config (#530) — via [`keychain::resolve_lazy`]. The
-/// keychain is read **lazily**: a configured env var (read by the caller, gated
-/// out of test builds) short-circuits before [`keychain::get`] is ever called, so
-/// the headless/CI escape hatch never touches (or prompts for) the OS store. This
-/// is called on the gating path (e.g. building the run-action palette), so it must
-/// not do keychain I/O when it doesn't have to. Shared by the text [`Settings`]
-/// and image [`image::ImageSettings`]; returns an owned key. `None` when every
-/// source is empty.
-pub(crate) fn resolved_key(
-    env: Option<&str>,
-    which: keychain::Key,
-    plaintext: &Option<String>,
-) -> Option<String> {
-    keychain::resolve_lazy(env, || keychain::get(which), plaintext.as_deref())
 }
 
 /// Render a list of items as numbered Markdown sections (`## {label} N`), each
@@ -430,6 +414,15 @@ pub struct Settings {
     /// revise) once this many chapters have changed since its last pass (#90).
     /// 0 disables incremental updates — every pass is a full rebuild.
     pub refresh_after_changes: usize,
+    /// Memoized OS-keychain read for the Claude key, so the store is consulted at
+    /// most once per session rather than on every palette-gating check (and, on a
+    /// changed dev binary, prompts at most once). Not config — skipped on load and
+    /// reset whenever settings are reloaded (a fresh `Settings`). Only populated
+    /// when the env var is absent, so an env key never triggers the read.
+    /// `pub(crate)` only so tests can build a `Settings { .. }` literal; treat it
+    /// as private (write nothing but `OnceCell::new()`).
+    #[serde(skip)]
+    pub(crate) keychain_cache: OnceCell<Option<String>>,
 }
 
 impl Default for Settings {
@@ -444,6 +437,7 @@ impl Default for Settings {
             api_key: None,
             cost_threshold: 0.20,
             refresh_after_changes: 5,
+            keychain_cache: OnceCell::new(),
         }
     }
 }
@@ -471,7 +465,19 @@ impl Settings {
         let env: Option<String> = None;
         #[cfg(not(test))]
         let env = std::env::var("ANTHROPIC_API_KEY").ok();
-        resolved_key(env.as_deref(), keychain::Key::Anthropic, &self.api_key)
+        // `resolve_lazy` only calls the thunk when the env var is absent, so an env
+        // key still skips the keychain; the thunk memoizes the read so repeated
+        // gating checks consult (and, on a changed binary, prompt for) it at most
+        // once. `api_key`/env stay live — only the keychain read is cached.
+        keychain::resolve_lazy(
+            env.as_deref(),
+            || {
+                self.keychain_cache
+                    .get_or_init(|| keychain::get(keychain::Key::Anthropic))
+                    .clone()
+            },
+            self.api_key.as_deref(),
+        )
     }
 
     /// The backend that will actually run, accounting for the privacy switch:

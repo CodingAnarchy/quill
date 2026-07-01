@@ -4,6 +4,8 @@
 //! opt-in and key-gated, the generated images saved as off-manuscript files the
 //! author owns. See `docs/ai-features.md`.
 
+use std::cell::OnceCell;
+
 use serde::Deserialize;
 
 use super::AiError;
@@ -89,6 +91,12 @@ pub struct ImageSettings {
     pub api_key: Option<String>,
     /// The remote provider model id (a fal.ai model, e.g. `fal-ai/flux/schnell`).
     pub model: String,
+    /// Memoized OS-keychain read for the fal.ai key (mirrors [`Settings`'s
+    /// cache](super::Settings)): consulted at most once per session, only when the
+    /// env var is absent. Not config — skipped on load, reset on reload.
+    /// `pub(crate)` only so tests can build the struct literal; treat as private.
+    #[serde(skip)]
+    pub(crate) keychain_cache: OnceCell<Option<String>>,
 }
 
 impl Default for ImageSettings {
@@ -99,6 +107,7 @@ impl Default for ImageSettings {
             offline: false,
             api_key: None,
             model: default_model(),
+            keychain_cache: OnceCell::new(),
         }
     }
 }
@@ -116,13 +125,24 @@ impl ImageSettings {
     /// plaintext `api_key` in config (#530). Mirrors the text key's precedence.
     /// Test builds read neither the env var nor the keychain (#528/#531).
     pub fn resolved_key(&self) -> Option<String> {
+        use super::keychain;
         // As with the Claude key, test builds never read the env key, so the suite
         // can't authenticate or reach the image provider by accident (#528).
         #[cfg(test)]
         let env: Option<String> = None;
         #[cfg(not(test))]
         let env = std::env::var("FAL_KEY").ok();
-        super::resolved_key(env.as_deref(), super::keychain::Key::Fal, &self.api_key)
+        // Env short-circuits the keychain; the read is memoized (once per session,
+        // and only when there's no env key). `api_key`/env stay live.
+        keychain::resolve_lazy(
+            env.as_deref(),
+            || {
+                self.keychain_cache
+                    .get_or_init(|| keychain::get(keychain::Key::Fal))
+                    .clone()
+            },
+            self.api_key.as_deref(),
+        )
     }
 
     /// The backend that will actually run, accounting for the privacy switch:
