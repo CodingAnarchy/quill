@@ -30,7 +30,7 @@ const CONTAINER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 const STYLE_CSS: &str = r#"body { margin: 5%; line-height: 1.5; }
 h1, h2 { text-align: center; font-weight: bold; }
 h1 { margin: 2em 0 1em; }
-p { margin: 0; text-indent: 1.5em; }
+p { margin: 0; text-indent: 1.5em; text-align: justify; -webkit-hyphens: auto; hyphens: auto; orphans: 2; widows: 2; }
 h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 .title-page { text-align: center; margin-top: 20%; }
 .title-page .title { font-size: 2em; font-weight: bold; margin: 0.5em 0; }
@@ -39,6 +39,7 @@ h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 .copyright-page { text-align: center; margin-top: 30%; font-size: 0.9em; }
 .copyright-page p { text-indent: 0; margin: 0.4em 0; }
 .epigraph { margin: 2em 10%; font-style: italic; }
+.epigraph p { text-align: initial; hyphens: none; }
 .epigraph .attribution { text-align: right; }
 .scene-break { text-align: center; margin: 1.5em 0; }
 pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent: 0; }
@@ -1202,6 +1203,37 @@ mod tests {
         carries("OEBPS/part0005.xhtml", "bodymatter"); // Part One divider
         carries("OEBPS/chap0006.xhtml", "bodymatter"); // The Find
         carries("OEBPS/chap0007.xhtml", "backmatter"); // Afterword
+    }
+
+    #[test]
+    fn body_css_justifies_hyphenates_and_controls_widows_and_orphans() {
+        // Print/ebook readiness (#650): the body paragraph rule carries justification,
+        // automatic hyphenation (with the -webkit- prefix for older WebKit readers), and
+        // widow/orphan protection; inset epigraph blocks stay ragged, not justified.
+        let css = part(
+            &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),
+            "OEBPS/style.css",
+        );
+        let p_rule = css
+            .lines()
+            .find(|l| l.starts_with("p {"))
+            .expect("the body paragraph rule");
+        assert!(
+            p_rule.contains("text-align: justify"),
+            "justified: {p_rule}"
+        );
+        assert!(p_rule.contains("hyphens: auto"), "hyphenated: {p_rule}");
+        assert!(
+            p_rule.contains("-webkit-hyphens: auto"),
+            "webkit hyphens: {p_rule}"
+        );
+        assert!(p_rule.contains("orphans: 2"), "orphans: {p_rule}");
+        assert!(p_rule.contains("widows: 2"), "widows: {p_rule}");
+        // Inset epigraph paragraphs are not justified (a set-apart block).
+        assert!(
+            css.contains(".epigraph p { text-align: initial"),
+            "epigraphs stay ragged: {css}"
+        );
     }
 
     #[test]

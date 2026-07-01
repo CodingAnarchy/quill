@@ -266,7 +266,10 @@ fn prose_paragraph(prose: &Prose) -> String {
                 .into_iter()
                 .map(|r| run(&r.text, r.bold, r.italic, None))
                 .collect();
-            para(r#"<w:ind w:firstLine="720"/>"#, runs)
+            // Widow/orphan control keeps a lone paragraph line off a page top/bottom
+            // (#650). Body stays ragged-right — standard manuscript format and Vellum
+            // import both expect unjustified text, applying their own typography.
+            para(r#"<w:widowControl/><w:ind w:firstLine="720"/>"#, runs)
         }
         // Verbatim monospace: line breaks preserved, no indent or emphasis (#522).
         Prose::Preformatted(code) => para(
@@ -513,6 +516,30 @@ mod tests {
         assert!(!xml.contains('*'), "no literal asterisks: {xml}");
         // XML special characters in the title are escaped.
         assert!(xml.contains("Red &lt;State&gt; Earth"), "title escaped");
+    }
+
+    #[test]
+    fn body_paragraphs_carry_widow_orphan_control() {
+        // Widow/orphan control (#650): each body paragraph sets `widowControl` so no
+        // single line strands at a page top/bottom. The body stays ragged-right (no
+        // justified `jc`) — manuscript format and Vellum import both expect that.
+        for profile in [Profile::Manuscript, Profile::Vellum] {
+            let xml = part(&to_docx(&doc(), profile).unwrap(), "word/document.xml");
+            assert!(
+                xml.contains("<w:widowControl/>"),
+                "widowControl on body paragraphs"
+            );
+            // The body paragraph pairs widowControl with the first-line indent.
+            assert!(
+                xml.contains(r#"<w:widowControl/><w:ind w:firstLine="720"/>"#),
+                "widowControl on the indented body paragraph: {xml}"
+            );
+            // Body is not justified (manuscript/Vellum convention).
+            assert!(
+                !xml.contains(r#"<w:jc w:val="both"/>"#),
+                "body stays ragged-right, not justified"
+            );
+        }
     }
 
     #[test]

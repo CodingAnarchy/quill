@@ -10,8 +10,8 @@ use super::wrap::{segments, words_of, wrap_lines, Seg, Word};
 use super::{Align, FontStyle, Pdf, Run, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
 
 impl Pdf {
-    /// A normal body paragraph: first-line indented, left-aligned, with `*`/`**`
-    /// emphasis as italic/bold runs.
+    /// A normal body paragraph: first-line indented, justified to both margins
+    /// (#650), with `*`/`**` emphasis as italic/bold runs.
     pub(super) fn paragraph(&mut self, runs: &[Run]) {
         let words = words_of(runs, false);
         self.flow(
@@ -20,7 +20,7 @@ impl Pdf {
             INDENT,
             BODY_SIZE,
             BODY_LEADING,
-            Align::Left,
+            Align::Justify,
         );
     }
 
@@ -68,20 +68,116 @@ impl Pdf {
                 max_width
             }
         });
+        let last = lines.len().saturating_sub(1);
+        let n = lines.len();
+        // Widow/orphan control (#650): decide up front the line index (if any) at which
+        // to force a page break so no single paragraph line is stranded at a page top
+        // (widow) or bottom (orphan). `None` leaves natural `need` pagination.
+        let force_break = self.widow_orphan_break(n, leading);
         for (i, (line, line_w)) in lines.into_iter().enumerate() {
-            self.need(leading);
+            if force_break == Some(i) {
+                // Pull this line (and the rest) onto a fresh page so neither the current
+                // page's tail nor the next page's head is a lone paragraph line.
+                self.start_page();
+            } else {
+                self.need(leading);
+            }
             let left = self.left();
             let indent = if i == 0 { first_indent } else { 0.0 };
-            let x = match align {
-                Align::Left => left + indent,
-                Align::Center => left + (col - line_w) / 2.0,
-                Align::LeftInset(pad) => left + pad,
-                Align::RightInset(pad) => left + col - pad - line_w,
-            };
-            let segs = segments(&line);
-            self.draw_line(x, self.y, &segs, size);
+            // Justify every line but the last, and never a one-word line (nothing to
+            // stretch) — the target width fills the column from the line's left edge
+            // (#650). Everything else draws flush at its computed x.
+            let target = max_width - indent;
+            if align == Align::Justify && i != last && line.len() > 1 {
+                self.draw_justified_line(left + indent, self.y, &line, size, target);
+            } else {
+                let x = match align {
+                    Align::Left | Align::Justify => left + indent,
+                    Align::Center => left + (col - line_w) / 2.0,
+                    Align::LeftInset(pad) => left + pad,
+                    Align::RightInset(pad) => left + col - pad - line_w,
+                };
+                let segs = segments(&line);
+                self.draw_line(x, self.y, &segs, size);
+            }
             self.y -= leading;
         }
+    }
+
+    /// Plan a paragraph's page break for widow/orphan control (#650). Given the line
+    /// count `n` and the `leading`, return the line index at which to force a fresh page
+    /// so no lone line is left behind — or `None` when the natural break is already safe
+    /// (the whole paragraph fits, or it splits leaving ≥2 lines on each side).
+    ///
+    /// - **Orphan:** only one line fits on the current page but the paragraph has more —
+    ///   move the whole paragraph (break at line 0) so its first line isn't stranded at
+    ///   the page bottom.
+    /// - **Widow:** the natural break would leave exactly the last line alone on the next
+    ///   page — break one line earlier so two lines carry over together.
+    pub(super) fn widow_orphan_break(&self, n: usize, leading: f32) -> Option<usize> {
+        if n < 2 {
+            return None; // a single line is never a widow/orphan
+        }
+        // How many of this paragraph's lines fit on the current page from `self.y`.
+        let room = self.y - self.layout.text_bottom();
+        let fit = if room < 0.0 {
+            0
+        } else {
+            (room / leading).floor() as usize + 1
+        };
+        if fit >= n {
+            return None; // the whole paragraph fits — no break needed
+        }
+        if fit <= 1 {
+            // Only the first line would fit here (orphan): push the paragraph down —
+            // unless we're already at the top of a fresh page (nothing to gain, and it
+            // would leave a blank page for an over-tall paragraph).
+            if self.y < self.layout.text_top() {
+                return Some(0);
+            }
+            return None;
+        }
+        // A widow forms when the tail left for the next page is exactly one line; break
+        // one line early so the last two lines travel together.
+        if n - fit == 1 {
+            return Some(fit - 1);
+        }
+        None
+    }
+
+    /// Draw one justified line: place each word so the row fills `target` points from
+    /// `x`, spreading the slack evenly across the inter-word gaps (#650). The pen walks
+    /// word to word — each word's measured width plus a stretched gap — so the last word
+    /// lands flush at `x + target` within measurement tolerance. Word emphasis/heading
+    /// faces are preserved (each word is placed as its own glyph run).
+    pub(super) fn draw_justified_line(
+        &mut self,
+        x: f32,
+        y: f32,
+        line: &[&Word],
+        size: f32,
+        target: f32,
+    ) {
+        let words_w: f32 = line
+            .iter()
+            .map(|w| self.layout.measure(&w.text, size, w.style(), w.heading))
+            .sum();
+        let gaps = (line.len() - 1) as f32;
+        // The slack to spread over the gaps; guard against a word row already wider than
+        // the target (falls back to a single normal-ish space) rather than overlapping.
+        let gap = ((target - words_w) / gaps).max(0.0);
+        let mut pen = x;
+        let mut block = String::new();
+        for w in line {
+            block.push_str(&self.glyph_block(
+                pen,
+                y,
+                size,
+                std::iter::once((w.text.as_str(), w.style(), w.heading)),
+            ));
+            pen += self.layout.measure(&w.text, size, w.style(), w.heading) + gap;
+        }
+        self.cur().push_str(&block);
     }
 
     /// Emit one positioned line of styled segments into the current page's content.

@@ -5,6 +5,7 @@
 //! rendered words; visual/qpdf validation is covered in the PR.
 
 use super::font::Fonts;
+use super::wrap::{words_of, wrap_lines, Word};
 use super::*;
 use crate::export::{Chapter, EmbeddedFont, ExportStyle, FontRole, Part};
 
@@ -938,6 +939,172 @@ fn contents_folios_use_the_body_scheme() {
             "Contents folio matches the page's own folio"
         );
     }
+}
+
+/// The `x` coordinates of every `… Tm` matrix in `content`, in order — where each
+/// glyph run is positioned. A justified line places one run per word, so these are the
+/// per-word pen positions.
+fn tm_xs(content: &str) -> Vec<f32> {
+    content
+        .lines()
+        .filter(|l| l.ends_with(" Tm"))
+        .filter_map(|l| {
+            // `1 0 {shear} 1 {x} {y} Tm` — the x is the 5th of six numbers.
+            let n: Vec<&str> = l.trim_end_matches(" Tm").split_whitespace().collect();
+            n.get(4).and_then(|s| s.parse::<f32>().ok())
+        })
+        .collect()
+}
+
+#[test]
+fn body_lines_are_justified_flush_to_the_right_margin() {
+    // A justified body line fills the column: its last word ends at the right text edge
+    // within a hair of measurement tolerance (#650). Only the last line stays ragged.
+    let style = plain();
+    let (w, h) = trim_points("6x9").unwrap();
+    let mut pdf = Pdf::new(
+        Layout::print(w, h, &style),
+        StyleBits::from_style(&style),
+        vec![],
+    );
+    pdf.start_page();
+    let full = pdf.layout.text_w();
+    let words: Vec<Word> = words_of(
+        &[Run::new(
+            "The quick brown fox jumps over the lazy dog again and again and yet again to \
+             fill the line with plenty of words so that it wraps to several lines within \
+             the narrower print column and can be justified across both margins cleanly",
+            false,
+            false,
+        )],
+        false,
+    );
+    let lines = wrap_lines(&pdf.layout, &words, BODY_SIZE, |_| full);
+    assert!(lines.len() >= 2, "the sample wraps to multiple lines");
+    let (first, _) = &lines[0];
+    let first: Vec<&Word> = first.clone();
+    let left = pdf.left();
+    pdf.draw_justified_line(left, pdf.y, &first, BODY_SIZE, full);
+
+    let content = pdf.cur().clone();
+    let xs = tm_xs(&content);
+    assert_eq!(xs.len(), first.len(), "one positioned run per word");
+    // The last word starts at its pen x; its right edge is x + its measured width.
+    let last = first.last().unwrap();
+    let last_w = pdf
+        .layout
+        .measure(&last.text, BODY_SIZE, last.style(), last.heading);
+    let right_edge = xs.last().unwrap() + last_w;
+    let target_right = left + full;
+    assert!(
+        (right_edge - target_right).abs() < 0.5,
+        "justified line reaches the right margin: {right_edge} vs {target_right}"
+    );
+    // The first word sits flush at the left edge, and words march strictly rightward.
+    assert!((xs[0] - left).abs() < 0.01, "first word flush left");
+    assert!(
+        xs.windows(2).all(|p| p[1] > p[0]),
+        "words placed left to right: {xs:?}"
+    );
+    // The inter-word gap is stretched past a normal space (the line is spread to fill).
+    let space = pdf
+        .layout
+        .measure(" ", BODY_SIZE, FontStyle::REGULAR, false);
+    let first_word_w = pdf.layout.measure(
+        &first[0].text,
+        BODY_SIZE,
+        first[0].style(),
+        first[0].heading,
+    );
+    let applied_gap = xs[1] - xs[0] - first_word_w;
+    assert!(
+        applied_gap >= space,
+        "gap {applied_gap} spread to at least a normal space {space}"
+    );
+}
+
+#[test]
+fn the_last_line_of_a_paragraph_is_not_justified() {
+    // The final line stays flush-left (ragged), never stretched — otherwise a short
+    // closing line would sprawl across the column (#650).
+    let style = plain();
+    let mut pdf = Pdf::new(
+        Layout::screen(&style),
+        StyleBits::from_style(&style),
+        vec![],
+    );
+    pdf.start_page();
+    let left = pdf.left();
+    let start_y = pdf.y;
+    // A short two-word paragraph: one line, drawn flush-left.
+    pdf.paragraph(&[Run::new("Two words.", false, false)]);
+    let content = pdf.cur().clone();
+    let xs = tm_xs(&content);
+    // One run for the whole (single, last) line — flush-left, indented, not per-word.
+    assert!(!xs.is_empty(), "the line is drawn");
+    assert!(
+        (xs[0] - (left + INDENT)).abs() < 0.01,
+        "first (and only) line is indented and flush-left, x={}",
+        xs[0]
+    );
+    assert!(pdf.y < start_y, "the baseline advanced");
+}
+
+#[test]
+fn a_paragraph_does_not_orphan_its_first_line_at_a_page_bottom() {
+    // With room for only one line, a multi-line paragraph moves to the next page rather
+    // than strand its first line at the bottom (#650).
+    let style = plain();
+    let mut pdf = Pdf::new(
+        Layout::screen(&style),
+        StyleBits::from_style(&style),
+        vec![],
+    );
+    pdf.start_page();
+    // Drop to one line of room above the bottom margin.
+    pdf.y = pdf.layout.text_bottom() + BODY_LEADING * 0.5;
+    let pages_before = pdf.pages.len();
+    pdf.paragraph(&[Run::new(
+        "This is a paragraph long enough to wrap across at least two full lines of body \
+         text so that an orphan would form if it began here at the very bottom.",
+        false,
+        false,
+    )]);
+    assert!(
+        pdf.pages.len() > pages_before,
+        "the paragraph started a fresh page instead of orphaning its first line"
+    );
+}
+
+#[test]
+fn a_paragraph_does_not_widow_its_last_line_at_a_page_top() {
+    // When the natural break would leave exactly the last line alone on the next page,
+    // the split moves one line earlier so two lines carry over together (#650).
+    let n = 5usize; // a five-line paragraph
+    let leading = BODY_LEADING;
+    let style = plain();
+    let mut pdf = Pdf::new(
+        Layout::screen(&style),
+        StyleBits::from_style(&style),
+        vec![],
+    );
+    pdf.start_page();
+    // Place y so that exactly four of the five lines fit here — the natural break would
+    // strand line five (a widow).
+    pdf.y = pdf.layout.text_bottom() + leading * 3.5;
+    let brk = pdf.widow_orphan_break(n, leading);
+    assert_eq!(
+        brk,
+        Some(3),
+        "break before the 4th line so lines 4 and 5 travel together"
+    );
+    // Sanity: a paragraph that splits leaving two lines on each side needs no help.
+    pdf.y = pdf.layout.text_bottom() + leading * 1.5; // two lines fit
+    assert_eq!(
+        pdf.widow_orphan_break(4, leading),
+        None,
+        "≥2 lines each side"
+    );
 }
 
 #[test]
