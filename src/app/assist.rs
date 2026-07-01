@@ -140,10 +140,17 @@ impl App {
         }
     }
 
-    /// Accumulate a pass's findings into the session revision-triage list,
-    /// de-duplicated.
+    /// Accumulate a pass's findings into the revision-triage list, de-duplicated,
+    /// and persist each new one to the durable store (#591). A finding the author
+    /// already dismissed is skipped — a re-run that re-produces it must not
+    /// re-surface it.
     pub(super) fn accumulate_triage(&mut self, findings: &[Finding]) {
+        let root = self.project.root.clone();
         for f in findings {
+            if self.findings_store.is_dismissed(f) {
+                continue;
+            }
+            self.findings_store.remember(&root, f);
             if !self.triage.contains(f) {
                 self.triage.push(f.clone());
             }

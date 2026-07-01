@@ -159,12 +159,23 @@ impl App {
         }
     }
 
+    /// Accumulate a pass's findings into durable triage and stash the still-open
+    /// ones for the overlay (#591): a finding the author already dismissed is
+    /// filtered out here, so a re-run that re-produces it neither re-enters triage
+    /// nor pops the overlay again.
+    fn stash_findings(&mut self, findings: Vec<Finding>) {
+        self.accumulate_triage(&findings);
+        self.pending_findings = findings
+            .into_iter()
+            .filter(|f| !self.findings_store.is_dismissed(f))
+            .collect();
+    }
+
     /// Open a findings-only result (analysis passes that write no bible file):
     /// clear any prior overlay, stash the findings, and open the overlay.
     pub(super) fn show_findings(&mut self, findings: Vec<Finding>) {
         self.overlay = None;
-        self.accumulate_triage(&findings);
-        self.pending_findings = findings;
+        self.stash_findings(findings);
         self.open_findings();
     }
 
@@ -181,8 +192,7 @@ impl App {
         findings: Vec<Finding>,
     ) {
         self.overlay = None;
-        self.accumulate_triage(&findings);
-        self.pending_findings = findings;
+        self.stash_findings(findings);
         match self.stage_bible(path, name, render) {
             Staged::Wrote => {
                 self.record_pass_state(); // the bible now reflects this manuscript state (#90)
@@ -338,12 +348,16 @@ impl App {
         match key.code {
             KeyCode::Char('d') => {
                 if f.selected < f.items.len() {
-                    f.items.remove(f.selected);
+                    // Dismiss durably (#591): the finding leaves the overlay and
+                    // the triage list, and a record on disk keeps a re-run from
+                    // re-surfacing it.
+                    let dropped = f.items.remove(f.selected);
                     if f.items.is_empty() {
                         self.mode = self.editing_mode();
                     } else {
                         f.selected = f.selected.min(f.items.len() - 1);
                     }
+                    self.dismiss_finding(&dropped);
                 }
             }
             KeyCode::Enter => {
@@ -365,13 +379,19 @@ impl App {
             // Turn the finding into an `xxx` TODO marker in its chapter (a note,
             // not prose). The keypress is the confirmation.
             KeyCode::Char('i') => {
-                let item = f.items.get(f.selected).cloned();
+                let selected = f.selected;
+                let item = f.items.get(selected).cloned();
                 if let Some(item) = item {
-                    if let Some(title) = item.chapters.first() {
+                    if let Some(title) = item.chapters.first().cloned() {
                         // A series finding (#341) may sit in another book; switch
                         // there first so the marker lands in the right chapter.
                         self.focus_finding_book(item.book);
-                        self.insert_todo(title, &item.summary);
+                        // Only drop the finding once the marker is actually
+                        // written (#591); a failed mark leaves it in triage.
+                        if self.insert_todo(&title, &item.summary) {
+                            self.resolve_finding(&item);
+                            self.drop_finding_from_overlay(selected);
+                        }
                     } else {
                         self.message = Some("No chapter to mark".into());
                     }
@@ -379,6 +399,38 @@ impl App {
             }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
+        }
+    }
+
+    /// Dismiss a finding durably (#591): mark it dismissed in the store (so a
+    /// re-run doesn't re-surface it) and drop it from the standing triage list.
+    fn dismiss_finding(&mut self, finding: &Finding) {
+        let root = self.project.root.clone();
+        self.findings_store.dismiss(&root, finding);
+        self.triage.retain(|f| f != finding);
+    }
+
+    /// Resolve a finding (#591): the author marked it `xxx`, so drop its record
+    /// from the store entirely and from the triage list. A recurrence in a later
+    /// manuscript is a fresh finding that a new pass may surface again.
+    fn resolve_finding(&mut self, finding: &Finding) {
+        let root = self.project.root.clone();
+        self.findings_store.resolve(&root, finding);
+        self.triage.retain(|f| f != finding);
+    }
+
+    /// Remove the finding at `index` from the open findings overlay, closing the
+    /// overlay when the list empties and clamping the selection otherwise.
+    fn drop_finding_from_overlay(&mut self, index: usize) {
+        if let Mode::Findings(f) = &mut self.mode {
+            if index < f.items.len() {
+                f.items.remove(index);
+            }
+            if f.items.is_empty() {
+                self.mode = self.editing_mode();
+            } else if let Mode::Findings(f) = &mut self.mode {
+                f.selected = f.selected.min(f.items.len() - 1);
+            }
         }
     }
 
@@ -397,20 +449,21 @@ impl App {
     /// Append an `xxx — <note>` TODO marker to the body of the chapter titled
     /// `title` (a note for the author; never prose). The active chapter is
     /// flushed and reloaded so its open buffer sees the marker; other chapters
-    /// are appended on disk.
-    pub(super) fn insert_todo(&mut self, title: &str, note: &str) {
+    /// are appended on disk. Returns whether the marker was written, so triage can
+    /// drop a finding only once it's actually captured (#591).
+    pub(super) fn insert_todo(&mut self, title: &str, note: &str) -> bool {
         let Some(i) =
             (0..self.chapter_count()).find(|&i| self.project.chapter_title(i) == Some(title))
         else {
             self.message = Some(format!("Chapter '{title}' not found"));
-            return;
+            return false;
         };
         let marker = format!("\n\nxxx — {note}\n");
 
         if i == self.project.active_index() {
             // Persist current edits, append, and reload so the buffer is current.
             if self.flush_active().is_err() {
-                return;
+                return false;
             }
         }
         let path = self.project.chapter_path(i);
@@ -418,12 +471,12 @@ impl App {
         // chapter's prose with just the marker while reporting success (#565).
         let Ok(mut body) = read_existing(&path) else {
             self.message = Some("Failed to read chapter; marker not written".into());
-            return;
+            return false;
         };
         body.push_str(&marker);
         if std::fs::write(&path, body).is_err() {
             self.message = Some("Failed to write marker".into());
-            return;
+            return false;
         }
         if i == self.project.active_index() {
             // Reload so the open buffer shows the marker and isn't overwritten on
@@ -437,6 +490,7 @@ impl App {
         // reads bodies live, and leaving the word cache untouched keeps an
         // AI-inserted note out of the author's word tally.
         self.message = Some(format!("Marked xxx in '{title}'"));
+        true
     }
 }
 

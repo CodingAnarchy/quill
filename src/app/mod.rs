@@ -38,6 +38,7 @@ mod bible_review;
 mod editing;
 mod export_style;
 mod exporting;
+mod findings_store;
 mod fonts;
 mod images;
 mod imports;
@@ -242,9 +243,15 @@ pub struct App {
     /// Continuity findings waiting to be shown — stashed while a timeline
     /// conflict is resolved first, then opened by [`App::open_findings`].
     pending_findings: Vec<Finding>,
-    /// All findings accumulated this session (continuity / setting / style /
-    /// naming / gaps), de-duplicated — the "revision triage" list.
+    /// All open findings (continuity / setting / style / naming / gaps),
+    /// de-duplicated — the "revision triage" list. Loaded from the project's
+    /// durable store at startup and kept in sync with it, so dismissals stick and
+    /// the list survives a restart (#591).
     triage: Vec<Finding>,
+    /// The durable triage store (#591): every finding the project has seen plus
+    /// the author's dismiss decisions, persisted as `bible/findings.toml`. Mirrors
+    /// dismiss / mark actions so a re-run doesn't re-surface a dismissed finding.
+    findings_store: findings_store::FindingsStore,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
     /// cleanly. `(tracker, digests, merge)` — `merge` keeps the other books'
@@ -327,6 +334,11 @@ impl App {
         let active_file = project.active_file().to_string();
         let annotations = project.annotations_for(&active_file);
         let annotations_context = format!("S:{active_file}");
+        // Restore the durable revision-triage list (#591): the open (not
+        // dismissed) findings from the project's store, so triage survives a
+        // restart and picks up where the author left off.
+        let findings_store = findings_store::FindingsStore::load(&project.root);
+        let triage = findings_store.open();
         let mut app = Self {
             buffer,
             project,
@@ -380,7 +392,8 @@ impl App {
             image_backend: Arc::new(Mutex::new(None)),
             pending_portraits: None,
             pending_findings: Vec::new(),
-            triage: Vec::new(),
+            triage,
+            findings_store,
             pending_pass: None,
             workflows: loaded.workflows,
             triggers: loaded.triggers,

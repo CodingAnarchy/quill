@@ -18,6 +18,7 @@ const GITIGNORE: &str = "\
 /.quill/
 /unused/
 /bible/.state.toml
+/bible/findings.toml
 
 # OS / editor cruft
 .DS_Store
@@ -423,6 +424,10 @@ mod tests {
         assert!(
             ignore.contains("/bible/.state.toml"),
             "the AI scoping cache is ignored (#90)"
+        );
+        assert!(
+            ignore.contains("/bible/findings.toml"),
+            "the durable triage store is editor state, not manuscript (#591)"
         );
         fs::remove_dir_all(&dir).ok();
     }
