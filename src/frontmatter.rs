@@ -159,6 +159,82 @@ status_table! {
     Final => "final", "Final", 'F';
 }
 
+/// Declare the [`SceneStatus`] enum and its accessors from one table, mirroring
+/// [`status_table`] (#636): each variant's `status:` value, its corkboard label,
+/// and a single-character badge on one line. [`SceneStatus::next`] cycles in the
+/// declaration order (stub → draft → done → stub), and [`SceneStatus::from_key`]
+/// parses the value case-insensitively.
+macro_rules! scene_status_table {
+    ($($variant:ident => $key:literal, $label:literal, $badge:literal);+ $(;)?) => {
+        /// A single scene's drafting status (#636), edited from the corkboard and
+        /// stored per scene in the chapter's `scenes:` front matter. Distinct from
+        /// the whole-chapter [`Status`]: a chapter holds many scenes, each at its
+        /// own stage.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+        pub enum SceneStatus {
+            #[default]
+            $($variant),+
+        }
+
+        impl SceneStatus {
+            /// The value as written in the `scenes:` front matter.
+            pub fn key(self) -> &'static str {
+                match self { $(SceneStatus::$variant => $key),+ }
+            }
+
+            /// Parse a scene `status:` value (case-insensitive); `None` when unknown.
+            pub fn from_key(s: &str) -> Option<SceneStatus> {
+                match s.trim().to_ascii_lowercase().as_str() {
+                    $($key => Some(SceneStatus::$variant),)+
+                    _ => None,
+                }
+            }
+
+            /// Human label for the corkboard card.
+            pub fn label(self) -> &'static str {
+                match self { $(SceneStatus::$variant => $label),+ }
+            }
+
+            /// Single-character badge for the card.
+            pub fn badge(self) -> char {
+                match self { $(SceneStatus::$variant => $badge),+ }
+            }
+
+            /// The next status in the cycle (declaration order, wrapping).
+            pub fn next(self) -> SceneStatus {
+                const ALL: &[SceneStatus] = &[$(SceneStatus::$variant),+];
+                let i = ALL.iter().position(|&s| s == self).unwrap_or(0);
+                ALL[(i + 1) % ALL.len()]
+            }
+        }
+    };
+}
+
+scene_status_table! {
+    Stub => "stub", "Stub", '·';
+    Draft => "draft", "Draft", '◐';
+    Done => "done", "Done", '●';
+}
+
+/// One scene's corkboard metadata (#636): a one-line synopsis and a drafting
+/// status, aligned positionally with the chapter body's headings in document
+/// order. Stored as an ordered `scenes:` sequence in the chapter's front matter,
+/// so it stays out of the prose.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SceneMeta {
+    pub synopsis: String,
+    pub status: SceneStatus,
+}
+
+impl SceneMeta {
+    /// Whether this entry carries nothing worth persisting — an empty synopsis at
+    /// the default status. A trailing run of these is trimmed before writing so the
+    /// block doesn't accumulate empty rows for scenes the author never annotated.
+    fn is_blank(&self) -> bool {
+        self.synopsis.is_empty() && self.status == SceneStatus::default()
+    }
+}
+
 /// Declare the [`Role`] enum and its accessors from one table (#435): each
 /// variant's `role:` key (plus any accepted alias spellings), label, and
 /// ordering band live on a single line, so adding a section role can't parse
@@ -447,6 +523,120 @@ impl FrontMatter {
 
     pub fn set_epigraph_by(&mut self, attribution: &str) {
         self.put_text("epigraph_by", attribution);
+    }
+
+    /// The per-scene corkboard metadata (#636): the ordered `scenes:` sequence,
+    /// each entry a synopsis + status, aligned positionally with the chapter
+    /// body's headings. Empty when there is no `scenes:` block, so an existing
+    /// chapter (which has none) reads as having no scene metadata. Entries with an
+    /// unknown status fall back to the default; a malformed block reads as far as
+    /// it parses rather than erroring.
+    pub fn scenes(&self) -> Vec<SceneMeta> {
+        let mut segments = self.raw.split_inclusive('\n');
+        // Advance to the `scenes:` line; the entries are its indented block.
+        if !segments.any(|seg| bare(seg).trim_end() == "scenes:") {
+            return Vec::new();
+        }
+        let mut out: Vec<SceneMeta> = Vec::new();
+        for seg in segments.by_ref() {
+            let line = bare(seg);
+            if line.is_empty() {
+                continue;
+            }
+            if !line.starts_with(' ') {
+                break; // a column-0 line ends the block
+            }
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("- ") {
+                // A new sequence item; its first inline `key: value` (if any).
+                out.push(SceneMeta::default());
+                apply_scene_field(out.last_mut().unwrap(), rest);
+            } else if let Some(scene) = out.last_mut() {
+                // A continuation key of the current item (`  status: …`).
+                apply_scene_field(scene, trimmed);
+            }
+        }
+        out
+    }
+
+    /// Write the ordered `scenes:` sequence (#636), replacing any existing block.
+    /// A trailing run of blank entries (empty synopsis, default status) is dropped
+    /// so the block doesn't grow rows for scenes the author never annotated; when
+    /// nothing is left the whole key is removed, keeping an un-annotated chapter's
+    /// front matter clean.
+    pub fn set_scenes(&mut self, scenes: &[SceneMeta]) {
+        let mut end = scenes.len();
+        while end > 0 && scenes[end - 1].is_blank() {
+            end -= 1;
+        }
+        let scenes = &scenes[..end];
+        if scenes.is_empty() {
+            self.replace_scenes(None);
+            return;
+        }
+        let mut block = String::from("scenes:\n");
+        for scene in scenes {
+            block.push_str(BLOCK_INDENT);
+            block.push_str("- synopsis: ");
+            block.push_str(&quote_scalar(&scene.synopsis));
+            block.push('\n');
+            block.push_str(BLOCK_INDENT);
+            block.push_str("  status: ");
+            block.push_str(scene.status.key());
+            block.push('\n');
+        }
+        self.replace_scenes(Some(&block));
+    }
+
+    /// Splice the `scenes:` sequence's full span — its `scenes:` line plus every
+    /// indented/blank continuation — replacing it with `replacement` (or removing
+    /// it when `None`); appends when the key is absent and a replacement is given.
+    /// The sequence's continuation is indented like a `|` block, so the span rule
+    /// is the same as [`replace_key`](Self::replace_key)'s block case.
+    fn replace_scenes(&mut self, replacement: Option<&str>) {
+        let segments: Vec<&str> = self.raw.split_inclusive('\n').collect();
+        let mut out = String::with_capacity(self.raw.len());
+        let mut i = 0;
+        let mut done = false;
+        while i < segments.len() {
+            let seg = segments[i];
+            if !done && bare(seg).trim_end() == "scenes:" {
+                let mut end = i + 1;
+                while end < segments.len() && is_block_continuation(segments[end]) {
+                    end += 1;
+                }
+                if let Some(rep) = replacement {
+                    out.push_str(rep);
+                }
+                i = end;
+                done = true;
+                continue;
+            }
+            out.push_str(seg);
+            i += 1;
+        }
+        if !done {
+            if let Some(rep) = replacement {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(rep);
+            }
+        }
+        self.raw = out;
+    }
+}
+
+/// Parse one `key: value` pair from a scene sequence item into `scene` (#636).
+/// Recognizes `synopsis` (unquoted) and `status` (parsed, unknown ignored);
+/// anything else is left alone, so an author's extra keys don't crash the read.
+fn apply_scene_field(scene: &mut SceneMeta, pair: &str) {
+    if let Some(v) = pair.strip_prefix("synopsis:") {
+        scene.synopsis = unquote(v.trim());
+    } else if let Some(v) = pair.strip_prefix("status:") {
+        if let Some(s) = SceneStatus::from_key(v) {
+            scene.status = s;
+        }
     }
 }
 
@@ -777,6 +967,90 @@ mod tests {
         let ep = fm.epigraph().unwrap();
         assert_eq!(ep.text, "Call me Ishmael.");
         assert_eq!(ep.attribution.as_deref(), Some("Melville"));
+    }
+
+    #[test]
+    fn scenes_round_trip_through_an_ordered_sequence() {
+        // Per-scene synopsis + status write as an ordered block and read back in
+        // order, aligned positionally with the body headings (#636).
+        let mut fm = FrontMatter::from_raw("status: draft\n");
+        fm.set_scenes(&[
+            SceneMeta {
+                synopsis: "The arrival: rain".into(),
+                status: SceneStatus::Done,
+            },
+            SceneMeta {
+                synopsis: "The meeting".into(),
+                status: SceneStatus::Stub,
+            },
+        ]);
+        let read = fm.scenes();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].synopsis, "The arrival: rain");
+        assert_eq!(read[0].status, SceneStatus::Done);
+        assert_eq!(read[1].synopsis, "The meeting");
+        assert_eq!(read[1].status, SceneStatus::Stub);
+        // The sibling chapter key survives the sequence write.
+        assert_eq!(fm.status(), Some(Status::Draft));
+    }
+
+    #[test]
+    fn a_chapter_with_no_scenes_key_reads_as_empty() {
+        let fm = FrontMatter::from_raw("status: draft\npov: Mara\n");
+        assert!(fm.scenes().is_empty());
+    }
+
+    #[test]
+    fn set_scenes_replaces_the_block_and_trims_trailing_blanks() {
+        let mut fm = FrontMatter::default();
+        fm.set_scenes(&[
+            SceneMeta {
+                synopsis: "One".into(),
+                status: SceneStatus::Draft,
+            },
+            SceneMeta {
+                synopsis: "Two".into(),
+                status: SceneStatus::Draft,
+            },
+        ]);
+        fm.set_status(Status::Final); // a key written after the block
+                                      // Rewrite with a trailing blank entry: it's dropped, the sibling stays.
+        fm.set_scenes(&[
+            SceneMeta {
+                synopsis: "Only one now".into(),
+                status: SceneStatus::Done,
+            },
+            SceneMeta::default(),
+        ]);
+        let read = fm.scenes();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].synopsis, "Only one now");
+        assert!(!fm.as_str().contains("Two"));
+        assert_eq!(fm.status(), Some(Status::Final));
+    }
+
+    #[test]
+    fn clearing_scenes_removes_the_whole_block() {
+        let mut fm = FrontMatter::from_raw("status: draft\n");
+        fm.set_scenes(&[SceneMeta {
+            synopsis: "A".into(),
+            status: SceneStatus::Draft,
+        }]);
+        // All-blank entries clear the block back out.
+        fm.set_scenes(&[SceneMeta::default(), SceneMeta::default()]);
+        assert!(fm.scenes().is_empty());
+        assert!(!fm.as_str().contains("scenes"));
+        assert_eq!(fm.status(), Some(Status::Draft));
+    }
+
+    #[test]
+    fn scene_status_cycles_and_parses() {
+        assert_eq!(SceneStatus::Stub.next(), SceneStatus::Draft);
+        assert_eq!(SceneStatus::Draft.next(), SceneStatus::Done);
+        assert_eq!(SceneStatus::Done.next(), SceneStatus::Stub);
+        assert_eq!(SceneStatus::from_key("DONE"), Some(SceneStatus::Done));
+        assert_eq!(SceneStatus::from_key("nonsense"), None);
+        assert_eq!(SceneStatus::default(), SceneStatus::Stub);
     }
 
     #[test]
