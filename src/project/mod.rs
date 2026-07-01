@@ -29,11 +29,13 @@ mod goals;
 mod io;
 mod series;
 mod structure;
+mod template;
 
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 use io::cache_chapter;
 pub(crate) use io::read_existing;
 use series::Book;
+pub use template::{ProjectTemplate, TEMPLATES};
 
 /// The manifest file at the root of every project.
 pub const MANIFEST_NAME: &str = "book.toml";
@@ -429,8 +431,22 @@ impl Project {
     }
 
     /// Initialize a new project in `dir` (creating the directory if needed): a
-    /// manifest plus one empty starter chapter, ready to edit.
+    /// manifest plus one empty starter chapter, ready to edit. The historic
+    /// "Empty" behavior, kept as the default; [`Project::create_with_template`]
+    /// scaffolds a richer structure.
     pub fn create(dir: impl AsRef<Path>) -> std::io::Result<Self> {
+        Self::create_with_template(dir, ProjectTemplate::at(0))
+    }
+
+    /// Initialize a new project in `dir`, scaffolding `template`'s structure
+    /// (#611). For the "Empty" template this is one blank starter chapter (the
+    /// historic default); for a structured template it writes a `[[parts]]`
+    /// grouping plus the template's titled empty chapter stubs, walking them
+    /// through the same `add_chapter`/manifest path an author would.
+    pub fn create_with_template(
+        dir: impl AsRef<Path>,
+        template: &ProjectTemplate,
+    ) -> std::io::Result<Self> {
         let root = dir.as_ref().to_path_buf();
         fs::create_dir_all(&root)?;
 
@@ -452,8 +468,48 @@ impl Project {
             dictionary: HashSet::new(),
             annotations: Vec::new(),
         };
-        project.add_default_chapter()?;
+        if template.is_empty() {
+            project.add_default_chapter()?;
+        } else {
+            project.scaffold_template(template)?;
+        }
         Ok(project)
+    }
+
+    /// Scaffold a non-empty template's structure (#611): append each part's
+    /// titled empty chapter stubs in order (reusing the `add_chapter` path so the
+    /// files are created and the cache read back), then record the derived
+    /// `[[parts]]` ranges on the manifest. The first chapter is made active so the
+    /// editor opens on it, exactly as a fresh project does.
+    fn scaffold_template(&mut self, template: &ProjectTemplate) -> std::io::Result<()> {
+        let mut parts = Vec::with_capacity(template.parts.len());
+        let mut next = 1; // 1-based chapter index of the next stub
+        for part in template.parts {
+            let start = next;
+            for stub in part.chapters {
+                self.add_chapter(self.manifest.chapters.len(), stub)?;
+                next += 1;
+            }
+            // A part with no stubs contributes no range; skip it rather than
+            // recording an inverted [start, start-1].
+            if next > start {
+                parts.push(Part {
+                    name: Some(part.name.to_string()),
+                    chapters: [start, next - 1],
+                    goal: None,
+                });
+            }
+        }
+        // A template with only empty parts still needs a chapter to edit.
+        if self.manifest.chapters.is_empty() {
+            self.add_default_chapter()?;
+        } else {
+            self.active = self.manifest.chapters[0].file.clone();
+        }
+        if !parts.is_empty() {
+            self.manifest.parts = Some(parts);
+        }
+        self.save_manifest()
     }
 
     /// Append a starter chapter (creating its file if absent) and persist the

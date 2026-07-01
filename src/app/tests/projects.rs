@@ -375,6 +375,25 @@ fn with_no_projects_home_only_recents_are_listed() {
 // --- New project (#273) ----------------------------------------------------
 
 #[test]
+fn creating_a_new_project_offers_a_template_picker() {
+    isolate("picker");
+    let parent = books_dir("picker-parent");
+    let cur = make_project("picker-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    app.create_project_at(parent.join("Fresh Book"));
+
+    match &app.mode {
+        Mode::Palette(p) => {
+            let labels: Vec<&str> = p.items.iter().map(|i| i.label.as_str()).collect();
+            assert_eq!(labels.first(), Some(&"Empty"), "Empty is the default");
+            assert!(labels.contains(&"Three-act"), "labels: {labels:?}");
+        }
+        _ => panic!("create should open the structure-template picker"),
+    }
+}
+
+#[test]
 fn creating_a_new_project_initializes_and_opens_it() {
     isolate("create");
     let parent = books_dir("create-parent");
@@ -383,6 +402,7 @@ fn creating_a_new_project_initializes_and_opens_it() {
     let mut app = open_app(&cur);
     let target = parent.join("Fresh Book");
     app.create_project_at(target.clone());
+    pick_template(&mut app, "Empty");
 
     assert!(
         Project::manifest_path(&target).exists(),
@@ -392,10 +412,54 @@ fn creating_a_new_project_initializes_and_opens_it() {
         app.project.manifest.title, "Fresh Book",
         "it becomes the active project"
     );
+    assert!(
+        app.project.manifest.parts.is_none(),
+        "the Empty template scaffolds no parts"
+    );
+    assert_eq!(
+        app.project.manifest.chapters.len(),
+        1,
+        "one blank starter chapter"
+    );
     let titles: Vec<String> = recent::list().into_iter().map(|r| r.title).collect();
     assert!(
         titles.contains(&"Fresh Book".to_string()),
         "it's added to recents: {titles:?}"
+    );
+}
+
+#[test]
+fn creating_with_the_three_act_template_scaffolds_the_skeleton() {
+    isolate("three-act");
+    let parent = books_dir("three-act-parent");
+    let cur = make_project("three-act-cur", "Current", "c\n");
+
+    let mut app = open_app(&cur);
+    let target = parent.join("Structured Book");
+    app.create_project_at(target.clone());
+    pick_template(&mut app, "Three-act");
+
+    assert_eq!(app.project.manifest.title, "Structured Book");
+    let parts = app
+        .project
+        .manifest
+        .parts
+        .as_ref()
+        .expect("the three-act template scaffolds parts");
+    assert_eq!(parts.len(), 3, "three acts");
+    assert_eq!(
+        parts[0].chapters[0], 1,
+        "the first part starts at chapter 1"
+    );
+    // The parts tile the chapters contiguously, ending at the last chapter.
+    let last = app.project.manifest.chapters.len();
+    assert_eq!(
+        parts[2].chapters[1], last,
+        "the last part ends at chapter {last}"
+    );
+    assert!(
+        last > 1,
+        "several titled chapter stubs were scaffolded, not one blank"
     );
 }
 
@@ -456,7 +520,8 @@ fn the_new_project_prompt_creates_and_opens_on_enter() {
     let mut app = open_app(&cur);
     app.prompt_new_project(parent.clone());
     type_str(&mut app, "Brand New");
-    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Enter)); // confirm the path → structure-template picker
+    pick_template(&mut app, "Empty");
 
     assert_eq!(app.project.manifest.title, "Brand New");
     assert!(Project::manifest_path(&parent.join("Brand New")).exists());

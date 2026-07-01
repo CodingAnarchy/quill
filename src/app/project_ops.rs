@@ -10,7 +10,7 @@ use crate::config::ProjectsConfig;
 use crate::mode::{
     Command, DirBrowser, DirEntry, Mode, Palette, PaletteItem, Pending, ProjectBrowser,
 };
-use crate::project::Project;
+use crate::project::{Project, ProjectTemplate, TEMPLATES};
 use crate::recent;
 
 use super::App;
@@ -309,28 +309,67 @@ impl App {
         self.open_prompt(Pending::NewProject, "New project — path: ", &prefill, None);
     }
 
-    /// Create a new project at `target` and open it in place. Refuses to clobber
-    /// an existing project, and surfaces a clear message on any failure rather
-    /// than crashing (#264/#273).
+    /// Offer a structure template for the new project at `target` (#611), then
+    /// create it. Refuses to clobber an existing project up front (so a bad path
+    /// reports before the picker), stashes the target, and opens a small picker of
+    /// the curated [`TEMPLATES`]; the selection routes to
+    /// [`Self::create_project_with_template`].
     pub(super) fn create_project_at(&mut self, target: PathBuf) {
-        // Offer the setup wizard only when the project was actually created and
-        // opened (#282), and the wizard isn't disabled.
-        if self.create_and_open(&target) && ProjectsConfig::load().wizard_enabled() {
+        if Project::manifest_path(&target).exists() {
+            self.message = Some(format!("A project already exists at {}", target.display()));
+            self.mode = self.editing_mode();
+            return;
+        }
+        self.pending_manage = Some(target);
+        let items = TEMPLATES
+            .iter()
+            .enumerate()
+            .map(|(i, t)| PaletteItem::new(t.name, t.desc, Command::NewProjectTemplate(i)))
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "New project — structure",
+            items,
+            selected: 0,
+            collapsed: Default::default(),
+        }));
+    }
+
+    /// Create the stashed new project (#611) with the template at `index`, then
+    /// open it in place. Offers the setup wizard only when the project was
+    /// actually created and opened (#282), and the wizard isn't disabled.
+    pub(super) fn create_project_with_template(&mut self, index: usize) {
+        let Some(target) = self.pending_manage.take() else {
+            self.mode = self.editing_mode();
+            return;
+        };
+        let template = ProjectTemplate::at(index);
+        if self.create_and_open_with_template(&target, template)
+            && ProjectsConfig::load().wizard_enabled()
+        {
             self.start_wizard();
         }
     }
 
-    /// Create a new project at `target` and switch to it in place. Returns whether
-    /// the switch landed (false if a project already exists there, creation fails,
-    /// or a save aborts the switch), with a clear message set on failure. Shared
-    /// by "new empty project" (#273) and "new project from notes" (#286).
+    /// Create a new empty project at `target` and switch to it in place. Returns
+    /// whether the switch landed (false if a project already exists there,
+    /// creation fails, or a save aborts the switch), with a clear message set on
+    /// failure. Shared by "new project from notes" (#286) and manuscript import
+    /// (#298), which scaffold their own content and so want the empty default.
     pub(crate) fn create_and_open(&mut self, target: &Path) -> bool {
+        self.create_and_open_with_template(target, ProjectTemplate::at(0))
+    }
+
+    /// Create a new project at `target` scaffolded from `template` (#611) and
+    /// switch to it in place. Returns whether the switch landed (false if a
+    /// project already exists there, creation fails, or a save aborts the switch),
+    /// with a clear message set on failure.
+    fn create_and_open_with_template(&mut self, target: &Path, template: &ProjectTemplate) -> bool {
         if Project::manifest_path(target).exists() {
             self.message = Some(format!("A project already exists at {}", target.display()));
             self.mode = self.editing_mode();
             return false;
         }
-        match Project::create(target) {
+        match Project::create_with_template(target, template) {
             // switch_to saves the current project, opens the new one, and records
             // it in recents — the same path a normal switch takes.
             Ok(_) => {

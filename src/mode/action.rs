@@ -129,6 +129,10 @@ pub(crate) enum Command {
     Portrait(PortraitChoice),
     /// Make the book at this index the active book (#329).
     SwitchBook(usize),
+    /// Create the pending new project (its path stashed in `App::pending_manage`)
+    /// with the structure template at this index in [`crate::project::TEMPLATES`]
+    /// (#611).
+    NewProjectTemplate(usize),
     /// Insert the author-defined snippet at this index in `App::snippets` (#411).
     InsertSnippet(usize),
     /// Open the role picker for the curated font family at this index in
