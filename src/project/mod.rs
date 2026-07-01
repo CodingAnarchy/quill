@@ -521,7 +521,7 @@ impl Project {
         let entry = ChapterEntry::new(format!("Chapter {n}"), format!("chapter-{n}.md"));
         let path = self.root.join(&entry.file);
         if !path.exists() {
-            fs::write(&path, "")?;
+            atomic::write(&path, b"")?;
         }
         self.active = entry.file.clone();
         self.manifest.chapters.push(entry);
