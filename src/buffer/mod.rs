@@ -130,6 +130,20 @@ impl Buffer {
         Ok(buffer)
     }
 
+    /// A buffer over file contents that came from somewhere other than the file at
+    /// `path` — a past commit's version of a chapter (#587). Splits off front matter
+    /// and points the buffer at `path` like [`from_path`](Self::from_path), but the
+    /// text is supplied rather than read, and the buffer is marked dirty: the
+    /// recovered version lands in the editor for review, and saving writes it out.
+    pub fn from_file_text(path: impl AsRef<Path>, text: &str) -> Self {
+        let (front, body) = crate::frontmatter::split(text);
+        let mut buffer = Self::from_text(body);
+        buffer.path = Some(with_default_extension(path.as_ref()));
+        buffer.front_matter = front.map(FrontMatter::from_raw);
+        buffer.dirty = true;
+        buffer
+    }
+
     /// The chapter's front matter, if any.
     pub fn front_matter(&self) -> Option<&FrontMatter> {
         self.front_matter.as_ref()

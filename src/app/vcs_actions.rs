@@ -128,9 +128,7 @@ impl App {
         match action {
             GitAction::Initialize => self.init_version_control(),
             GitAction::Commit => self.start_commit(),
-            GitAction::History => {
-                self.overlay = Some(Overlay::report("history", self.vc_log_lines()))
-            }
+            GitAction::History => self.open_history(),
             GitAction::Diff => self.show_diff(),
             GitAction::RestoreChapter => self.start_restore(),
             GitAction::SetRemote => self.start_set_remote(),
@@ -290,12 +288,7 @@ impl App {
 
     /// Restore the active chapter from HEAD and reload it into the editor.
     pub(crate) fn restore_chapter(&mut self) {
-        let path = self.project.active_path();
-        let rel = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_string();
+        let rel = self.active_chapter_rel();
         match crate::vcs::restore(&self.project.root, &rel) {
             Ok(true) => {
                 self.message = Some(match self.reload_active_chapter() {
@@ -311,15 +304,112 @@ impl App {
         }
     }
 
-    /// The commit-history rows for the read-only overlay (#133), newest first.
-    fn vc_log_lines(&self) -> Vec<Line<'static>> {
+    /// The active chapter's path relative to the repo root — the file name, since
+    /// chapters live at the project root. The handle the per-file version-control
+    /// operations (restore, diff/restore-from-a-commit) address.
+    fn active_chapter_rel(&self) -> String {
+        self.project
+            .active_path()
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Open the navigable commit-history view (#587). A read-only list until a
+    /// commit is chosen; from the selection the author diffs the current chapter
+    /// against it or restores that chapter to it. Falls back to a message when
+    /// there's nothing to browse (no commits yet, or the log can't be read).
+    fn open_history(&mut self) {
         match crate::vcs::log(&self.project.root, 200) {
-            Ok(commits) if commits.is_empty() => vec![Line::raw("No commits yet.")],
-            Ok(commits) => commits
-                .iter()
-                .map(|c| Line::raw(format!("{}  {}  {}", c.when, c.id, c.summary)))
-                .collect(),
-            Err(e) => vec![Line::raw(format!("Could not read history: {e}"))],
+            Ok(commits) if commits.is_empty() => {
+                self.message = Some("No commits yet.".into());
+            }
+            Ok(commits) => {
+                self.mode = Mode::History(Box::new(History {
+                    commits,
+                    selected: 0,
+                }));
+            }
+            Err(e) => self.message = Some(format!("Could not read history: {e}")),
+        }
+    }
+
+    /// Handle a key in the commit-history view (#587): arrows move the selection,
+    /// `d` diffs the current chapter against the selected commit, `r` restores the
+    /// chapter to it (into the editable buffer for review-and-save), Esc closes.
+    pub(crate) fn on_key_history(&mut self, key: KeyEvent) {
+        let Mode::History(history) = &mut self.mode else {
+            return;
+        };
+        let last = history.commits.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                history.selected = history.selected.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                history.selected = (history.selected + 1).min(last);
+            }
+            KeyCode::Char('d') => self.diff_against_selected_commit(),
+            KeyCode::Char('r') => self.restore_from_selected_commit(),
+            KeyCode::Esc => self.mode = self.editing_mode(),
+            _ => {}
+        }
+    }
+
+    /// The revision id of the commit selected in the history view, or `None` when
+    /// that view isn't open.
+    fn selected_commit_rev(&self) -> Option<String> {
+        match &self.mode {
+            Mode::History(h) => h.commits.get(h.selected).map(|c| c.rev.clone()),
+            _ => None,
+        }
+    }
+
+    /// Diff the current chapter against the selected commit (#587), showing the
+    /// unified patch in the read-only diff overlay (the same colorizer as the
+    /// working-tree "Changes" view). The history view stays open behind it.
+    fn diff_against_selected_commit(&mut self) {
+        let Some(rev) = self.selected_commit_rev() else {
+            return;
+        };
+        self.save_edit(); // diff against the latest edits, not the last-saved state
+        let rel = self.active_chapter_rel();
+        // `rev` → working tree: what changed in this chapter since that commit.
+        match crate::vcs::diff_file_to_worktree(&self.project.root, &rev, &rel) {
+            Ok(d) if d.trim().is_empty() => {
+                self.message = Some("This chapter is unchanged since that commit.".into());
+            }
+            Ok(d) => self.overlay = Some(Overlay::report("diff", diff_lines(&d))),
+            Err(e) => self.message = Some(format!("Diff failed: {e}")),
+        }
+    }
+
+    /// Restore the current chapter to the selected commit (#587) into the editable
+    /// buffer, matching the review-and-save semantics of the HEAD restore: the
+    /// recovered version loads into the editor, marked dirty, so the author reviews
+    /// it and saves (or discards) rather than the file changing underneath them.
+    fn restore_from_selected_commit(&mut self) {
+        let Some(rev) = self.selected_commit_rev() else {
+            return;
+        };
+        self.leave_continuous(); // restore operates on the single active chapter
+        let rel = self.active_chapter_rel();
+        match crate::vcs::show_file_at(&self.project.root, &rev, &rel) {
+            Ok(Some(text)) => {
+                let path = self.project.active_path();
+                self.buffer = Buffer::from_file_text(&path, &text);
+                self.cache_focus_words();
+                self.mode = self.editing_mode();
+                let short: String = rev.chars().take(7).collect();
+                self.message = Some(format!(
+                    "Restored from {short} — review and save to keep it."
+                ));
+            }
+            Ok(None) => {
+                self.message = Some("That commit has no version of this chapter.".into());
+            }
+            Err(e) => self.message = Some(format!("Restore failed: {e}")),
         }
     }
 

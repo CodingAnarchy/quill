@@ -25,8 +25,9 @@ mod list_overlay;
 mod overlay;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 use list_overlay::{
-    draw_annotations, draw_dir_browser, draw_findings, draw_list_overlay, draw_model_manager,
-    draw_palette, draw_project_browser, draw_project_search, list_row, marker, row_style,
+    draw_annotations, draw_dir_browser, draw_findings, draw_history, draw_list_overlay,
+    draw_model_manager, draw_palette, draw_project_browser, draw_project_search, list_row, marker,
+    row_style,
 };
 pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
 use overlay::{draw_bible_review, draw_overlay, draw_tree};
@@ -74,6 +75,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Mode::Findings(findings) => modal(frame, area, |f, r| {
             draw_findings(f, r, findings, &app.project)
         }),
+        Mode::History(history) => {
+            let chapter = app.project.active_title().unwrap_or("this chapter");
+            modal(frame, area, |f, r| draw_history(f, r, history, chapter))
+        }
         Mode::Annotations { selected } => {
             modal(frame, area, |f, r| draw_annotations(f, r, app, *selected))
         }

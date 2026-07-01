@@ -60,22 +60,110 @@ fn vc_status_reflects_uncommitted_changes() {
     assert!(app.vc_changes > 0, "dirty after a saved edit");
 }
 
+/// The commit summaries shown in the open history view, newest first.
+fn history_summaries(app: &App) -> Vec<String> {
+    match &app.mode {
+        Mode::History(h) => h.commits.iter().map(|c| c.summary.clone()).collect(),
+        _ => panic!("expected the history view to be open"),
+    }
+}
+
 #[test]
 fn git_palette_shows_commit_history() {
     let (mut app, _dir) = two_chapter_app("vc-log");
     git_menu(&mut app, 0); // Initialize
-    git_menu(&mut app, 1); // History — before any commit
-    assert!(overlay_text(&app).contains("No commits yet"));
-    app.on_key(key(KeyCode::Esc)); // close the overlay
+    git_menu(&mut app, 1); // History — before any commit: a message, no view
+    assert!(!matches!(app.mode, Mode::History(_)));
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("No commits yet"));
 
     git_menu(&mut app, 0); // Commit
     type_str(&mut app, "first draft");
     app.on_key(key(KeyCode::Enter));
 
-    git_menu(&mut app, 1); // History
+    git_menu(&mut app, 1); // History — now a navigable view
     assert!(
-        overlay_text(&app).contains("first draft"),
+        history_summaries(&app).contains(&"first draft".to_string()),
         "history lists the commit"
+    );
+    app.on_key(key(KeyCode::Esc)); // close it
+    assert!(!matches!(app.mode, Mode::History(_)));
+}
+
+#[test]
+fn history_diffs_the_chapter_against_a_chosen_commit() {
+    let (mut app, _dir) = two_chapter_app("vc-hist-diff");
+    git_menu(&mut app, 0); // Initialize
+
+    // Commit an original version of the active chapter (one.md).
+    type_str(&mut app, "The night was dark.");
+    app.on_key(ctrl('s'));
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "original");
+    app.on_key(key(KeyCode::Enter));
+
+    // Edit and save a newer version (the cursor sits after the committed text).
+    type_str(&mut app, " Then it was long.");
+    app.on_key(ctrl('s'));
+
+    // Open history, select the "original" commit, and diff.
+    git_menu(&mut app, 1); // History (newest first: [original])
+    app.on_key(key(KeyCode::Char('d')));
+    let diff = overlay_text(&app);
+    assert!(
+        diff.contains("+") && diff.contains("Then it was long"),
+        "the diff shows what changed since that commit: {diff}"
+    );
+}
+
+#[test]
+fn history_restores_the_chapter_from_a_chosen_commit() {
+    let (mut app, _dir) = two_chapter_app("vc-hist-restore");
+    git_menu(&mut app, 0); // Initialize
+
+    // First committed version of the active chapter.
+    type_str(&mut app, "The first draft.");
+    app.on_key(ctrl('s'));
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "draft one");
+    app.on_key(key(KeyCode::Enter));
+
+    // A second, different committed version.
+    type_str(&mut app, " Now revised.");
+    app.on_key(ctrl('s'));
+    git_menu(&mut app, 0); // Commit
+    type_str(&mut app, "draft two");
+    app.on_key(key(KeyCode::Enter));
+    assert!(
+        app.buffer.text().contains("Now revised"),
+        "the revision is live"
+    );
+
+    // Open history (newest first: [draft two, draft one]); pick the older commit.
+    git_menu(&mut app, 1); // History
+    app.on_key(key(KeyCode::Down)); // move to "draft one"
+    app.on_key(key(KeyCode::Char('r'))); // restore from it
+
+    // The older version is in the editable buffer (review-and-save), not written.
+    assert!(!matches!(app.mode, Mode::History(_)), "the view closed");
+    assert!(
+        app.buffer.text().contains("The first draft") && !app.buffer.text().contains("Now revised"),
+        "the older version loaded into the buffer: {:?}",
+        app.buffer.text()
+    );
+    assert!(
+        app.edit_dirty(),
+        "the recovered version is dirty, awaiting save"
+    );
+    // Unsaved: the file on disk still holds the newer, committed version.
+    assert!(
+        crate::vcs::show_file_at(&app.project.root, "HEAD", "one.md")
+            .unwrap()
+            .unwrap()
+            .contains("Now revised")
     );
 }
 

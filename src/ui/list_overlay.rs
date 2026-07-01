@@ -18,7 +18,8 @@ use ratatui::{
 };
 
 use crate::mode::{
-    DirBrowser, Findings, Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage,
+    DirBrowser, Findings, History, Palette, PaletteRow, ProjectBrowser, ProjectSearch,
+    ProjectSearchStage,
 };
 use crate::project::Project;
 
@@ -434,6 +435,33 @@ pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, 
         "Findings — ↑↓ move · enter jump · i mark xxx · d dismiss · esc close",
         rows,
         Some(findings.selected),
+    );
+}
+
+/// Render the commit history as a navigable list (#587): each row is a commit's
+/// date, short id, and summary. The selected commit is the one the diff / restore
+/// actions address.
+pub(super) fn draw_history(frame: &mut Frame, area: Rect, history: &History, chapter: &str) {
+    let title = format!(" History — {chapter} ");
+    let rows = history
+        .commits
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            list_row(
+                i == history.selected,
+                format!("{}  {}  {}", c.when, c.id, c.summary),
+                None,
+            )
+        })
+        .collect();
+    draw_list_overlay(
+        frame,
+        area,
+        &title,
+        "History — ↑↓ move · d diff this chapter · r restore this chapter · esc close",
+        rows,
+        Some(history.selected),
     );
 }
 

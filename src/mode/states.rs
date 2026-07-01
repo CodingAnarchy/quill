@@ -15,6 +15,15 @@ pub struct Findings {
     pub(crate) selected: usize,
 }
 
+/// State for the navigable commit-history view (#587): the commits (newest first)
+/// and the selected row. From the selected commit the author diffs the current
+/// chapter against it or restores that chapter to it. The list is captured when
+/// the view opens, so it's a stable target for the arrow keys.
+pub struct History {
+    pub(crate) commits: Vec<crate::vcs::CommitMeta>,
+    pub(crate) selected: usize,
+}
+
 /// One triageable finding (a continuity contradiction, style note, …). UI-shaped
 /// — the AI layer maps its typed findings into this for display.
 #[derive(Clone, PartialEq)]
