@@ -187,6 +187,66 @@ fn motions_do_not_panic_at_boundaries() {
 }
 
 #[test]
+fn word_motions_are_correct_past_the_scan_window() {
+    // Runs longer than one class window (#660) must still resolve correctly: the
+    // window doubles and rescans rather than stopping at its edge. Build a word
+    // and a whitespace run each far larger than CLASS_WINDOW (4 KiB).
+    let big = 10_000;
+    let text = format!("{}{}{}", "a".repeat(big), " ".repeat(big), "b".repeat(3));
+    let mut b = Buffer::from_text(&text);
+
+    // From the head of the giant word, `w` crosses the whole word *and* the whole
+    // whitespace run to reach "b" — a scan far past the initial window.
+    b.cursor = Cursor { line: 0, col: 0 };
+    b.move_word_forward();
+    assert_eq!(b.cursor_byte(), big * 2, "w reaches the far word start");
+
+    // `e` from the start lands on the last char of the giant word.
+    b.cursor = Cursor { line: 0, col: 0 };
+    b.move_word_end();
+    assert_eq!(b.cursor_byte(), big - 1, "e reaches the far word end");
+
+    // `b` from the far word walks back across the whitespace and the giant word.
+    b.cursor = Cursor {
+        line: 0,
+        col: big * 2,
+    };
+    b.move_word_backward();
+    assert_eq!(b.cursor_byte(), 0, "b reaches the far word start");
+
+    // `iw` on the giant word spans its full extent, not just the window.
+    b.cursor = Cursor {
+        line: 0,
+        col: big / 2,
+    };
+    assert_eq!(b.text_object(TextObject::Word, false), Some((0, big)));
+}
+
+#[test]
+fn bracket_object_spans_a_large_gap() {
+    // A pair whose delimiters straddle a large body must still match — the scan
+    // streams rope chars outward from the cursor rather than copying the buffer.
+    let inner = "x".repeat(10_000);
+    let text = format!("({inner})");
+    let b_len = text.len();
+    let mut b = Buffer::from_text(&text);
+    b.cursor = Cursor {
+        line: 0,
+        col: 5_000,
+    };
+    assert_eq!(
+        b.text_object(TextObject::Pair('(', ')'), false),
+        Some((1, b_len - 1)),
+        "i( spans the whole body"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Pair('(', ')'), true),
+        Some((0, b_len)),
+        "a( includes the parens"
+    );
+}
+
+#[test]
 fn round_trip_is_byte_identical_with_trailing_newline() {
     let path = temp_path("roundtrip.md");
     let original = "# Chapter One\n\nThe night was *dark* and **stormy**.\n";
@@ -435,6 +495,53 @@ fn reparse_is_fast_at_window_size() {
     println!("reparse on {words} words = {best:?} (best of 5)");
     assert!(best.as_millis() < 16, "reparse took {best:?}");
     fs::remove_file(&path).ok();
+}
+
+#[test]
+#[ignore]
+fn word_motion_is_decoupled_from_document_size() {
+    // A word motion scans a bounded window around the cursor (#660), not the
+    // whole rope, so its cost can't grow with the document. Before the fix each
+    // call copied the entire buffer to a `String`, so `w` at mid-document scaled
+    // with the document; now the same motion on a buffer 100× larger costs
+    // essentially the same. Compare a window-sized buffer against one far past
+    // the ~3-chapter cap; best-of-N to shed one-off noise, as elsewhere.
+    fn best_word_forward(text: &str) -> Duration {
+        let mut best = Duration::MAX;
+        for _ in 0..50 {
+            let mut b = Buffer::from_text(text);
+            b.cursor = Cursor {
+                line: b.line_count() / 2,
+                col: 0,
+            };
+            let t = Instant::now();
+            b.move_word_forward();
+            best = best.min(t.elapsed());
+        }
+        best
+    }
+
+    // Realistic prose (short lines, so line-length isn't the variable): a
+    // window-sized buffer vs. one ~100× larger.
+    let para = "The night was dark and the road was long indeed.\n".repeat(50);
+    let small = para.clone(); // ~2.5 KB, ~one screen
+    let big = para.repeat(100); // ~250 KB, far past the ~3-chapter cap
+
+    let small_dt = best_word_forward(&small);
+    let big_dt = best_word_forward(&big);
+    let ratio = big_dt.as_secs_f64() / small_dt.as_secs_f64().max(f64::MIN_POSITIVE);
+    println!(
+        "w: small={small_dt:?} big={big_dt:?} ({} bytes, {ratio:.1}×)",
+        big.len()
+    );
+
+    // The window is fixed-size, so the 100×-larger buffer's motion stays within a
+    // small constant of the small one — nowhere near the 100× the byte counts
+    // differ by. A copy-the-whole-rope regression would blow past this.
+    assert!(
+        ratio < 5.0,
+        "word motion scaled with document size (small={small_dt:?}, big={big_dt:?}, {ratio:.1}×)"
+    );
 }
 
 #[test]

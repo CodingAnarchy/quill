@@ -65,69 +65,120 @@ impl CharClass {
     }
 }
 
+/// Initial half-width (bytes) of the [`ClassWindow`] a word motion scans around
+/// the cursor before falling back to a wider window (#660). A word/whitespace run
+/// almost never exceeds this, so one window covers the walk without copying the
+/// whole rope; the doubling retry keeps a pathological run correct.
+const CLASS_WINDOW: usize = 4096;
+
+/// A bounded slice of `(absolute byte offset, character class)` graphemes around
+/// the cursor — the scan the word motions and `iw`/`aw` walk, without
+/// materializing the whole document (#660). `at_doc_start`/`at_doc_end` say
+/// whether the window's edges are the real document boundaries, so a walk that
+/// reaches an edge can tell "end of document" from "end of window".
+struct ClassWindow {
+    items: Vec<(usize, CharClass)>,
+    /// Grapheme index of the cursor within `items` (its length when the cursor
+    /// sits at or past the window's end).
+    cursor: usize,
+    doc_len: usize,
+    at_doc_start: bool,
+    at_doc_end: bool,
+}
+
+impl ClassWindow {
+    /// The class at grapheme index `i`, or `None` past the window's end.
+    fn class(&self, i: usize) -> Option<CharClass> {
+        self.items.get(i).map(|&(_, c)| c)
+    }
+
+    /// The byte offset at grapheme index `i`; the document length when `i` is
+    /// past the last grapheme (only ever called at a genuine `at_doc_end` edge).
+    fn byte_at(&self, i: usize) -> usize {
+        self.items.get(i).map_or(self.doc_len, |&(b, _)| b)
+    }
+}
+
 impl Buffer {
     /// Move to the start of the next word — Vim's `w`. A word is a run of
     /// word-characters or a run of punctuation; whitespace separates them. Spans
     /// line boundaries like Vim.
     pub fn move_word_forward(&mut self) {
-        let items = self.classes();
-        let mut i = self.grapheme_index(&items);
-        let Some(&(_, start)) = items.get(i) else {
-            return;
-        };
-        if start != CharClass::Space {
-            while items.get(i).is_some_and(|&(_, c)| c == start) {
+        let target = self.with_class_window(|w| {
+            let mut i = w.cursor;
+            if let Some(start) = w.class(i).filter(|&c| c != CharClass::Space) {
+                while w.class(i) == Some(start) {
+                    i += 1;
+                }
+            }
+            while w.class(i) == Some(CharClass::Space) {
                 i += 1;
             }
-        }
-        while items.get(i).is_some_and(|&(_, c)| c == CharClass::Space) {
-            i += 1;
-        }
-        let target = items
-            .get(i)
-            .map_or_else(|| self.rope.len_bytes(), |&(b, _)| b);
+            // Reached the window's forward edge with document still beyond it —
+            // widen and rescan so the walk isn't cut short.
+            if i >= w.items.len() && !w.at_doc_end {
+                return None;
+            }
+            Some(w.byte_at(i))
+        });
         self.cursor = self.cursor_at_byte(target);
         self.goal_x = None;
     }
 
     /// Move to the start of the current/previous word — Vim's `b`.
     pub fn move_word_backward(&mut self) {
-        let items = self.classes();
-        let cur = self.grapheme_index(&items);
-        if cur == 0 {
-            return;
-        }
-        let mut i = cur - 1;
-        while i > 0 && items[i].1 == CharClass::Space {
-            i -= 1;
-        }
-        if items[i].1 == CharClass::Space {
-            self.cursor = self.cursor_at_byte(items[0].0);
-            self.goal_x = None;
-            return;
-        }
-        let class = items[i].1;
-        while i > 0 && items[i - 1].1 == class {
-            i -= 1;
-        }
-        self.cursor = self.cursor_at_byte(items[i].0);
+        let Some(target) = self.with_class_window(|w| {
+            if w.cursor == 0 {
+                return if w.at_doc_start { Some(None) } else { None };
+            }
+            let mut i = w.cursor - 1;
+            while i > 0 && w.items[i].1 == CharClass::Space {
+                i -= 1;
+            }
+            if i == 0 && !w.at_doc_start {
+                return None; // the run (space or word) may extend before the window
+            }
+            if w.items[i].1 == CharClass::Space {
+                return Some(Some(w.items[0].0)); // i == 0 at genuine document start
+            }
+            let class = w.items[i].1;
+            while i > 0 && w.items[i - 1].1 == class {
+                i -= 1;
+            }
+            if i == 0 && !w.at_doc_start {
+                return None; // the word run may continue before the window
+            }
+            Some(Some(w.items[i].0))
+        }) else {
+            return; // already at the document start
+        };
+        self.cursor = self.cursor_at_byte(target);
         self.goal_x = None;
     }
 
     /// Move to the end of the next word — Vim's `e`.
     pub fn move_word_end(&mut self) {
-        let items = self.classes();
-        let mut i = self.grapheme_index(&items) + 1;
-        while items.get(i).is_some_and(|&(_, c)| c == CharClass::Space) {
-            i += 1;
-        }
-        let Some(&(_, class)) = items.get(i) else {
-            return;
+        let Some(target) = self.with_class_window(|w| {
+            let mut i = w.cursor + 1;
+            while w.class(i) == Some(CharClass::Space) {
+                i += 1;
+            }
+            let Some(class) = w.class(i) else {
+                // Nothing but whitespace ahead: if the document really ends here
+                // the cursor stays put, otherwise widen to look further.
+                return if w.at_doc_end { Some(None) } else { None };
+            };
+            while w.class(i + 1) == Some(class) {
+                i += 1;
+            }
+            if i + 1 >= w.items.len() && !w.at_doc_end {
+                return None; // the run may extend past the window
+            }
+            Some(Some(w.items[i].0))
+        }) else {
+            return; // nothing ahead — cursor unchanged
         };
-        while items.get(i + 1).is_some_and(|&(_, c)| c == class) {
-            i += 1;
-        }
-        self.cursor = self.cursor_at_byte(items[i].0);
+        self.cursor = self.cursor_at_byte(target);
         self.goal_x = None;
     }
 
@@ -162,23 +213,55 @@ impl Buffer {
         }
     }
 
-    /// The whole buffer as `(byte offset, character class)` per grapheme — the
-    /// scan the word motions walk.
-    fn classes(&self) -> Vec<(usize, CharClass)> {
-        let text = self.rope.to_string();
-        text.grapheme_indices(true)
-            .map(|(b, g)| (b, CharClass::of(g)))
-            .collect()
+    /// Run `f` against a [`ClassWindow`] centered on the cursor, widening the
+    /// window and retrying whenever `f` returns `None` (it reached a window edge
+    /// that isn't the real document boundary). Word motions only ever walk a
+    /// bounded distance, so the first window almost always suffices — this avoids
+    /// materializing the whole rope (#660) while staying byte-identical to a
+    /// full-document scan. The window doubles each retry; once it reaches the
+    /// buffer size [`class_window`](Self::class_window) clamps it to the whole
+    /// document, so a genuine boundary is always reached.
+    fn with_class_window<T>(&self, mut f: impl FnMut(&ClassWindow) -> Option<T>) -> T {
+        let mut radius = CLASS_WINDOW;
+        loop {
+            let window = self.class_window(radius);
+            let covers_all = window.at_doc_start && window.at_doc_end;
+            if let Some(out) = f(&window) {
+                return out;
+            }
+            // `f` asked for more but the window already spans the whole document
+            // — its edge *is* the boundary; force one final pass that accepts it.
+            debug_assert!(!covers_all, "window scan failed to terminate");
+            radius = radius.saturating_mul(2);
+        }
     }
 
-    /// Index into [`classes`](Self::classes) of the grapheme at the cursor (the
-    /// length when the cursor is at the very end).
-    fn grapheme_index(&self, items: &[(usize, CharClass)]) -> usize {
+    /// A `(byte offset, character class)` slice of the rope around the cursor:
+    /// `radius` bytes each side, snapped to grapheme boundaries. Byte offsets are
+    /// absolute so results map straight back to document positions.
+    fn class_window(&self, radius: usize) -> ClassWindow {
         let byte = self.cursor_byte();
-        items
+        let len = self.rope.len_bytes();
+        let lo = self.rope.byte_to_char(byte.saturating_sub(radius));
+        let lo = self.rope.char_to_byte(lo);
+        let hi = self.rope.byte_to_char((byte + radius).min(len));
+        let hi = self.rope.char_to_byte(hi);
+        let text = self.rope.byte_slice(lo..hi).to_string();
+        let items: Vec<(usize, CharClass)> = text
+            .grapheme_indices(true)
+            .map(|(b, g)| (lo + b, CharClass::of(g)))
+            .collect();
+        let cursor = items
             .iter()
             .position(|&(b, _)| b >= byte)
-            .unwrap_or(items.len())
+            .unwrap_or(items.len());
+        ClassWindow {
+            items,
+            cursor,
+            doc_len: len,
+            at_doc_start: lo == 0,
+            at_doc_end: hi == len,
+        }
     }
 
     /// The byte range of a text object around the cursor (#203) — `inner` is the
@@ -195,39 +278,50 @@ impl Buffer {
     /// `iw` / `aw`: the run of same-class graphemes under the cursor; `aw` also
     /// takes the trailing whitespace (or leading, when there's none trailing).
     fn word_object(&self, around: bool) -> Option<(usize, usize)> {
-        let items = self.classes();
-        if items.is_empty() {
-            return None;
-        }
-        let cur = self.grapheme_index(&items).min(items.len() - 1);
-        let class = items[cur].1;
-        let mut start = cur;
-        while start > 0 && items[start - 1].1 == class {
-            start -= 1;
-        }
-        let mut end = cur; // last grapheme index of the run
-        while end + 1 < items.len() && items[end + 1].1 == class {
-            end += 1;
-        }
-        let mut start_b = items[start].0;
-        let mut end_b = items
-            .get(end + 1)
-            .map_or_else(|| self.len_bytes(), |&(b, _)| b);
-        if around {
-            let mut e = end + 1;
-            if items.get(e).is_some_and(|&(_, c)| c == CharClass::Space) {
-                while items.get(e).is_some_and(|&(_, c)| c == CharClass::Space) {
-                    e += 1;
-                }
-                end_b = items.get(e).map_or_else(|| self.len_bytes(), |&(b, _)| b);
-            } else {
-                while start > 0 && items[start - 1].1 == CharClass::Space {
-                    start -= 1;
-                }
-                start_b = items[start].0;
+        self.with_class_window(|w| {
+            if w.items.is_empty() {
+                return Some(None);
             }
-        }
-        Some((start_b, end_b))
+            let cur = w.cursor.min(w.items.len() - 1);
+            let class = w.items[cur].1;
+            let mut start = cur;
+            while start > 0 && w.items[start - 1].1 == class {
+                start -= 1;
+            }
+            if start == 0 && !w.at_doc_start {
+                return None; // the run may reach before the window
+            }
+            let mut end = cur; // last grapheme index of the run
+            while end + 1 < w.items.len() && w.items[end + 1].1 == class {
+                end += 1;
+            }
+            if end + 1 >= w.items.len() && !w.at_doc_end {
+                return None; // the run may reach past the window
+            }
+            let mut start_b = w.items[start].0;
+            let mut end_b = w.byte_at(end + 1);
+            if around {
+                let mut e = end + 1;
+                if w.class(e) == Some(CharClass::Space) {
+                    while w.class(e) == Some(CharClass::Space) {
+                        e += 1;
+                    }
+                    if e >= w.items.len() && !w.at_doc_end {
+                        return None; // trailing whitespace may extend past the window
+                    }
+                    end_b = w.byte_at(e);
+                } else {
+                    while start > 0 && w.items[start - 1].1 == CharClass::Space {
+                        start -= 1;
+                    }
+                    if start == 0 && !w.at_doc_start {
+                        return None; // leading whitespace may extend before the window
+                    }
+                    start_b = w.items[start].0;
+                }
+            }
+            Some(Some((start_b, end_b)))
+        })
     }
 
     /// `i"` / `a"` (and `'`, `` ` ``): the text between the pair of quotes on the
@@ -255,17 +349,27 @@ impl Buffer {
     }
 
     /// `i(` / `a(` (and the other bracket pairs): the enclosing matched pair,
-    /// honoring nesting, searched across the whole buffer.
+    /// honoring nesting. Scans outward from the cursor by streaming rope
+    /// characters — never copying the whole buffer (#660) — stopping as soon as
+    /// the enclosing pair is found.
     fn pair_object(&self, open: char, close: char, around: bool) -> Option<(usize, usize)> {
-        let text = self.rope.to_string();
-        let cur = self.cursor_byte().min(text.len());
-        // Walk back to the unmatched open bracket enclosing the cursor.
+        let len = self.rope.len_bytes();
+        let cur = self.cursor_byte().min(len);
+        // Walk back to the unmatched open bracket enclosing the cursor. Position
+        // the iterator just past the cursor's own char so it is the first one
+        // `prev()` yields (mirroring the old inclusive `text[..=cur]` scan); a
+        // close bracket sitting exactly at the cursor doesn't count as nesting.
+        let start_char = if cur < len {
+            self.rope.byte_to_char(cur) + 1
+        } else {
+            self.rope.len_chars()
+        };
+        let mut chars = self.rope.chars_at(start_char);
+        let mut b = self.rope.char_to_byte(start_char);
         let mut depth = 0usize;
         let mut open_b = None;
-        for (b, ch) in text[..=cur.min(text.len().saturating_sub(1))]
-            .char_indices()
-            .rev()
-        {
+        while let Some(ch) = chars.prev() {
+            b -= ch.len_utf8();
             if ch == close && b != cur {
                 depth += 1;
             } else if ch == open {
@@ -278,10 +382,11 @@ impl Buffer {
         }
         let open_b = open_b?;
         // Walk forward to its matching close.
+        let mut b = open_b + open.len_utf8();
+        let chars = self.rope.chars_at(self.rope.byte_to_char(b));
         depth = 0;
         let mut close_b = None;
-        for (b, ch) in text[open_b + open.len_utf8()..].char_indices() {
-            let b = open_b + open.len_utf8() + b;
+        for ch in chars {
             if ch == open {
                 depth += 1;
             } else if ch == close {
@@ -291,6 +396,7 @@ impl Buffer {
                 }
                 depth -= 1;
             }
+            b += ch.len_utf8();
         }
         let close_b = close_b?;
         Some(if around {
