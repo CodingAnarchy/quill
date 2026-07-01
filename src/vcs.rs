@@ -110,17 +110,29 @@ impl Status {
 /// so it's cheap enough to refresh on idle, not per keystroke.
 pub fn status(root: &Path) -> Result<Status, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let changed = changed_paths(&repo)?;
+    Ok(Status { changed })
+}
+
+/// The non-ignored paths that differ from `HEAD` (added, modified, deleted, or
+/// untracked). Shared by [`status`] and the dirty-tree guard in [`pull`].
+fn changed_paths(repo: &git2::Repository) -> Result<Vec<PathBuf>, String> {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
     let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
-    let changed = statuses
+    Ok(statuses
         .iter()
         .filter(|e| !e.status().is_ignored())
         .filter_map(|e| e.path().map(PathBuf::from))
-        .collect();
-    Ok(Status { changed })
+        .collect())
+}
+
+/// Whether the working tree has uncommitted changes (added, modified, deleted, or
+/// untracked non-ignored files). The guard [`pull`] uses to avoid clobbering edits.
+fn is_dirty(repo: &git2::Repository) -> Result<bool, String> {
+    Ok(!changed_paths(repo)?.is_empty())
 }
 
 /// The working-tree diff against `HEAD` as a unified patch (added/modified/
@@ -350,10 +362,23 @@ pub fn push(root: &Path) -> Result<String, String> {
 
 /// Pull `origin`'s changes for the current branch (#134). Fast-forward only and
 /// non-destructive: if local and remote have diverged (each has commits the other
-/// lacks), it stops and explains rather than merging or resetting. The caller is
-/// expected to ensure the working tree is clean first. Returns a human message.
+/// lacks), it stops and explains rather than merging or resetting. Returns a human
+/// message.
+///
+/// A fast-forward finishes with a force checkout of the fetched tree, which would
+/// clobber uncommitted working-tree edits. Rather than trust the caller to keep the
+/// tree clean, `pull` refuses up front when the tree is dirty (#639) — so a
+/// save-but-don't-commit-then-pull can never silently discard the author's words.
 pub fn pull(root: &Path) -> Result<String, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+
+    // Guard against silent data loss: the fast-forward below force-checks-out the
+    // fetched tree, overwriting any uncommitted edits. Refuse before touching the
+    // network so the author commits (or restores) those changes first.
+    if is_dirty(&repo)? {
+        return Err(DIRTY_PULL.to_string());
+    }
+
     let branch = current_branch(&repo)?;
     let mut remote = repo
         .find_remote("origin")
@@ -404,6 +429,10 @@ pub fn pull(root: &Path) -> Result<String, String> {
 }
 
 const NO_REMOTE: &str = "No remote configured — set one first.";
+
+/// Shown when a pull is refused because the working tree has uncommitted edits a
+/// fast-forward checkout would overwrite (#639). Commit (or restore) them first.
+const DIRTY_PULL: &str = "You have uncommitted changes — commit them before pulling.";
 
 /// Shown when a push is refused because the remote has commits the local branch
 /// doesn't. The single source for this guidance — both the push error path
@@ -678,6 +707,96 @@ mod tests {
         commit(&a, "a-change").unwrap();
         let err = push(&a).unwrap_err();
         assert!(err.to_lowercase().contains("pull first"), "{err}");
+
+        fs::remove_dir_all(&a).ok();
+        fs::remove_dir_all(&b).ok();
+        fs::remove_dir_all(&remote).ok();
+    }
+
+    #[test]
+    fn pull_refuses_a_dirty_tree_and_preserves_edits() {
+        // #639: a save-but-don't-commit-then-pull must not silently discard the
+        // uncommitted edit. Set up a real fast-forward, then dirty the tree and
+        // confirm the pull is refused with the edit left intact on disk.
+        let remote = temp_dir("dirty-bare");
+        git2::Repository::init_bare(&remote).unwrap();
+        let url = remote.to_str().unwrap();
+
+        let a = temp_dir("dirty-a");
+        init(&a).unwrap();
+        fs::write(a.join("one.md"), "# One\n\nDraft.\n").unwrap();
+        commit(&a, "first").unwrap();
+        set_remote(&a, url).unwrap();
+        push(&a).unwrap();
+
+        // b clones, then a pushes a second commit so b has something to fast-forward.
+        let b = temp_dir("dirty-b");
+        fs::remove_dir_all(&b).ok();
+        git2::Repository::clone(url, &b).unwrap();
+        fs::write(a.join("one.md"), "# One\n\nRevised draft.\n").unwrap();
+        commit(&a, "second").unwrap();
+        push(&a).unwrap();
+
+        // The author saved an edit in b but hasn't committed. A pull would
+        // fast-forward and force-checkout, clobbering this — so it must refuse.
+        let uncommitted = "# One\n\nB's unsaved-to-git work.\n";
+        fs::write(b.join("one.md"), uncommitted).unwrap();
+        let err = pull(&b).unwrap_err();
+        assert!(
+            err.to_lowercase().contains("uncommitted"),
+            "refusal should name the uncommitted changes: {err}"
+        );
+        // The author's words are still on disk, untouched.
+        assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), uncommitted);
+
+        // After committing, the same pull fast-forwards exactly as before.
+        commit(&b, "keep-my-edit").unwrap();
+        // (b and the remote have diverged now, so it stops for merge — the point
+        // is only that the dirty-tree refusal is gone once the tree is clean.)
+        let outcome = pull(&b);
+        assert!(
+            outcome.is_err()
+                && !outcome
+                    .as_ref()
+                    .unwrap_err()
+                    .to_lowercase()
+                    .contains("uncommitted"),
+            "a clean tree gets past the dirty guard: {outcome:?}"
+        );
+
+        fs::remove_dir_all(&a).ok();
+        fs::remove_dir_all(&b).ok();
+        fs::remove_dir_all(&remote).ok();
+    }
+
+    #[test]
+    fn pull_fast_forwards_a_clean_tree() {
+        // The unchanged happy path: a clean working tree fast-forwards and the
+        // remote's changes land on disk (the dirty guard must not block this).
+        let remote = temp_dir("clean-bare");
+        git2::Repository::init_bare(&remote).unwrap();
+        let url = remote.to_str().unwrap();
+
+        let a = temp_dir("clean-a");
+        init(&a).unwrap();
+        fs::write(a.join("one.md"), "# One\n\nDraft.\n").unwrap();
+        commit(&a, "first").unwrap();
+        set_remote(&a, url).unwrap();
+        push(&a).unwrap();
+
+        let b = temp_dir("clean-b");
+        fs::remove_dir_all(&b).ok();
+        git2::Repository::clone(url, &b).unwrap();
+
+        fs::write(a.join("one.md"), "# One\n\nRevised draft.\n").unwrap();
+        commit(&a, "second").unwrap();
+        push(&a).unwrap();
+
+        let msg = pull(&b).unwrap();
+        assert!(msg.contains("Pulled"), "{msg}");
+        assert!(fs::read_to_string(b.join("one.md"))
+            .unwrap()
+            .contains("Revised"));
 
         fs::remove_dir_all(&a).ok();
         fs::remove_dir_all(&b).ok();
