@@ -400,6 +400,113 @@ fn continuity_with_no_findings_summarizes() {
     assert!(!matches!(app.mode, Mode::Findings(_)));
 }
 
+/// A continuity result with a single event of the given description and no
+/// findings — for the revise-delta tests, where a second pass rewrites the same
+/// clean (AI-written) timeline with different content.
+fn cont_event(description: &str) -> Continuity {
+    Continuity {
+        events: vec![continuity::Event {
+            description: description.into(),
+            chapter: "One".into(),
+            story_order: 1,
+        }],
+        findings: Vec::new(),
+    }
+}
+
+#[test]
+fn clean_revise_surfaces_the_delta() {
+    let (mut app, dir) = two_chapter_app("cont-delta");
+    // First pass establishes a clean, AI-written timeline (no findings).
+    app.apply_continuity(Ok(cont_event("alpha event")));
+    assert!(dir.join("bible/timeline.md").exists());
+
+    // A second pass rewrites the same file with different content. The file was
+    // AI-written (not hand-edited), so it's a clean write — and the author should
+    // see what changed (#607).
+    app.apply_continuity(Ok(cont_event("beta event")));
+    let panel = app
+        .overlay_lines()
+        .expect("a clean revise that changed the tracker opens the delta overlay");
+    let text: String = panel
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.starts_with("Updated timeline: +"),
+        "the panel leads with a `+N/-M` delta summary: {text:?}"
+    );
+    assert!(
+        text.contains("+- **One:** beta event") && text.contains("-- **One:** alpha event"),
+        "the diff shows the change from alpha to beta: {text:?}"
+    );
+}
+
+#[test]
+fn revise_with_findings_puts_the_delta_summary_in_the_message() {
+    let (mut app, _dir) = two_chapter_app("cont-delta-findings");
+    // A clean first pass, then a revise that both changes the tracker and
+    // surfaces a finding. Findings lead (the overlay), but the `+N/-M` summary
+    // rides the message line so the delta isn't lost.
+    app.apply_continuity(Ok(cont_event("alpha event")));
+    app.apply_continuity(Ok(Continuity {
+        events: vec![continuity::Event {
+            description: "beta event".into(),
+            chapter: "One".into(),
+            story_order: 1,
+        }],
+        findings: vec![continuity::Finding {
+            kind: "object".into(),
+            detail: "the locket changes color".into(),
+            chapters: vec!["One".into()],
+        }],
+    }));
+    assert!(
+        matches!(app.mode, Mode::Findings(_)),
+        "findings still lead the review"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("Updated timeline: +"),
+        "the delta summary rides the message line: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn no_change_revise_shows_no_delta() {
+    let (mut app, _dir) = two_chapter_app("cont-nodelta");
+    app.apply_continuity(Ok(cont_event("alpha event")));
+
+    // Re-run the identical pass: the file is unchanged, so there's no delta to
+    // show — the historic clean-write summary, not a diff.
+    app.apply_continuity(Ok(cont_event("alpha event")));
+    let text = app
+        .overlay_lines()
+        .expect("the clean-write summary still shows")
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !text.contains("Updated") && !text.contains("+beta"),
+        "a no-change write surfaces no delta: {text:?}"
+    );
+}
+
 #[test]
 fn findings_dismiss_removes_and_closes_when_empty() {
     let (mut app, _dir) = two_chapter_app("cont-dismiss");
