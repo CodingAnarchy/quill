@@ -129,28 +129,33 @@ pub fn to_pdf_series(
 }
 
 /// Compile a [`Document`] to a print-ready interior PDF (#464) at the given trim
-/// (points): mirrored margins + gutter, running heads, recto starts, embedded fonts,
-/// honoring the designed `[style]` (#489).
+/// (points) with a `bleed` allowance (#652, points; `0` for none): mirrored margins +
+/// gutter, running heads, recto starts, embedded fonts, honoring the designed
+/// `[style]` (#489). A non-zero bleed enlarges the media box and lets the cover fill
+/// past the trim edge; body margins are unchanged.
 pub fn to_pdf_print(
     doc: &Document,
     trim_w: f32,
     trim_h: f32,
+    bleed: f32,
     style: &ExportStyle,
 ) -> std::io::Result<Vec<u8>> {
     Ok(render_book(
         doc,
         style,
-        Layout::print(trim_w, trim_h, style),
+        Layout::print(trim_w, trim_h, bleed, style),
     ))
 }
 
-/// Compile a whole series to one print-ready interior PDF (#464).
+/// Compile a whole series to one print-ready interior PDF (#464), with a `bleed`
+/// allowance (#652, points; `0` for none).
 pub fn to_pdf_series_print(
     books: &[Document],
     series: Option<&str>,
     author: Option<&str>,
     trim_w: f32,
     trim_h: f32,
+    bleed: f32,
     style: &ExportStyle,
 ) -> std::io::Result<Vec<u8>> {
     Ok(render_series(
@@ -158,7 +163,7 @@ pub fn to_pdf_series_print(
         series,
         author,
         style,
-        Layout::print(trim_w, trim_h, style),
+        Layout::print(trim_w, trim_h, bleed, style),
     ))
 }
 
@@ -528,9 +533,12 @@ impl Pdf {
     }
 
     /// The book cover (#582), when a cover image is configured: a full-page page 0
-    /// holding the cover image, scaled to fill the page (aspect preserved) and
-    /// centered. The page carries no running head or folio. No-op when no cover is
-    /// set, leaving the output unchanged.
+    /// holding the cover image, scaled to cover the whole media box — the trim plus any
+    /// bleed allowance (#652) — with the aspect ratio preserved and centered, so
+    /// full-bleed art reaches the page edge with no white border (POD needs this).
+    /// Overflow past the media box is cropped by the page (`clip_media` clips the
+    /// content to the media box). The page carries no running head or folio. No-op when
+    /// no cover is set, leaving the output unchanged.
     fn cover_page(&mut self) {
         let Some((name, w, h)) = self
             .image(ImageRole::Cover)
@@ -541,14 +549,19 @@ impl Pdf {
         self.start_page();
         // No running head or folio on the cover.
         self.meta.last_mut().unwrap().blank = true;
-        let (page_w, page_h) = (self.layout.page_w, self.layout.page_h);
-        // Scale to fill the whole page, keeping the aspect ratio, and center.
-        let scale = (page_w / w).min(page_h / h);
+        let (page_w, page_h) = (self.layout.media_w(), self.layout.media_h());
+        // Scale to cover the whole media box (bleed included), keeping the aspect ratio,
+        // and center; overflow is cropped so there's no white margin at the trim edge.
+        let scale = (page_w / w).max(page_h / h);
         let (dw, dh) = (w * scale, h * scale);
         let x = (page_w - dw) / 2.0;
         let y = (page_h - dh) / 2.0;
+        // Clip to the media box so cover-fill overflow (a differing aspect ratio) is
+        // cropped at the page edge rather than spilling past it.
         self.cur().push_str(&format!(
-            "q {} 0 0 {} {} {} cm /{name} Do Q\n",
+            "q 0 0 {} {} re W n {} 0 0 {} {} {} cm /{name} Do Q\n",
+            num(page_w),
+            num(page_h),
             num(dw),
             num(dh),
             num(x),
@@ -577,7 +590,7 @@ impl Pdf {
                 BODY_LEADING * 2.0,
             );
         } else {
-            self.y = self.layout.page_h * 0.62;
+            self.y = self.layout.trim_y(0.62);
         }
         if let Some(s) = series {
             self.centered(s, false, false, false, BODY_SIZE, BODY_LEADING * 2.0);
@@ -630,7 +643,7 @@ impl Pdf {
         }
         self.open_section();
         // Set the block low on the page, the conventional copyright-page placement.
-        self.y = self.layout.page_h * 0.3;
+        self.y = self.layout.trim_y(0.3);
         for line in lines {
             self.centered(&line, false, false, false, EPIGRAPH_SIZE, EPIGRAPH_LEADING);
         }
@@ -773,7 +786,7 @@ impl Pdf {
         align: Align,
     ) -> usize {
         let page = self.open_section();
-        self.y = self.layout.page_h * 0.5;
+        self.y = self.layout.trim_y(0.5);
         self.heading_line(title, size, size * 1.4, align);
         if let Some(o) = ornament.filter(|o| self.layout.renders(o)) {
             self.centered(o, false, false, false, HEADING_SIZE, BODY_LEADING);
@@ -998,7 +1011,7 @@ impl Pdf {
             } else {
                 left + (col - w) / 2.0
             };
-            s.push_str(&self.text_op(x, self.layout.text_bottom() * 0.5, &label, size));
+            s.push_str(&self.text_op(x, self.layout.folio_baseline(), &label, size));
         }
         // Running head, print only, off the title and section-opening pages.
         if self.layout.running_heads && i > 0 && !m.opener {
@@ -1008,7 +1021,7 @@ impl Pdf {
                     .layout
                     .measure(head, HEAD_SIZE, FontStyle::REGULAR, false);
                 let x = left + (col - w) / 2.0;
-                let y = self.layout.page_h - self.layout.margin_top * 0.5;
+                let y = self.layout.head_baseline();
                 s.push_str(&self.text_op(x, y, head, HEAD_SIZE));
             }
         }
@@ -1056,7 +1069,7 @@ impl Pdf {
             3,
             &mut next,
             &page_obj,
-            self.layout.page_h,
+            self.layout.media_h(),
             &mut objects,
             &mut item_count,
         );
@@ -1083,8 +1096,8 @@ impl Pdf {
             2,
             format!(
                 "<< /Type /Pages /Kids [ {kids}] /Count {n_pages} /MediaBox [0 0 {} {}] {resources} >>",
-                num(self.layout.page_w),
-                num(self.layout.page_h)
+                num(self.layout.media_w()),
+                num(self.layout.media_h())
             )
             .into_bytes(),
         );

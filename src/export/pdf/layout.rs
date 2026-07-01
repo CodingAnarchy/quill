@@ -17,11 +17,26 @@ pub const DEFAULT_TRIM: &str = "6x9";
 pub const TRIM_NAMES: [&str; 3] = ["6x9", "5x8", "5.5x8.5"];
 
 /// Opt-in print-interior settings (#464), read from the manifest `[print]` table.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct PrintConfig {
     /// The book trim size, e.g. `"6x9"` (see [`trim_points`]). Absent → 6×9.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trim: Option<String>,
+    /// The bleed allowance in inches (#652) — how far full-bleed art (the cover,
+    /// full-page images) extends past the trim edge for print-on-demand. POD services
+    /// (KDP/IngramSpark) want 0.125" on anything meant to reach the page edge. Absent
+    /// or `0` → no bleed (the media box is exactly the trim), leaving today's output
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bleed: Option<f32>,
+}
+
+impl PrintConfig {
+    /// The configured bleed in PDF points (1/72"), clamped to non-negative; `0` when
+    /// unset. Screen exports never call this — bleed is a print-only allowance.
+    pub fn bleed_points(&self) -> f32 {
+        (self.bleed.unwrap_or(0.0) * 72.0).max(0.0)
+    }
 }
 
 /// A named trim size in PDF points (1/72"), or `None` if unrecognized.
@@ -38,8 +53,16 @@ pub fn trim_points(name: &str) -> Option<(f32, f32)> {
 /// The page geometry and font plan of one render — the only difference between the
 /// screen and print profiles.
 pub(super) struct Layout {
+    /// The trim width/height — the finished page the reader holds. Content margins are
+    /// measured from the trim, not the (possibly larger) media box.
     pub(super) page_w: f32,
     pub(super) page_h: f32,
+    /// The bleed allowance (#652), in points, added to every side of the media box so
+    /// full-bleed art can extend past the trim. `0` for the screen profile and for a
+    /// print export with no `[print] bleed`, leaving the media box exactly the trim.
+    /// The trim rectangle is then inset by `bleed` within the media box, so all
+    /// trim-relative content (text, folios, running heads) is offset by `bleed`.
+    pub(super) bleed: f32,
     pub(super) margin_top: f32,
     pub(super) margin_bottom: f32,
     /// The binding-side and outer margins. Equal for the screen profile; mirrored
@@ -64,6 +87,7 @@ impl Layout {
         Layout {
             page_w: 612.0,
             page_h: 792.0,
+            bleed: 0.0,
             margin_top: 72.0,
             margin_bottom: 72.0,
             margin_inside: 72.0,
@@ -75,14 +99,17 @@ impl Layout {
         }
     }
 
-    /// The print interior (#464) at `trim_w`×`trim_h` points: generous top/bottom
-    /// margins, a wider binding (inside) margin than outside for the gutter, with
-    /// running heads, recto starts, and embedded fonts. Margins clear KDP's minimums
-    /// for a typical book.
-    pub(super) fn print(trim_w: f32, trim_h: f32, style: &ExportStyle) -> Self {
+    /// The print interior (#464) at `trim_w`×`trim_h` points, with a `bleed` allowance
+    /// (#652, points; `0` for none): generous top/bottom margins, a wider binding
+    /// (inside) margin than outside for the gutter, with running heads, recto starts,
+    /// and embedded fonts. Margins clear KDP's minimums for a typical book. Margins are
+    /// measured from the trim; the bleed only enlarges the media box so full-bleed art
+    /// can run past the trim edge.
+    pub(super) fn print(trim_w: f32, trim_h: f32, bleed: f32, style: &ExportStyle) -> Self {
         Layout {
             page_w: trim_w,
             page_h: trim_h,
+            bleed,
             margin_top: 54.0,     // 0.75"
             margin_bottom: 54.0,  // 0.75"
             margin_inside: 63.0,  // 0.875" (0.5" outside + 0.375" gutter)
@@ -94,27 +121,62 @@ impl Layout {
         }
     }
 
+    /// The media-box width — the trim plus a bleed allowance on each side (#652). Equal
+    /// to the trim when there's no bleed. This is the `/MediaBox` the page tree records.
+    pub(super) fn media_w(&self) -> f32 {
+        self.page_w + 2.0 * self.bleed
+    }
+
+    /// The media-box height — the trim plus a bleed allowance on each side (#652).
+    pub(super) fn media_h(&self) -> f32 {
+        self.page_h + 2.0 * self.bleed
+    }
+
     pub(super) fn text_top(&self) -> f32 {
-        self.page_h - self.margin_top
+        // The trim sits inset by `bleed` within the media box, so a trim-relative y is
+        // offset up by the bleed of the bottom edge.
+        self.bleed + self.page_h - self.margin_top
     }
 
     pub(super) fn text_bottom(&self) -> f32 {
-        self.margin_bottom
+        self.bleed + self.margin_bottom
     }
 
     pub(super) fn text_w(&self) -> f32 {
         self.page_w - self.margin_inside - self.margin_outside
     }
 
+    /// A y-coordinate `frac` of the way up the trim page, mapped into media-box space
+    /// (#652) — the trim is inset by `bleed`, so this offsets by the bottom bleed. Used
+    /// for the fractional placements (title block, copyright, divider) that measure from
+    /// the trim, not the media box. With no bleed this is just `frac * page_h`.
+    pub(super) fn trim_y(&self, frac: f32) -> f32 {
+        self.bleed + self.page_h * frac
+    }
+
+    /// The y-baseline of the running head, in media-box space (#652): trim-relative,
+    /// half a top margin down from the trim's top edge.
+    pub(super) fn head_baseline(&self) -> f32 {
+        self.bleed + self.page_h - self.margin_top * 0.5
+    }
+
+    /// The y-baseline of the folio, in media-box space (#652): trim-relative, centered
+    /// in the bottom margin.
+    pub(super) fn folio_baseline(&self) -> f32 {
+        self.bleed + self.margin_bottom * 0.5
+    }
+
     /// The left edge of the text column on page `idx`. Recto pages are even (page 1
     /// is the first, a recto); on a mirrored layout the binding (inside) margin sits
-    /// on the left of a recto and the right of a verso.
+    /// on the left of a recto and the right of a verso. Offset by the bleed of the
+    /// media box's left edge (#652), so the column stays trim-relative.
     pub(super) fn left(&self, idx: usize) -> f32 {
-        if self.mirrored && idx % 2 == 1 {
+        let margin = if self.mirrored && idx % 2 == 1 {
             self.margin_outside
         } else {
             self.margin_inside
-        }
+        };
+        self.bleed + margin
     }
 
     /// The rendered width of `text` at `size` for the `style` face (body, or the
