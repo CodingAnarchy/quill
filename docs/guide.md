@@ -155,6 +155,21 @@ editor, chapter list, and reports follow the book you pick, and the chapter
 you're leaving is saved first. A standalone novel is just a one-book project, so
 the command says there's only one book.
 
+To build a series in the first place, run "Manage books (series)…" from the
+Ctrl-K menu (the "book:manage" action). On a standalone novel it offers to start
+a series: name the series (blank uses the current book's title), and the book you
+have becomes book one — then it prompts for the second book's title straight
+away, since a series only earns its keep with more than one book. Each book you
+add starts with an empty chapter and becomes the active book. On a project that's
+already a series, "Manage books" lists every book with entries to switch to it,
+move it up or down in reading order, remove it, or add another. Removing a book
+is confirmed first and never deletes your work — its chapter files move to the
+project's `unused/` folder, the same as removing a chapter — and the active book
+stays consistent (removing the one you're in drops you into a neighbour).
+Reordering only changes the book order in the series; no files move. Every change
+is written to the `[[books]]` manifest in `book.toml`, so hand-editing it still
+works and round-trips.
+
 "Project tree" (also in the Ctrl-K menu) opens a navigator for the whole
 project: the series, its books, their parts, and their chapters, as an indented
 tree with a word count at every level. Arrow keys move; → expands a book and ←

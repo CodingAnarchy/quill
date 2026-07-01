@@ -122,6 +122,90 @@ fn the_book_switcher_lists_every_book_with_the_active_one_marked() {
     assert!(p.items[1].label.contains("Book Two") && !p.items[1].label.contains("current"));
 }
 
+// --- Series management: create / add / remove / reorder (#648) ---------------
+
+/// Converting a standalone novel to a series in-app (#648): the convert prompt
+/// writes the series and chains to the add-a-book prompt, and the second book
+/// then appears in the switcher.
+#[test]
+fn convert_and_add_a_book_in_app() {
+    let (mut app, _dir) = two_chapter_app("convert");
+    assert_eq!(app.project.book_count(), 1);
+
+    // Convert: blank uses the current book title as the series name; this chains
+    // straight into the add-a-book prompt.
+    app.start_convert_to_series();
+    app.convert_to_series("The Saga");
+    assert_eq!(app.project.book_count(), 1);
+    assert_eq!(app.project.series_title(), Some("The Saga"));
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::AddBook)),
+        "convert chains into the add-a-book prompt"
+    );
+
+    // Add the second book: it becomes active and shows in the switcher.
+    app.add_book("Book Two");
+    assert_eq!(app.project.book_count(), 2);
+    assert_eq!(app.project.active_book(), 1);
+    assert!(
+        app.buffer.text().is_empty(),
+        "opened the new book's starter chapter"
+    );
+
+    app.open_book_switcher();
+    let Mode::Palette(p) = &app.mode else {
+        panic!("expected the book palette")
+    };
+    assert_eq!(p.items.len(), 2);
+    assert!(p.items[1].label.contains("Book Two") && p.items[1].label.contains("current"));
+}
+
+/// The manage-books palette (#648) lists each book with remove / move / add
+/// entries; removing a book (confirmed) drops it from the switcher, and its
+/// chapters are retired to `unused/`.
+#[test]
+fn manage_books_removes_a_book() {
+    let (mut app, dir) = series_app("manage-remove");
+    app.open_manage_books();
+    assert!(
+        matches!(app.mode, Mode::Palette(_)),
+        "manage-books opens a palette"
+    );
+
+    // Remove the inactive second book through the confirm flow.
+    app.confirm_remove_book(1);
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmRemoveBook { index: 1 })),
+        "remove opens a confirm"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+    assert_eq!(app.project.book_count(), 1);
+    assert!(dir.join("unused").join("one.md").exists());
+
+    // The switcher now reports a single book.
+    app.open_book_switcher();
+    assert!(
+        !matches!(app.mode, Mode::Palette(_)),
+        "one book left — no switcher"
+    );
+}
+
+/// Reordering books in-app (#648) swaps their series order and re-opens the
+/// manage palette so the new order is visible; the switcher reflects it.
+#[test]
+fn manage_books_reorders() {
+    let (mut app, _dir) = series_app("manage-reorder");
+    // Move Book One (index 0) down.
+    app.move_book(0, false);
+    assert_eq!(app.project.book_title(0), Some("Book Two"));
+    assert_eq!(app.project.book_title(1), Some("Book One"));
+    // The palette re-opened with the new order.
+    let Mode::Palette(p) = &app.mode else {
+        panic!("manage palette re-opens after a move")
+    };
+    assert!(p.items[0].label.contains("Book Two"));
+}
+
 // --- Tree navigator (#330) --------------------------------------------------
 
 /// The visible tree row labels, indent-prefixed, with the `· N w` count suffix
