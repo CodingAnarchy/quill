@@ -130,6 +130,17 @@ pub struct App {
     /// beside `routed_backend` when routing on-device and consumed by
     /// `backend_spec`. `None` ⇒ the single hardware-recommended model.
     routed_model: std::cell::Cell<Option<&'static ai::model_select::Model>>,
+    /// A one-line notice the worker sets when a routed-local request couldn't
+    /// obtain its model (download/init failed) and fell back to Claude (#725), so
+    /// the fallback is never silent. Shared with the worker thread; read and
+    /// cleared by `poll_ai` when the outcome lands.
+    ai_routing_notice: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    /// Test-only override for "is a usable local model on disk?" (#725), so the
+    /// hermetic routing tests can exercise the not-downloaded / downloaded paths
+    /// without touching the real `hf-hub` cache or the network. `None` in
+    /// production (the real cache probe is used).
+    #[cfg(test)]
+    pub(crate) test_local_present: Option<bool>,
     /// Inline author annotations (#302) for the active chapter, as live buffer
     /// ranges (sorted by start). Loaded when the chapter changes and re-anchored
     /// on the idle tick; empty in the continuous view. The chapter `.md` never
@@ -409,6 +420,9 @@ impl App {
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
+            ai_routing_notice: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(test)]
+            test_local_present: None,
             annotations,
             annotations_context,
             anno_undo: std::collections::VecDeque::new(),

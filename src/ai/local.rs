@@ -50,19 +50,29 @@ impl LocalBackend {
         Ok((backend, rec))
     }
 
+    /// The Qwen this machine would load when no model set is configured — the
+    /// hardware recommendation, resolved *without downloading anything* (#725). The
+    /// router uses it to ask "is a usable local model actually on disk?" before it
+    /// routes a pass on-device, so an AI pass never triggers an implicit fetch.
+    /// `None` when the machine is too small for even the smallest model.
+    pub fn recommended_model() -> Option<&'static model_select::Model> {
+        let (ram_gb, accel) = detect_hardware();
+        model_select::recommend(ram_gb, accel).model
+    }
+
     /// Download (cached, resumable via `hf-hub`) and load a specific Qwen — the
     /// model the router picked from the author's configured set (#377). Shared
     /// with [`recommended`], which chooses the model from the hardware first.
     pub fn for_model(model: &model_select::Model) -> Result<Self, AiError> {
-        let hub = hf_hub::api::sync::Api::new().map_err(|e| internal(format!("hf-hub: {e}")))?;
+        let hub = hf_hub::api::sync::Api::new().map_err(|e| download_error(model, e))?;
         let gguf = hub
             .model(model.gguf_repo.to_string())
             .get(model.gguf_file)
-            .map_err(|e| internal(format!("download {}: {e}", model.gguf_file)))?;
+            .map_err(|e| download_error(model, e))?;
         let tokenizer = hub
             .model(model.tokenizer_repo.to_string())
             .get("tokenizer.json")
-            .map_err(|e| internal(format!("download tokenizer: {e}")))?;
+            .map_err(|e| download_error(model, e))?;
         Self::load(
             gguf.to_str().unwrap_or_default(),
             tokenizer.to_str().unwrap_or_default(),
@@ -291,6 +301,20 @@ fn rank_desc(logits: &[f32]) -> Vec<u32> {
 
 fn internal(msg: String) -> AiError {
     AiError::Internal(msg)
+}
+
+/// An actionable error when a local model can't be fetched from HuggingFace
+/// (#725): name the model and how to fix it (download it deliberately, or route
+/// to Claude), rather than surfacing a bare `hf-hub` string. The underlying cause
+/// is appended so a genuine failure (offline, disk full) is still diagnosable.
+fn download_error(model: &model_select::Model, cause: impl std::fmt::Display) -> AiError {
+    AiError::NotConfigured(format!(
+        "couldn't obtain the local model Qwen2.5-{} (~{:.1} GB) — download it from \
+         \"Local AI models\" (Ctrl-K) while online, or set `backend = \"claude\"` / adjust \
+         `[ai] routing`. ({cause})",
+        model.id(),
+        model.size_gb,
+    ))
 }
 
 #[cfg(test)]

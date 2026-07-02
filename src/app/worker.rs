@@ -26,6 +26,15 @@ pub(super) fn model_downloaded(_model: &ai::model_select::Model) -> bool {
     false
 }
 
+/// The single hardware-recommended model this machine would load when no set is
+/// configured (#725) — resolved without downloading, so the router's "is a usable
+/// local model on disk?" gate can consider it. `None` when the machine is too
+/// small for any model.
+#[cfg(feature = "local")]
+pub(super) fn recommended_model() -> Option<&'static ai::model_select::Model> {
+    ai::local::LocalBackend::recommended_model()
+}
+
 /// Fetch `model`'s GGUF + tokenizer into the `hf-hub` cache (#382), without
 /// loading it — the explicit "download now" the manager offers (resumable, cached
 /// outside the project). Run on a worker thread.
@@ -70,19 +79,65 @@ pub(super) enum BackendSpec {
     Claude(String),
     /// The local backend, sharing `App`'s per-model cache so a loaded model is
     /// reused across requests. The `Model` (#377) is the one the router picked, or
-    /// `None` to load the single hardware-recommended model.
-    Local(
-        Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
-        Option<&'static ai::model_select::Model>,
-    ),
+    /// `None` to load the single hardware-recommended model. `fallback` carries the
+    /// Claude API key to fall back to (#725) when the local model can't be obtained
+    /// (download/init fails) — `None` when Claude isn't ready, so the local error
+    /// surfaces as-is (still actionable). `notice` is the shared slot the fallback
+    /// writes so the switch to Claude is never silent.
+    Local {
+        slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
+        model: Option<&'static ai::model_select::Model>,
+        fallback: Option<String>,
+        notice: Arc<Mutex<Option<String>>>,
+    },
 }
 
 impl BackendSpec {
-    /// Build (or fetch the cached) backend. Runs on the worker thread.
+    /// A local spec with no Claude fallback and a throwaway notice slot — for the
+    /// callers that don't route (the assistant, image passes), where a local build
+    /// error should just surface.
+    pub(super) fn local(
+        slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
+        model: Option<&'static ai::model_select::Model>,
+    ) -> Self {
+        BackendSpec::Local {
+            slot,
+            model,
+            fallback: None,
+            notice: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Build (or fetch the cached) backend. Runs on the worker thread. When a
+    /// routed-local build fails and a Claude `fallback` is available, it builds
+    /// Claude instead and records why in `notice` (#725), turning a routing
+    /// decision into graceful degradation rather than a hard failure.
     pub(super) fn build(self) -> Result<Arc<dyn Backend>, ai::AiError> {
         match self {
             BackendSpec::Claude(key) => Ok(Arc::new(ClaudeBackend::new(key))),
-            BackendSpec::Local(slot, model) => build_local(slot, model),
+            BackendSpec::Local {
+                slot,
+                model,
+                fallback,
+                notice,
+            } => match build_local(slot, model) {
+                Ok(backend) => Ok(backend),
+                Err(local_err) => match fallback {
+                    Some(key) => {
+                        if let Ok(mut slot) = notice.lock() {
+                            *slot = Some(
+                                "Local model isn't available — ran on Claude instead. \
+                                 Download it from \"Local AI models\" (Ctrl-K) to run on-device."
+                                    .to_string(),
+                            );
+                        }
+                        Ok(Arc::new(ClaudeBackend::new(key)))
+                    }
+                    // No fallback (Claude not ready): surface the actionable local
+                    // error (which names the model and how to fix it, #725).
+                    None => Err(local_err),
+                },
+            },
         }
     }
 }
@@ -654,7 +709,7 @@ impl App {
                     .ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
                 BackendSpec::Claude(key.to_string())
             }
-            ai::BackendKind::Local => BackendSpec::Local(self.local_backend.clone(), model),
+            ai::BackendKind::Local => BackendSpec::local(self.local_backend.clone(), model),
         })
     }
 
@@ -664,14 +719,38 @@ impl App {
     /// one-shots are consumed every call so a choice never leaks into a later
     /// request, and the in-flight indicator is set once a spec resolves.
     pub(super) fn backend_spec(&self) -> Result<BackendSpec, ai::AiError> {
-        let chosen = self
-            .routed_backend
-            .take()
-            .unwrap_or_else(|| self.ai.backend());
+        let routed = self.routed_backend.take();
+        let chosen = routed.unwrap_or_else(|| self.ai.backend());
         let model = self.routed_model.take();
-        let spec = self.build_spec(chosen, model)?;
+        let mut spec = self.build_spec(chosen, model)?;
+        // When the *router* (not the offline pin) sent this pass on-device and
+        // Claude is ready, arm a Claude fallback (#725): if the local model can't
+        // be obtained at build time (not downloaded / download fails / offline),
+        // the worker runs on Claude and notes the switch rather than hard-failing.
+        // An `offline` pin is deliberate privacy — it never falls back.
+        if let BackendSpec::Local {
+            fallback, notice, ..
+        } = &mut spec
+        {
+            if routed == Some(ai::BackendKind::Local)
+                && !self.ai.offline
+                && self.ai.ready_for(ai::BackendKind::Claude).is_ok()
+            {
+                *fallback = self.ai.resolved_key();
+                *notice = self.ai_routing_notice.clone();
+            }
+        }
         self.ai_in_flight.set(Some(chosen)); // the status bar shows where it runs
         Ok(spec)
+    }
+
+    /// Take (and clear) any fallback notice a routed-local build left when it
+    /// dropped to Claude (#725), so `poll_ai` can surface it once.
+    fn take_routing_notice(&self) -> Option<String> {
+        self.ai_routing_notice
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take())
     }
 
     /// The backend the assistant pane runs its tool-use turns on (#310): the
@@ -752,6 +831,15 @@ impl App {
                     Outcome::Recheck(r) => self.apply_recheck(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
+                // If a routed-local pass fell back to Claude (#725), surface why —
+                // the pass ran, but the author should know their local model wasn't
+                // used (and how to enable it). Overrides the per-feature success
+                // message since the fallback is the more important thing to know.
+                if let Some(notice) = self.take_routing_notice() {
+                    if step_error.is_none() {
+                        self.message = Some(notice);
+                    }
+                }
                 // The in-flight pass is done; a clean bible apply already recorded
                 // its state (#90), so drop any snapshot a failed/conflicted one left.
                 self.pending_pass = None;
@@ -801,6 +889,57 @@ impl App {
         out.sort();
         out.dedup();
         out
+    }
+}
+
+/// Hermetic tests for the routed-local → Claude fallback build (#725). No
+/// network, no download: in the default (non-`local`) test build `build_local`
+/// always errors, which is exactly the "local can't be obtained" condition the
+/// fallback rides. Gated to that build so no real fetch is attempted.
+#[cfg(all(test, not(feature = "local")))]
+mod fallback_build_tests {
+    use super::*;
+
+    fn slot() -> Arc<Mutex<HashMap<String, Arc<dyn Backend>>>> {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
+    #[test]
+    fn a_routed_local_build_falls_back_to_claude_with_a_notice() {
+        let notice = Arc::new(Mutex::new(None));
+        let spec = BackendSpec::Local {
+            slot: slot(),
+            model: None,
+            fallback: Some("sk-test".into()),
+            notice: notice.clone(),
+        };
+        // The local build can't produce a model → it builds Claude instead, and
+        // records why so the switch is never silent.
+        assert!(
+            spec.build().is_ok(),
+            "fell back to Claude, didn't hard-fail"
+        );
+        let msg = notice.lock().unwrap().clone().expect("a fallback notice");
+        assert!(msg.contains("Claude"), "{msg}");
+        assert!(
+            msg.contains("Local AI models"),
+            "actionable next step: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_routed_local_build_without_a_fallback_surfaces_the_local_error() {
+        let notice = Arc::new(Mutex::new(None));
+        let spec = BackendSpec::Local {
+            slot: slot(),
+            model: None,
+            fallback: None, // Claude not ready → no fallback
+            notice: notice.clone(),
+        };
+        // With no fallback the local error surfaces (still actionable), and no
+        // spurious fallback notice is left behind.
+        assert!(spec.build().is_err(), "local error surfaces, not swallowed");
+        assert!(notice.lock().unwrap().is_none(), "no fallback happened");
     }
 }
 

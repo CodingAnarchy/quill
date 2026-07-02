@@ -11,6 +11,7 @@ use crate::mode::{Action, AiAction, AiCost, ExportScope, PaletteRow};
 /// The routing decision for starting an AI action (#82/#372): run it now on a
 /// chosen backend, or confirm first (the estimate is over the threshold) — the
 /// confirm optionally offering "run locally instead" as a third choice.
+#[cfg_attr(test, derive(Debug))]
 pub(crate) enum AiStart {
     Run(BackendKind),
     Confirm { label: String, offer_local: bool },
@@ -461,14 +462,18 @@ impl App {
         ai::model_select::pick_for(tokens, &available)
     }
 
-    /// Whether a downloaded local model's context window can hold a pass of
-    /// `input_tokens` (#378) — the router routes on-device only when it can. With
-    /// no model set configured, the single recommended (standard, 32k) model is
-    /// the bound; otherwise it's the largest window among the configured set, so a
-    /// long-context model lets a whole-manuscript pass run locally.
+    /// Whether an *actually-present* local model can hold a pass of `input_tokens`
+    /// (#378/#725) — the router routes on-device only when one can. Requires both a
+    /// fitting context window and a model whose weights are already on disk
+    /// (`--features local` compiled in but nothing downloaded ⇒ not eligible, so a
+    /// routed pass never kicks off a surprise multi-GB HuggingFace fetch, #725).
+    /// With no model set configured, the single recommended model is the candidate;
+    /// otherwise it's the configured set, so a long-context model lets a
+    /// whole-manuscript pass run locally.
     fn local_fits(&self, input_tokens: u32) -> bool {
         cfg!(feature = "local")
             && input_tokens <= ai::model_select::local_window(&self.ai.local_models)
+            && self.local_model_present(input_tokens)
     }
 
     /// The cost decision for a network AI action (#82): run it now, or confirm

@@ -391,11 +391,58 @@ fn prefer_local_runs_a_fitting_pass_on_device() {
     let (mut app, _dir) = two_chapter_app("route-prefer-local");
     app.ai.enabled = true;
     app.ai.routing = Policy::PreferLocal;
+    app.test_local_present = Some(true); // a usable local model is on disk (#725)
     assert!(
         matches!(
             app.ai_action_start(AiAction::Continuity, false),
             AiStart::Run(ai::BackendKind::Local)
         ),
         "prefer-local keeps a small pass on-device",
+    );
+}
+
+// --- Local-not-downloaded fallback (#725) ----------------------------------
+
+/// The bug: `cost-ceiling` + `--features local` compiled in, but no local model
+/// downloaded. An over-threshold pass must NOT route on-device (which would kick
+/// off a surprise HuggingFace fetch); a not-downloaded model is "local
+/// unavailable," so the pass runs on Claude instead.
+#[cfg(feature = "local")]
+#[test]
+fn cost_ceiling_does_not_route_local_when_the_model_isnt_downloaded() {
+    let (mut app, _dir) = two_chapter_app("route-not-downloaded");
+    app.ai.enabled = true;
+    app.ai.routing = Policy::CostCeiling;
+    app.ai.cost_threshold = 0.0; // any non-empty manuscript is "over the ceiling"
+    app.test_local_present = Some(false); // compiled in, but nothing downloaded
+
+    // Over the ceiling but no local model present → Claude with a notice, never
+    // the on-device route that would trigger a download.
+    match app.ai_action_start(AiAction::Continuity, false) {
+        AiStart::Run(ai::BackendKind::Claude) => {}
+        AiStart::Confirm { offer_local, .. } => {
+            assert!(!offer_local, "no local detour when nothing is downloaded");
+        }
+        other => panic!("expected a Claude route/confirm, not {other:?}"),
+    }
+}
+
+/// With a usable local model on disk, the same over-ceiling pass does route
+/// on-device — confirming the not-downloaded case above is what gates it.
+#[cfg(feature = "local")]
+#[test]
+fn cost_ceiling_routes_local_when_the_model_is_downloaded() {
+    let (mut app, _dir) = two_chapter_app("route-downloaded");
+    app.ai.enabled = true;
+    app.ai.routing = Policy::CostCeiling;
+    app.ai.cost_threshold = 0.0;
+    app.test_local_present = Some(true); // the model's weights are on disk
+
+    assert!(
+        matches!(
+            app.ai_action_start(AiAction::Continuity, false),
+            AiStart::Run(ai::BackendKind::Local)
+        ),
+        "over the ceiling with a downloaded model → on-device",
     );
 }
