@@ -479,6 +479,12 @@ pub(crate) enum Action {
     /// (theme, column width, smart typography, Vim mode, autosave, typewriter /
     /// focus) and the `[analysis]` stopwords, no AI required (#592).
     Settings,
+    /// Export the story bible as one clean, shareable Markdown document (#708):
+    /// the scattered `bible/` files assembled in order (characters, relationships,
+    /// setting, timeline, plot, outline) with the generated/notes markers and YAML
+    /// front matter stripped, written to `export/story-bible.md`. Pure local
+    /// concatenation of files already on disk — no AI request.
+    ExportBible,
 }
 
 impl Action {
@@ -508,6 +514,7 @@ impl Action {
         Action::Export(ExportFormat::Epub),
         Action::Export(ExportFormat::Pdf),
         Action::Export(ExportFormat::PdfPrint),
+        Action::ExportBible,
         Action::BrowseFonts,
         Action::SetExportStyle,
         // Reports
@@ -622,6 +629,7 @@ impl Action {
             Action::BrowseFonts => "fonts:browse",
             Action::SetExportStyle => "style:set",
             Action::Settings => "settings",
+            Action::ExportBible => "export:bible",
         }
     }
 
@@ -644,7 +652,10 @@ impl Action {
             | Action::ImportManuscript
             | Action::ArchiveProject
             | Action::RestoreArchive => "Project",
-            Action::Export(_) | Action::BrowseFonts | Action::SetExportStyle => "Export",
+            Action::Export(_)
+            | Action::ExportBible
+            | Action::BrowseFonts
+            | Action::SetExportStyle => "Export",
             Action::ProgressReport | Action::AnalysisReport | Action::WritingHistory => "Reports",
             Action::Ai(_)
             | Action::EnableAi
@@ -749,6 +760,7 @@ impl Action {
             Action::BrowseFonts => "Browse & download fonts…",
             Action::SetExportStyle => "Set export style…",
             Action::Settings => "Settings…",
+            Action::ExportBible => "Export story bible → Markdown",
         }
     }
 
@@ -785,6 +797,7 @@ impl Action {
             self,
             Action::Save
                 | Action::Export(_)
+                | Action::ExportBible
                 | Action::ProgressReport
                 | Action::AnalysisReport
                 | Action::WritingHistory

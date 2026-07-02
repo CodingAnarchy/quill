@@ -365,6 +365,75 @@ fn set_claude_key_action_opens_a_prompt() {
     }
 }
 
+// --- Exporting the story bible (#708) --------------------------------------
+
+/// The export-bible action is registered, needs no AI, and (unlike the manuscript
+/// exports) works from the continuous view — it reads `bible/` from disk, not the
+/// buffer.
+#[test]
+fn export_bible_action_is_registered_and_always_available() {
+    assert!(matches!(
+        Action::from_name("export:bible"),
+        Some(Action::ExportBible)
+    ));
+    assert_eq!(Action::ExportBible.group(), "Export");
+    let (mut app, _dir) = two_chapter_app("action-export-bible-avail");
+    app.ai = ai::Settings::default(); // AI off — still available (no request)
+    assert!(app.action_status(Action::ExportBible).is_none());
+}
+
+/// End-to-end: seeding a bible and dispatching the action writes a clean, ordered
+/// `export/story-bible.md` with the generated/notes markers and front matter
+/// stripped.
+#[test]
+fn export_bible_action_writes_a_clean_document() {
+    use crate::ai::bible::render;
+
+    let (mut app, dir) = two_chapter_app("action-export-bible-run");
+    let bible = dir.join("bible");
+    fs::create_dir_all(bible.join("characters")).unwrap();
+    fs::write(
+        bible.join("characters").join("mara.md"),
+        render(
+            "name: Mara\n",
+            "## Physical\n- green eyes\n",
+            "## Notes\n\nThe lead.\n",
+            "2026-06-19",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        bible.join("setting.md"),
+        render(
+            "title: Setting\n",
+            "## Gazetteer\n- Aldermoor\n",
+            "## Notes\n",
+            "2026-06-19",
+        ),
+    )
+    .unwrap();
+
+    app.run_action(Action::ExportBible, false);
+
+    let written =
+        fs::read_to_string(dir.join("export").join("story-bible.md")).expect("bible written");
+    assert!(written.contains("## Characters"));
+    assert!(written.contains("green eyes"));
+    assert!(written.contains("The lead."));
+    assert!(written.contains("Aldermoor"));
+    assert!(!written.contains("generated:start"), "markers stripped");
+    assert!(!written.contains("digest:"), "front matter stripped");
+    assert!(
+        written.find("## Characters").unwrap() < written.find("## Setting").unwrap(),
+        "sections in order"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("story-bible"),
+        "reports the written path, got: {:?}",
+        app.message
+    );
+}
+
 /// A blank entry cancels — nothing is stored, no follow-up prompt.
 #[test]
 fn entering_a_blank_key_cancels() {

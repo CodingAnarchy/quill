@@ -42,6 +42,28 @@ pub(crate) fn bullet_section(body: &mut String, heading: &str, items: &[String])
     body.push('\n');
 }
 
+/// A bible file's human-readable content with the machine scaffolding removed —
+/// the YAML front matter dropped and the generated/notes block-marker comments
+/// stripped — for a clean, shareable export (#708). The generated body and the
+/// author's Notes are kept (in that order), separated by a blank line and with
+/// surrounding blank lines trimmed. A file with no markers (e.g. an imported or
+/// foreign `.md`) falls back to its whole body sans front matter.
+pub fn clean(raw: &str) -> String {
+    let body = crate::frontmatter::split(raw).1;
+    let generated = between(body, GEN_START, GEN_END);
+    let notes = between(body, NOTES_START, NOTES_END);
+    match (generated, notes) {
+        (None, None) => body.trim().to_string(),
+        (g, n) => [g, n]
+            .into_iter()
+            .flatten()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    }
+}
+
 /// The author's Notes block from an existing file, or the placeholder so a fresh
 /// file still has the section.
 pub fn extract_notes(existing: &str) -> String {
@@ -294,5 +316,34 @@ mod tests {
     #[test]
     fn extract_notes_falls_back_to_placeholder() {
         assert!(extract_notes("no markers here").contains("Your notes here"));
+    }
+
+    #[test]
+    fn clean_strips_front_matter_and_markers_keeps_content() {
+        let file = render(
+            "name: Mara\n",
+            "## Physical\n- green eyes\n",
+            "## Notes\n\nKeep me.\n",
+            "2026-06-19",
+        );
+        let clean = clean(&file);
+        assert!(!clean.contains("---"), "front matter dropped: {clean}");
+        assert!(
+            !clean.contains("generated:start"),
+            "markers dropped: {clean}"
+        );
+        assert!(!clean.contains("notes:start"), "markers dropped: {clean}");
+        // Both the generated body and the author's Notes survive, in order.
+        let phys = clean.find("green eyes").expect("generated body kept");
+        let notes = clean.find("Keep me.").expect("notes kept");
+        assert!(phys < notes, "generated body precedes notes");
+    }
+
+    #[test]
+    fn clean_falls_back_to_body_when_unmarked() {
+        // A foreign / imported file with front matter but no block markers.
+        assert_eq!(clean("---\ntitle: x\n---\n\nJust prose.\n"), "Just prose.");
+        // No front matter and no markers: the whole thing, trimmed.
+        assert_eq!(clean("\n\nBare notes.\n\n"), "Bare notes.");
     }
 }
