@@ -793,6 +793,17 @@ impl Pane for StatusBar<'_> {
                 Span::styled(prompt_state.input.as_str(), style),
             ]));
             frame.render_widget(prompt, area);
+            // Draw the caret at its position within the typed text (#706); the
+            // text prompts accept caret movement, so the block cursor has to
+            // follow it rather than sit at the end. y/N confirmations carry no
+            // input, so the caret rests right after the label.
+            let before =
+                prompt_state.label.width() + prompt_state.input[..prompt_state.caret].width();
+            let col = area
+                .x
+                .saturating_add(before as u16)
+                .min(area.right().saturating_sub(1));
+            frame.set_cursor_position((col, area.y));
             return;
         }
 

@@ -44,16 +44,17 @@ pub enum TextObject {
 }
 
 /// Vim's character classes for word motions: a word is a run of word-characters
-/// or a run of punctuation, separated by whitespace.
+/// or a run of punctuation, separated by whitespace. Shared with the prompt line
+/// editor (#706), which reuses this classification for word-delete.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum CharClass {
+pub(crate) enum CharClass {
     Word,
     Punct,
     Space,
 }
 
 impl CharClass {
-    fn of(grapheme: &str) -> Self {
+    pub(crate) fn of(grapheme: &str) -> Self {
         let c = grapheme.chars().next().unwrap_or(' ');
         if c.is_whitespace() {
             Self::Space
