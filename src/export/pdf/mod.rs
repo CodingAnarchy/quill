@@ -15,7 +15,9 @@
 //! ornaments) is the styling epic; cover/bleed are a separate artifact.
 
 mod draw;
-mod font;
+// `font` is otherwise private to the PDF writer, but the EPUB writer reuses its
+// glyph subsetter for embedded fonts (#709).
+pub(crate) mod font;
 mod images;
 mod layout;
 mod wrap;

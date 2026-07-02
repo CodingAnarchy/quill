@@ -242,6 +242,21 @@ pub struct EmbeddedFont {
     pub bytes: Vec<u8>,
 }
 
+impl EmbeddedFont {
+    /// The CSS `@font-face` `format(...)` token for this file's media type (#709),
+    /// so a reader that can't handle the format has a fallback signal instead of
+    /// downloading an unusable face. `None` for a type with no standard token.
+    pub(crate) fn css_format(&self) -> Option<&'static str> {
+        Some(match self.media_type {
+            "font/ttf" => "truetype",
+            "font/otf" => "opentype",
+            "font/woff" => "woff",
+            "font/woff2" => "woff2",
+            _ => return None,
+        })
+    }
+}
+
 /// Where an [`EmbeddedImage`] is placed in a designed export (#472).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageRole {

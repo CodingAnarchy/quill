@@ -15,7 +15,7 @@
 //! renumbers glyphs, so the content streams are remapped through [`GidMap`].
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use subsetter::{GlyphRemapper, Tag};
 use ttf_parser::{Face, GlyphId};
@@ -596,4 +596,155 @@ pub(super) fn pdf_text_string(text: &str) -> String {
             .collect();
         format!("<{hex}>")
     }
+}
+
+/// Subset a static (non-variable) TrueType/OpenType font to the glyphs `used`
+/// requires, for embedding in an EPUB (#709). The PDF subsetter [`subsetter::subset`]
+/// renumbers glyphs and — because a PDF supplies its own CMap and addresses glyphs
+/// by id — strips the font's `cmap`, `OS/2`, and other tables a web/EPUB reader
+/// needs to map text to glyphs. So the PDF subset is unusable in CSS `@font-face`
+/// as-is; this reuses the same subsetter but rebuilds a `cmap` (a format-12
+/// subtable over the used code points, keyed by the *new* glyph ids) and injects it
+/// back, yielding a self-contained font a reader can shape with.
+///
+/// Returns `None` — so the caller falls back to embedding the font verbatim — when
+/// the font can't be safely subset this way: a variable font (plain `subset` would
+/// drop the `[wght]` axis the EPUB relies on for real bold, #638), a container that
+/// isn't a parseable single TrueType/CFF `sfnt` (e.g. a `.woff`/`.woff2`, which is
+/// compressed and already small), or any subsetting/parse failure.
+pub(crate) fn subset_for_web(program: &[u8], used: &BTreeSet<char>) -> Option<Vec<u8>> {
+    let face = Face::parse(program, 0).ok()?;
+    // A variable font must keep its axes for the reader to render both weights; the
+    // PDF subsetter would flatten it to the default instance, so leave it verbatim.
+    if has_wght_axis(program) {
+        return None;
+    }
+    // Map each used char to its glyph id in the original font; the `.notdef` glyph
+    // (0) is always kept so the subset is well-formed.
+    let mut cmap: BTreeMap<u32, u16> = BTreeMap::new();
+    for &c in used {
+        if let Some(gid) = face.glyph_index(c) {
+            cmap.insert(c as u32, gid.0);
+        }
+    }
+    let mut old_gids: Vec<u16> = std::iter::once(0).chain(cmap.values().copied()).collect();
+    old_gids.sort_unstable();
+    old_gids.dedup();
+    let remapper = GlyphRemapper::new_from_glyphs(&old_gids);
+    let subset = subsetter::subset(program, 0, &remapper).ok()?;
+    // Rebuild the cmap keyed by the *new* glyph ids the subset assigned.
+    let remapped: BTreeMap<u32, u16> = cmap
+        .into_iter()
+        .filter_map(|(cp, old)| remapper.get(old).map(|new| (cp, new)))
+        .collect();
+    let table = cmap_table(&remapped);
+    let out = inject_table(&subset, *b"cmap", &table)?;
+    // Only accept the rebuilt font if it re-parses with a working cmap — otherwise
+    // fall back to verbatim rather than ship a font that renders nothing.
+    let ok = Face::parse(&out, 0)
+        .ok()
+        .is_some_and(|f| f.tables().cmap.is_some());
+    ok.then_some(out)
+}
+
+/// A `cmap` table with a single format-12 subtable (platform 3 / encoding 10, the
+/// Windows UCS-4 mapping every reader honors) mapping each code point to its
+/// (subset-renumbered) glyph id. Format 12 covers the full Unicode range, so
+/// astral-plane glyphs work without a second BMP subtable.
+fn cmap_table(map: &BTreeMap<u32, u16>) -> Vec<u8> {
+    // Coalesce consecutive (code point, glyph id) pairs into groups: a run where
+    // both the code point and the glyph id advance by one packs into a single
+    // 12-byte group.
+    let mut groups: Vec<(u32, u32, u32)> = Vec::new();
+    for (&cp, &gid) in map {
+        match groups.last_mut() {
+            Some(g) if cp == g.1 + 1 && gid as u32 == g.2 + (g.1 - g.0) + 1 => g.1 = cp,
+            _ => groups.push((cp, cp, gid as u32)),
+        }
+    }
+    let mut sub = Vec::new();
+    sub.extend_from_slice(&12u16.to_be_bytes()); // format
+    sub.extend_from_slice(&0u16.to_be_bytes()); // reserved
+    sub.extend_from_slice(&((16 + groups.len() * 12) as u32).to_be_bytes()); // length
+    sub.extend_from_slice(&0u32.to_be_bytes()); // language
+    sub.extend_from_slice(&(groups.len() as u32).to_be_bytes()); // numGroups
+    for (start, end, start_gid) in groups {
+        sub.extend_from_slice(&start.to_be_bytes());
+        sub.extend_from_slice(&end.to_be_bytes());
+        sub.extend_from_slice(&start_gid.to_be_bytes());
+    }
+    let mut cmap = Vec::new();
+    cmap.extend_from_slice(&0u16.to_be_bytes()); // version
+    cmap.extend_from_slice(&1u16.to_be_bytes()); // numTables
+    cmap.extend_from_slice(&3u16.to_be_bytes()); // platformID (Windows)
+    cmap.extend_from_slice(&10u16.to_be_bytes()); // encodingID (UCS-4)
+    cmap.extend_from_slice(&12u32.to_be_bytes()); // subtable offset (after the record)
+    cmap.extend_from_slice(&sub);
+    cmap
+}
+
+/// Insert (or replace) `table` under `tag` in an `sfnt` font, rewriting the table
+/// directory, the offsets, and each table checksum so the result is a well-formed
+/// font. Tables are laid out 4-byte aligned in tag order, matching the OpenType
+/// spec. Returns `None` on a malformed input directory.
+fn inject_table(font: &[u8], tag: [u8; 4], table: &[u8]) -> Option<Vec<u8>> {
+    let sfnt_version = font.get(0..4)?;
+    let num_tables = u16::from_be_bytes([*font.get(4)?, *font.get(5)?]) as usize;
+    let mut tables: BTreeMap<[u8; 4], Vec<u8>> = BTreeMap::new();
+    for i in 0..num_tables {
+        let rec = 12 + i * 16;
+        let mut t = [0u8; 4];
+        t.copy_from_slice(font.get(rec..rec + 4)?);
+        let off = u32::from_be_bytes(font.get(rec + 8..rec + 12)?.try_into().ok()?) as usize;
+        let len = u32::from_be_bytes(font.get(rec + 12..rec + 16)?.try_into().ok()?) as usize;
+        tables.insert(t, font.get(off..off + len)?.to_vec());
+    }
+    tables.insert(tag, table.to_vec());
+
+    let n = tables.len();
+    // The binary-search hint fields the offset table carries (largest power of two
+    // ≤ n, and derived counts), per the sfnt header spec.
+    let mut max_pow = 1u16;
+    while (max_pow * 2) as usize <= n {
+        max_pow *= 2;
+    }
+    let search_range = max_pow * 16;
+    let entry_selector = max_pow.trailing_zeros() as u16;
+    let range_shift = (n as u16) * 16 - search_range;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(sfnt_version);
+    out.extend_from_slice(&(n as u16).to_be_bytes());
+    out.extend_from_slice(&search_range.to_be_bytes());
+    out.extend_from_slice(&entry_selector.to_be_bytes());
+    out.extend_from_slice(&range_shift.to_be_bytes());
+
+    let mut data_off = 12 + n * 16;
+    for (t, data) in &tables {
+        out.extend_from_slice(t);
+        out.extend_from_slice(&table_checksum(data).to_be_bytes());
+        out.extend_from_slice(&(data_off as u32).to_be_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        data_off += (data.len() + 3) & !3;
+    }
+    for data in tables.values() {
+        out.extend_from_slice(data);
+        out.extend(std::iter::repeat_n(
+            0u8,
+            ((data.len() + 3) & !3) - data.len(),
+        ));
+    }
+    Some(out)
+}
+
+/// The sum of a table's contents as big-endian `u32`s (zero-padded to a 4-byte
+/// boundary) — the checksum an sfnt table-directory record carries.
+fn table_checksum(data: &[u8]) -> u32 {
+    let mut sum = 0u32;
+    for chunk in data.chunks(4) {
+        let mut word = [0u8; 4];
+        word[..chunk.len()].copy_from_slice(chunk);
+        sum = sum.wrapping_add(u32::from_be_bytes(word));
+    }
+    sum
 }
