@@ -20,6 +20,20 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
         // The guide ships pre-wrapped to a readable width; keep it unwrapped so its
         // key-reference columns stay aligned and the scroll bound stays exact.
         OverlayKind::Guide => (format!(" Quill — user's guide ({hint}) "), false),
+        // The pre-commit review (#704) confirms rather than dismisses, so its hint
+        // names the commit/cancel keys (not "any key to close"); the scroll marker
+        // is added only when the content is actually taller than the box.
+        OverlayKind::CommitReview => {
+            let scroll = if max_scroll(lines.len(), area.height) > 0 {
+                " · ↑↓ scroll"
+            } else {
+                ""
+            };
+            (
+                format!(" Review commit — enter commit · esc cancel{scroll} "),
+                false,
+            )
+        }
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let mut paragraph = Paragraph::new(lines.clone())

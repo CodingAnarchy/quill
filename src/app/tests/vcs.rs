@@ -12,6 +12,16 @@ fn git_menu(app: &mut App, index: usize) {
     app.on_key(key(KeyCode::Enter));
 }
 
+/// Run the Commit action, then confirm the pre-commit review (#704) — Enter on the
+/// review overlay proceeds to the message prompt, type `message`, and submit. The
+/// full author-facing commit flow, reused by the tests that just want a snapshot.
+fn commit_via_menu(app: &mut App, message: &str) {
+    git_menu(app, 0); // Commit → the pre-commit review overlay
+    app.on_key(key(KeyCode::Enter)); // confirm → the message prompt
+    type_str(app, message);
+    app.on_key(key(KeyCode::Enter));
+}
+
 fn palette_labels(app: &App) -> Vec<&str> {
     match &app.mode {
         Mode::Palette(p) => p.items.iter().map(|it| it.label.as_str()).collect(),
@@ -48,9 +58,7 @@ fn vc_status_reflects_uncommitted_changes() {
     git_menu(&mut app, 0); // Initialize → the project's files are uncommitted
     assert!(app.vc_changes > 0, "a fresh repo has uncommitted files");
 
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "snapshot");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "snapshot");
     assert_eq!(app.vc_changes, 0, "clean working tree after a commit");
 
     // Edit a chapter and save → the tree is dirty again (refreshed on idle).
@@ -80,9 +88,7 @@ fn git_palette_shows_commit_history() {
         .unwrap_or("")
         .contains("No commits yet"));
 
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "first draft");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "first draft");
 
     git_menu(&mut app, 1); // History — now a navigable view
     assert!(
@@ -101,9 +107,7 @@ fn history_diffs_the_chapter_against_a_chosen_commit() {
     // Commit an original version of the active chapter (one.md).
     type_str(&mut app, "The night was dark.");
     app.on_key(ctrl('s'));
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "original");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "original");
 
     // Edit and save a newer version (the cursor sits after the committed text).
     type_str(&mut app, " Then it was long.");
@@ -127,16 +131,12 @@ fn history_restores_the_chapter_from_a_chosen_commit() {
     // First committed version of the active chapter.
     type_str(&mut app, "The first draft.");
     app.on_key(ctrl('s'));
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "draft one");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "draft one");
 
     // A second, different committed version.
     type_str(&mut app, " Now revised.");
     app.on_key(ctrl('s'));
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "draft two");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "draft two");
     assert!(
         app.buffer.text().contains("Now revised"),
         "the revision is live"
@@ -171,10 +171,21 @@ fn history_restores_the_chapter_from_a_chosen_commit() {
 fn git_palette_commits_with_a_message() {
     let (mut app, _dir) = two_chapter_app("vcs-commit");
     git_menu(&mut app, 0); // Initialize
+
+    // Commit first opens the pre-commit review (#704): the changed-file list + diff.
     git_menu(&mut app, 0); // Commit
+    assert!(app.overlay.is_some(), "the pre-commit review overlay opens");
+    let review = overlay_text(&app);
+    assert!(
+        review.contains("one.md") && review.contains("will be committed"),
+        "the review lists the changed files: {review}"
+    );
+
+    // Confirm the review → the message prompt.
+    app.on_key(key(KeyCode::Enter));
     assert!(
         matches!(app.mode, Mode::Prompt(_)),
-        "a commit-message prompt opens"
+        "a commit-message prompt opens after the review"
     );
     type_str(&mut app, "first draft");
     app.on_key(key(KeyCode::Enter));
@@ -191,12 +202,89 @@ fn git_palette_commits_with_a_message() {
 }
 
 #[test]
+fn pre_commit_review_can_be_cancelled_without_committing() {
+    let (mut app, _dir) = two_chapter_app("vcs-review-cancel");
+    git_menu(&mut app, 0); // Initialize
+    let dirty_before = app.vc_changes;
+    assert!(dirty_before > 0, "the fresh repo has uncommitted files");
+
+    // Open the review, then cancel with Esc — nothing is committed.
+    git_menu(&mut app, 0); // Commit
+    assert!(app.overlay.is_some(), "the review overlay opens");
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.overlay.is_none(), "the review closed");
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "cancelling doesn't open the message prompt"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("cancelled"),
+        "{:?}",
+        app.message
+    );
+    app.refresh_vc_status();
+    assert_eq!(
+        app.vc_changes, dirty_before,
+        "nothing was committed — the tree is still dirty"
+    );
+}
+
+#[test]
+fn commit_on_a_clean_tree_reports_nothing_to_commit() {
+    let (mut app, _dir) = two_chapter_app("vcs-clean");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "everything"); // capture the initial files
+    assert_eq!(app.vc_changes, 0, "clean after the first commit");
+
+    // A second Commit on a clean tree: no review overlay, just a message.
+    git_menu(&mut app, 0); // Commit
+    assert!(app.overlay.is_none(), "no review overlay on a clean tree");
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "and no message prompt either"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Nothing to commit"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn pre_commit_review_shows_the_diff_of_what_will_be_committed() {
+    let (mut app, _dir) = two_chapter_app("vcs-review-diff");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "base"); // capture the starting files
+
+    // Edit and save the active chapter, then open the review.
+    type_str(&mut app, "The night was long.");
+    app.on_key(ctrl('s'));
+    git_menu(&mut app, 0); // Commit → the pre-commit review
+    let review = overlay_text(&app);
+    assert!(
+        review.contains("1 file will be committed") && review.contains("one.md"),
+        "the review lists the single changed file: {review}"
+    );
+    assert!(
+        review.contains("+The night was long."),
+        "the review shows the added line the commit would capture: {review}"
+    );
+
+    // Confirming commits it; the tree goes clean.
+    app.on_key(key(KeyCode::Enter));
+    type_str(&mut app, "add a line");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.vc_changes, 0, "committed → clean working tree");
+}
+
+#[test]
 fn git_palette_shows_changes_diff() {
     let (mut app, _dir) = two_chapter_app("vc-diff");
     git_menu(&mut app, 0); // Initialize
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "base");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "base");
 
     // Clean tree → a message, no overlay.
     git_menu(&mut app, 2); // Changes
@@ -221,9 +309,7 @@ fn git_palette_shows_changes_diff() {
 fn git_palette_restores_a_chapter() {
     let (mut app, _dir) = two_chapter_app("vc-restore");
     git_menu(&mut app, 0); // Initialize
-    git_menu(&mut app, 0); // Commit
-    type_str(&mut app, "base");
-    app.on_key(key(KeyCode::Enter));
+    commit_via_menu(&mut app, "base");
 
     // Edit + save, then restore.
     app.on_key(key(KeyCode::Char('Z')));
