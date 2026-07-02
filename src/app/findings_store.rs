@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic;
 use crate::mode::Finding;
 
 /// A content key for a finding — stable across sessions and re-runs, derived from
@@ -99,7 +100,7 @@ impl FindingsStore {
             }
         }
         if let Ok(body) = toml::to_string(self) {
-            let _ = std::fs::write(path, body);
+            let _ = atomic::write(&path, body.as_bytes());
         }
     }
 
@@ -156,7 +157,8 @@ impl FindingsStore {
 
 #[cfg(test)]
 mod tests {
-    use super::FindingsStore;
+    use super::{store_path, FindingsStore};
+    use crate::atomic;
     use crate::mode::Finding;
 
     fn finding(summary: &str) -> Finding {
@@ -200,6 +202,35 @@ mod tests {
         assert_eq!(restored[0].summary, "still open");
         // A resolved finding leaves no record, so a re-run may surface it again.
         assert!(!reloaded.is_dismissed(&done));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Routing the store through the atomic layer (#694) means an interrupted save
+    // can't truncate it: a write faulted before its rename leaves the prior good
+    // file byte-for-byte intact. We arm the pre-rename fault seam, force a save
+    // (via `remember`), then confirm the on-disk store still holds the earlier
+    // finding rather than an empty or half-written file.
+    #[test]
+    fn interrupted_save_preserves_the_prior_store() {
+        let dir = crate::testutil::scratch_dir("findings-store", "atomic-preserve");
+        let mut store = FindingsStore::load(&dir);
+        store.remember(&dir, &finding("the good version")); // writes the seed store
+        let good = std::fs::read_to_string(store_path(&dir)).unwrap();
+        assert!(good.contains("the good version"));
+
+        // Arm a crash before the next write's rename, then trigger a save.
+        atomic::fail_point::arm_pre_rename_failure();
+        store.remember(&dir, &finding("a doomed addition"));
+
+        // The seed store survives unchanged; the doomed addition never landed.
+        assert_eq!(
+            std::fs::read_to_string(store_path(&dir)).unwrap(),
+            good,
+            "the previous store must survive an interrupted save"
+        );
+        let reloaded = FindingsStore::load(&dir);
+        assert!(!reloaded.is_dismissed(&finding("a doomed addition")));
+        assert_eq!(reloaded.open().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

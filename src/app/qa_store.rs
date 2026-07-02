@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::assist::QaEntry;
 use crate::ai::Answer;
+use crate::atomic;
 
 /// The most recent asks to keep on disk. Q&A recall is a "return to a past
 /// lookup" convenience, not an archive, so cap the log to keep the file small and
@@ -86,7 +87,7 @@ impl QaStore {
             }
         }
         if let Ok(body) = toml::to_string(self) {
-            let _ = std::fs::write(path, body);
+            let _ = atomic::write(&path, body.as_bytes());
         }
     }
 
