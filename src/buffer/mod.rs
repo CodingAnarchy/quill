@@ -22,6 +22,13 @@ mod motions;
 use history::Snapshot;
 pub use motions::{FindKind, TextObject};
 
+/// Initial window size (bytes) [`Buffer::grapheme_after`](Buffer::grapheme_after)
+/// scans forward from the offset before falling back to a wider window (#693). A
+/// single grapheme is a handful of bytes, so this covers it in one pass without
+/// copying the whole rope; the doubling retry keeps a pathological grapheme that
+/// straddles the window edge correct.
+const GRAPHEME_WINDOW: usize = 64;
+
 /// A cursor position expressed in (line, grapheme-column).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cursor {
@@ -638,12 +645,28 @@ impl Buffer {
 
     /// The byte just past the grapheme starting at `byte` — so an inclusive
     /// motion or `x` can cover the grapheme the cursor is on. Clamped to the end.
+    ///
+    /// Scans a bounded window starting at `byte` rather than copying the whole
+    /// rope (#693): a single grapheme is short, so [`GRAPHEME_WINDOW`] almost
+    /// always covers it in one pass. If the window ends mid-grapheme with the
+    /// document still beyond it, widen and retry so the boundary is byte-identical
+    /// to a full-document scan even for a grapheme straddling the window edge.
     pub fn grapheme_after(&self, byte: usize) -> usize {
-        let text = self.rope.to_string();
-        text[byte.min(text.len())..]
-            .grapheme_indices(true)
-            .nth(1)
-            .map_or(text.len(), |(b, _)| byte + b)
+        let len = self.rope.len_bytes();
+        let byte = byte.min(len);
+        let mut radius = GRAPHEME_WINDOW;
+        loop {
+            let hi = (byte + radius).min(len);
+            let hi = self.rope.char_to_byte(self.rope.byte_to_char(hi));
+            let text = self.rope.byte_slice(byte..hi).to_string();
+            match text.grapheme_indices(true).nth(1) {
+                Some((b, _)) => return byte + b,
+                // No boundary within the window. If it reaches the document end,
+                // that end *is* the boundary; otherwise widen and rescan.
+                None if hi >= len => return len,
+                None => radius = radius.saturating_mul(2),
+            }
+        }
     }
 
     /// The byte where the line after `line` begins — i.e. just past `line`'s
