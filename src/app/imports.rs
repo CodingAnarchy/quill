@@ -131,9 +131,12 @@ impl App {
         );
     }
 
-    /// Create the new project at `dest` and import the manuscript chosen earlier:
-    /// split it into per-chapter files in reading order. The source is read only —
-    /// never moved or altered.
+    /// Parse the manuscript chosen earlier and open the import-preview (#702)
+    /// instead of writing straight to disk: the author sees the chapters the split
+    /// produced (titles + count), the heading level it split on, and any
+    /// dropped-element warnings, then confirms or cancels. The write+open runs only
+    /// on confirm ([`confirm_import_preview`](Self::confirm_import_preview)). The
+    /// source is read only — never moved or altered.
     pub(crate) fn finish_import_manuscript(&mut self, dest: &str) {
         let Some(PendingImportSource::Manuscript(source)) = self.pending_import_source.take()
         else {
@@ -146,6 +149,18 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
+        // A Markdown source is re-splittable at a chosen level, so keep its text;
+        // other formats (`.docx`/`.scriv`/folder/`.txt`) don't split on a Markdown
+        // heading level, so the preview offers no level toggle for them.
+        let ext = source
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let markdown = (ext == "md" && source.is_file())
+            .then(|| std::fs::read_to_string(&source).ok())
+            .flatten();
+
         let parsed = match read_manuscript(&source) {
             Ok(p) => p,
             Err(e) => {
@@ -165,8 +180,108 @@ impl App {
             .into_iter()
             .map(|c| (c.title, c.body))
             .collect();
+
+        // For a Markdown source, record which heading level the split used and the
+        // levels the manuscript actually uses, so the preview can re-split on them.
+        let (level, levels) = match &markdown {
+            Some(text) => {
+                use crate::manuscript_import as import;
+                let (_, body) = crate::frontmatter::split(text);
+                let level = import::chapter_level(body);
+                let levels: Vec<usize> = (1..=6)
+                    .filter(|&l| import::heading_count(body, l) > 0)
+                    .collect();
+                (Some(level), levels)
+            }
+            None => (None, Vec::new()),
+        };
+
+        self.mode = Mode::ImportPreview(Box::new(ImportPreview {
+            source,
+            dest,
+            markdown,
+            title: parsed.title,
+            author: parsed.author,
+            chapters,
+            level,
+            levels,
+            warning,
+            scroll: 0,
+        }));
+    }
+
+    /// Handle a key while the import preview (#702) is open: arrows / j-k / paging
+    /// scroll the chapter list, `1`–`6` re-split a Markdown source at that heading
+    /// level (re-previewing without writing), Enter confirms the import, and Esc
+    /// (or any other key) cancels — writing nothing.
+    pub(crate) fn on_key_import_preview(&mut self, key: KeyEvent) {
+        let Mode::ImportPreview(preview) = &mut self.mode else {
+            return;
+        };
+        let last = preview.chapters.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => preview.scroll = (preview.scroll + 1).min(last),
+            KeyCode::Up | KeyCode::Char('k') => preview.scroll = preview.scroll.saturating_sub(1),
+            KeyCode::PageDown => preview.scroll = (preview.scroll + 10).min(last),
+            KeyCode::PageUp => preview.scroll = preview.scroll.saturating_sub(10),
+            KeyCode::Home => preview.scroll = 0,
+            KeyCode::End => preview.scroll = last,
+            KeyCode::Char(c @ '1'..='6') => {
+                let level = c.to_digit(10).unwrap() as usize;
+                self.repreview_import_at(level);
+            }
+            KeyCode::Enter => self.confirm_import_preview(),
+            _ => {
+                self.mode = self.editing_mode();
+                self.message = Some("Import cancelled.".into());
+            }
+        }
+    }
+
+    /// Re-split the previewed Markdown manuscript (#702) at heading `level` and
+    /// refresh the preview in place — nothing is written. A no-op for a level the
+    /// source doesn't use, or a non-Markdown source (which has no level to toggle).
+    fn repreview_import_at(&mut self, level: usize) {
+        let Mode::ImportPreview(preview) = &mut self.mode else {
+            return;
+        };
+        let Some(text) = preview.markdown.as_deref() else {
+            return;
+        };
+        if !preview.levels.contains(&level) {
+            return;
+        }
+        let parsed = crate::manuscript_import::parse_markdown_at(text, level);
+        preview.title = parsed.title;
+        preview.author = parsed.author;
+        preview.chapters = parsed
+            .chapters
+            .into_iter()
+            .map(|c| (c.title, c.body))
+            .collect();
+        preview.level = Some(level);
+        preview.scroll = 0;
+    }
+
+    /// Confirm the import preview (#702): create the project at the chosen
+    /// destination, write the previewed chapters in reading order, and open it.
+    /// Runs only when the author confirms — Esc from the preview writes nothing.
+    pub(crate) fn confirm_import_preview(&mut self) {
+        let editing = self.editing_mode();
+        let Mode::ImportPreview(preview) = std::mem::replace(&mut self.mode, editing) else {
+            return;
+        };
+        let ImportPreview {
+            source,
+            dest,
+            title,
+            author,
+            chapters,
+            warning,
+            ..
+        } = *preview;
         let built = Project::create(&dest).and_then(|mut p| {
-            p.import_chapters(parsed.title.as_deref(), parsed.author.as_deref(), &chapters)
+            p.import_chapters(title.as_deref(), author.as_deref(), &chapters)
                 .map(|()| chapters.len())
         });
         match built {
@@ -179,7 +294,8 @@ impl App {
             }
             Err(e) => {
                 self.message = Some(format!("Import failed: {e}"));
-                self.mode = self.editing_mode();
+                // `editing_mode()` is already set; leave it so the author lands back
+                // in the editor with the failure message.
             }
         }
     }

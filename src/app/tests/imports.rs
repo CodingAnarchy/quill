@@ -394,8 +394,25 @@ fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
     assert!(
         matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest))
     );
-    // Project-path prompt → create + split into chapters.
+    // Project-path prompt → the import preview (#702), before anything is written.
     app.finish_import_manuscript(dest.to_str().unwrap());
+    let Mode::ImportPreview(preview) = &app.mode else {
+        panic!("expected the import preview before writing");
+    };
+    let previewed: Vec<&str> = preview.chapters.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        previewed,
+        vec!["One", "Two"],
+        "the preview lists the chapters (titles + count) before writing"
+    );
+    assert_eq!(preview.title.as_deref(), Some("Salt and Iron"));
+    assert_eq!(preview.level, Some(2), "the guessed split level is shown");
+    assert!(
+        !Project::manifest_path(&dest).exists(),
+        "nothing is written while the preview is up"
+    );
+    // Confirm the preview → create + split into chapters.
+    app.confirm_import_preview();
 
     // A valid project: manifest title/author from the source, one file per chapter.
     assert_eq!(app.project.root, dest);
@@ -475,6 +492,11 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
         "a .docx is accepted"
     );
     app.finish_import_manuscript(dest.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::ImportPreview(_)),
+        "the import preview (#702) is shown before writing"
+    );
+    app.confirm_import_preview(); // confirm the preview → write + open
 
     assert_eq!(app.project.root, dest);
     let titles: Vec<&str> = app
@@ -548,6 +570,11 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
         "a .scriv bundle is accepted"
     );
     app.finish_import_manuscript(dest.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::ImportPreview(_)),
+        "the import preview (#702) is shown before writing"
+    );
+    app.confirm_import_preview(); // confirm the preview → write + open
 
     assert_eq!(app.project.root, dest);
     assert_eq!(
@@ -617,6 +644,11 @@ fn importing_a_txt_manuscript_splits_into_chapters() {
         "a .txt is accepted"
     );
     app.finish_import_manuscript(dest.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::ImportPreview(_)),
+        "the import preview (#702) is shown before writing"
+    );
+    app.confirm_import_preview(); // confirm the preview → write + open
 
     assert_eq!(app.project.root, dest);
     let titles: Vec<&str> = app
@@ -659,6 +691,11 @@ fn importing_a_folder_of_markdown_makes_one_chapter_per_file() {
         "a folder of .md is accepted"
     );
     app.finish_import_manuscript(dest.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::ImportPreview(_)),
+        "the import preview (#702) is shown before writing"
+    );
+    app.confirm_import_preview(); // confirm the preview → write + open
 
     assert_eq!(app.project.root, dest);
     let titles: Vec<&str> = app
@@ -677,6 +714,118 @@ fn importing_a_folder_of_markdown_makes_one_chapter_per_file() {
     assert_eq!(ch1, "First.\n", "the heading is dropped from the body");
 
     let _ = fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn cancelling_the_import_preview_writes_nothing() {
+    isolate("import-cancel");
+    let cur = make_project("import-cancel-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+    let cur_root = app.project.root.clone();
+
+    let source = std::env::temp_dir().join(format!("quill-cancel-{}.md", std::process::id()));
+    fs::write(&source, "# One\n\nAlpha.\n\n# Two\n\nBeta.\n").unwrap();
+    let dest = books_dir("import-cancel-dest").join("Book");
+
+    app.begin_import_manuscript(source.to_str().unwrap());
+    app.finish_import_manuscript(dest.to_str().unwrap());
+    assert!(matches!(&app.mode, Mode::ImportPreview(_)), "preview shown");
+
+    // Esc cancels: no project is created and the current one stays open.
+    app.on_key_import_preview(key(KeyCode::Esc));
+    assert!(
+        !Project::manifest_path(&dest).exists(),
+        "cancelling the preview writes nothing"
+    );
+    assert!(!dest.exists(), "the destination folder is never created");
+    assert_eq!(app.project.root, cur_root, "the current project stays open");
+    assert_eq!(app.message.as_deref(), Some("Import cancelled."));
+    let _ = fs::remove_file(&source);
+}
+
+#[test]
+fn confirming_the_import_preview_via_enter_writes_and_opens() {
+    isolate("import-confirm");
+    let cur = make_project("import-confirm-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    let source = std::env::temp_dir().join(format!("quill-confirm-{}.md", std::process::id()));
+    fs::write(&source, "# One\n\nAlpha.\n\n# Two\n\nBeta.\n").unwrap();
+    let dest = books_dir("import-confirm-dest").join("Book");
+
+    app.begin_import_manuscript(source.to_str().unwrap());
+    app.finish_import_manuscript(dest.to_str().unwrap());
+    // Enter through the key handler confirms the import.
+    app.on_key_import_preview(key(KeyCode::Enter));
+
+    assert_eq!(app.project.root, dest, "the imported project is opened");
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["One", "Two"]);
+    let _ = fs::remove_file(&source);
+}
+
+#[test]
+fn re_splitting_the_preview_at_another_level_re_previews_without_writing() {
+    isolate("import-relevel");
+    let cur = make_project("import-relevel-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // A lone `#` title over three `##` chapters, each with a `###` scene. The
+    // parser guesses level 2 (three chapters); re-splitting on level 3 yields the
+    // three scene headings as chapters instead.
+    let source = std::env::temp_dir().join(format!("quill-relevel-{}.md", std::process::id()));
+    let manuscript = "# Book\n\n## One\n\n### Scene A\n\na\n\n## Two\n\n### Scene B\n\nb\n\n## Three\n\n### Scene C\n\nc\n";
+    fs::write(&source, manuscript).unwrap();
+    let dest = books_dir("import-relevel-dest").join("Book");
+
+    app.begin_import_manuscript(source.to_str().unwrap());
+    app.finish_import_manuscript(dest.to_str().unwrap());
+
+    let Mode::ImportPreview(preview) = &app.mode else {
+        panic!("preview expected");
+    };
+    assert_eq!(preview.level, Some(2), "guessed the lone-title/## shape");
+    let at_two: Vec<&str> = preview.chapters.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(at_two, vec!["One", "Two", "Three"]);
+    assert!(
+        preview.levels.contains(&1) && preview.levels.contains(&2) && preview.levels.contains(&3),
+        "the levels the manuscript uses are offered"
+    );
+
+    // Toggle to level 3 → the scene headings become chapters; nothing is written.
+    app.on_key_import_preview(key(KeyCode::Char('3')));
+    let Mode::ImportPreview(preview) = &app.mode else {
+        panic!("still previewing after a re-split");
+    };
+    assert_eq!(preview.level, Some(3));
+    let at_three: Vec<&str> = preview.chapters.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        at_three,
+        vec!["Scene A", "Scene B", "Scene C"],
+        "re-split on level 3"
+    );
+    assert!(
+        !Project::manifest_path(&dest).exists(),
+        "re-previewing writes nothing"
+    );
+
+    // Confirm at the re-chosen level → that split is what gets written.
+    app.confirm_import_preview();
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["Scene A", "Scene B", "Scene C"]);
+    let _ = fs::remove_file(&source);
 }
 
 #[test]

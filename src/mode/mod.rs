@@ -215,6 +215,13 @@ pub enum Mode {
     /// a directory navigator. Enter opens a project / descends a folder, `..`
     /// goes up, Esc cancels. Boxed (carries the directory listing).
     DirBrowser(Box<DirBrowser>),
+    /// Previewing a manuscript import before writing it (#702): the chapters the
+    /// parser split out (titles + count), the heading level it split on, and any
+    /// dropped-element warnings — shown so a mis-split is caught up front. Enter
+    /// confirms (write + open), Esc cancels (writes nothing); for a Markdown source
+    /// the split level can be toggled and the preview re-parsed. Boxed (carries the
+    /// parsed chapters and the source text).
+    ImportPreview(Box<ImportPreview>),
 }
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key

@@ -848,3 +848,52 @@ fn manuscript_corkboard_renders_chapter_group_headers() {
         "chapter two's header sits above its card:\n{screen}"
     );
 }
+
+#[test]
+fn import_preview_lists_the_chapters_count_and_level() {
+    // The import preview (#702) shows the split before writing: the chapter
+    // count, the guessed heading level, the book title, and the chapter titles.
+    use crate::mode::ImportPreview;
+
+    let mut app = app_with("body\n");
+    app.mode = Mode::ImportPreview(Box::new(ImportPreview {
+        source: std::path::PathBuf::from("/tmp/book.md"),
+        dest: std::path::PathBuf::from("/tmp/proj"),
+        markdown: Some(String::new()),
+        title: Some("The Long Road".into()),
+        author: Some("A. Writer".into()),
+        chapters: vec![
+            ("One".into(), "a\n".into()),
+            ("Two".into(), "b\n".into()),
+            ("Three".into(), "c\n".into()),
+        ],
+        level: Some(2),
+        levels: vec![1, 2, 3],
+        warning: String::new(),
+        scroll: 0,
+    }));
+
+    let screen = render(&app, 80, 24);
+    assert!(
+        screen.contains("3 chapters will be created"),
+        "the chapter count is shown before writing:\n{screen}"
+    );
+    assert!(
+        screen.contains("heading level 2"),
+        "the guessed split level is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("The Long Road") && screen.contains("A. Writer"),
+        "the mined title/author are shown:\n{screen}"
+    );
+    for title in ["One", "Two", "Three"] {
+        assert!(
+            screen.contains(title),
+            "chapter {title} is listed:\n{screen}"
+        );
+    }
+    assert!(
+        screen.contains("enter import") && screen.contains("esc cancel"),
+        "the confirm/cancel affordance is shown:\n{screen}"
+    );
+}
