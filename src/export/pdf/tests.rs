@@ -282,6 +282,61 @@ fn a_series_bookmarks_every_book_in_order() {
 }
 
 #[test]
+fn a_series_reprints_each_books_copyright_not_just_the_first() {
+    // #711: a series omnibus must not silently drop a later book's rights/ISBN. The
+    // omnibus's front-matter copyright page is series-level (the first book's), but
+    // each book's own copyright is reprinted on its divider page. So a series whose
+    // *second* book carries copyright metadata draws strictly more page-content text
+    // (Identity-H glyph runs shown with `Tj`) than the same series with no per-book
+    // metadata — proof the later book's copyright reached the layout.
+    let book = |title: &str, publishing: PubMeta| Document {
+        title: title.into(),
+        subtitle: None,
+        author: None,
+        series: None,
+        publishing,
+        epigraph: None,
+        front: vec![],
+        parts: vec![Part {
+            name: None,
+            chapters: vec![ch("Ch", None, "Prose.")],
+        }],
+        back: vec![],
+    };
+    let bare = || book("Book One", PubMeta::default());
+    // Only the *second* book carries metadata, so a first-book-only reader would
+    // drop it — the regression this guards.
+    let second_meta = PubMeta {
+        isbn: Some("978-1-11-111111-1".into()),
+        rights: Some("© 2026 B. Author. All rights reserved.".into()),
+        ..Default::default()
+    };
+
+    let with_meta = to_pdf_series(
+        &[bare(), book("Book Two", second_meta)],
+        Some("The Saga"),
+        Some("A. Writer"),
+        &plain(),
+    )
+    .unwrap();
+    let without = to_pdf_series(
+        &[bare(), book("Book Two", PubMeta::default())],
+        Some("The Saga"),
+        Some("A. Writer"),
+        &plain(),
+    )
+    .unwrap();
+
+    let shown = |bytes: &[u8]| count(content(bytes).as_bytes(), " Tj\n");
+    assert!(
+        shown(&with_meta) > shown(&without),
+        "the second book's copyright is reprinted, not dropped: {} vs {}",
+        shown(&with_meta),
+        shown(&without),
+    );
+}
+
+#[test]
 fn fonts_route_glyphs_by_coverage() {
     let fonts = Fonts::new(&plain());
     let reg = FontStyle::REGULAR;

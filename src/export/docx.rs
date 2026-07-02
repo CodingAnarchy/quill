@@ -69,6 +69,15 @@ pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
 /// Compile a whole series (one book per [`Document`], in order) to one `.docx`
 /// (#332): a series title page (manuscript profile), then each book under its own
 /// title, page-broken from the last. Single book → the same body as [`to_docx`].
+///
+/// # Series publishing metadata (#711)
+///
+/// An omnibus is one publication, so the front-matter copyright page is
+/// series-level — the first book's [`PubMeta`]. Per-book rights/publisher/ISBN
+/// are not silently dropped, though: each book's own copyright block is reprinted
+/// under its title (manuscript profile), the way a print omnibus reproduces each
+/// original edition's copyright. The Vellum profile omits both (it applies its
+/// own front matter and splits on Heading 1).
 pub fn to_docx_series(
     books: &[Document],
     series: Option<&str>,
@@ -91,6 +100,8 @@ pub fn to_docx_series(
                 run(&format!("by {author}"), false, false, None),
             ));
         }
+        // The omnibus-level copyright page is the first book's (#711); each book's
+        // own copyright is reprinted under its title below.
         if let Some(first) = books.first() {
             body.push_str(&copyright_page(&first.publishing));
         }
@@ -98,6 +109,12 @@ pub fn to_docx_series(
     }
     for book in books {
         body.push_str(&book_heading(&book.title, profile));
+        // A later book's rights/ISBN aren't silently dropped (#711): reprint this
+        // book's own copyright block under its title (manuscript profile only —
+        // Vellum applies its own front matter).
+        if profile == Profile::Manuscript {
+            body.push_str(&book_copyright(&book.publishing));
+        }
         body.push_str(&book_body(book, profile));
     }
     let header = running_header(author, series, profile);
@@ -217,6 +234,26 @@ fn copyright_page(publishing: &PubMeta) -> String {
             r#"<w:jc w:val="center"/>"#
         };
         out.push_str(&para(ppr, run(line, false, false, None)));
+    }
+    out
+}
+
+/// A series book's own copyright block (#711), reprinted under its title in a
+/// series omnibus so a later book's rights/ISBN aren't silently dropped. Unlike
+/// [`copyright_page`], it does not force a fresh page — it sits directly under the
+/// page-broken book title — but stacks the same centered lines. Empty when the
+/// book has no publishing metadata, leaving the output unchanged.
+fn book_copyright(publishing: &PubMeta) -> String {
+    let lines = copyright_lines(publishing);
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for line in lines {
+        out.push_str(&para(
+            r#"<w:spacing w:before="120"/><w:jc w:val="center"/>"#,
+            run(&line, false, false, None),
+        ));
     }
     out
 }
@@ -618,6 +655,86 @@ mod tests {
         let one = xml.find("Book One").expect("book one");
         let two = xml.find("Book Two").expect("book two");
         assert!(one < two, "books in order");
+    }
+
+    #[test]
+    fn series_docx_reprints_each_books_copyright_not_just_the_first() {
+        // #711: a series omnibus must not silently drop a later book's rights/ISBN.
+        // The front-matter copyright page is series-level (the first book's), but
+        // each book's own copyright is reprinted under its title — so both books'
+        // distinct rights lines and ISBNs reach the document.
+        let book = |title: &str, publishing: PubMeta| crate::export::Document {
+            title: title.into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            publishing,
+            epigraph: None,
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: None,
+                chapters: vec![crate::export::Chapter {
+                    title: "Ch".into(),
+                    epigraph: None,
+                    body: "prose".into(),
+                    role: None,
+                }],
+            }],
+            back: vec![],
+        };
+        let first = PubMeta {
+            isbn: Some("978-0-00-000000-0".into()),
+            rights: Some("© 2024 A. Writer".into()),
+            ..Default::default()
+        };
+        let second = PubMeta {
+            isbn: Some("978-1-11-111111-1".into()),
+            rights: Some("© 2026 B. Author".into()),
+            ..Default::default()
+        };
+        let xml = part(
+            &to_docx_series(
+                &[book("Book One", first), book("Book Two", second)],
+                Some("The Saga"),
+                Some("A. Writer"),
+                Profile::Manuscript,
+            )
+            .unwrap(),
+            "word/document.xml",
+        );
+        // Both books' distinct rights lines and ISBNs are present, in reading order.
+        for needle in [
+            "© 2024 A. Writer",
+            "ISBN: 978-0-00-000000-0",
+            "© 2026 B. Author",
+            "ISBN: 978-1-11-111111-1",
+        ] {
+            assert!(xml.contains(needle), "{needle} present: {xml}");
+        }
+        // The second book's copyright follows the second book's title (reprinted
+        // under it, not dropped).
+        let book_two = xml.find("Book Two").expect("second book title");
+        let second_rights = xml.find("© 2026 B. Author").expect("second rights");
+        assert!(
+            book_two < second_rights,
+            "second book's copyright is under its title: {xml}"
+        );
+
+        // The Vellum profile applies its own front matter — no generated copyright.
+        let vellum = part(
+            &to_docx_series(
+                &[book("Book One", PubMeta::default())],
+                Some("The Saga"),
+                None,
+                Profile::Vellum,
+            )
+            .unwrap(),
+            "word/document.xml",
+        );
+        assert!(
+            !vellum.contains("ISBN:") && !vellum.contains("Published by"),
+            "no per-book copyright in the Vellum profile: {vellum}"
+        );
     }
 
     #[test]

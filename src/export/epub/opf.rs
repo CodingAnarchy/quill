@@ -743,4 +743,105 @@ mod tests {
         // Each book's prose is in its own chapter file.
         assert!(part(&bytes, "OEBPS/chap0003.xhtml").contains("alpha"));
     }
+
+    #[test]
+    fn series_epub_reprints_each_books_copyright_not_just_the_first() {
+        // #711: a series omnibus must not silently drop a later book's rights/ISBN.
+        // The package-level OPF identifier/language and the single OPF-level
+        // copyright page are series-level (the first book's), but each book's own
+        // copyright is reprinted on its divider page — so both books' distinct
+        // rights lines and ISBNs reach the omnibus.
+        let book = |title: &str, publishing: PubMeta| Document {
+            title: title.into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            publishing,
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("Ch", None, "prose")],
+            }],
+            back: vec![],
+        };
+        let first = PubMeta {
+            isbn: Some("978-0-00-000000-0".into()),
+            rights: Some("© 2024 A. Writer".into()),
+            ..Default::default()
+        };
+        let second = PubMeta {
+            isbn: Some("978-1-11-111111-1".into()),
+            rights: Some("© 2026 B. Author".into()),
+            ..Default::default()
+        };
+        let bytes = to_epub_series(
+            &[book("Book One", first), book("Book Two", second)],
+            Some("The Saga"),
+            Some("A. Writer"),
+            MODIFIED,
+            &ExportStyle::default(),
+        )
+        .unwrap();
+
+        // The omnibus package identifier is the first book's ISBN (one per package);
+        // the second book's ISBN is not the package id.
+        let opf = part(&bytes, "OEBPS/content.opf");
+        assert!(
+            opf.contains("<dc:identifier id=\"bookid\">978-0-00-000000-0</dc:identifier>"),
+            "package identifier is the first book's ISBN: {opf}"
+        );
+
+        // The divider files (the `book*` prefix) reprint each book's own copyright,
+        // so no later book's rights/ISBN is dropped. Concatenate them and assert
+        // both books' distinct notices are present.
+        let dividers: String = {
+            let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
+            let names: Vec<String> = zip
+                .file_names()
+                .filter(|n| n.contains("/book") && n.ends_with(".xhtml"))
+                .map(str::to_string)
+                .collect();
+            names.iter().map(|n| part(&bytes, n)).collect()
+        };
+        assert!(
+            dividers.contains("© 2024 A. Writer") && dividers.contains("ISBN: 978-0-00-000000-0"),
+            "first book's copyright on its divider: {dividers}"
+        );
+        assert!(
+            dividers.contains("© 2026 B. Author") && dividers.contains("ISBN: 978-1-11-111111-1"),
+            "second book's copyright reprinted, not dropped: {dividers}"
+        );
+        assert!(
+            dividers.matches("book-copyright").count() == 2,
+            "each book's divider carries its own copyright block: {dividers}"
+        );
+
+        // A book with no publishing metadata gets no copyright block on its divider,
+        // leaving the default output unchanged.
+        let plain = to_epub_series(
+            &[
+                book("Book One", PubMeta::default()),
+                book("Book Two", PubMeta::default()),
+            ],
+            Some("The Saga"),
+            None,
+            MODIFIED,
+            &ExportStyle::default(),
+        )
+        .unwrap();
+        let plain_dividers: String = {
+            let zip = zip::ZipArchive::new(Cursor::new(plain.to_vec())).unwrap();
+            let names: Vec<String> = zip
+                .file_names()
+                .filter(|n| n.contains("/book") && n.ends_with(".xhtml"))
+                .map(str::to_string)
+                .collect();
+            names.iter().map(|n| part(&plain, n)).collect()
+        };
+        assert!(
+            !plain_dividers.contains("book-copyright"),
+            "no per-book copyright block without metadata: {plain_dividers}"
+        );
+    }
 }

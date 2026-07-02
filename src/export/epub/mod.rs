@@ -75,6 +75,20 @@ pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::
 /// Compile a whole series (one book per [`Document`], in order) to one `.epub`
 /// (#332): a series title page, then each book as a divider page with its
 /// parts/chapters nested beneath it in the table of contents.
+///
+/// # Series publishing metadata (#711)
+///
+/// An omnibus is one publication, so the *package-level* metadata is
+/// series-level: the OPF `dc:identifier` (one ISBN for the omnibus, if any),
+/// `dc:language`, and the single OPF-level copyright page come from the first
+/// book's [`PubMeta`]. That is deliberate — an omnibus legitimately carries one
+/// ISBN and one package language, not one per contained book.
+///
+/// Per-book rights, publisher, publication date, and ISBN are *not* dropped: each
+/// book renders its own copyright block on its divider page (via
+/// [`Builder::add_book_divider`]) when its metadata warrants one, so a
+/// three-book omnibus reprints all three copyright notices in reading order —
+/// mirroring how print omnibuses reproduce each original edition's copyright.
 pub fn to_epub_series(
     books: &[Document],
     series: Option<&str>,
@@ -84,6 +98,10 @@ pub fn to_epub_series(
 ) -> std::io::Result<Vec<u8>> {
     let mut b = Builder::new(
         style,
+        // Package-level metadata (the OPF identifier/language and the
+        // omnibus-level copyright page) is series-level — the first book's
+        // (#711). Each book's own copyright rides its divider page below, so no
+        // later book's rights/ISBN are silently dropped.
         &books
             .first()
             .map(|d| d.publishing.clone())
@@ -256,8 +274,13 @@ impl Builder {
         self.add("copyright", "Copyright", "copyright-page", body);
     }
 
-    /// A series book's divider page: its title, subtitle, and epigraph. Body
-    /// matter (#604) — the first divider is the "Begin Reading" landmark.
+    /// A series book's divider page: its title, subtitle, epigraph, and — so a
+    /// series export never silently drops a later book's rights/ISBN (#711) — the
+    /// book's own copyright block when its [`PubMeta`] warrants one. The omnibus's
+    /// package-level identifier/language stays series-level (the first book's; see
+    /// [`to_epub_series`]); this reprints each contained book's copyright notice in
+    /// reading order, the way a print omnibus does. Body matter (#604) — the first
+    /// divider is the "Begin Reading" landmark.
     fn add_book_divider(&mut self, doc: &Document) -> String {
         let mut body = heading_with_ornament("book-title", &doc.title, None);
         if let Some(s) = &doc.subtitle {
@@ -265,6 +288,14 @@ impl Builder {
         }
         if let Some(e) = &doc.epigraph {
             body.push_str(&epigraph_xhtml(e));
+        }
+        let copyright = copyright_lines(&doc.publishing);
+        if !copyright.is_empty() {
+            body.push_str("<div class=\"copyright-page book-copyright\">\n");
+            for line in copyright {
+                push_p(&mut body, "copyright", &line);
+            }
+            body.push_str("</div>\n");
         }
         let href = self.add("book", &doc.title, "bodymatter", body);
         self.landmarks
