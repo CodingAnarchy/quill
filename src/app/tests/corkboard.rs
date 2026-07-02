@@ -8,6 +8,7 @@
 use super::*;
 use crate::mode::Mode;
 use crate::project::Project;
+use std::time::{Duration, Instant};
 
 /// A one-chapter project whose body has scene headings, opened and pinned like the
 /// other fixtures.
@@ -71,6 +72,41 @@ fn enter_jumps_the_cursor_to_the_selected_scene() {
     // The cursor now sits at the "## The Meeting" heading's byte offset.
     let expected = body.find("## The Meeting").unwrap();
     assert_eq!(app.edit_buffer().cursor_byte(), expected);
+}
+
+/// #717: the corkboard snapshots each `Card.start` when it opens, and autosave
+/// (#409) fires on the idle tick regardless of mode (with an idle reparse). Neither
+/// may shift the byte offset the snapshot jumps to. The buffer is dirty and
+/// idle-elapsed while the board is up, so both a `tick_autosave` and an `on_idle`
+/// reparse run before Enter; the jump must still land on the selected scene.
+#[test]
+fn autosave_and_reparse_cant_shift_a_focused_corkboard_jump() {
+    let body = "# Chapter One\n\n\
+                ## The Arrival\n\nRain hammered the platform.\n\n\
+                ## The Meeting\n\nShe was already waiting.\n";
+    let (mut app, _dir) = scene_app("corkboard-autosave-jump", body);
+    app.autosave_interval_secs = 1; // autosave on
+    app.open_corkboard();
+
+    // Select the second card ("The Meeting").
+    app.on_key(key(KeyCode::Down));
+
+    // The buffer is dirty and has gone idle while the board is up: the event loop
+    // would run both the idle-timer autosave and an idle reparse here.
+    app.buffer.dirty = true;
+    app.last_activity = Instant::now() - Duration::from_secs(2);
+    app.tick_autosave();
+    app.on_idle();
+
+    // Enter still lands on the correct "## The Meeting" offset — the save and
+    // reparse left the in-memory offsets the snapshot jumps by untouched.
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(
+        app.edit_buffer().cursor_byte(),
+        body.find("## The Meeting").unwrap()
+    );
+    assert!(!app.buffer.dirty, "autosave saved the dirty buffer");
 }
 
 #[test]

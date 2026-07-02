@@ -50,6 +50,17 @@ impl App {
             return;
         }
         let len = self.buffer.syntax().headings().len();
+        // Re-clamp against the live heading list every keystroke (#717): the list
+        // can shrink between focusing the outline and now (an idle reparse after an
+        // edit trims a heading), and a `selected` left past the end would make Enter
+        // silently no-op instead of landing on a scene. An empty list means the pane
+        // has nothing left to navigate — return to editing rather than hold a focus
+        // that can't move or jump.
+        let Some(selected) = len.checked_sub(1).map(|last| selected.min(last)) else {
+            self.mode = self.editing_mode();
+            return;
+        };
+        self.mode = Mode::Outline { selected };
         if let Some(s) = super::assist::list_move(selected, len, key.code) {
             self.mode = Mode::Outline { selected: s };
             return;
