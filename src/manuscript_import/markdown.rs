@@ -6,14 +6,24 @@ use crate::frontmatter;
 
 use super::{assemble, fallback_chapter, finalize_titles, mine_preamble, Dropped, Imported};
 
-/// Parse a single-Markdown-file manuscript (#298).
+/// Parse a single-Markdown-file manuscript (#298), splitting on the auto-detected
+/// chapter heading level (see [`chapter_level`]).
 pub fn parse_markdown(source: &str) -> Imported {
+    let (_, body) = frontmatter::split(source);
+    parse_markdown_at(source, chapter_level(body))
+}
+
+/// Parse a single-Markdown-file manuscript, splitting chapters on ATX headings of
+/// the given `level` (1–6). The import-preview step (#702) uses this to re-split
+/// at a level the author chose, so [`parse_markdown`]'s auto-detected split isn't
+/// the only option. Everything else — front-matter/title-page mining, the
+/// fence-aware split, the fallback single chapter — is identical to
+/// [`parse_markdown`].
+pub fn parse_markdown_at(source: &str, level: usize) -> Imported {
     // Book-level YAML front matter (if any) → title/author; the rest is the body.
     let (front, body) = frontmatter::split(source);
     let title = yaml_field(front, "title");
     let author = yaml_field(front, "author");
-
-    let level = chapter_level(body);
 
     // Split at each chapter-level heading; lines before the first such heading
     // are the preamble (a title page, in the export shape). A `Line` carries its
@@ -50,21 +60,10 @@ pub fn parse_markdown(source: &str) -> Imported {
 
 /// The heading level chapters break on: level 2 when there's a lone title `#`
 /// over `##` chapters (Quill's export), else level 1 when `#` is used per
-/// chapter, else level 2 as the default.
-fn chapter_level(body: &str) -> usize {
-    let (mut h1, mut h2) = (0u32, 0u32);
-    let mut in_fence = false;
-    for line in body.lines() {
-        if is_fence(line) {
-            in_fence = !in_fence;
-        } else if !in_fence {
-            match heading_level(line) {
-                Some(1) => h1 += 1,
-                Some(2) => h2 += 1,
-                _ => {}
-            }
-        }
-    }
+/// chapter, else level 2 as the default. Public so the import-preview step (#702)
+/// can show the author which level the parser guessed.
+pub fn chapter_level(body: &str) -> usize {
+    let (h1, h2) = (heading_count(body, 1), heading_count(body, 2));
     if h1 == 1 && h2 >= 1 {
         2
     } else if h1 >= 1 {
@@ -72,6 +71,22 @@ fn chapter_level(body: &str) -> usize {
     } else {
         2
     }
+}
+
+/// How many ATX headings of the given `level` the body holds, skipping headings
+/// inside fenced code blocks. Public so the import-preview step (#702) can offer
+/// the author only the levels the manuscript actually uses to re-split on.
+pub fn heading_count(body: &str, level: usize) -> usize {
+    let mut count = 0;
+    let mut in_fence = false;
+    for line in body.lines() {
+        if is_fence(line) {
+            in_fence = !in_fence;
+        } else if !in_fence && heading_level(line) == Some(level) {
+            count += 1;
+        }
+    }
+    count
 }
 
 /// One source line, pre-classified for the shared assembler: its text and

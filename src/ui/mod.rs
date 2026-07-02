@@ -26,8 +26,8 @@ mod overlay;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 use list_overlay::{
     draw_annotations, draw_corkboard, draw_dir_browser, draw_findings, draw_history,
-    draw_list_overlay, draw_model_manager, draw_palette, draw_project_browser, draw_project_search,
-    list_row, marker, row_style,
+    draw_import_preview, draw_list_overlay, draw_model_manager, draw_palette, draw_project_browser,
+    draw_project_search, list_row, marker, row_style,
 };
 pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
 use overlay::{draw_bible_review, draw_overlay, draw_tree};
@@ -93,6 +93,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             draw_project_browser(f, r, browser, &app.project.root)
         }),
         Mode::DirBrowser(browser) => modal(frame, area, |f, r| draw_dir_browser(f, r, browser)),
+        Mode::ImportPreview(preview) => {
+            modal(frame, area, |f, r| draw_import_preview(f, r, preview))
+        }
         Mode::Prompt(_) => dim_backdrop(frame, area),
         _ => {}
     }

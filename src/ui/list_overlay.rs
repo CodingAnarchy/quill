@@ -18,8 +18,8 @@ use ratatui::{
 };
 
 use crate::mode::{
-    Corkboard, DirBrowser, Findings, History, Palette, PaletteRow, ProjectBrowser, ProjectSearch,
-    ProjectSearchStage,
+    Corkboard, DirBrowser, Findings, History, ImportPreview, Palette, PaletteRow, ProjectBrowser,
+    ProjectSearch, ProjectSearchStage,
 };
 use crate::project::Project;
 
@@ -483,6 +483,82 @@ pub(super) fn draw_history(frame: &mut Frame, area: Rect, history: &History, cha
         "History — ↑↓ move · d diff this chapter · r restore this chapter · esc close",
         rows,
         Some(history.selected),
+    );
+}
+
+/// Render the manuscript-import preview (#702): a summary header (chapter count,
+/// the heading level the split used, book title/author, any dropped-element
+/// warnings) then the list of chapters that will be created — shown so the author
+/// can catch a mis-split before anything is written. Enter confirms, Esc cancels;
+/// a Markdown source's split level can be toggled with `1`–`6`.
+///
+/// The header rows are non-selectable; the chapter list scrolls under them by
+/// re-basing the list overlay's `selected` index past the header, so a long list
+/// stays navigable while the summary stays pinned at the top.
+pub(super) fn draw_import_preview(frame: &mut Frame, area: Rect, preview: &ImportPreview) {
+    let dim = Style::default().fg(theme::current().dim);
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let n = preview.chapters.len();
+    let title = " Import preview ".to_string();
+
+    // The summary header, above the chapter list. Non-selectable rows.
+    let mut header = vec![Line::from(Span::styled(
+        format!(
+            "{n} chapter{} will be created:",
+            if n == 1 { "" } else { "s" }
+        ),
+        bold,
+    ))];
+    if let Some(book) = &preview.title {
+        let by = preview
+            .author
+            .as_deref()
+            .map(|a| format!("  ·  by {a}"))
+            .unwrap_or_default();
+        header.push(Line::from(Span::styled(format!("  {book}{by}"), dim)));
+    }
+    if let Some(level) = preview.level {
+        let toggle = if preview.levels.len() > 1 {
+            "  (press 1–6 to re-split on another heading level)"
+        } else {
+            ""
+        };
+        header.push(Line::from(Span::styled(
+            format!("  split on heading level {level}{toggle}"),
+            dim,
+        )));
+    }
+    if !preview.warning.is_empty() {
+        // The warning suffix is `" (…)"`; trim to the parenthetical for the header.
+        header.push(Line::from(Span::styled(
+            format!("  warnings:{}", preview.warning),
+            dim,
+        )));
+    }
+    header.push(Line::raw(""));
+
+    let header_len = header.len();
+    let chapter_rows = preview
+        .chapters
+        .iter()
+        .enumerate()
+        .map(|(i, (t, _))| list_row(i == preview.scroll, format!("{}. {t}", i + 1), None));
+    header.extend(chapter_rows);
+
+    let levels = if preview.levels.len() > 1 {
+        " · 1–6 change split level"
+    } else {
+        ""
+    };
+    let help = format!("Import preview — ↑↓ scroll{levels} · enter import · esc cancel");
+    // Pin the scroll to the selected chapter row, past the header block.
+    draw_list_overlay(
+        frame,
+        area,
+        &title,
+        &help,
+        header,
+        Some(header_len + preview.scroll),
     );
 }
 

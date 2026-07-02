@@ -57,7 +57,7 @@ mod text;
 
 pub use docx::parse_docx;
 pub use folder::parse_markdown_folder;
-pub use markdown::parse_markdown;
+pub use markdown::{chapter_level, heading_count, parse_markdown, parse_markdown_at};
 pub use scriv::parse_scriv;
 pub use text::parse_text;
 

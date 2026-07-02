@@ -22,8 +22,8 @@ use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BookField, Command, Finding, Findings, GitAction, History, MetaEdit, MetaField, Mode, Overlay,
-    Palette, PaletteItem, Pending, RefFiles, VimState,
+    BookField, Command, Finding, Findings, GitAction, History, ImportPreview, MetaEdit, MetaField,
+    Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
 };
 use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::recovery;
@@ -791,6 +791,7 @@ impl App {
             Mode::Tree(_) => self.on_key_tree(key),
             Mode::ProjectBrowser(_) => self.on_key_project_browser(key),
             Mode::DirBrowser(_) => self.on_key_dir_browser(key),
+            Mode::ImportPreview(_) => self.on_key_import_preview(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
             Mode::Visual { .. } => self.on_key_visual(key),
