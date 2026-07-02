@@ -714,7 +714,7 @@ impl Action {
             Action::SwitchBook => "Switch book",
             Action::ManageBooks => "Manage books (series)…",
             Action::SeriesTree => "Project tree",
-            Action::RenameProject => "Rename project folder",
+            Action::RenameProject => "Rename project",
             Action::BookDetails => "Book details…",
             Action::SetGoals => "Set writing goals",
             Action::RefreshSeriesBible => "Refresh series bible",
