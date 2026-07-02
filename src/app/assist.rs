@@ -773,6 +773,9 @@ impl App {
                 character::render_profile(c, notes, &today)
             })
         }));
+        // Refresh the cross-cast relationship index (#707) from the profiles just
+        // written — pure aggregation of the extracted edges, no new AI call.
+        self.write_relationship_index(&chars, &today);
 
         let count = chars.len();
         self.resolve_staged(
@@ -783,6 +786,20 @@ impl App {
                 app.show_ai(character_summary_lines(count, written, drift));
             },
         );
+    }
+
+    /// Write the aggregated relationship index to `bible/relationships.md` (#707):
+    /// a cross-cast rollup of the `relationships` the character profiles already
+    /// carry. Fully derived from the profiles (no author Notes block to preserve),
+    /// so it's regenerated wholesale each time profiles are written rather than
+    /// staged for conflict review. A write failure is surfaced but doesn't abort
+    /// the pass — the per-character profiles are the primary artifact.
+    pub(crate) fn write_relationship_index(&mut self, chars: &[Character], today: &str) {
+        let path = self.project.root.join("bible").join("relationships.md");
+        let index = character::render_index(chars, today);
+        if let Err(msg) = self.write_file(&path, &index) {
+            self.message = Some(write_failure_message(&[msg]));
+        }
     }
 
     /// Count a character's name/alias mentions across the manuscript and record

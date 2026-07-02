@@ -4,6 +4,8 @@
 //! (`bible/characters/<slug>.md`). The first feature to use structured outputs;
 //! its on-disk format is reused by the later trackers. See `docs/ai-features.md`.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -321,6 +323,163 @@ fn generated_block(c: &Character) -> String {
     s
 }
 
+// --- Relationship index (aggregation, #707) --------------------------------
+
+/// A resolved relationship edge in the index: the target as the author would see
+/// it (the profile's canonical name when the reference resolves to a tracked
+/// character, otherwise the raw reference), whether that target has its own
+/// profile, and the relation label.
+struct Edge<'a> {
+    /// The canonical display name of the target (a tracked character's `name`, or
+    /// the raw reference when it doesn't resolve to one).
+    target: &'a str,
+    relation: &'a str,
+    /// Whether `target` is one of the tracked characters (so the index can link
+    /// mutual pairs and separate off-cast references).
+    tracked: bool,
+}
+
+/// Case-insensitive resolver from a relationship reference (a name or alias) to
+/// the canonical profile name it belongs to. Built once per index render so the
+/// aggregation is O(edges), not O(edges × characters).
+fn name_resolver(chars: &[Character]) -> HashMap<String, &str> {
+    let mut map = HashMap::new();
+    for c in chars {
+        // Later profiles don't clobber earlier ones for a shared alias; the first
+        // (name before alias, earlier character before later) wins, which keeps
+        // the canonical name stable.
+        map.entry(c.name.to_lowercase()).or_insert(c.name.as_str());
+        for alias in &c.aliases {
+            map.entry(alias.to_lowercase()).or_insert(c.name.as_str());
+        }
+    }
+    map
+}
+
+/// Resolve one character's relationships into display edges, canonicalizing each
+/// target to a tracked profile's name where the reference matches.
+fn edges_of<'a>(c: &'a Character, resolver: &HashMap<String, &'a str>) -> Vec<Edge<'a>> {
+    c.relationships
+        .iter()
+        .map(|r| match resolver.get(&r.name.to_lowercase()) {
+            Some(&canonical) => Edge {
+                target: canonical,
+                relation: &r.relation,
+                tracked: true,
+            },
+            None => Edge {
+                target: &r.name,
+                relation: &r.relation,
+                tracked: false,
+            },
+        })
+        .collect()
+}
+
+/// Render the aggregated relationship index (#707): a single `bible/relationships.md`
+/// rolling up the `relationships` every character profile already carries into one
+/// cross-cast view — no new AI call, pure aggregation of extracted facts.
+///
+/// Each tracked character gets a section listing their outgoing relationships.
+/// When the target is itself a tracked character and names this character back,
+/// the edge is annotated as mutual with the reciprocal label. References the
+/// character doesn't list back but that name *them* are surfaced under "Also
+/// referenced by", so a one-sided edge is visible from both ends.
+pub fn render_index(chars: &[Character], today: &str) -> String {
+    let resolver = name_resolver(chars);
+    // Resolve every character's edges once, indexed by canonical name, so both the
+    // outgoing list and the reciprocity / back-reference lookups read the same
+    // resolved data.
+    let edges: Vec<(&str, Vec<Edge>)> = chars
+        .iter()
+        .map(|c| (c.name.as_str(), edges_of(c, &resolver)))
+        .collect();
+
+    // Alphabetical, case-insensitive, so the index is stable regardless of the
+    // order the pass returned characters in.
+    let mut order: Vec<usize> = (0..chars.len()).collect();
+    order.sort_by_key(|&i| chars[i].name.to_lowercase());
+
+    let mut body = String::new();
+    let mut any = false;
+    for &i in &order {
+        let name = chars[i].name.as_str();
+        let outgoing = &edges[i].1;
+        let back = back_references(name, &edges);
+        if outgoing.is_empty() && back.is_empty() {
+            continue;
+        }
+        any = true;
+        body.push_str(&format!("## {name}\n"));
+        for edge in outgoing {
+            let mutual = edge
+                .tracked
+                .then(|| reciprocal(name, edge.target, &edges))
+                .flatten();
+            match mutual {
+                Some(back_relation) => body.push_str(&format!(
+                    "- {} — {} (mutual: {})\n",
+                    edge.target, edge.relation, back_relation
+                )),
+                None => body.push_str(&format!("- {} — {}\n", edge.target, edge.relation)),
+            }
+        }
+        // Incoming edges this character doesn't list back — a one-sided reference
+        // the author can see from this end too.
+        let names_back: Vec<&str> = outgoing.iter().map(|e| e.target).collect();
+        let unlisted: Vec<&(&str, &str)> = back
+            .iter()
+            .filter(|(from, _)| !names_back.contains(from))
+            .collect();
+        if !unlisted.is_empty() {
+            let refs: Vec<String> = unlisted
+                .iter()
+                .map(|(from, relation)| format!("{from} ({relation})"))
+                .collect();
+            body.push_str(&format!("- _Also referenced by:_ {}\n", refs.join(", ")));
+        }
+        body.push('\n');
+    }
+    if !any {
+        body.push_str("_No relationships recorded yet._\n\n");
+    }
+
+    let front = "title: Relationship index\n".to_string();
+    // The index is fully derived from the profiles, so it carries no author Notes
+    // block to preserve — an empty notes block keeps the bible-file shape uniform.
+    bible::render(&front, &body, "", today)
+}
+
+/// The reciprocal relation label `target` records for `source`, if `target` is a
+/// tracked character that names `source` back — used to mark a mutual edge.
+fn reciprocal<'a>(source: &str, target: &str, edges: &'a [(&str, Vec<Edge>)]) -> Option<&'a str> {
+    edges
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(target))
+        .and_then(|(_, es)| {
+            es.iter()
+                .find(|e| e.target.eq_ignore_ascii_case(source))
+                .map(|e| e.relation)
+        })
+}
+
+/// Every tracked character that names `name`, as `(their name, the relation they
+/// record)` — the incoming edges, so a one-sided reference shows from both ends.
+fn back_references<'a>(name: &str, edges: &'a [(&str, Vec<Edge>)]) -> Vec<(&'a str, &'a str)> {
+    let mut out = Vec::new();
+    for (from, es) in edges {
+        if from.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        for e in es {
+            if e.target.eq_ignore_ascii_case(name) {
+                out.push((*from, e.relation));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +586,107 @@ mod tests {
         // Round-trip: the notes come back out unchanged (bible-format behavior).
         assert_eq!(bible::extract_notes(&file).trim(), notes.trim());
         assert!(!bible::is_hand_edited(&file));
+    }
+
+    // --- Relationship index (#707) -----------------------------------------
+
+    /// A minimal character with just a name and a set of outgoing relationships,
+    /// so the index tests read as edge lists.
+    fn with_rels(name: &str, rels: &[(&str, &str)]) -> Character {
+        Character {
+            name: name.into(),
+            relationships: rels
+                .iter()
+                .map(|(n, r)| Relationship {
+                    name: (*n).into(),
+                    relation: (*r).into(),
+                })
+                .collect(),
+            ..Character::default()
+        }
+    }
+
+    #[test]
+    fn index_aggregates_each_characters_edges() {
+        // Two characters, one edge each, both pointing at off-cast names: each gets
+        // its own section with its outgoing edge, sorted alphabetically.
+        let chars = vec![
+            with_rels("Mara", &[("the locket", "obsessed with")]),
+            with_rels("Ada", &[("her past", "haunted by")]),
+        ];
+        let index = render_index(&chars, "2026-06-19");
+        // Alphabetical: Ada before Mara.
+        let ada = index.find("## Ada").unwrap();
+        let mara = index.find("## Mara").unwrap();
+        assert!(ada < mara, "sections are alphabetical");
+        assert!(index.contains("- her past — haunted by"));
+        assert!(index.contains("- the locket — obsessed with"));
+    }
+
+    #[test]
+    fn index_marks_reciprocal_edges_as_mutual() {
+        // Mara → Tomas and Tomas → Mara: each edge is annotated with the other's
+        // relation label.
+        let chars = vec![
+            with_rels("Mara", &[("Tomas", "estranged brother")]),
+            with_rels("Tomas", &[("Mara", "sister he abandoned")]),
+        ];
+        let index = render_index(&chars, "2026-06-19");
+        assert!(index.contains("- Tomas — estranged brother (mutual: sister he abandoned)"));
+        assert!(index.contains("- Mara — sister he abandoned (mutual: estranged brother)"));
+    }
+
+    #[test]
+    fn index_surfaces_one_sided_edges_from_both_ends() {
+        // Mara names Tomas, but Tomas's profile doesn't name Mara back. Tomas's
+        // section still shows the incoming reference so the edge is visible both ways.
+        let chars = vec![
+            with_rels("Mara", &[("Tomas", "estranged brother")]),
+            with_rels("Tomas", &[]),
+        ];
+        let index = render_index(&chars, "2026-06-19");
+        assert!(index.contains("## Mara"));
+        assert!(index.contains("- Tomas — estranged brother"));
+        assert!(
+            !index.contains("- Tomas — estranged brother (mutual"),
+            "not mutual — Tomas doesn't list Mara back"
+        );
+        assert!(index.contains("## Tomas"));
+        assert!(
+            index.contains("- _Also referenced by:_ Mara (estranged brother)"),
+            "Tomas's section surfaces the incoming edge"
+        );
+    }
+
+    #[test]
+    fn index_resolves_references_through_aliases() {
+        // Mara refers to "Tom", which is Tomas's alias; the edge canonicalizes to
+        // Tomas and pairs up as mutual.
+        let mut tomas = with_rels("Tomas", &[("Mara", "sister")]);
+        tomas.aliases = vec!["Tom".into()];
+        let chars = vec![with_rels("Mara", &[("Tom", "brother")]), tomas];
+        let index = render_index(&chars, "2026-06-19");
+        // Displayed under the canonical name, marked mutual.
+        assert!(index.contains("- Tomas — brother (mutual: sister)"));
+        assert!(index.contains("- Mara — sister (mutual: brother)"));
+    }
+
+    #[test]
+    fn index_handles_a_cast_with_no_relationships() {
+        let chars = vec![with_rels("Mara", &[]), with_rels("Ada", &[])];
+        let index = render_index(&chars, "2026-06-19");
+        assert!(index.contains("_No relationships recorded yet._"));
+        // A clean, non-hand-edited bible file even when empty.
+        assert!(!bible::is_hand_edited(&index));
+    }
+
+    #[test]
+    fn index_is_a_wellformed_bible_file() {
+        let chars = vec![with_rels("Mara", &[("Tomas", "brother")])];
+        let index = render_index(&chars, "2026-06-19");
+        assert!(index.contains("title: Relationship index"));
+        assert!(index.contains("generated: 2026-06-19"));
+        // No author notes to preserve, but the round-trip stays clean.
+        assert!(!bible::is_hand_edited(&index));
     }
 }

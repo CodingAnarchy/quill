@@ -299,6 +299,11 @@ impl App {
                 character::render_profile(c, notes, &today)
             }));
         }
+        if !chars.is_empty() {
+            // Refresh the cross-cast relationship index (#707) from the imported
+            // profiles — the same aggregation the character pass runs.
+            self.write_relationship_index(&chars, &today);
+        }
         if setting_has {
             staged.push(
                 self.stage_bible(bible.join("setting.md"), "setting", |notes| {
