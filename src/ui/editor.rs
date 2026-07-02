@@ -195,7 +195,17 @@ fn render_body(
             .find(|(at, _)| *at == line)
             .map_or(0, |(_, b)| b.len())
     };
-    let body_rows = |line: usize| crate::wrap::row_starts(&buffer.line(line), wrap).len();
+    // Row count honoring fenced-code treatment (#723): a hidden fence line is zero
+    // rows, verbatim preview code is one, everything else soft-wraps — kept in
+    // lockstep with the fill loop's `styled_line` so scroll math matches the render.
+    let syntax = buffer.syntax();
+    let line_rows = |line: usize| {
+        let start = buffer.line_start_byte(line);
+        let text = buffer.line(line);
+        let kind = row_kind(syntax, start, &text, hl.conceal);
+        row_count(kind, &text, wrap)
+    };
+    let body_rows = line_rows;
 
     let total = buffer.line_count();
     let cursor_line = buffer.cursor.line;
@@ -256,14 +266,10 @@ fn render_body(
             }
         }
         let indent = paragraph_indent && starts_paragraph(buffer, ll);
-        let body = styled_line(
-            buffer.syntax(),
-            buffer.line_start_byte(ll),
-            &buffer.line(ll),
-            hl,
-            wrap,
-            indent,
-        );
+        let line_start = buffer.line_start_byte(ll);
+        let text = buffer.line(ll);
+        let kind = row_kind(syntax, line_start, &text, hl.conceal);
+        let body = styled_line(syntax, line_start, &text, hl, wrap, indent, kind);
         for (sub, line) in body.into_iter().enumerate() {
             if to_skip > 0 {
                 to_skip -= 1;
@@ -431,10 +437,71 @@ fn centered_line(label: String, width: u16, style: Style) -> Line<'static> {
     Line::from(Span::styled(format!("{}{label}", " ".repeat(pad)), style))
 }
 
+/// How a logical line renders with respect to fenced code blocks (#723). Prose is
+/// the default; the fence lines and code content of a block get special treatment
+/// that mirrors emphasis's reveal-on-cursor concealment.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowKind {
+    /// Ordinary prose: soft-wrapped, styled per the highlight spans.
+    Prose,
+    /// A fence-delimiter row (the ``` ``` ``` line) that is currently concealed
+    /// because the cursor is outside its block — it renders as zero rows so the
+    /// block reads as a set-apart preview with the fences hidden.
+    HiddenFence,
+    /// A code-content line inside a fenced block. `verbatim` when the block is in
+    /// preview (cursor outside): whitespace is preserved and the line is *not*
+    /// soft-wrapped/reflowed. When the cursor is inside, the fences are revealed
+    /// and the content edits like prose, so it soft-wraps (`verbatim == false`).
+    Code { verbatim: bool },
+}
+
+/// Classify a logical line for fenced-code rendering (#723). A line is a
+/// [`RowKind::HiddenFence`] when its whole content sits inside a currently-active
+/// conceal range (a hidden fence row); a [`RowKind::Code`] when a `Code` highlight
+/// covers its start byte. `verbatim` is set when that block's fences are concealed
+/// (preview state) — the same all-or-nothing signal the conceal list already
+/// carries, so no separate cursor test is needed here.
+fn row_kind(syntax: &Syntax, line_start: usize, text: &str, conceal: &[(usize, usize)]) -> RowKind {
+    let line_end = line_start + text.len();
+    // A fence row is fully hidden: its content range lies within one conceal range.
+    // (Fence lines are never blank, so an empty line is only ordinary blank prose.)
+    if !text.is_empty()
+        && conceal
+            .iter()
+            .any(|&(s, e)| s <= line_start && line_end <= e)
+    {
+        return RowKind::HiddenFence;
+    }
+    // Code content: a `Code` span covers the line's start. Its block is in preview
+    // (verbatim) when any fence line of that span is still concealed.
+    let probe = line_start.min(line_end.saturating_sub(1));
+    if let Some(code) = syntax
+        .highlights_in(line_start, line_end.max(line_start + 1))
+        .find(|h| h.kind == HighlightKind::Code && h.start <= probe && probe < h.end)
+    {
+        let verbatim = conceal.iter().any(|&(s, e)| s < code.end && e > code.start);
+        return RowKind::Code { verbatim };
+    }
+    RowKind::Prose
+}
+
+/// The display rows a logical line occupies at wrap `width`, honoring fenced-code
+/// treatment (#723): a hidden fence row is zero rows; verbatim code is one row (no
+/// reflow); everything else soft-wraps. Kept in lockstep with [`styled_line`] so
+/// the scroll math and the rendered output always agree on row counts.
+fn row_count(kind: RowKind, text: &str, width: usize) -> usize {
+    match kind {
+        RowKind::HiddenFence => 0,
+        RowKind::Code { verbatim: true } => 1,
+        _ => crate::wrap::row_starts(text, width).len(),
+    }
+}
+
 /// Soft-wrap a logical line into its visual rows (#143) and style each. `text` is
 /// one line (no newline); `line_start` its absolute byte offset (highlights,
 /// conceal, and match ranges use document offsets). Returns one [`Line`] per
-/// wrapped row.
+/// wrapped row — or no rows for a hidden fence line, and a single verbatim row for
+/// preview code (#723).
 fn styled_line(
     syntax: &Syntax,
     line_start: usize,
@@ -442,10 +509,25 @@ fn styled_line(
     hl: &SpanHighlights,
     width: usize,
     indent: bool,
+    kind: RowKind,
 ) -> Vec<Line<'static>> {
+    match kind {
+        // Concealed fence line: contributes no visual row, so the block's fences
+        // vanish and it reads as a set-apart preview.
+        RowKind::HiddenFence => return Vec::new(),
+        // Preview code: one verbatim row, whitespace preserved (no soft-wrap), set
+        // apart with a full-width tint. An empty content line still gets a tinted
+        // row so the block reads as one continuous box.
+        RowKind::Code { verbatim: true } => {
+            let row = styled_row(syntax, line_start, text, 0, text.len(), hl);
+            return vec![code_row(row, width)];
+        }
+        _ => {}
+    }
     if text.is_empty() {
         return vec![Line::raw("")];
     }
+    let code = matches!(kind, RowKind::Code { .. });
     let starts = crate::wrap::row_starts(text, width);
     starts
         .iter()
@@ -453,16 +535,44 @@ fn styled_line(
         .map(|(i, &rs)| {
             let re = starts.get(i + 1).copied().unwrap_or(text.len());
             let row = styled_row(syntax, line_start, text, rs, re, hl);
-            // First-line paragraph indent (#722): a display-only leading space on
-            // the paragraph's first visual row only, mirroring `epigraph_lines`'
-            // leading-space precedent. Never enters the buffer or any file.
-            if indent && i == 0 {
+            // Revealed code (cursor inside the block): keep the set-apart tint so the
+            // box stays visible while editing, but let it soft-wrap like prose.
+            if code {
+                code_row(row, width)
+            } else if indent && i == 0 {
+                // First-line paragraph indent (#722): a display-only leading space on
+                // the paragraph's first visual row only, mirroring `epigraph_lines`'
+                // leading-space precedent. Never enters the buffer or any file.
                 indented(row)
             } else {
                 row
             }
         })
         .collect()
+}
+
+/// Set a fenced-code row apart (#723): tint every cell — the row's characters and
+/// a trailing pad out to the column edge — with `theme.code` as a background, so
+/// the block reads as one continuous box distinct from the surrounding prose. The
+/// pad is appended after the content, so it never shifts the on-screen cursor,
+/// which is only ever placed before it (the cursor's block is revealed, not preview).
+fn code_row(row: Line<'static>, width: usize) -> Line<'static> {
+    let bg = theme::current().code_bg;
+    let used: usize = row
+        .spans
+        .iter()
+        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    let mut spans: Vec<Span> = row
+        .spans
+        .into_iter()
+        .map(|s| Span::styled(s.content, s.style.bg(bg)))
+        .collect();
+    let pad = width.saturating_sub(used);
+    if pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
+    }
+    Line::from(spans)
 }
 
 /// Prepend the display-only first-line indent to a rendered row (#722), reusing the

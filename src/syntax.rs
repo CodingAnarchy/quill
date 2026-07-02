@@ -190,6 +190,21 @@ fn collect(
                 end: node.end_byte(),
                 kind: HighlightKind::Code,
             });
+            // Register the opening/closing fence *lines* as concealable markers,
+            // reusing the emphasis reveal-on-cursor path (#723): each fence line is
+            // hidden unless the cursor is anywhere in the block, so the block reads
+            // as a set-apart preview until you step in to edit the raw markup. The
+            // reveal span is the whole `fenced_code_block` node. The line range runs
+            // from a delimiter's line start to the byte after it (including the
+            // newline), so the whole row disappears — not just the backticks.
+            for line in fence_delimiter_lines(&node, &read) {
+                markers.push(Marker {
+                    delim_start: line.0,
+                    delim_end: line.1,
+                    span_start: node.start_byte(),
+                    span_end: node.end_byte(),
+                });
+            }
         }
     });
 
@@ -233,6 +248,43 @@ fn collect(
     markers.sort_by_key(|m| m.delim_start);
     headings.sort_by_key(|h| h.start);
     (out, markers, headings)
+}
+
+/// The byte range of each fence-delimiter *line* in a `fenced_code_block` — the
+/// opening and (when present) closing ``` ``` ``` rows, each spanning from the
+/// delimiter's line start through its trailing newline so the whole row can be
+/// hidden. The delimiter node itself is just the backticks (plus, for the opener,
+/// an info string on the same line), so we extend the range to the next newline
+/// (inclusive) — the actual end of the fence row — clamped to the block's end.
+fn fence_delimiter_lines(
+    node: &Node,
+    read: &impl Fn(usize, usize) -> String,
+) -> Vec<(usize, usize)> {
+    let mut lines = Vec::new();
+    let node_end = node.end_byte();
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            if child.kind() == "fenced_code_block_delimiter" {
+                let start = child.start_byte();
+                // Read from the delimiter to the block's end and find its line's
+                // terminating newline; the concealed range covers up to and
+                // including it so the whole row (backticks + any info string +
+                // newline) disappears. An unterminated final fence ends at the block.
+                let rest = read(start, node_end);
+                let line_end = rest
+                    .find('\n')
+                    .map_or(node_end, |nl| start + nl + 1)
+                    .min(node_end);
+                lines.push((start, line_end));
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+    lines
 }
 
 /// Pull a heading's level and title out of its node. Reads the heading's source
@@ -394,11 +446,47 @@ mod tests {
             span.contains("```") && span.contains("log *not italic* line"),
             "{span}"
         );
-        // The `*` inside the fence is plain code, so nothing is concealed there.
-        assert!(
-            s.conceal_ranges(None).is_empty(),
-            "no emphasis parsed in code"
-        );
+        // The `*` inside the fence is plain code, so no emphasis delimiter is
+        // concealed — the only concealed ranges are the fence lines themselves.
+        let hidden = concealed(text, &s, None);
+        assert!(hidden.iter().all(|d| d.trim() == "```"), "{hidden:?}");
+    }
+
+    #[test]
+    fn conceals_whole_fence_lines_and_reveals_them_inside_the_block() {
+        // Opening fence carries an info string; both fence rows (with newline) hide.
+        let text = "Intro.\n\n```rust\nlet x = 1;\n```\n\nAfter.\n";
+        let s = Syntax::new(text);
+
+        // Cursor outside: the two concealed ranges are exactly the fence *lines*,
+        // each including its trailing newline (so the whole row disappears, not
+        // just the backticks), and the info string is part of the hidden opener.
+        let outside = s.conceal_ranges(None);
+        assert_eq!(outside.len(), 2, "opening and closing fence lines");
+        assert_eq!(&text[outside[0].0..outside[0].1], "```rust\n");
+        assert_eq!(&text[outside[1].0..outside[1].1], "```\n");
+
+        // The content line between the fences is never concealed.
+        let content = text.find("let x").unwrap();
+        assert!(!outside.iter().any(|&(a, b)| a <= content && content < b));
+
+        // Cursor inside the block reveals the raw fences for editing.
+        assert!(s.conceal_ranges(Some(content)).is_empty());
+        // Cursor on the fence line itself counts as inside (the reveal span is the
+        // whole node), so the fences show while editing there too.
+        let on_open = outside[0].0;
+        assert!(s.conceal_ranges(Some(on_open)).is_empty());
+    }
+
+    #[test]
+    fn fence_concealment_is_independent_per_block() {
+        let text = "```\na\n```\n\nmid\n\n```\nb\n```\n";
+        let s = Syntax::new(text);
+        // Four fence lines total across the two blocks when the cursor is elsewhere.
+        assert_eq!(s.conceal_ranges(Some(text.find("mid").unwrap())).len(), 4);
+        // Cursor in the first block reveals only its two fences; the second's stay.
+        let in_first = text.find("a\n").unwrap();
+        assert_eq!(s.conceal_ranges(Some(in_first)).len(), 2);
     }
 
     #[test]

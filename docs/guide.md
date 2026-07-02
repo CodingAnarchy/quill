@@ -25,8 +25,13 @@ softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
 in-chapter outline pane.
 
 Fence a block in ``` to set it apart verbatim — a log readout, a transmission,
-a letter, anything whose line breaks and spacing should be preserved exactly. It
-renders monospaced and unstyled, and carries through to every export. (Smart
+a letter, anything whose line breaks and spacing should be preserved exactly. In
+the editor the block shows as a set-apart, tinted box: the ``` fence lines are
+hidden and the content is shown exactly as typed, whitespace and line breaks
+preserved rather than reflowed like prose — a true preview of how it will appear.
+Move the cursor into the block and the raw ``` fences reappear so you can edit
+the markup, just as emphasis markers reveal on the span you're editing; move out
+and it returns to the preview. The block carries through to every export. (Smart
 typography still applies inside: these blocks hold prose, not source code.)
 
 
