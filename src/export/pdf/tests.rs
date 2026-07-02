@@ -1450,3 +1450,78 @@ fn compression_shrinks_a_pdf_with_an_embedded_custom_font() {
         bytes.len()
     );
 }
+
+#[test]
+fn bleed_export_emits_trim_and_bleed_boxes() {
+    // A bleed print export states where the finished page is (#692): every page carries
+    // a /TrimBox inset within the media box by the bleed, and a /BleedBox equal to the
+    // media box, so a print shop knows where to cut. 6x9 (432×648) + 9pt bleed each side
+    // → media 450×666, trim inset to [9 9 441 657].
+    let bleed = 0.125 * 72.0; // 9pt
+    let (w, h) = trim_points("6x9").unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, bleed, &plain()).unwrap();
+    assert!(
+        has(&bytes, "MediaBox [0 0 450 666]"),
+        "media box = trim + bleed"
+    );
+    assert!(
+        has(&bytes, "/TrimBox [9 9 441 657]"),
+        "trim inset within the media box by the bleed"
+    );
+    assert!(
+        has(&bytes, "/BleedBox [0 0 450 666]"),
+        "bleed box = the full media box"
+    );
+    // On every page, not just one.
+    let pages = count(&bytes, "/Type /Page ");
+    assert!(pages > 1, "the doc spans several pages");
+    assert_eq!(count(&bytes, "/TrimBox"), pages, "a TrimBox on every page");
+    assert_eq!(
+        count(&bytes, "/BleedBox"),
+        pages,
+        "a BleedBox on every page"
+    );
+}
+
+#[test]
+fn no_bleed_export_makes_trim_and_bleed_coincide_with_the_media_box() {
+    // With no bleed the trim, bleed, and media boxes coincide — still emitted so the
+    // file is unambiguous (#692). 6x9 = 432×648.
+    let (w, h) = trim_points("6x9").unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, 0.0, &plain()).unwrap();
+    assert!(
+        has(&bytes, "/TrimBox [0 0 432 648]"),
+        "trim = the media box"
+    );
+    assert!(
+        has(&bytes, "/BleedBox [0 0 432 648]"),
+        "bleed = the media box"
+    );
+}
+
+#[test]
+fn the_trailer_references_an_info_dict_with_title_author_and_producer() {
+    // The PDF carries document metadata (#692): an /Info dict with Title/Author from the
+    // manifest and Producer "Quill", referenced from the trailer so readers and library
+    // systems can index it.
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    assert!(has(&bytes, "/Info "), "the trailer references /Info");
+    assert!(has(&bytes, "/Title (Red State Earth)"), "manifest title");
+    assert!(has(&bytes, "/Author (A. Writer)"), "manifest author");
+    assert!(has(&bytes, "/Producer (Quill)"), "producer is Quill");
+}
+
+#[test]
+fn info_dict_omits_an_absent_author_but_still_names_the_producer() {
+    // A book with no author (#692): /Info drops /Author rather than emitting an empty
+    // one, but Title and Producer are always present.
+    let mut d = doc();
+    d.author = None;
+    let bytes = to_pdf(&d, &plain()).unwrap();
+    assert!(
+        has(&bytes, "/Title (Red State Earth)"),
+        "title still present"
+    );
+    assert!(has(&bytes, "/Producer (Quill)"), "producer still present");
+    assert!(!has(&bytes, "/Author"), "no /Author when unset");
+}

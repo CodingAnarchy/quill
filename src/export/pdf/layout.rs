@@ -132,6 +132,25 @@ impl Layout {
         self.page_h + 2.0 * self.bleed
     }
 
+    /// The `/BleedBox` rectangle `[x0 y0 x1 y1]` — the full media box (trim + bleed on
+    /// every side, #692). A print shop's bleed extends to this edge. Equal to the
+    /// `/MediaBox` here, but emitted explicitly so the file states it.
+    pub(super) fn bleed_box(&self) -> (f32, f32, f32, f32) {
+        (0.0, 0.0, self.media_w(), self.media_h())
+    }
+
+    /// The `/TrimBox` rectangle `[x0 y0 x1 y1]` — the finished page, inset within the
+    /// media box by the bleed on every side (#692). This is the "cut here" box a print
+    /// shop trims to; with no bleed it coincides with the media box.
+    pub(super) fn trim_box(&self) -> (f32, f32, f32, f32) {
+        (
+            self.bleed,
+            self.bleed,
+            self.bleed + self.page_w,
+            self.bleed + self.page_h,
+        )
+    }
+
     pub(super) fn text_top(&self) -> f32 {
         // The trim sits inset by `bleed` within the media box, so a trim-relative y is
         // offset up by the bleed of the bottom edge.
