@@ -64,6 +64,40 @@ impl App {
         self.downloaded_models.iter().any(|m| m == id)
     }
 
+    /// Whether a local model that can hold a pass of `input_tokens` is *actually
+    /// present on disk* (#725) — a no-download `hf-hub` cache probe. The router
+    /// gate (`local_fits`) uses this so it never routes a pass on-device when only
+    /// the code, not the weights, is present: a compiled-in-but-not-downloaded
+    /// model is "local unavailable," and an AI pass never triggers an implicit
+    /// multi-GB fetch (that's the deliberate model-manager download's job). The
+    /// candidates are the author's configured set (`[ai] local_models`), or — when
+    /// none is set — the single hardware-recommended model. Always `false` without
+    /// the `local` feature (nothing can be downloaded there).
+    #[cfg(feature = "local")]
+    pub(crate) fn local_model_present(&self, input_tokens: u32) -> bool {
+        #[cfg(test)]
+        if let Some(present) = self.test_local_present {
+            return present;
+        }
+        let configured = model_select::available(&self.ai.local_models);
+        let candidates = if configured.is_empty() {
+            worker::recommended_model().into_iter().collect()
+        } else {
+            configured
+        };
+        candidates
+            .iter()
+            .any(|m| m.context_tokens >= input_tokens && worker::model_downloaded(m))
+    }
+    #[cfg(not(feature = "local"))]
+    pub(crate) fn local_model_present(&self, _input_tokens: u32) -> bool {
+        #[cfg(test)]
+        if let Some(present) = self.test_local_present {
+            return present;
+        }
+        false
+    }
+
     /// Re-probe which catalog models are on disk (#382) and cache the result.
     /// Cheap I/O, run on open and after a download / remove — never per frame.
     fn refresh_downloaded_models(&mut self) {
