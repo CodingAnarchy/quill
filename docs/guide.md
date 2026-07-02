@@ -143,11 +143,11 @@ so they survive a reopen and an export. The publication date accepts a year
 (`2026`) or a full date (`2026-06-30`); the language is a BCP-47 tag (`en`,
 `fr`, `es-419`, …).
 
-To make the project's folder match its title, run "Rename project folder" from
-the Ctrl-K menu: it's prefilled with the book title, the folder moves without
-quitting, and the project keeps saving to the new location. Renaming the folder
-is separate from the title (set with "Book details" in the Ctrl-K menu, or "t"
-in the chapter browser).
+To rename a project, run "Rename project" from the Ctrl-K menu: it's prefilled
+with the book title, and renaming moves the folder and updates the book title
+together so they stay in sync. The move happens without quitting, and the project
+keeps saving to the new location. (You can still set the title on its own with
+"Book details" in the Ctrl-K menu, or "t" in the chapter browser.)
 
 A project can hold a series of books. When it does, Quill opens the first book;
 run "Switch book" from the run-action menu (Ctrl-K) to move to another — the

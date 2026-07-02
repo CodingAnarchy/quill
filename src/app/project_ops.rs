@@ -799,23 +799,24 @@ impl App {
         }
     }
 
-    /// Prompt for the open project's new folder name (#424), prefilled with the
-    /// book title so matching the folder to the title is a single Enter. Renaming
-    /// moves only the directory, not the title (they're edited separately).
+    /// Prompt for the open project's new name (#424), prefilled with the book
+    /// title. Renaming moves the folder and updates the book title together
+    /// (#690), so the folder and the title stay in sync.
     pub(crate) fn prompt_rename_project(&mut self) {
         let prefill = self.project.manifest.title.clone();
         self.open_prompt(
             Pending::RenameProject,
-            "Rename project folder (matches the book title): ",
+            "Rename project (folder and book title): ",
             &prefill,
             None,
         );
     }
 
-    /// Rename the open project's directory to `new_name`, in place: save the
-    /// current work, move the folder, and reopen the project at the new path so
-    /// every save from here lands there (#424). Refuses to clobber an existing
-    /// folder, and leaves the project untouched on any failure (no half-move).
+    /// Rename the open project to `new_name`, in place: save the current work,
+    /// move the folder, sync the book title to match (#690), and reopen the project
+    /// at the new path so every save from here lands there (#424). Refuses to
+    /// clobber an existing folder, and leaves the project untouched on any failure
+    /// (no half-move).
     pub(crate) fn rename_project(&mut self, new_name: &str) {
         let name = crate::project::sanitize_dir_name(new_name);
         if name.is_empty() {
@@ -858,20 +859,34 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
+        // The folder moved; now bring the book title into sync so the folder and
+        // the title (report, exports, recents) don't diverge (#690). Write it onto
+        // the manifest at the new location before reopening, since open_in_place
+        // adopts whatever the manifest on disk says.
+        if let Err(e) = set_manifest_title(&new_root, &name) {
+            // The folder is at the new path but the title didn't update — report,
+            // then still reopen at the new path so the editor follows the folder.
+            self.message = Some(format!(
+                "Renamed folder, but couldn't update the title: {e}"
+            ));
+            self.open_in_place(new_root.clone());
+            return;
+        }
         // Reopen at the new path (the old recents entry self-prunes — its folder is
         // gone). open_in_place sets an "Opened …" message; replace it with the
         // rename confirmation.
         self.open_in_place(new_root.clone());
         if self.project.root == new_root {
-            self.message = Some(format!("Renamed project folder to \u{201c}{name}\u{201d}."));
+            self.message = Some(format!("Renamed project to \u{201c}{name}\u{201d}."));
         }
     }
 
-    /// Prompt for a new folder name for the project selected in the browser
-    /// (#612), stashing its path so the rename knows which folder to move. The
-    /// prompt is prefilled with the project's current folder name. Renaming the
-    /// project that's currently open is deferred to the in-place rename (#424),
-    /// which also reopens it at the new path.
+    /// Prompt for a new name for the project selected in the browser (#612),
+    /// stashing its path so the rename knows which folder to move. The prompt is
+    /// prefilled with the project's current folder name; renaming moves the folder
+    /// and updates the book title together (#690). Renaming the project that's
+    /// currently open is deferred to the in-place rename (#424), which also reopens
+    /// it at the new path.
     fn prompt_rename_browser_project(&mut self) {
         let q = self.project_query();
         let Some(project) = self.selected_project().filter(|p| project_matches(p, &q)) else {
@@ -891,17 +906,17 @@ impl App {
         self.pending_manage = Some(project.path);
         self.open_prompt(
             Pending::RenameBrowserProject,
-            "Rename project folder: ",
+            "Rename project (folder and book title): ",
             &prefill,
             None,
         );
     }
 
-    /// Rename the stashed browser project's directory to `new_name` (#612): move
-    /// the folder, record the new path in recents (the old entry self-prunes),
-    /// and re-list the browser so the change shows without reopening the project.
-    /// Refuses to clobber an existing folder and leaves everything untouched on
-    /// any failure (no half-move).
+    /// Rename the stashed browser project to `new_name` (#612): move the folder,
+    /// sync the book title to match (#690), record the new path in recents (the old
+    /// entry self-prunes), and re-list the browser so the change shows without
+    /// reopening the project. Refuses to clobber an existing folder and leaves
+    /// everything untouched on any failure (no half-move).
     pub(crate) fn rename_browser_project(&mut self, new_name: &str) {
         let Some(old_root) = self.pending_manage.take() else {
             self.mode = self.editing_mode();
@@ -936,14 +951,22 @@ impl App {
             self.reopen_project_browser();
             return;
         }
+        // Bring the book title into sync with the folder so the two don't diverge
+        // (#690) — the report, exports, and the recents label all read the title.
+        if let Err(e) = set_manifest_title(&new_root, &name) {
+            // The folder moved but the title didn't; still record the new path so
+            // the entry isn't lost, labeled with the new folder name.
+            recent::record(&new_root, &name);
+            self.message = Some(format!(
+                "Renamed folder, but couldn't update the title: {e}"
+            ));
+            self.reopen_project_browser();
+            return;
+        }
         // Record the new path so it stays in recents (the old entry self-prunes —
-        // its folder is gone). The title is the project's manifest title, which
-        // the move didn't touch; read it back to keep the recents label accurate.
-        let title = Project::open(&new_root)
-            .map(|p| p.manifest.title)
-            .unwrap_or_else(|_| name.clone());
-        recent::record(&new_root, &title);
-        self.message = Some(format!("Renamed project folder to \u{201c}{name}\u{201d}."));
+        // its folder is gone), labeled with the freshly-synced title.
+        recent::record(&new_root, &name);
+        self.message = Some(format!("Renamed project to \u{201c}{name}\u{201d}."));
         self.reopen_project_browser();
     }
 
@@ -1021,6 +1044,17 @@ impl App {
     pub(super) fn reopen_project_browser(&mut self) {
         self.open_project_browser();
     }
+}
+
+/// Set the book title in the manifest of the project at `root` to `title` and
+/// write it back (#690), so renaming a project keeps its folder and its title in
+/// sync. Loads the manifest first, so a multi-book series (`[[books]]`) round-trips
+/// through the series form rather than being flattened. `title` is the sanitized
+/// folder name, keeping the two identical.
+fn set_manifest_title(root: &Path, title: &str) -> std::io::Result<()> {
+    let mut project = Project::open(root)?;
+    project.manifest.title = title.to_string();
+    project.save_manifest()
 }
 
 /// Whether project `p` passes the browser's active filter (#612): a

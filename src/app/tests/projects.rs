@@ -650,6 +650,32 @@ fn renaming_updates_recents_to_the_new_path() {
     fs::remove_dir_all(&new_root).ok();
 }
 
+#[test]
+fn renaming_syncs_the_book_title_to_the_folder() {
+    isolate("rename-title");
+    let dir = make_project("rename-title-src", "Working Title", "prose\n");
+    let mut app = open_app(&dir);
+    assert_eq!(app.project.manifest.title, "Working Title");
+
+    let new_root = dir.parent().unwrap().join("Synced Title");
+    let _ = fs::remove_dir_all(&new_root);
+    app.rename_project("Synced Title");
+
+    // The live project reflects the new title...
+    assert_eq!(
+        app.project.manifest.title, "Synced Title",
+        "the open project shows the new title"
+    );
+    // ...and it's persisted: reopening the manifest from disk agrees.
+    let reloaded = Project::open(&new_root).expect("project reopens at the new path");
+    assert_eq!(
+        reloaded.manifest.title, "Synced Title",
+        "the new title is saved to the manifest, not just the folder"
+    );
+
+    fs::remove_dir_all(&new_root).ok();
+}
+
 // --- Browser filter, rename, and delete (#612) ----------------------------
 
 /// Select the project row whose title equals `title` in the open browser.
@@ -765,6 +791,50 @@ fn renaming_from_the_browser_moves_the_folder_and_updates_recents() {
     assert!(
         matches!(app.mode, Mode::ProjectBrowser(_)),
         "back in the browser after the rename"
+    );
+
+    fs::remove_dir_all(&new_root).ok();
+}
+
+#[test]
+fn browser_rename_syncs_the_title_in_the_manifest_and_recents() {
+    isolate("browser-rename-title");
+    let lib = books_dir("browser-rename-title-lib");
+    let alpha = project_in(&lib, "alpha", "Alpha", "a\n");
+    set_projects_home(&lib);
+
+    // Browse `alpha` while a different project is open.
+    let other = make_project("browser-rename-title-other", "Other", "o\n");
+    let mut app = open_app(&other);
+    app.on_key(ctrl('b'));
+    select_project(&mut app, "Alpha");
+
+    let new_root = lib.join("Renamed Alpha");
+    let _ = fs::remove_dir_all(&new_root);
+    app.on_key(key(KeyCode::Char('r')));
+    if let Mode::Prompt(s) = &mut app.mode {
+        s.input.clear();
+    }
+    type_str(&mut app, "Renamed Alpha");
+    app.on_key(key(KeyCode::Enter));
+
+    assert!(!alpha.exists(), "the old folder was moved away");
+    // The saved manifest carries the new title, not the stale "Alpha".
+    let reloaded = Project::open(&new_root).expect("project reopens at the new path");
+    assert_eq!(
+        reloaded.manifest.title, "Renamed Alpha",
+        "the browser rename saves the new title to the manifest"
+    );
+    // The recents entry for the new path is labeled with the new title.
+    let new_canon = new_root.canonicalize().unwrap();
+    let label = recent::list()
+        .into_iter()
+        .find(|r| r.path == new_canon)
+        .map(|r| r.title);
+    assert_eq!(
+        label.as_deref(),
+        Some("Renamed Alpha"),
+        "the recents label reflects the new title, not the old one"
     );
 
     fs::remove_dir_all(&new_root).ok();
