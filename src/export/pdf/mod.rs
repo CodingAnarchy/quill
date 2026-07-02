@@ -24,7 +24,7 @@ mod write;
 use std::collections::BTreeMap;
 
 use self::draw::{mono_wrap, num};
-use self::font::{Fonts, GidMap, ObjMap};
+use self::font::{pdf_text_string, Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::layout::Layout;
 use self::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg};
@@ -171,6 +171,7 @@ pub fn to_pdf_series_print(
 fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
     let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
+    pdf.set_info(&doc.title, doc.author.as_deref().unwrap_or(""));
     pdf.cover_page();
     pdf.title_page(
         doc.series.as_deref(),
@@ -204,6 +205,7 @@ fn render_series(
     let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     let title = series.unwrap_or("Series");
     pdf.set_heads(title, author.unwrap_or(title));
+    pdf.set_info(title, author.unwrap_or(""));
     pdf.cover_page();
     pdf.title_page(None, title, None, author, None);
     if let Some(first) = books.first() {
@@ -400,6 +402,10 @@ struct Pdf {
     outline: Vec<OutlineItem>,
     head_verso: String,
     head_recto: String,
+    /// The document title and author for the `/Info` dictionary (#692), sourced from
+    /// the manifest. Empty when unknown; an empty field is omitted from `/Info`.
+    doc_title: String,
+    doc_author: String,
     /// The first body page index (#651): pages before it are front matter, numbered
     /// in lowercase roman; the body from here is Arabic starting at 1. `usize::MAX`
     /// until the body begins, so every page laid out so far counts as front matter.
@@ -418,8 +424,17 @@ impl Pdf {
             outline: Vec::new(),
             head_verso: String::new(),
             head_recto: String::new(),
+            doc_title: String::new(),
+            doc_author: String::new(),
             body_start: usize::MAX,
         }
+    }
+
+    /// Record the document title/author for the `/Info` dictionary (#692), from the
+    /// manifest metadata. Empty fields are omitted from `/Info`.
+    fn set_info(&mut self, title: &str, author: &str) {
+        self.doc_title = title.to_string();
+        self.doc_author = author.to_string();
     }
 
     /// Mark the body as beginning at the next page to be started (#651): everything
@@ -1101,11 +1116,28 @@ impl Pdf {
             )
             .into_bytes(),
         );
+        // The trim (cut) and bleed rectangles a print shop reads (#692). TrimBox is the
+        // finished page inset within the media box by the bleed; BleedBox is the full
+        // media box. With no bleed the two coincide with the media box, but stating them
+        // explicitly keeps the file unambiguous. Emitted on every page.
+        let (tx0, ty0, tx1, ty1) = self.layout.trim_box();
+        let (bx0, by0, bx1, by1) = self.layout.bleed_box();
+        let boxes = format!(
+            "/TrimBox [{} {} {} {}] /BleedBox [{} {} {} {}]",
+            num(tx0),
+            num(ty0),
+            num(tx1),
+            num(ty1),
+            num(bx0),
+            num(by0),
+            num(bx1),
+            num(by1)
+        );
         for i in 0..n_pages {
             objects.insert(
                 page_obj[i],
                 format!(
-                    "<< /Type /Page /Parent 2 0 R /Contents {} 0 R >>",
+                    "<< /Type /Page /Parent 2 0 R /Contents {} 0 R {boxes} >>",
                     content_obj[i]
                 )
                 .into_bytes(),
@@ -1131,7 +1163,20 @@ impl Pdf {
             1,
             b"<< /Type /Catalog /Pages 2 0 R /Outlines 3 0 R /PageMode /UseOutlines >>".to_vec(),
         );
-        serialize(&objects)
+        // The document `/Info` dictionary (#692): Title/Author from the manifest, and a
+        // Producer identifying Quill. CreationDate is omitted here (the export is
+        // deterministic — no wall-clock nondeterminism a test/script would trip on).
+        let info_id = next;
+        let mut info = String::from("<<");
+        if !self.doc_title.is_empty() {
+            info.push_str(&format!(" /Title {}", pdf_text_string(&self.doc_title)));
+        }
+        if !self.doc_author.is_empty() {
+            info.push_str(&format!(" /Author {}", pdf_text_string(&self.doc_author)));
+        }
+        info.push_str(&format!(" /Producer {} >>", pdf_text_string("Quill")));
+        objects.insert(info_id, info.into_bytes());
+        serialize(&objects, Some(info_id))
     }
 }
 

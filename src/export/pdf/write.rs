@@ -142,8 +142,10 @@ pub(super) fn flatten_outline(
     (ids.first().copied(), ids.last().copied())
 }
 
-/// Write the objects (in id order), the xref table, and the trailer.
-pub(super) fn serialize(objects: &ObjMap) -> Vec<u8> {
+/// Write the objects (in id order), the xref table, and the trailer. `info` is the
+/// object id of the document `/Info` dictionary (#692), referenced from the trailer
+/// so readers and print tooling can index Title/Author/Producer; `None` omits it.
+pub(super) fn serialize(objects: &ObjMap, info: Option<u32>) -> Vec<u8> {
     let max_id = *objects.keys().max().expect("at least the catalog");
     let mut out: Vec<u8> = b"%PDF-1.7\n".to_vec();
     let mut offsets = vec![0usize; (max_id + 1) as usize];
@@ -160,9 +162,13 @@ pub(super) fn serialize(objects: &ObjMap) -> Vec<u8> {
     for id in 1..=max_id {
         out.extend_from_slice(format!("{:010} {:05} n \n", offsets[id as usize], 0).as_bytes());
     }
+    let info_ref = match info {
+        Some(id) => format!(" /Info {id} 0 R"),
+        None => String::new(),
+    };
     out.extend_from_slice(
         format!(
-            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            "trailer\n<< /Size {} /Root 1 0 R{info_ref} >>\nstartxref\n{xref}\n%%EOF\n",
             max_id + 1
         )
         .as_bytes(),
