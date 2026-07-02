@@ -416,7 +416,7 @@ impl App {
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
-            focus_width: 72,
+            focus_width: editor.column_width,
             typewriter,
             focus_mode,
             autosave_interval_secs,
