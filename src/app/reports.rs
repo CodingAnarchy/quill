@@ -104,11 +104,23 @@ impl App {
         let max = self.overlay_max_scroll();
         let page = self.viewport_height.saturating_sub(3).max(1); // keep a line of context
         let cur = self.overlay_scroll();
-        // `Some(row)` scrolls to `row`; a non-scroll key dismisses the overlay.
+        // A confirm overlay (the pre-commit review, #704) scrolls the same way, but
+        // Enter proceeds to the action and any non-scroll key cancels rather than
+        // silently closing — so the author never commits by mistaking a dismiss.
+        let confirm = self.overlay.as_ref().is_some_and(Overlay::is_confirm);
+        // `Some(row)` scrolls to `row`; a non-scroll key resolves the overlay.
         match super::scroll_target(key.code, ctrl, cur, max, page) {
             Some(row) => {
                 if let Some(overlay) = self.overlay.as_mut() {
                     overlay.scroll = row;
+                }
+            }
+            None if confirm => {
+                self.overlay = None;
+                if key.code == KeyCode::Enter {
+                    self.confirm_commit_review();
+                } else {
+                    self.message = Some("Commit cancelled.".into());
                 }
             }
             None => self.overlay = None,

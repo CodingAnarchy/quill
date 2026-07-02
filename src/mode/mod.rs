@@ -35,6 +35,10 @@ pub enum OverlayKind {
     AiPanel,
     /// The built-in user's guide (#281) — a fixed help document.
     Guide,
+    /// The pre-commit review (#704): the changed-file list and the diff of what a
+    /// commit would capture. Unlike the read-only reports, this overlay confirms —
+    /// Enter proceeds to the commit-message prompt, Esc (or any other key) cancels.
+    CommitReview,
 }
 
 impl Overlay {
@@ -65,13 +69,29 @@ impl Overlay {
         }
     }
 
+    /// The pre-commit review overlay (#704), scrolled to the top.
+    pub fn commit_review(lines: Vec<Line<'static>>) -> Self {
+        Self {
+            lines,
+            kind: OverlayKind::CommitReview,
+            scroll: 0,
+        }
+    }
+
+    /// Whether this overlay confirms an action (the pre-commit review, #704) rather
+    /// than being a press-any-key-to-dismiss read-only surface — so the key handler
+    /// knows Enter should proceed and any other key should cancel, not just close.
+    pub fn is_confirm(&self) -> bool {
+        matches!(self.kind, OverlayKind::CommitReview)
+    }
+
     /// The report label if this is a [`OverlayKind::Report`] overlay (e.g.
     /// "progress", "analysis") — the base name a saved snapshot (#601) is written
     /// under. `None` for the AI panel and the guide, which don't save to a file.
     pub fn report_label(&self) -> Option<&'static str> {
         match self.kind {
             OverlayKind::Report(label) => Some(label),
-            OverlayKind::AiPanel | OverlayKind::Guide => None,
+            OverlayKind::AiPanel | OverlayKind::Guide | OverlayKind::CommitReview => None,
         }
     }
 
