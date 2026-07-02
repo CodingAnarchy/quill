@@ -132,6 +132,23 @@ impl App {
         }
     }
 
+    /// Replace the active buffer's byte range `[lo, hi)` with `text` (#700) — the
+    /// range-edit path shared by the Vim operators and find/replace. In the
+    /// continuous view it routes through [`Manuscript::replace_byte_range`], which
+    /// clamps the range to the owning chapter and keeps its seam bookkeeping
+    /// correct; in the single-chapter view it's the buffer's own range edit.
+    /// Returns whether any text actually changed (a fully-clamped seam edit is a
+    /// no-op).
+    pub(super) fn edit_replace_range(&mut self, lo: usize, hi: usize, text: &str) -> bool {
+        match &mut self.manuscript {
+            Some(m) => m.replace_byte_range(lo, hi, text),
+            None => {
+                self.buffer.replace_byte_range(lo, hi, text);
+                true
+            }
+        }
+    }
+
     /// Move the cursor a screenful of visual rows up or down (#641) — PageUp /
     /// PageDown. Pages by the editor's interior height (keeping a line of
     /// context), reusing the wrap-aware per-row motions so it lands on a real

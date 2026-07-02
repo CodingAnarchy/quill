@@ -97,6 +97,161 @@ fn continuous_view_undo_of_a_second_chapters_edit_leaves_the_first_intact() {
     assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "gamma\n");
 }
 
+/// Enter the continuous view with Vim mode forced on, resting in Normal — the
+/// setup the range-edit Vim tests (#700) build on.
+fn continuous_vim_app(name: &str) -> (App, TempProject) {
+    let (mut app, dir) = three_chapter_app(name); // alpha / beta / gamma
+    app.vim = true;
+    app.mode = Mode::Normal;
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some());
+    (app, dir)
+}
+
+#[test]
+fn continuous_vim_word_delete_edits_the_right_chapter() {
+    // #700: `dw` in the continuous view is no longer refused — it routes through
+    // the range-edit primitive and writes back to the owning chapter's file.
+    let (mut app, dir) = continuous_vim_app("cont-dw");
+    // Move into chapter 1 ("beta") and delete the word.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('w')));
+    assert_eq!(app.edit_buffer().line(1), "", "beta was deleted");
+    assert_ne!(
+        app.message.as_deref(),
+        Some("Editing commands aren't available in the continuous view — Ctrl-l to return."),
+        "the operator was performed, not refused"
+    );
+
+    // Leaving persists just chapter 1's edit; the seams held.
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c1.md")).unwrap(), "");
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "alpha\n");
+    assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "gamma\n");
+}
+
+#[test]
+fn continuous_vim_x_and_dollar_delete_within_a_chapter() {
+    let (mut app, dir) = continuous_vim_app("cont-x");
+    // Chapter 0 ("alpha"): `x` drops the first char, `$`... use `D`/`d$`.
+    app.on_key(key(KeyCode::Char('x'))); // delete 'a' → "lpha"
+    assert_eq!(app.edit_buffer().line(0), "lpha");
+    app.on_key(key(KeyCode::Char('l'))); // move onto 'p'
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('$'))); // delete to line end → "l"
+    assert_eq!(app.edit_buffer().line(0), "l");
+
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "l\n");
+    assert_eq!(fs::read_to_string(dir.join("c1.md")).unwrap(), "beta\n");
+}
+
+#[test]
+fn continuous_vim_visual_delete_edits_the_right_chapter() {
+    let (mut app, dir) = continuous_vim_app("cont-visual");
+    // Chapter 2 ("gamma"): select the whole word charwise and delete it.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('v')));
+    for _ in 0..4 {
+        app.on_key(key(KeyCode::Char('l'))); // extend across "gamma"
+    }
+    app.on_key(key(KeyCode::Char('d')));
+    assert_eq!(app.edit_buffer().line(2), "", "the selection was deleted");
+    assert!(matches!(app.mode, Mode::Normal));
+
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "");
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "alpha\n");
+}
+
+#[test]
+fn continuous_vim_change_leaves_a_seam_intact() {
+    // `cc` on a middle chapter clears the line's content but keeps the chapter's
+    // terminating newline — the seam holds even though the line is emptied.
+    let (mut app, dir) = continuous_vim_app("cont-cc");
+    app.on_key(key(KeyCode::Down)); // into chapter 1 ("beta")
+    app.on_key(key(KeyCode::Char('c')));
+    app.on_key(key(KeyCode::Char('c'))); // clear the line, enter Insert
+    assert!(matches!(app.mode, Mode::Insert));
+    type_str(&mut app, "new");
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(app.edit_buffer().line(1), "new");
+
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c1.md")).unwrap(), "new\n");
+    // The neighbours never merged in.
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "alpha\n");
+    assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "gamma\n");
+}
+
+#[test]
+fn continuous_vim_undo_reverts_a_range_delete() {
+    let (mut app, dir) = continuous_vim_app("cont-op-undo");
+    app.on_key(key(KeyCode::Down)); // chapter 1 ("beta")
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('w'))); // delete "beta"
+    assert_eq!(app.edit_buffer().line(1), "");
+    app.on_key(key(KeyCode::Char('u'))); // Vim undo
+    assert_eq!(
+        app.edit_buffer().line(1),
+        "beta",
+        "the range delete was undone"
+    );
+
+    // Nothing dirty after the undo, so leaving writes the file back unchanged.
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("c1.md")).unwrap(), "beta\n");
+}
+
+#[test]
+fn find_works_within_the_continuous_view() {
+    // #700: opening find no longer drops back to single-chapter view; the search
+    // runs across the loaded window's chapters.
+    let (mut app, _dir) = three_chapter_app("cont-find");
+    app.mode = Mode::Insert;
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some());
+
+    app.on_key(ctrl('f')); // open find — must stay in the continuous view
+    assert!(
+        app.manuscript.is_some(),
+        "find did not leave the continuous view"
+    );
+    type_str(&mut app, "gamma"); // a word only in chapter 2
+    app.on_key(key(KeyCode::Enter)); // to the navigate stage
+
+    // The cursor jumped to "gamma" in chapter 2 — a cross-chapter match found
+    // without leaving the view.
+    let cursor_line = app.edit_buffer().cursor.line;
+    assert_eq!(app.edit_buffer().line(cursor_line), "gamma");
+}
+
+#[test]
+fn find_replace_within_the_continuous_view_edits_the_right_chapter() {
+    let (mut app, dir) = three_chapter_app("cont-replace");
+    app.mode = Mode::Insert;
+    app.on_key(ctrl('l'));
+
+    app.on_key(ctrl('f'));
+    type_str(&mut app, "beta");
+    app.on_key(key(KeyCode::Enter)); // navigate stage
+    app.on_key(key(KeyCode::Char('r'))); // promote to replace
+    type_str(&mut app, "delta");
+    app.on_key(key(KeyCode::Enter)); // start stepping
+    app.on_key(key(KeyCode::Char('a'))); // replace all remaining
+
+    assert!(
+        app.manuscript.is_some(),
+        "replace stayed in the continuous view"
+    );
+    app.on_key(ctrl('l')); // leave — saves
+    assert_eq!(fs::read_to_string(dir.join("c1.md")).unwrap(), "delta\n");
+    assert_eq!(fs::read_to_string(dir.join("c0.md")).unwrap(), "alpha\n");
+    assert_eq!(fs::read_to_string(dir.join("c2.md")).unwrap(), "gamma\n");
+}
+
 #[test]
 fn entering_continuous_flushes_the_single_chapter() {
     let (mut app, dir) = two_chapter_app("continuous-flush");

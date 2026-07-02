@@ -371,6 +371,78 @@ impl Manuscript {
         self.commit_checkpoint(was_open, pre);
     }
 
+    // --- Range edits (#700) ------------------------------------------------
+
+    /// The buffer-absolute byte span `[start, end)` of segment `seg`. The end is
+    /// the start of the next segment's first line, i.e. one past this chapter's
+    /// terminating newline — the fixed seam a range edit must never cross.
+    fn segment_byte_span(&self, seg: usize) -> (usize, usize) {
+        let start_line = self.segment_start_line(seg);
+        let end_line = start_line + self.segments[seg].lines;
+        let start = self.buffer.line_start_byte(start_line);
+        let end = if end_line >= self.buffer.line_count() {
+            self.buffer.len_bytes()
+        } else {
+            self.buffer.line_start_byte(end_line)
+        };
+        (start, end)
+    }
+
+    /// The byte range a range edit starting at `start` is allowed to touch: the
+    /// owning chapter's span, clamped so it never reaches across a fixed chapter
+    /// seam (#700). A middle chapter keeps its terminating newline (the seam that
+    /// separates it from the chapter below); the last loaded chapter has no
+    /// trailing newline of its own, so its whole span is editable. Returns
+    /// `(seg, lo, hi)` — the owning segment and the clamped `[lo, hi)`.
+    fn clamp_to_chapter(&self, start: usize) -> (usize, usize, usize) {
+        let seg = self.owner_of_line(self.buffer.cursor_at_byte(start).line);
+        let (seg_start, seg_end) = self.segment_byte_span(seg);
+        let is_last = seg + 1 == self.segments.len();
+        let max_end = if is_last {
+            seg_end
+        } else {
+            seg_end.saturating_sub(1) // leave the terminating newline in place
+        };
+        (seg, seg_start.max(start), max_end.max(start))
+    }
+
+    /// Replace the buffer-absolute byte range `[start, end)` with `text`, keeping
+    /// per-chapter seam/line-count/dirty bookkeeping correct (#700). This is the
+    /// range-edit primitive the continuous view's Vim operators and find/replace
+    /// route through, generalizing the char-level seam-maintaining edits above.
+    ///
+    /// The range is attributed to the chapter its `start` falls in and **clamped
+    /// to that chapter** — a range that would reach across a fixed chapter seam is
+    /// trimmed back so it never touches another chapter's text or the newline that
+    /// keeps the chapters apart (seams never merge).
+    ///
+    /// Returns whether any text actually changed, so a caller can tell a real edit
+    /// from a fully-clamped no-op (e.g. a delete aimed only at a seam).
+    pub fn replace_byte_range(&mut self, start: usize, end: usize, text: &str) -> bool {
+        let start = start.min(self.buffer.len_bytes());
+        let end = end.min(self.buffer.len_bytes()).max(start);
+        let (seg, lo, hi) = self.clamp_to_chapter(start);
+        let start = start.max(lo);
+        let end = end.min(hi).max(start);
+        if start >= end && text.is_empty() {
+            return false;
+        }
+
+        // Line-count delta: newlines removed from the chapter vs. newlines added by
+        // the replacement. Computed on the exact clamped span so the segment's line
+        // count — and thus every seam below it — stays exact.
+        let removed = self.buffer.byte_slice(start, end).matches('\n').count();
+        let added = text.matches('\n').count();
+
+        let pre = self.seg_states();
+        let was_open = self.buffer.group_open();
+        self.buffer.replace_byte_range(start, end, text);
+        self.segments[seg].lines = self.segments[seg].lines + added - removed;
+        self.segments[seg].dirty = true;
+        self.commit_checkpoint(was_open, pre);
+        true
+    }
+
     // --- Undo / redo (#649) ------------------------------------------------
 
     /// Undo the most recent edit group. Reverts the buffer's rope and restores
@@ -1124,6 +1196,104 @@ mod tests {
         m.backspace();
         assert!(!m.dirty());
         assert!(!m.undo(), "the refused edit left nothing to undo");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- Range edits (#700) ------------------------------------------------
+
+    #[test]
+    fn range_delete_attributes_to_the_owning_chapter_and_saves_it() {
+        let (mut project, dir) = project_with("range-del", &["alpha\n", "beta\n", "gamma\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+        // Buffer: "alpha\nbeta\ngamma\n". Delete "et" from "beta" (bytes 7..9).
+        assert!(m.replace_byte_range(7, 9, ""));
+        assert_eq!(flow(&m), "alpha\nba\ngamma\n");
+        assert!(!m.segments[0].dirty && m.segments[1].dirty && !m.segments[2].dirty);
+        assert_eq!(lines_sum(&m), m.buffer.line_count() - 1);
+
+        m.save(&mut project).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "ba\n");
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+        assert_eq!(fs::read_to_string(dir.join("ch2.md")).unwrap(), "gamma\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn range_replace_maintains_line_counts_when_lines_change() {
+        let (project, dir) = project_with("range-lines", &["a1\na2\n", "b1\n", "c1\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+        assert_eq!(m.segments[0].lines, 2);
+        // Replace "a1\na2" (bytes 0..5) with a single-line "X" — drops a line from
+        // chapter 0, and the seam to chapter 1 must move up with it.
+        assert!(m.replace_byte_range(0, 5, "X"));
+        assert_eq!(flow(&m), "X\nb1\nc1\n");
+        assert_eq!(m.segments[0].lines, 1);
+        assert_eq!(m.segments[1].index, 1);
+        assert_eq!(lines_sum(&m), m.buffer.line_count() - 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn range_delete_is_clamped_at_a_chapter_seam() {
+        let (mut project, dir) = project_with("range-seam", &["alpha\n", "beta\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+        // Try to delete from inside chapter 0 across the seam into chapter 1
+        // (bytes 2..9 spans "pha\nbe"). The clamp trims it to chapter 0's editable
+        // span, leaving the terminating newline so the chapters never merge.
+        m.buffer.cursor = Cursor { line: 0, col: 2 };
+        assert!(m.replace_byte_range(2, 9, ""));
+        assert_eq!(flow(&m), "al\nbeta\n"); // "pha" gone, seam and "beta" intact
+        assert_eq!(m.segments[1].index, 1);
+        assert_eq!(lines_sum(&m), m.buffer.line_count() - 1);
+
+        m.save(&mut project).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "al\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "beta\n");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn range_delete_of_a_whole_seam_only_leaves_the_seam_intact() {
+        // A delete aimed exactly at the newline that separates two chapters is
+        // fully clamped away — it changes nothing and never merges the chapters.
+        let (project, dir) = project_with("range-seamonly", &["alpha\n", "beta\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+        // Byte 5 is chapter 0's terminating '\n'; deleting [5,6) would merge.
+        m.buffer.cursor = Cursor { line: 0, col: 5 };
+        assert!(
+            !m.replace_byte_range(5, 6, ""),
+            "a pure-seam delete is a no-op"
+        );
+        assert_eq!(flow(&m), "alpha\nbeta\n");
+        assert!(!m.dirty());
+        assert!(!m.undo(), "the clamped no-op left nothing to undo");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn undo_reverts_a_range_delete_and_restores_the_seams() {
+        let (mut project, dir) = project_with("range-undo", &["a1\na2\n", "b1\n", "c1\n"]);
+        let mut m = Manuscript::open(&project).unwrap();
+        // Delete "a1\n" (bytes 0..3) — chapter 0 drops to one line.
+        assert!(m.replace_byte_range(0, 3, ""));
+        m.buffer.seal_undo_group();
+        assert_eq!(flow(&m), "a2\nb1\nc1\n");
+        assert_eq!(m.segments[0].lines, 1);
+
+        // Undo puts the line — and the seam below it — back exactly.
+        assert!(m.undo());
+        assert_eq!(flow(&m), "a1\na2\nb1\nc1\n");
+        assert_eq!(m.segments[0].lines, 2);
+        assert_eq!(m.segments[1].index, 1);
+        assert!(!m.dirty(), "undo restored the clean pre-edit state");
+        assert_eq!(lines_sum(&m), m.buffer.line_count() - 1);
+
+        // Redo re-applies it and re-dirties chapter 0.
+        assert!(m.redo());
+        assert_eq!(flow(&m), "a2\nb1\nc1\n");
+        m.save(&mut project).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "a2\n");
+        assert_eq!(fs::read_to_string(dir.join("ch1.md")).unwrap(), "b1\n");
         fs::remove_dir_all(&dir).ok();
     }
 }
