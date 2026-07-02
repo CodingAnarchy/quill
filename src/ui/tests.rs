@@ -796,3 +796,55 @@ fn continuous_view_shows_part_headers_at_boundaries() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn manuscript_corkboard_renders_chapter_group_headers() {
+    // The manuscript-wide board (#701) prefixes each chapter's first card with a
+    // chapter-title header, so its cards read grouped by chapter.
+    use crate::frontmatter::SceneStatus;
+    use crate::mode::{Card, Corkboard};
+
+    let card = |title: &str, chapter: usize, chapter_title: &str| Card {
+        title: title.into(),
+        level: 2,
+        prose_line: String::new(),
+        synopsis: String::new(),
+        status: SceneStatus::Stub,
+        start: 0,
+        chapter: Some(chapter),
+        chapter_title: chapter_title.into(),
+    };
+    let mut app = app_with("body\n");
+    app.mode = Mode::Corkboard(Box::new(Corkboard {
+        cards: vec![
+            card("The Arrival", 0, "One"),
+            card("The Meeting", 0, "One"),
+            card("The Departure", 1, "Two"),
+        ],
+        selected: 0,
+        manuscript: true,
+    }));
+
+    let screen = render(&app, 80, 20);
+    assert!(
+        screen.contains("manuscript"),
+        "board titled its scope:\n{screen}"
+    );
+    // Each chapter's title heads its group, above that chapter's scene cards.
+    let one = screen.find("One").unwrap();
+    let arrival = screen.find("The Arrival").unwrap();
+    let two = screen.find("Two").unwrap();
+    let departure = screen.find("The Departure").unwrap();
+    assert!(
+        one < arrival,
+        "chapter one's header sits above its cards:\n{screen}"
+    );
+    assert!(
+        arrival < two,
+        "chapter two's header follows chapter one's cards:\n{screen}"
+    );
+    assert!(
+        two < departure,
+        "chapter two's header sits above its card:\n{screen}"
+    );
+}

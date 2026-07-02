@@ -324,16 +324,25 @@ pub struct Tree {
     pub(crate) expanded: std::collections::HashSet<usize>,
 }
 
-/// State for the corkboard (#589 Phase 1 / #636 Phase 2): the active chapter's
-/// scenes as index cards, plus the selected row. Phase 1's read-only view is now
-/// an editable planning surface — the author reorders scenes and annotates each
-/// with a synopsis + status. The cards are rebuilt (from the already-parsed
-/// headings and the chapter's `scenes:` front matter) when the view opens and
-/// after every edit, so the byte offsets stay a valid jump target and the
-/// metadata stays aligned with the body headings.
+/// State for the corkboard (#589 Phase 1 / #636 Phase 2 / #701): scenes as index
+/// cards, plus the selected row. Phase 1's read-only view is an editable planning
+/// surface — the author reorders scenes and annotates each with a synopsis +
+/// status. The cards are rebuilt (from the already-parsed headings and each
+/// chapter's `scenes:` front matter) when the view opens and after every edit, so
+/// the byte offsets stay a valid jump target and the metadata stays aligned with
+/// the body headings.
+///
+/// `manuscript` (#701) distinguishes the two scopes. The default per-chapter board
+/// (`false`) cards the active buffer's scenes; the manuscript-wide board (`true`)
+/// cards every chapter's scenes, grouped by chapter — each card then names its
+/// chapter so the render can insert group headers and jump/reorder can target the
+/// right file.
 pub struct Corkboard {
     pub(crate) cards: Vec<Card>,
     pub(crate) selected: usize,
+    /// Whether this is the manuscript-wide board (#701) spanning every chapter,
+    /// versus the per-chapter board over just the active buffer.
+    pub(crate) manuscript: bool,
 }
 
 /// One corkboard index card (#589 / #636): a scene heading and the first line of
@@ -354,8 +363,19 @@ pub struct Card {
     /// The scene's drafting status (#636), shown as a badge and cycled from the
     /// board.
     pub(crate) status: crate::frontmatter::SceneStatus,
-    /// Byte offset where the heading begins; Enter moves the cursor here.
+    /// Byte offset where the heading begins, within its chapter's body; Enter
+    /// moves the cursor here (after opening the card's chapter, on the
+    /// manuscript-wide board).
     pub(crate) start: usize,
+    /// Which chapter this card's scene belongs to on the manuscript-wide board
+    /// (#701) — the index the jump opens and reorder/status/synopsis edits target.
+    /// `None` on the per-chapter board, whose cards all belong to the active
+    /// buffer. Also groups the manuscript board's cards under chapter headers.
+    pub(crate) chapter: Option<usize>,
+    /// The card's chapter title, shown as the group header before the chapter's
+    /// first card on the manuscript-wide board (#701). Empty on the per-chapter
+    /// board, which needs no grouping.
+    pub(crate) chapter_title: String,
 }
 
 /// State for an open [`Mode::DirBrowser`] (#271): a filesystem navigator for
@@ -552,11 +572,19 @@ pub(crate) enum Pending {
     /// Text input: the note for an inline annotation (#302) anchored to the byte
     /// range `[start, end)` of the active chapter. Enter saves it, Esc cancels.
     Annotate { start: usize, end: usize },
-    /// Text input: the one-line synopsis for the scene at card `index` on the
-    /// corkboard (#636). Enter persists it to the chapter's `scenes:` front matter
-    /// (a blank entry clears it) and re-opens the board; Esc returns without a
-    /// change.
-    SetSceneSynopsis { index: usize },
+    /// Text input: the one-line synopsis for a scene on the corkboard (#636 / #701).
+    /// The target is resolved when the prompt opens — `chapter` is the card's
+    /// chapter on the manuscript-wide board (`None` on the per-chapter board), and
+    /// `scene` is its within-chapter scene index — so the write lands on the right
+    /// file even after the mode has left `Corkboard` for the prompt. `manuscript`
+    /// records which board to re-open. Enter persists it to the chapter's `scenes:`
+    /// front matter (a blank entry clears it) and re-opens the board; Esc returns
+    /// without a change.
+    SetSceneSynopsis {
+        chapter: Option<usize>,
+        scene: usize,
+        manuscript: bool,
+    },
     /// y/N: remove the downloaded local model with this id from disk (#382). The
     /// id is a catalog `&'static str`, so [`Pending`] stays `Copy`.
     ConfirmRemoveModel(&'static str),

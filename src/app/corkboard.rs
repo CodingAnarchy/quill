@@ -27,7 +27,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use super::App;
 use crate::frontmatter::SceneMeta;
 use crate::mode::{Card, Corkboard, Mode, Pending};
-use crate::syntax::Heading;
+use crate::syntax::{Heading, Syntax};
 
 impl App {
     /// Open the corkboard for the active chapter (#589 / #636), or report when the
@@ -45,7 +45,35 @@ impl App {
                 Some("No scenes here — add a ## or ### heading to build the corkboard.".into());
             return;
         }
-        self.mode = Mode::Corkboard(Box::new(Corkboard { cards, selected: 0 }));
+        self.mode = Mode::Corkboard(Box::new(Corkboard {
+            cards,
+            selected: 0,
+            manuscript: false,
+        }));
+    }
+
+    /// Open the manuscript-wide corkboard (#701): scene cards across *every*
+    /// chapter, grouped by chapter, navigable, with jump-to-scene. Unlike the
+    /// per-chapter board this is reachable from the continuous view — it leaves it
+    /// first (like the other project-wide features) so a jump lands in a normal
+    /// single-chapter editing buffer. Cards are sourced from each chapter's body +
+    /// `scenes:` front matter off the keystroke path (the active chapter from its
+    /// live buffer, the rest read on demand, one file at a time), so this scales
+    /// with the manuscript, never the per-frame budget.
+    pub(crate) fn open_manuscript_corkboard(&mut self) {
+        self.leave_continuous();
+        let _ = self.flush_active();
+        let cards = self.manuscript_corkboard_cards();
+        if cards.is_empty() {
+            self.message =
+                Some("No scenes anywhere — add a ## or ### heading to build the corkboard.".into());
+            return;
+        }
+        self.mode = Mode::Corkboard(Box::new(Corkboard {
+            cards,
+            selected: 0,
+            manuscript: true,
+        }));
     }
 
     /// Build the corkboard cards for the active buffer (#589 / #636 / #698): one
@@ -64,33 +92,51 @@ impl App {
             .front_matter()
             .map(|fm| fm.scenes())
             .unwrap_or_default();
-        scenes(&text, headings)
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                // The scene body runs from the end of its heading's line up to the
-                // end of its block (past any folded-in sub-beats).
-                let body_start = line_end(&text, s.start).min(text.len());
-                let prose_line = first_prose_line(&text[body_start..s.end.min(text.len())]);
-                // Reconcile the metadata by position; a missing entry pads to the
-                // default rather than dropping the card.
-                let meta = meta.get(i).cloned().unwrap_or_default();
-                Card {
-                    title: headings[s.heading].title.clone(),
-                    level: headings[s.heading].level,
-                    prose_line,
-                    synopsis: meta.synopsis,
-                    status: meta.status,
-                    start: s.start,
+        // Per-chapter board: cards belong to the active buffer, so they carry no
+        // chapter tag or group header.
+        cards_for(&text, headings, &meta, None, "")
+    }
+
+    /// Build the manuscript-wide corkboard cards (#701): every chapter's scenes in
+    /// chapter then document order, each tagged with its chapter index and title so
+    /// the board groups them and a jump/edit targets the right file. The active
+    /// chapter's cards come from its live buffer (so pending edits show); other
+    /// chapters are read from disk on demand — one body + one front-matter read
+    /// each, off the keystroke path.
+    fn manuscript_corkboard_cards(&self) -> Vec<Card> {
+        let active = self.project.active_index();
+        (0..self.chapter_count())
+            .flat_map(|ch| {
+                let title = self.project.chapter_title(ch).unwrap_or("").to_string();
+                // The active chapter is already parsed in the buffer; reuse it
+                // rather than re-reading the file.
+                if ch == active {
+                    let buffer = self.edit_buffer();
+                    let text = buffer.text();
+                    let meta = buffer
+                        .front_matter()
+                        .map(|fm| fm.scenes())
+                        .unwrap_or_default();
+                    cards_for(&text, buffer.syntax().headings(), &meta, Some(ch), &title)
+                } else {
+                    let body = self.project.chapter_body(ch);
+                    let headings = Syntax::new(&body).headings().to_vec();
+                    let meta = self
+                        .project
+                        .chapter_front_matter(ch)
+                        .map(|fm| fm.scenes())
+                        .unwrap_or_default();
+                    cards_for(&body, &headings, &meta, Some(ch), &title)
                 }
             })
             .collect()
     }
 
-    /// Key handling for the corkboard (#589 / #636): move (arrows / j-k), jump the
-    /// editor cursor to the selected scene (Enter), reorder the selected scene up
-    /// (`K` / `[`) or down (`J` / `]`), edit its synopsis (`e`), cycle its status
-    /// (`s` / Space), close (Esc).
+    /// Key handling for the corkboard (#589 / #636 / #701): move (arrows / j-k),
+    /// jump the editor cursor to the selected scene (Enter), reorder the selected
+    /// scene up (`K` / `[`) or down (`J` / `]`), edit its synopsis (`e`), cycle its
+    /// status (`s` / Space), close (Esc). On the manuscript-wide board every edit
+    /// first targets the selected card's chapter, then rebuilds the board.
     pub(crate) fn on_key_corkboard(&mut self, key: KeyEvent) {
         let Mode::Corkboard(board) = &mut self.mode else {
             return;
@@ -101,15 +147,7 @@ impl App {
         }
         let selected = board.selected;
         match key.code {
-            KeyCode::Enter => {
-                let start = board.cards.get(selected).map(|c| c.start);
-                self.mode = self.editing_mode();
-                if let Some(start) = start {
-                    let buf = self.edit_buffer_mut();
-                    let at = start.min(buf.len_bytes());
-                    buf.cursor = buf.cursor_at_byte(at);
-                }
-            }
+            KeyCode::Enter => self.jump_to_card(selected),
             KeyCode::Char('K') | KeyCode::Char('[') => self.reorder_scene(selected, -1),
             KeyCode::Char('J') | KeyCode::Char(']') => self.reorder_scene(selected, 1),
             KeyCode::Char('e') => self.prompt_scene_synopsis(selected),
@@ -119,6 +157,52 @@ impl App {
         }
     }
 
+    /// Jump the editor to the scene of the card at `index` and close the board: on
+    /// the manuscript-wide board (#701) open the card's chapter first (a normal
+    /// single-chapter buffer), then move the cursor to the scene heading. On the
+    /// per-chapter board the card is already in the active buffer.
+    fn jump_to_card(&mut self, index: usize) {
+        let Some((chapter, start)) = self.card_target(index) else {
+            self.mode = self.editing_mode();
+            return;
+        };
+        self.mode = self.editing_mode();
+        if let Some(chapter) = chapter {
+            self.activate_chapter(chapter);
+        }
+        let buf = self.edit_buffer_mut();
+        let at = start.min(buf.len_bytes());
+        buf.cursor = buf.cursor_at_byte(at);
+    }
+
+    /// The chapter and scene-heading byte offset the card at `index` targets: the
+    /// `chapter` is `Some` only on the manuscript-wide board (#701), where an edit
+    /// or jump must open that file first; `None` means the active buffer.
+    fn card_target(&self, index: usize) -> Option<(Option<usize>, usize)> {
+        let Mode::Corkboard(board) = &self.mode else {
+            return None;
+        };
+        board.cards.get(index).map(|c| (c.chapter, c.start))
+    }
+
+    /// Resolve what the card at board `index` edits (#701): its chapter (`Some` only
+    /// on the manuscript-wide board), its within-chapter scene index (the position
+    /// the per-chapter reorder / status / synopsis machinery indexes by), and
+    /// whether this is the manuscript-wide board (so the right board re-opens). The
+    /// within-chapter index counts the cards before it that share its chapter, so on
+    /// the per-chapter board it is simply the card index.
+    fn card_edit_target(&self, index: usize) -> Option<(Option<usize>, usize, bool)> {
+        let Mode::Corkboard(board) = &self.mode else {
+            return None;
+        };
+        let card = board.cards.get(index)?;
+        let within = board.cards[..index]
+            .iter()
+            .filter(|c| c.chapter == card.chapter)
+            .count();
+        Some((card.chapter, within, board.manuscript))
+    }
+
     /// Move the scene at card `index` one slot in `dir` (−1 up, +1 down): its
     /// heading and prose (the whole block, including any folded-in `###` sub-beats)
     /// swap with the neighbouring scene block, and its `scenes:` metadata entry
@@ -126,17 +210,33 @@ impl App {
     /// Rewrites the whole body once (off the keystroke path), persists, and
     /// rebuilds the cards with the moved scene still selected.
     fn reorder_scene(&mut self, index: usize, dir: isize) {
-        let Some(other) = index.checked_add_signed(dir) else {
+        // On the manuscript-wide board (#701), reorder stays inside the card's own
+        // chapter: a move past a chapter boundary would touch the manifest and
+        // rewrite two files, which is deferred. Focus the chapter, then work in its
+        // within-chapter scene indices.
+        let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
+            return;
+        };
+        self.focus_chapter(chapter);
+        let Some(other) = scene.checked_add_signed(dir) else {
             return;
         };
         let buffer = self.edit_buffer();
         let text = buffer.text();
         let scenes = scenes(&text, buffer.syntax().headings());
-        if index >= scenes.len() || other >= scenes.len() {
-            return; // at an end — nothing to swap with
+        if scene >= scenes.len() || other >= scenes.len() {
+            // At a chapter boundary — the neighbour is in another chapter (or off
+            // the end). Cross-chapter reorder is deferred (#701).
+            if manuscript && !scenes.is_empty() {
+                self.message = Some(
+                    "Cross-chapter reorder isn't supported yet — reorder within a chapter.".into(),
+                );
+            }
+            self.reopen_board_for(manuscript, chapter, scene);
+            return;
         }
         // The two adjacent scene blocks, in body order (lower index first).
-        let (a, b) = (index.min(other), index.max(other));
+        let (a, b) = (scene.min(other), scene.max(other));
         let mut body = String::with_capacity(text.len());
         body.push_str(&text[..scenes[a].start]); // everything before the pair
         body.push_str(&text[scenes[b].start..scenes[b].end]); // the later block, first
@@ -149,52 +249,84 @@ impl App {
         meta.swap(a, b);
 
         self.rewrite_chapter(&body, &meta);
-        self.reopen_board(other);
+        self.reopen_board_for(manuscript, chapter, other);
     }
 
     /// Cycle the selected scene's status (stub → draft → done → stub) and persist
     /// it to the chapter's `scenes:` front matter (#636), then rebuild the board.
     fn cycle_scene_status(&mut self, index: usize) {
+        let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
+            return;
+        };
+        self.focus_chapter(chapter);
         let count = self.scene_count();
-        if index >= count {
+        if scene >= count {
             return;
         }
         let mut scenes = self.chapter_scenes(count);
-        scenes[index].status = scenes[index].status.next();
+        scenes[scene].status = scenes[scene].status.next();
         self.set_chapter_scenes(&scenes);
-        self.reopen_board(index);
+        self.reopen_board_for(manuscript, chapter, scene);
+    }
+
+    /// Focus `chapter` as the active buffer if it is `Some` and not already active
+    /// (manuscript-wide board, #701), so the per-chapter edit helpers act on the
+    /// right file. A no-op for `None` (the per-chapter board, already the active
+    /// buffer).
+    fn focus_chapter(&mut self, chapter: Option<usize>) {
+        if let Some(chapter) = chapter {
+            self.activate_chapter(chapter);
+        }
     }
 
     /// Open a text prompt to edit the selected scene's one-line synopsis (#636),
-    /// prefilled with the current value. Enter persists it; Esc leaves it.
+    /// prefilled with the current value. Enter persists it; Esc leaves it. The
+    /// target (chapter + within-chapter scene index) is resolved now and carried on
+    /// the prompt, so the write lands on the right file after the mode leaves the
+    /// board for the prompt (#701).
     fn prompt_scene_synopsis(&mut self, index: usize) {
-        let prefill = self
-            .edit_buffer()
-            .front_matter()
-            .map(|fm| fm.scenes())
-            .unwrap_or_default()
+        let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
+            return;
+        };
+        let Mode::Corkboard(board) = &self.mode else {
+            return;
+        };
+        let prefill = board
+            .cards
             .get(index)
-            .map(|s| s.synopsis.clone())
+            .map(|c| c.synopsis.clone())
             .unwrap_or_default();
         self.open_prompt(
-            Pending::SetSceneSynopsis { index },
+            Pending::SetSceneSynopsis {
+                chapter,
+                scene,
+                manuscript,
+            },
             "Scene synopsis: ",
             &prefill,
             None,
         );
     }
 
-    /// Persist a scene's edited synopsis (#636), from the
-    /// [`Pending::SetSceneSynopsis`] prompt. A blank entry clears it. Rebuilds the
-    /// board with the scene selected.
-    pub(crate) fn apply_scene_synopsis(&mut self, index: usize, text: &str) {
+    /// Persist a scene's edited synopsis (#636 / #701), from the
+    /// [`Pending::SetSceneSynopsis`] prompt. A blank entry clears it. Focuses the
+    /// resolved `chapter` first (manuscript-wide board), writes to its `scenes:`
+    /// front matter, and rebuilds the board with the scene selected.
+    pub(crate) fn apply_scene_synopsis(
+        &mut self,
+        chapter: Option<usize>,
+        scene: usize,
+        manuscript: bool,
+        text: &str,
+    ) {
+        self.focus_chapter(chapter);
         let count = self.scene_count();
-        if index < count {
+        if scene < count {
             let mut scenes = self.chapter_scenes(count);
-            scenes[index].synopsis = text.trim().to_string();
+            scenes[scene].synopsis = text.trim().to_string();
             self.set_chapter_scenes(&scenes);
         }
-        self.reopen_board(index);
+        self.reopen_board_for(manuscript, chapter, scene);
     }
 
     /// How many scenes the active chapter has (#698): the card count, one per scene
@@ -253,20 +385,82 @@ impl App {
         self.cache_focus_words();
     }
 
-    /// Rebuild the corkboard after an edit and re-enter it with `selected`
-    /// highlighted, clamped to the card count. The cards are re-derived from the
-    /// current headings + metadata, so reorder / status / synopsis changes show at
-    /// once. Returns to the editor if the chapter no longer has any scenes (it
-    /// always should after an in-place edit).
-    fn reopen_board(&mut self, selected: usize) {
-        let cards = self.corkboard_cards();
+    /// Rebuild the corkboard after an edit and re-enter it with the scene at
+    /// (`chapter`, `scene`) highlighted (#701). `chapter` is `Some` on the
+    /// manuscript-wide board, where the board is re-derived across every chapter
+    /// and the selection is the card that is `scene` scenes into that chapter;
+    /// `None` on the per-chapter board, where `scene` is simply the card index. The
+    /// cards are re-derived from the current headings + metadata, so reorder /
+    /// status / synopsis changes show at once. Returns to the editor if no scenes
+    /// remain (it always should after an in-place edit).
+    fn reopen_board_for(&mut self, manuscript: bool, chapter: Option<usize>, scene: usize) {
+        let cards = if manuscript {
+            self.manuscript_corkboard_cards()
+        } else {
+            self.corkboard_cards()
+        };
         if cards.is_empty() {
             self.mode = self.editing_mode();
             return;
         }
-        let selected = selected.min(cards.len() - 1);
-        self.mode = Mode::Corkboard(Box::new(Corkboard { cards, selected }));
+        // Re-find the moved scene by its (chapter, within-chapter index) so the
+        // highlight follows it even though the flat board index shifted.
+        let selected = match chapter {
+            Some(ch) => cards
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.chapter == Some(ch))
+                .nth(scene)
+                .map(|(i, _)| i)
+                .unwrap_or(cards.len() - 1),
+            None => scene.min(cards.len() - 1),
+        };
+        self.mode = Mode::Corkboard(Box::new(Corkboard {
+            cards,
+            selected,
+            manuscript,
+        }));
     }
+}
+
+/// Build one corkboard card per scene of a chapter body (#589 / #636 / #698 /
+/// #701): scenes in document order, each with the scene heading's byte offset for
+/// the jump and its metadata (synopsis + status) reconciled by position — a chapter
+/// with no metadata (or fewer entries than scenes) still lists every scene, padded
+/// with the default (blank synopsis, stub status). A scene owns its deeper sub-beats
+/// and the `#` chapter title is not a card (#698). `chapter` / `chapter_title` tag
+/// the cards for the manuscript-wide board (#701) and are `None` / empty on the
+/// per-chapter board. Shared by both boards so scene identity is defined once.
+fn cards_for(
+    text: &str,
+    headings: &[Heading],
+    meta: &[SceneMeta],
+    chapter: Option<usize>,
+    chapter_title: &str,
+) -> Vec<Card> {
+    scenes(text, headings)
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            // The scene body runs from the end of its heading's line up to the end
+            // of its block (past any folded-in sub-beats).
+            let body_start = line_end(text, s.start).min(text.len());
+            let prose_line = first_prose_line(&text[body_start..s.end.min(text.len())]);
+            // Reconcile the metadata by position; a missing entry pads to the
+            // default rather than dropping the card.
+            let meta = meta.get(i).cloned().unwrap_or_default();
+            Card {
+                title: headings[s.heading].title.clone(),
+                level: headings[s.heading].level,
+                prose_line,
+                synopsis: meta.synopsis,
+                status: meta.status,
+                start: s.start,
+                chapter,
+                chapter_title: chapter_title.to_string(),
+            }
+        })
+        .collect()
 }
 
 /// One scene of the corkboard (#698): a scene heading plus the block of body it
