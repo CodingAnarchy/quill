@@ -7,12 +7,14 @@
 //! result opens in Apple Books / Kobo / Calibre and is structured to pass
 //! epubcheck.
 
+use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use self::opf::{build_nav, build_ncx, build_opf, OpfMeta};
+use super::pdf::font::subset_for_web;
 use super::{
     copyright_lines, inline_runs, prose_blocks, render_epigraph, xml_escape, Chapter, Document,
     EmbeddedImage, ExportStyle, FontRole, ImageRole, Prose, PubMeta, Run,
@@ -349,6 +351,40 @@ impl Builder {
         nav
     }
 
+    /// Every character the book renders (#709), for subsetting the embedded fonts:
+    /// the content XHTML, the TOC labels (recursively), and the title-block
+    /// metadata, seeded with printable ASCII so markup, punctuation, and the
+    /// XML-escaped `& < >` are always covered. The XHTML holds non-ASCII text
+    /// literally (only `& < >` are escaped, and those are ASCII), so gathering its
+    /// chars is an exact-or-superset of the glyphs the reader will shape.
+    fn used_chars(
+        &self,
+        nav: &[Nav],
+        title: &str,
+        subtitle: Option<&str>,
+        author: Option<&str>,
+        series: Option<&str>,
+    ) -> BTreeSet<char> {
+        let mut used: BTreeSet<char> = (' '..='~').collect();
+        for item in &self.items {
+            used.extend(item.xhtml.chars());
+        }
+        for meta in [Some(title), subtitle, author, series]
+            .into_iter()
+            .flatten()
+        {
+            used.extend(meta.chars());
+        }
+        fn walk(nav: &[Nav], used: &mut BTreeSet<char>) {
+            for entry in nav {
+                used.extend(entry.label.chars());
+                walk(&entry.children, used);
+            }
+        }
+        walk(nav, &mut used);
+        used
+    }
+
     /// Render the OPF, nav doc, and NCX from the accumulated items + TOC, then zip
     /// the package (mimetype first and stored, the rest deflated).
     fn finish(
@@ -375,6 +411,13 @@ impl Builder {
             modified,
             publishing: &self.publishing,
         };
+        // The glyphs the book actually renders (#709): every char across the content
+        // XHTML, the TOC labels, and the title-block metadata, plus printable ASCII
+        // as a floor so markup/punctuation and the entity-escaped `& < >` are always
+        // covered. Non-ASCII text passes through XML escaping literally, so gathering
+        // it here is exact. Used to subset the embedded fonts before they're zipped.
+        let used = self.used_chars(&nav, title, subtitle, author, series);
+
         let opf = build_opf(&meta, &self.items, &self.style.fonts, &self.style.images);
         let nav_doc = build_nav(&nav, &self.landmarks, self.publishing.language());
         let ncx = build_ncx(&id, title, &nav);
@@ -394,9 +437,12 @@ impl Builder {
         ];
         // Embedded fonts (#469) and images (#472), referenced by the stylesheet /
         // the `<img>` tags. `finish` owns `self`, so the (potentially large) bytes
-        // move, not copy.
+        // move, not copy. Each static font is subset to just the used glyphs (#709)
+        // — a full serif family is megabytes verbatim; a variable font or a
+        // `.woff`/`.woff2` (already compact/compressed) stays verbatim.
         for font in self.style.fonts {
-            parts.push((format!("OEBPS/{}", font.href), font.bytes));
+            let bytes = subset_for_web(&font.bytes, &used).unwrap_or(font.bytes);
+            parts.push((format!("OEBPS/{}", font.href), bytes));
         }
         for image in self.style.images {
             parts.push((format!("OEBPS/{}", image.href), image.bytes));
@@ -432,8 +478,15 @@ fn stylesheet(style: &ExportStyle) -> String {
     // supplies both the normal and bold weights from its axis. `<em>`/`<strong>`
     // then resolve to the right face instead of the reader faux-styling one weight.
     for font in &style.fonts {
+        // A `format(...)` hint (#709) lets a reader that can't handle the file's
+        // format skip it rather than fetch an unusable face; omitted only for a
+        // media type with no standard token.
+        let format = font
+            .css_format()
+            .map(|f| format!(" format(\"{f}\")"))
+            .unwrap_or_default();
         css.push_str(&format!(
-            "@font-face {{ font-family: \"{}\"; font-style: {}; font-weight: 400 700; src: url(\"{}\"); }}\n",
+            "@font-face {{ font-family: \"{}\"; font-style: {}; font-weight: 400 700; src: url(\"{}\"){format}; }}\n",
             font.family,
             if font.italic { "italic" } else { "normal" },
             font.href
@@ -1018,6 +1071,100 @@ mod tests {
                 "font-style: italic; font-weight: 400 700; src: url(\"fonts/body-italic.ttf\")"
             ),
             "italic face: {css}"
+        );
+    }
+
+    /// Read one package entry as raw bytes (fonts and images aren't UTF-8).
+    fn part_bytes(bytes: &[u8], name: &str) -> Vec<u8> {
+        let mut zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid zip");
+        let mut file = zip.by_name(name).expect("entry present");
+        let mut out = Vec::new();
+        file.read_to_end(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn embedded_fonts_are_subset_smaller_than_the_source() {
+        // A real serif family is embedded; the package copy must be subset to the
+        // book's glyphs (#709), so far smaller than the ~380 KB source, yet still
+        // render every character the text uses — punctuation and the smart-typography
+        // em-dash/curly quotes included.
+        let source = include_bytes!("../../../assets/fonts/LiberationSerif-Regular.ttf");
+        let d = Document {
+            title: "The Book".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            publishing: Default::default(),
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter(
+                    "One",
+                    None,
+                    "She paused — then, \u{201c}quietly,\u{201d} left. \u{2018}Café\u{2019}",
+                )],
+            }],
+            back: vec![],
+        };
+        let mut style = ExportStyle {
+            body_font: Some("fonts/body.ttf".into()),
+            ..Default::default()
+        };
+        style.resolve_fonts(|_| Ok(source.to_vec()));
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+
+        let embedded = part_bytes(&bytes, "OEBPS/fonts/body.ttf");
+        assert!(
+            embedded.len() < source.len() / 4,
+            "subset {} should be far smaller than source {}",
+            embedded.len(),
+            source.len()
+        );
+        // The subset still resolves every glyph actually used, via a rebuilt cmap.
+        let face = ttf_parser::Face::parse(&embedded, 0).expect("subset parses");
+        assert!(face.tables().cmap.is_some(), "subset keeps a cmap");
+        for c in [
+            'S', 'h', 'e', ',', '.', '\u{2014}', '\u{201c}', '\u{201d}', 'é',
+        ] {
+            assert!(face.glyph_index(c).is_some(), "subset covers {c:?}");
+        }
+    }
+
+    #[test]
+    fn font_face_declarations_carry_a_format_hint() {
+        // Each `@font-face src:` gets a `format(...)` hint matching the media type
+        // (#709), so a reader that can't handle the format has a fallback signal.
+        let d = Document {
+            title: "T".into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            publishing: Default::default(),
+            epigraph: None,
+            front: vec![],
+            parts: vec![Part {
+                name: None,
+                chapters: vec![chapter("C", None, "Body.")],
+            }],
+            back: vec![],
+        };
+        let mut style = ExportStyle {
+            body_font: Some("b.otf".into()),
+            heading_font: Some("h.ttf".into()),
+            ..Default::default()
+        };
+        style.resolve_fonts(|p| Ok(format!("font:{p}").into_bytes()));
+        let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+        let css = part(&bytes, "OEBPS/style.css");
+        assert!(
+            css.contains("src: url(\"fonts/body.otf\") format(\"opentype\");"),
+            "otf hint: {css}"
+        );
+        assert!(
+            css.contains("src: url(\"fonts/heading.ttf\") format(\"truetype\");"),
+            "ttf hint: {css}"
         );
     }
 
