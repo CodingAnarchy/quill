@@ -184,9 +184,12 @@ impl App {
         );
     }
 
-    /// Pull the remote's changes on a worker thread (#134). Conservative: refuses
-    /// when the working tree is dirty (a fast-forward checkout would overwrite
-    /// uncommitted edits), so the author commits first.
+    /// Pull the remote's changes on a worker thread (#134). Refuses when the working
+    /// tree is dirty (a fast-forward or merge checkout would overwrite uncommitted
+    /// edits), so the author commits first. When local and remote have diverged the
+    /// worker merges them in-app (#703): a clean merge is committed and reloaded like
+    /// any pull, while a conflicting one comes back as the reported message naming the
+    /// files to reconcile, leaving the tree untouched.
     fn start_pull(&mut self) {
         if !self.guard_remote() || self.vc_task.is_busy() {
             return;
