@@ -436,6 +436,32 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_column_width_applies_at_startup() {
+        // Regression for #742: `App::new` must read `[editor] column_width` from
+        // the loaded config, not seed a hardcoded default. Point config resolution
+        // at a scratch dir (#528) and write the width *before* opening the app.
+        let dir = app_scratch_dir("startup-width");
+        std::fs::write(
+            Project::manifest_path(&dir),
+            "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+        let cfg_dir = app_scratch_dir("startup-width-cfg");
+        config::set_config_dir(Some(cfg_dir));
+        std::fs::write(
+            config::config_path().unwrap(),
+            "[editor]\ncolumn_width = 96\n",
+        )
+        .unwrap();
+        let app = open_test_app(&dir);
+        assert_eq!(
+            app.focus_width, 96,
+            "startup width reflects the configured column_width, not the default"
+        );
+    }
+
+    #[test]
     fn an_invalid_column_width_is_rejected_and_nothing_written() {
         let (mut app, _dir) = settings_app("settings-width-bad");
         // Out of the 32–160 range — rejected by the shared validator.
