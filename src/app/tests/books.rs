@@ -582,14 +582,18 @@ fn refresh_all_bibles_estimate_sums_the_four_passes() {
     // of the parts, one figure to confirm rather than four separate ones.
     let combined = app.bibles_refresh_estimate_for_test(false);
     let whole = app.manuscript_text().len();
+    // No bible yet + the Claude backend means each pass is a from-scratch full
+    // rebuild, which runs through the Batch API at half rate (#691), so the
+    // combined figure is priced batched too.
     let expected =
-        crate::ai::cost::estimate(whole * 4, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model);
+        crate::ai::cost::estimate(whole * 4, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
     assert_eq!(
         combined.tokens, expected.tokens,
         "combined input = four whole-book passes summed"
     );
     // And it's four times a single whole-book pass, up to token truncation.
-    let one_pass = crate::ai::cost::estimate(whole, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model);
+    let one_pass =
+        crate::ai::cost::estimate(whole, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
     assert!(
         combined.tokens >= one_pass.tokens * 4,
         "at least four passes' input: {} vs {}",

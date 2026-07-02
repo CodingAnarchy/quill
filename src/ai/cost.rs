@@ -59,13 +59,21 @@ fn rate(model: &str) -> (f64, f64) {
         .map_or(OPUS_RATE, |r| (r.input, r.output))
 }
 
+/// The Batch API's discount: input and output both bill at half the standard
+/// rate (Anthropic message batches). A full-manuscript bible rebuild runs
+/// batched (#176), so its estimate must apply this to match the real charge
+/// (#691) — otherwise the pre-flight confirm quotes ~2× the true cost.
+const BATCH_DISCOUNT: f64 = 0.5;
+
 /// Estimate a request's size and cost. `input_chars` is the prompt text length
 /// (input tokens ≈ chars / 4); `max_tokens` bounds the output for a worst-case
-/// dollar figure.
-pub fn estimate(input_chars: usize, max_tokens: u32, model: &str) -> Estimate {
+/// dollar figure. When `batch` is set the pass runs via the Batch API, so input
+/// and output are billed at half rate to match what's actually charged (#691).
+pub fn estimate(input_chars: usize, max_tokens: u32, model: &str, batch: bool) -> Estimate {
     let tokens = (input_chars / 4) as u32;
     let (in_rate, out_rate) = rate(model);
-    let dollars = (tokens as f64 * in_rate + max_tokens as f64 * out_rate) / 1_000_000.0;
+    let discount = if batch { BATCH_DISCOUNT } else { 1.0 };
+    let dollars = (tokens as f64 * in_rate + max_tokens as f64 * out_rate) * discount / 1_000_000.0;
     Estimate { tokens, dollars }
 }
 
@@ -121,21 +129,36 @@ mod tests {
     #[test]
     fn estimate_scales_with_size_and_model() {
         // 400k chars ≈ 100k input tokens; opus = $5/1M in, $25/1M out.
-        let opus = estimate(400_000, 8192, "claude-opus-4-8");
+        let opus = estimate(400_000, 8192, "claude-opus-4-8", false);
         assert_eq!(opus.tokens, 100_000);
         // 100k*5/1e6 + 8192*25/1e6 = 0.5 + 0.2048 ≈ 0.7048
         assert!((opus.dollars - 0.7048).abs() < 1e-3, "{}", opus.dollars);
 
         // Haiku is far cheaper for the same request.
-        let haiku = estimate(400_000, 8192, "claude-haiku-4-5");
+        let haiku = estimate(400_000, 8192, "claude-haiku-4-5", false);
         assert!(haiku.dollars < opus.dollars);
+    }
+
+    #[test]
+    fn batch_estimate_is_half_the_standard_rate() {
+        // The Batch API bills input + output at half price (#691), so a batched
+        // pass estimates exactly half the standard figure for the same request.
+        let standard = estimate(400_000, 8192, "claude-opus-4-8", false);
+        let batched = estimate(400_000, 8192, "claude-opus-4-8", true);
+        assert_eq!(batched.tokens, standard.tokens); // token count is unchanged
+        assert!(
+            (batched.dollars - standard.dollars / 2.0).abs() < 1e-9,
+            "batched {} should be half of standard {}",
+            batched.dollars,
+            standard.dollars
+        );
     }
 
     #[test]
     fn unknown_model_uses_the_opus_tier() {
         assert_eq!(
-            estimate(4000, 100, "mystery").dollars,
-            estimate(4000, 100, "claude-opus-4-8").dollars
+            estimate(4000, 100, "mystery", false).dollars,
+            estimate(4000, 100, "claude-opus-4-8", false).dollars
         );
     }
 
@@ -157,7 +180,7 @@ mod tests {
     fn a_cached_turn_costs_far_less_than_re_billing_the_manuscript() {
         // A whole-novel turn: the manuscript cached vs sent fresh, same fresh tail.
         let cached = estimate_turn(400_000, 4_000, 8192, "claude-opus-4-8");
-        let fresh = estimate(404_000, 8192, "claude-opus-4-8");
+        let fresh = estimate(404_000, 8192, "claude-opus-4-8", false);
         assert!(
             cached.dollars < fresh.dollars,
             "caching the manuscript is cheaper: {} vs {}",
@@ -171,7 +194,7 @@ mod tests {
 
     #[test]
     fn label_is_compact() {
-        let est = estimate(124_000, 8192, "claude-opus-4-8"); // 31k tokens
+        let est = estimate(124_000, 8192, "claude-opus-4-8", false); // 31k tokens
         let l = label(&est, "claude-opus-4-8");
         assert!(l.contains("~31k tokens"), "{l}");
         assert!(l.contains("on claude-opus-4-8"), "{l}");
@@ -179,7 +202,7 @@ mod tests {
 
     #[test]
     fn compare_label_shows_both_backends() {
-        let est = estimate(124_000, 8192, "claude-opus-4-8");
+        let est = estimate(124_000, 8192, "claude-opus-4-8", false);
         let l = compare_label(&est, "claude-opus-4-8");
         assert!(l.contains("on claude-opus-4-8"), "the remote price: {l}");
         assert!(l.contains("free on-device"), "the local alternative: {l}");
