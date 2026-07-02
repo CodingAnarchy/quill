@@ -92,6 +92,9 @@ theme_colors! {
     muted => "muted prose (epigraphs)",
     /// Preformatted (fenced code) blocks, shown verbatim and set apart (#522).
     code => "preformatted (code) blocks",
+    /// Background tint that sets a fenced code block apart as a box (#723), the
+    /// way the preview hides the fences and preserves the block's whitespace.
+    code_bg => "the fenced code block background",
     /// Background of the current search match (the bright one).
     match_current => "the current search match background",
     /// Background of the other (non-current) search matches.
@@ -135,6 +138,7 @@ impl Theme {
             dim: Color::DarkGray,
             muted: Color::Gray,
             code: Color::Rgb(150, 170, 140),
+            code_bg: Color::Rgb(38, 42, 38),
             match_current: Color::Yellow,
             match_other: Color::DarkGray,
             status_bg: Color::Rgb(30, 30, 36),
@@ -157,6 +161,7 @@ impl Theme {
             dim: Color::Rgb(90, 90, 96),
             muted: Color::Rgb(110, 110, 116),
             code: Color::Rgb(70, 100, 80),
+            code_bg: Color::Rgb(228, 232, 226),
             match_current: Color::Yellow,
             match_other: Color::Rgb(205, 205, 205),
             status_bg: Color::Rgb(225, 225, 230),
