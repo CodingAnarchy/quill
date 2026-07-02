@@ -242,7 +242,7 @@ impl SceneMeta {
 /// chapter has no role (`None`), so existing projects — which have no `role:`
 /// key — read as plain chapters (#179).
 macro_rules! role_table {
-    ($($variant:ident => $key:literal $(| $alias:literal)*, $label:literal, $band:ident);+ $(;)?) => {
+    ($($variant:ident => $key:literal $(| $alias:literal)*, $label:literal, $band:ident, $epub_type:literal);+ $(;)?) => {
         /// A project file's **section role** (#179): a front- or back-matter
         /// section type for the non-chapter parts of a book.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,6 +252,17 @@ macro_rules! role_table {
             /// Which ordering band this section sits in (#180).
             pub fn band(self) -> Band {
                 match self { $(Role::$variant => Band::$band),+ }
+            }
+
+            /// The EPUB 3 structural `epub:type` for this section (#695), so the
+            /// EPUB writer can tag the section's `<body>` and its landmark with the
+            /// precise semantic (`foreword`, `dedication`, `glossary`, …) rather
+            /// than the generic front/back-matter band. `None` for a role with no
+            /// distinct term in the EPUB Structural Semantics Vocabulary (the
+            /// writer falls back to the band's generic `frontmatter`/`backmatter`);
+            /// every `Some` value is a term epubcheck/ACE recognize.
+            pub fn epub_type(self) -> Option<&'static str> {
+                match self { $(Role::$variant => none_if_empty($epub_type)),+ }
             }
 
             /// The `role:` value as written in front matter.
@@ -278,21 +289,35 @@ macro_rules! role_table {
 }
 
 role_table! {
-    // Front matter (sorts before the body), in conventional reading order.
-    Dedication => "dedication", "Dedication", Front;
-    Foreword => "foreword", "Foreword", Front;
-    Preface => "preface", "Preface", Front;
-    Introduction => "introduction", "Introduction", Front;
-    Prologue => "prologue", "Prologue", Front;
+    // Front matter (sorts before the body), in conventional reading order. The
+    // final column is the EPUB Structural Semantics term (#695); an empty string
+    // means "no distinct term — use the band's generic frontmatter/backmatter".
+    Dedication => "dedication", "Dedication", Front, "dedication";
+    Foreword => "foreword", "Foreword", Front, "foreword";
+    Preface => "preface", "Preface", Front, "preface";
+    Introduction => "introduction", "Introduction", Front, "introduction";
+    Prologue => "prologue", "Prologue", Front, "prologue";
     // Back matter (sorts after the body), in conventional reading order.
-    Epilogue => "epilogue", "Epilogue", Back;
-    Afterword => "afterword", "Afterword", Back;
-    Acknowledgments => "acknowledgments" | "acknowledgements", "Acknowledgments", Back;
-    Appendix => "appendix", "Appendix", Back;
-    Glossary => "glossary", "Glossary", Back;
-    AlsoBy => "also-by" | "also by the author", "Also by the Author", Back;
-    AboutTheAuthor => "about-the-author" | "about the author", "About the Author", Back;
-    Colophon => "colophon", "Colophon", Back;
+    Epilogue => "epilogue", "Epilogue", Back, "epilogue";
+    Afterword => "afterword", "Afterword", Back, "afterword";
+    Acknowledgments => "acknowledgments" | "acknowledgements", "Acknowledgments", Back, "acknowledgments";
+    Appendix => "appendix", "Appendix", Back, "appendix";
+    Glossary => "glossary", "Glossary", Back, "glossary";
+    // "also by" and "about the author" have no distinct EPUB term — they keep the
+    // generic backmatter semantic.
+    AlsoBy => "also-by" | "also by the author", "Also by the Author", Back, "";
+    AboutTheAuthor => "about-the-author" | "about the author", "About the Author", Back, "";
+    Colophon => "colophon", "Colophon", Back, "colophon";
+}
+
+/// `None` for an empty string, else `Some(s)` — lets a [`role_table!`] row leave
+/// the EPUB-type column blank to mean "no distinct term, use the band default".
+const fn none_if_empty(s: &'static str) -> Option<&'static str> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// The three ordering bands of a manuscript (#180): front matter sorts before
@@ -851,6 +876,21 @@ mod tests {
         assert_eq!(Role::from_key("chapter"), None); // unknown → body
         assert_eq!(Role::Appendix.key(), "appendix");
         assert_eq!(Role::Appendix.label(), "Appendix");
+    }
+
+    #[test]
+    fn roles_map_to_their_epub_structural_terms() {
+        // Each role reaching the EPUB writer (#695) carries its precise EPUB
+        // Structural Semantics term; the two roles with no distinct term fall back
+        // to `None` so the writer keeps the generic front/back-matter band.
+        assert_eq!(Role::Dedication.epub_type(), Some("dedication"));
+        assert_eq!(Role::Foreword.epub_type(), Some("foreword"));
+        assert_eq!(Role::Glossary.epub_type(), Some("glossary"));
+        assert_eq!(Role::Epilogue.epub_type(), Some("epilogue"));
+        assert_eq!(Role::Colophon.epub_type(), Some("colophon"));
+        // No distinct EPUB term for these → the band default is used.
+        assert_eq!(Role::AlsoBy.epub_type(), None);
+        assert_eq!(Role::AboutTheAuthor.epub_type(), None);
     }
 
     #[test]

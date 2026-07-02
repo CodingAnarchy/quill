@@ -364,11 +364,13 @@ mod tests {
                         title: "One".into(),
                         epigraph: None,
                         body: "The night was *dark*.".into(),
+                        role: None,
                     },
                     Chapter {
                         title: "Two".into(),
                         epigraph: None,
                         body: "The **end**.".into(),
+                        role: None,
                     },
                 ],
             }],

@@ -5,7 +5,7 @@
 //! (#190); the Word / Scrivener / Vellum writers (#191–#193) consume the same
 //! `Document`.
 
-use crate::frontmatter::Epigraph;
+use crate::frontmatter::{Epigraph, Role};
 
 pub mod docx;
 pub mod epub;
@@ -116,6 +116,11 @@ pub struct Chapter {
     pub title: String,
     pub epigraph: Option<Epigraph>,
     pub body: String,
+    /// The section's role (#179), when it is a front/back-matter section rather
+    /// than a plain body chapter (`None`). Carried through so the EPUB writer can
+    /// tag each section with the precise `epub:type` (#695) — a foreword,
+    /// dedication, glossary, … — instead of the generic front/back-matter band.
+    pub role: Option<Role>,
 }
 
 /// The book flattened to a linear sequence — part headings interleaved with
@@ -481,6 +486,7 @@ mod tests {
             title: title.to_string(),
             epigraph,
             body: body.to_string(),
+            role: None,
         }
     }
 

@@ -489,6 +489,7 @@ mod tests {
                 title: "Prologue".into(),
                 epigraph: None,
                 body: "Before *it* all.".into(),
+                role: None,
             }],
             parts: vec![Part {
                 name: Some("Part One".into()),
@@ -496,12 +497,14 @@ mod tests {
                     title: "The Find".into(),
                     epigraph: None,
                     body: "The locket **gleamed**.".into(),
+                    role: None,
                 }],
             }],
             back: vec![Chapter {
                 title: "Epilogue".into(),
                 epigraph: None,
                 body: "After.".into(),
+                role: None,
             }],
         };
         let dir =
