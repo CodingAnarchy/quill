@@ -324,3 +324,194 @@ fn an_existing_chapter_without_scene_metadata_opens_unchanged() {
     // Nothing persisted yet — the file is byte-for-byte the original.
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), body);
 }
+
+// --- Manuscript-wide corkboard (#701) --------------------------------------
+
+/// A two-chapter project whose chapters each have scene headings, opened and
+/// pinned like the other corkboard fixtures. The active chapter starts as the
+/// first (`one.md`).
+fn multi_scene_app(name: &str, one: &str, two: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), one).unwrap();
+    fs::write(dir.join("two.md"), two).unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn manuscript_board_lists_scenes_from_every_chapter_grouped_by_chapter() {
+    let (mut app, _dir) = multi_scene_app(
+        "corkboard-ms-list",
+        "# Chapter One\n\n## The Arrival\n\nRain.\n\n## The Meeting\n\nShe waited.\n",
+        "# Chapter Two\n\n## The Departure\n\nSmoke.\n",
+    );
+    app.open_manuscript_corkboard();
+
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("manuscript corkboard should be open");
+    };
+    assert!(board.manuscript, "the board is the manuscript-wide scope");
+    // Every chapter's scenes, in chapter then document order.
+    let titles: Vec<&str> = board.cards.iter().map(|c| c.title.as_str()).collect();
+    assert_eq!(titles, vec!["The Arrival", "The Meeting", "The Departure"]);
+    // Cards are grouped by chapter: the first two belong to chapter 0, the last to
+    // chapter 1, each tagged with its chapter title for the group header.
+    assert_eq!(board.cards[0].chapter, Some(0));
+    assert_eq!(board.cards[1].chapter, Some(0));
+    assert_eq!(board.cards[2].chapter, Some(1));
+    assert_eq!(board.cards[0].chapter_title, "One");
+    assert_eq!(board.cards[2].chapter_title, "Two");
+}
+
+#[test]
+fn manuscript_board_jump_opens_the_right_chapter_at_the_right_heading() {
+    let two_body = "# Chapter Two\n\n## The Departure\n\nSmoke.\n";
+    let (mut app, _dir) = multi_scene_app(
+        "corkboard-ms-jump",
+        "# Chapter One\n\n## The Arrival\n\nRain.\n",
+        two_body,
+    );
+    app.open_manuscript_corkboard();
+    // Chapter 0 starts active; the third card ("The Departure") is in chapter 1.
+    assert_eq!(app.project.active_index(), 0);
+
+    // Select the chapter-two scene and jump to it.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Enter));
+
+    // The jump switched to chapter 1 and closed the board.
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(app.project.active_index(), 1);
+    // The cursor sits on the "## The Departure" heading of chapter two's body.
+    let expected = two_body.find("## The Departure").unwrap();
+    assert_eq!(app.edit_buffer().cursor_byte(), expected);
+}
+
+#[test]
+fn manuscript_board_reorders_within_a_nonactive_chapter_and_persists() {
+    // Reorder two scenes in chapter *two* while chapter one is active — the edit
+    // must open chapter two, move the block, and persist to its file (#701).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-reorder",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## First\n\nBeta.\n\n## Second\n\nGamma.\n",
+    );
+    app.open_manuscript_corkboard();
+    // Cards: [Alpha(ch0), First(ch1), Second(ch1)]. Select "Second" and move up.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('K')));
+
+    // The board stays open, still manuscript-wide, with "Second" now before
+    // "First" within chapter two, and the moved card still selected.
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("manuscript corkboard stays open after a reorder");
+    };
+    assert!(board.manuscript);
+    let titles: Vec<&str> = board.cards.iter().map(|c| c.title.as_str()).collect();
+    assert_eq!(titles, vec!["Alpha", "Second", "First"]);
+    assert_eq!(board.cards[board.selected].title, "Second");
+
+    // Chapter two's file reflects the new order; chapter one is untouched.
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(two.find("## Second").unwrap() < two.find("## First").unwrap());
+    assert!(two.contains("## Second\n\nGamma.\n"));
+    assert!(two.contains("## First\n\nBeta.\n"));
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert_eq!(one, "# Chapter One\n\n## Alpha\n\nA.\n");
+}
+
+#[test]
+fn manuscript_board_synopsis_and_status_target_the_cards_own_chapter() {
+    // Cycle status and set a synopsis on a scene in the non-active chapter two;
+    // both must round-trip through *that* chapter's front matter (#701).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-meta",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    app.open_manuscript_corkboard();
+    // Select "Beta" (chapter two), cycle its status, and set a synopsis.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('s')));
+    app.on_key(key(KeyCode::Char('e')));
+    type_str(&mut app, "the exit");
+    app.on_key(key(KeyCode::Enter));
+
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("manuscript corkboard reopens after a synopsis edit");
+    };
+    let beta = board.cards.iter().find(|c| c.title == "Beta").unwrap();
+    assert_eq!(beta.synopsis, "the exit");
+    assert_eq!(beta.status, crate::frontmatter::SceneStatus::Draft);
+
+    // The metadata landed in chapter two's front matter, not chapter one's.
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(two.starts_with("---\n") && two.contains("the exit"));
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(!one.contains("scenes:"), "chapter one is untouched");
+
+    // Reopen from disk: the synopsis and status survived on chapter two.
+    let reopened = open_test_app(&dir);
+    let cards = reopened.project.chapter_front_matter(1).unwrap().scenes();
+    assert_eq!(cards[0].synopsis, "the exit");
+    assert_eq!(cards[0].status, crate::frontmatter::SceneStatus::Draft);
+}
+
+#[test]
+fn manuscript_board_is_reachable_from_the_continuous_view() {
+    // The per-chapter board is refused in the continuous view; the manuscript-wide
+    // board leaves it first and opens (#701).
+    let (mut app, _dir) = multi_scene_app(
+        "corkboard-ms-continuous",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    app.enter_continuous();
+    assert!(app.manuscript.is_some(), "continuous view is active");
+
+    app.open_manuscript_corkboard();
+    assert!(app.manuscript.is_none(), "it left the continuous view");
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("manuscript corkboard opens from the continuous view");
+    };
+    assert!(board.manuscript);
+    assert_eq!(board.cards.len(), 2);
+}
+
+#[test]
+fn manuscript_board_refuses_a_cross_chapter_reorder() {
+    // Moving the first chapter's last scene *down* would cross into chapter two —
+    // deferred, so it's a no-op with an explanatory message (#701).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-cross",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    app.open_manuscript_corkboard();
+    // "Alpha" is the last (only) scene of chapter one; move it down.
+    app.on_key(key(KeyCode::Char('J')));
+
+    // Order unchanged, a message explains why, and neither file was rewritten.
+    assert_eq!(card_titles(&app), vec!["Alpha", "Beta"]);
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("Cross-chapter"));
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "# Chapter One\n\n## Alpha\n\nA.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "# Chapter Two\n\n## Beta\n\nB.\n"
+    );
+}

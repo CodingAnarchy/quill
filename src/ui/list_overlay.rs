@@ -521,12 +521,16 @@ pub(super) fn draw_annotations(
     );
 }
 
-/// Render the corkboard (#589 / #636): the active chapter's scenes as index cards,
-/// each a status badge + scene heading over its synopsis (the author's one-liner,
-/// or the first line of prose as a fallback), indented by heading level so nested
-/// scenes read as a hierarchy. Navigable; the author reorders scenes, edits each
-/// synopsis, and cycles each status from here, or jumps the editor cursor to a
-/// scene with Enter.
+/// Render the corkboard (#589 / #636 / #701): scenes as index cards, each a status
+/// badge + scene heading over its synopsis (the author's one-liner, or the first
+/// line of prose as a fallback), indented by heading level so nested scenes read as
+/// a hierarchy. Navigable; the author reorders scenes, edits each synopsis, and
+/// cycles each status from here, or jumps the editor cursor to a scene with Enter.
+///
+/// The manuscript-wide board (#701) prefixes each chapter's first card with a
+/// non-selectable chapter-title header, so the cards read grouped by chapter. Those
+/// header rows shift the selected card's display position, so the highlight index is
+/// re-derived over the interleaved rows rather than reusing the card index.
 pub(super) fn draw_corkboard(frame: &mut Frame, area: Rect, board: &Corkboard) {
     // The selected scene's status reads in words in the title (the per-card badge
     // is the glance version); the count summarizes the board.
@@ -535,36 +539,50 @@ pub(super) fn draw_corkboard(frame: &mut Frame, area: Rect, board: &Corkboard) {
         .get(board.selected)
         .map(|c| format!(" · {}", c.status.label()))
         .unwrap_or_default();
-    let title = format!(" Corkboard ({} scenes{status}) ", board.cards.len());
-    let rows = board
-        .cards
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            // Indent by heading depth (level 2 is the top scene level, so subtract
-            // it) so `###` sub-scenes nest under their `##` parent.
-            let indent = "  ".repeat((c.level.saturating_sub(2)) as usize);
-            // The author's synopsis when set, else the first line of prose (#636).
-            let synopsis = if !c.synopsis.is_empty() {
-                Some(c.synopsis.clone())
-            } else {
-                (!c.prose_line.is_empty()).then(|| c.prose_line.clone())
-            };
-            // A status badge leads each card so the drafting state reads at a glance.
-            list_row(
-                i == board.selected,
-                format!("{} {indent}{}", c.status.badge(), c.title),
-                synopsis,
-            )
-        })
-        .collect();
+    let scope = if board.manuscript { "manuscript" } else { "" };
+    let title = format!(" Corkboard {scope} ({} scenes{status}) ", board.cards.len());
+
+    let mut rows: Vec<Line<'static>> = Vec::with_capacity(board.cards.len());
+    // The display row the selected card lands on, once chapter headers are woven in.
+    let mut selected_row = 0;
+    // Track the chapter of the previous card so a header is emitted once per group.
+    let mut last_chapter: Option<usize> = None;
+    for (i, c) in board.cards.iter().enumerate() {
+        // On the manuscript board, open a new group with a chapter-title header the
+        // first time a chapter's cards appear.
+        if board.manuscript && c.chapter != last_chapter {
+            last_chapter = c.chapter;
+            rows.push(Line::from(Span::styled(
+                format!("  {}", c.chapter_title),
+                super::active_style(),
+            )));
+        }
+        if i == board.selected {
+            selected_row = rows.len();
+        }
+        // Indent by heading depth (level 2 is the top scene level, so subtract it)
+        // so `###` sub-scenes nest under their `##` parent.
+        let indent = "  ".repeat((c.level.saturating_sub(2)) as usize);
+        // The author's synopsis when set, else the first line of prose (#636).
+        let synopsis = if !c.synopsis.is_empty() {
+            Some(c.synopsis.clone())
+        } else {
+            (!c.prose_line.is_empty()).then(|| c.prose_line.clone())
+        };
+        // A status badge leads each card so the drafting state reads at a glance.
+        rows.push(list_row(
+            i == board.selected,
+            format!("{} {indent}{}", c.status.badge(), c.title),
+            synopsis,
+        ));
+    }
     draw_list_overlay(
         frame,
         area,
         &title,
         "Corkboard — ↑↓ move · enter jump · K/J reorder · e synopsis · s status · esc close",
         rows,
-        Some(board.selected),
+        Some(selected_row),
     );
 }
 

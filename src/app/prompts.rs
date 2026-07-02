@@ -448,11 +448,15 @@ impl App {
                                 self.mode = closed;
                                 self.create_annotation(start, end, text.to_string());
                             }
-                            Pending::SetSceneSynopsis { index } => {
+                            Pending::SetSceneSynopsis {
+                                chapter,
+                                scene,
+                                manuscript,
+                            } => {
                                 // Persist the synopsis (blank clears it); the setter
                                 // re-opens the corkboard itself, so don't reset the
-                                // mode here (#636).
-                                self.apply_scene_synopsis(index, text);
+                                // mode here (#636 / #701).
+                                self.apply_scene_synopsis(chapter, scene, manuscript, text);
                             }
                             Pending::AskAi => {
                                 // Back to editing immediately; the answer arrives

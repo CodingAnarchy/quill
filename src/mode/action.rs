@@ -441,6 +441,12 @@ pub(crate) enum Action {
     /// the editor cursor to that scene. Phase 2 (per-scene metadata + reorder,
     /// possibly cross-chapter) is a documented follow-up on #589.
     Corkboard,
+    /// Open the manuscript-wide corkboard (#701): scene cards across *every*
+    /// chapter, grouped by chapter, navigable, with jump-to-scene. Unlike the
+    /// per-chapter [`Action::Corkboard`] it is reachable from the continuous view
+    /// (it leaves it first). Within-chapter reorder / synopsis / status work per
+    /// card; cross-chapter reorder is a documented follow-up.
+    ManuscriptCorkboard,
     /// Annotate the selection (or word at the cursor) with a note (#302).
     AddAnnotation,
     /// Open the annotation review list for the active chapter (#302).
@@ -555,6 +561,7 @@ impl Action {
         Action::ToggleTypewriter,
         Action::ToggleFocus,
         Action::Corkboard,
+        Action::ManuscriptCorkboard,
         Action::Settings,
         // Help
         Action::UserGuide,
@@ -602,6 +609,7 @@ impl Action {
             Action::ToggleTypewriter => "view:typewriter",
             Action::ToggleFocus => "view:focus",
             Action::Corkboard => "view:corkboard",
+            Action::ManuscriptCorkboard => "view:corkboard-all",
             Action::AddAnnotation => "annotate",
             Action::ReviewAnnotations => "annotate:review",
             Action::SwitchBackend => "ai:backend",
@@ -660,6 +668,7 @@ impl Action {
             Action::ToggleTypewriter
             | Action::ToggleFocus
             | Action::Corkboard
+            | Action::ManuscriptCorkboard
             | Action::Settings => "View",
             Action::UserGuide => "Help",
         }
@@ -727,6 +736,7 @@ impl Action {
             Action::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Action::ToggleFocus => "Focus mode (toggle)",
             Action::Corkboard => "Corkboard (scene overview)",
+            Action::ManuscriptCorkboard => "Corkboard — whole manuscript",
             Action::AddAnnotation => "Annotate selection",
             Action::ReviewAnnotations => "Review annotations",
             Action::SwitchBackend => "Switch AI backend (Claude / local)",

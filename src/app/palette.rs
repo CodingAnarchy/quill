@@ -246,6 +246,7 @@ impl App {
                 self.message = Some(format!("Focus mode {}.", on_off(self.focus_mode)));
             }
             Action::Corkboard => self.open_corkboard(),
+            Action::ManuscriptCorkboard => self.open_manuscript_corkboard(),
             Action::AddAnnotation => self.start_annotation(),
             Action::ReviewAnnotations => self.open_annotation_review(),
             Action::SwitchBackend => self.toggle_ai_backend(),
