@@ -1,7 +1,9 @@
-//! The read-only corkboard (#589, Phase 1): an index-card overview built from the
-//! active chapter's `##`/`###` scene headings. Each card is a heading + its first
-//! line of prose; Enter jumps the editor cursor to that scene. Phase 2 (per-scene
-//! metadata + reorder) is a documented follow-up on #589.
+//! The corkboard (#589 Phase 1 / #636 Phase 2 / #698): an index-card overview
+//! built from the active chapter's scene headings. Each card is a scene (a heading
+//! plus everything up to the next same-or-shallower heading, so a `##` owns its
+//! `###` sub-beats) + its first line of prose; Enter jumps the editor cursor to
+//! that scene. The `#` chapter title is not a reorderable card, and reorder /
+//! synopsis / status persist through the `scenes:` front matter.
 
 use super::*;
 use crate::mode::Mode;
@@ -34,15 +36,14 @@ fn corkboard_lists_the_active_chapters_scenes_as_cards() {
     let Mode::Corkboard(board) = &app.mode else {
         panic!("corkboard should be open");
     };
-    // A card per heading, in document order — including the chapter's `#` title.
+    // A card per scene heading, in document order — the `#` chapter title is not a
+    // reorderable scene, so it isn't carded (#698).
     let titles: Vec<&str> = board.cards.iter().map(|c| c.title.as_str()).collect();
-    assert_eq!(titles, vec!["Chapter One", "The Arrival", "The Meeting"]);
+    assert_eq!(titles, vec!["The Arrival", "The Meeting"]);
 
     // Each scene card carries its first line of prose as the fallback synopsis.
-    assert_eq!(board.cards[1].prose_line, "Rain hammered the platform.");
-    assert_eq!(board.cards[2].prose_line, "She was already waiting.");
-    // The `#` title has no prose before the first `##`, so its fallback is empty.
-    assert_eq!(board.cards[0].prose_line, "");
+    assert_eq!(board.cards[0].prose_line, "Rain hammered the platform.");
+    assert_eq!(board.cards[1].prose_line, "She was already waiting.");
     // A chapter with no scene metadata still lists cards, each at the default
     // (blank synopsis, stub status) (#636).
     assert!(board.cards.iter().all(|c| c.synopsis.is_empty()));
@@ -218,6 +219,98 @@ fn reorder_keeps_each_scenes_metadata_attached() {
     // "second synopsis", not the metadata that had been at position 0.
     assert_eq!(board.cards[0].synopsis, "second synopsis");
     assert_eq!(board.cards[1].synopsis, "first synopsis");
+}
+
+#[test]
+fn nested_sub_beats_fold_into_their_scene_and_the_title_is_not_a_card() {
+    // A `#` chapter title plus two `##` scenes, each with `###` sub-beats. The
+    // title is not a card, and each `##` is one card that owns its sub-beats — the
+    // `###` headings do not become their own reorderable scenes (#698).
+    let (mut app, _dir) = scene_app(
+        "corkboard-nested-cards",
+        "# Chapter One\n\n\
+         ## The Arrival\n\nRain fell.\n\n\
+         ### Off the train\n\nMara stepped down.\n\n\
+         ## The Meeting\n\nShe waited.\n\n\
+         ### The handoff\n\nThe case changed hands.\n",
+    );
+    app.open_corkboard();
+
+    // Only the two `##` scenes card up; the `#` title and the `###` sub-beats do
+    // not.
+    assert_eq!(card_titles(&app), vec!["The Arrival", "The Meeting"]);
+}
+
+#[test]
+fn reordering_a_scene_carries_its_nested_sub_beats_and_metadata() {
+    // Reordering a `##` scene up must move its `###` sub-beat prose with it as one
+    // block — never splitting the scene at its first sub-beat — and its metadata
+    // must travel too (#698). This is the data-integrity regression: the old
+    // flat-heading reorder moved only up to the first `###`.
+    let (mut app, dir) = scene_app(
+        "corkboard-nested-reorder",
+        "# Chapter One\n\n\
+         ## The Arrival\n\nRain fell.\n\n\
+         ### Off the train\n\nMara stepped down.\n\n\
+         ## The Meeting\n\nShe waited.\n\n\
+         ### The handoff\n\nThe case changed hands.\n",
+    );
+    app.open_corkboard();
+    // Annotate each scene so we can prove the metadata moved with it.
+    app.on_key(key(KeyCode::Char('e')));
+    for c in "arrival note".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('e')));
+    for c in "meeting note".chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    app.on_key(key(KeyCode::Enter));
+
+    // Selection is on "The Meeting"; move it up above "The Arrival".
+    app.on_key(key(KeyCode::Char('K')));
+
+    // The board reordered, and each card still carries its own synopsis.
+    assert_eq!(card_titles(&app), vec!["The Meeting", "The Arrival"]);
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("corkboard stays open after a reorder");
+    };
+    assert_eq!(board.selected, 0);
+    assert_eq!(board.cards[0].synopsis, "meeting note");
+    assert_eq!(board.cards[1].synopsis, "arrival note");
+
+    // The whole "The Meeting" block — heading, prose, and its `### The handoff`
+    // sub-beat — moved above "The Arrival" as a unit; no prose was left behind.
+    let saved = fs::read_to_string(dir.join("one.md")).unwrap();
+    let meeting = saved.find("## The Meeting").unwrap();
+    let arrival = saved.find("## The Arrival").unwrap();
+    let handoff = saved.find("### The handoff").unwrap();
+    let off_train = saved.find("### Off the train").unwrap();
+    // The Meeting scene (heading through its sub-beat) sits entirely before The
+    // Arrival scene.
+    assert!(
+        meeting < handoff,
+        "The Meeting's sub-beat follows its heading"
+    );
+    assert!(
+        handoff < arrival,
+        "The whole Meeting block precedes The Arrival"
+    );
+    assert!(
+        arrival < off_train,
+        "The Arrival still owns its own sub-beat"
+    );
+    // The prose stayed intact within each block — no scene was split.
+    assert!(saved
+        .contains("## The Meeting\n\nShe waited.\n\n### The handoff\n\nThe case changed hands.\n"));
+    assert!(
+        saved.contains("## The Arrival\n\nRain fell.\n\n### Off the train\n\nMara stepped down.\n")
+    );
+    // The `#` chapter title stayed at the top, above both moved scenes.
+    let title = saved.find("# Chapter One").unwrap();
+    assert!(title < meeting, "the chapter title is untouched at the top");
 }
 
 #[test]
