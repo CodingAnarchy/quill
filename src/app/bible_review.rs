@@ -12,6 +12,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::ai::bible;
+use crate::atomic;
 use crate::buffer::Buffer;
 use crate::mode::{BibleConflict, BibleReview, Finding, Findings, Mode};
 use crate::project::read_existing;
@@ -154,7 +155,8 @@ impl App {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("{}: {e}", self.display_path(path)))?;
         }
-        std::fs::write(path, content).map_err(|e| format!("{}: {e}", self.display_path(path)))
+        atomic::write(path, content.as_bytes())
+            .map_err(|e| format!("{}: {e}", self.display_path(path)))
     }
 
     /// A project-relative label for `path`, for author-facing messages.
@@ -570,7 +572,7 @@ impl App {
             return false;
         };
         body.push_str(&marker);
-        if std::fs::write(&path, body).is_err() {
+        if atomic::write(&path, body.as_bytes()).is_err() {
             self.message = Some("Failed to write marker".into());
             return false;
         }
