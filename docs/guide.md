@@ -189,7 +189,7 @@ SAVING & SAFETY
 Ctrl-S saves the active chapter (or the continuous window). Saves are atomic: an
 interrupted save never corrupts a file, and the previous version always
 survives. If Quill exits unexpectedly, the next launch offers back any unsaved
-work. Ctrl-Q quits, prompting first if there are unsaved changes.
+work. Ctrl-Q (or Ctrl-C) quits, prompting first if there are unsaved changes.
 
 On a clean save or quit, Quill also remembers where you left off — the active
 chapter and the cursor — and reopens the project there next time, rather than at
@@ -358,7 +358,7 @@ KEY REFERENCE
 
   F1              this guide
   Ctrl-S          save
-  Ctrl-Q          quit (prompts if unsaved)
+  Ctrl-Q / Ctrl-C quit (prompts if unsaved)
   Ctrl-Z / Ctrl-Y undo / redo
   Ctrl-F          find (then "r" to replace)
   Ctrl-O          toggle the chapter / outline pane
