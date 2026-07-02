@@ -10,6 +10,11 @@ use crate::theme::{self, Theme};
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
 type ByteRange = (usize, usize);
 
+/// The display-only first-line paragraph indent (#722): a fixed four spaces on the
+/// first visual row of each prose paragraph when the setting is on, matching the
+/// exports' first-line indent. Never enters the buffer or any file.
+const PARAGRAPH_INDENT: &str = "    ";
+
 /// The "what to highlight in this span" overlays threaded through the body
 /// renderer (#431): one cohesive bundle, built once per pane and passed by
 /// reference through `render_body → styled_line → styled_row`, so a new overlay
@@ -97,6 +102,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         &highlights,
         app.typewriter,
         editing,
+        app.paragraph_indent,
     );
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
@@ -155,12 +161,22 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         annotations: &[],
         focus: None,
     };
-    render_body(frame, column, buffer, &[], &highlights, false, false);
+    render_body(
+        frame,
+        column,
+        buffer,
+        &[],
+        &highlights,
+        false,
+        false,
+        app.paragraph_indent,
+    );
 }
 
 /// Render `buffer`'s soft-wrapped, styled prose into `column`, following the
 /// cursor by visual row. Places the terminal cursor when `place_cursor`. The
 /// shared core of both pane renderers (#163).
+#[allow(clippy::too_many_arguments)]
 fn render_body(
     frame: &mut Frame,
     column: Rect,
@@ -169,6 +185,7 @@ fn render_body(
     hl: &SpanHighlights,
     typewriter: bool,
     place_cursor: bool,
+    paragraph_indent: bool,
 ) {
     let height = column.height as usize;
     let wrap = column.width as usize;
@@ -238,12 +255,14 @@ fn render_body(
                 }
             }
         }
+        let indent = paragraph_indent && starts_paragraph(buffer, ll);
         let body = styled_line(
             buffer.syntax(),
             buffer.line_start_byte(ll),
             &buffer.line(ll),
             hl,
             wrap,
+            indent,
         );
         for (sub, line) in body.into_iter().enumerate() {
             if to_skip > 0 {
@@ -269,12 +288,17 @@ fn render_body(
         if let Some(row) = cursor_row {
             let screen_y = column.y + row;
             let row_start = cstarts[cursor_subrow];
-            let col_width = visible_width_before(
+            let mut col_width = visible_width_before(
                 &cline[row_start..],
                 cline_start + row_start,
                 cursor_byte,
                 hl.conceal,
             );
+            // The first-line indent shifts the cursor right too, but only on the
+            // paragraph's first visual row (#722) — continuation rows aren't indented.
+            if paragraph_indent && cursor_subrow == 0 && starts_paragraph(buffer, cursor_line) {
+                col_width += PARAGRAPH_INDENT.len() as u16;
+            }
             let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
             frame.set_cursor_position((screen_x, screen_y));
         }
@@ -417,6 +441,7 @@ fn styled_line(
     text: &str,
     hl: &SpanHighlights,
     width: usize,
+    indent: bool,
 ) -> Vec<Line<'static>> {
     if text.is_empty() {
         return vec![Line::raw("")];
@@ -427,9 +452,27 @@ fn styled_line(
         .enumerate()
         .map(|(i, &rs)| {
             let re = starts.get(i + 1).copied().unwrap_or(text.len());
-            styled_row(syntax, line_start, text, rs, re, hl)
+            let row = styled_row(syntax, line_start, text, rs, re, hl);
+            // First-line paragraph indent (#722): a display-only leading space on
+            // the paragraph's first visual row only, mirroring `epigraph_lines`'
+            // leading-space precedent. Never enters the buffer or any file.
+            if indent && i == 0 {
+                indented(row)
+            } else {
+                row
+            }
         })
         .collect()
+}
+
+/// Prepend the display-only first-line indent to a rendered row (#722), reusing the
+/// first span's style so the indent doesn't introduce a style change mid-run.
+fn indented(row: Line<'static>) -> Line<'static> {
+    let style = row.spans.first().map_or(Style::default(), |s| s.style);
+    let mut spans = Vec::with_capacity(row.spans.len() + 1);
+    spans.push(Span::styled(PARAGRAPH_INDENT, style));
+    spans.extend(row.spans);
+    Line::from(spans)
 }
 
 /// Style one visual row — the byte sub-range `[rs, re)` of `text` — into runs of
@@ -582,6 +625,37 @@ fn focus_paragraph(buffer: &Buffer) -> ByteRange {
         buffer.line_start_byte(first),
         buffer.line_start_byte(last) + buffer.line(last).len(),
     )
+}
+
+/// Whether logical line `line` is the first line of a prose paragraph that should
+/// receive the display-only first-line indent (#722). A paragraph's first line is
+/// `sub == 0` of a non-blank logical line; this decides *which* logical lines are
+/// indentable prose. Indented: a non-blank line that isn't a heading or fenced
+/// code, and isn't the first paragraph immediately after a heading (matching the
+/// manuscript convention the exports already follow — `h1+p`/`h2+p` get no indent).
+/// Blank lines, headings, and fenced code are never indented; centered chapter/part
+/// dividers and epigraphs are render-only inserts that never pass through here.
+fn starts_paragraph(buffer: &Buffer, line: usize) -> bool {
+    let syntax = buffer.syntax();
+    // A logical line is one of these kinds if a highlight of that kind covers its
+    // start byte — the whole heading / fenced block is one span (`syntax.rs`).
+    let is_kind = |l: usize, kind: HighlightKind| {
+        let start = buffer.line_start_byte(l);
+        syntax
+            .highlights_in(start, start + 1)
+            .any(|h| h.kind == kind && h.start <= start && h.end > start)
+    };
+    let blank = |l: usize| buffer.line(l).trim().is_empty();
+    if blank(line) || is_kind(line, HighlightKind::Heading) || is_kind(line, HighlightKind::Code) {
+        return false;
+    }
+    // The first paragraph after a heading gets no indent: walk up past the blank
+    // separator lines; if the nearest non-blank line above is a heading, skip it.
+    let mut prev = line;
+    while prev > 0 && blank(prev - 1) {
+        prev -= 1;
+    }
+    !(prev > 0 && is_kind(prev - 1, HighlightKind::Heading))
 }
 
 /// A `focus_width`-wide prose column centered horizontally in `area` (full width

@@ -87,6 +87,8 @@ pub(crate) enum Action {
     ToggleTypewriter,
     /// Toggle focus mode — dim every paragraph but the current one (#301).
     ToggleFocus,
+    /// Toggle the first-line paragraph indent in the editor (#722).
+    ToggleParagraphIndent,
     /// Open the read-only corkboard for the active chapter (#589, Phase 1): an
     /// index-card overview built from the chapter's `##`/`###` scene headings —
     /// each card is a heading + its first line of prose — navigable, Enter jumps
@@ -219,6 +221,7 @@ impl Action {
         // View
         Action::ToggleTypewriter,
         Action::ToggleFocus,
+        Action::ToggleParagraphIndent,
         Action::Corkboard,
         Action::ManuscriptCorkboard,
         Action::Settings,
@@ -267,6 +270,7 @@ impl Action {
             Action::PrevMisspelling => "spell:prev",
             Action::ToggleTypewriter => "view:typewriter",
             Action::ToggleFocus => "view:focus",
+            Action::ToggleParagraphIndent => "view:paragraph-indent",
             Action::Corkboard => "view:corkboard",
             Action::ManuscriptCorkboard => "view:corkboard-all",
             Action::AddAnnotation => "annotate",
@@ -330,6 +334,7 @@ impl Action {
             | Action::StopSprint => "Editing",
             Action::ToggleTypewriter
             | Action::ToggleFocus
+            | Action::ToggleParagraphIndent
             | Action::Corkboard
             | Action::ManuscriptCorkboard
             | Action::Settings => "View",
@@ -398,6 +403,7 @@ impl Action {
             Action::PrevMisspelling => "Previous misspelling",
             Action::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Action::ToggleFocus => "Focus mode (toggle)",
+            Action::ToggleParagraphIndent => "Paragraph indent (toggle)",
             Action::Corkboard => "Corkboard (scene overview)",
             Action::ManuscriptCorkboard => "Corkboard — whole manuscript",
             Action::AddAnnotation => "Annotate selection",
@@ -459,6 +465,7 @@ impl Action {
                 | Action::PrevMisspelling
                 | Action::ToggleTypewriter
                 | Action::ToggleFocus
+                | Action::ToggleParagraphIndent
                 | Action::SwitchBackend
                 | Action::Ai(
                     AiAction::Characters

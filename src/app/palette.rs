@@ -246,6 +246,13 @@ impl App {
                 self.focus_mode = !self.focus_mode;
                 self.message = Some(format!("Focus mode {}.", on_off(self.focus_mode)));
             }
+            Action::ToggleParagraphIndent => {
+                self.paragraph_indent = !self.paragraph_indent;
+                self.message = Some(format!(
+                    "Paragraph indent {}.",
+                    on_off(self.paragraph_indent)
+                ));
+            }
             Action::Corkboard => self.open_corkboard(),
             Action::ManuscriptCorkboard => self.open_manuscript_corkboard(),
             Action::AddAnnotation => self.start_annotation(),
