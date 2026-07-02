@@ -550,6 +550,36 @@ impl App {
         }
     }
 
+    /// Whether a costed pass for `book` will actually run via the Batch API (half
+    /// price) — so its cost estimate can quote the discounted figure the confirm
+    /// gates (#691). This must track the run-time decision in [`run_bible_tracker`]
+    /// exactly: a full rebuild batches, but only on the Claude backend and only
+    /// when it rebuilds the whole book from scratch (a first build, or a standalone
+    /// / single-book project). A series that revises its shared bible, an
+    /// incremental pass, an up-to-date pass, and every non-bible pass all run at the
+    /// standard rate.
+    pub(crate) fn book_pass_batches(&self, action: AiAction, book: usize, force: bool) -> bool {
+        let Some(t) = bible_tracker(action) else {
+            return false; // non-bible passes never batch
+        };
+        if self.ai.backend() != ai::BackendKind::Claude {
+            return false; // only the Claude backend has a batch path
+        }
+        let (scope, prior, _) = self.plan_bible_pass(&t, book);
+        // `force` (the palette's `R`) rebuilds in full regardless of the delta.
+        let full = force || matches!(scope, ai::incremental::Scope::Full);
+        // A series with an existing bible *revises* rather than rebuilds, so its
+        // "full" pass runs at standard rate; only a from-scratch rebuild batches.
+        let from_scratch = prior.trim().is_empty() || self.project.book_count() <= 1;
+        full && from_scratch
+    }
+
+    /// Whether the active book's costed pass will run batched — the active-book
+    /// form of [`book_pass_batches`], mirroring [`pass_context_len`].
+    pub(crate) fn pass_batches(&self, action: AiAction, force: bool) -> bool {
+        self.book_pass_batches(action, self.project.active_book(), force)
+    }
+
     /// A human label for the AI backend that will actually run (#371): the active
     /// one, accounting for the `offline` privacy pin. Shown in the run-action menu
     /// and the switch's confirmation.

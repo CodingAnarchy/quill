@@ -481,7 +481,12 @@ impl App {
         };
         // Estimate the remote cost, then let the hybrid router (#372) pick a backend
         // from the policy, the estimate, and each backend's readiness.
-        let est = cost::estimate(self.pass_context_len(action, force), max_tokens, model);
+        let est = cost::estimate(
+            self.pass_context_len(action, force),
+            max_tokens,
+            model,
+            self.pass_batches(action, force),
+        );
         let route = router::route(&router::Inputs {
             policy: self.ai.routing,
             configured: self.ai.backend,
