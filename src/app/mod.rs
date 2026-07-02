@@ -47,6 +47,7 @@ mod images;
 mod imports;
 mod meta;
 mod models;
+pub(crate) mod mouse; // the click→byte layout map + mouse handlers (#757/#764)
 mod nav;
 mod outline;
 mod palette;
@@ -76,6 +77,7 @@ mod wizard;
 
 pub(crate) use assistant::{Assistant, Entry, Speaker};
 use imports::PendingImportSource;
+pub(crate) use mouse::EditorLayout;
 #[cfg(test)]
 pub(crate) use panes::SplitView; // the type name is only spelled in tests
 use panes::{OtherPane, Split};
@@ -215,6 +217,19 @@ pub struct App {
     /// Height of a docked surface pane (#164), set by the renderer so its scroll
     /// bound matches what's drawn.
     pub(crate) surface_height: std::cell::Cell<u16>,
+    /// The focused editor's per-visual-row screen layout (#757), recorded by the
+    /// renderer each frame and read by the mouse-click handler to invert screen
+    /// coordinates back to a buffer position without redoing the layout math. A
+    /// `RefCell` because the renderer borrows `App` immutably; empty until the
+    /// first draw or when an overlay replaces the editor.
+    pub(crate) editor_layout: std::cell::RefCell<EditorLayout>,
+    /// The editor viewport's read-ahead scroll offset (#764): visual rows the view
+    /// is shifted down past the cursor-driven top, decoupled from the cursor. The
+    /// renderer honors it and writes back the value clamped to the content, so a
+    /// wheel-up right after over-scrolling responds immediately; any cursor move /
+    /// edit snaps it back to zero, bringing the view back to the cursor as before.
+    /// A `Cell` so the immutable render path can store the clamped offset.
+    pub(crate) scroll_offset: std::cell::Cell<usize>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.
@@ -449,6 +464,8 @@ impl App {
             viewport_height: 0,
             wrap_width: std::cell::Cell::new(72),
             surface_height: std::cell::Cell::new(0),
+            editor_layout: std::cell::RefCell::new(EditorLayout::default()),
+            scroll_offset: std::cell::Cell::new(0),
             added: 0,
             removed: 0,
             moved_to_unused: 0,
@@ -713,10 +730,12 @@ impl App {
     /// Handle a terminal event, dispatching key presses to the active mode.
     /// Non-key events and key releases/repeats are ignored.
     pub fn handle_event(&mut self, ev: Event) {
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Press {
-                self.on_key(key);
-            }
+        match ev {
+            Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
+            // Left-click positions the cursor (#757); the wheel scrolls the editor
+            // or the focused scrollable overlay (#764).
+            Event::Mouse(m) => self.on_mouse(m),
+            _ => {}
         }
     }
 
@@ -725,6 +744,18 @@ impl App {
     pub fn on_key(&mut self, key: KeyEvent) {
         // A fresh keystroke clears any stale status message.
         self.message = None;
+
+        // Any editing-mode keystroke (a cursor move or an edit) snaps a read-ahead
+        // wheel scroll (#764) back to the cursor, as the acceptance criteria call
+        // for. Overlay / prompt / list keys leave it alone — they don't drive the
+        // editor viewport.
+        if matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+            && self.overlay.is_none()
+            && !self.surface_pane_focused()
+            && !self.assistant_pane_focused()
+        {
+            self.scroll_offset.set(0);
+        }
 
         // F1 opens the user's guide from an editing mode (#281). Guarded so it
         // doesn't pre-empt a key's meaning elsewhere: with an overlay already up,

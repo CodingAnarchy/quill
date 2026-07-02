@@ -4,6 +4,7 @@
 //! in the shared types and the `Pane` trait.
 
 use super::*;
+use crate::app::mouse::{EditorLayout, VisualRow};
 use crate::buffer::Buffer;
 use crate::theme::{self, Theme};
 
@@ -94,7 +95,11 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         annotations: &annotations,
         focus,
     };
-    render_body(
+    // Record the focused editor's layout so a click can invert screen → byte
+    // (#757), and honor the read-ahead wheel-scroll offset (#764). Both apply only
+    // to the focused editing pane, never a reference pane.
+    let mut editor_layout = app.editor_layout.borrow_mut();
+    let clamped = render_body(
         frame,
         column,
         buffer,
@@ -103,7 +108,13 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         app.typewriter,
         editing,
         app.paragraph_indent,
+        app.scroll_offset.get(),
+        Some(&mut editor_layout),
     );
+    drop(editor_layout);
+    // Store the offset the renderer actually applied (clamped to the content), so a
+    // wheel-up right after over-scrolling responds immediately (#764).
+    app.scroll_offset.set(clamped);
 
     // Editing a metadata field: a banner on the otherwise-blank top row.
     if let Mode::EditMeta(meta) = &app.mode {
@@ -170,6 +181,8 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         false,
         false,
         app.paragraph_indent,
+        0,
+        None,
     );
 }
 
@@ -186,7 +199,14 @@ fn render_body(
     typewriter: bool,
     place_cursor: bool,
     paragraph_indent: bool,
-) {
+    // Read-ahead viewport offset in visual rows (#764): shift the cursor-driven top
+    // down by this many rows, clamped so no blank space shows past the end. Zero
+    // (and `None` for a reference pane) leaves the cursor-driven behavior unchanged.
+    scroll_offset: usize,
+    // When `Some`, record the focused editor's per-visual-row layout here (#757) so
+    // a click can be inverted to a buffer byte. `None` for the reference pane.
+    mut layout: Option<&mut EditorLayout>,
+) -> usize {
     let height = column.height as usize;
     let wrap = column.width as usize;
     let header_rows = |line: usize| {
@@ -250,15 +270,64 @@ fn render_body(
     }
     let mut to_skip = acc.saturating_sub(keep_above);
 
+    // Read-ahead wheel scroll (#764): advance the cursor-driven top by the offset,
+    // clamped so the bottom never shows blank space past the end. Applied by walking
+    // the same rows the fill loop does — starting from the cursor-driven top, skip
+    // `scroll_offset` more visual rows, but stop early if fewer than a screenful
+    // remain below (which would leave a blank tail).
+    // The offset actually applied this frame, clamped to the content — handed back
+    // to the caller so the stored offset can't run away past the last valid row.
+    let mut applied_offset = 0usize;
+    if scroll_offset > 0 {
+        // Rows from the cursor-driven top to the end of the document.
+        let mut rows_below = header_rows(top).saturating_sub(to_skip);
+        for l in top..total {
+            if l > top {
+                rows_below += header_rows(l);
+            }
+            rows_below += body_rows(l);
+        }
+        // The most we can advance and still fill the screen from the bottom up.
+        let room = rows_below.saturating_sub(height);
+        applied_offset = scroll_offset.min(room);
+        let mut advance = applied_offset;
+        // Consume `advance` more rows off the current top, moving `top`/`to_skip`.
+        while advance > 0 {
+            let line_rows = header_rows(top) + body_rows(top);
+            let remaining = line_rows - to_skip;
+            if advance < remaining {
+                to_skip += advance;
+                advance = 0;
+            } else {
+                advance -= remaining;
+                to_skip = 0;
+                top += 1;
+            }
+        }
+    }
+
+    // Record the on-screen layout for click inversion (#757): the column, and one
+    // entry per drawn visual row.
+    if let Some(map) = layout.as_deref_mut() {
+        map.column = column;
+        map.conceal = hl.conceal.to_vec();
+        map.last_line = total.saturating_sub(1);
+        map.rows.clear();
+    }
+
     let mut lines: Vec<Line> = Vec::with_capacity(height);
     let mut cursor_row = None;
     let mut ll = top;
+    let mut skip = to_skip;
     'fill: while lines.len() < height && ll < total {
         if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == ll) {
             for line in block {
-                if to_skip > 0 {
-                    to_skip -= 1;
+                if skip > 0 {
+                    skip -= 1;
                 } else if lines.len() < height {
+                    // A header block precedes line `ll`; a click here maps to that
+                    // line's start (it carries no editable text of its own).
+                    record_row(&mut layout, ll, buffer, 0, 0, false, false, false);
                     lines.push(line.clone());
                 } else {
                     break 'fill;
@@ -269,10 +338,12 @@ fn render_body(
         let line_start = buffer.line_start_byte(ll);
         let text = buffer.line(ll);
         let kind = row_kind(syntax, line_start, &text, hl.conceal);
+        let verbatim = matches!(kind, RowKind::Code { verbatim: true });
+        let starts = row_starts_for(kind, &text, wrap);
         let body = styled_line(syntax, line_start, &text, hl, wrap, indent, kind);
         for (sub, line) in body.into_iter().enumerate() {
-            if to_skip > 0 {
-                to_skip -= 1;
+            if skip > 0 {
+                skip -= 1;
                 continue;
             }
             if lines.len() >= height {
@@ -281,6 +352,19 @@ fn render_body(
             if ll == cursor_line && sub == cursor_subrow {
                 cursor_row = Some(lines.len() as u16);
             }
+            // The byte span of this visual row within its logical line.
+            let rs = starts.get(sub).copied().unwrap_or(0);
+            let re = starts.get(sub + 1).copied().unwrap_or(text.len());
+            record_row(
+                &mut layout,
+                ll,
+                buffer,
+                rs,
+                re,
+                true,
+                verbatim,
+                indent && sub == 0,
+            );
             lines.push(line);
         }
         ll += 1;
@@ -309,6 +393,8 @@ fn render_body(
             frame.set_cursor_position((screen_x, screen_y));
         }
     }
+
+    applied_offset
 }
 
 /// The display-only header blocks to inject above the body, keyed by the buffer
@@ -494,6 +580,45 @@ fn row_count(kind: RowKind, text: &str, width: usize) -> usize {
         RowKind::HiddenFence => 0,
         RowKind::Code { verbatim: true } => 1,
         _ => crate::wrap::row_starts(text, width).len(),
+    }
+}
+
+/// The byte offsets (within the line) of each visual row's start, honoring
+/// fenced-code treatment (#723) so the click layout map (#757) agrees with the
+/// render: verbatim preview code is a single row starting at 0; a hidden fence has
+/// none; everything else soft-wraps. A trailing sentinel isn't added — the caller
+/// reads the end of the last row as the line length.
+fn row_starts_for(kind: RowKind, text: &str, width: usize) -> Vec<usize> {
+    match kind {
+        RowKind::HiddenFence => Vec::new(),
+        RowKind::Code { verbatim: true } => vec![0],
+        _ => crate::wrap::row_starts(text, width),
+    }
+}
+
+/// Append one visual row to the click layout map (#757), if one is being recorded.
+/// `rs`/`re` are the row's byte span within its logical line.
+#[allow(clippy::too_many_arguments)]
+fn record_row(
+    layout: &mut Option<&mut EditorLayout>,
+    line: usize,
+    buffer: &Buffer,
+    rs: usize,
+    re: usize,
+    editable: bool,
+    verbatim: bool,
+    indent: bool,
+) {
+    if let Some(map) = layout.as_deref_mut() {
+        map.rows.push(VisualRow {
+            line,
+            line_start: buffer.line_start_byte(line),
+            row_start: rs,
+            row_end: re,
+            editable,
+            verbatim,
+            indent,
+        });
     }
 }
 

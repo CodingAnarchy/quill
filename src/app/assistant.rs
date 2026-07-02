@@ -230,6 +230,12 @@ impl Assistant {
         self.scroll_up
     }
 
+    /// Set the transcript's scroll-up (rows up from the tail), for wheel scrolling
+    /// (#764); the caller clamps to the renderer's `assistant_scroll_max`.
+    pub(crate) fn set_scroll_up(&mut self, up: u16) {
+        self.scroll_up = up;
+    }
+
     /// Push a Quill status note into the transcript (used when opening the pane).
     pub(super) fn note(&mut self, text: &str) {
         self.entries.push(Entry::sys(text));
