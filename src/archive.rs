@@ -13,7 +13,7 @@
 //! can't overwrite one.
 
 use std::fs::{self, File};
-use std::io::{Cursor, Read};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use zip::write::SimpleFileOptions;
@@ -21,6 +21,26 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::atomic;
 use crate::project::MANIFEST_NAME;
+
+/// The most total uncompressed bytes a restore will unpack from one archive
+/// before giving up. A project backup is a manuscript and its bible — text, not
+/// media — so even a large novel is a few tens of megabytes; 2 GiB is orders of
+/// magnitude over any real project yet refuses a decompression bomb that would
+/// otherwise expand without bound and exhaust memory or disk.
+const MAX_TOTAL_UNCOMPRESSED: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The largest compression ratio (uncompressed ÷ compressed) any single entry is
+/// allowed. Ordinary text deflates well but not absurdly (a few-fold, tens at
+/// most for very repetitive prose); a classic zip bomb is a tiny entry that
+/// balloons thousands-fold. 1000 leaves honest text ample room while catching
+/// the bomb. A floor on the compressed size keeps the ratio from tripping on
+/// tiny-but-innocent entries whose few bytes divide badly.
+const MAX_ENTRY_RATIO: u64 = 1000;
+
+/// Below this compressed size an entry's ratio isn't checked: a handful of
+/// compressed bytes can legitimately expand past the ratio (a short, repetitive
+/// header) without being a bomb, and the cumulative cap still bounds the total.
+const RATIO_CHECK_FLOOR: u64 = 4 * 1024;
 
 /// The default file name for a project's archive: `<project>-<stamp>.zip`, where
 /// `stamp` is the local `YYYY-MM-DD-HHMMSS` so successive backups sort and never
@@ -150,6 +170,12 @@ fn zip_name(rel: &Path) -> String {
 /// at `dest`) or to write outside `dest` (a zip-slip guard), and requires the
 /// archive to actually be a project (its manifest present). Returns the number of
 /// files unpacked.
+///
+/// Each entry streams through a bounded, atomic copy — never the whole zip nor a
+/// header-sized buffer in memory — with per-entry ratio and cumulative-size caps
+/// that reject a decompression bomb (#699). Any failure (bad zip, I/O error,
+/// rejected bomb, missing manifest) removes `dest`, so a rejected archive never
+/// leaves a half-restored project behind.
 pub fn restore_archive(src: &Path, dest: &Path) -> std::io::Result<usize> {
     if crate::project::Project::manifest_path(dest).exists() {
         return Err(std::io::Error::new(
@@ -157,37 +183,73 @@ pub fn restore_archive(src: &Path, dest: &Path) -> std::io::Result<usize> {
             format!("a project already exists at {}", dest.display()),
         ));
     }
-    let bytes = fs::read(src)?;
-    let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(std::io::Error::other)?;
+    // Restore is the recovery path and must be at least as robust as archive,
+    // which streams to keep the project out of memory (#658). Open the zip over a
+    // buffered file handle rather than slurping the whole archive into RAM, and
+    // unpack each entry through a bounded, atomic copy so a large or hostile
+    // archive can't OOM (#699). Any failure removes the partial folder so a
+    // rejected archive never leaves a half-restored project behind.
+    match unpack(src, dest) {
+        Ok(written) => Ok(written),
+        Err(e) => {
+            let _ = fs::remove_dir_all(dest);
+            Err(e)
+        }
+    }
+}
+
+/// Unpack every entry of the archive at `src` under `dest`, returning the number
+/// of files written. Split out from [`restore_archive`] so its single caller can
+/// clean up a partial `dest` on *any* error, whether a bad zip, an I/O failure,
+/// a rejected zip bomb, or a missing manifest.
+fn unpack(src: &Path, dest: &Path) -> io::Result<usize> {
+    let file = File::open(src)?;
+    let mut zip = ZipArchive::new(BufReader::new(file)).map_err(io::Error::other)?;
     let mut has_manifest = false;
     let mut written = 0;
+    let mut total_uncompressed: u64 = 0;
     for i in 0..zip.len() {
-        let mut file = zip.by_index(i).map_err(std::io::Error::other)?;
-        let Some(rel) = file.enclosed_name() else {
+        let mut entry = zip.by_index(i).map_err(io::Error::other)?;
+        let Some(rel) = entry.enclosed_name() else {
             // A path that escapes the archive root (zip slip) — skip it rather
             // than write outside the destination.
             continue;
         };
-        if file.is_dir() {
+        if entry.is_dir() {
             continue;
         }
         if rel == Path::new(MANIFEST_NAME) {
             has_manifest = true;
         }
+        // Guard the per-entry compression ratio before decompressing a byte: a
+        // classic bomb is a tiny compressed entry that balloons thousandsfold.
+        // The declared uncompressed size is untrusted, so this is a cheap first
+        // filter; the streamed cap below is the real ceiling.
+        let compressed = entry.compressed_size();
+        if compressed >= RATIO_CHECK_FLOOR && entry.size() / compressed.max(1) > MAX_ENTRY_RATIO {
+            return Err(bomb_error());
+        }
         let target = dest.join(&rel);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut buf = Vec::with_capacity(file.size() as usize);
-        file.read_to_end(&mut buf)?;
-        fs::write(&target, buf)?;
+        // Stream the entry through a bounded copy into an atomically-swapped temp
+        // file. `budget` is what remains of the whole-archive cap; the copy stops
+        // and errors the moment an entry (whose real size we don't trust from the
+        // header) would push the running total past it, so no single entry — nor
+        // the archive as a whole — can expand without bound.
+        atomic::write_with(&target, |out| {
+            let budget = MAX_TOTAL_UNCOMPRESSED - total_uncompressed;
+            let n = bounded_copy(&mut entry, out, budget)?;
+            total_uncompressed += n;
+            Ok(())
+        })?;
         written += 1;
     }
     if !has_manifest {
-        // Not a Quill project archive — don't leave a half-written folder behind.
-        let _ = fs::remove_dir_all(dest);
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        // Not a Quill project archive.
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
             format!(
                 "{} is not a Quill project archive (no {MANIFEST_NAME})",
                 src.display()
@@ -197,9 +259,43 @@ pub fn restore_archive(src: &Path, dest: &Path) -> std::io::Result<usize> {
     Ok(written)
 }
 
+/// Copy at most `limit` bytes from `reader` to `writer`, returning the number
+/// copied. Errors [`io::ErrorKind::InvalidData`] the instant the source would
+/// exceed `limit` — the source's real length is unknown until it's read, so the
+/// only safe bound is to stop mid-stream rather than trust a declared size.
+/// A fixed buffer keeps memory flat regardless of the entry's size.
+fn bounded_copy<R: Read, W: Write>(reader: &mut R, writer: &mut W, limit: u64) -> io::Result<u64> {
+    let mut buf = [0u8; 64 * 1024];
+    let mut copied: u64 = 0;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            return Ok(copied);
+        }
+        // Reading past the budget means the archive is larger than any real
+        // project — refuse it rather than keep expanding a possible bomb.
+        if copied + n as u64 > limit {
+            return Err(bomb_error());
+        }
+        writer.write_all(&buf[..n])?;
+        copied += n as u64;
+    }
+}
+
+/// The error a restore fails with when an archive would expand past the size or
+/// ratio caps — a likely decompression bomb.
+fn bomb_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "archive rejected: an entry expands too large (possible zip bomb)",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
     use crate::project::Project;
     use crate::testutil::scratch_dir;
 
@@ -362,5 +458,87 @@ mod tests {
         assert!(name.ends_with(".zip"));
         // The stamp is YYYY-MM-DD-HHMMSS, so the name is well past the prefix.
         assert!(name.len() > "My Novel-.zip".len() + 10);
+    }
+
+    /// Write a zip at `path` from `entries` (name, uncompressed bytes), deflating
+    /// each so a highly repetitive payload lands with a bomb-like ratio.
+    fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = File::create(path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let opts =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, body) in entries {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(body).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn bounded_copy_stops_at_the_limit() {
+        // The core defense in isolation: a source larger than the budget errors
+        // mid-stream rather than allocating or copying past it.
+        let src = vec![0u8; 4096];
+        let mut out = Vec::new();
+        let err = bounded_copy(&mut Cursor::new(&src), &mut out, 1024).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(out.len() <= 1024, "must not write past the budget");
+
+        // A source within budget copies whole and reports its length.
+        let mut out = Vec::new();
+        let n = bounded_copy(&mut Cursor::new(&src), &mut out, 8192).unwrap();
+        assert_eq!(n, 4096);
+        assert_eq!(out, src);
+    }
+
+    #[test]
+    fn restore_rejects_a_zip_bomb_entry() {
+        let dir = scratch_dir("archive", "bomb");
+        // A well-formed manifest plus one entry of many megabytes of zeros, which
+        // deflates thousandsfold — a decompression bomb. The ratio guard must
+        // refuse it, and no half-restored project may survive.
+        let zip = dir.join("bomb.zip");
+        let bomb = vec![0u8; 16 * 1024 * 1024];
+        write_zip(
+            &zip,
+            &[(MANIFEST_NAME, b"title = \"x\"\n"), ("chapter-1.md", &bomb)],
+        );
+
+        let restored = dir.join("restored");
+        let err = restore_archive(&zip, &restored).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            !restored.exists(),
+            "a rejected archive must leave no project"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_blocks_zip_slip() {
+        let dir = scratch_dir("archive", "slip");
+        // A traversal entry (`../escape.md`) alongside a real project. The slip
+        // entry must never be written outside `dest`; the rest still restores.
+        let zip = dir.join("slip.zip");
+        write_zip(
+            &zip,
+            &[
+                (MANIFEST_NAME, b"title = \"x\"\n"),
+                ("../escape.md", b"pwned\n"),
+                ("chapter-1.md", b"safe\n"),
+            ],
+        );
+
+        let restored = dir.join("restored");
+        restore_archive(&zip, &restored).unwrap();
+        // The traversal target — a sibling of `restored` — must not exist.
+        assert!(
+            !dir.join("escape.md").exists(),
+            "zip slip wrote outside the destination"
+        );
+        assert!(restored.join("chapter-1.md").exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
