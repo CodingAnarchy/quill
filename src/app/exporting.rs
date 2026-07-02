@@ -264,6 +264,10 @@ impl App {
             ExportFormat::Pdf => {
                 let (style, mut warnings) = self.export_style();
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
+                warnings.extend(export::pdf::pdf_dpi_warnings(
+                    &style,
+                    export::pdf::SCREEN_MEDIA_W,
+                ));
                 self.write_built(export::pdf::to_pdf(doc, &style), name, "pdf");
                 self.note_export_warnings(warnings);
             }
@@ -273,6 +277,7 @@ impl App {
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
                 let bleed = self.print_bleed();
+                warnings.extend(export::pdf::pdf_dpi_warnings(&style, w + 2.0 * bleed));
                 self.write_built(
                     export::pdf::to_pdf_print(doc, w, h, bleed, &style),
                     name,
@@ -447,6 +452,10 @@ impl App {
             ExportFormat::Pdf => {
                 let (style, mut warnings) = self.export_style();
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
+                warnings.extend(export::pdf::pdf_dpi_warnings(
+                    &style,
+                    export::pdf::SCREEN_MEDIA_W,
+                ));
                 self.write_built(
                     export::pdf::to_pdf_series(docs, series, author.as_deref(), &style),
                     name,
@@ -460,6 +469,7 @@ impl App {
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
                 let bleed = self.print_bleed();
+                warnings.extend(export::pdf::pdf_dpi_warnings(&style, w + 2.0 * bleed));
                 self.write_built(
                     export::pdf::to_pdf_series_print(
                         docs,

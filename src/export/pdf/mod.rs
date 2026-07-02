@@ -52,6 +52,12 @@ pub(super) const MONO_SIZE: f32 = 10.5; // fixed-width face for fenced blocks (#
 const MONO_LEADING: f32 = 13.0;
 const HEAD_SIZE: f32 = 10.0; // running heads + folios in the print profile
 
+// The print-quality DPI floor (#696). KDP/IngramSpark want cover art at ≥300 DPI and
+// flag under-resolution; a cover that fills the media box at fewer effective DPI
+// (pixel_width ÷ media-box inches) prints soft, so we warn (never hard-fail).
+const MIN_COVER_DPI: f32 = 300.0;
+const PTS_PER_INCH: f32 = 72.0;
+
 // The printed table-of-contents page (#603): its heading, list rhythm, and the gutter
 // reserved at the right of each line for the right-aligned folio. The gutter is sized
 // for a four-digit folio so a title wraps to the same width whether the reservation
@@ -105,6 +111,48 @@ pub fn pdf_style_warnings(style: &ExportStyle) -> Vec<String> {
     }
     warnings
 }
+
+/// The effective DPI a `width_px`-wide image resolves to when scaled to fill a
+/// `media_w_pts`-wide media box: pixels ÷ inches. `0` for a degenerate media box.
+fn effective_dpi(width_px: u32, media_w_pts: f32) -> f32 {
+    let inches = media_w_pts / PTS_PER_INCH;
+    if inches <= 0.0 {
+        return 0.0;
+    }
+    width_px as f32 / inches
+}
+
+/// A print-resolution warning for a cover that would fill a `media_w_pts`-wide media
+/// box below [`MIN_COVER_DPI`] (#696), or `None` when it's at/above the floor. The
+/// image scales to cover the whole media box, so its effective DPI is fixed by the
+/// source pixel width; a low-res cover silently prints blurry, so we surface it.
+fn cover_dpi_warning(width_px: u32, media_w_pts: f32) -> Option<String> {
+    let dpi = effective_dpi(width_px, media_w_pts);
+    (dpi < MIN_COVER_DPI).then(|| {
+        format!(
+            "cover: effective resolution is {dpi:.0} DPI (under {MIN_COVER_DPI:.0}); \
+             print services want ≥{MIN_COVER_DPI:.0} DPI — the cover may print blurry"
+        )
+    })
+}
+
+/// Print-resolution warnings for the export (#696), to surface alongside the style
+/// warnings: the cover image, scaled to fill the `media_w_pts`-wide media box, is
+/// checked against the [`MIN_COVER_DPI`] floor. Mirrors [`pdf_style_warnings`] and
+/// uses the same `media_w` `cover_page` scales to, so the reported warning matches the
+/// emitted PDF. Undecodable/absent covers yield nothing (that's a style warning's job).
+pub fn pdf_dpi_warnings(style: &ExportStyle, media_w_pts: f32) -> Vec<String> {
+    style
+        .image(ImageRole::Cover)
+        .and_then(|img| image::load_from_memory(&img.bytes).ok())
+        .and_then(|decoded| cover_dpi_warning(decoded.width(), media_w_pts))
+        .into_iter()
+        .collect()
+}
+
+/// The Letter media-box width (points) the screen profile scales a cover to fill,
+/// exposed so the exporter can compute [`pdf_dpi_warnings`] for a screen PDF.
+pub const SCREEN_MEDIA_W: f32 = 612.0;
 
 /// Compile a [`Document`] to a screen PDF (#463): US-Letter, embedded Type0 fonts,
 /// honoring the designed `[style]` (#489/#492).
@@ -553,7 +601,10 @@ impl Pdf {
     /// full-bleed art reaches the page edge with no white border (POD needs this).
     /// Overflow past the media box is cropped by the page (`clip_media` clips the
     /// content to the media box). The page carries no running head or folio. No-op when
-    /// no cover is set, leaving the output unchanged.
+    /// no cover is set, leaving the output unchanged. The cover scales to fill the
+    /// media-box width, so its effective resolution is fixed here; the print DPI-floor
+    /// check (#696) is the same `media_w()` used below and is surfaced to the exporter
+    /// by [`pdf_dpi_warnings`] rather than mutating the emitted page.
     fn cover_page(&mut self) {
         let Some((name, w, h)) = self
             .image(ImageRole::Cover)
