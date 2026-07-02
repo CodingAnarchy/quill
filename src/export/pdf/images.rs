@@ -1,11 +1,12 @@
 //! Image-ornament embedding for the PDF writer (#490): decode the configured
-//! `[style]` raster ornaments and emit them as PDF image XObjects (uncompressed RGB
-//! samples plus a grayscale `/SMask` for alpha). Placement lives in the layout
-//! module; this is the decode + object emission.
+//! `[style]` raster ornaments and emit them as PDF image XObjects (FlateDecode-
+//! compressed RGB samples plus a grayscale `/SMask` for alpha, #696). Placement
+//! lives in the layout module; this is the decode + object emission.
 
 use crate::export::{ExportStyle, ImageRole};
 
 use super::font::{take, ObjMap};
+use super::write::flate_stream;
 
 /// A decoded `[style]` image ornament, ready to embed as a PDF image XObject: the
 /// role it fills, a resource name, pixel dimensions, the RGB samples, and the alpha
@@ -59,9 +60,9 @@ pub(super) fn decode_images(style: &ExportStyle) -> Vec<PdfImage> {
     images
 }
 
-/// Emit each decoded image as a PDF image XObject (RGB samples, uncompressed) with a
-/// grayscale `/SMask` when the source had alpha, returning the (resource name, object
-/// id) pairs for the page-tree `/Resources /XObject` dictionary.
+/// Emit each decoded image as a PDF image XObject (FlateDecode-compressed RGB
+/// samples, #696) with a grayscale `/SMask` when the source had alpha, returning the
+/// (resource name, object id) pairs for the page-tree `/Resources /XObject` dictionary.
 pub(super) fn emit_images(
     images: &[PdfImage],
     next: &mut u32,
@@ -87,8 +88,11 @@ pub(super) fn emit_images(
     names
 }
 
-/// One image XObject: an (uncompressed) sample stream of `color`/8-bit data, with an
-/// optional soft mask reference.
+/// One image XObject: a FlateDecode-compressed sample stream of `color`/8-bit data
+/// (#696), with an optional soft mask reference. The XObject dictionary entries ride
+/// as the `extra` dict fields of [`flate_stream`], which supplies `/Filter
+/// /FlateDecode /Length` and the zlib payload; the samples round-trip via inflate so
+/// the image renders identically, just smaller on disk.
 fn image_xobject(
     width: u32,
     height: u32,
@@ -99,13 +103,9 @@ fn image_xobject(
     let smask = smask
         .map(|id| format!(" /SMask {id} 0 R"))
         .unwrap_or_default();
-    let mut v = format!(
-        "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} \
-         /ColorSpace /{color} /BitsPerComponent 8{smask} /Length {} >>\nstream\n",
-        samples.len()
-    )
-    .into_bytes();
-    v.extend_from_slice(samples);
-    v.extend_from_slice(b"\nendstream");
-    v
+    let extra = format!(
+        " /Type /XObject /Subtype /Image /Width {width} /Height {height} \
+         /ColorSpace /{color} /BitsPerComponent 8{smask}"
+    );
+    flate_stream(samples, &extra)
 }
