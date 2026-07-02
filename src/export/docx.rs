@@ -16,14 +16,26 @@ use super::{
 };
 use crate::frontmatter::Epigraph;
 
-const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>"#;
+/// The content-types manifest, minus its closing tag. The manuscript profile
+/// appends the header override (see [`content_types`]); this head declares the
+/// always-present parts.
+const CONTENT_TYPES_HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>"#;
+
+/// The header part's content-type override, added only for the manuscript profile.
+const CONTENT_TYPES_HEADER: &str = r#"<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>"#;
 
 const RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#;
 
-const DOC_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>"#;
+/// The document's relationships, minus its closing tag (always the styles part).
+/// The manuscript profile appends the header relationship (see [`doc_rels`]).
+const DOC_RELS_HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#;
+
+/// The header relationship, added only for the manuscript profile. `rId2` is
+/// referenced by the `<w:headerReference>` in the section properties.
+const DOC_RELS_HEADER: &str = r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>"#;
 
 /// Document defaults: Times New Roman 12pt, double-spaced — the manuscript-format
 /// baseline that body paragraphs inherit and headings/epigraphs override.
@@ -50,7 +62,8 @@ pub enum Profile {
 
 /// Compile a [`Document`] to the bytes of a `.docx` file in the given [`Profile`].
 pub fn to_docx(doc: &Document, profile: Profile) -> std::io::Result<Vec<u8>> {
-    build_docx(document_xml(doc, profile), profile)
+    let header = running_header(doc.author.as_deref(), Some(&doc.title), profile);
+    build_docx(document_xml(doc, profile), profile, header)
 }
 
 /// Compile a whole series (one book per [`Document`], in order) to one `.docx`
@@ -81,16 +94,47 @@ pub fn to_docx_series(
         if let Some(first) = books.first() {
             body.push_str(&copyright_page(&first.publishing));
         }
+        body.push_str(&toc_page());
     }
     for book in books {
         body.push_str(&book_heading(&book.title, profile));
         body.push_str(&book_body(book, profile));
     }
-    build_docx(wrap_document(&body), profile)
+    let header = running_header(author, series, profile);
+    build_docx(wrap_document(&body, &header), profile, header)
 }
 
-/// Zip the four-part `.docx` package around a built `word/document.xml`.
-fn build_docx(document_xml: String, profile: Profile) -> std::io::Result<Vec<u8>> {
+/// The running-header content for the manuscript profile, or [`None`] when it
+/// carries no header (the Vellum profile, which applies its own).
+///
+/// Standard manuscript format runs `Author / Title / page #` across the top of
+/// every page; the page number is a live `PAGE` field. Either field may be
+/// absent (missing author or title), in which case only what's present appears.
+type Header = Option<String>;
+
+/// Build the [`Header`] for a profile: the manuscript running header (author,
+/// title, and a live page-number field), or [`None`] for Vellum.
+fn running_header(author: Option<&str>, title: Option<&str>, profile: Profile) -> Header {
+    if profile != Profile::Manuscript {
+        return None;
+    }
+    // Right-aligned `Surname / Title / N` — the page number a live PAGE field so
+    // it renumbers when the manuscript reflows.
+    let mut runs = String::new();
+    if let Some(author) = author {
+        runs.push_str(&run(&format!("{author} / "), false, false, None));
+    }
+    if let Some(title) = title {
+        runs.push_str(&run(&format!("{title} / "), false, false, None));
+    }
+    runs.push_str(&page_field());
+    Some(header_xml(&para(r#"<w:jc w:val="right"/>"#, runs)))
+}
+
+/// Zip the `.docx` package around a built `word/document.xml`. The manuscript
+/// profile adds a `word/header1.xml` part (with its content-type + relationship);
+/// Vellum omits it.
+fn build_docx(document_xml: String, profile: Profile, header: Header) -> std::io::Result<Vec<u8>> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default();
     // Vellum needs a Heading 1 style to recognize chapter breaks; the manuscript
@@ -100,13 +144,19 @@ fn build_docx(document_xml: String, profile: Profile) -> std::io::Result<Vec<u8>
         Profile::Vellum => VELLUM_STYLES,
     };
     let styles = format!("{STYLES}{extra}</w:styles>");
-    let parts = [
-        ("[Content_Types].xml", CONTENT_TYPES.to_string()),
-        ("_rels/.rels", RELS.to_string()),
-        ("word/_rels/document.xml.rels", DOC_RELS.to_string()),
-        ("word/styles.xml", styles),
-        ("word/document.xml", document_xml),
+    let mut parts = vec![
+        ("[Content_Types].xml".to_string(), content_types(&header)),
+        ("_rels/.rels".to_string(), RELS.to_string()),
+        (
+            "word/_rels/document.xml.rels".to_string(),
+            doc_rels(&header),
+        ),
+        ("word/styles.xml".to_string(), styles),
+        ("word/document.xml".to_string(), document_xml),
     ];
+    if let Some(header) = header {
+        parts.push(("word/header1.xml".to_string(), header));
+    }
     for (name, content) in parts {
         zip.start_file(name, opts).map_err(std::io::Error::other)?;
         zip.write_all(content.as_bytes())?;
@@ -114,16 +164,38 @@ fn build_docx(document_xml: String, profile: Profile) -> std::io::Result<Vec<u8>
     Ok(zip.finish().map_err(std::io::Error::other)?.into_inner())
 }
 
+/// The `[Content_Types].xml`, with the header override when a header is present.
+fn content_types(header: &Header) -> String {
+    let extra = if header.is_some() {
+        CONTENT_TYPES_HEADER
+    } else {
+        ""
+    };
+    format!("{CONTENT_TYPES_HEAD}{extra}</Types>")
+}
+
+/// The document relationships, with the header relationship when present.
+fn doc_rels(header: &Header) -> String {
+    let extra = if header.is_some() {
+        DOC_RELS_HEADER
+    } else {
+        ""
+    };
+    format!("{DOC_RELS_HEAD}{extra}</Relationships>")
+}
+
 /// The `word/document.xml` for one book: the title block (manuscript only), then
 /// its parts/chapters, wrapped in the document shell.
 fn document_xml(doc: &Document, profile: Profile) -> String {
+    let header = running_header(doc.author.as_deref(), Some(&doc.title), profile);
     let mut body = String::new();
     if profile == Profile::Manuscript {
         body.push_str(&title_page(doc));
         body.push_str(&copyright_page(&doc.publishing));
+        body.push_str(&toc_page());
     }
     body.push_str(&book_body(doc, profile));
-    wrap_document(&body)
+    wrap_document(&body, &header)
 }
 
 /// The copyright page (#583), when publishing metadata warrants one: the rights
@@ -206,8 +278,9 @@ fn book_body(doc: &Document, profile: Profile) -> String {
 /// heading (manuscript), or a Heading 1 (Vellum, where it reads as a break).
 fn book_heading(title: &str, profile: Profile) -> String {
     match profile {
+        // Outline level 1 so a series book title also lands in the TOC.
         Profile::Manuscript => para(
-            r#"<w:pageBreakBefore/><w:spacing w:before="360" w:after="360" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
+            r#"<w:pageBreakBefore/><w:spacing w:before="360" w:after="360" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/><w:outlineLvl w:val="0"/>"#,
             run(title, true, false, Some(32)),
         ),
         Profile::Vellum => para(
@@ -218,16 +291,83 @@ fn book_heading(title: &str, profile: Profile) -> String {
 }
 
 /// Wrap a built body in the `word/document.xml` shell (letter page, 1" margins).
-fn wrap_document(body: &str) -> String {
-    let sect = r#"<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>"#;
+/// When a [`Header`] is present (manuscript profile), the section references the
+/// `word/header1.xml` part via `rId2` so the running header shows on every page.
+fn wrap_document(body: &str, header: &Header) -> String {
+    let header_ref = if header.is_some() {
+        r#"<w:headerReference w:type="default" r:id="rId2"/>"#
+    } else {
+        ""
+    };
+    // The `r` namespace carries the header relationship id; declare it only when
+    // it is used so the document stays minimal for the Vellum profile.
+    let rns = if header.is_some() {
+        r#" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+    } else {
+        ""
+    };
+    let sect = format!(
+        r#"<w:sectPr>{header_ref}<w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720"/></w:sectPr>"#,
+    );
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n",
-            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"{rns}>",
             "<w:body>{body}{sect}</w:body></w:document>"
         ),
+        rns = rns,
         body = body,
         sect = sect,
+    )
+}
+
+/// A live `PAGE` field: the current page number, computed by the word processor
+/// and updated as the document reflows. Rendered as three runs — a field-begin,
+/// the `PAGE` instruction, and a field-end — with a `1` placeholder so a viewer
+/// that doesn't recalculate still shows a number.
+fn page_field() -> String {
+    concat!(
+        r#"<w:r><w:fldChar w:fldCharType="begin"/></w:r>"#,
+        r#"<w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>"#,
+        r#"<w:r><w:fldChar w:fldCharType="separate"/></w:r>"#,
+        r#"<w:r><w:t>1</w:t></w:r>"#,
+        r#"<w:r><w:fldChar w:fldCharType="end"/></w:r>"#,
+    )
+    .to_string()
+}
+
+/// A `Contents`-titled page carrying a live `TOC` field (manuscript profile). The
+/// `\o "1-1"` switch collects heading-1 outline levels — the chapter/part titles
+/// — and `\h` makes the entries clickable. A placeholder line stands in until the
+/// reader updates the field (Word prompts on open; LibreOffice recalculates).
+fn toc_page() -> String {
+    let mut out = para(
+        r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
+        run("Contents", true, false, Some(28)),
+    );
+    let field = concat!(
+        r#"<w:r><w:fldChar w:fldCharType="begin"/></w:r>"#,
+        r#"<w:r><w:instrText xml:space="preserve"> TOC \o "1-1" \h </w:instrText></w:r>"#,
+        r#"<w:r><w:fldChar w:fldCharType="separate"/></w:r>"#,
+        r#"<w:r><w:t>Right-click to update the table of contents.</w:t></w:r>"#,
+        r#"<w:r><w:fldChar w:fldCharType="end"/></w:r>"#,
+    );
+    out.push_str(&format!(
+        "<w:p><w:pPr><w:spacing w:line=\"240\" w:lineRule=\"auto\"/></w:pPr>{field}</w:p>",
+    ));
+    out
+}
+
+/// The `word/header1.xml` part wrapping one header paragraph. Its own `<w:hdr>`
+/// root with the wordprocessing namespace, as a header part requires.
+fn header_xml(paragraph: &str) -> String {
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n",
+            "<w:hdr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
+            "{paragraph}</w:hdr>"
+        ),
+        paragraph = paragraph,
     )
 }
 
@@ -236,8 +376,10 @@ fn wrap_document(body: &str) -> String {
 /// chapters there and applies its own styling.
 fn heading(title: &str, profile: Profile) -> String {
     match profile {
+        // `outlineLvl 0` marks the title as an outline-level-1 heading so the TOC
+        // field collects it, without changing the centered bold look.
         Profile::Manuscript => para(
-            r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/>"#,
+            r#"<w:pageBreakBefore/><w:spacing w:before="240" w:after="240" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/><w:outlineLvl w:val="0"/>"#,
             run(title, true, false, Some(28)),
         ),
         Profile::Vellum => para(
@@ -651,5 +793,157 @@ mod tests {
             "bold + italic runs"
         );
         assert!(!xml.contains('*'), "no literal asterisks");
+    }
+
+    /// Whether the produced .docx zip contains a part by name.
+    fn has_part(bytes: &[u8], name: &str) -> bool {
+        let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid zip");
+        let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+        names.iter().any(|n| n == name)
+    }
+
+    #[test]
+    fn manuscript_profile_emits_a_running_header_with_a_page_field() {
+        // #705: the manuscript profile carries a running header (author / title /
+        // page) wired through the package — a header part, its content-type
+        // override, a relationship, and a section reference.
+        let bytes = to_docx(&doc(), Profile::Manuscript).unwrap();
+        assert!(
+            has_part(&bytes, "word/header1.xml"),
+            "header part is written"
+        );
+        let header = part(&bytes, "word/header1.xml");
+        // Running header carries author and title, right-aligned.
+        assert!(header.contains("<w:hdr"), "header root element");
+        assert!(
+            header.contains("A. Writer /") && header.contains("Red &lt;State&gt; Earth /"),
+            "author and (escaped) title in the header: {header}"
+        );
+        assert!(
+            header.contains(r#"<w:jc w:val="right"/>"#),
+            "header right-aligned"
+        );
+        // A live PAGE field, not a literal number.
+        assert!(
+            header.contains("<w:instrText xml:space=\"preserve\"> PAGE </w:instrText>"),
+            "PAGE field instruction: {header}"
+        );
+        assert!(
+            header.contains(r#"<w:fldChar w:fldCharType="begin"/>"#)
+                && header.contains(r#"<w:fldChar w:fldCharType="end"/>"#),
+            "field delimiters"
+        );
+        // The content-type override and relationship are declared, and the section
+        // references the header.
+        let ctypes = part(&bytes, "[Content_Types].xml");
+        assert!(
+            ctypes.contains(r#"PartName="/word/header1.xml""#),
+            "header content-type override: {ctypes}"
+        );
+        let rels = part(&bytes, "word/_rels/document.xml.rels");
+        assert!(
+            rels.contains(r#"Target="header1.xml""#) && rels.contains(r#"Id="rId2""#),
+            "header relationship: {rels}"
+        );
+        let xml = part(&bytes, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:headerReference w:type="default" r:id="rId2"/>"#),
+            "section references the header: {xml}"
+        );
+        assert!(
+            xml.contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "the r namespace is declared for the header id"
+        );
+    }
+
+    #[test]
+    fn manuscript_profile_emits_a_toc_field_for_the_chapters() {
+        // #705: a TOC field collects the chapter/part titles into a clickable,
+        // updatable contents. The chapter headings carry outline level 1 so the
+        // field picks them up.
+        let bytes = to_docx(&doc(), Profile::Manuscript).unwrap();
+        let xml = part(&bytes, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:instrText xml:space="preserve"> TOC \o "1-1" \h </w:instrText>"#),
+            "TOC field instruction: {xml}"
+        );
+        // The Contents heading precedes the chapter body.
+        let toc_at = xml.find("Contents").expect("contents heading");
+        let chapter_at = xml.find("The Find").expect("first chapter");
+        assert!(toc_at < chapter_at, "TOC before the body: {xml}");
+        // Chapter/part headings are outline level 1 so the TOC can collect them.
+        assert!(
+            xml.contains(r#"<w:outlineLvl w:val="0"/>"#),
+            "headings carry an outline level: {xml}"
+        );
+    }
+
+    #[test]
+    fn vellum_profile_has_no_header_or_toc() {
+        // Vellum applies its own front matter and running header — the generated
+        // package must not add one, or it would conflict on import.
+        let bytes = to_docx(&doc(), Profile::Vellum).unwrap();
+        assert!(
+            !has_part(&bytes, "word/header1.xml"),
+            "no header part in the Vellum profile"
+        );
+        let ctypes = part(&bytes, "[Content_Types].xml");
+        assert!(
+            !ctypes.contains("header1.xml"),
+            "no header content-type override"
+        );
+        let rels = part(&bytes, "word/_rels/document.xml.rels");
+        assert!(!rels.contains("header1.xml"), "no header relationship");
+        let xml = part(&bytes, "word/document.xml");
+        assert!(
+            !xml.contains("<w:headerReference"),
+            "no header reference in the section"
+        );
+        assert!(!xml.contains(" TOC "), "no TOC field: {xml}");
+        assert!(!xml.contains("Contents"), "no contents page");
+    }
+
+    #[test]
+    fn series_docx_carries_a_header_and_toc() {
+        // #705: the series document (manuscript) also gets a running header
+        // (series / author) and a TOC over the book/chapter titles.
+        let book = |title: &str| crate::export::Document {
+            title: title.into(),
+            subtitle: None,
+            author: None,
+            series: None,
+            publishing: Default::default(),
+            epigraph: None,
+            front: vec![],
+            parts: vec![crate::export::Part {
+                name: None,
+                chapters: vec![crate::export::Chapter {
+                    title: "Ch".into(),
+                    epigraph: None,
+                    body: "prose".into(),
+                }],
+            }],
+            back: vec![],
+        };
+        let bytes = to_docx_series(
+            &[book("Book One"), book("Book Two")],
+            Some("The Saga"),
+            Some("A. Writer"),
+            Profile::Manuscript,
+        )
+        .unwrap();
+        let header = part(&bytes, "word/header1.xml");
+        assert!(
+            header.contains("The Saga /") && header.contains("A. Writer /"),
+            "series and author in the header: {header}"
+        );
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains(" TOC "), "series TOC field: {xml}");
+        assert!(
+            xml.contains(r#"<w:headerReference w:type="default" r:id="rId2"/>"#),
+            "series header reference"
+        );
     }
 }
