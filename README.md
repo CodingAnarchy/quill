@@ -442,7 +442,7 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | Ctrl-Z / Ctrl-Y| undo / redo                     |
 | Ctrl-F         | find (then `r` to replace)      |
 | Ctrl-S         | save                            |
-| Ctrl-Q         | quit (prompts if unsaved)       |
+| Ctrl-Q / Ctrl-C| quit (prompts if unsaved)       |
 | Ctrl-O         | toggle the chapter pane         |
 | Ctrl-R         | progress report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |

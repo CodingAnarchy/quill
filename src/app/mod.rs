@@ -849,7 +849,14 @@ impl App {
     fn on_key_ctrl(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char('s') => self.save_edit(),
-            KeyCode::Char('q') => self.request_quit(),
+            // Ctrl-Q and Ctrl-C both quit through the same guard (#730). Under raw
+            // mode Ctrl-C arrives as a key event, not SIGINT, and terminal users
+            // reflexively press it to leave a program — so honor it, but via
+            // `request_quit` so a stray press still can't silently drop unsaved
+            // work. It only quits from the top-level editor: overlays, prompts,
+            // and palettes intercept keys before `on_key_ctrl`, so there Ctrl-C
+            // is theirs to handle (Esc-style cancel), which is the least surprising.
+            KeyCode::Char('q') | KeyCode::Char('c') => self.request_quit(),
             KeyCode::Char('=') | KeyCode::Char('+') => {
                 self.focus_width = (self.focus_width + 4).min(160);
             }

@@ -311,3 +311,44 @@ fn replace_honors_whole_word_and_case() {
         "only the standalone, capitalized 'Will' was renamed"
     );
 }
+
+// --- #730: Ctrl-C quits, with the same unsaved-changes guard as Ctrl-Q -------
+
+#[test]
+fn ctrl_c_quits_when_there_are_no_unsaved_changes() {
+    // A freshly-opened, unmodified chapter: Ctrl-C should quit straight away,
+    // exactly as Ctrl-Q does, with no prompt in the way.
+    let (mut app, _dir) = one_chapter_app("ctrl-c-clean", "settled prose\n");
+    assert!(!app.edit_dirty(), "the fixture opens clean");
+
+    app.on_key(ctrl('c'));
+
+    assert!(
+        app.should_quit,
+        "Ctrl-C on a clean buffer quits immediately"
+    );
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no confirm prompt when there's nothing to lose"
+    );
+}
+
+#[test]
+fn ctrl_c_prompts_before_quitting_with_unsaved_changes() {
+    // With an unsaved edit, a reflexive Ctrl-C must not drop the work: it opens
+    // the same quit-confirm prompt Ctrl-Q would, and doesn't quit yet.
+    let (mut app, _dir) = one_chapter_app("ctrl-c-dirty", "settled prose\n");
+    type_str(&mut app, "more");
+    assert!(app.edit_dirty(), "the edit made the buffer dirty");
+
+    app.on_key(ctrl('c'));
+
+    assert!(
+        !app.should_quit,
+        "Ctrl-C with unsaved work doesn't quit outright"
+    );
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::Quit)),
+        "it opens the quit-confirm prompt, the same guard as Ctrl-Q"
+    );
+}
