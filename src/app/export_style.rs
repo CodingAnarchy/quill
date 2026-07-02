@@ -663,6 +663,7 @@ mod tests {
                         title: "One".into(),
                         epigraph: None,
                         body: "Prose.".into(),
+                        role: None,
                     }],
                 }],
                 back: vec![],

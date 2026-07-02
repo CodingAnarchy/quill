@@ -142,6 +142,19 @@ struct Landmarks {
     cover: Option<String>,
     titlepage: Option<String>,
     bodymatter: Option<String>,
+    /// Role-specific reference points (#695): a front/back-matter section whose
+    /// role carries a distinct `epub:type` (a foreword, dedication, glossary, …)
+    /// becomes its own landmark so screen readers can jump straight to it. In
+    /// reading order, first occurrence wins per type.
+    sections: Vec<RoleLandmark>,
+}
+
+/// One role-specific landmark (#695): the section's `epub:type`, a human label,
+/// and the href of its content document.
+struct RoleLandmark {
+    epub_type: &'static str,
+    label: String,
+    href: String,
 }
 
 impl Builder {
@@ -259,15 +272,29 @@ impl Builder {
     }
 
     /// One chapter or section as its own XHTML document, returning its TOC entry.
-    /// `epub_type` is the structural role (#604): `frontmatter` for front chapters,
-    /// `bodymatter` for the body, `backmatter` for the back; the first body-matter
-    /// section becomes the "Begin Reading" landmark.
-    fn add_chapter(&mut self, ch: &Chapter, epub_type: &str) -> Nav {
+    /// `band_type` is the generic structural role of the band (#604):
+    /// `frontmatter` for front chapters, `bodymatter` for the body, `backmatter`
+    /// for the back. A front/back-matter section whose [`Role`](crate::frontmatter::Role) carries a distinct
+    /// `epub:type` (#695) — a foreword, dedication, glossary, … — is tagged with
+    /// that precise term instead and becomes its own landmark; the first
+    /// body-matter section becomes the "Begin Reading" landmark.
+    fn add_chapter(&mut self, ch: &Chapter, band_type: &str) -> Nav {
+        // The section's role gives the precise EPUB term; an untyped (body) section
+        // — or a role with no distinct term — keeps the generic band semantic.
+        let role_type = ch.role.and_then(|r| r.epub_type());
+        let epub_type = role_type.unwrap_or(band_type);
         let href = self.add("chap", &ch.title, epub_type, chapter_body(ch, &self.style));
-        if epub_type == "bodymatter" {
+        if band_type == "bodymatter" {
             self.landmarks
                 .bodymatter
                 .get_or_insert_with(|| href.clone());
+        }
+        if let Some(role_type) = role_type {
+            self.landmarks.sections.push(RoleLandmark {
+                epub_type: role_type,
+                label: ch.title.clone(),
+                href: href.clone(),
+            });
         }
         Nav {
             label: ch.title.clone(),
@@ -626,6 +653,7 @@ fn identifier(title: &str, series: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::export::{Chapter, Document, ExportStyle, Part};
+    use crate::frontmatter::Role;
     use std::io::Read;
 
     const MODIFIED: &str = "2026-06-27T00:00:00Z";
@@ -642,6 +670,18 @@ mod tests {
             title: title.to_string(),
             epigraph,
             body: body.to_string(),
+            role: None,
+        }
+    }
+
+    /// A front/back-matter section carrying a specific [`Role`] (#695), so a test
+    /// can assert its `epub:type` reaches the output.
+    fn section(title: &str, role: Role, body: &str) -> Chapter {
+        Chapter {
+            title: title.to_string(),
+            epigraph: None,
+            body: body.to_string(),
+            role: Some(role),
         }
     }
 
@@ -1203,6 +1243,78 @@ mod tests {
         carries("OEBPS/part0005.xhtml", "bodymatter"); // Part One divider
         carries("OEBPS/chap0006.xhtml", "bodymatter"); // The Find
         carries("OEBPS/chap0007.xhtml", "backmatter"); // Afterword
+    }
+
+    #[test]
+    fn role_sections_carry_their_specific_epub_type() {
+        // A book with a dedication and a foreword up front and a glossary in back
+        // (#695): each section's `<body>` carries its precise EPUB Structural
+        // Semantics term — not the generic front/back-matter band — while an
+        // untyped body chapter stays `bodymatter`.
+        let d = Document {
+            front: vec![
+                section("For E.", Role::Dedication, "For everyone."),
+                section("Foreword", Role::Foreword, "A word before."),
+            ],
+            back: vec![section("Glossary", Role::Glossary, "arcana — old magic.")],
+            ..doc()
+        };
+        let bytes = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+
+        let body_type = |file: &str| {
+            let x = part(&bytes, file);
+            let at = x.find("<body epub:type=\"").expect("a typed body") + 17;
+            x[at..x[at..].find('"').map(|i| at + i).unwrap()].to_string()
+        };
+        // No cover / copyright page here: title → dedication → foreword → part →
+        // chapter → glossary.
+        assert_eq!(body_type("OEBPS/chap0002.xhtml"), "dedication");
+        assert_eq!(body_type("OEBPS/chap0003.xhtml"), "foreword");
+        assert_eq!(body_type("OEBPS/chap0006.xhtml"), "glossary");
+        // An untyped body chapter keeps the generic body-matter semantic.
+        assert_eq!(body_type("OEBPS/chap0005.xhtml"), "bodymatter");
+
+        // The role sections also become landmarks pointing at their own docs, so a
+        // reader can jump straight to the dedication / foreword / glossary.
+        let nav = part(&bytes, "OEBPS/nav.xhtml");
+        let lm = &nav[nav.find("epub:type=\"landmarks\"").expect("landmarks nav")..];
+        assert!(
+            lm.contains("epub:type=\"dedication\" href=\"chap0002.xhtml\""),
+            "dedication landmark: {lm}"
+        );
+        assert!(
+            lm.contains("epub:type=\"foreword\" href=\"chap0003.xhtml\""),
+            "foreword landmark: {lm}"
+        );
+        assert!(
+            lm.contains("epub:type=\"glossary\" href=\"chap0006.xhtml\""),
+            "glossary landmark: {lm}"
+        );
+    }
+
+    #[test]
+    fn a_role_without_a_distinct_epub_type_keeps_the_band_fallback() {
+        // "Also by the author" and "about the author" have no distinct EPUB term
+        // (#695): they stay generic `backmatter` and raise no role landmark, so an
+        // untyped section is unchanged from before roles reached the writer.
+        let d = Document {
+            front: vec![],
+            back: vec![section("Also by", Role::AlsoBy, "Other books.")],
+            ..doc()
+        };
+        let bytes = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+        // title → part → chapter → also-by (backmatter).
+        let also = part(&bytes, "OEBPS/chap0004.xhtml");
+        assert!(
+            also.contains("<body epub:type=\"backmatter\">"),
+            "no distinct term falls back to the band: {also}"
+        );
+        let nav = part(&bytes, "OEBPS/nav.xhtml");
+        let lm = &nav[nav.find("epub:type=\"landmarks\"").expect("landmarks nav")..];
+        assert!(
+            !lm.contains("also-by") && !lm.contains("\"also"),
+            "no role landmark for a term-less section: {lm}"
+        );
     }
 
     #[test]

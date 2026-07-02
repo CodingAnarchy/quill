@@ -264,6 +264,7 @@ mod tests {
             title: title.to_string(),
             epigraph,
             body: body.to_string(),
+            role: None,
         }
     }
 

@@ -615,6 +615,7 @@ impl App {
             title,
             epigraph: self.chapter_epigraph(i),
             body,
+            role: self.project.chapter_role(i),
         }
     }
 
@@ -657,6 +658,7 @@ impl App {
                 title: ce.title.clone(),
                 epigraph: fm.and_then(|f| f.epigraph()),
                 body: export::strip_repeated_title(&body, &ce.title),
+                role: ce.role,
             };
             match Band::of(ce.role) {
                 Band::Front => front.push(chapter),
@@ -730,6 +732,7 @@ fn style_preview_document() -> Document {
                        After the scene break the story resumes, so the divider — a glyph \
                        or an image — appears in place between the two scenes."
                     .into(),
+                role: None,
             }],
         }],
         back: Vec::new(),

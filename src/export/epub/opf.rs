@@ -238,6 +238,17 @@ fn nav_landmarks(landmarks: &Landmarks) -> String {
     if let Some(href) = &landmarks.bodymatter {
         li("bodymatter", href, "Begin Reading");
     }
+    // Role-specific reference points (#695): a foreword, dedication, glossary, …
+    // in reading order, first occurrence per `epub:type` (a book with two
+    // appendices lands one appendix landmark, at the first).
+    let mut seen: Vec<&str> = Vec::new();
+    for section in &landmarks.sections {
+        if seen.contains(&section.epub_type) {
+            continue;
+        }
+        seen.push(section.epub_type);
+        li(section.epub_type, &section.href, &section.label);
+    }
     format!("<nav epub:type=\"landmarks\" hidden=\"hidden\"><h2>Landmarks</h2>\n<ol>\n{lis}</ol>\n</nav>")
 }
 
@@ -326,6 +337,7 @@ mod tests {
             title: title.to_string(),
             epigraph,
             body: body.to_string(),
+            role: None,
         }
     }
 

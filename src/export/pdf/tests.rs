@@ -30,6 +30,7 @@ fn ch(title: &str, epigraph: Option<Epigraph>, body: &str) -> Chapter {
         title: title.into(),
         epigraph,
         body: body.into(),
+        role: None,
     }
 }
 
