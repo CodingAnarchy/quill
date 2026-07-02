@@ -1554,6 +1554,26 @@ fn compression_shrinks_a_pdf_with_an_embedded_custom_font() {
 }
 
 #[test]
+fn tounicode_cmap_is_flate_compressed() {
+    // The /ToUnicode CMap ships FlateDecode-compressed (#712), the last uncompressed
+    // stream type. A compressed stream that inflates to CMap text (begincmap … the
+    // Adobe-Identity-UCS name … bfchar entries) proves the filter and the round-trip.
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    let cmap = flate_streams(&bytes)
+        .into_iter()
+        .find(|(_, body)| {
+            let s = String::from_utf8_lossy(body);
+            s.contains("begincmap") && s.contains("/Adobe-Identity-UCS")
+        })
+        .expect("the /ToUnicode CMap is a FlateDecode stream");
+    let body = String::from_utf8_lossy(&cmap.1);
+    assert!(
+        body.contains("beginbfchar") && body.contains("endcmap"),
+        "the inflated CMap round-trips to its bfchar mapping"
+    );
+}
+
+#[test]
 fn bleed_export_emits_trim_and_bleed_boxes() {
     // A bleed print export states where the finished page is (#692): every page carries
     // a /TrimBox inset within the media box by the bleed, and a /BleedBox equal to the

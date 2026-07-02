@@ -490,10 +490,9 @@ fn to_unicode_cmap(used: &BTreeMap<u16, char>) -> Vec<u8> {
         body.push_str("endbfchar\n");
     }
     body.push_str("endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend");
-    let mut v = format!("<< /Length {} >>\nstream\n", body.len()).into_bytes();
-    v.extend_from_slice(body.as_bytes());
-    v.extend_from_slice(b"\nendstream");
-    v
+    // FlateDecode-compress the CMap (#712), the last uncompressed stream type; the
+    // helper adds `/Filter /FlateDecode` and the compressed `/Length`.
+    flate_stream(body.as_bytes(), "")
 }
 
 /// A char as a UTF-16BE hex string (a surrogate pair for non-BMP).
