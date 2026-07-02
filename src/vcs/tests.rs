@@ -243,10 +243,11 @@ fn pull_refuses_a_dirty_tree_and_preserves_edits() {
     // The author's words are still on disk, untouched.
     assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), uncommitted);
 
-    // After committing, the same pull fast-forwards exactly as before.
+    // After committing, the dirty-tree refusal is gone. b and the remote have
+    // diverged on the same line now, so the pull reports a merge conflict (#703)
+    // rather than the uncommitted-changes refusal — the point here is only that the
+    // clean tree gets past the dirty guard.
     commit(&b, "keep-my-edit").unwrap();
-    // (b and the remote have diverged now, so it stops for merge — the point
-    // is only that the dirty-tree refusal is gone once the tree is clean.)
     let outcome = pull(&b);
     assert!(
         outcome.is_err()
@@ -291,6 +292,106 @@ fn pull_fast_forwards_a_clean_tree() {
     assert!(fs::read_to_string(b.join("one.md"))
         .unwrap()
         .contains("Revised"));
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn pull_merges_a_conflict_free_divergence() {
+    // #703: two machines commit different files, then one pushes. The other pulls a
+    // diverged branch that touches no shared line — the pull merges instead of
+    // dead-ending, and both authors' commits survive.
+    let remote = temp_dir("merge-bare");
+    git2::Repository::init_bare(&remote).unwrap();
+    let url = remote.to_str().unwrap();
+
+    let a = temp_dir("merge-a");
+    init(&a).unwrap();
+    fs::write(a.join("one.md"), "# One\n\nShared.\n").unwrap();
+    commit(&a, "first").unwrap();
+    set_remote(&a, url).unwrap();
+    push(&a).unwrap();
+
+    let b = temp_dir("merge-b");
+    fs::remove_dir_all(&b).ok();
+    git2::Repository::clone(url, &b).unwrap();
+
+    // a and b now diverge on *different* files, so there's no textual conflict.
+    fs::write(a.join("two.md"), "# Two\n\nA's new chapter.\n").unwrap();
+    commit(&a, "a-adds-two").unwrap();
+    push(&a).unwrap();
+    fs::write(b.join("three.md"), "# Three\n\nB's new chapter.\n").unwrap();
+    commit(&b, "b-adds-three").unwrap();
+
+    let msg = pull(&b).unwrap();
+    assert!(msg.to_lowercase().contains("merged"), "{msg}");
+    // Both sides' files landed on disk after the merge.
+    assert!(b.join("two.md").exists(), "a's chapter merged into b");
+    assert!(b.join("three.md").exists(), "b's own chapter is preserved");
+
+    // Both commits are reachable, plus the merge commit itself.
+    let summaries: Vec<String> = log(&b, 20)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect();
+    assert!(summaries.iter().any(|s| s == "a-adds-two"), "{summaries:?}");
+    assert!(
+        summaries.iter().any(|s| s == "b-adds-three"),
+        "{summaries:?}"
+    );
+    assert!(
+        summaries.iter().any(|s| s.contains("Merge remote")),
+        "a merge commit ties the two histories: {summaries:?}"
+    );
+
+    // The merge is now pushable (b is ahead of the remote, not behind).
+    push(&b).unwrap();
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn pull_reports_conflicts_without_losing_work() {
+    // #703: both machines edit the *same* line, then one pushes. The other's pull
+    // can't merge automatically — it must name the conflicted file and leave the
+    // author's own committed work exactly as it was, not a half-merged tree.
+    let remote = temp_dir("conflict-bare");
+    git2::Repository::init_bare(&remote).unwrap();
+    let url = remote.to_str().unwrap();
+
+    let a = temp_dir("conflict-a");
+    init(&a).unwrap();
+    fs::write(a.join("one.md"), "# One\n\nOriginal line.\n").unwrap();
+    commit(&a, "first").unwrap();
+    set_remote(&a, url).unwrap();
+    push(&a).unwrap();
+
+    let b = temp_dir("conflict-b");
+    fs::remove_dir_all(&b).ok();
+    git2::Repository::clone(url, &b).unwrap();
+
+    // Same file, same line, edited differently on each side.
+    fs::write(a.join("one.md"), "# One\n\nA's rewrite.\n").unwrap();
+    commit(&a, "a-edit").unwrap();
+    push(&a).unwrap();
+    let b_content = "# One\n\nB's rewrite.\n";
+    fs::write(b.join("one.md"), b_content).unwrap();
+    commit(&b, "b-edit").unwrap();
+
+    let err = pull(&b).unwrap_err();
+    assert!(
+        err.contains("one.md"),
+        "the conflict names the file to reconcile: {err}"
+    );
+    // b's committed work is untouched — no half-merged tree, no conflict markers.
+    assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), b_content);
+    // The repo isn't left mid-merge: a fresh commit sees a clean tree.
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
 
     fs::remove_dir_all(&a).ok();
     fs::remove_dir_all(&b).ok();

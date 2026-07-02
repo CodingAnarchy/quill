@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use super::local::is_dirty;
+use super::local::{is_dirty, signature};
 
 /// Point the project at a hosted remote (#134). Stores it as `origin`, replacing
 /// any existing one, so reconfiguring is just calling this again. The URL can be
@@ -72,15 +72,24 @@ pub fn push(root: &Path) -> Result<String, String> {
     Ok(branch)
 }
 
-/// Pull `origin`'s changes for the current branch (#134). Fast-forward only and
-/// non-destructive: if local and remote have diverged (each has commits the other
-/// lacks), it stops and explains rather than merging or resetting. Returns a human
-/// message.
+/// Pull `origin`'s changes for the current branch (#134), resolving a diverged
+/// branch in-app (#703). Non-destructive throughout — it never resets, force-pushes,
+/// or discards a commit:
 ///
-/// A fast-forward finishes with a force checkout of the fetched tree, which would
-/// clobber uncommitted working-tree edits. Rather than trust the caller to keep the
-/// tree clean, `pull` refuses up front when the tree is dirty (#639) — so a
-/// save-but-don't-commit-then-pull can never silently discard the author's words.
+/// * **Up to date / behind** — a fast-forward moves the branch to the fetched commit.
+/// * **Diverged, no conflicts** — both sides committed. The fetched tree is merged
+///   into local and, when the merge is clean, committed as an ordinary two-parent
+///   merge commit, so both authors' commits stay reachable.
+/// * **Diverged, with conflicts** — the same files were edited on both machines in a
+///   way git can't reconcile. Rather than write half-merged files or leave the repo
+///   mid-merge, the attempt is rolled back and the conflicted paths are reported so
+///   the author knows exactly what to reconcile.
+///
+/// A fast-forward (and the merge checkout) finishes with a force checkout of the
+/// resulting tree, which would clobber uncommitted working-tree edits. Rather than
+/// trust the caller to keep the tree clean, `pull` refuses up front when the tree is
+/// dirty (#639) — so a save-but-don't-commit-then-pull can never silently discard the
+/// author's words. Returns a human message.
 pub fn pull(root: &Path) -> Result<String, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
 
@@ -118,7 +127,9 @@ pub fn pull(root: &Path) -> Result<String, String> {
         return Ok("Already up to date with the remote.".to_string());
     }
     if !analysis.is_fast_forward() {
-        return Err("Local and remote have diverged — resolve manually.".to_string());
+        // Local and remote both moved (each has commits the other lacks). Merge the
+        // fetched commit into local rather than dead-ending (#703).
+        return merge_diverged(&repo, &branch, &fetched);
     }
 
     // Fast-forward: move the branch ref to the fetched commit and update the tree.
@@ -138,6 +149,85 @@ pub fn pull(root: &Path) -> Result<String, String> {
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .map_err(|e| e.to_string())?;
     Ok("Pulled the latest changes from the remote.".to_string())
+}
+
+/// Merge the fetched commit into the local branch when the two have diverged (#703).
+/// The tree is already known clean (the caller's #639 dirty guard runs first), so a
+/// clean merge can safely land on disk. On a clean merge this writes a two-parent
+/// merge commit (both authors' history preserved) and checks it out; on conflicts it
+/// rolls the attempt back and reports the conflicted paths without changing a commit
+/// or leaving a half-written tree.
+fn merge_diverged(
+    repo: &git2::Repository,
+    branch: &str,
+    fetched: &git2::AnnotatedCommit,
+) -> Result<String, String> {
+    let local = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| e.to_string())?;
+    let their_commit = repo.find_commit(fetched.id()).map_err(|e| e.to_string())?;
+
+    // Merge the two trees in memory first, so a conflict never touches the working
+    // tree or the index — nothing to unwind on the conflict path.
+    let mut merged = repo
+        .merge_commits(&local, &their_commit, None)
+        .map_err(|e| format!("merge: {e}"))?;
+
+    if merged.has_conflicts() {
+        let files = conflicted_paths(&merged);
+        return Err(format!(
+            "Local and remote have diverged and the same text was edited on both — \
+             Quill can't merge {files} automatically. Restore or reconcile {them} \
+             (the History view shows each side), then pull again.",
+            files = if files.is_empty() {
+                "these changes".to_string()
+            } else {
+                files.clone()
+            },
+            them = if files.is_empty() { "them" } else { "it" },
+        ));
+    }
+
+    // Clean merge: write the merged tree and record a two-parent merge commit so both
+    // sides' commits stay in history.
+    let tree_id = merged
+        .write_tree_to(repo)
+        .map_err(|e| format!("merge tree: {e}"))?;
+    let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
+    let sig = signature(repo)?;
+    let message = format!("Merge remote changes into {branch}");
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        &message,
+        &tree,
+        &[&local, &their_commit],
+    )
+    .map_err(|e| format!("merge commit: {e}"))?;
+
+    // Bring the working tree up to the merged result.
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .map_err(|e| e.to_string())?;
+    Ok("Merged the remote's changes with yours — push to share the merge.".to_string())
+}
+
+/// The paths libgit2 reports as conflicting in a merged index, joined for display.
+/// Reads the "our" side's path (present for edit/edit conflicts, the common case for
+/// two authors touching the same chapter).
+fn conflicted_paths(index: &git2::Index) -> String {
+    let Ok(conflicts) = index.conflicts() else {
+        return String::new();
+    };
+    let mut names: Vec<String> = conflicts
+        .filter_map(|c| c.ok())
+        .filter_map(|c| c.our.or(c.their).or(c.ancestor))
+        .filter_map(|entry| String::from_utf8(entry.path).ok())
+        .collect();
+    names.sort();
+    names.dedup();
+    names.join(", ")
 }
 
 const NO_REMOTE: &str = "No remote configured — set one first.";

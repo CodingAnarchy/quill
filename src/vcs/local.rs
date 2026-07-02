@@ -260,10 +260,7 @@ pub fn restore(root: &Path, rel_path: &str) -> Result<bool, String> {
 /// can still commit without configuring anything.
 pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
-    let sig = repo
-        .signature()
-        .or_else(|_| git2::Signature::now("Quill Author", "author@quill.local"))
-        .map_err(|e| format!("signature: {e}"))?;
+    let sig = signature(&repo)?;
 
     let mut index = repo.index().map_err(|e| e.to_string())?;
     index
@@ -293,4 +290,14 @@ pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
         .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
         .map_err(|e| format!("commit: {e}"))?;
     Ok(Some(oid.to_string().chars().take(7).collect()))
+}
+
+/// The identity to record on a commit — the author's git config when set, else a
+/// generic Quill default, so someone who has never configured git can still commit
+/// (and merge). Shared by [`commit`] and the merge commit [`super::remote::pull`]
+/// creates when a diverged branch merges cleanly.
+pub(super) fn signature(repo: &git2::Repository) -> Result<git2::Signature<'static>, String> {
+    repo.signature()
+        .or_else(|_| git2::Signature::now("Quill Author", "author@quill.local"))
+        .map_err(|e| format!("signature: {e}"))
 }
