@@ -259,6 +259,7 @@ impl App {
             Action::BrowseFonts => self.open_font_browser(),
             Action::SetExportStyle => self.open_export_style_menu(),
             Action::Settings => self.open_settings_menu(),
+            Action::ExportBible => self.export_story_bible(),
         }
     }
 
