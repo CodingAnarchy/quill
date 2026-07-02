@@ -140,6 +140,43 @@ fn dictionary_add_rejects_a_multi_word_value() {
     );
 }
 
+// A project's `[quill]` overrides in book.toml apply the moment the editor opens
+// it (#710): here the global config leaves Vim off, but the project turns it on,
+// so the freshly-built App rests in Vim's Normal mode. Hermetic (#528/#531): the
+// global config points at an empty scratch dir, and the project override is the
+// only thing switching Vim on.
+#[test]
+fn a_project_override_applies_when_the_editor_opens_the_project() {
+    let dir = app_scratch_dir("per-project-vim");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [quill.editor]\nvim = true\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+    // Point the global config at an empty scratch dir so Vim is off globally; only
+    // the project override can turn it on.
+    crate::config::set_config_dir(Some(app_scratch_dir("per-project-vim-cfg")));
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let app = App::new(buffer, project);
+    assert!(
+        app.vim,
+        "the project's [quill.editor] vim = true applies at open"
+    );
+    assert!(
+        matches!(app.mode, Mode::Normal),
+        "Vim on means the editor opens in Normal mode"
+    );
+
+    crate::config::set_config_dir(None);
+    crate::config::set_project_dir(None);
+    let _keep = TempProject::new(dir);
+}
+
 #[test]
 fn declining_the_confirm_changes_nothing() {
     use crossterm::event::KeyCode;

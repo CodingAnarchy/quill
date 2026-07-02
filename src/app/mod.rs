@@ -356,6 +356,12 @@ pub struct App {
 impl App {
     pub fn new(buffer: Buffer, project: Project) -> Self {
         let under_vc = crate::vcs::is_repo(&project.root);
+        // Register the project so every config loader below layers this project's
+        // `book.toml` `[quill]` overrides over the global config (#710). Set before
+        // the first load, and re-set here on a switch (open_in_place rebuilds the
+        // App), so a project's overrides take effect the moment it opens and replace
+        // the prior project's when another is opened in place.
+        crate::config::set_project_dir(Some(project.root.clone()));
         let editor = crate::config::EditorConfig::load();
         let vim = editor.vim;
         let smart_typography = editor.smart_typography;

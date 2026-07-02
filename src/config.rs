@@ -1,8 +1,30 @@
-//! User configuration shared across features, loaded from the user's home
-//! config file (`~/.config/quill/config.toml`) — never the project directory, so
-//! an unpublished draft and the user's settings stay separate. Each feature owns
-//! its own section (`[ai]`, `[editor]`, …); this module owns the file location
-//! and the `[editor]` section.
+//! User configuration shared across features. The base layer is the user's home
+//! config file (`~/.config/quill/config.toml`) — the global settings shared
+//! across every project. On top of it sits an optional per-project layer inside
+//! the project's `book.toml` manifest, under a `[quill]` table (#710): a project
+//! may override any of the settings sections (`[quill.editor]`, `[quill.theme]`,
+//! `[quill.snippets]`, `[quill.workflows]`, `[quill.projects]`, …) for that
+//! project alone.
+//!
+//! The per-project layer lives in `book.toml` — the file that already carries the
+//! project's committed configuration (`[goals]`, `[analysis]`) — rather than the
+//! project's `.quill/` directory, which holds transient machine-local state
+//! (recovery, history, cursor position) and is git-ignored. Putting the override
+//! in `book.toml` means a project's settings travel with the book: they're
+//! committed and shared, so a screenplay's wider column or its own workflow set is
+//! part of the project, not a local artifact. Nesting under `[quill]` keeps the
+//! override sections clear of the manifest's own tables.
+//!
+//! **Precedence is per field.** For each `[section]`, a key set in the project's
+//! `[quill.section]` wins; any key it leaves unset falls back to the global value;
+//! and a key neither layer sets falls back to the built-in default. With no
+//! project override present, behavior is exactly the global-only behavior it always
+//! was. The home config stays the base so the user's private settings stay out of
+//! a shared project directory — the AI keys, for instance, live only in the global
+//! file, never in a committed `book.toml`.
+//!
+//! Each feature owns its own section; this module owns both file locations and
+//! the `[editor]` section.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -57,12 +79,40 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+thread_local! {
+    /// The currently-open project's root directory, or `None` when no project is
+    /// open (#710). Set by [`set_project_dir`] when a project opens; consulted by
+    /// [`load_section`] to layer the project's `book.toml` `[quill]` overrides over
+    /// the global config. Per-thread — like [`config_dir`]'s test override — so it
+    /// stays hermetic in the parallel test suite (#531) and never leaks a project's
+    /// overrides into an unrelated thread.
+    static PROJECT_CONFIG_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Point config resolution at `dir` (or clear it with `None`) for the current
 /// test thread (#528). Test-only; production resolves from `$XDG_CONFIG_HOME` /
 /// `$HOME`.
 #[cfg(test)]
 pub(crate) fn set_config_dir(dir: Option<PathBuf>) {
     TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = dir);
+}
+
+/// Register the open project's root so [`load_section`] layers that project's
+/// `book.toml` `[quill]` overrides over the global config (#710). Called when a
+/// project opens (and re-called on a switch); pass `None` to clear it. Per-thread,
+/// so the override is scoped to the running editor and stays hermetic in tests
+/// (#531).
+pub(crate) fn set_project_dir(dir: Option<PathBuf>) {
+    PROJECT_CONFIG_DIR.with(|c| *c.borrow_mut() = dir);
+}
+
+/// The open project's manifest, `<project>/book.toml` (#710), or `None` when no
+/// project is registered. Its `[quill]` table is the per-project override layer:
+/// any settings section under `[quill]` wins, field by field, over the global
+/// config; keys it omits fall back to the global value.
+fn project_manifest_path() -> Option<PathBuf> {
+    PROJECT_CONFIG_DIR.with(|c| c.borrow().as_ref().map(|root| root.join("book.toml")))
 }
 
 /// `$XDG_CONFIG_HOME/quill/config.toml`, else `$HOME/.config/quill/config.toml`.
@@ -293,19 +343,76 @@ impl Default for EditorConfig {
     }
 }
 
-/// Read one `[section]` table from the home config file, deserialized into `T`
-/// (#430). Best-effort: a missing/unreadable/malformed file, or an absent or
-/// malformed section, yields `T::default()`. Collapses the per-section
+/// Read one `[section]` table, deserialized into `T` (#430), layering the open
+/// project's override over the global config (#710). The global home config is
+/// the base; if the project registered via [`set_project_dir`] declares this
+/// section under `[quill]` in its `book.toml` (e.g. `[quill.editor]`), its keys
+/// are merged over the global section field by field (project wins, global fills
+/// the gaps). With no project override the result is exactly the global section,
+/// unchanged.
+///
+/// Best-effort throughout: a missing/unreadable/malformed file, or an absent or
+/// malformed section, contributes nothing (rather than failing), so an absent
+/// section on both layers yields `T::default()`. Collapses the per-section
 /// wrapper-struct idiom (`struct File { <section>: T }`) every loader used to
-/// re-derive into one call. The config file is small, so re-reading it per
+/// re-derive into one call. The config files are small, so re-reading them per
 /// section at startup is negligible.
 pub(crate) fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
-    config_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    let global = read_section(config_path().as_deref(), section);
+    let project = read_project_section(section);
+    match merge_sections(global, project) {
+        Some(value) => value.try_into().unwrap_or_default(),
+        None => T::default(),
+    }
+}
+
+/// The `[section]` table of the TOML file at `path`, as a raw [`toml::Value`], or
+/// `None` when the path is absent, unreadable, unparseable, or lacks the section.
+/// Untyped so [`merge_sections`] can overlay two layers key by key before either
+/// is deserialized into the section's concrete type.
+fn read_section(path: Option<&std::path::Path>, section: &str) -> Option<toml::Value> {
+    path.and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
         .and_then(|mut table| table.remove(section))
-        .and_then(|value| value.try_into().ok())
-        .unwrap_or_default()
+}
+
+/// The project's override for `section`: the `[quill.<section>]` table in the open
+/// project's `book.toml` (#710), or `None` when no project is registered or the
+/// manifest has no such override. Best-effort like [`read_section`].
+fn read_project_section(section: &str) -> Option<toml::Value> {
+    project_manifest_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
+        .and_then(|mut table| table.remove("quill"))
+        .and_then(|quill| match quill {
+            toml::Value::Table(mut t) => t.remove(section),
+            _ => None,
+        })
+}
+
+/// Overlay a project section over the global section, key by key (#710): a key
+/// present in `project` wins; a key only `global` has is kept; nested tables
+/// (e.g. `[editor.keys]`) merge recursively so a project can override one nested
+/// key without dropping the rest. When either side is absent the other is used
+/// as-is; when both are, and both are tables, they merge — otherwise the project
+/// value replaces the global one wholesale.
+fn merge_sections(
+    global: Option<toml::Value>,
+    project: Option<toml::Value>,
+) -> Option<toml::Value> {
+    match (global, project) {
+        (Some(toml::Value::Table(mut base)), Some(toml::Value::Table(over))) => {
+            for (key, value) in over {
+                let merged = merge_sections(base.remove(&key), Some(value));
+                if let Some(v) = merged {
+                    base.insert(key, v);
+                }
+            }
+            Some(toml::Value::Table(base))
+        }
+        (base, None) => base,
+        (_, over) => over,
+    }
 }
 
 impl EditorConfig {
@@ -755,5 +862,144 @@ mod tests {
 
         set_config_dir(None);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Point the global config at a scratch dir and register a scratch project,
+    /// both hermetic (#528/#531). `global` is the home `config.toml`; `project`, if
+    /// given, is the `book.toml` manifest text (its overrides live under `[quill]`).
+    /// Returns a guard that clears both overrides and removes the dirs on drop, so
+    /// the layering tests stay isolated even on an assertion panic.
+    struct LayerFixture {
+        cfg_dir: PathBuf,
+        project_dir: PathBuf,
+    }
+
+    impl LayerFixture {
+        fn new(name: &str, global: &str, project: Option<&str>) -> Self {
+            let cfg_dir = crate::testutil::scratch_dir("config", &format!("{name}-cfg"));
+            let project_dir = crate::testutil::scratch_dir("config", &format!("{name}-proj"));
+            std::fs::create_dir_all(&cfg_dir).unwrap();
+            std::fs::create_dir_all(&project_dir).unwrap();
+            std::fs::write(cfg_dir.join("config.toml"), global).unwrap();
+            set_config_dir(Some(cfg_dir.clone()));
+            if let Some(manifest) = project {
+                std::fs::write(project_dir.join("book.toml"), manifest).unwrap();
+            }
+            set_project_dir(Some(project_dir.clone()));
+            Self {
+                cfg_dir,
+                project_dir,
+            }
+        }
+    }
+
+    impl Drop for LayerFixture {
+        fn drop(&mut self) {
+            set_project_dir(None);
+            set_config_dir(None);
+            std::fs::remove_dir_all(&self.cfg_dir).ok();
+            std::fs::remove_dir_all(&self.project_dir).ok();
+        }
+    }
+
+    #[test]
+    fn a_project_override_wins_over_the_global_setting() {
+        // Global says width 72; this project's book.toml overrides it to 100 (#710).
+        let _fx = LayerFixture::new(
+            "override-wins",
+            "[editor]\ncolumn_width = 72\n",
+            Some("title = \"Book\"\n\n[quill.editor]\ncolumn_width = 100\n"),
+        );
+        assert_eq!(EditorConfig::load().column_width, 100, "project value wins");
+    }
+
+    #[test]
+    fn an_unset_project_key_falls_back_to_the_global_value() {
+        // The project overrides only `vim`; `column_width` falls back to global,
+        // and a key neither layer sets falls back to the built-in default (#710).
+        let _fx = LayerFixture::new(
+            "field-fallback",
+            "[editor]\ncolumn_width = 80\n",
+            Some("title = \"Book\"\n\n[quill.editor]\nvim = true\n"),
+        );
+        let editor = EditorConfig::load();
+        assert!(editor.vim, "project's key applies");
+        assert_eq!(editor.column_width, 80, "global fills the unset key");
+        assert!(
+            editor.smart_typography,
+            "a key neither layer sets keeps its default"
+        );
+    }
+
+    #[test]
+    fn with_no_project_override_the_global_value_is_used() {
+        // A registered project whose book.toml has no `[quill]` table behaves
+        // exactly as the global-only loader always did (#710).
+        let _fx = LayerFixture::new(
+            "no-override",
+            "[editor]\ncolumn_width = 88\n",
+            Some("title = \"Book\"\n"),
+        );
+        assert_eq!(
+            EditorConfig::load().column_width,
+            88,
+            "global value used when the project has no override"
+        );
+    }
+
+    #[test]
+    fn a_registered_project_without_a_manifest_uses_the_global_value() {
+        // No book.toml at all (e.g. before one is written): still global-only (#710).
+        let _fx = LayerFixture::new("no-manifest", "[editor]\ncolumn_width = 66\n", None);
+        assert_eq!(EditorConfig::load().column_width, 66);
+    }
+
+    #[test]
+    fn a_project_override_leaves_the_global_config_unchanged() {
+        // The override is a read-only overlay: the global file on disk isn't
+        // rewritten when a project layers its own value on top (#710).
+        let fx = LayerFixture::new(
+            "global-untouched",
+            "[editor]\ncolumn_width = 72\n",
+            Some("title = \"Book\"\n\n[quill.editor]\ncolumn_width = 100\n"),
+        );
+        assert_eq!(EditorConfig::load().column_width, 100);
+        let global = std::fs::read_to_string(fx.cfg_dir.join("config.toml")).unwrap();
+        assert_eq!(
+            global, "[editor]\ncolumn_width = 72\n",
+            "the global config on disk is untouched"
+        );
+    }
+
+    #[test]
+    fn merge_overlays_nested_tables_key_by_key() {
+        // A project can override one key of a nested table (e.g. [editor.keys])
+        // without dropping the sibling keys the global sets (#710). Both sides are
+        // the `[editor]` section value, each carrying a nested `keys` table.
+        let global = toml::from_str::<toml::Table>("[editor.keys]\ndown = \"n\"\nup = \"e\"\n")
+            .unwrap()
+            .remove("editor");
+        let project = toml::from_str::<toml::Table>("[editor.keys]\ndown = \"j\"\n")
+            .unwrap()
+            .remove("editor");
+        let merged = merge_sections(global, project).unwrap();
+        let keys = merged.get("keys").unwrap().as_table().unwrap();
+        assert_eq!(keys["down"].as_str(), Some("j"), "project key wins");
+        assert_eq!(keys["up"].as_str(), Some("e"), "global sibling kept");
+    }
+
+    #[test]
+    fn merge_uses_whichever_layer_is_present_when_only_one_is() {
+        let only_global = toml::Value::Integer(1);
+        assert_eq!(
+            merge_sections(Some(only_global.clone()), None),
+            Some(only_global)
+        );
+        let only_project = toml::Value::Integer(2);
+        assert_eq!(
+            merge_sections(None, Some(only_project.clone())),
+            Some(only_project)
+        );
+        assert_eq!(merge_sections(None, None), None);
     }
 }

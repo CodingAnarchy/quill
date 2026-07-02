@@ -404,3 +404,31 @@ Changes apply live — no restart. The editor/theme settings are written to your
 stopwords are written to the project's book.toml. If you'd rather describe the
 change in words and let the AI map it (AI required), "Configure by description"
 does the same thing conversationally.
+
+PER-PROJECT SETTINGS
+
+Your ~/.config/quill/config.toml holds the global settings shared across every
+project. A single book can override any of them for itself in its book.toml
+manifest, under a [quill] table — a screenplay can pin a wider column, a light
+theme, or its own workflow set without disturbing your defaults. The override
+sections mirror the global file's, nested under [quill]:
+
+  [quill.editor]
+  column_width = 90
+  vim = true
+
+  [quill.theme]
+  name = "light"
+
+The same works for [quill.snippets], [quill.workflows], and [quill.projects].
+Precedence is per field: a key set under [quill] wins; a key it leaves unset
+falls back to the global value; and a key neither file sets falls back to Quill's
+built-in default. So a project override lists only the settings it wants to
+change — everything else still tracks your global config. A book.toml with no
+[quill] table behaves exactly as before, using the global settings throughout.
+
+The override lives in book.toml (alongside [goals] and [analysis]) rather than
+the project's git-ignored .quill/ state directory, so a project's settings are
+committed and travel with the book. The global file stays the base — your AI keys
+and other private settings live there, never in a committed book.toml. Project
+overrides are hand-edited; the in-app Settings menu always writes the global file.
