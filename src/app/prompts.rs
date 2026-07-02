@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::mode::{Mode, Pending, PromptState, WizardStep};
 
@@ -52,10 +52,8 @@ impl App {
         nav_return: Option<usize>,
     ) {
         self.mode = Mode::Prompt(PromptState {
-            pending,
-            label: label.into(),
-            input: prefill.to_string(),
             nav_return,
+            ..PromptState::new(pending, label.into(), prefill.to_string())
         });
     }
 
@@ -341,11 +339,20 @@ impl App {
             | Pending::RestoreArchiveDest
             | Pending::SetApiKey(_)
             | Pending::SprintDuration => {
+                // Line editing shared by every text prompt (#706): typing and
+                // deletion happen at the caret, which the arrows / Home / End
+                // move and Ctrl/Alt-Backspace word-deletes back through.
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                let alt = key.modifiers.contains(KeyModifiers::ALT);
                 match key.code {
-                    KeyCode::Char(c) => self.prompt_mut().input.push(c),
-                    KeyCode::Backspace => {
-                        self.prompt_mut().input.pop();
-                    }
+                    KeyCode::Char(c) => self.prompt_mut().insert(c),
+                    KeyCode::Backspace if ctrl || alt => self.prompt_mut().delete_word_back(),
+                    KeyCode::Backspace => self.prompt_mut().backspace(),
+                    KeyCode::Delete => self.prompt_mut().delete_forward(),
+                    KeyCode::Left => self.prompt_mut().move_left(),
+                    KeyCode::Right => self.prompt_mut().move_right(),
+                    KeyCode::Home => self.prompt_mut().move_home(),
+                    KeyCode::End => self.prompt_mut().move_end(),
                     KeyCode::Enter => {
                         let text = std::mem::take(&mut self.prompt_mut().input);
                         let text = text.trim();

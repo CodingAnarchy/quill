@@ -16,7 +16,7 @@ fn archive_to(app: &mut App, dest: &Path) {
     );
     // Replace the prefilled default with the test's destination.
     if let Mode::Prompt(state) = &mut app.mode {
-        state.input.clear();
+        state.clear();
     }
     type_str(app, &dest.to_string_lossy());
     app.on_key(key(KeyCode::Enter));
@@ -57,7 +57,7 @@ fn restoring_reproduces_and_opens_the_project() {
         "the restore destination prompt opened"
     );
     if let Mode::Prompt(state) = &mut app.mode {
-        state.input.clear();
+        state.clear();
     }
     type_str(&mut app, &dest.to_string_lossy());
     app.on_key(key(KeyCode::Enter));
@@ -91,7 +91,7 @@ fn restoring_refuses_a_non_archive_file() {
     if matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::RestoreArchiveDest)) {
         let dest = app_scratch_dir("archive-badsrc-dest").join("X");
         if let Mode::Prompt(state) = &mut app.mode {
-            state.input.clear();
+            state.clear();
         }
         type_str(&mut app, &dest.to_string_lossy());
         app.on_key(key(KeyCode::Enter));

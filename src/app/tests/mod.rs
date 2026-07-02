@@ -70,6 +70,7 @@ mod outline;
 mod panes;
 mod project_search;
 mod projects;
+mod prompt_editing;
 mod recovery;
 mod resume;
 mod snippets;
@@ -86,6 +87,11 @@ fn ctrl(c: char) -> KeyEvent {
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+/// A key with the Ctrl modifier held (e.g. Ctrl-Backspace).
+fn ctrl_key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
 /// Type a string into the active prompt (or the buffer, in insert mode).

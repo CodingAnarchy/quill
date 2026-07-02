@@ -770,7 +770,7 @@ fn renaming_from_the_browser_moves_the_folder_and_updates_recents() {
     );
     // Clear the prefilled folder name, then type the new one.
     if let Mode::Prompt(s) = &mut app.mode {
-        s.input.clear();
+        s.clear();
     }
     type_str(&mut app, "Renamed Alpha");
     app.on_key(key(KeyCode::Enter));
@@ -813,7 +813,7 @@ fn browser_rename_syncs_the_title_in_the_manifest_and_recents() {
     let _ = fs::remove_dir_all(&new_root);
     app.on_key(key(KeyCode::Char('r')));
     if let Mode::Prompt(s) = &mut app.mode {
-        s.input.clear();
+        s.clear();
     }
     type_str(&mut app, "Renamed Alpha");
     app.on_key(key(KeyCode::Enter));

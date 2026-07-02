@@ -20,6 +20,7 @@ use crate::syntax::Syntax;
 mod history;
 mod motions;
 use history::Snapshot;
+pub(crate) use motions::CharClass;
 pub use motions::{FindKind, TextObject};
 
 /// Initial window size (bytes) [`Buffer::grapheme_after`](Buffer::grapheme_after)
