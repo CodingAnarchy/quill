@@ -1,11 +1,13 @@
-//! Find and find-and-replace over the active chapter (#144).
+//! Find and find-and-replace over the active buffer (#144).
 //!
-//! Search is scoped to the single-chapter view: opening it leaves the
-//! continuous view first, so every operation works on one chapter's buffer.
-//! Matches are stored as byte ranges into that buffer and recomputed whenever
-//! the query or the document changes; the editor highlights them and the cursor
-//! jumps to the current one. Replace goes through the buffer's normal edit path,
-//! so it is captured by undo (#145).
+//! Search runs against whichever buffer the author is editing — the single
+//! chapter, or the continuous window's concatenated chapters (#700), so a find
+//! or `/`-search no longer has to drop back to single-chapter view. Matches are
+//! stored as byte ranges into that buffer and recomputed whenever the query or
+//! the document changes; the editor highlights them and the cursor jumps to the
+//! current one. Replace goes through the range-edit path (`edit_replace_range`),
+//! so it is captured by undo (#145) and keeps the continuous view's per-chapter
+//! seam bookkeeping correct.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -15,21 +17,20 @@ use crate::mode::{Mode, Search, SearchStage, VimSearch};
 use crate::text::{match_ranges, match_ranges_opts};
 
 impl App {
-    /// Open the find prompt (Ctrl-F). Drops to the single-chapter view so search
-    /// operates on one chapter; from the query, `r` promotes it to a replace.
+    /// Open the find prompt (Ctrl-F). Works in whichever view is active: the
+    /// single chapter, or the continuous window (#700), searching across its
+    /// loaded chapters. From the query, `r` promotes it to a replace.
     pub(super) fn open_find(&mut self) {
-        self.leave_continuous();
-        let origin_byte = self.buffer.cursor_byte();
+        let origin_byte = self.edit_buffer().cursor_byte();
         self.mode = Mode::Search(Box::new(Search::new(origin_byte, false, false)));
     }
 
     /// Open a Vim search (#206): `/` forward, `?` backward. Reuses the find query
     /// line and live highlight; Enter finalizes back to Normal and records the
-    /// search for `n` / `N`. Scoped to the single chapter, like the find (#144).
+    /// search for `n` / `N`. Works in the continuous view too (#700).
     pub(super) fn open_vim_search(&mut self, backward: bool) {
-        self.leave_continuous();
         self.vim_state.op = None; // a search isn't an operator target here
-        let origin_byte = self.buffer.cursor_byte();
+        let origin_byte = self.edit_buffer().cursor_byte();
         self.mode = Mode::Search(Box::new(Search::new(origin_byte, backward, true)));
     }
 
@@ -224,7 +225,7 @@ impl App {
             return;
         };
         let replacement = self.search().replacement.clone();
-        self.buffer.replace_byte_range(start, end, &replacement);
+        self.edit_replace_range(start, end, &replacement);
         self.search_mut().replaced += 1;
 
         // The edit shifted later offsets — recompute and resume past the
@@ -244,7 +245,7 @@ impl App {
         let ranges = s.matches[s.current.min(s.matches.len())..].to_vec();
         let replacement = s.replacement.clone();
         for &(start, end) in ranges.iter().rev() {
-            self.buffer.replace_byte_range(start, end, &replacement);
+            self.edit_replace_range(start, end, &replacement);
         }
         self.search_mut().replaced += ranges.len();
         self.finish_replace();
@@ -267,7 +268,8 @@ impl App {
         // Vim's incremental search (#206).
         if self.search().from_vim {
             let origin = self.search().origin_byte;
-            self.buffer.cursor = self.buffer.cursor_at_byte(origin);
+            let buffer = self.edit_buffer_mut();
+            buffer.cursor = buffer.cursor_at_byte(origin);
         }
         self.mode = self.editing_mode();
     }
@@ -302,7 +304,7 @@ impl App {
     /// first match at/after `anchor` (or past the end — i.e. "no current match" —
     /// when none follow it).
     fn recompute_matches_from(&mut self, anchor: usize) {
-        let text = self.buffer.text();
+        let text = self.edit_buffer().text();
         let s = self.search_mut();
         s.matches = match_ranges_opts(&text, &s.query, s.opts);
         s.current = s
@@ -315,7 +317,8 @@ impl App {
     /// Move the cursor to the current match so the editor scrolls it into view.
     fn jump_to_current(&mut self) {
         if let Some((start, _)) = self.search().current_match() {
-            self.buffer.cursor = self.buffer.cursor_at_byte(start);
+            let buffer = self.edit_buffer_mut();
+            buffer.cursor = buffer.cursor_at_byte(start);
         }
     }
 

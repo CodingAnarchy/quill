@@ -386,27 +386,22 @@ impl App {
     /// register, then — for delete/change — remove it; yank leaves the text and
     /// just moves the cursor to the start. Change ends in Insert mode.
     fn operate_charwise(&mut self, op: Op, lo: usize, hi: usize) {
-        if self.guard_vim_edit() {
-            return;
-        }
         if lo < hi {
-            let text = {
+            let text = self.edit_buffer().byte_slice(lo, hi);
+            if op == Op::Yank {
                 let buf = self.edit_buffer_mut();
-                let text = buf.byte_slice(lo, hi);
-                if op == Op::Yank {
-                    buf.cursor = buf.cursor_at_byte(lo);
-                } else {
-                    buf.replace_byte_range(lo, hi, "");
-                }
-                text
-            };
+                buf.cursor = buf.cursor_at_byte(lo);
+            } else {
+                // Route through the range-edit path so the continuous view keeps
+                // its per-chapter seam bookkeeping correct (#700); a range that
+                // would cross a seam is clamped there, never merging chapters.
+                self.edit_replace_range(lo, hi, "");
+                self.cache_focus_words();
+            }
             self.store_register(Yank {
                 text,
                 linewise: false,
             });
-            if op != Op::Yank {
-                self.cache_focus_words();
-            }
         }
         if op == Op::Change {
             self.mode = Mode::Insert;
@@ -418,27 +413,28 @@ impl App {
     /// line and enter Insert (`cc`), or — for yank — leave them and move to the
     /// first.
     fn operate_linewise(&mut self, op: Op, first: usize, last: usize) {
-        if self.guard_vim_edit() {
-            return;
-        }
-        let text = {
-            let buf = self.edit_buffer_mut();
+        let (text, start, end, content_end) = {
+            let buf = self.edit_buffer();
             let last = last.min(buf.line_count().saturating_sub(1));
             let start = buf.line_start_byte(first);
             // The register always holds the full lines (with their newlines).
             let end = buf.next_line_byte(last);
-            let text = buf.byte_slice(start, end);
-            match op {
-                Op::Delete => buf.replace_byte_range(start, end, ""),
-                Op::Change => {
-                    // Clear the lines' content but keep one line to type on.
-                    let content_end = buf.line_start_byte(last) + buf.line(last).len();
-                    buf.replace_byte_range(start, content_end, "");
-                }
-                Op::Yank => {}
-            }
-            text
+            let content_end = buf.line_start_byte(last) + buf.line(last).len();
+            (buf.byte_slice(start, end), start, end, content_end)
         };
+        // Route the removal through the range-edit path so the continuous view's
+        // seam bookkeeping stays correct (#700). Delete drops the full lines
+        // (clamped at a seam so the chapter's final newline survives); Change
+        // clears the lines' content but keeps one line to type on.
+        match op {
+            Op::Delete => {
+                self.edit_replace_range(start, end, "");
+            }
+            Op::Change => {
+                self.edit_replace_range(start, content_end, "");
+            }
+            Op::Yank => {}
+        }
         self.store_register(Yank {
             text,
             linewise: true,
@@ -474,49 +470,42 @@ impl App {
     /// `p` / `P`: put the active register `count` times — inline for a charwise
     /// yank, on new lines for a linewise one.
     fn put(&mut self, after: bool, count: usize) {
-        if self.guard_vim_edit() {
-            return;
-        }
         let Some(yank) = self.active_register() else {
             return;
         };
         let body = yank.text.repeat(count);
+        // Where the put lands (computed against the current buffer), then insert
+        // through the range-edit path so the continuous view keeps its seam
+        // bookkeeping correct (#700). An insert never crosses a seam, but the
+        // primitive still attributes the added lines to the right chapter.
+        let (at, line) = {
+            let buf = self.edit_buffer();
+            let line = buf.cursor.line;
+            if yank.linewise {
+                let at = if after {
+                    buf.next_line_byte(line)
+                } else {
+                    buf.line_start_byte(line)
+                };
+                (at, line)
+            } else {
+                let line_end = buf.line_start_byte(line) + buf.line(line).len();
+                let at = if after {
+                    buf.grapheme_after(buf.cursor_byte()).min(line_end)
+                } else {
+                    buf.cursor_byte()
+                };
+                (at, line)
+            }
+        };
+        self.edit_replace_range(at, at, &body);
         let buf = self.edit_buffer_mut();
         if yank.linewise {
-            let line = buf.cursor.line;
-            let at = if after {
-                buf.next_line_byte(line)
-            } else {
-                buf.line_start_byte(line)
-            };
-            buf.replace_byte_range(at, at, &body);
             buf.move_to_line(if after { line + 1 } else { line });
         } else {
-            let line_end = buf.line_start_byte(buf.cursor.line) + buf.line(buf.cursor.line).len();
-            let at = if after {
-                buf.grapheme_after(buf.cursor_byte()).min(line_end)
-            } else {
-                buf.cursor_byte()
-            };
-            buf.replace_byte_range(at, at, &body);
             buf.move_left(); // land on the last grapheme put, as Vim does
         }
         self.cache_focus_words();
-    }
-
-    /// Vim editing commands need the per-chapter buffer; like undo (#145), they're
-    /// guarded out of the continuous view, whose segment bookkeeping a raw range
-    /// edit would desync. Returns whether the command was blocked.
-    fn guard_vim_edit(&mut self) -> bool {
-        if self.manuscript.is_some() {
-            self.message = Some(
-                "Editing commands aren't available in the continuous view — Ctrl-l to return."
-                    .into(),
-            );
-            true
-        } else {
-            false
-        }
     }
 
     /// Vim Visual mode (#205): motions extend the selection; `d`/`c`/`y` act on
@@ -628,16 +617,15 @@ impl App {
 
     /// `p` in Visual: replace the selection with the register, then leave Visual.
     fn visual_put(&mut self, anchor: usize, linewise: bool) {
-        if self.guard_vim_edit() {
-            return;
-        }
         let Some(yank) = self.active_register() else {
             self.mode = Mode::Normal;
             return;
         };
         let (lo, hi) = self.selection_bytes(anchor, linewise);
+        // Through the range-edit path so the continuous view's seam bookkeeping
+        // stays correct (#700); a selection spanning a seam is clamped there.
+        self.edit_replace_range(lo, hi, &yank.text);
         let buf = self.edit_buffer_mut();
-        buf.replace_byte_range(lo, hi, &yank.text);
         buf.cursor = buf.cursor_at_byte(lo);
         self.cache_focus_words();
         self.mode = Mode::Normal;
