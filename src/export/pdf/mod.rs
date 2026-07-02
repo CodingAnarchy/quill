@@ -258,6 +258,9 @@ fn render_series(
     pdf.set_info(title, author.unwrap_or(""));
     pdf.cover_page();
     pdf.title_page(None, title, None, author, None);
+    // The omnibus's front-matter copyright page is series-level — the first book's
+    // (#711). Each book's own copyright is reprinted on its divider page below, so a
+    // later book's rights/ISBN aren't silently dropped.
     if let Some(first) = books.first() {
         pdf.copyright_page(&first.publishing);
     }
@@ -274,6 +277,8 @@ fn render_series(
     for book in books {
         pdf.set_heads(&book.title, author.unwrap_or(&book.title));
         let page = pdf.divider_page(&book.title, PART_SIZE, None, Align::Center);
+        // Reprint this book's own copyright beneath its divider (#711).
+        pdf.divider_copyright(&book.publishing);
         let mut item = OutlineItem::new(book.title.clone(), page);
         item.children = book_outline(&mut pdf, book);
         outline.push(item);
@@ -860,6 +865,23 @@ impl Pdf {
             self.centered(o, false, false, false, HEADING_SIZE, BODY_LEADING);
         }
         page
+    }
+
+    /// A series book's own copyright block (#711), set low on its just-opened
+    /// divider page so a later book's rights/ISBN aren't silently dropped in an
+    /// omnibus — the omnibus's front-matter copyright page stays series-level (see
+    /// [`render_series`]). No-op when the book has no publishing metadata, leaving
+    /// the divider page unchanged. Not a bookmark.
+    fn divider_copyright(&mut self, publishing: &PubMeta) {
+        let lines = copyright_lines(publishing);
+        if lines.is_empty() {
+            return;
+        }
+        // Set the block low on the divider page, the conventional copyright placement.
+        self.y = self.layout.trim_y(0.25);
+        for line in lines {
+            self.centered(&line, false, false, false, EPIGRAPH_SIZE, EPIGRAPH_LEADING);
+        }
     }
 
     /// One chapter on a fresh page: the title (honoring the heading alignment), an
