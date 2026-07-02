@@ -322,6 +322,13 @@ pub struct EditorConfig {
     /// Focus mode (#301): dim every paragraph but the one under the cursor, so the
     /// passage you're shaping stands out. Off by default.
     pub focus_mode: bool,
+    /// First-line paragraph indent (#722): visually indent the first line of each
+    /// prose paragraph in the editor, matching what the exports already do
+    /// (soft-wrapped continuation rows, blank lines, headings, dividers, epigraphs,
+    /// fenced code, and the first paragraph after a heading are never indented). It's
+    /// display-only — no spaces ever enter the buffer or the saved file. Off by
+    /// default.
+    pub paragraph_indent: bool,
     /// Autosave interval in seconds (#409): after this many seconds with no input,
     /// the active chapter is saved automatically through the same atomic,
     /// front-matter-preserving path as Ctrl-S (but without firing on-save
@@ -338,6 +345,7 @@ impl Default for EditorConfig {
             column_width: 72,
             typewriter: false,
             focus_mode: false,
+            paragraph_indent: false,
             autosave_interval_secs: 0,
         }
     }

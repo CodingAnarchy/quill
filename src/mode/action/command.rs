@@ -130,6 +130,8 @@ pub(crate) enum SettingBool {
     Typewriter,
     /// Focus mode (`editor.focus_mode`).
     FocusMode,
+    /// First-line paragraph indent (`editor.paragraph_indent`).
+    ParagraphIndent,
 }
 
 impl SettingBool {
@@ -140,6 +142,7 @@ impl SettingBool {
             SettingBool::SmartTypography => "editor.smart_typography",
             SettingBool::Typewriter => "editor.typewriter",
             SettingBool::FocusMode => "editor.focus_mode",
+            SettingBool::ParagraphIndent => "editor.paragraph_indent",
         }
     }
 
@@ -150,6 +153,7 @@ impl SettingBool {
             SettingBool::SmartTypography => "Smart typography",
             SettingBool::Typewriter => "Typewriter scrolling",
             SettingBool::FocusMode => "Focus mode",
+            SettingBool::ParagraphIndent => "Paragraph indent",
         }
     }
 }

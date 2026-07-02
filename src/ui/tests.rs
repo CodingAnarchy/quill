@@ -58,6 +58,9 @@ fn render_stays_within_a_frame() {
     app.outline_visible = true;
     app.focus_mode = true;
     app.typewriter = true;
+    // The first-line paragraph indent (#722) classifies each visible logical line
+    // (a bounded highlight lookup per row); on here so the render guard covers it.
+    app.paragraph_indent = true;
     // A spread of inline annotations (#302) so the per-row/char annotation
     // scan is exercised under the frame budget too.
     app.annotations = (0..50)
@@ -294,6 +297,145 @@ fn focus_mode_dims_the_other_paragraphs() {
         first_letter_fg(&app, "bravo"),
         Some(dim),
         "the focused paragraph stays normal"
+    );
+}
+
+/// The screen column of the first non-space character on the first rendered row
+/// whose text contains `needle` — how far that row is indented on screen.
+fn indent_of_row(app: &App, needle: &str, w: u16, h: u16) -> Option<usize> {
+    render(app, w, h)
+        .lines()
+        .find(|l| l.contains(needle))
+        .map(|l| l.len() - l.trim_start().len())
+}
+
+#[test]
+fn paragraph_indent_indents_only_the_first_line_of_a_prose_paragraph() {
+    // A long single-paragraph logical line that soft-wraps to several rows.
+    let long = "word ".repeat(40);
+    let mut app = app_with(&format!("{long}\n"));
+    let w = 60;
+    let h = 20;
+
+    // Off (default): the paragraph's rows all start at the same column.
+    app.paragraph_indent = false;
+    let base = indent_of_row(&app, "word word", w, h).expect("paragraph on screen");
+
+    // On: the first row shifts right by the four-space indent…
+    app.paragraph_indent = true;
+    let first = indent_of_row(&app, "word word", w, h).expect("first row on screen");
+    assert_eq!(first, base + 4, "first line indented by four columns");
+
+    // …while the soft-wrapped continuation rows keep the un-indented column.
+    let screen = render(&app, w, h);
+    let rows: Vec<&str> = screen.lines().filter(|l| l.contains("word word")).collect();
+    assert!(rows.len() > 1, "the paragraph wrapped:\n{screen}");
+    for cont in &rows[1..] {
+        let indent = cont.len() - cont.trim_start().len();
+        assert_eq!(indent, base, "continuation row is not indented: {cont:?}");
+    }
+}
+
+#[test]
+fn paragraph_indent_leaves_the_buffer_and_file_bytes_unchanged() {
+    // The indent is display-only: rendering it never mutates the prose.
+    let text = "First paragraph.\n\nSecond paragraph.\n";
+    let mut app = app_with(text);
+    let before = app.edit_buffer().text();
+    app.paragraph_indent = true;
+    let _ = render(&app, 60, 12);
+    assert_eq!(
+        app.edit_buffer().text(),
+        before,
+        "rendering the indent left the buffer byte-for-byte unchanged"
+    );
+    // And the rendered indent is whitespace only — no stray characters injected.
+    assert!(
+        render(&app, 60, 12).contains("    First paragraph."),
+        "the first paragraph shows the four-space indent"
+    );
+}
+
+#[test]
+fn paragraph_indent_skips_headings_blank_lines_and_the_first_para_after_a_heading() {
+    // A heading, its opening paragraph, then a following paragraph.
+    let mut app = app_with("# A Heading\n\nOpening line.\n\nFollowing line.\n");
+    let w = 60;
+    let h = 16;
+
+    let base_heading = indent_of_row(&app, "A Heading", w, h).expect("heading on screen");
+    let base_opening = indent_of_row(&app, "Opening line.", w, h).expect("opening on screen");
+
+    app.paragraph_indent = true;
+    // The heading itself is never indented.
+    assert_eq!(
+        indent_of_row(&app, "A Heading", w, h),
+        Some(base_heading),
+        "heading not indented"
+    );
+    // The first paragraph right after the heading is not indented (manuscript rule).
+    assert_eq!(
+        indent_of_row(&app, "Opening line.", w, h),
+        Some(base_opening),
+        "first paragraph after a heading not indented"
+    );
+    // A later paragraph is indented.
+    let base_following = {
+        app.paragraph_indent = false;
+        let b = indent_of_row(&app, "Following line.", w, h).expect("following on screen");
+        app.paragraph_indent = true;
+        b
+    };
+    assert_eq!(
+        indent_of_row(&app, "Following line.", w, h),
+        Some(base_following + 4),
+        "a later paragraph is indented"
+    );
+}
+
+#[test]
+fn paragraph_indent_skips_fenced_code_blocks() {
+    // Prose, then a fenced code block; the code content must not be indented.
+    let mut app = app_with("Prose line.\n\n```\ncode line\n```\n");
+    let w = 60;
+    let h = 16;
+    let base_code = indent_of_row(&app, "code line", w, h).expect("code on screen");
+    app.paragraph_indent = true;
+    assert_eq!(
+        indent_of_row(&app, "code line", w, h),
+        Some(base_code),
+        "fenced code content is not indented"
+    );
+}
+
+#[test]
+fn paragraph_indent_keeps_the_cursor_on_the_indented_line() {
+    use ratatui::{backend::TestBackend, Terminal};
+    // Cursor at the very start of an indented paragraph's first line.
+    let mut app = app_with("Alpha beta gamma.\n");
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+
+    let cursor_x = |app: &App| -> u16 {
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        terminal.get_cursor_position().unwrap().x
+    };
+
+    let off = cursor_x(&app);
+    app.paragraph_indent = true;
+    let on = cursor_x(&app);
+    assert_eq!(on, off + 4, "the cursor shifts right with the indent");
+
+    // The character under the cursor is still the paragraph's first letter, not a
+    // space — the indent hasn't displaced which byte the cursor addresses.
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    terminal.draw(|f| draw(f, &app)).unwrap();
+    let pos = terminal.get_cursor_position().unwrap();
+    let buf = terminal.backend().buffer().clone();
+    assert_eq!(
+        buf[(pos.x, pos.y)].symbol(),
+        "A",
+        "cursor lands on the first character of the prose"
     );
 }
 

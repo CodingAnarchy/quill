@@ -396,6 +396,10 @@ shows each setting's current value; pick a row to change it:
   Autosave interval   seconds of idle before an automatic save (0 is off)
   Typewriter scrolling pin the cursor's line to the page centre
   Focus mode          dim every paragraph but the one under the cursor
+  Paragraph indent    indent the first line of each prose paragraph (off by
+                      default; display-only, and matches how the exports look —
+                      headings, dividers, epigraphs, code, and the first
+                      paragraph after a heading are never indented)
   Analysis stopwords  extra words to exclude from the analysis report's
                       most-used-words list (space-separated; blank clears them)
 

@@ -152,6 +152,7 @@ impl App {
         self.focus_width = editor.column_width;
         self.typewriter = editor.typewriter;
         self.focus_mode = editor.focus_mode;
+        self.paragraph_indent = editor.paragraph_indent;
         self.autosave_interval_secs = editor.autosave_interval_secs;
         let (theme, _) = config::load_theme();
         self.theme = theme;
@@ -183,6 +184,10 @@ pub(crate) fn settings_vocab() -> Vec<(String, String)> {
         (
             "editor.focus_mode".to_string(),
             "Focus mode — dim every paragraph but the one under the cursor — true or false".to_string(),
+        ),
+        (
+            "editor.paragraph_indent".to_string(),
+            "Indent the first line of each prose paragraph in the editor (display-only) — true or false".to_string(),
         ),
         (
             "editor.autosave_interval_secs".to_string(),
@@ -219,12 +224,14 @@ pub(crate) fn validate_change(key: &str, value: &str) -> Result<String, String> 
     let bad = |why: &str| Err(format!("{key} ({why})"));
     let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
     match key {
-        "editor.vim" | "editor.smart_typography" | "editor.typewriter" | "editor.focus_mode" => {
-            match parse_bool(value) {
-                Some(b) => Ok(b.to_string()),
-                None => bad("expected true/false"),
-            }
-        }
+        "editor.vim"
+        | "editor.smart_typography"
+        | "editor.typewriter"
+        | "editor.focus_mode"
+        | "editor.paragraph_indent" => match parse_bool(value) {
+            Some(b) => Ok(b.to_string()),
+            None => bad("expected true/false"),
+        },
         "editor.column_width" => match value.trim().parse::<u16>() {
             Ok(w) if (32..=160).contains(&w) => Ok(w.to_string()),
             _ => bad("expected a width 32–160"),

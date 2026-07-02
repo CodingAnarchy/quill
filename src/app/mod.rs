@@ -164,6 +164,10 @@ pub struct App {
     /// Focus mode (#301), from the `[editor]` config: dim every paragraph but the
     /// one under the cursor. A toggle (palette action); off by default.
     pub focus_mode: bool,
+    /// First-line paragraph indent (#722), from the `[editor]` config: visually
+    /// indent the first line of each prose paragraph, display-only. A toggle
+    /// (palette action); off by default.
+    pub paragraph_indent: bool,
     /// Autosave interval in seconds (#409), from `[editor]`; `0` is off.
     pub(crate) autosave_interval_secs: u64,
     /// Time of the last input burst (reset each idle tick), so autosave can fire
@@ -367,6 +371,7 @@ impl App {
         let smart_typography = editor.smart_typography;
         let typewriter = editor.typewriter;
         let focus_mode = editor.focus_mode;
+        let paragraph_indent = editor.paragraph_indent;
         let autosave_interval_secs = editor.autosave_interval_secs;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let (theme, theme_warnings) = crate::config::load_theme();
@@ -419,6 +424,7 @@ impl App {
             focus_width: editor.column_width,
             typewriter,
             focus_mode,
+            paragraph_indent,
             autosave_interval_secs,
             last_activity: std::time::Instant::now(),
             outline_visible: false,

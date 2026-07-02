@@ -488,6 +488,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "spell:prev",
         "view:typewriter",
         "view:focus",
+        "view:paragraph-indent",
         "ai:backend",
         "ai:characters",
         "ai:continuity",

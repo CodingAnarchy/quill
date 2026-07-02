@@ -48,6 +48,7 @@ impl App {
             ),
             bool_row(SettingBool::Typewriter, self.typewriter),
             bool_row(SettingBool::FocusMode, self.focus_mode),
+            bool_row(SettingBool::ParagraphIndent, self.paragraph_indent),
             PaletteItem::new(
                 "Analysis stopwords",
                 format!("Currently: {}", self.stopwords_label()),
@@ -391,8 +392,9 @@ mod tests {
         let Mode::Palette(p) = &app.mode else {
             panic!("the setter opens a palette");
         };
-        // Theme, width, smart typography, vim, autosave, typewriter, focus, stopwords.
-        assert_eq!(p.items.len(), 8);
+        // Theme, width, smart typography, vim, autosave, typewriter, focus,
+        // paragraph indent, stopwords.
+        assert_eq!(p.items.len(), 9);
         assert_eq!(p.title, "Settings");
     }
 
