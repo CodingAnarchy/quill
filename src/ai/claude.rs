@@ -37,7 +37,11 @@ impl ClaudeBackend {
 
 impl Backend for ClaudeBackend {
     fn complete(&self, req: &Request) -> Result<Response, AiError> {
-        let (status, value) = self.post(API_URL, &build_body(req))?;
+        let body = build_body(req);
+        // Single idempotent request: ride out a transient blip (429/529, dropped
+        // connection) with bounded backoff rather than forfeiting a whole,
+        // expensive pass (#697). The batch path below is deliberately not retried.
+        let (status, value) = http::retry(http::transient_status, || self.post(API_URL, &body))?;
         if !is_ok(status) {
             return Err(api_error(status, &value));
         }
@@ -92,7 +96,9 @@ impl Converse for ClaudeBackend {
     /// (messages + tools + the cached manuscript prefix) and parse the reply into
     /// tool calls or a final answer.
     fn respond(&self, body: &Value) -> Result<Turn, AiError> {
-        let (status, value) = self.post(API_URL, body)?;
+        // One idempotent turn of the tool-use loop: same bounded-retry policy as
+        // the single-shot completion (#697).
+        let (status, value) = http::retry(http::transient_status, || self.post(API_URL, body))?;
         if !is_ok(status) {
             return Err(api_error(status, &value));
         }

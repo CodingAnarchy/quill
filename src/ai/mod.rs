@@ -257,6 +257,33 @@ pub enum AiError {
     Internal(String),
 }
 
+impl AiError {
+    /// Whether this failure is worth retrying on an *idempotent single request*:
+    /// a transient condition a bounded backoff can ride out. A dropped connection
+    /// (`Network { status: None }`, where the request may never have reached the
+    /// server) and the retryable HTTP statuses (see [`retryable_status`]) qualify.
+    /// Everything else — a definite error status, a malformed body, a
+    /// non-compliant model, a config problem, an internal fault — is permanent:
+    /// re-sending would only re-pay for the same failure. (#697)
+    pub(crate) fn retryable(&self) -> bool {
+        match self {
+            AiError::Network { status: None, .. } => true,
+            AiError::Network {
+                status: Some(code), ..
+            } => retryable_status(*code),
+            _ => false,
+        }
+    }
+}
+
+/// Whether an HTTP status is a *transient* server condition worth retrying on an
+/// idempotent request: 429 (rate limited) and 529 (overloaded) are the two the
+/// provider explicitly marks retryable. Everything else (other 5xx included) is
+/// treated as permanent here — we only retry what's known-safe. (#697)
+pub(crate) fn retryable_status(status: u16) -> bool {
+    matches!(status, 429 | 529)
+}
+
 impl fmt::Display for AiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
