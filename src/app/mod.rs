@@ -284,6 +284,12 @@ pub struct App {
     /// A background local-model download (#382): `(model id, result)`, polled in
     /// the event loop so a multi-gigabyte fetch never blocks the editor.
     download_task: Task<(String, Result<(), String>)>,
+    /// Live progress of the in-flight model download (#813): the shared byte
+    /// counter the worker's `hf-hub` fetch drives, plus when the download started
+    /// (for the ETA). `Some` only while a download runs; the terminal poll clears
+    /// it. Read each tick by [`App::poll_model_download`] to render progress in
+    /// Quill's own status line rather than over the TUI (#727).
+    download_progress: Option<(Arc<models::DownloadProgress>, std::time::Instant)>,
     /// Model ids known to be on disk (#382), refreshed when the manager opens and
     /// after a download/remove — so the manager shows status without probing the
     /// `hf-hub` cache every frame.
@@ -505,6 +511,7 @@ impl App {
             ai_task: Task::idle(),
             vc_task: Task::idle(),
             download_task: Task::idle(),
+            download_progress: None,
             downloaded_models: Vec::new(),
             local_backend: Arc::new(Mutex::new(HashMap::new())),
             image_backend: Arc::new(Mutex::new(None)),
