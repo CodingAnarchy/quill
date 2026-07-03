@@ -171,7 +171,10 @@ const RECOMMEND_CONTEXT_TOKENS: u32 = 8_192;
 /// (the quality-per-byte sweet spot). Native context is 40960 across the family
 /// ([`STANDARD_CONTEXT_TOKENS`]); Qwen3 has no ~1M GGUF, so — unlike the old Qwen2.5
 /// table — there is no extended-context row (#791). Update as new Qwen3 releases
-/// land. (The catalog is vetted for download/load in #379.)
+/// land. Every row's GGUF filename is release-gate-vetted against its HuggingFace
+/// repo by the `#[ignore]`d `catalog_gguf_files_exist_on_huggingface` check (#726),
+/// so a row that names a file that doesn't exist (renamed, sharded, wrong quant) is
+/// caught before a user's download 404s — run it whenever a row's repo/file changes.
 ///
 /// The `layers` / `kv_heads` / `head_dim` columns are the Qwen3 model-card
 /// architecture (`num_hidden_layers`, `num_key_value_heads`, `head_dim`); they
@@ -293,6 +296,24 @@ impl Model {
     #[cfg_attr(not(feature = "local"), allow(dead_code))]
     pub fn required_mem_gb(&self, context_tokens: u32) -> f64 {
         self.size_gb + self.kv_cache_gb(context_tokens) + RUNTIME_OVERHEAD_GB
+    }
+
+    /// The HuggingFace `resolve` URL for this row's GGUF weights — the exact file
+    /// [`crate::ai::local::LocalBackend::for_model`] fetches (`hf-hub`'s
+    /// `model(repo).get(file)` resolves the same path). Used by the release-gated
+    /// catalog vetting check (`catalog_gguf_files_exist_on_huggingface`) to HEAD
+    /// every row and catch a filename that doesn't exist *before* a user's download
+    /// 404s (#726). A live file answers this URL with a `302` redirect to the CDN.
+    ///
+    /// Only the vetting check consumes it, so it's `#[cfg(test)]`-gated — it isn't a
+    /// production affordance, and gating it also keeps it off the `dead_code` radar
+    /// in every non-test build (default and `--features local`).
+    #[cfg(test)]
+    pub fn gguf_resolve_url(&self) -> String {
+        format!(
+            "https://huggingface.co/{}/resolve/main/{}",
+            self.gguf_repo, self.gguf_file
+        )
     }
 
     /// A compact context-window label for the model manager (#379): `"40k"`, `"1M"`.
@@ -691,5 +712,57 @@ mod tests {
     #[test]
     fn every_model_has_a_description() {
         assert!(MODELS.iter().all(|m| !m.description.is_empty()));
+    }
+
+    /// Release gate: every catalog row's GGUF filename actually exists in its
+    /// HuggingFace repo (#726). This is the concrete failure the ticket was filed
+    /// for — a catalog that named a single-file GGUF Qwen ships only as multi-part
+    /// shards, so [`crate::ai::local::LocalBackend::for_model`]'s single-file fetch
+    /// 404s on exactly the models a capable machine is recommended. A live weights
+    /// file answers its `resolve/main/<file>` URL with a `302` redirect to the CDN;
+    /// a `404` means the row points at a name that isn't there (renamed, sharded, or
+    /// a wrong quant). We HEAD each row without following the redirect, so the check
+    /// is a few tiny requests, never a multi-gigabyte download.
+    ///
+    /// **Opt-in / non-hermetic on purpose** — it reaches HuggingFace, so it's
+    /// `#[ignore]`d and kept out of the default and `--features local` suites (they
+    /// must never touch the network, #531). Run it before a release, and whenever a
+    /// `MODELS` row's `gguf_repo`/`gguf_file` changes, to catch a bad filename here
+    /// rather than in a user's failed download:
+    /// `cargo test catalog_gguf_files_exist_on_huggingface -- --ignored --nocapture`
+    #[test]
+    #[ignore = "release gate: reaches HuggingFace to vet catalog filenames; not hermetic (#726)"]
+    fn catalog_gguf_files_exist_on_huggingface() {
+        let mut missing = Vec::new();
+        for m in MODELS {
+            let url = m.gguf_resolve_url();
+            // HEAD without following the redirect: a present file answers 302 (→ CDN),
+            // a missing one 404. `max_redirects(0)` + not-an-error keeps the raw status.
+            let status = ureq::head(&url)
+                .config()
+                .http_status_as_error(false)
+                .max_redirects(0)
+                .max_redirects_will_error(false)
+                .build()
+                .call()
+                .map_or_else(
+                    |e| {
+                        missing.push(format!("{} — request error: {e}", m.id()));
+                        0
+                    },
+                    |r| r.status().as_u16(),
+                );
+            println!("{:>5}  HTTP {status}  {url}", m.id());
+            // 302 = present (redirect to CDN); 200 also counts as present. Anything
+            // else (notably 404) means the catalog names a file that isn't there.
+            if status != 302 && status != 200 {
+                missing.push(format!("{} — HTTP {status} at {url}", m.id()));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "catalog rows point at GGUF files that don't exist on HuggingFace \
+             (a user's download would 404): {missing:?}"
+        );
     }
 }
