@@ -508,6 +508,24 @@ impl App {
         }
     }
 
+    /// Book `b`'s own publishing metadata for its divider copyright in a series
+    /// export (#810): each book carries its own ISBN/publisher/date/rights (a book
+    /// with none falls back to the series/active-book metadata — see
+    /// [`Project::book_publishing`]), so an omnibus stamps each book's copyright
+    /// with that book's data rather than reusing the active book's for all of them.
+    /// Language is a package-level concern kept once on the manifest, so it stays
+    /// series-level here.
+    fn book_publishing_meta(&self, b: usize) -> export::PubMeta {
+        let pubmeta = self.project.book_publishing(b);
+        export::PubMeta {
+            isbn: pubmeta.isbn,
+            publisher: pubmeta.publisher,
+            date: pubmeta.pub_date,
+            lang: self.project.manifest.language.clone(),
+            rights: pubmeta.rights,
+        }
+    }
+
     /// Build one chapter for export: its title, epigraph, and prose (front matter
     /// stripped, a repeated title heading dropped).
     fn export_chapter(&self, i: usize) -> Chapter {
@@ -596,9 +614,11 @@ impl App {
             author: self.project.manifest.author.clone(),
             // The series title is carried once by the series writer, not per book.
             series: None,
-            // Publishing metadata is series-level (one ISBN/publisher per project
-            // manifest); each book in a series carries the same.
-            publishing: self.publishing_meta(),
+            // Each book in a series carries its OWN publishing metadata (#810): its
+            // ISBN/publisher/date/rights (falling back to the series/active-book
+            // metadata when unset), so its divider copyright is stamped with its own
+            // data rather than the active book's reused for every book.
+            publishing: self.book_publishing_meta(b),
             epigraph: self.project.book_epigraph(b),
             front,
             parts: body_parts,
