@@ -443,7 +443,8 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | -------------- | ------------------------------- |
 | *(typing)*     | insert text                     |
 | Arrows         | move cursor                     |
-| Mouse          | click to position the cursor; scroll-wheel to scroll |
+| Mouse          | click to position the cursor; drag to select (a Visual selection); scroll-wheel to scroll; click a row in a focused list overlay to select it |
+| Paste          | terminal paste (Ctrl-Shift-V / Cmd-V / middle-click) inserts the system clipboard at the cursor as one undoable edit |
 | Home / End     | start / end of line             |
 | F1             | open the built-in user's guide  |
 | Ctrl-Z / Ctrl-Y| undo / redo                     |
@@ -684,6 +685,22 @@ Visual mode:
   cancels.
 - **`d`** / **`c`** / **`y`** act on the selection (delete / change / yank), and
   **`p`** replaces it with the register.
+- **Drag to select** — pressing and dragging the left mouse button enters Visual
+  mode anchored at the press point and extends the selection as you drag
+  (correct across the centered margin, soft-wrap, the paragraph indent, and
+  fenced-code rows); releasing leaves the selection active. A plain click (no
+  drag) still just positions the cursor.
+
+System clipboard:
+
+- A **yank / delete** and a **Visual copy** also place the text on the system
+  clipboard, so you can paste it into another app — over SSH and tmux too (Quill
+  writes the clipboard with the OSC 52 terminal escape). The internal Vim
+  registers keep working unchanged.
+- **Paste** with your terminal's paste (Ctrl-Shift-V / Cmd-V / middle-click):
+  the system clipboard is inserted at the cursor as one undoable edit (replacing
+  a Visual selection, if one is active). In Vim mode, **`"+p`** / **`"*p`** paste
+  the system clipboard explicitly.
 
 Search:
 

@@ -53,7 +53,11 @@ impl App {
             }
             VimPending::Register => {
                 self.vim_state.pending = VimPending::None;
-                if c.is_ascii_alphabetic() {
+                if c == '+' || c == '*' {
+                    // The system-clipboard registers (#811): a following `p` / `P`
+                    // pastes the OS clipboard.
+                    self.vim_state.clipboard_register = true;
+                } else if c.is_ascii_alphabetic() {
                     self.vim_state.selected_register = Some(c.to_ascii_lowercase());
                 }
                 return;
@@ -245,6 +249,7 @@ impl App {
         // it. If this key completed a command (nothing left pending), drop it.
         if self.vim_state.op.is_none() && self.vim_state.pending == VimPending::None {
             self.vim_state.selected_register = None;
+            self.vim_state.clipboard_register = false;
         }
     }
 
@@ -450,12 +455,49 @@ impl App {
     }
 
     /// Record a yank into the unnamed register, and into the named register if
-    /// `"x` selected one.
+    /// `"x` selected one. Also mirror the text onto the system clipboard (#811),
+    /// so a Vim yank / delete or a Visual copy is available to paste into another
+    /// app — the internal registers keep working exactly as before, the clipboard
+    /// is an additional destination.
     fn store_register(&mut self, yank: Yank) {
+        self.clipboard.set(&yank.text);
         if let Some(name) = self.vim_state.selected_register.take() {
             self.vim_state.registers.named.insert(name, yank.clone());
         }
         self.vim_state.registers.unnamed = Some(yank);
+    }
+
+    /// Insert the system clipboard's contents (#811) at the cursor as one
+    /// undoable edit — the seam-read paste path (what Quill itself copied, over
+    /// OSC 52). A no-op when the clipboard is empty.
+    pub(crate) fn paste_from_clipboard(&mut self) {
+        if let Some(text) = self.clipboard.get().filter(|t| !t.is_empty()) {
+            self.insert_pasted_text(&text);
+        }
+    }
+
+    /// Insert `text` at the cursor (or over a Visual selection) as one undoable
+    /// edit (#811). The shared paste path: the terminal's bracketed-paste event
+    /// delivers the OS clipboard here, and [`Self::paste_from_clipboard`] routes
+    /// the seam-read text through it too. The text lands verbatim
+    /// (characterwise), through the range-edit path so the continuous view's seam
+    /// bookkeeping stays correct (#700), and the whole insert is a single undo
+    /// group.
+    pub(crate) fn insert_pasted_text(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        // A Visual selection is replaced by the paste, matching `p` in Visual mode;
+        // otherwise the text is inserted at the cursor.
+        let (lo, hi) = if let Mode::Visual { anchor, linewise } = self.mode {
+            self.mode = self.editing_mode();
+            self.selection_bytes(anchor, linewise)
+        } else {
+            let at = self.edit_buffer().cursor_byte();
+            (at, at)
+        };
+        self.edit_replace_range(lo, hi, text);
+        self.cache_focus_words();
     }
 
     /// The register `p` / `P` reads from: the `"x`-selected named register, else
@@ -470,6 +512,15 @@ impl App {
     /// `p` / `P`: put the active register `count` times — inline for a charwise
     /// yank, on new lines for a linewise one.
     fn put(&mut self, after: bool, count: usize) {
+        // `"+p` / `"*p`: paste the OS clipboard (#811) as a characterwise put,
+        // rather than an internal register.
+        if self.vim_state.clipboard_register {
+            self.vim_state.clipboard_register = false;
+            for _ in 0..count {
+                self.paste_from_clipboard();
+            }
+            return;
+        }
         let Some(yank) = self.active_register() else {
             return;
         };

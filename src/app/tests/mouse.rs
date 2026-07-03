@@ -35,6 +35,27 @@ fn click(app: &mut App, col: u16, row: u16) {
     }));
 }
 
+/// Feed a left-button drag to screen `(col, row)` — extends / enters a Visual
+/// selection (#812).
+fn drag(app: &mut App, col: u16, row: u16) {
+    app.handle_event(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }));
+}
+
+/// Feed a left-button release (#812) — leaves the selection active.
+fn release(app: &mut App, col: u16, row: u16) {
+    app.handle_event(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }));
+}
+
 /// Feed a scroll-wheel notch (`up` toward earlier content, else later).
 fn wheel(app: &mut App, up: bool) {
     let kind = if up {
@@ -228,6 +249,164 @@ fn click_on_a_render_only_header_row_maps_to_an_editable_position() {
     for row in BODY_TOP..(BODY_TOP + 6) {
         click(&mut app, x + 2, row);
         assert!(app.edit_buffer().cursor.line < app.edit_buffer().line_count());
+    }
+}
+
+// --- Drag-to-select (#812) ----------------------------------------------------
+
+/// The (start, end) absolute bytes of the current Visual selection, or `None`
+/// when not in Visual mode.
+fn selection(app: &App) -> Option<(usize, usize)> {
+    match app.mode {
+        Mode::Visual { anchor, linewise } => Some(app.selection_bytes(anchor, linewise)),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_plain_click_does_not_enter_visual() {
+    let (mut app, _dir) = rendered_app("drag-click", "hello world\n", 20);
+    let x = column_x(20);
+    click(&mut app, x + 2, BODY_TOP);
+    release(&mut app, x + 2, BODY_TOP);
+    assert!(
+        selection(&app).is_none(),
+        "a press-and-release with no drag just positions the cursor"
+    );
+    assert_eq!(app.edit_buffer().cursor.col, 2);
+}
+
+#[test]
+fn a_drag_selects_the_spanned_range() {
+    // Press on 'h' (byte 0), drag to the 'w' of "world" (byte 6): the selection
+    // spans [0, 6) plus the char under the active end (inclusive, Vim charwise).
+    let (mut app, _dir) = rendered_app("drag-span", "hello world\n", 20);
+    let x = column_x(20);
+    click(&mut app, x, BODY_TOP);
+    drag(&mut app, x + 6, BODY_TOP);
+    let (lo, hi) = selection(&app).expect("a drag enters Visual mode");
+    assert_eq!(lo, 0, "anchored at the press");
+    assert_eq!(hi, 7, "through the char under the drag point (inclusive)");
+    assert_eq!(&app.edit_buffer().byte_slice(lo, hi), "hello w");
+}
+
+#[test]
+fn a_release_leaves_the_selection_active() {
+    let (mut app, _dir) = rendered_app("drag-release", "hello world\n", 20);
+    let x = column_x(20);
+    click(&mut app, x, BODY_TOP);
+    drag(&mut app, x + 5, BODY_TOP);
+    release(&mut app, x + 5, BODY_TOP);
+    assert!(
+        matches!(app.mode, Mode::Visual { .. }),
+        "the selection stays active after release, like Vim Visual"
+    );
+}
+
+#[test]
+fn a_drag_across_a_soft_wrap_selects_the_wrapped_bytes() {
+    // A long line that wraps; drag from the first row to the continuation row and
+    // the selection spans the wrap, not just one visual row.
+    let long = "aaaa bbbb cccc dddd eeee ffff\n";
+    let (mut app, _dir) = rendered_app("drag-wrap", long, 20);
+    let x = column_x(20);
+    click(&mut app, x, BODY_TOP);
+    drag(&mut app, x + 3, BODY_TOP + 1);
+    let (lo, hi) = selection(&app).expect("dragging enters Visual");
+    assert_eq!(lo, 0);
+    assert!(
+        hi > "aaaa bbbb".len(),
+        "the selection reaches past the first wrapped row into the continuation"
+    );
+}
+
+#[test]
+fn a_drag_accounts_for_the_paragraph_indent() {
+    // With the #722 indent on, the first row shifts right by four cells; a drag
+    // still maps to the right bytes through the indent.
+    let (mut app, _dir) = rendered_app("drag-indent", "hello world\n", 20);
+    app.paragraph_indent = true;
+    render_to_string(&app, W, H);
+    let x = column_x(20);
+    // Press at the 'h' (rendered at column 4 with the indent), drag five chars.
+    click(&mut app, x + 4, BODY_TOP);
+    drag(&mut app, x + 4 + 5, BODY_TOP);
+    let (lo, hi) = selection(&app).expect("dragging enters Visual");
+    assert_eq!(lo, 0, "anchored past the indent at byte 0");
+    assert_eq!(&app.edit_buffer().byte_slice(lo, hi), "hello ");
+}
+
+#[test]
+fn a_drag_accounts_for_vertical_scroll() {
+    // A tall document scrolled so the top row isn't line 0; a drag on the visible
+    // rows selects the on-screen (scrolled-to) bytes, not from line 0.
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
+    let (mut app, _dir) = rendered_app("drag-scroll", &body, 20);
+    for _ in 0..50 {
+        app.on_key(key(KeyCode::Down));
+    }
+    render_to_string(&app, W, H);
+    let x = column_x(20);
+    click(&mut app, x, BODY_TOP);
+    drag(&mut app, x + 3, BODY_TOP);
+    let (lo, hi) = selection(&app).expect("dragging enters Visual");
+    assert!(lo > 0, "the anchor is a scrolled-to line, not line 0");
+    assert!(hi > lo, "a non-empty selection");
+}
+
+#[test]
+fn a_drag_never_panics_on_far_points() {
+    let (mut app, _dir) = rendered_app("drag-far", "hi\n", 20);
+    let x = column_x(20);
+    click(&mut app, x, BODY_TOP);
+    drag(&mut app, 250, 250); // way off screen
+    drag(&mut app, x + 1, BODY_TOP);
+    release(&mut app, x + 1, BODY_TOP);
+    assert!(app.edit_buffer().cursor.line < app.edit_buffer().line_count());
+}
+
+#[test]
+fn a_drag_works_in_the_continuous_view() {
+    // The continuous view shares the render→byte map; a drag selects there too.
+    let (mut app, _dir) = two_chapter_app("drag-continuous");
+    app.on_key(ctrl('l')); // enter continuous view
+    render_to_string(&app, W, H);
+    let x = column_x(app.focus_width);
+    click(&mut app, x, BODY_TOP);
+    drag(&mut app, x + 4, BODY_TOP);
+    assert!(
+        selection(&app).is_some(),
+        "dragging selects in the continuous view"
+    );
+}
+
+// --- Overlay click-to-select (#812) -------------------------------------------
+
+#[test]
+fn a_click_selects_a_findings_row() {
+    use crate::mode::{Finding, Findings};
+    let (mut app, _dir) = rendered_app("click-findings", "hi\n", 20);
+    let items: Vec<Finding> = (0..5)
+        .map(|i| Finding {
+            summary: format!("finding {i}"),
+            chapters: Vec::new(),
+            book: None,
+            action: None,
+        })
+        .collect();
+    app.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
+    let screen = render_to_string(&app, W, H);
+    assert!(screen.contains("finding 0"), "the list rendered");
+    // Click the third visible row of the list (findings row indices == screen rows).
+    let first_row = app.list_layout.borrow().first_row;
+    click(&mut app, 3, first_row + 2);
+    if let Mode::Findings(f) = &app.mode {
+        assert_eq!(f.selected, 2, "the clicked row is selected");
+    } else {
+        panic!("still in the findings list");
     }
 }
 

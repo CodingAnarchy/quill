@@ -11,6 +11,7 @@ mod app;
 mod archive;
 mod atomic;
 mod buffer;
+mod clipboard;
 mod config;
 #[cfg(test)]
 mod datapath_tests;
@@ -50,8 +51,8 @@ use std::time::Duration;
 use crossterm::{
     cursor::Show,
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{
@@ -344,7 +345,13 @@ fn restore_terminal(w: &mut impl io::Write) {
         let _ = execute!(w, PopKeyboardEnhancementFlags);
     }
     let _ = disable_raw_mode();
-    let _ = execute!(w, LeaveAlternateScreen, DisableMouseCapture, Show);
+    let _ = execute!(
+        w,
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        Show
+    );
 }
 
 /// Install a panic hook that restores the terminal before the default hook
@@ -367,7 +374,15 @@ impl Tui {
     fn new() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        // Bracketed paste (#811) so a terminal paste (Ctrl-Shift-V / Cmd-V /
+        // middle-click) arrives as one `Event::Paste` with the OS clipboard's
+        // text, inserted as a single undoable edit rather than replayed key by key.
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
         // Turn on the terminal's enhanced ("Kitty") keyboard protocol when it's
         // supported (#348), so combinations the legacy encoding can't tell apart
         // — Tab vs Ctrl-I, Enter vs Ctrl-M, and various Ctrl/Shift combos — arrive

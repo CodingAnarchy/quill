@@ -63,6 +63,35 @@ pub struct EditorLayout {
     pub last_line: usize,
 }
 
+/// The focused list overlay's on-screen layout for one frame (#812): where its
+/// rows were drawn, so a click can be mapped back to a list index the way
+/// [`EditorLayout`] maps a click to a buffer byte. Recorded by
+/// [`crate::ui::list_overlay::draw_list_overlay`] each frame the list is drawn;
+/// empty when no list overlay is on screen.
+#[derive(Clone, Debug, Default)]
+pub struct ListLayout {
+    /// Screen row of the first rendered list row (past the box border, help line,
+    /// and blank). A click at or below this row, within `height`, is on a list row.
+    pub first_row: u16,
+    /// How many screen rows the list occupies (its visible viewport).
+    pub height: u16,
+    /// The list index of the first *visible* row — the scroll offset the overlay
+    /// applied so the selection stayed in view. A click on visible row `i` selects
+    /// index `first_index + i`.
+    pub first_index: usize,
+    /// The number of selectable list items, so a click past the last one is
+    /// clamped rather than selecting a non-existent row.
+    pub len: usize,
+}
+
+impl ListLayout {
+    /// Reset to empty, so a stale layout from a previous frame can't take a click
+    /// after the list overlay has closed. Called at the top of each render.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// The display-only first-line indent width in cells (mirrors `editor::PARAGRAPH_INDENT`).
 const INDENT_CELLS: u16 = 4;
 
@@ -70,45 +99,102 @@ const INDENT_CELLS: u16 = 4;
 const SCROLL_STEP: usize = 3;
 
 impl App {
-    /// Dispatch a mouse event (#757/#764): a left-click positions the cursor in the
-    /// editor; the wheel scrolls the focused scrollable surface (an overlay, the
-    /// assistant transcript, or the editor viewport). Other mouse events are ignored.
+    /// Dispatch a mouse event (#757/#764/#812): a left press positions the cursor
+    /// in the editor (or selects a row in a focused list); dragging the left button
+    /// extends a Visual selection; release leaves it active; the wheel scrolls the
+    /// focused scrollable surface. Other mouse events are ignored.
     pub(crate) fn on_mouse(&mut self, ev: MouseEvent) {
         match ev.kind {
-            MouseEventKind::Down(MouseButton::Left) => self.on_click(ev.column, ev.row),
+            MouseEventKind::Down(MouseButton::Left) => self.on_press(ev.column, ev.row),
+            MouseEventKind::Drag(MouseButton::Left) => self.on_drag(ev.column, ev.row),
+            MouseEventKind::Up(MouseButton::Left) => self.mouse_anchor = None,
             MouseEventKind::ScrollUp => self.on_scroll(-1),
             MouseEventKind::ScrollDown => self.on_scroll(1),
             _ => {}
         }
     }
 
-    /// Move the cursor to the character nearest a left-click at screen `(col, row)`
-    /// (#757). A no-op unless the plain editor is the active surface and the click
-    /// falls in its prose column — clicks in an overlay, a modal, a prompt, the
-    /// outline strip, or the status line are out of scope here.
-    fn on_click(&mut self, col: u16, row: u16) {
-        // Only the plain editing surface takes clicks: an open overlay, a focused
-        // docked surface / assistant pane, or a modal mode owns the screen instead.
-        if self.overlay.is_some()
-            || self.surface_pane_focused()
-            || self.assistant_pane_focused()
-            || !matches!(
-                self.mode,
-                Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_)
-            )
-        {
+    /// A left-button press (#757/#812): position the cursor at the click in the
+    /// editor and remember the press byte so a following drag can anchor a Visual
+    /// selection there; or, when a scrollable list overlay is focused, select the
+    /// clicked row. A plain press-and-release (no drag) is just a cursor move — the
+    /// press byte is only consumed by [`Self::on_drag`], and cleared on release.
+    fn on_press(&mut self, col: u16, row: u16) {
+        // A focused list overlay (corkboard / outline / findings / …) takes a click
+        // on one of its rows as a selection (#812), before the editor click path.
+        if self.click_list_row(col, row) {
             return;
         }
-        let Some((line, byte)) = self.click_target(col, row) else {
+        // Only the plain editing surface takes clicks: an open overlay, a focused
+        // docked surface / assistant pane, or a modal mode owns the screen instead.
+        if !self.editor_takes_click() {
+            return;
+        }
+        let Some(byte) = self.click_byte(col, row) else {
             return;
         };
         let buffer = self.edit_buffer_mut();
-        let line_start = buffer.line_start_byte(line);
-        buffer.cursor = buffer.cursor_at_byte(line_start + byte);
+        buffer.cursor = buffer.cursor_at_byte(byte);
+        // Remember where the press landed so a drag can anchor a selection there.
+        self.mouse_anchor = Some(byte);
+        // Leaving Visual on a fresh press matches clicking away from a selection.
+        if matches!(self.mode, Mode::Visual { .. }) {
+            self.mode = self.editing_mode();
+        }
         // A click is a cursor move, so any read-ahead scroll snaps back (#764) and
         // the status message clears the way a keystroke would.
         self.scroll_offset.set(0);
         self.message = None;
+    }
+
+    /// A left-button drag (#812): extend a Visual selection to the drag point,
+    /// entering Visual mode (anchored at the press byte) on the first drag. A
+    /// no-op unless a press landed in the editor text (so `mouse_anchor` is set)
+    /// and the drag maps to a buffer byte — a drag that started outside the prose
+    /// column, or in a mode that doesn't select, does nothing.
+    fn on_drag(&mut self, col: u16, row: u16) {
+        let Some(anchor) = self.mouse_anchor else {
+            return;
+        };
+        if !self.editor_takes_click() {
+            return;
+        }
+        let Some(byte) = self.click_byte(col, row) else {
+            return;
+        };
+        // Enter Visual (characterwise) on the first drag, anchored at the press;
+        // subsequent drags just move the cursor (the active end), extending it.
+        if !matches!(self.mode, Mode::Visual { .. }) {
+            self.mode = Mode::Visual {
+                anchor,
+                linewise: false,
+            };
+        }
+        let buffer = self.edit_buffer_mut();
+        buffer.cursor = buffer.cursor_at_byte(byte);
+        self.scroll_offset.set(0);
+        self.message = None;
+    }
+
+    /// Whether the plain editing surface should take a click / drag — not an open
+    /// overlay, a focused docked surface / assistant pane, or a non-editing modal.
+    const fn editor_takes_click(&self) -> bool {
+        self.overlay.is_none()
+            && !self.surface_pane_focused()
+            && !self.assistant_pane_focused()
+            && matches!(
+                self.mode,
+                Mode::Insert | Mode::Normal | Mode::Visual { .. } | Mode::EditMeta(_)
+            )
+    }
+
+    /// The absolute buffer byte a click at screen `(col, row)` maps to, using the
+    /// render-time layout (#757) — `None` when the click is outside the prose
+    /// column. Wraps [`Self::click_target`], resolving its (line, byte-in-line) to
+    /// an absolute offset.
+    fn click_byte(&self, col: u16, row: u16) -> Option<usize> {
+        let (line, byte) = self.click_target(col, row)?;
+        Some(self.edit_buffer().line_start_byte(line) + byte)
     }
 
     /// Map a screen `(col, row)` to a `(logical line, byte-within-line)` in the
@@ -140,6 +226,46 @@ impl App {
         let text = self.edit_buffer().line(vrow.line);
         let byte = byte_at_click(&text, vrow, &layout.conceal, col.saturating_sub(column.x));
         Some((vrow.line, byte))
+    }
+
+    /// A click on a row of a focused scrollable list overlay (#812): select that
+    /// row. Uses the render-time [`ListLayout`] to map the click's screen row to a
+    /// list index (accounting for the overlay's scroll offset), then moves the
+    /// active list mode's selection there. Returns whether the click hit a list row
+    /// (so the editor click path is skipped). Only the modal list modes that
+    /// navigate a `selected` index are affected; a full-screen report / guide
+    /// overlay (no selection) records no list layout and so is untouched.
+    fn click_list_row(&mut self, col: u16, row: u16) -> bool {
+        // The click must fall on the vertical band the list rows occupy.
+        let (first_row, height, first_index, len) = {
+            let l = self.list_layout.borrow();
+            (l.first_row, l.height, l.first_index, l.len)
+        };
+        if len == 0 || height == 0 || row < first_row || col == 0 {
+            return false;
+        }
+        let offset = (row - first_row) as usize;
+        if offset >= height as usize {
+            return false;
+        }
+        // Clamp a click past the last item to the last row rather than miss.
+        let index = (first_index + offset).min(len - 1);
+        self.select_list_index(index)
+    }
+
+    /// Move the focused list mode's selection to `index` (#812). Returns whether a
+    /// list mode was actually selectable — `false` for a mode with no navigable
+    /// `selected` row, so the caller can fall through to the editor click path.
+    fn select_list_index(&mut self, index: usize) -> bool {
+        match &mut self.mode {
+            Mode::Findings(f) => f.selected = index,
+            Mode::History(h) => h.selected = index,
+            Mode::Corkboard(c) => c.selected = index,
+            Mode::Annotations { selected } | Mode::Outline { selected } => *selected = index,
+            _ => return false,
+        }
+        self.message = None;
+        true
     }
 
     /// Scroll the focused scrollable surface by `notches` (positive = down, toward

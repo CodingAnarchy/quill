@@ -19,9 +19,23 @@ impl App {
     pub fn handle_event(&mut self, ev: Event) {
         match ev {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
-            // Left-click positions the cursor (#757); the wheel scrolls the editor
-            // or the focused scrollable overlay (#764).
+            // Left-click positions the cursor (#757); a drag selects (#812); the
+            // wheel scrolls the editor or the focused scrollable overlay (#764).
             Event::Mouse(m) => self.on_mouse(m),
+            // A bracketed paste (#811) — the terminal's own paste of the OS
+            // clipboard (Ctrl-Shift-V, Cmd-V, middle-click) — inserts at the cursor
+            // as one undoable edit, but only in an editing mode; a prompt / list /
+            // overlay owns its own input, so a stray paste there is ignored.
+            Event::Paste(text)
+                if self.overlay.is_none()
+                    && !self.surface_pane_focused()
+                    && !self.assistant_pane_focused()
+                    && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. }) =>
+            {
+                self.message = None;
+                self.scroll_offset.set(0);
+                self.insert_pasted_text(&text);
+            }
             _ => {}
         }
     }

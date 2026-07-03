@@ -67,6 +67,7 @@ mod chapters_counts_and_perf;
 mod chapters_editing;
 mod chapters_filter;
 mod chapters_sections;
+mod clipboard;
 mod configure;
 mod corkboard;
 mod editing;
@@ -142,6 +143,9 @@ pub fn open_test_app(dir: &Path) -> App {
     app.mode = Mode::Insert;
     app.workflows = Vec::new();
     app.triggers = Triggers::default();
+    // Swap in the in-memory clipboard so copy / paste tests never touch the real
+    // OS clipboard or emit a terminal escape (#531, #811).
+    app.use_fake_clipboard();
     app
 }
 
