@@ -17,8 +17,9 @@ The usual editing keys work in the default (non-Vim) mode: Backspace deletes the
 character behind the cursor and Delete the one ahead; Ctrl-Backspace (or
 Alt-Backspace) deletes the whole word behind it. The arrows move by character
 and line, Home/End jump to the ends of the row, Ctrl-← and Ctrl-→ move a word at
-a time, and PageUp/PageDown move a screenful. (Vim mode, if enabled, keeps its
-own bindings.)
+a time, and PageUp/PageDown move a screenful. The mouse works too: click to
+place the cursor, and scroll the wheel to scroll the page. (Vim mode, if enabled,
+keeps its own bindings.)
 
 Markdown is understood as you write: emphasis (*italic*, **bold**) renders
 softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
@@ -362,11 +363,13 @@ the cursor verbatim, as a single undo.
 KEY REFERENCE
 
   F1              this guide
+  Mouse           click to position the cursor; scroll-wheel to scroll
   Ctrl-S          save
   Ctrl-Q / Ctrl-C quit (prompts if unsaved)
   Ctrl-Z / Ctrl-Y undo / redo
   Ctrl-F          find (then "r" to replace)
-  Ctrl-O          toggle the chapter / outline pane
+  Ctrl-O          toggle the chapter / outline pane (press again to focus it,
+                  then Enter jumps to the selected heading)
   Ctrl-L          toggle the continuous manuscript
   Ctrl-N / Ctrl-P next / previous chapter
   Ctrl-G          browse chapters
