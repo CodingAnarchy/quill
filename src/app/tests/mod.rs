@@ -42,11 +42,14 @@ impl Drop for TempProject {
 }
 
 mod actions;
+mod ai_characters;
+mod ai_continuity;
 mod ai_cost_routing;
 mod ai_generation;
 mod ai_images;
+mod ai_plot;
 mod ai_prose;
-mod ai_qa_trackers;
+mod ai_qa;
 mod analysis;
 mod annotations;
 mod archive;
@@ -54,6 +57,9 @@ mod assistant;
 mod autosave;
 mod book_details;
 mod books;
+mod books_bible;
+mod books_export;
+mod books_switching;
 mod chapters_continuous;
 mod chapters_counts_and_perf;
 mod chapters_editing;
@@ -220,4 +226,31 @@ pub(super) fn pick_template(app: &mut App, name: &str) {
 /// adds), for exercising the navigator and as a parent for new projects.
 pub(super) fn books_dir(tag: &str) -> PathBuf {
     crate::testutil::scratch_dir("navbooks", tag)
+}
+
+/// A two-book series on disk, opened on book one, with the deterministic test
+/// pins the shared helper applies (Vim / smart typography / workflows off).
+/// Shared by the book-switching, tree-navigator, series-bible, and series-export
+/// test modules (#763 split).
+pub(super) fn series_app(name: &str) -> (App, TempProject) {
+    let dir = crate::testutil::scratch_dir("books", name);
+    for sub in ["b1", "b2"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    fs::write(dir.join("b1/one.md"), "alpha one\n").unwrap();
+    fs::write(dir.join("b1/two.md"), "alpha two\n").unwrap();
+    fs::write(dir.join("b2/one.md"), "beta one\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"The Saga\"\n\n\
+         [[books]]\ntitle = \"Book One\"\n\n\
+         [[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n\
+         [[books.chapters]]\ntitle = \"Noon\"\nfile = \"b1/two.md\"\n\n\
+         [[books]]\ntitle = \"Book Two\"\n\n\
+         [[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n",
+    )
+    .unwrap();
+
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
 }
