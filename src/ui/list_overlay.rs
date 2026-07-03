@@ -679,17 +679,22 @@ pub(super) fn draw_model_manager(
             } else {
                 ""
             };
-            // "needs" is the computed footprint at the model's context — weights +
-            // KV cache + overhead (#728), not a fixed floor.
+            // "needs" is the computed worst-case footprint at the model's FULL
+            // context window — weights + KV cache + overhead (#728), not a fixed
+            // floor. For Qwen3 the 8-KV-head cache at the native 40k window is the
+            // dominant term (#790), so this is the honest peak a whole-window pass
+            // would cost; ordinary passes use far less. The quant is shown because
+            // the Qwen3 catalog is mixed (Q8_0 for the smallest tiers, #789).
             let stats = format!(
-                "{:.1} GB · needs ~{:.1} GB · {} ctx{disk}",
+                "{} · {:.1} GB · needs ≤{:.1} GB · {} ctx{disk}",
+                m.quant,
                 m.size_gb,
                 m.required_mem_gb(m.context_tokens),
                 m.context_label()
             );
             list_row(
                 i == selected,
-                &format!("{mark}Qwen2.5-{}", m.id()),
+                &format!("{mark}Qwen3-{}", m.id()),
                 Some(format!("{stats} — {}", m.description)),
             )
         })
