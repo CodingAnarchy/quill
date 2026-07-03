@@ -82,3 +82,51 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Clippy lint policy. All `warn`, not `deny`: these surface existing violations to
+# clean up incrementally (tracked by the idiomatic/perf/correctness cleanup issues)
+# without breaking the build; promote a category to `deny` once it's clean. Only
+# `cargo clippy` honors these — normal `cargo build` is unaffected.
+#
+# Deliberately NOT enabled (high violation count with low signal, or conflicting
+# with a reasonable existing choice): use_self, redundant_pub_crate,
+# missing_const_for_fn, doc_markdown, default_trait_access, suboptimal_flops, and
+# the cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
+# usize<->u16 conversions in TUI layout code).
+[lints.clippy]
+# Correctness-adjacent — most likely to be actual bugs.
+case_sensitive_file_extension_comparisons = "warn"
+maybe_infinite_iter = "warn"
+unchecked_time_subtraction = "warn"
+float_cmp = "warn"
+
+# Allocation / clone hygiene (perf-adjacent).
+format_push_string = "warn"
+format_collect = "warn"
+redundant_clone = "warn"
+assigning_clones = "warn"
+implicit_clone = "warn"
+needless_collect = "warn"
+or_fun_call = "warn"
+
+# Idiom / clarity.
+map_unwrap_or = "warn"
+redundant_closure_for_method_calls = "warn"
+unnested_or_patterns = "warn"
+manual_let_else = "warn"
+single_match_else = "warn"
+match_same_arms = "warn"
+semicolon_if_nothing_returned = "warn"
+derive_partial_eq_without_eq = "warn"
+needless_pass_by_value = "warn"
+needless_pass_by_ref_mut = "warn"
+unnecessary_wraps = "warn"
+needless_continue = "warn"
+items_after_statements = "warn"
+cast_lossless = "warn"
+uninlined_format_args = "warn"
+unused_self = "warn"
+ignore_without_reason = "warn"
+
+# Noisier / nursery — useful but flags more debatable cases; drop if too chatty.
+option_if_let_else = "warn"
