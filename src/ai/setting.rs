@@ -5,6 +5,8 @@
 //! bible file reuses the shared [`bible`] format; the rule violations surface as
 //! triageable findings. See `docs/ai-features.md` §4.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -12,7 +14,7 @@ use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a setting pass: the categorized bible, the gazetteer, and the
 /// rule-consistency findings.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Setting {
     #[serde(default)]
     pub categories: Vec<Category>,
@@ -24,21 +26,21 @@ pub struct Setting {
 }
 
 /// One bible category (e.g. "Geography", "Magic system", "Factions").
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Category {
     pub name: String,
     #[serde(default)]
     pub entries: Vec<Entry>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
     pub detail: String,
 }
 
 /// A place where the prose breaks an established worldbuilding rule.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuleFinding {
     /// The established rule, e.g. "magic requires a focus object".
     pub rule: String,
@@ -163,9 +165,9 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
     let mut body = String::new();
 
     for cat in &s.categories {
-        body.push_str(&format!("## {}\n", cat.name));
+        writeln!(body, "## {}", cat.name).unwrap();
         for e in &cat.entries {
-            body.push_str(&format!("- **{}** — {}\n", e.name, e.detail));
+            writeln!(body, "- **{}** — {}", e.name, e.detail).unwrap();
         }
         body.push('\n');
     }
@@ -173,7 +175,7 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
     if !s.gazetteer.is_empty() {
         body.push_str("## Gazetteer\n");
         for term in &s.gazetteer {
-            body.push_str(&format!("- {term}\n"));
+            writeln!(body, "- {term}").unwrap();
         }
         body.push('\n');
     }
@@ -186,7 +188,7 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            body.push_str(&format!("- **{}:** {}{}\n", f.rule, f.violation, where_));
+            writeln!(body, "- **{}:** {}{}", f.rule, f.violation, where_).unwrap();
         }
         body.push('\n');
     }

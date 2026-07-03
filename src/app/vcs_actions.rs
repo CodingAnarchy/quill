@@ -10,7 +10,7 @@ use ratatui::style::Modifier;
 /// The result of a remote push/pull (#134), sent back from the worker thread to
 /// the UI thread. `reload` asks the UI to re-read the active chapter, since a pull
 /// can change files on disk.
-pub(crate) struct VcMsg {
+pub struct VcMsg {
     text: String,
     reload: bool,
 }
@@ -174,7 +174,7 @@ impl App {
             title: "Version control",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -356,7 +356,7 @@ impl App {
                 self.refresh_vc_status();
             }
             Ok(false) => {
-                self.message = Some("No committed version of this chapter to restore.".into())
+                self.message = Some("No committed version of this chapter to restore.".into());
             }
             Err(e) => self.message = Some(format!("Restore failed: {e}")),
         }

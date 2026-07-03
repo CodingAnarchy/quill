@@ -120,6 +120,9 @@ impl Project {
             .iter()
             .map(|c| c.file.as_str())
             .collect();
+        // `used` and the on-disk names are finite, so all but finitely many of the
+        // distinct `chapter-{n}.md` names are free — `find` always terminates.
+        #[allow(clippy::maybe_infinite_iter)]
         (1..)
             .map(|n| format!("chapter-{n}.md"))
             .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())
@@ -129,7 +132,7 @@ impl Project {
 
 /// A path inside `dir` for `file`, appending `-1`, `-2`, … to the stem if a file
 /// of that name already exists there (so moving to `unused/` never clobbers).
-pub(crate) fn unique_dest(dir: &Path, file: &str) -> PathBuf {
+pub fn unique_dest(dir: &Path, file: &str) -> PathBuf {
     let candidate = dir.join(file);
     if !candidate.exists() {
         return candidate;
@@ -137,10 +140,15 @@ pub(crate) fn unique_dest(dir: &Path, file: &str) -> PathBuf {
     let path = Path::new(file);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(file);
     let ext = path.extension().and_then(|s| s.to_str());
+    // Each `k` yields a distinct candidate and the on-disk names are finite, so all
+    // but finitely many candidates don't exist — `find` always terminates.
+    #[allow(clippy::maybe_infinite_iter)]
     (1..)
-        .map(|k| match ext {
-            Some(e) => dir.join(format!("{stem}-{k}.{e}")),
-            None => dir.join(format!("{stem}-{k}")),
+        .map(|k| {
+            ext.map_or_else(
+                || dir.join(format!("{stem}-{k}")),
+                |e| dir.join(format!("{stem}-{k}.{e}")),
+            )
         })
         .find(|c| !c.exists())
         .expect("an unbounded range always yields a free name")

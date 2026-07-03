@@ -10,7 +10,7 @@ use super::{Action, AiAction, ExportFormat, ExportScope, GitAction};
 /// A command reachable from a palette — the AI menu (Ctrl-A), the version-control
 /// menu (Ctrl-V), and the export menu (Ctrl-E) share one palette mechanism.
 #[derive(Clone)]
-pub(crate) enum Command {
+pub enum Command {
     Ai(AiAction),
     Git(GitAction),
     Export(ExportFormat, ExportScope),
@@ -111,7 +111,7 @@ pub(crate) enum Command {
 /// menu opens, each emitting a `Set…` command on Enter. (The numeric / list knobs
 /// use a prompt instead; see [`SettingTextKnob`].)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SettingPicker {
+pub enum SettingPicker {
     /// The built-in color-theme list (dark / light).
     Theme,
     /// An on/off picker for one boolean `[editor]` knob.
@@ -121,7 +121,7 @@ pub(crate) enum SettingPicker {
 /// A boolean `[editor]` knob the plain Settings menu toggles (#592). Each maps to a
 /// dotted config key validated through the shared vocabulary (`editor.vim`, …).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SettingBool {
+pub enum SettingBool {
     /// Vim-style modal editing (`editor.vim`).
     Vim,
     /// Smart typography as you type (`editor.smart_typography`).
@@ -136,24 +136,24 @@ pub(crate) enum SettingBool {
 
 impl SettingBool {
     /// The dotted config key this knob writes, matched by the shared validator.
-    pub(crate) fn key(self) -> &'static str {
+    pub(crate) const fn key(self) -> &'static str {
         match self {
-            SettingBool::Vim => "editor.vim",
-            SettingBool::SmartTypography => "editor.smart_typography",
-            SettingBool::Typewriter => "editor.typewriter",
-            SettingBool::FocusMode => "editor.focus_mode",
-            SettingBool::ParagraphIndent => "editor.paragraph_indent",
+            Self::Vim => "editor.vim",
+            Self::SmartTypography => "editor.smart_typography",
+            Self::Typewriter => "editor.typewriter",
+            Self::FocusMode => "editor.focus_mode",
+            Self::ParagraphIndent => "editor.paragraph_indent",
         }
     }
 
     /// A human label for the menu row, picker title, and status message.
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
-            SettingBool::Vim => "Vim mode",
-            SettingBool::SmartTypography => "Smart typography",
-            SettingBool::Typewriter => "Typewriter scrolling",
-            SettingBool::FocusMode => "Focus mode",
-            SettingBool::ParagraphIndent => "Paragraph indent",
+            Self::Vim => "Vim mode",
+            Self::SmartTypography => "Smart typography",
+            Self::Typewriter => "Typewriter scrolling",
+            Self::FocusMode => "Focus mode",
+            Self::ParagraphIndent => "Paragraph indent",
         }
     }
 }
@@ -163,7 +163,7 @@ impl SettingBool {
 /// The two `[editor]` knobs validate through the shared vocabulary and persist via
 /// the config splicer; the stopwords splice into `book.toml`'s `[analysis]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SettingTextKnob {
+pub enum SettingTextKnob {
     /// The centered text column width (`editor.column_width`).
     ColumnWidth,
     /// The autosave interval in seconds (`editor.autosave_interval_secs`).
@@ -175,11 +175,11 @@ pub(crate) enum SettingTextKnob {
 
 impl SettingTextKnob {
     /// A human label for the menu row, prompt, and status message.
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
-            SettingTextKnob::ColumnWidth => "column width",
-            SettingTextKnob::AutosaveSecs => "autosave interval (seconds)",
-            SettingTextKnob::Stopwords => "analysis stopwords",
+            Self::ColumnWidth => "column width",
+            Self::AutosaveSecs => "autosave interval (seconds)",
+            Self::Stopwords => "analysis stopwords",
         }
     }
 }
@@ -188,7 +188,7 @@ impl SettingTextKnob {
 /// menu opens, each emitting a `Set…` command on Enter. (The free-text knobs use a
 /// prompt instead; see [`StyleTextKnob`].)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StylePicker {
+pub enum StylePicker {
     /// The built-in preset library (or "(none)").
     Preset,
     /// The heading-alignment allowlist (or "(default)").
@@ -204,7 +204,7 @@ pub(crate) enum StylePicker {
 /// each a short string the writers render / embed verbatim. (The font/decorative
 /// image paths have their own browser, #494.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StyleTextKnob {
+pub enum StyleTextKnob {
     /// The scene-break divider glyph (`scene_break`).
     SceneBreak,
     /// The title-page ornament (`title_ornament`).
@@ -217,22 +217,22 @@ pub(crate) enum StyleTextKnob {
 
 impl StyleTextKnob {
     /// The `[style]` key this knob is stored under in `book.toml`.
-    pub(crate) fn key(self) -> &'static str {
+    pub(crate) const fn key(self) -> &'static str {
         match self {
-            StyleTextKnob::SceneBreak => "scene_break",
-            StyleTextKnob::TitleOrnament => "title_ornament",
-            StyleTextKnob::PartOrnament => "part_ornament",
-            StyleTextKnob::CoverImage => "cover_image",
+            Self::SceneBreak => "scene_break",
+            Self::TitleOrnament => "title_ornament",
+            Self::PartOrnament => "part_ornament",
+            Self::CoverImage => "cover_image",
         }
     }
 
     /// A human label for the menu row, prompt, and status message.
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
-            StyleTextKnob::SceneBreak => "scene-break glyph",
-            StyleTextKnob::TitleOrnament => "title ornament",
-            StyleTextKnob::PartOrnament => "part ornament",
-            StyleTextKnob::CoverImage => "cover image",
+            Self::SceneBreak => "scene-break glyph",
+            Self::TitleOrnament => "title ornament",
+            Self::PartOrnament => "part ornament",
+            Self::CoverImage => "cover image",
         }
     }
 }
@@ -240,7 +240,7 @@ impl StyleTextKnob {
 /// Which `[style]` font slot(s) a chosen curated font fills (#494) — picked after
 /// the family, before the download.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FontTarget {
+pub enum FontTarget {
     /// Set `body_font` only.
     Body,
     /// Set `heading_font` only.
@@ -252,7 +252,7 @@ pub(crate) enum FontTarget {
 /// Which character(s) a portrait pass should generate (#244), chosen from the
 /// character-portrait picker.
 #[derive(Clone, Copy)]
-pub(crate) enum PortraitChoice {
+pub enum PortraitChoice {
     /// Every character in the bible.
     All,
     /// The character at this index in the (sorted) bible list.

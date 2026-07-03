@@ -25,6 +25,10 @@ impl App {
     }
 
     /// Key handling while in [`Mode::ProjectSearch`].
+    // The Results and Step stages share n/N navigation bodies but stay in their own
+    // documented sections ("Navigating results" vs "Stepping through replacements");
+    // merging the patterns would fold two distinct stages of the flow together.
+    #[allow(clippy::match_same_arms)]
     pub(super) fn on_key_project_search(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let stage = match &self.mode {
@@ -51,7 +55,7 @@ impl App {
 
             // --- Typing the query ------------------------------------------
             (ProjectSearchStage::Query, KeyCode::Char(c)) if !ctrl => {
-                self.project_search_mut().query.push(c)
+                self.project_search_mut().query.push(c);
             }
             (ProjectSearchStage::Query, KeyCode::Backspace) => {
                 self.project_search_mut().query.pop();
@@ -60,10 +64,10 @@ impl App {
 
             // --- Navigating results (find) ---------------------------------
             (ProjectSearchStage::Results, KeyCode::Char('n') | KeyCode::Down) => {
-                self.project_search_advance(1)
+                self.project_search_advance(1);
             }
             (ProjectSearchStage::Results, KeyCode::Char('N') | KeyCode::Up) => {
-                self.project_search_advance(-1)
+                self.project_search_advance(-1);
             }
             (ProjectSearchStage::Results, KeyCode::Enter) => self.jump_to_project_match(),
             (ProjectSearchStage::Results, KeyCode::Char('r')) => {
@@ -86,10 +90,10 @@ impl App {
             // --- Stepping through replacements -----------------------------
             (ProjectSearchStage::Step, KeyCode::Char('y')) => self.replace_project_selected(),
             (ProjectSearchStage::Step, KeyCode::Char('n') | KeyCode::Down) => {
-                self.project_search_advance(1)
+                self.project_search_advance(1);
             }
             (ProjectSearchStage::Step, KeyCode::Char('N') | KeyCode::Up) => {
-                self.project_search_advance(-1)
+                self.project_search_advance(-1);
             }
             (ProjectSearchStage::Step, KeyCode::Char('a')) => {
                 self.project_search_mut().stage = ProjectSearchStage::Confirm;
@@ -97,8 +101,8 @@ impl App {
             (ProjectSearchStage::Step, KeyCode::Enter) => self.finish_project_replace(),
 
             // --- Confirming the irreversible replace-all -------------------
-            (ProjectSearchStage::Confirm, KeyCode::Char('y') | KeyCode::Char('Y')) => {
-                self.replace_project_all()
+            (ProjectSearchStage::Confirm, KeyCode::Char('y' | 'Y')) => {
+                self.replace_project_all();
             }
             (ProjectSearchStage::Confirm, _) => {
                 // Anything else backs out to stepping, nothing replaced.
@@ -273,19 +277,23 @@ impl App {
         let _ = self.flush_active();
         let replaced = self.project_search().replaced + replaced_here;
         self.mode = self.editing_mode();
-        self.message = Some(match failure {
-            Some(e) => format!(
-                "Replaced {replaced} occurrence{} across {done_chapters} chapter{}; \
+        self.message = Some(failure.map_or_else(
+            || {
+                format!(
+                    "Replaced {replaced} occurrence{} across {chapters} chapter{}.",
+                    if replaced == 1 { "" } else { "s" },
+                    if chapters == 1 { "" } else { "s" },
+                )
+            },
+            |e| {
+                format!(
+                    "Replaced {replaced} occurrence{} across {done_chapters} chapter{}; \
                  stopped on a read failure: {e}",
-                if replaced == 1 { "" } else { "s" },
-                if done_chapters == 1 { "" } else { "s" },
-            ),
-            None => format!(
-                "Replaced {replaced} occurrence{} across {chapters} chapter{}.",
-                if replaced == 1 { "" } else { "s" },
-                if chapters == 1 { "" } else { "s" },
-            ),
-        });
+                    if replaced == 1 { "" } else { "s" },
+                    if done_chapters == 1 { "" } else { "s" },
+                )
+            },
+        ));
     }
 
     /// Apply `ranges` (byte ranges into the chapter's body) to chapter

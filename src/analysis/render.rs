@@ -2,6 +2,8 @@
 //! report's styled rows. The metrics themselves live in the parent `analysis`
 //! module; this is the only half that depends on `ratatui`.
 
+use std::fmt::Write;
+
 use super::*;
 use crate::theme;
 use ratatui::style::{Modifier, Style};
@@ -154,7 +156,7 @@ const fn col(label: &'static str, width: usize) -> Col {
 fn header(cols: &[Col]) -> Line<'static> {
     let mut s = name_cell("Chapter");
     for c in cols {
-        s.push_str(&format!("{:>w$}", c.label, w = c.width));
+        write!(s, "{:>w$}", c.label, w = c.width).unwrap();
     }
     dim(s)
 }
@@ -164,7 +166,7 @@ fn header(cols: &[Col]) -> Line<'static> {
 fn data_row(name: &str, cols: &[Col], cells: &[String]) -> String {
     let mut s = name_cell(name);
     for (c, cell) in cols.iter().zip(cells) {
-        s.push_str(&format!("{:>w$}", cell, w = c.width));
+        write!(s, "{:>w$}", cell, w = c.width).unwrap();
     }
     s
 }

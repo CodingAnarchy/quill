@@ -53,13 +53,13 @@ fn strip_open_fence(text: &str) -> Option<&str> {
 /// split-off block used CRLF — so a CRLF chapter round-trips byte-for-byte just
 /// like an LF one.
 pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
-    match front {
-        Some(inner) => {
+    front.map_or_else(
+        || Cow::Borrowed(body),
+        |inner| {
             let nl = fence_newline(inner, body);
             Cow::Owned(format!("---{nl}{inner}---{nl}{body}"))
-        }
-        None => Cow::Borrowed(body),
-    }
+        },
+    )
 }
 
 /// The newline the reconstructed fences should use: CRLF when the chapter uses
@@ -102,9 +102,9 @@ impl Epigraph {
     /// blank strings as absent. `None` when there's no quotation — an
     /// attribution alone is not an epigraph. Shared by the chapter (front
     /// matter) and book (manifest) accessors.
-    pub fn from_parts(text: Option<String>, attribution: Option<String>) -> Option<Epigraph> {
+    pub fn from_parts(text: Option<String>, attribution: Option<String>) -> Option<Self> {
         let text = text.filter(|s| !s.is_empty())?;
-        Some(Epigraph {
+        Some(Self {
             text,
             attribution: attribution.filter(|s| !s.is_empty()),
         })
@@ -184,7 +184,7 @@ impl FrontMatter {
                     break; // a column-0 line ends the block
                 }
             }
-            while out.last().is_some_and(|l| l.is_empty()) {
+            while out.last().is_some_and(std::string::String::is_empty) {
                 out.pop(); // a `|` block clips trailing blank lines
             }
             Some(out.join("\n"))
@@ -482,12 +482,13 @@ fn unquote(value: &str) -> String {
             match c {
                 '\\' => match chars.next() {
                     Some('"') => out.push('"'),
-                    Some('\\') => out.push('\\'),
+                    // An escaped backslash, or a trailing lone backslash at end of
+                    // input, both yield a single literal backslash.
+                    Some('\\') | None => out.push('\\'),
                     Some(other) => {
                         out.push('\\');
                         out.push(other);
                     }
-                    None => out.push('\\'),
                 },
                 _ => out.push(c),
             }

@@ -7,6 +7,7 @@ use super::*;
 use crate::mode::{Mode, Overlay};
 use crate::ui::render_to_string;
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
+use std::fmt::Write;
 
 /// The width and height every test renders at — wide enough to center a narrow
 /// prose column with a clear left margin, tall enough for a screenful of rows.
@@ -100,7 +101,10 @@ fn click_accounts_for_vertical_scroll() {
     // A tall document scrolled so the cursor is near the bottom; the top of the
     // screen is no longer line 0. A click on the first body row should map to
     // whatever logical line is drawn there, not line 0.
-    let body: String = (0..60).map(|i| format!("line{i}\n")).collect();
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
     let (mut app, _dir) = rendered_app("mouse-scroll", &body, 20);
     // Move the cursor far down so the view scrolls, then re-render to refresh the map.
     for _ in 0..50 {
@@ -231,7 +235,10 @@ fn click_on_a_render_only_header_row_maps_to_an_editable_position() {
 
 #[test]
 fn wheel_scrolls_the_editor_without_moving_the_cursor() {
-    let body: String = (0..60).map(|i| format!("line{i}\n")).collect();
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
     let (mut app, _dir) = rendered_app("wheel-editor", &body, 20);
     let cursor_before = app.edit_buffer().cursor;
     wheel(&mut app, false); // scroll down
@@ -245,7 +252,10 @@ fn wheel_scrolls_the_editor_without_moving_the_cursor() {
 
 #[test]
 fn wheel_up_clamps_at_the_top() {
-    let body: String = (0..60).map(|i| format!("line{i}\n")).collect();
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
     let (mut app, _dir) = rendered_app("wheel-top", &body, 20);
     // Already at the top; scrolling up can't go negative.
     wheel(&mut app, true);
@@ -254,7 +264,10 @@ fn wheel_up_clamps_at_the_top() {
 
 #[test]
 fn a_keystroke_snaps_the_view_back_to_the_cursor() {
-    let body: String = (0..60).map(|i| format!("line{i}\n")).collect();
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
     let (mut app, _dir) = rendered_app("wheel-snap", &body, 20);
     wheel(&mut app, false);
     wheel(&mut app, false);
@@ -292,7 +305,10 @@ fn wheel_routes_to_an_open_overlay() {
 fn wheel_down_shifts_what_the_top_row_shows_and_clamps_to_content() {
     // A tall document: scrolling down moves later lines up to the top row, and the
     // renderer clamps the stored offset so it can't run past the last screenful.
-    let body: String = (0..60).map(|i| format!("line{i}\n")).collect();
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
     let (mut app, _dir) = rendered_app("wheel-shift", &body, 20);
     let top_before = top_row_text(&app);
     wheel(&mut app, false);

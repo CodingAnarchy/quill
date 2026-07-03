@@ -16,7 +16,7 @@ use super::*;
 
 /// An in-progress writing sprint: when it began, how long it runs, and the word
 /// count at the start to diff against.
-pub(crate) struct Sprint {
+pub struct Sprint {
     start: Instant,
     duration: Duration,
     baseline_words: usize,
@@ -49,7 +49,7 @@ impl Sprint {
 
     /// Net words written since the start (negative if the author cut more than
     /// they added) — the same total the status bar and report count, diffed.
-    pub(crate) fn words(&self, current_words: usize) -> i64 {
+    pub(crate) const fn words(&self, current_words: usize) -> i64 {
         current_words as i64 - self.baseline_words as i64
     }
 }
@@ -122,7 +122,7 @@ fn sprint_result(prefix: &str, words: i64, elapsed: Duration) -> String {
 
 /// The status-bar segment for a running sprint (#299): the countdown and the live
 /// net word count, e.g. "⏱ 12:34 · +312w".
-pub(crate) fn status_segment(remaining: Duration, words: i64) -> String {
+pub fn status_segment(remaining: Duration, words: i64) -> String {
     let secs = remaining.as_secs();
     let (mins, rem) = (secs / 60, secs % 60);
     let sign = if words < 0 { "" } else { "+" };
@@ -132,9 +132,11 @@ pub(crate) fn status_segment(remaining: Duration, words: i64) -> String {
 /// A sprint that's already over (started two minutes ago, one-minute length), so
 /// the event-loop tick (#299) can be tested without waiting on the clock.
 #[cfg(test)]
-pub(crate) fn test_finished_sprint(baseline_words: usize) -> Sprint {
+pub fn test_finished_sprint(baseline_words: usize) -> Sprint {
     Sprint {
-        start: Instant::now() - Duration::from_secs(120),
+        start: Instant::now()
+            .checked_sub(Duration::from_secs(120))
+            .unwrap(),
         duration: Duration::from_secs(60),
         baseline_words,
     }
@@ -156,7 +158,7 @@ mod tests {
     fn a_back_dated_start_is_finished_and_has_no_time_left() {
         // Start a 30s sprint a full minute ago: it's over.
         let s = Sprint {
-            start: Instant::now() - Duration::from_secs(60),
+            start: Instant::now().checked_sub(Duration::from_secs(60)).unwrap(),
             duration: Duration::from_secs(30),
             baseline_words: 0,
         };

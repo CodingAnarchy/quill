@@ -16,6 +16,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 
 use subsetter::{GlyphRemapper, Tag};
 use ttf_parser::{Face, GlyphId};
@@ -69,7 +70,7 @@ const MONO_NAME: &str = "Fmo";
 
 /// The body-face slot index for a `(bold, italic)` style: regular, bold, italic,
 /// bold-italic.
-fn body_index(style: FontStyle) -> usize {
+const fn body_index(style: FontStyle) -> usize {
     match (style.bold, style.italic) {
         (false, false) => 0,
         (true, false) => 1,
@@ -95,11 +96,11 @@ impl Fonts {
     /// from the configured `[style]` font when present (its true-italic file for
     /// the italic slots, `wght`-instanced for the bold slots) or the bundled
     /// Liberation Serif faces otherwise, plus the DejaVu Sans fallback and mono.
-    pub(super) fn new(style: &ExportStyle) -> Fonts {
+    pub(super) fn new(style: &ExportStyle) -> Self {
         let body = |s: FontStyle, default: &'static [u8], base: &str| {
             body_face(style, FontRole::Body, s, default, base)
         };
-        Fonts {
+        Self {
             body: [
                 body(FontStyle::REGULAR, REGULAR, "LiberationSerif"),
                 body(FontStyle::BOLD, BOLD, "LiberationSerif-Bold"),
@@ -138,7 +139,7 @@ impl Fonts {
     /// the two families' slotting is decided.
     fn face_of(&self, style: FontStyle, heading: bool) -> (&CidFont, &'static str) {
         if heading {
-            let idx = style.bold as usize;
+            let idx = usize::from(style.bold);
             (&self.heading[idx], HEADING_NAMES[idx])
         } else {
             let idx = body_index(style);
@@ -178,8 +179,7 @@ impl Fonts {
         }
         self.fallback
             .gid(c)
-            .map(|gid| self.fallback.advance_em(gid))
-            .unwrap_or(0.0)
+            .map_or(0.0, |gid| self.fallback.advance_em(gid))
     }
 
     /// Resolve `c` for the monospace face (fenced preformatted blocks, #524) to a
@@ -200,8 +200,7 @@ impl Fonts {
         }
         self.fallback
             .gid(c)
-            .map(|gid| self.fallback.advance_em(gid))
-            .unwrap_or(0.0)
+            .map_or(0.0, |gid| self.fallback.advance_em(gid))
     }
 
     /// Whether any font can render `c`.
@@ -256,6 +255,9 @@ fn body_face(
     default: &'static [u8],
     base: &str,
 ) -> CidFont {
+    // The `Some` arm is a multi-statement block; a `map_or_else` closure would read
+    // worse than the explicit match.
+    #[allow(clippy::option_if_let_else)]
     match style.font_face(role, want) {
         Some(f) => {
             let program = leak(&f.bytes);
@@ -309,8 +311,8 @@ struct CidFont {
 
 impl CidFont {
     /// Load a face with no instancing or synthesis (the fallback and mono faces).
-    fn load(program: &'static [u8], base: &str, serif: bool) -> CidFont {
-        CidFont::new(program, base, serif, false, false)
+    fn load(program: &'static [u8], base: &str, serif: bool) -> Self {
+        Self::new(program, base, serif, false, false)
     }
 
     fn new(
@@ -319,7 +321,7 @@ impl CidFont {
         serif: bool,
         bold_weight: bool,
         synthetic_oblique: bool,
-    ) -> CidFont {
+    ) -> Self {
         let mut face = Face::parse(program, 0).expect("font parses");
         // Match the instancing done at embed time (#638): pin the parsed face to the
         // bold weight too, so measured advances/metrics reflect the heavier outline
@@ -327,8 +329,8 @@ impl CidFont {
         if bold_weight {
             face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), BOLD_WGHT);
         }
-        let scale = 1000.0 / face.units_per_em() as f32;
-        CidFont {
+        let scale = 1000.0 / f32::from(face.units_per_em());
+        Self {
             base: base.to_string(),
             program,
             face,
@@ -345,7 +347,7 @@ impl CidFont {
     }
 
     fn advance_em(&self, gid: u16) -> f32 {
-        self.face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0) as f32 * self.scale
+        f32::from(self.face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0)) * self.scale
     }
 
     /// Note `c` as used and return its glyph id, or `None` if this font lacks it.
@@ -381,6 +383,9 @@ impl CidFont {
         } else {
             subsetter::subset(self.program, 0, &remapper)
         };
+        // The `Ok` arm is a multi-line tuple build; a `map_or_else` closure would read
+        // worse than the explicit match.
+        #[allow(clippy::option_if_let_else)]
         let (program, gids): (Vec<u8>, GidMap) = match subset {
             Ok(sub) => (
                 sub,
@@ -398,13 +403,12 @@ impl CidFont {
         out.insert(file, font_file_stream(&program));
 
         let bb = self.face.global_bounding_box();
-        let s = |v: i16| (v as f32 * self.scale).round() as i32;
+        let s = |v: i16| (f32::from(v) * self.scale).round() as i32;
         let ascent = s(self.face.ascender());
         let cap = self
             .face
             .capital_height()
-            .map(s)
-            .unwrap_or((ascent as f32 * 0.7) as i32);
+            .map_or((ascent as f32 * 0.7) as i32, s);
         // Nonsymbolic (uses a standard charset), serif bit for the body faces, and
         // the italic bit (0x40) when the face is slanted — a true italic or a
         // synthetically obliqued one (#638).
@@ -436,10 +440,16 @@ impl CidFont {
         );
 
         // Widths keyed by the new (subset) glyph id, measured from the original.
-        let widths: String = used
-            .keys()
-            .map(|&old| format!("{} [{}] ", gids[&old], self.advance_em(old).round() as i32))
-            .collect();
+        let widths = used.keys().fold(String::new(), |mut s, &old| {
+            write!(
+                s,
+                "{} [{}] ",
+                gids[&old],
+                self.advance_em(old).round() as i32
+            )
+            .unwrap();
+            s
+        });
         let cid = take(next);
         out.insert(
             cid,
@@ -483,9 +493,9 @@ fn to_unicode_cmap(used: &BTreeMap<u16, char>) -> Vec<u8> {
     // bfchar blocks are capped at 100 entries.
     let entries: Vec<(u16, char)> = used.iter().map(|(&g, &c)| (g, c)).collect();
     for chunk in entries.chunks(100) {
-        body.push_str(&format!("{} beginbfchar\n", chunk.len()));
+        writeln!(body, "{} beginbfchar", chunk.len()).unwrap();
         for (gid, ch) in chunk {
-            body.push_str(&format!("<{gid:04X}> <{}>\n", utf16be_hex(*ch)));
+            writeln!(body, "<{gid:04X}> <{}>", utf16be_hex(*ch)).unwrap();
         }
         body.push_str("endbfchar\n");
     }
@@ -500,8 +510,10 @@ fn utf16be_hex(c: char) -> String {
     let mut units = [0u16; 2];
     c.encode_utf16(&mut units)
         .iter()
-        .map(|u| format!("{u:04X}"))
-        .collect()
+        .fold(String::new(), |mut s, u| {
+            write!(s, "{u:04X}").unwrap();
+            s
+        })
 }
 
 /// Glyph ids for `text` in the `style` face (body or `heading`), face→fallback
@@ -519,7 +531,7 @@ pub(super) fn glyph_run(
             continue;
         };
         match runs.last_mut() {
-            Some((n, hex)) if *n == name => hex.push_str(&format!("{gid:04X}")),
+            Some((n, hex)) if *n == name => write!(hex, "{gid:04X}").unwrap(),
             _ => runs.push((name, format!("{gid:04X}"))),
         }
     }
@@ -535,7 +547,7 @@ pub(super) fn glyph_run_mono(fonts: &Fonts, text: &str) -> Vec<(&'static str, St
             continue;
         };
         match runs.last_mut() {
-            Some((n, hex)) if *n == name => hex.push_str(&format!("{gid:04X}")),
+            Some((n, hex)) if *n == name => write!(hex, "{gid:04X}").unwrap(),
             _ => runs.push((name, format!("{gid:04X}"))),
         }
     }
@@ -571,7 +583,7 @@ fn leak(bytes: &[u8]) -> &'static [u8] {
 }
 
 /// Allocate the next object id (shared with the layout module).
-pub(super) fn take(next: &mut u32) -> u32 {
+pub(super) const fn take(next: &mut u32) -> u32 {
     let id = *next;
     *next += 1;
     id
@@ -611,7 +623,7 @@ pub(super) fn pdf_text_string(text: &str) -> String {
 /// drop the `[wght]` axis the EPUB relies on for real bold, #638), a container that
 /// isn't a parseable single TrueType/CFF `sfnt` (e.g. a `.woff`/`.woff2`, which is
 /// compressed and already small), or any subsetting/parse failure.
-pub(crate) fn subset_for_web(program: &[u8], used: &BTreeSet<char>) -> Option<Vec<u8>> {
+pub fn subset_for_web(program: &[u8], used: &BTreeSet<char>) -> Option<Vec<u8>> {
     let face = Face::parse(program, 0).ok()?;
     // A variable font must keep its axes for the reader to render both weights; the
     // PDF subsetter would flatten it to the default instance, so leave it verbatim.
@@ -657,8 +669,8 @@ fn cmap_table(map: &BTreeMap<u32, u16>) -> Vec<u8> {
     let mut groups: Vec<(u32, u32, u32)> = Vec::new();
     for (&cp, &gid) in map {
         match groups.last_mut() {
-            Some(g) if cp == g.1 + 1 && gid as u32 == g.2 + (g.1 - g.0) + 1 => g.1 = cp,
-            _ => groups.push((cp, cp, gid as u32)),
+            Some(g) if cp == g.1 + 1 && u32::from(gid) == g.2 + (g.1 - g.0) + 1 => g.1 = cp,
+            _ => groups.push((cp, cp, u32::from(gid))),
         }
     }
     let mut sub = Vec::new();

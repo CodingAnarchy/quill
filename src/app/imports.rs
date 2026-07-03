@@ -4,6 +4,8 @@
 //! `assist.rs` to keep that module under the ~1,000-line convention (#426); a
 //! child module, so it keeps access to `App`'s private fields.
 
+use std::fmt::Write as _;
+
 use super::assist::write_failure_message;
 use super::bible_review::{Staged, StagedTally};
 use super::*;
@@ -13,7 +15,7 @@ use crate::ai::scaffold;
 /// of notes to seed a new project's bible from (#286), or the manuscript file to
 /// split into chapters (#298). Held in `App::pending_import_source` while the
 /// destination prompt is open, then taken by the matching `finish_*`.
-pub(crate) enum PendingImportSource {
+pub enum PendingImportSource {
     /// A folder of Markdown notes to import into the new project's bible (#286).
     NotesFolder(PathBuf),
     /// A Markdown / Word / Scrivener manuscript to split into chapters (#298).
@@ -183,18 +185,15 @@ impl App {
 
         // For a Markdown source, record which heading level the split used and the
         // levels the manuscript actually uses, so the preview can re-split on them.
-        let (level, levels) = match &markdown {
-            Some(text) => {
-                use crate::manuscript_import as import;
-                let (_, body) = crate::frontmatter::split(text);
-                let level = import::chapter_level(body);
-                let levels: Vec<usize> = (1..=6)
-                    .filter(|&l| import::heading_count(body, l) > 0)
-                    .collect();
-                (Some(level), levels)
-            }
-            None => (None, Vec::new()),
-        };
+        let (level, levels) = markdown.as_ref().map_or((None, Vec::new()), |text| {
+            use crate::manuscript_import as import;
+            let (_, body) = crate::frontmatter::split(text);
+            let level = import::chapter_level(body);
+            let levels: Vec<usize> = (1..=6)
+                .filter(|&l| import::heading_count(body, l) > 0)
+                .collect();
+            (Some(level), levels)
+        });
 
         self.mode = Mode::ImportPreview(Box::new(ImportPreview {
             source,
@@ -328,8 +327,7 @@ impl App {
             };
             let name = f
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "notes.md".into());
+                .map_or_else(|| "notes.md".into(), |n| n.to_string_lossy().into_owned());
             // Two imported folders can each hold a `characters.md`; keying only by
             // filename would let the second silently overwrite the first. Give
             // colliding names unique destinations so no source is lost.
@@ -339,7 +337,7 @@ impl App {
                 continue;
             }
             preserved += 1;
-            combined.push_str(&format!("## {name}\n\n{text}\n\n"));
+            write!(combined, "## {name}\n\n{text}\n\n").unwrap();
         }
         if preserved == 0 {
             self.message = Some(write_failure_message(&failures));
@@ -349,8 +347,7 @@ impl App {
         let label = match &files[..] {
             [one] => one
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "notes".into()),
+                .map_or_else(|| "notes".into(), |n| n.to_string_lossy().into_owned()),
             _ => format!("{preserved} files"),
         };
         // With AI off, the source is safely preserved but the bible can't be built.

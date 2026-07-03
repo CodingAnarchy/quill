@@ -13,14 +13,14 @@ use serde_json::Value;
 use super::{AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a voice pass: the voice-consistency observations.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Voice {
     #[serde(default)]
     pub findings: Vec<VoiceFinding>,
 }
 
 /// One voice observation, grounded in a character's voice profile.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct VoiceFinding {
     /// "dialogue" (a line out of character) or "narration" (POV voice drift / not
     /// distinct from another POV).

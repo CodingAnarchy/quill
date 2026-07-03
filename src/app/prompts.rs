@@ -13,7 +13,7 @@ impl App {
     /// Where an overlay (prompt or metadata editor) returns when it closes
     /// without acting: back to the chapter browser at `selected`, or to the
     /// editor's resting mode.
-    pub(super) fn closed_mode(&self, nav_return: Option<usize>) -> Mode {
+    pub(super) const fn closed_mode(&self, nav_return: Option<usize>) -> Mode {
         match nav_return {
             Some(selected) => Mode::Nav {
                 selected,
@@ -122,7 +122,7 @@ impl App {
 
         match pending {
             Pending::Quit => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     // Deliberately quitting despite unsaved changes is an explicit
                     // discard, so don't re-offer this work next launch (#263).
                     self.clear_recovery();
@@ -131,14 +131,14 @@ impl App {
                 _ => self.mode = closed,
             },
             Pending::Delete { at } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     let selected = self.delete_chapter(at);
                     self.select(selected);
                 }
                 _ => self.mode = closed,
             },
             Pending::Merge { at } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     let selected = self.merge_chapter(at);
                     self.select(selected);
                 }
@@ -150,12 +150,12 @@ impl App {
                 offer_local,
             } => match key.code {
                 // Confirm: run on the paid cloud backend.
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;
                     self.run_confirmed_ai(action, force, crate::ai::BackendKind::Claude);
                 }
                 // The hybrid router's third option (#372): run this one on-device.
-                KeyCode::Char('l') | KeyCode::Char('L') if offer_local => {
+                KeyCode::Char('l' | 'L') if offer_local => {
                     self.mode = closed;
                     self.run_confirmed_ai(action, force, crate::ai::BackendKind::Local);
                 }
@@ -165,48 +165,45 @@ impl App {
                     self.decline_workflow();
                 }
             },
-            Pending::ConfirmRefreshBibles { force } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+            Pending::ConfirmRefreshBibles { force } => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.mode = closed;
                     self.refresh_bibles_confirmed(force);
-                }
-                _ => {
+                } else {
                     self.mode = closed;
                     self.message = Some("Bible refresh cancelled.".into());
                 }
-            },
+            }
             Pending::ConfirmRemoveModel(id) => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;
                     self.remove_model(id);
                 }
                 _ => self.mode = closed,
             },
-            Pending::StripPlaintextKey(which) => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+            Pending::StripPlaintextKey(which) => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.mode = closed;
                     self.strip_plaintext_key(which);
-                }
-                _ => {
+                } else {
                     // Leaving it is fine — it stays the lowest-precedence fallback.
                     self.mode = closed;
                     self.message = Some("Left the plaintext key in the config.".into());
                 }
-            },
-            Pending::ConfirmEnableAi { resume } => match key.code {
+            }
+            Pending::ConfirmEnableAi { resume } => {
                 // Confirm: write `[ai] enabled = true`, then chain (key flow or the
                 // pass the author reached for). AI stays off on any other key (#602).
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.mode = closed;
                     self.enable_ai(resume);
-                }
-                _ => {
+                } else {
                     self.mode = closed;
                     self.message = Some("AI left off.".into());
                 }
-            },
+            }
             Pending::ConfirmRestore => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;
                     self.restore_chapter();
                 }
@@ -229,8 +226,8 @@ impl App {
                     self.pending_recovery = None;
                 }
             },
-            Pending::ConfirmSwitch => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+            Pending::ConfirmSwitch => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     // switch_to saves the current project, then replaces the app
                     // state (which resets the mode); on failure it restores a
                     // resting mode itself.
@@ -238,48 +235,46 @@ impl App {
                         Some(target) => self.switch_to(target),
                         None => self.mode = closed,
                     }
-                }
-                _ => {
+                } else {
                     self.pending_switch = None;
                     self.mode = closed;
                 }
-            },
-            Pending::ConfirmRemoveBook { index } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+            }
+            Pending::ConfirmRemoveBook { index } => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.mode = closed;
                     self.remove_book(index);
-                }
-                _ => {
+                } else {
                     self.mode = closed;
                     self.message = Some("Book kept.".into());
                 }
-            },
-            Pending::ConfirmDeleteProject => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.delete_browser_project(),
-                _ => {
+            }
+            Pending::ConfirmDeleteProject => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.delete_browser_project();
+                } else {
                     // Cancel: drop the stashed target, back to the browser (#612).
                     self.pending_manage = None;
                     self.reopen_project_browser();
                 }
-            },
+            }
             Pending::WizardStart => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.wizard_open(Some(WizardStep::Goals))
+                KeyCode::Char('y' | 'Y') => {
+                    self.wizard_open(Some(WizardStep::Goals));
                 }
                 _ => self.mode = closed, // declined now — land in the editor
             },
-            Pending::ConfirmPortraits => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+            Pending::ConfirmPortraits => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.mode = closed;
                     self.generate_portraits();
-                }
-                _ => {
+                } else {
                     self.pending_portraits = None; // discard the picked selection
                     self.mode = closed;
                 }
-            },
+            }
             Pending::ConfirmScene => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;
                     self.generate_scene();
                 }
@@ -288,16 +283,15 @@ impl App {
             // Apply the AI-proposed config changes (#303), or cancel (changing
             // nothing). `y` writes and applies them; the editing mode that follows
             // reflects any newly-toggled Vim setting.
-            Pending::ConfirmConfig => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
+            Pending::ConfirmConfig => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.write_config_changes();
                     self.mode = self.editing_mode();
-                }
-                _ => {
+                } else {
                     self.pending_config = None;
                     self.mode = closed;
                 }
-            },
+            }
             // The text prompts share the editing keys; only Enter differs.
             Pending::GoToChapter
             | Pending::NewChapter { .. }
@@ -362,19 +356,16 @@ impl App {
                                 // Jump straight to a chapter by 1-based number or
                                 // title substring (#588); a blank entry or no match
                                 // returns to the browser unchanged.
-                                match self.resolve_chapter_target(text) {
-                                    Some(index) => {
-                                        self.activate_chapter(index);
-                                        self.browser_opened_outline = false;
-                                        self.mode = self.editing_mode();
+                                if let Some(index) = self.resolve_chapter_target(text) {
+                                    self.activate_chapter(index);
+                                    self.browser_opened_outline = false;
+                                    self.mode = self.editing_mode();
+                                } else {
+                                    if !text.is_empty() {
+                                        self.message =
+                                            Some(format!("No chapter matches '{text}'."));
                                     }
-                                    None => {
-                                        if !text.is_empty() {
-                                            self.message =
-                                                Some(format!("No chapter matches '{text}'."));
-                                        }
-                                        self.select(fallback);
-                                    }
+                                    self.select(fallback);
                                 }
                             }
                             Pending::NewChapter { at } => {

@@ -129,7 +129,7 @@ impl Manuscript {
     pub fn open(project: &Project) -> std::io::Result<Self> {
         let active = project.active_index();
         let (lo, hi) = window_bounds(active, chapter_count(project));
-        let mut m = Manuscript {
+        let mut m = Self {
             segments: Vec::new(),
             buffer: Buffer::from_text(""),
             undo_states: VecDeque::new(),
@@ -139,11 +139,11 @@ impl Manuscript {
         Ok(m)
     }
 
-    pub fn buffer(&self) -> &Buffer {
+    pub const fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 
-    pub fn buffer_mut(&mut self) -> &mut Buffer {
+    pub const fn buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffer
     }
 
@@ -563,12 +563,11 @@ impl Manuscript {
         let mut start_line = 0;
         for s in &mut self.segments {
             let recovered = chapters.iter().find(|(idx, _)| *idx == s.index);
-            let mut content = match recovered {
-                Some((_, body)) => normalize_trailing_newline(body),
-                None => {
-                    let end = start_line + s.lines;
-                    self.buffer.line_range_text(start_line, end)
-                }
+            let mut content = if let Some((_, body)) = recovered {
+                normalize_trailing_newline(body)
+            } else {
+                let end = start_line + s.lines;
+                self.buffer.line_range_text(start_line, end)
             };
             start_line += s.lines;
             if content.is_empty() {
@@ -577,7 +576,7 @@ impl Manuscript {
             if recovered.is_some() {
                 s.dirty = true;
                 restored.push(s.index);
-                first_start_line.get_or_insert(text.matches('\n').count());
+                first_start_line.get_or_insert_with(|| text.matches('\n').count());
             }
             s.lines = content.matches('\n').count();
             text.push_str(&content);
@@ -702,7 +701,7 @@ impl Manuscript {
     }
 }
 
-fn chapter_count(project: &Project) -> usize {
+const fn chapter_count(project: &Project) -> usize {
     project.manifest.chapters.len()
 }
 

@@ -48,8 +48,8 @@ pub struct Recovery {
 
 impl Recovery {
     /// A single-chapter recovery record (the single-chapter view's snapshot).
-    pub fn single(chapter_file: String, body: String) -> Self {
-        Recovery {
+    pub const fn single(chapter_file: String, body: String) -> Self {
+        Self {
             chapter_file,
             body,
             extra: Vec::new(),
@@ -64,7 +64,7 @@ impl Recovery {
             return None;
         }
         let first = chapters.remove(0);
-        Some(Recovery {
+        Some(Self {
             chapter_file: first.chapter_file,
             body: first.body,
             extra: chapters,
@@ -212,7 +212,7 @@ mod tests {
         // staged by the atomic path may linger after a clean write.
         let strays: Vec<_> = fs::read_dir(dir.join(DIR))
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(strays.is_empty(), "temp file left behind: {strays:?}");

@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use super::{AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// One candidate the word search returns.
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Word {
     /// The candidate word or short phrase.
     pub text: String,

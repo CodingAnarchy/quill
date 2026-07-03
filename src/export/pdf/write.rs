@@ -2,6 +2,7 @@
 //! objects → xref → trailer byte assembly. Layout produces the objects and the
 //! outline; this turns them into the file.
 
+use std::fmt::Write as _;
 use std::io::Write;
 
 use flate2::write::ZlibEncoder;
@@ -58,7 +59,7 @@ pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String
             for chunk in hex.as_bytes().chunks(4) {
                 let old =
                     u16::from_str_radix(std::str::from_utf8(chunk).unwrap_or(""), 16).unwrap_or(0);
-                out.push_str(&format!("{:04X}", map.get(&old).copied().unwrap_or(0)));
+                write!(out, "{:04X}", map.get(&old).copied().unwrap_or(0)).unwrap();
             }
             out.push_str("> Tj");
         } else {
@@ -73,13 +74,13 @@ pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String
 pub(super) struct OutlineItem {
     pub(super) title: String,
     pub(super) page: usize,
-    pub(super) children: Vec<OutlineItem>,
+    pub(super) children: Vec<Self>,
 }
 
 impl OutlineItem {
     /// A bookmark to `page`; nest entries by pushing onto `children` afterward.
-    pub(super) fn new(title: String, page: usize) -> Self {
-        OutlineItem {
+    pub(super) const fn new(title: String, page: usize) -> Self {
+        Self {
             title,
             page,
             children: Vec::new(),
@@ -125,16 +126,18 @@ pub(super) fn flatten_outline(
             pdf_text_string(&item.title)
         );
         if k > 0 {
-            body.push_str(&format!(" /Prev {} 0 R", ids[k - 1]));
+            write!(body, " /Prev {} 0 R", ids[k - 1]).unwrap();
         }
         if k + 1 < ids.len() {
-            body.push_str(&format!(" /Next {} 0 R", ids[k + 1]));
+            write!(body, " /Next {} 0 R", ids[k + 1]).unwrap();
         }
         if let (Some(f), Some(l)) = (first, last) {
-            body.push_str(&format!(
+            write!(
+                body,
                 " /First {f} 0 R /Last {l} 0 R /Count {}",
                 item.children.len()
-            ));
+            )
+            .unwrap();
         }
         body.push_str(" >>");
         objects.insert(id, body.into_bytes());
@@ -162,10 +165,7 @@ pub(super) fn serialize(objects: &ObjMap, info: Option<u32>) -> Vec<u8> {
     for id in 1..=max_id {
         out.extend_from_slice(format!("{:010} {:05} n \n", offsets[id as usize], 0).as_bytes());
     }
-    let info_ref = match info {
-        Some(id) => format!(" /Info {id} 0 R"),
-        None => String::new(),
-    };
+    let info_ref = info.map_or_else(String::new, |id| format!(" /Info {id} 0 R"));
     out.extend_from_slice(
         format!(
             "trailer\n<< /Size {} /Root 1 0 R{info_ref} >>\nstartxref\n{xref}\n%%EOF\n",

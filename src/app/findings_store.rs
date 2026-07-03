@@ -50,7 +50,7 @@ struct Record {
 
 impl Record {
     fn from(f: &Finding, dismissed: bool) -> Self {
-        Record {
+        Self {
             summary: f.summary.clone(),
             chapters: f.chapters.clone(),
             book: f.book,
@@ -85,7 +85,7 @@ fn store_path(root: &Path) -> PathBuf {
 impl FindingsStore {
     /// Load the store, or the empty default when it's missing/unreadable (best
     /// effort — a corrupt file just starts triage fresh, never blocks the editor).
-    pub(super) fn load(root: &Path) -> FindingsStore {
+    pub(super) fn load(root: &Path) -> Self {
         std::fs::read_to_string(store_path(root))
             .ok()
             .and_then(|t| toml::from_str(&t).ok())

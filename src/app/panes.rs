@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// How the two panes are arranged.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum SplitDir {
+pub enum SplitDir {
     /// Stacked top/bottom (Vim `:split`).
     Stacked,
     /// Side by side left/right (Vim `:vsplit`).
@@ -24,7 +24,7 @@ pub(crate) enum SplitDir {
 /// What the non-focused pane holds. Only ever one instance (in `App::split`), so
 /// the variant size gap doesn't matter — no boxing.
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum OtherPane {
+pub enum OtherPane {
     /// A second editor on a chapter (#163).
     Editor(Buffer),
     /// A docked read-only surface — report / analysis / AI answer (#164).
@@ -36,7 +36,7 @@ pub(crate) enum OtherPane {
     Assistant { conv: Assistant, focused: bool },
 }
 
-pub(crate) struct Split {
+pub struct Split {
     pub(crate) other: OtherPane,
     pub(crate) dir: SplitDir,
     /// Whether the focused editor (`App::buffer`) is the top/left pane.
@@ -48,7 +48,7 @@ pub(crate) struct Split {
 
 /// What the renderer needs to lay out a split (#163/#164/#166): the shared
 /// geometry, plus what the other pane holds.
-pub(crate) struct SplitView<'a> {
+pub struct SplitView<'a> {
     pub(crate) dir: SplitDir,
     /// Percentage of the split axis given to the first (top/left) pane.
     pub(crate) first_ratio: u16,
@@ -58,7 +58,7 @@ pub(crate) struct SplitView<'a> {
 }
 
 /// What the non-focused pane shows the renderer (mirrors [`OtherPane`]).
-pub(crate) enum SplitContent<'a> {
+pub enum SplitContent<'a> {
     /// A second editor pane (#163/#165).
     Editor(&'a Buffer),
     /// A docked read-only surface — report / analysis / AI answer (#164).
@@ -118,6 +118,7 @@ impl App {
     /// to compare, or a story-bible entry / note to write alongside. It's a normal
     /// editor pane (read, edit, and save independently), reusing the #163 split
     /// machinery. Single-chapter view only.
+    #[allow(clippy::needless_pass_by_value)] // callers (nav.rs) hand over an owned path
     pub(super) fn open_file_in_pane(&mut self, path: PathBuf) {
         self.place_editor_pane(
             &path,
@@ -232,7 +233,7 @@ impl App {
             // A docked surface or the assistant: toggle which pane keys go to.
             match &mut s.other {
                 OtherPane::Surface { focused, .. } | OtherPane::Assistant { focused, .. } => {
-                    *focused = !*focused
+                    *focused = !*focused;
                 }
                 OtherPane::Editor(_) => {}
             }
@@ -328,24 +329,24 @@ impl App {
         // Grow the focused pane → enlarge whichever side it's on (XNOR). The
         // `.clamp` bounds both ends, so plain signed arithmetic is safe.
         let step = if grow == focused_is_first {
-            RESIZE_STEP as i32
+            i32::from(RESIZE_STEP)
         } else {
-            -(RESIZE_STEP as i32)
+            -i32::from(RESIZE_STEP)
         };
-        let next = split.first_ratio as i32 + step;
-        split.first_ratio = next.clamp(MIN_RATIO as i32, 100 - MIN_RATIO as i32) as u16;
+        let next = i32::from(split.first_ratio) + step;
+        split.first_ratio = next.clamp(i32::from(MIN_RATIO), 100 - i32::from(MIN_RATIO)) as u16;
     }
 
     /// Reset the split to an even balance (#173). A no-op when not split or already
     /// even.
-    fn equalize_split(&mut self) {
+    const fn equalize_split(&mut self) {
         if let Some(split) = self.split.as_mut() {
             split.first_ratio = EVEN_SPLIT;
         }
     }
 
     /// Whether a docked surface currently has scroll focus (#164) — keys go to it.
-    pub(crate) fn surface_pane_focused(&self) -> bool {
+    pub(crate) const fn surface_pane_focused(&self) -> bool {
         matches!(
             &self.split,
             Some(Split {
@@ -356,7 +357,7 @@ impl App {
     }
 
     /// Whether the assistant pane currently has key focus (#307) — keys go to it.
-    pub(crate) fn assistant_pane_focused(&self) -> bool {
+    pub(crate) const fn assistant_pane_focused(&self) -> bool {
         matches!(
             &self.split,
             Some(Split {

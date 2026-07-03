@@ -79,7 +79,7 @@ impl Manifest {
     /// [`Project::open`].
     pub(super) fn from_toml_value(
         value: toml::Value,
-    ) -> Result<(Manifest, Vec<Book>, usize), toml::de::Error> {
+    ) -> Result<(Self, Vec<Book>, usize), toml::de::Error> {
         let is_series = value
             .get("books")
             .and_then(|b| b.as_array())
@@ -93,7 +93,7 @@ impl Manifest {
                 .books
                 .first()
                 .expect("is_series guarantees a non-empty [[books]] array");
-            let manifest = Manifest::from_series(&series, first);
+            let manifest = Self::from_series(&series, first);
             Ok((manifest, series.books, 0))
         } else {
             Ok((value.try_into()?, Vec::new(), 0))
@@ -106,7 +106,7 @@ impl Manifest {
     fn from_series(series: &SeriesFile, book: &Book) -> Self {
         // Series-level fields come from the file root; the per-book fields are
         // filled in by `load_book`, and everything else is the manifest default.
-        let mut manifest = Manifest {
+        let mut manifest = Self {
             author: series.author.clone(),
             series: Some(series.title.clone()),
             start_date: series.start_date.clone(),
@@ -122,15 +122,15 @@ impl Manifest {
     /// [`to_book`](Manifest::to_book); hoists a book into the active manifest when
     /// opening (#328) or switching books (#329).
     fn load_book(&mut self, book: &Book) {
-        self.title = book.title.clone();
-        self.subtitle = book.subtitle.clone();
-        self.epigraph = book.epigraph.clone();
-        self.epigraph_by = book.epigraph_by.clone();
-        self.part_label = book.part_label.clone();
+        self.title.clone_from(&book.title);
+        self.subtitle.clone_from(&book.subtitle);
+        self.epigraph.clone_from(&book.epigraph);
+        self.epigraph_by.clone_from(&book.epigraph_by);
+        self.part_label.clone_from(&book.part_label);
         self.run_on_threshold = book.run_on_threshold;
-        self.goals = book.goals.clone();
-        self.parts = book.parts.clone();
-        self.chapters = book.chapters.clone();
+        self.goals.clone_from(&book.goals);
+        self.parts.clone_from(&book.parts);
+        self.chapters.clone_from(&book.chapters);
     }
 
     /// The per-book fields of this (active) manifest, for writing back into the
@@ -178,7 +178,7 @@ impl Project {
     }
 
     /// The index of the active book within the series (0 for a standalone novel).
-    pub fn active_book(&self) -> usize {
+    pub const fn active_book(&self) -> usize {
         self.active_book
     }
 
@@ -296,10 +296,10 @@ impl Project {
             let src = self.root.join(&chapter.file);
             if src.exists() {
                 fs::create_dir_all(&unused)?;
-                let base = Path::new(&chapter.file)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| chapter.file.clone());
+                let base = Path::new(&chapter.file).file_name().map_or_else(
+                    || chapter.file.clone(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
                 let dest = unique_dest(&unused, &base);
                 fs::rename(&src, &dest)?;
             }
@@ -374,6 +374,9 @@ impl Project {
             .map(|c| c.file.as_str())
             .chain(self.manifest.chapters.iter().map(|c| c.file.as_str()))
             .collect();
+        // `used` is finite and disk names are finite, so all but finitely many of
+        // the distinct `chapter-{n}.md` names are free — `find` always terminates.
+        #[allow(clippy::maybe_infinite_iter)]
         (1..)
             .map(|n| format!("chapter-{n}.md"))
             .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())
@@ -488,6 +491,7 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write;
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
@@ -539,12 +543,14 @@ mod tests {
         let mut manifest = String::from("title = \"Series\"\n\n");
         for b in 0..books {
             fs::create_dir_all(dir.join(format!("b{b}"))).unwrap();
-            manifest.push_str(&format!("[[books]]\ntitle = \"Book {b}\"\n\n"));
+            write!(manifest, "[[books]]\ntitle = \"Book {b}\"\n\n").unwrap();
             for i in 0..per_book {
                 let file = format!("b{b}/ch{i}.md");
-                manifest.push_str(&format!(
+                write!(
+                    manifest,
                     "[[books.chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
-                ));
+                )
+                .unwrap();
                 let mut body = String::from("---\nstatus: draft\npov: Mara\n---\n# Chapter\n\n");
                 for _ in 0..50 {
                     body.push_str("The night was dark and the road was very long indeed.\n");
@@ -563,7 +569,7 @@ mod tests {
     /// it stays linear. Catches a regression to O(n²) parse/cache work on the
     /// larger manifest.
     #[test]
-    #[ignore]
+    #[ignore = "release-only perf guard; run via cargo perf"]
     fn open_is_fast_for_a_multi_book_series() {
         let (books, per_book) = (6, 250); // 1500 chapters across the series
         let dir = temp_dir("perf-open-multibook");
@@ -723,7 +729,7 @@ file = \"b2/one.md\"
     /// the same bounded work `open` does for the first book — never the whole
     /// series. Catches a regression that re-reads or re-parses superlinearly.
     #[test]
-    #[ignore]
+    #[ignore = "release-only perf guard; run via cargo perf"]
     fn switching_books_is_fast_in_a_series() {
         let (books, per_book) = (2, 750);
         let dir = temp_dir("perf-switch-book");

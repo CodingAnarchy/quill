@@ -38,7 +38,7 @@ impl App {
 
     /// The prompt label for a wizard step. Each notes that blank skips and Esc
     /// dismisses the rest.
-    fn wizard_label(step: WizardStep) -> &'static str {
+    const fn wizard_label(step: WizardStep) -> &'static str {
         match step {
             WizardStep::Goals => {
                 "Goals — target words and chapters, e.g. \"80000 30\" (blank skips · Esc finishes)"
@@ -80,7 +80,7 @@ impl App {
                     _ => {
                         self.message = Some(
                             "Skipped goals — give target words and chapters, e.g. 80000 30.".into(),
-                        )
+                        );
                     }
                 }
             }

@@ -6,6 +6,7 @@
 use super::*;
 use crate::app::mouse::{EditorLayout, VisualRow};
 use crate::buffer::Buffer;
+use crate::manuscript::Manuscript;
 use crate::theme::{self, Theme};
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
@@ -407,17 +408,19 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
         return Vec::new();
     }
     let book_epigraph = app.project.manifest.epigraph();
-    let headers = match &app.manuscript {
-        Some(m) => m.segment_headers(),
+    let headers = app.manuscript.as_ref().map_or_else(
         // Single-chapter view: one header for the active chapter at line 0.
-        None => vec![SegmentHeader {
-            start: 0,
-            index: app.project.active_index(),
-            title: None,
-            structure: None,
-            epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),
-        }],
-    };
+        || {
+            vec![SegmentHeader {
+                start: 0,
+                index: app.project.active_index(),
+                title: None,
+                structure: None,
+                epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),
+            }]
+        },
+        Manuscript::segment_headers,
+    );
 
     let mut inserts = Vec::new();
     for header in &headers {
@@ -450,8 +453,8 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
 /// blank lines. Long lines soft-wrap to the column so nothing is cut off (#518).
 /// Never enters the buffer or any file.
 fn epigraph_lines(epigraph: &Epigraph, width: u16) -> Vec<Line<'static>> {
-    let theme = theme::current();
     const INDENT: &str = "    ";
+    let theme = theme::current();
     // Wrap within the column, leaving room for the inset on every row.
     let wrap_width = (width as usize).saturating_sub(INDENT.len()).max(1);
     let quote = Style::default()
@@ -503,7 +506,7 @@ fn structure_line(name: &str, width: u16) -> Line<'static> {
     let style = Style::default()
         .fg(theme::current().heading)
         .add_modifier(Modifier::ITALIC);
-    centered_line(name.to_uppercase(), width, style)
+    centered_line(&name.to_uppercase(), width, style)
 }
 
 /// A centered, dimmed chapter-break label, e.g. `—— Chapter Two ——`. Rendered
@@ -512,13 +515,13 @@ fn divider_line(title: &str, width: u16) -> Line<'static> {
     let style = Style::default()
         .fg(theme::current().dim)
         .add_modifier(Modifier::BOLD);
-    centered_line(format!("—— {title} ——"), width, style)
+    centered_line(&format!("—— {title} ——"), width, style)
 }
 
 /// A `label` padded to sit centered in `width` cells and styled — the shared
 /// shape of the chapter divider and the part/section header (#412), both of
 /// which are render-only.
-fn centered_line(label: String, width: u16, style: Style) -> Line<'static> {
+fn centered_line(label: &str, width: u16, style: Style) -> Line<'static> {
     let pad = (width as usize).saturating_sub(label.chars().count()) / 2;
     Line::from(Span::styled(format!("{}{label}", " ".repeat(pad)), style))
 }
@@ -703,7 +706,7 @@ fn code_row(row: Line<'static>, width: usize) -> Line<'static> {
 /// Prepend the display-only first-line indent to a rendered row (#722), reusing the
 /// first span's style so the indent doesn't introduce a style change mid-run.
 fn indented(row: Line<'static>) -> Line<'static> {
-    let style = row.spans.first().map_or(Style::default(), |s| s.style);
+    let style = row.spans.first().map_or_else(Style::default, |s| s.style);
     let mut spans = Vec::with_capacity(row.spans.len() + 1);
     spans.push(Span::styled(PARAGRAPH_INDENT, style));
     spans.extend(row.spans);

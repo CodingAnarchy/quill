@@ -143,9 +143,10 @@ fn the_tree_rolls_up_word_counts() {
 /// Building the tree rows for a series-sized project reads only cached metadata
 /// (never files), so even with every book expanded it stays well within a frame.
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn tree_rows_are_fast_for_a_series() {
     use std::collections::HashSet;
+    use std::fmt::Write;
     use std::time::Instant;
 
     let (books, per_book) = (4, 200);
@@ -153,12 +154,14 @@ fn tree_rows_are_fast_for_a_series() {
     let mut manifest = String::from("title = \"Series\"\n\n");
     for b in 0..books {
         fs::create_dir_all(dir.join(format!("b{b}"))).unwrap();
-        manifest.push_str(&format!("[[books]]\ntitle = \"Book {b}\"\n\n"));
+        write!(manifest, "[[books]]\ntitle = \"Book {b}\"\n\n").unwrap();
         for i in 0..per_book {
             let file = format!("b{b}/ch{i}.md");
-            manifest.push_str(&format!(
+            write!(
+                manifest,
                 "[[books.chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
-            ));
+            )
+            .unwrap();
             fs::write(dir.join(&file), "prose\n").unwrap();
         }
     }

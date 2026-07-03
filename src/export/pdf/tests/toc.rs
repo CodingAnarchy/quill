@@ -32,7 +32,7 @@ fn a_series_bookmarks_every_book_in_order() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -207,7 +207,7 @@ fn a_long_contents_flows_onto_a_second_page() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {

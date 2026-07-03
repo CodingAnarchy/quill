@@ -4,6 +4,8 @@
 //! keep both under the size convention (#716); the chapter/body layout, the Contents
 //! machinery, and the public entry points stay in their own modules.
 
+use std::fmt::Write;
+
 use super::draw::num;
 use super::{
     copyright_lines, Align, Epigraph, ImageRole, Pdf, PubMeta, BODY_LEADING, BODY_SIZE,
@@ -40,15 +42,17 @@ impl Pdf {
         let y = (page_h - dh) / 2.0;
         // Clip to the media box so cover-fill overflow (a differing aspect ratio) is
         // cropped at the page edge rather than spilling past it.
-        self.cur().push_str(&format!(
-            "q 0 0 {} {} re W n {} 0 0 {} {} {} cm /{name} Do Q\n",
+        writeln!(
+            self.cur(),
+            "q 0 0 {} {} re W n {} 0 0 {} {} {} cm /{name} Do Q",
             num(page_w),
             num(page_h),
             num(dw),
             num(dh),
             num(x),
             num(y)
-        ));
+        )
+        .unwrap();
     }
 
     /// The book title page: series, title, subtitle, author, and the book epigraph,

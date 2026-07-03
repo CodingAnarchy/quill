@@ -5,6 +5,7 @@
 //! its on-disk format is reused by the later trackers. See `docs/ai-features.md`.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -13,7 +14,7 @@ use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// One character's profile. The serde fields the model fills define the JSON
 /// schema; `mentions`/`last_chapter` are enriched locally after extraction.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Character {
     pub name: String,
     #[serde(default)]
@@ -45,7 +46,7 @@ pub struct Character {
 /// An actionable voice profile (#183): the speech fingerprint the voice-analysis
 /// pass checks dialogue and narration against, richer than a one-line summary.
 /// Every field is optional so a thin character still parses.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct VoiceProfile {
     /// How they build sentences — habits of phrasing, syntax, directness.
     #[serde(default)]
@@ -63,7 +64,7 @@ pub struct VoiceProfile {
 
 impl VoiceProfile {
     /// Whether the profile carries anything worth rendering.
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.patterns.is_empty()
             && self.register.is_none()
             && self.tics.is_empty()
@@ -71,19 +72,19 @@ impl VoiceProfile {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Relationship {
     pub name: String,
     pub relation: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ArcBeat {
     pub chapter: String,
     pub state: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Drift {
     pub detail: String,
     #[serde(default)]
@@ -256,14 +257,14 @@ pub fn render_profile(c: &Character, notes: &str, today: &str) -> String {
     let mut fm = format!("name: {}\n", bible::yaml(&c.name));
     if !c.aliases.is_empty() {
         let aliases: Vec<String> = c.aliases.iter().map(|a| bible::yaml(a)).collect();
-        fm.push_str(&format!("aliases: [{}]\n", aliases.join(", ")));
+        writeln!(fm, "aliases: [{}]", aliases.join(", ")).unwrap();
     }
     if let Some(role) = &c.role {
-        fm.push_str(&format!("role: {}\n", bible::yaml(role)));
+        writeln!(fm, "role: {}", bible::yaml(role)).unwrap();
     }
-    fm.push_str(&format!("mentions: {}\n", c.mentions));
+    writeln!(fm, "mentions: {}", c.mentions).unwrap();
     if let Some(last) = &c.last_chapter {
-        fm.push_str(&format!("last_chapter: {}\n", bible::yaml(last)));
+        writeln!(fm, "last_chapter: {}", bible::yaml(last)).unwrap();
     }
     bible::render(&fm, &generated_block(c), notes, today)
 }
@@ -272,23 +273,23 @@ pub fn render_profile(c: &Character, notes: &str, today: &str) -> String {
 fn generated_block(c: &Character) -> String {
     let mut s = String::new();
     if let Some(role) = &c.role {
-        s.push_str(&format!("**Role:** {role}\n\n"));
+        writeln!(s, "**Role:** {role}\n").unwrap();
     }
     bible::bullet_section(&mut s, "Physical", &c.physical);
     if let Some(voice) = c.voice.as_ref().filter(|v| !v.is_empty()) {
         s.push_str("## Voice\n");
         let labeled = |s: &mut String, label: &str, items: &[String]| {
             if !items.is_empty() {
-                s.push_str(&format!("- **{label}:** {}\n", items.join("; ")));
+                writeln!(s, "- **{label}:** {}", items.join("; ")).unwrap();
             }
         };
         labeled(&mut s, "Speech patterns", &voice.patterns);
         if let Some(register) = &voice.register {
-            s.push_str(&format!("- **Register:** {register}\n"));
+            writeln!(s, "- **Register:** {register}").unwrap();
         }
         labeled(&mut s, "Verbal tics", &voice.tics);
         if let Some(rhythm) = &voice.rhythm {
-            s.push_str(&format!("- **Rhythm:** {rhythm}\n"));
+            writeln!(s, "- **Rhythm:** {rhythm}").unwrap();
         }
         s.push('\n');
     }
@@ -296,7 +297,7 @@ fn generated_block(c: &Character) -> String {
     if !c.relationships.is_empty() {
         s.push_str("## Relationships\n");
         for r in &c.relationships {
-            s.push_str(&format!("- {} — {}\n", r.name, r.relation));
+            writeln!(s, "- {} — {}", r.name, r.relation).unwrap();
         }
         s.push('\n');
     }
@@ -304,7 +305,7 @@ fn generated_block(c: &Character) -> String {
     if !c.arc.is_empty() {
         s.push_str("## Arc\n");
         for beat in &c.arc {
-            s.push_str(&format!("- **{}:** {}\n", beat.chapter, beat.state));
+            writeln!(s, "- **{}:** {}", beat.chapter, beat.state).unwrap();
         }
         s.push('\n');
     }
@@ -316,7 +317,7 @@ fn generated_block(c: &Character) -> String {
             } else {
                 format!(" ({})", d.chapters.join(", "))
             };
-            s.push_str(&format!("- {}{}\n", d.detail, where_));
+            writeln!(s, "- {}{}", d.detail, where_).unwrap();
         }
         s.push('\n');
     }
@@ -410,18 +411,20 @@ pub fn render_index(chars: &[Character], today: &str) -> String {
             continue;
         }
         any = true;
-        body.push_str(&format!("## {name}\n"));
+        writeln!(body, "## {name}").unwrap();
         for edge in outgoing {
             let mutual = edge
                 .tracked
                 .then(|| reciprocal(name, edge.target, &edges))
                 .flatten();
             match mutual {
-                Some(back_relation) => body.push_str(&format!(
-                    "- {} — {} (mutual: {})\n",
+                Some(back_relation) => writeln!(
+                    body,
+                    "- {} — {} (mutual: {})",
                     edge.target, edge.relation, back_relation
-                )),
-                None => body.push_str(&format!("- {} — {}\n", edge.target, edge.relation)),
+                )
+                .unwrap(),
+                None => writeln!(body, "- {} — {}", edge.target, edge.relation).unwrap(),
             }
         }
         // Incoming edges this character doesn't list back — a one-sided reference
@@ -436,7 +439,7 @@ pub fn render_index(chars: &[Character], today: &str) -> String {
                 .iter()
                 .map(|(from, relation)| format!("{from} ({relation})"))
                 .collect();
-            body.push_str(&format!("- _Also referenced by:_ {}\n", refs.join(", ")));
+            writeln!(body, "- _Also referenced by:_ {}", refs.join(", ")).unwrap();
         }
         body.push('\n');
     }

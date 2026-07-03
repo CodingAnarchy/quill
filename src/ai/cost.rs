@@ -73,7 +73,8 @@ pub fn estimate(input_chars: usize, max_tokens: u32, model: &str, batch: bool) -
     let tokens = (input_chars / 4) as u32;
     let (in_rate, out_rate) = rate(model);
     let discount = if batch { BATCH_DISCOUNT } else { 1.0 };
-    let dollars = (tokens as f64 * in_rate + max_tokens as f64 * out_rate) * discount / 1_000_000.0;
+    let dollars =
+        (f64::from(tokens) * in_rate + f64::from(max_tokens) * out_rate) * discount / 1_000_000.0;
     Estimate { tokens, dollars }
 }
 
@@ -95,10 +96,10 @@ pub fn estimate_turn(
     let cached = (cached_chars / 4) as u32;
     let fresh = (fresh_chars / 4) as u32;
     let (in_rate, out_rate) = rate(model);
-    let dollars = (f64::from(cached) * in_rate * CACHE_READ
-        + f64::from(fresh) * in_rate
-        + f64::from(max_tokens) * out_rate)
-        / 1_000_000.0;
+    let dollars = f64::from(max_tokens).mul_add(
+        out_rate,
+        (f64::from(cached) * in_rate).mul_add(CACHE_READ, f64::from(fresh) * in_rate),
+    ) / 1_000_000.0;
     Estimate {
         tokens: cached + fresh,
         dollars,
@@ -155,6 +156,9 @@ mod tests {
     }
 
     #[test]
+    // Both sides run the identical code path, so the dollar figures are bit-for-bit
+    // equal — an exact compare is the point (unknown falls back to the opus tier).
+    #[allow(clippy::float_cmp)]
     fn unknown_model_uses_the_opus_tier() {
         assert_eq!(
             estimate(4000, 100, "mystery", false).dollars,

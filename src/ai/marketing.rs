@@ -5,13 +5,15 @@
 //! — so it stays within the assistant-not-co-writer rule. See
 //! `docs/ai-features.md`.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{numbered_sections, AiError, Request};
 
 /// A round of marketing copy: several blurb variants and several taglines.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Marketing {
     #[serde(default)]
     pub blurbs: Vec<String>,
@@ -25,11 +27,10 @@ impl Marketing {
     /// Skips an artifact with no content so an empty round writes no empty file.
     pub fn artifacts(&self) -> Vec<(&'static str, &'static str, String)> {
         let blurbs = numbered_sections("Variant", &self.blurbs);
-        let taglines: String = self
-            .taglines
-            .iter()
-            .map(|t| format!("- {}\n", t.trim()))
-            .collect();
+        let mut taglines = String::new();
+        for t in &self.taglines {
+            writeln!(taglines, "- {}", t.trim()).unwrap();
+        }
         [
             ("Back-cover blurbs", "blurbs.md", blurbs),
             ("Taglines", "taglines.md", taglines),

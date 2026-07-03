@@ -16,8 +16,7 @@ impl App {
             .manifest
             .print
             .as_ref()
-            .map(|p| p.bleed_points())
-            .unwrap_or(0.0)
+            .map_or(0.0, crate::export::pdf::PrintConfig::bleed_points)
     }
 
     /// The print trim (in points) from the manifest `[print]` table, with a warning
@@ -30,16 +29,19 @@ impl App {
             .as_ref()
             .and_then(|p| p.trim.as_deref())
             .unwrap_or(export::pdf::DEFAULT_TRIM);
-        match export::pdf::trim_points(name) {
-            Some(dims) => (dims, None),
-            None => (
-                export::pdf::trim_points(export::pdf::DEFAULT_TRIM).expect("default trim is valid"),
-                Some(format!(
-                    "print: unknown trim '{name}' (use 6x9/5x8/5.5x8.5) — using {}",
-                    export::pdf::DEFAULT_TRIM
-                )),
-            ),
-        }
+        export::pdf::trim_points(name).map_or_else(
+            || {
+                (
+                    export::pdf::trim_points(export::pdf::DEFAULT_TRIM)
+                        .expect("default trim is valid"),
+                    Some(format!(
+                        "print: unknown trim '{name}' (use 6x9/5x8/5.5x8.5) — using {}",
+                        export::pdf::DEFAULT_TRIM
+                    )),
+                )
+            },
+            |dims| (dims, None),
+        )
     }
 
     /// The designed-export styling for this project (#468): the manifest's
@@ -60,7 +62,7 @@ impl App {
 
     /// Append styling warnings (e.g. an unreadable font) to the export message, so
     /// a misconfigured `[style]` doesn't fail silently.
-    pub(super) fn note_export_warnings(&mut self, warnings: Vec<String>) {
+    pub(super) fn note_export_warnings(&mut self, warnings: &[String]) {
         if warnings.is_empty() {
             return;
         }
@@ -97,10 +99,10 @@ impl App {
                 self.message = Some(format!(
                     "Wrote {} but couldn't open it: {e}",
                     path.display()
-                ))
+                ));
             }
         }
-        self.note_export_warnings(warnings);
+        self.note_export_warnings(&warnings);
     }
 
     /// Render the fixed style-preview sample (#483) through the resolved `[style]`

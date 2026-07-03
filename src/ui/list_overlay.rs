@@ -24,7 +24,7 @@ use crate::mode::{
 use crate::project::Project;
 
 /// The selection marker for a list row.
-pub(super) fn marker(selected: bool) -> &'static str {
+pub(super) const fn marker(selected: bool) -> &'static str {
     if selected {
         "▸ "
     } else {
@@ -44,11 +44,7 @@ pub(super) fn row_style(selected: bool) -> Style {
 /// A standard list row: the selection marker + `primary` text (reversed when
 /// selected), optionally followed by dimmed `secondary` text (`  — …`). The
 /// shared shape of every list-overlay row.
-pub(super) fn list_row(
-    selected: bool,
-    primary: String,
-    secondary: Option<String>,
-) -> Line<'static> {
+pub(super) fn list_row(selected: bool, primary: &str, secondary: Option<String>) -> Line<'static> {
     let mut spans = vec![Span::styled(
         format!("{}{primary}", marker(selected)),
         row_style(selected),
@@ -185,7 +181,7 @@ pub(super) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palette) {
                     let indent = if item.group.is_some() { "  " } else { "" };
                     list_row(
                         selected,
-                        format!("{indent}{}", item.label),
+                        &format!("{indent}{}", item.label),
                         Some(item.desc.clone()),
                     )
                 }
@@ -221,12 +217,12 @@ pub fn draw_startup_chooser(frame: &mut Frame, area: Rect, selected: usize) {
     let rows = vec![
         list_row(
             selected == 0,
-            "Create a new project".to_string(),
+            "Create a new project",
             Some("name it and start a fresh book".to_string()),
         ),
         list_row(
             selected == 1,
-            "Open an existing project".to_string(),
+            "Open an existing project",
             Some("pick from your recent projects and library".to_string()),
         ),
     ];
@@ -252,13 +248,7 @@ pub fn draw_startup_browser(
     let rows = projects
         .iter()
         .enumerate()
-        .map(|(i, p)| {
-            list_row(
-                i == selected,
-                p.title.clone(),
-                Some(p.path.display().to_string()),
-            )
-        })
+        .map(|(i, p)| list_row(i == selected, &p.title, Some(p.path.display().to_string())))
         .collect();
     draw_list_overlay(
         frame,
@@ -304,7 +294,7 @@ pub(super) fn draw_project_browser(
             let tag = if here { "  (open)" } else { "" };
             list_row(
                 *i == browser.selected,
-                format!("{}{tag}", p.title),
+                &format!("{}{tag}", p.title),
                 Some(p.path.display().to_string()),
             )
         })
@@ -339,7 +329,7 @@ pub(super) fn draw_dir_browser(frame: &mut Frame, area: Rect, browser: &DirBrows
             } else {
                 "/"
             };
-            list_row(i == browser.selected, format!("{}{tag}", e.label), None)
+            list_row(i == browser.selected, &format!("{}{tag}", e.label), None)
         })
         .collect();
     let title = format!(" {} ", browser.cwd.display());
@@ -406,7 +396,7 @@ pub(super) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &ProjectSea
         .map(|(i, m)| {
             list_row(
                 show_selection && i == ps.selected,
-                m.context.clone(),
+                &m.context,
                 Some(m.title.clone()),
             )
         })
@@ -444,7 +434,7 @@ pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, 
             };
             list_row(
                 i == findings.selected,
-                format!("{}{loc}", item.summary),
+                &format!("{}{loc}", item.summary),
                 None,
             )
         })
@@ -471,7 +461,7 @@ pub(super) fn draw_history(frame: &mut Frame, area: Rect, history: &History, cha
         .map(|(i, c)| {
             list_row(
                 i == history.selected,
-                format!("{}  {}  {}", c.when, c.id, c.summary),
+                &format!("{}  {}  {}", c.when, c.id, c.summary),
                 None,
             )
         })
@@ -542,7 +532,7 @@ pub(super) fn draw_import_preview(frame: &mut Frame, area: Rect, preview: &Impor
         .chapters
         .iter()
         .enumerate()
-        .map(|(i, (t, _))| list_row(i == preview.scroll, format!("{}. {t}", i + 1), None));
+        .map(|(i, (t, _))| list_row(i == preview.scroll, &format!("{}. {t}", i + 1), None));
     header.extend(chapter_rows);
 
     let levels = if preview.levels.len() > 1 {
@@ -584,7 +574,7 @@ pub(super) fn draw_annotations(
             } else {
                 "(text gone)".to_string()
             };
-            list_row(i == selected, a.note.clone(), Some(snippet))
+            list_row(i == selected, &a.note, Some(snippet))
         })
         .collect();
     draw_list_overlay(
@@ -648,7 +638,7 @@ pub(super) fn draw_corkboard(frame: &mut Frame, area: Rect, board: &Corkboard) {
         // A status badge leads each card so the drafting state reads at a glance.
         rows.push(list_row(
             i == board.selected,
-            format!("{} {indent}{}", c.status.badge(), c.title),
+            &format!("{} {indent}{}", c.status.badge(), c.title),
             synopsis,
         ));
     }
@@ -699,7 +689,7 @@ pub(super) fn draw_model_manager(
             );
             list_row(
                 i == selected,
-                format!("{mark}Qwen2.5-{}", m.id()),
+                &format!("{mark}Qwen2.5-{}", m.id()),
                 Some(format!("{stats} — {}", m.description)),
             )
         })

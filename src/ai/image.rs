@@ -18,7 +18,7 @@ pub struct ImageRequest {
 
 /// What an image pass produced: the saved files (project-relative paths) and a
 /// reason for each one that couldn't be generated or written.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct ImageReport {
     pub saved: Vec<String>,
     pub failed: Vec<String>,
@@ -147,7 +147,7 @@ impl ImageSettings {
 
     /// The backend that will actually run, accounting for the privacy switch:
     /// `offline` forces local; otherwise the configured `backend`.
-    pub fn backend(&self) -> ImageBackendKind {
+    pub const fn backend(&self) -> ImageBackendKind {
         if self.offline {
             ImageBackendKind::Local
         } else {

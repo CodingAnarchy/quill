@@ -90,7 +90,7 @@ impl App {
         let headings = buffer.syntax().headings();
         let meta = buffer
             .front_matter()
-            .map(|fm| fm.scenes())
+            .map(super::super::frontmatter::FrontMatter::scenes)
             .unwrap_or_default();
         // Per-chapter board: cards belong to the active buffer, so they carry no
         // chapter tag or group header.
@@ -115,7 +115,7 @@ impl App {
                     let text = buffer.text();
                     let meta = buffer
                         .front_matter()
-                        .map(|fm| fm.scenes())
+                        .map(super::super::frontmatter::FrontMatter::scenes)
                         .unwrap_or_default();
                     cards_for(&text, buffer.syntax().headings(), &meta, Some(ch), &title)
                 } else {
@@ -148,10 +148,10 @@ impl App {
         let selected = board.selected;
         match key.code {
             KeyCode::Enter => self.jump_to_card(selected),
-            KeyCode::Char('K') | KeyCode::Char('[') => self.reorder_scene(selected, -1),
-            KeyCode::Char('J') | KeyCode::Char(']') => self.reorder_scene(selected, 1),
+            KeyCode::Char('K' | '[') => self.reorder_scene(selected, -1),
+            KeyCode::Char('J' | ']') => self.reorder_scene(selected, 1),
             KeyCode::Char('e') => self.prompt_scene_synopsis(selected),
-            KeyCode::Char('s') | KeyCode::Char(' ') => self.cycle_scene_status(selected),
+            KeyCode::Char('s' | ' ') => self.cycle_scene_status(selected),
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
         }
@@ -345,7 +345,7 @@ impl App {
         let mut scenes = self
             .edit_buffer()
             .front_matter()
-            .map(|fm| fm.scenes())
+            .map(super::super::frontmatter::FrontMatter::scenes)
             .unwrap_or_default();
         scenes.resize(count, SceneMeta::default());
         scenes
@@ -405,16 +405,17 @@ impl App {
         }
         // Re-find the moved scene by its (chapter, within-chapter index) so the
         // highlight follows it even though the flat board index shifted.
-        let selected = match chapter {
-            Some(ch) => cards
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.chapter == Some(ch))
-                .nth(scene)
-                .map(|(i, _)| i)
-                .unwrap_or(cards.len() - 1),
-            None => scene.min(cards.len() - 1),
-        };
+        let selected = chapter.map_or_else(
+            || scene.min(cards.len() - 1),
+            |ch| {
+                cards
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.chapter == Some(ch))
+                    .nth(scene)
+                    .map_or(cards.len() - 1, |(i, _)| i)
+            },
+        );
         self.mode = Mode::Corkboard(Box::new(Corkboard {
             cards,
             selected,
@@ -520,10 +521,7 @@ fn scenes(text: &str, headings: &[Heading]) -> Vec<Scene> {
 /// covers its own line; this finds where the following prose begins.
 fn line_end(text: &str, at: usize) -> usize {
     let at = at.min(text.len());
-    match text[at..].find('\n') {
-        Some(nl) => at + nl + 1,
-        None => text.len(),
-    }
+    text[at..].find('\n').map_or(text.len(), |nl| at + nl + 1)
 }
 
 /// The first non-empty, non-heading line of `body`, trimmed — the card's prose

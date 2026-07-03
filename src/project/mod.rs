@@ -33,9 +33,9 @@ mod template;
 
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 use io::cache_chapter;
-pub(crate) use io::read_existing;
+pub use io::read_existing;
 use series::Book;
-pub(crate) use structure::unique_dest;
+pub use structure::unique_dest;
 pub use template::{ProjectTemplate, TEMPLATES};
 
 /// The manifest file at the root of every project.
@@ -82,7 +82,7 @@ pub struct ChapterEntry {
 impl ChapterEntry {
     /// A new entry with the given title and file; the transient caches start
     /// empty (populated from the file at open and as the chapter is edited).
-    fn new(title: String, file: String) -> Self {
+    const fn new(title: String, file: String) -> Self {
         Self {
             title,
             file,
@@ -275,7 +275,7 @@ impl Manifest {
 
 /// Count of leading front-matter chapters (#185) in a band-ordered chapter list.
 /// Shared by [`Manifest::front_chapter_count`] and the series tree (#330).
-pub(crate) fn front_chapter_count(chapters: &[ChapterEntry]) -> usize {
+pub fn front_chapter_count(chapters: &[ChapterEntry]) -> usize {
     chapters
         .iter()
         .filter(|c| Band::of(c.role) == Band::Front)
@@ -285,7 +285,7 @@ pub(crate) fn front_chapter_count(chapters: &[ChapterEntry]) -> usize {
 /// The 0-based part containing 1-based **body** position `body_pos`, if any. Part
 /// ranges are inclusive 1-based positions among the body chapters (#185). Shared
 /// by [`Manifest::part_of`] and the series tree (#330) so the mapping can't drift.
-pub(crate) fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
+pub fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
     parts
         .iter()
         .position(|p| p.chapters[0] <= body_pos && body_pos <= p.chapters[1])
@@ -296,7 +296,7 @@ pub(crate) fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<u
 /// the name stays one folder (no `..`, no nesting). Shared by the no-path startup
 /// (#423) and renaming the open project (#424). The trailing trim runs last
 /// because stripping an outer dot can expose a space (`"book . "` → `"book"`).
-pub(crate) fn sanitize_dir_name(input: &str) -> String {
+pub fn sanitize_dir_name(input: &str) -> String {
     let flattened = input.trim().replace(['/', '\\'], "-");
     flattened.trim_matches('.').trim().to_string()
 }
@@ -414,7 +414,9 @@ impl Project {
             // Order front matter → body → back matter in memory, whatever order
             // the manifest listed them in (#180).
             project.reorder_by_band();
-            project.active = project.manifest.chapters[0].file.clone();
+            project
+                .active
+                .clone_from(&project.manifest.chapters[0].file);
         }
         // Cache the other books' chapters too (#331), so book and series totals
         // are real without re-reading later. One file read per chapter; the
@@ -454,8 +456,7 @@ impl Project {
 
         let title = root
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Untitled".into());
+            .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned());
 
         let mut project = Self {
             root,
@@ -523,7 +524,7 @@ impl Project {
         if !path.exists() {
             atomic::write(&path, b"")?;
         }
-        self.active = entry.file.clone();
+        self.active.clone_from(&entry.file);
         self.manifest.chapters.push(entry);
         self.save_manifest()
     }
@@ -876,7 +877,7 @@ fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
             // Generated/scratch trees aren't reference material: `unused/` (deleted
             // chapters) and `export/` (compiled output, #190).
             let name = path.file_name().and_then(|n| n.to_str());
-            if !matches!(name, Some("unused") | Some("export")) {
+            if !matches!(name, Some("unused" | "export")) {
                 collect_markdown(&path, chapters, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some("md")

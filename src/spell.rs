@@ -172,7 +172,7 @@ mod tests {
     /// chapter (#357) stays well within a frame, so checking on idle never
     /// stutters. Excludes the one-time dictionary parse (warmed first).
     #[test]
-    #[ignore]
+    #[ignore = "release-only perf guard; run via cargo perf"]
     fn spell_pass_is_fast_at_window_size() {
         let para =
             "The night was dark and the road was very long indeed and the captain walked on. ";

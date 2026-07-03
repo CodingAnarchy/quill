@@ -5,6 +5,8 @@
 //! (#190); the Word / Scrivener / Vellum writers (#191–#193) consume the same
 //! `Document`.
 
+use std::fmt::Write;
+
 use crate::frontmatter::{Epigraph, Role};
 
 pub mod docx;
@@ -68,7 +70,7 @@ impl PubMeta {
     /// belongs on it (publisher, date, ISBN, or an explicit rights line) is set.
     /// A book with no publishing metadata gets no copyright page, so the default
     /// output is unchanged.
-    fn has_copyright_page(&self) -> bool {
+    const fn has_copyright_page(&self) -> bool {
         self.rights.is_some()
             || self.publisher.is_some()
             || self.date.is_some()
@@ -82,7 +84,7 @@ impl PubMeta {
 /// markup (centered/italic prose), the way [`render_epigraph`] is shared. Returns
 /// an empty vector when no copyright page is warranted, so callers can skip the
 /// section entirely.
-pub(crate) fn copyright_lines(meta: &PubMeta) -> Vec<String> {
+pub fn copyright_lines(meta: &PubMeta) -> Vec<String> {
     if !meta.has_copyright_page() {
         return Vec::new();
     }
@@ -156,12 +158,12 @@ pub fn to_markdown(doc: &Document) -> String {
         out.push_str(series);
         out.push_str("\n\n");
     }
-    out.push_str(&format!("# {}\n\n", doc.title));
+    write!(out, "# {}\n\n", doc.title).unwrap();
     if let Some(subtitle) = &doc.subtitle {
-        out.push_str(&format!("*{subtitle}*\n\n"));
+        write!(out, "*{subtitle}*\n\n").unwrap();
     }
     if let Some(author) = &doc.author {
-        out.push_str(&format!("by {author}\n\n"));
+        write!(out, "by {author}\n\n").unwrap();
     }
     if let Some(epigraph) = &doc.epigraph {
         out.push_str(&epigraph_block(epigraph));
@@ -169,9 +171,9 @@ pub fn to_markdown(doc: &Document) -> String {
 
     for block in doc.blocks() {
         match block {
-            Block::Part(name) => out.push_str(&format!("## {name}\n\n")),
+            Block::Part(name) => write!(out, "## {name}\n\n").unwrap(),
             Block::Chapter(chapter) => {
-                out.push_str(&format!("## {}\n\n", chapter.title));
+                write!(out, "## {}\n\n", chapter.title).unwrap();
                 if let Some(epigraph) = &chapter.epigraph {
                     out.push_str(&epigraph_block(epigraph));
                 }
@@ -206,7 +208,7 @@ pub fn to_markdown_series(
         out.push_str("\n\n");
     }
     if let Some(author) = author {
-        out.push_str(&format!("by {author}\n\n"));
+        write!(out, "by {author}\n\n").unwrap();
     }
     for book in books {
         out.push_str(&to_markdown(book));
@@ -219,7 +221,7 @@ pub fn to_markdown_series(
 /// show the title twice. A body whose first heading differs from the title is
 /// left untouched — only a true duplicate is removed. Mirrors the outline pane's
 /// `redundant_title_heading`.
-pub(crate) fn strip_repeated_title(body: &str, title: &str) -> String {
+pub fn strip_repeated_title(body: &str, title: &str) -> String {
     let trimmed = body.trim_start_matches('\n');
     let Some(rest) = trimmed.strip_prefix("# ") else {
         return body.to_string();
@@ -237,7 +239,7 @@ pub(crate) fn strip_repeated_title(body: &str, title: &str) -> String {
 /// round-trips Quill's own export, so the type is shared rather than modeled as
 /// an untyped `(String, bool, bool)` tuple on each side (#506).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Run {
+pub struct Run {
     pub(crate) text: String,
     pub(crate) bold: bool,
     pub(crate) italic: bool,
@@ -246,7 +248,7 @@ pub(crate) struct Run {
 impl Run {
     /// A run carrying `text` with the given emphasis.
     pub(crate) fn new(text: impl Into<String>, bold: bool, italic: bool) -> Self {
-        Run {
+        Self {
             text: text.into(),
             bold,
             italic,
@@ -292,7 +294,7 @@ fn inline_runs(text: &str) -> Vec<Run> {
 /// Flush the accumulated text as a [`Run`] with the current bold/italic flags.
 /// The single `mem::take`-into-a-run helper shared by the export run-splitter and
 /// the import RTF run-collector (#506).
-pub(crate) fn push_run(runs: &mut Vec<Run>, cur: &mut String, bold: bool, italic: bool) {
+pub fn push_run(runs: &mut Vec<Run>, cur: &mut String, bold: bool, italic: bool) {
     if !cur.is_empty() {
         runs.push(Run::new(std::mem::take(cur), bold, italic));
     }
@@ -309,7 +311,7 @@ fn xml_escape(s: &str) -> String {
 /// the standard manuscript / Scrivener scene divider, which Vellum also
 /// recognizes as a scene break on import (#199). The `.scriv` importer reads it
 /// back to a thematic break, so it's shared rather than re-declared.
-pub(crate) const SCENE_BREAK: &str = "#";
+pub const SCENE_BREAK: &str = "#";
 
 /// One block of a chapter body (the body split on blank lines), classified so
 /// each format writer renders it in its own markup. Shared by the Word and
@@ -496,7 +498,7 @@ mod tests {
             subtitle: Some("a novel".into()),
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -518,7 +520,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -574,7 +576,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -602,7 +604,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -726,7 +728,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -749,7 +751,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: Some(epigraph("Roses are red\n\nViolets are blue", None)),
             front: vec![],
             parts: vec![],

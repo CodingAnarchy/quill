@@ -65,13 +65,13 @@ impl App {
     /// the single view, the loaded-chapter indices in the continuous view. Stable
     /// across prose edits; changes when the buffer is rebuilt around a new layout.
     fn annotation_context(&self) -> String {
-        match &self.manuscript {
-            Some(m) => {
+        self.manuscript.as_ref().map_or_else(
+            || format!("S:{}", self.project.active_file()),
+            |m| {
                 let ids: Vec<String> = m.loaded_chapters().iter().map(usize::to_string).collect();
                 format!("C:{}", ids.join(","))
-            }
-            None => format!("S:{}", self.project.active_file()),
-        }
+            },
+        )
     }
 
     /// Load every loaded chapter's annotations for the current view (#370),
@@ -97,14 +97,15 @@ impl App {
     /// active chapter at 0 in the single view; each segment's chapter and start
     /// byte in the continuous view. The seam for translating annotation offsets.
     fn chapter_bases(&self) -> Vec<(String, usize)> {
-        match &self.manuscript {
-            Some(m) => m
-                .segment_spans()
-                .into_iter()
-                .map(|(idx, start, _end)| (self.project.chapter_file(idx).to_string(), start))
-                .collect(),
-            None => vec![(self.project.active_file().to_string(), 0)],
-        }
+        self.manuscript.as_ref().map_or_else(
+            || vec![(self.project.active_file().to_string(), 0)],
+            |m| {
+                m.segment_spans()
+                    .into_iter()
+                    .map(|(idx, start, _end)| (self.project.chapter_file(idx).to_string(), start))
+                    .collect()
+            },
+        )
     }
 
     /// The chapter `(file, base_byte)` that owns a buffer byte (#370) — the active
@@ -195,7 +196,8 @@ impl App {
         match range {
             Some((start, end)) => self.start_annotation_range(start, end),
             None => {
-                self.message = Some("Select text or place the cursor on a word to annotate.".into())
+                self.message =
+                    Some("Select text or place the cursor on a word to annotate.".into());
             }
         }
     }
@@ -215,6 +217,7 @@ impl App {
     /// Create the annotation for a confirmed note (#302). An empty note cancels.
     /// The range is buffer-absolute; it's tagged with the chapter that owns it
     /// (#370) so it persists to the right file in either view.
+    #[allow(clippy::needless_pass_by_value)] // callers (prompts.rs, tests) pass owned notes
     pub(crate) fn create_annotation(&mut self, start: usize, end: usize, note: String) {
         let note = note.trim().to_string();
         if note.is_empty() {

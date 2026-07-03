@@ -30,29 +30,29 @@ pub enum Kind {
 
 impl Kind {
     /// The three kinds, in menu order.
-    pub const ALL: &'static [Kind] = &[Kind::Character, Kind::Place, Kind::Term];
+    pub const ALL: &'static [Self] = &[Self::Character, Self::Place, Self::Term];
 
     /// A short human label for the picker row and prompt.
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
-            Kind::Character => "character",
-            Kind::Place => "place",
-            Kind::Term => "invented term",
+            Self::Character => "character",
+            Self::Place => "place",
+            Self::Term => "invented term",
         }
     }
 
     /// How the kind reads in the request to the model.
-    fn phrase(self) -> &'static str {
+    const fn phrase(self) -> &'static str {
         match self {
-            Kind::Character => "a character (person) name",
-            Kind::Place => "a place name (city, region, or landmark)",
-            Kind::Term => "an invented term (a coined word for an object or concept)",
+            Self::Character => "a character (person) name",
+            Self::Place => "a place name (city, region, or landmark)",
+            Self::Term => "an invented term (a coined word for an object or concept)",
         }
     }
 }
 
 /// One candidate the name generator returns.
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Name {
     /// The candidate name.
     pub text: String,

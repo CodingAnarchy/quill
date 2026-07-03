@@ -15,7 +15,7 @@ use crate::workflow;
 /// A workflow run in progress (#227): the resolved steps plus the shared
 /// sequenced-run bookkeeping (#344). Lives in `App::workflow_run` as `Some` for
 /// the run's lifetime.
-pub(crate) struct WorkflowRun {
+pub struct WorkflowRun {
     /// The workflow's name, for progress and summary messages.
     name: String,
     /// The fully-resolved steps, in order.
@@ -36,7 +36,7 @@ impl WorkflowRun {
 
 /// The workflow runner's [`Sequenced`] behavior (#344) — the marker the generic
 /// advance/timeout/cancel dispatch through.
-pub(crate) struct WorkflowDriver;
+pub struct WorkflowDriver;
 
 impl Sequenced for WorkflowDriver {
     fn run_mut(app: &mut App) -> Option<&mut SequencedRun> {
@@ -58,11 +58,7 @@ impl Sequenced for WorkflowDriver {
         }
     }
     fn cancelling_message(app: &App) -> String {
-        let name = app
-            .workflow_run
-            .as_ref()
-            .map(|r| r.name.as_str())
-            .unwrap_or("");
+        let name = app.workflow_run.as_ref().map_or("", |r| r.name.as_str());
         format!("Workflow '{name}': cancelling after this step…")
     }
 }
@@ -90,7 +86,7 @@ impl App {
             title: "Workflows",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

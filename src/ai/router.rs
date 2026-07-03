@@ -58,7 +58,7 @@ pub struct Inputs {
 }
 
 /// The router's decision for one action.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Route {
     /// Where to run it (the default if a confirm is offered and declined-to-run).
     pub backend: BackendKind,
@@ -71,7 +71,7 @@ pub struct Route {
 }
 
 /// A pending routing confirmation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirm {
     /// Whether "run locally instead" is one of the offered choices.
     pub offer_local: bool,
@@ -79,7 +79,7 @@ pub struct Confirm {
 
 impl Route {
     fn run(backend: BackendKind, reason: impl Into<String>) -> Self {
-        Route {
+        Self {
             backend,
             confirm: None,
             reason: reason.into(),

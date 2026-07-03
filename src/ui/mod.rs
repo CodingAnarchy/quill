@@ -32,7 +32,7 @@ use list_overlay::{
 pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
 use overlay::{draw_bible_review, draw_overlay, draw_tree};
 // `max_scroll` is shared with the report key handler (`crate::ui::max_scroll`).
-pub(crate) use overlay::max_scroll;
+pub use overlay::max_scroll;
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
 /// itself into a given area. A custom trait rather than ratatui's `Widget`
@@ -73,28 +73,28 @@ pub fn draw(frame: &mut Frame, app: &App) {
     match &app.mode {
         Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
         Mode::Findings(findings) => modal(frame, area, |f, r| {
-            draw_findings(f, r, findings, &app.project)
+            draw_findings(f, r, findings, &app.project);
         }),
         Mode::History(history) => {
             let chapter = app.project.active_title().unwrap_or("this chapter");
-            modal(frame, area, |f, r| draw_history(f, r, history, chapter))
+            modal(frame, area, |f, r| draw_history(f, r, history, chapter));
         }
         Mode::Annotations { selected } => {
-            modal(frame, area, |f, r| draw_annotations(f, r, app, *selected))
+            modal(frame, area, |f, r| draw_annotations(f, r, app, *selected));
         }
         Mode::Corkboard(board) => modal(frame, area, |f, r| draw_corkboard(f, r, board)),
         Mode::ModelManager { selected } => {
-            modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected))
+            modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected));
         }
         Mode::ProjectSearch(ps) => modal(frame, area, |f, r| draw_project_search(f, r, ps)),
         Mode::Palette(palette) => modal(frame, area, |f, r| draw_palette(f, r, palette)),
         Mode::Tree(tree) => modal(frame, area, |f, r| draw_tree(f, r, app, tree)),
         Mode::ProjectBrowser(browser) => modal(frame, area, |f, r| {
-            draw_project_browser(f, r, browser, &app.project.root)
+            draw_project_browser(f, r, browser, &app.project.root);
         }),
         Mode::DirBrowser(browser) => modal(frame, area, |f, r| draw_dir_browser(f, r, browser)),
         Mode::ImportPreview(preview) => {
-            modal(frame, area, |f, r| draw_import_preview(f, r, preview))
+            modal(frame, area, |f, r| draw_import_preview(f, r, preview));
         }
         Mode::Prompt(_) => dim_backdrop(frame, area),
         _ => {}
@@ -177,7 +177,7 @@ fn dim_backdrop(frame: &mut Frame, screen: Rect) {
 /// Render the whole app to a plain-text screen of the given size — a shared
 /// test helper for both the `ui` and `app` test suites.
 #[cfg(test)]
-pub(crate) fn render_to_string(app: &App, w: u16, h: u16) -> String {
+pub fn render_to_string(app: &App, w: u16, h: u16) -> String {
     use ratatui::{backend::TestBackend, Terminal};
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
     terminal.draw(|f| draw(f, app)).unwrap();
@@ -257,7 +257,7 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
             draw_overlay(frame, other_area, &app.project.manifest.title, overlay);
         }
         SplitContent::Assistant { conv, focused } => {
-            draw_assistant_pane(frame, other_area, app, conv, focused)
+            draw_assistant_pane(frame, other_area, app, conv, focused);
         }
     }
 }
@@ -270,7 +270,7 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
 }
 
 /// The accent style for the active/current item in the nav pane.
-pub(super) fn active_style() -> Style {
+pub fn active_style() -> Style {
     Style::default()
         .fg(theme::current().heading)
         .add_modifier(Modifier::BOLD)
@@ -310,15 +310,15 @@ fn chapter_line(
     }
     let marker = if is_active { "▸ " } else { "  " };
     // A grouped body chapter (#181) shows its 1-based number; sections don't.
-    let label = match number {
-        Some(n) => format!("{marker}{n}. {title}"),
-        None => format!("{marker}{title}"),
-    };
+    let label = number.map_or_else(
+        || format!("{marker}{title}"),
+        |n| format!("{marker}{n}. {title}"),
+    );
     // With a goal (#146), show progress (a ✓ once reached); otherwise just the count.
-    let count = match goal {
-        Some(g) => format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
-        None => words.to_string(),
-    };
+    let count = goal.map_or_else(
+        || words.to_string(),
+        |g| format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
+    );
     // The selection highlight reverses every span on the row.
     let sel = |s: Style| {
         if is_selected {
@@ -370,7 +370,7 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
             .strip_prefix(&app.project.root)
             .unwrap_or(path)
             .to_string_lossy();
-        lines.push(list_row(i == state.selected, label.to_string(), None));
+        lines.push(list_row(i == state.selected, &label, None));
     }
     lines
 }
@@ -635,7 +635,7 @@ fn search_status(s: &Search) -> String {
 
 /// Save-state indicator (#409): ● when there are unsaved changes, ✓ when the
 /// buffer is on disk — so persistence is legible at a glance.
-fn dirty_marker(dirtied: bool) -> &'static str {
+const fn dirty_marker(dirtied: bool) -> &'static str {
     if dirtied {
         " ●"
     } else {
@@ -670,13 +670,12 @@ fn vc_tag(app: &App) -> String {
 /// A running writing sprint (#299): live countdown + net words written, always
 /// visible (independent of the transient message on the right).
 fn sprint_tag(app: &App) -> String {
-    match &app.sprint {
-        Some(s) => format!(
+    app.sprint.as_ref().map_or_else(String::new, |s| {
+        format!(
             " · {}",
             crate::app::sprint::status_segment(s.remaining(), s.words(app.project_word_count()))
-        ),
-        None => String::new(),
-    }
+        )
+    })
 }
 
 /// While browsing, the bar describes the *selected* chapter: its title, and
@@ -701,9 +700,8 @@ fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (St
         };
         (format!(" /{filter}{count}"), format!("{title}{hint}  "))
     } else {
-        let right = match &app.message {
-            Some(m) => format!("{m}  "),
-            None => {
+        let right = app.message.as_ref().map_or_else(
+            || {
                 let mut parts = Vec::new();
                 if let Some(s) = app.project.chapter_summary(selected) {
                     parts.push(s.to_string());
@@ -719,8 +717,9 @@ fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (St
                 } else {
                     format!("{}  ", parts.join("  ·  "))
                 }
-            }
-        };
+            },
+            |m| format!("{m}  "),
+        );
         (format!(" {title}"), right)
     }
 }
@@ -732,22 +731,24 @@ fn editor_status_bar(app: &App) -> (String, String) {
     let buffer = app.edit_buffer();
     // The chapter the cursor is in: in continuous view that's the segment
     // under the cursor (with a marker); otherwise the single active chapter.
-    let (name, dirtied) = match &app.manuscript {
-        Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
+    let (name, dirtied) = app.manuscript.as_ref().map_or_else(
         // The focused buffer's own title — usually the active chapter, but
         // a reference pane swapped into focus (#165) shows its file name.
-        None => (app.pane_title_for(buffer), buffer.dirty),
-    };
+        || (app.pane_title_for(buffer), buffer.dirty),
+        |m| (format!("≡ {}", m.current_title()), m.dirty()),
+    );
     let dirty = dirty_marker(dirtied);
-    let right = match &app.message {
-        Some(m) => format!("{m}  "),
-        None => format!(
-            "{} words · ln {}/{}  ",
-            buffer.word_count(),
-            buffer.cursor.line + 1,
-            buffer.line_count()
-        ),
-    };
+    let right = app.message.as_ref().map_or_else(
+        || {
+            format!(
+                "{} words · ln {}/{}  ",
+                buffer.word_count(),
+                buffer.cursor.line + 1,
+                buffer.line_count()
+            )
+        },
+        |m| format!("{m}  "),
+    );
     let left = format!(
         " {name}{dirty}{}{}{}",
         vc_tag(app),

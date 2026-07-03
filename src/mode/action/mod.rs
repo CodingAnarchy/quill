@@ -17,11 +17,11 @@ mod command;
 mod palette;
 mod registry;
 
-pub(crate) use ai::{AiAction, AiCost};
-pub(crate) use command::{
+pub use ai::{AiAction, AiCost};
+pub use command::{
     Command, FontTarget, PortraitChoice, SettingBool, SettingPicker, SettingTextKnob, StylePicker,
     StyleTextKnob,
 };
-pub(crate) use palette::PaletteRow;
+pub use palette::PaletteRow;
 pub use palette::{Palette, PaletteItem};
-pub(crate) use registry::{Action, ExportFormat, ExportScope, GitAction};
+pub use registry::{Action, ExportFormat, ExportScope, GitAction};

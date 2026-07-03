@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 /// What a [`Task::poll`] found.
-pub(crate) enum Poll<T> {
+pub enum Poll<T> {
     /// Still running.
     Pending,
     /// Finished; carries the worker's result.
@@ -19,18 +19,18 @@ pub(crate) enum Poll<T> {
 
 /// A background job whose result is delivered once, then consumed. Idle until
 /// [`spawn`](Task::spawn) is called.
-pub(crate) struct Task<T> {
+pub struct Task<T> {
     rx: Option<Receiver<T>>,
 }
 
 impl<T: Send + 'static> Task<T> {
     /// A task with nothing running.
-    pub(crate) fn idle() -> Self {
+    pub(crate) const fn idle() -> Self {
         Self { rx: None }
     }
 
     /// Whether a job is currently in flight.
-    pub(crate) fn is_busy(&self) -> bool {
+    pub(crate) const fn is_busy(&self) -> bool {
         self.rx.is_some()
     }
 
@@ -84,7 +84,7 @@ mod tests {
         let value = loop {
             match task.poll() {
                 Poll::Ready(v) => break v,
-                Poll::Pending => continue,
+                Poll::Pending => {}
                 Poll::Died => panic!("worker shouldn't die"),
             }
         };
@@ -99,7 +99,7 @@ mod tests {
         task.spawn(|| panic!("boom"));
         let state = loop {
             match task.poll() {
-                Poll::Pending => continue,
+                Poll::Pending => {}
                 other => break other,
             }
         };

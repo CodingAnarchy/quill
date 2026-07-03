@@ -3,6 +3,8 @@
 
 use super::*;
 use crate::project::Project;
+use crate::workflow::Triggers;
+use std::fmt::Write;
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -122,7 +124,7 @@ fn cont_with(findings: Vec<continuity::Finding>) -> Continuity {
 }
 
 /// A unique-per-process scratch directory for an app-test project (#428).
-pub(crate) fn app_scratch_dir(name: &str) -> PathBuf {
+pub fn app_scratch_dir(name: &str) -> PathBuf {
     crate::testutil::scratch_dir("app", name)
 }
 
@@ -131,7 +133,7 @@ pub(crate) fn app_scratch_dir(name: &str) -> PathBuf {
 /// `App::new` reads the developer's real config, so without these pins a dev with
 /// Vim mode, smart typography, or an on-save trigger would make tests flaky or
 /// config-dependent. Tests that want those opt back in explicitly.
-pub(crate) fn open_test_app(dir: &Path) -> App {
+pub fn open_test_app(dir: &Path) -> App {
     let project = Project::open(dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);
@@ -139,7 +141,7 @@ pub(crate) fn open_test_app(dir: &Path) -> App {
     app.smart_typography = false;
     app.mode = Mode::Insert;
     app.workflows = Vec::new();
-    app.triggers = Default::default();
+    app.triggers = Triggers::default();
     app
 }
 
@@ -167,9 +169,11 @@ fn three_chapter_app(name: &str) -> (App, TempProject) {
     let dir = app_scratch_dir(name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, body) in ["alpha\n", "beta\n", "gamma\n"].iter().enumerate() {
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"
-        ));
+        )
+        .unwrap();
         fs::write(dir.join(format!("c{i}.md")), body).unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

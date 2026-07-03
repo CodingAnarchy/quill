@@ -7,10 +7,10 @@ use super::*;
 impl App {
     /// Cycle the selected chapter's status (none → Draft → Revised → Final → …).
     pub(crate) fn cycle_status(&mut self, index: usize) {
-        let next = match self.project.chapter_status(index) {
-            None => Status::Draft,
-            Some(s) => s.next(),
-        };
+        let next = self
+            .project
+            .chapter_status(index)
+            .map_or(Status::Draft, Status::next);
         if self.edit_chapter_meta(index, |fm| fm.set_status(next)) {
             let title = self.project.chapter_title(index).unwrap_or("Chapter");
             self.message = Some(format!("{title}: {}", next.label()));
@@ -49,10 +49,10 @@ impl App {
         let title = moved
             .and_then(|i| self.project.chapter_title(i))
             .unwrap_or("Chapter");
-        self.message = Some(match role {
-            Some(r) => format!("{title}: {}", r.label()),
-            None => format!("{title}: body chapter"),
-        });
+        self.message = Some(role.map_or_else(
+            || format!("{title}: body chapter"),
+            |r| format!("{title}: {}", r.label()),
+        ));
         moved
     }
 
@@ -232,12 +232,11 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
-        match next_goal_field(field) {
-            Some(next) => self.prompt_goal(next),
-            None => {
-                self.mode = self.editing_mode();
-                self.message = Some("Writing goals updated.".into());
-            }
+        if let Some(next) = next_goal_field(field) {
+            self.prompt_goal(next);
+        } else {
+            self.mode = self.editing_mode();
+            self.message = Some("Writing goals updated.".into());
         }
     }
 
@@ -287,12 +286,11 @@ impl App {
     /// single-letter keys), then chain to the next field — or finish on the last.
     pub(crate) fn apply_book_field(&mut self, field: BookField, text: &str) {
         self.apply_meta(field.meta(), text);
-        match next_book_field(field) {
-            Some(next) => self.prompt_book_field(next),
-            None => {
-                self.mode = self.editing_mode();
-                self.message = Some("Book details updated.".into());
-            }
+        if let Some(next) = next_book_field(field) {
+            self.prompt_book_field(next);
+        } else {
+            self.mode = self.editing_mode();
+            self.message = Some("Book details updated.".into());
         }
     }
 
@@ -311,6 +309,7 @@ impl App {
     // --- Editing a multi-line metadata field in the editor ------------------
 
     /// Open `target`'s text in the editor as a scratch buffer (`Mode::EditMeta`).
+    #[allow(clippy::needless_pass_by_value)] // callers (nav.rs) hand over owned metadata text
     pub(crate) fn edit_meta(
         &mut self,
         target: MetaField,
@@ -433,7 +432,7 @@ impl App {
 /// The next field in the goal-setting flow (#550): the three motivating goals
 /// first (words → chapters → daily), then words-per-page last (rarely changed,
 /// prefilled with its current/default value, so it's a single Enter to keep).
-fn next_goal_field(field: GoalField) -> Option<GoalField> {
+const fn next_goal_field(field: GoalField) -> Option<GoalField> {
     match field {
         GoalField::Words => Some(GoalField::Chapters),
         GoalField::Chapters => Some(GoalField::Daily),
@@ -446,7 +445,7 @@ fn next_goal_field(field: GoalField) -> Option<GoalField> {
 /// fields the chapter-browser `t`/`b`/`w`/`e` keys also set — title → subtitle →
 /// author → series — then the publishing metadata (#583) — ISBN → publisher →
 /// publication date → language → rights — then done.
-fn next_book_field(field: BookField) -> Option<BookField> {
+const fn next_book_field(field: BookField) -> Option<BookField> {
     match field {
         BookField::Title => Some(BookField::Subtitle),
         BookField::Subtitle => Some(BookField::Author),
@@ -464,8 +463,7 @@ fn next_book_field(field: BookField) -> Option<BookField> {
 /// (e.g. "target words" → "Target words").
 fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }

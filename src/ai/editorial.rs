@@ -14,7 +14,7 @@ use super::{AiError, Request};
 
 /// One editorial flag: which lens it came from, the chapter(s) it concerns, an
 /// optional verbatim span to pinpoint it, and the plain-language concern.
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Note {
     /// The lens: `"structural"`, `"continuity"`, or `"line"`.
     pub focus: String,

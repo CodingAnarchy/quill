@@ -76,7 +76,7 @@ impl App {
             title: "Export style",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -106,7 +106,7 @@ impl App {
             title: "Style preset",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -128,7 +128,7 @@ impl App {
             title: "Heading alignment",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -151,7 +151,7 @@ impl App {
             title: "Drop caps",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -175,7 +175,7 @@ impl App {
             title: "Print trim size",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -203,10 +203,10 @@ impl App {
             } = v;
         }) {
             Ok(()) => {
-                self.message = Some(match value {
-                    Some(v) => format!("Set {} to {v}.", knob.label()),
-                    None => format!("Cleared {}.", knob.label()),
-                });
+                self.message = Some(value.map_or_else(
+                    || format!("Cleared {}.", knob.label()),
+                    |v| format!("Set {} to {v}.", knob.label()),
+                ));
                 self.open_export_style_menu();
             }
             Err(e) => {
@@ -221,7 +221,7 @@ impl App {
     pub(crate) fn set_style_preset(&mut self, index: Option<usize>) {
         let value = index
             .and_then(|i| PRESET_NAMES.get(i))
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let outcome = self.set_style_value("preset", value.clone(), |style, v| style.preset = v);
         self.report_style_set(outcome, "preset", value.as_deref());
     }
@@ -231,7 +231,7 @@ impl App {
     pub(crate) fn set_style_align(&mut self, index: Option<usize>) {
         let value = index
             .and_then(|i| HEADING_ALIGNS.get(i))
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let outcome = self.set_style_value("heading_align", value.clone(), |style, v| {
             style.heading_align = v;
         });
@@ -243,7 +243,7 @@ impl App {
     pub(crate) fn set_style_drop_cap(&mut self, value: Option<bool>) {
         // A bool is a bare TOML literal (`true` / `false`), not a quoted string.
         let outcome = self.splice_style("drop_cap", value.map(|b| b.to_string()), |style| {
-            style.drop_cap = value
+            style.drop_cap = value;
         });
         let label = value.map(|b| if b { "on" } else { "off" });
         self.report_style_set(outcome, "drop caps", label);
@@ -272,10 +272,10 @@ impl App {
     fn report_style_set(&mut self, outcome: std::io::Result<()>, label: &str, value: Option<&str>) {
         match outcome {
             Ok(()) => {
-                self.message = Some(match value {
-                    Some(v) => format!("Set {label} to {v}."),
-                    None => format!("Cleared {label}."),
-                });
+                self.message = Some(value.map_or_else(
+                    || format!("Cleared {label}."),
+                    |v| format!("Set {label} to {v}."),
+                ));
                 self.open_export_style_menu();
             }
             Err(e) => {
@@ -351,10 +351,10 @@ impl App {
         // A failed read must abort: splicing onto an empty base would overwrite the
         // whole manifest while reporting success (#565).
         let text = read_existing(&path)?;
-        let updated = match literal {
-            Some(v) => config::set_value(&text, "style", key, &v),
-            None => config::strip_value(&text, "style", key).0,
-        };
+        let updated = literal.map_or_else(
+            || config::strip_value(&text, "style", key).0,
+            |v| config::set_value(&text, "style", key, &v),
+        );
         crate::atomic::write(&path, updated.as_bytes())
     }
 
@@ -381,7 +381,7 @@ impl App {
 }
 
 /// A bool's drop-cap label for the menu (`Some(true)` → "on", `None` → "default").
-fn drop_cap_label(value: Option<bool>) -> &'static str {
+const fn drop_cap_label(value: Option<bool>) -> &'static str {
     match value {
         Some(true) => "on",
         Some(false) => "off",
@@ -391,10 +391,7 @@ fn drop_cap_label(value: Option<bool>) -> &'static str {
 
 /// An optional string's menu label — the value, or "(default)" when unset.
 fn opt_label(value: Option<&str>) -> String {
-    match value {
-        Some(v) => v.to_string(),
-        None => "(default)".to_string(),
-    }
+    value.map_or_else(|| "(default)".to_string(), ToString::to_string)
 }
 
 #[cfg(test)]
@@ -654,7 +651,7 @@ mod tests {
                 subtitle: None,
                 author: None,
                 series: None,
-                publishing: Default::default(),
+                publishing: crate::export::PubMeta::default(),
                 epigraph: None,
                 front: vec![],
                 parts: vec![crate::export::Part {

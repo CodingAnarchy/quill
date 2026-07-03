@@ -5,13 +5,15 @@
 //! `bible/timeline.md`; the contradictions are surfaced as a triageable findings
 //! list. See `docs/ai-features.md` §2.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a continuity pass: the ordered events and the contradictions.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Continuity {
     #[serde(default)]
     pub events: Vec<Event>,
@@ -21,7 +23,7 @@ pub struct Continuity {
 
 /// One story event. The model returns events in **narrative** order (order of
 /// appearance) and assigns each a `story_order` rank for chronological sorting.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Event {
     pub description: String,
     /// The chapter (title) the event appears in.
@@ -32,7 +34,7 @@ pub struct Event {
 }
 
 /// One continuity contradiction.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Finding {
     /// A short category, e.g. "location", "age", "object", "timeline".
     pub kind: String,
@@ -128,7 +130,7 @@ pub fn render_timeline(c: &Continuity, notes: &str, today: &str) -> String {
 
     body.push_str("## Timeline (narrative order)\n");
     for e in &c.events {
-        body.push_str(&format!("- **{}:** {}\n", e.chapter, e.description));
+        writeln!(body, "- **{}:** {}", e.chapter, e.description).unwrap();
     }
     body.push('\n');
 
@@ -136,7 +138,7 @@ pub fn render_timeline(c: &Continuity, notes: &str, today: &str) -> String {
     chrono.sort_by_key(|e| e.story_order);
     body.push_str("## Timeline (story order)\n");
     for e in &chrono {
-        body.push_str(&format!("- {} _({})_\n", e.description, e.chapter));
+        writeln!(body, "- {} _({})_", e.description, e.chapter).unwrap();
     }
     body.push('\n');
 
@@ -148,7 +150,7 @@ pub fn render_timeline(c: &Continuity, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            body.push_str(&format!("- **{}:** {}{}\n", f.kind, f.detail, where_));
+            writeln!(body, "- **{}:** {}{}", f.kind, f.detail, where_).unwrap();
         }
         body.push('\n');
     }

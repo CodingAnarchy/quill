@@ -145,7 +145,7 @@ fn parse_turn(value: &Value) -> Result<Turn, AiError> {
 
 impl ClaudeBackend {
     /// The auth headers every Claude request carries.
-    fn auth(&self) -> [Header<'_>; 2] {
+    const fn auth(&self) -> [Header<'_>; 2] {
         [
             ("x-api-key", self.key.as_str()),
             ("anthropic-version", API_VERSION),

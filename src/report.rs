@@ -45,7 +45,11 @@ pub struct SeriesSummary {
 /// #182), `chapters` body chapters, `todo` TODO markers, and today's `momentum`,
 /// as of `today`. Rows are styled (the word delta is colored). Returns a short
 /// hint when no goals are set.
-#[allow(clippy::too_many_arguments)] // the report's measured inputs read clearer flat than boxed
+// The report's measured inputs read clearer flat than boxed.
+#[allow(clippy::too_many_arguments)]
+// `series` is taken by value: the caller (app/reports.rs) builds it fresh and hands
+// it off, and passing `&Option` would ripple a `&` into that out-of-crate call site.
+#[allow(clippy::needless_pass_by_value)]
 pub fn lines(
     manifest: &Manifest,
     words: usize,
@@ -223,7 +227,7 @@ fn delta_line(momentum: &Momentum) -> Line<'static> {
 /// A net word count as a signed, colored span: green with a `+` for a gain, red
 /// for a loss. Shared by the delta line, the per-part rows, the daily goal, and
 /// the writing-history view (#586).
-pub(crate) fn colored_net_span(net: i64) -> Span<'static> {
+pub fn colored_net_span(net: i64) -> Span<'static> {
     let theme = theme::current();
     let color = if net >= 0 { theme.added } else { theme.removed };
     let signed = if net >= 0 {
@@ -275,10 +279,9 @@ fn part_lines(parts: &[PartDelta], label: &str) -> Vec<Line<'static>> {
     for p in parts {
         // When a part has a goal (#146), show its words against it; otherwise
         // just the count.
-        let target = match p.goal {
-            Some(g) => format!(" / {} ( {} )", thousands(g as i64), percent(p.words, g)),
-            None => String::new(),
-        };
+        let target = p.goal.map_or_else(String::new, |g| {
+            format!(" / {} ( {} )", thousands(g as i64), percent(p.words, g))
+        });
         let mut spans = vec![Span::raw(format!(
             "  {name:<name_w$}  {words:>words_w$} words{target}   ",
             name = p.name,
@@ -308,12 +311,12 @@ impl Projection {
         chapters: usize,
         goals: &crate::project::Goals,
         wpp: usize,
-    ) -> Option<Projection> {
+    ) -> Option<Self> {
         if chapters == 0 || goals.chapters == 0 {
             return None;
         }
         let wp = words as f64 * goals.chapters as f64 / chapters as f64;
-        Some(Projection {
+        Some(Self {
             words: wp.round() as i64,
             pages: (wp / wpp as f64).floor() as i64,
             ratio: if goals.words > 0 {
@@ -352,7 +355,7 @@ fn percent(numerator: usize, denominator: usize) -> String {
 }
 
 /// Group an integer with thousands separators, e.g. `163,204`.
-pub(crate) fn thousands(n: i64) -> String {
+pub fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, ch) in digits.chars().enumerate() {

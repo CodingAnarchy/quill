@@ -33,7 +33,7 @@ pub struct PaletteItem {
 
 /// A rendered row of an open palette: a collapsible group header, or a runnable
 /// item carrying its index into [`Palette::items`] (#514).
-pub(crate) enum PaletteRow {
+pub enum PaletteRow {
     Header {
         group: &'static str,
         collapsed: bool,
@@ -45,7 +45,7 @@ impl PaletteItem {
     /// An ungrouped palette entry — the default; flat palettes (AI, export, git,
     /// snippets, …) use this and render exactly as before.
     pub(crate) fn new(label: impl Into<String>, desc: impl Into<String>, command: Command) -> Self {
-        PaletteItem {
+        Self {
             label: label.into(),
             desc: desc.into(),
             command,
@@ -54,7 +54,7 @@ impl PaletteItem {
     }
 
     /// Place this entry under a collapsible group heading (the run-action menu).
-    pub(crate) fn in_group(mut self, group: &'static str) -> Self {
+    pub(crate) const fn in_group(mut self, group: &'static str) -> Self {
         self.group = Some(group);
         self
     }

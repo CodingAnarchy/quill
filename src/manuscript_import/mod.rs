@@ -90,14 +90,14 @@ pub struct Dropped {
 
 impl Dropped {
     /// How many notes were converted to inline markers (footnotes + endnotes).
-    pub fn notes(&self) -> usize {
+    pub const fn notes(&self) -> usize {
         self.footnotes + self.endnotes
     }
 
     /// How many elements were lost outright — everything but footnotes/endnotes,
     /// which are converted to inline markers. Zero for a clean document.
     #[cfg(test)]
-    pub fn lost(&self) -> usize {
+    pub const fn lost(&self) -> usize {
         self.images + self.tables + self.comments
     }
 }
@@ -480,21 +480,17 @@ fn decode_entities(s: &str) -> String {
     while let Some(amp) = rest.find('&') {
         out.push_str(&rest[..amp]);
         let after = &rest[amp..];
-        match after.find(';').map(|semi| (&after[1..semi], semi)) {
-            Some((entity, semi)) => match decode_entity(entity) {
-                Some(c) => {
-                    out.push(c);
-                    rest = &after[semi + 1..];
-                }
-                None => {
-                    out.push('&');
-                    rest = &after[1..];
-                }
-            },
-            None => {
+        if let Some((entity, semi)) = after.find(';').map(|semi| (&after[1..semi], semi)) {
+            if let Some(c) = decode_entity(entity) {
+                out.push(c);
+                rest = &after[semi + 1..];
+            } else {
                 out.push('&');
                 rest = &after[1..];
             }
+        } else {
+            out.push('&');
+            rest = &after[1..];
         }
     }
     out.push_str(rest);

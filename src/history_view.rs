@@ -26,7 +26,7 @@ const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
 /// Build the writing-history overlay's rows from the recorded `snaps` (oldest
 /// first, as [`crate::history::load`] returns them), as of `today`. With no
 /// history yet, returns a single hint line so the view is never blank.
-pub(crate) fn lines(snaps: &[Snapshot], today: Date) -> Vec<Line<'static>> {
+pub fn lines(snaps: &[Snapshot], today: Date) -> Vec<Line<'static>> {
     if snaps.is_empty() {
         return vec![Line::raw(
             "No writing history yet — it builds up a day at a time as you write.",
@@ -95,7 +95,7 @@ pub(crate) fn lines(snaps: &[Snapshot], today: Date) -> Vec<Line<'static>> {
 }
 
 /// Today's net words for a snapshot: added − removed.
-fn net(s: &Snapshot) -> i64 {
+const fn net(s: &Snapshot) -> i64 {
     s.added as i64 - s.removed as i64
 }
 
@@ -176,9 +176,7 @@ fn sparkline_line(nets: &[i64]) -> Line<'static> {
 /// An ISO date string in the report's human `D Mon YYYY` form, falling back to
 /// the raw string if it doesn't parse.
 fn human(iso: &str) -> String {
-    date::parse(iso)
-        .map(date::human)
-        .unwrap_or_else(|| iso.to_string())
+    date::parse(iso).map_or_else(|| iso.to_string(), date::human)
 }
 
 #[cfg(test)]

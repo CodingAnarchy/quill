@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::buffer::Cursor;
+use std::fmt::Write;
 use std::path::PathBuf;
 
 /// Build a temp project whose chapters hold the given contents, and return
@@ -12,9 +13,11 @@ fn project_with(name: &str, chapters: &[&str]) -> (Project, PathBuf) {
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, body) in chapters.iter().enumerate() {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
-        ));
+        )
+        .unwrap();
         fs::write(dir.join(&file), body).unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

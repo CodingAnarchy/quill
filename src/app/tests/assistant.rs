@@ -380,9 +380,9 @@ fn the_assistant_action_is_not_offered_to_the_assistant() {
         "the assistant can't run itself"
     );
     let tools = assistant_tools();
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let mut names = tools.iter().map(|t| t["name"].as_str().unwrap());
     assert!(
-        !names.contains(&"assistant"),
+        !names.any(|n| n == "assistant"),
         "the open-assistant action isn't in the tool catalog"
     );
 }
@@ -405,6 +405,9 @@ fn the_assistant_action_is_unavailable_in_the_continuous_view() {
 // --- Multi-turn cost control (#309) --------------------------------------
 
 #[test]
+// A local run costs exactly `0.0` — the free-run sentinel is an exact value, so an
+// exact compare is the intended check.
+#[allow(clippy::float_cmp)]
 fn an_on_device_run_is_free_so_never_gated() {
     let (app, _dir) = offline_app("budget-local");
     assert_eq!(

@@ -26,7 +26,7 @@ const TRACKERS: [AiAction; 4] = [
 /// A series-bible refresh in progress (#340): the queue of `(tracker, book)`
 /// passes in order, plus the shared sequenced-run bookkeeping (#344). Lives in
 /// `App::series_bible_run` for the run's lifetime.
-pub(crate) struct SeriesBibleRun {
+pub struct SeriesBibleRun {
     queue: Vec<(AiAction, usize)>,
     /// Cursor, tallies, cancel flag, and the in-flight pass's start time (#344).
     seq: SequencedRun,
@@ -55,7 +55,7 @@ impl SeriesBibleRun {
 
 /// The series-bible refresh's [`Sequenced`] behavior (#344) — the marker the
 /// generic advance/timeout/cancel dispatch through.
-pub(crate) struct SeriesBibleDriver;
+pub struct SeriesBibleDriver;
 
 impl Sequenced for SeriesBibleDriver {
     fn run_mut(app: &mut App) -> Option<&mut SequencedRun> {
@@ -230,7 +230,7 @@ impl App {
     }
 
     /// Whether a series-bible refresh is running (Esc routes to its cancel).
-    pub(crate) fn series_bible_running(&self) -> bool {
+    pub(crate) const fn series_bible_running(&self) -> bool {
         self.series_bible_run.is_some()
     }
 

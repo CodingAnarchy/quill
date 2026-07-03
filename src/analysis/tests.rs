@@ -1,6 +1,11 @@
 //! Tests for the `src/analysis/mod.rs` module, split out to keep the module under the
 //! ~1,000-line convention (#404). Pure move — no behavior change.
 
+// The stats assertions compare exact, hand-computed values (medians, TTR ratios,
+// `0.0` sentinels) produced by deterministic integer/float arithmetic — an exact
+// `assert_eq!` is the intended check, not a fragile equality.
+#![allow(clippy::float_cmp)]
+
 use super::*;
 
 #[test]

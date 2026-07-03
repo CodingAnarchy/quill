@@ -11,14 +11,14 @@ use serde_json::Value;
 use super::{AiError, Request};
 
 /// The result of a prose/style pass: the style observations.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Style {
     #[serde(default)]
     pub findings: Vec<StyleFinding>,
 }
 
 /// One style observation.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleFinding {
     /// A short category: "POV", "tense", "voice", or "repetition".
     pub kind: String,

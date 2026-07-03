@@ -191,6 +191,7 @@ impl App {
     /// chosen format (#7), overwriting any previous one so it always reflects the
     /// current project. `scope` picks the active book (#7) or the whole series
     /// (#332); a standalone novel only ever has the one book.
+    #[allow(clippy::needless_pass_by_value)] // callers (palette.rs, tests) hand over an owned scope
     pub(crate) fn run_export(&mut self, format: ExportFormat, scope: ExportScope) {
         // The continuous view's edits live in the windowed buffer, not the
         // per-chapter ones export reads — compile from the single-chapter view so
@@ -199,21 +200,18 @@ impl App {
             self.message = Some("Leave the continuous view (Ctrl-l) before exporting.".into());
             return;
         }
-        match &scope {
-            ExportScope::Series => {
-                let docs = self.export_series_documents();
-                let series = self.project.series_title().map(str::to_string);
-                let name = bible::slug(series.as_deref().unwrap_or("series"));
-                self.write_series(format, &docs, series.as_deref(), &name);
-            }
+        if matches!(scope, ExportScope::Series) {
+            let docs = self.export_series_documents();
+            let series = self.project.series_title().map(str::to_string);
+            let name = bible::slug(series.as_deref().unwrap_or("series"));
+            self.write_series(format, &docs, series.as_deref(), &name);
+        } else {
             // The active book whole (#7) or a sample of it (#584) — both compile one
             // [`Document`] from the active book, differing only in which chapters
             // the loop keeps (`chapter_span`) and the output filename.
-            _ => {
-                let doc = self.export_document(scope.chapter_span());
-                let name = self.export_name(&scope);
-                self.write_book(format, &doc, &name);
-            }
+            let doc = self.export_document(scope.chapter_span().as_ref());
+            let name = self.export_name(&scope);
+            self.write_book(format, &doc, &name);
         }
     }
 
@@ -227,8 +225,7 @@ impl App {
             ExportScope::Chapter(i) => self
                 .project
                 .chapter_title(*i)
-                .map(bible::slug)
-                .unwrap_or_else(|| format!("chapter-{}", i + 1)),
+                .map_or_else(|| format!("chapter-{}", i + 1), bible::slug),
             ExportScope::Part { name, .. } => bible::slug(name),
             // 1-based, inclusive — what an author counting chapters expects.
             ExportScope::Range { start, end } => format!("chapters-{}-{}", start + 1, end + 1),
@@ -241,7 +238,7 @@ impl App {
     fn write_book(&mut self, format: ExportFormat, doc: &Document, name: &str) {
         match format {
             ExportFormat::Markdown => {
-                self.write_export(name, "md", export::to_markdown(doc).as_bytes())
+                self.write_export(name, "md", export::to_markdown(doc).as_bytes());
             }
             ExportFormat::Docx => self.write_built(
                 export::docx::to_docx(doc, export::docx::Profile::Manuscript),
@@ -260,7 +257,7 @@ impl App {
                     name,
                     "epub",
                 );
-                self.note_export_warnings(warnings);
+                self.note_export_warnings(&warnings);
             }
             ExportFormat::Pdf => {
                 let (style, mut warnings) = self.export_style();
@@ -270,7 +267,7 @@ impl App {
                     export::pdf::SCREEN_MEDIA_W,
                 ));
                 self.write_built(export::pdf::to_pdf(doc, &style), name, "pdf");
-                self.note_export_warnings(warnings);
+                self.note_export_warnings(&warnings);
             }
             ExportFormat::PdfPrint => {
                 let (style, mut warnings) = self.export_style();
@@ -278,13 +275,16 @@ impl App {
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
                 let bleed = self.print_bleed();
-                warnings.extend(export::pdf::pdf_dpi_warnings(&style, w + 2.0 * bleed));
+                warnings.extend(export::pdf::pdf_dpi_warnings(
+                    &style,
+                    2.0f32.mul_add(bleed, w),
+                ));
                 self.write_built(
                     export::pdf::to_pdf_print(doc, w, h, bleed, &style),
                     name,
                     "print.pdf",
                 );
-                self.note_export_warnings(warnings);
+                self.note_export_warnings(&warnings);
             }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
@@ -344,7 +344,7 @@ impl App {
                     name,
                     "epub",
                 );
-                self.note_export_warnings(warnings);
+                self.note_export_warnings(&warnings);
             }
             ExportFormat::Pdf => {
                 let (style, mut warnings) = self.export_style();
@@ -358,7 +358,7 @@ impl App {
                     name,
                     "pdf",
                 );
-                self.note_export_warnings(warnings);
+                self.note_export_warnings(&warnings);
             }
             ExportFormat::PdfPrint => {
                 let (style, mut warnings) = self.export_style();
@@ -366,7 +366,10 @@ impl App {
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
                 let bleed = self.print_bleed();
-                warnings.extend(export::pdf::pdf_dpi_warnings(&style, w + 2.0 * bleed));
+                warnings.extend(export::pdf::pdf_dpi_warnings(
+                    &style,
+                    2.0f32.mul_add(bleed, w),
+                ));
                 self.write_built(
                     export::pdf::to_pdf_series_print(
                         docs,
@@ -380,7 +383,7 @@ impl App {
                     name,
                     "print.pdf",
                 );
-                self.note_export_warnings(warnings);
+                self.note_export_warnings(&warnings);
             }
             ExportFormat::Scriv => {
                 let path = self.export_path(name, "scriv");
@@ -412,12 +415,10 @@ impl App {
     /// by the manuscript exports and the report snapshots (#601).
     pub(crate) fn write_export(&mut self, name: &str, ext: &str, bytes: &[u8]) {
         let path = self.export_path(name, ext);
-        let result = match path.parent() {
-            Some(parent) => {
-                std::fs::create_dir_all(parent).and_then(|()| std::fs::write(&path, bytes))
-            }
-            None => std::fs::write(&path, bytes),
-        };
+        let result = path.parent().map_or_else(
+            || std::fs::write(&path, bytes),
+            |parent| std::fs::create_dir_all(parent).and_then(|()| std::fs::write(&path, bytes)),
+        );
         self.report_export(&path, result);
     }
 
@@ -442,7 +443,7 @@ impl App {
     /// passes an inclusive manifest chapter-index range, which keeps only the body
     /// chapters in it — front and back matter are dropped from a sample, and the
     /// kept body chapters still group under their part headings.
-    fn export_document(&self, span: Option<std::ops::RangeInclusive<usize>>) -> Document {
+    fn export_document(&self, span: Option<&std::ops::RangeInclusive<usize>>) -> Document {
         let m = &self.project.manifest;
         let parts = self.part_ranges(); // (name, body-chapter index range), in order
         let mut front = Vec::new();
@@ -455,7 +456,7 @@ impl App {
         let mut prev: Option<Option<usize>> = None;
         for i in 0..self.chapter_count() {
             // A sample keeps only its chapters; the rest of the book is skipped.
-            if span.as_ref().is_some_and(|s| !s.contains(&i)) {
+            if span.is_some_and(|s| !s.contains(&i)) {
                 continue;
             }
             let chapter = self.export_chapter(i);

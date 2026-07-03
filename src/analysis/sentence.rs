@@ -72,7 +72,7 @@ fn sentence_spans(text: &str) -> Vec<(usize, usize)> {
     spans
 }
 
-fn is_terminator(c: char) -> bool {
+const fn is_terminator(c: char) -> bool {
     matches!(c, '.' | '!' | '?' | '…')
 }
 

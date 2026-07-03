@@ -20,6 +20,9 @@
 //! drives turns on the UI thread (network off-thread, action execution on it),
 //! rather than a single off-thread function, so the orchestration isn't here.
 
+#[cfg(any(feature = "local", test))]
+use std::fmt::Write as _;
+
 use serde_json::{json, Value};
 
 use super::AiError;
@@ -30,7 +33,7 @@ pub const MAX_TURNS: usize = 8;
 
 /// One tool the model asked to run: the API's call id (echoed in the result), the
 /// action name, and its arguments.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -52,7 +55,7 @@ pub trait Converse {
 /// The `assistant` turn replaying the model's tool calls (the API requires the
 /// `tool_use` blocks be echoed back before their results). Shared by [`run`] and
 /// the assistant pane (#307) so both speak the protocol the same way.
-pub(crate) fn tool_use_message(calls: &[ToolCall]) -> Value {
+pub fn tool_use_message(calls: &[ToolCall]) -> Value {
     let blocks: Vec<Value> = calls
         .iter()
         .map(|c| json!({ "type": "tool_use", "id": c.id, "name": c.name, "input": c.input }))
@@ -61,12 +64,14 @@ pub(crate) fn tool_use_message(calls: &[ToolCall]) -> Value {
 }
 
 /// One tool's result block, matched to its call by `tool_use_id`.
-pub(crate) fn tool_result_block(id: &str, content: &str) -> Value {
+pub fn tool_result_block(id: &str, content: &str) -> Value {
     json!({ "type": "tool_result", "tool_use_id": id, "content": content })
 }
 
 /// The `user` turn carrying the tool results back to the model.
-pub(crate) fn tool_result_message(results: Vec<Value>) -> Value {
+// takes ownership: `results` is moved into the constructed JSON message
+#[allow(clippy::needless_pass_by_value)]
+pub fn tool_result_message(results: Vec<Value>) -> Value {
     json!({ "role": "user", "content": results })
 }
 
@@ -85,11 +90,11 @@ pub(crate) fn tool_result_message(results: Vec<Value>) -> Value {
 /// The token a constrained choice uses to answer the author instead of calling a
 /// tool.
 #[cfg(any(feature = "local", test))]
-pub(crate) const RESPOND: &str = "respond";
+pub const RESPOND: &str = "respond";
 
 /// The tool names offered in a loop body.
 #[cfg(any(feature = "local", test))]
-pub(crate) fn tool_names(body: &Value) -> Vec<String> {
+pub fn tool_names(body: &Value) -> Vec<String> {
     body.get("tools")
         .and_then(Value::as_array)
         .map(|ts| {
@@ -104,7 +109,7 @@ pub(crate) fn tool_names(body: &Value) -> Vec<String> {
 /// [`RESPOND`]), an `argument` (the text input for an action that takes one, #390),
 /// and a `message` (the answer when responding).
 #[cfg(any(feature = "local", test))]
-pub(crate) fn choice_schema(tool_names: &[String]) -> Value {
+pub fn choice_schema(tool_names: &[String]) -> Value {
     let mut actions: Vec<Value> = tool_names.iter().map(|n| json!(n)).collect();
     actions.push(json!(RESPOND));
     json!({
@@ -122,7 +127,7 @@ pub(crate) fn choice_schema(tool_names: &[String]) -> Value {
 /// takes a single prompt (no role/block structure): the manuscript and requests,
 /// the tools already run, and their results, in order.
 #[cfg(any(feature = "local", test))]
-pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
+pub fn flatten_conversation(messages: &[Value]) -> String {
     let mut out = String::new();
     for m in messages {
         let assistant = m["role"].as_str() == Some("assistant");
@@ -138,16 +143,16 @@ pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
                             out.push('\n');
                         }
                         Some("tool_use") => {
-                            out.push_str(&format!(
-                                "(ran the tool: {})\n",
-                                b["name"].as_str().unwrap_or("")
-                            ));
+                            writeln!(out, "(ran the tool: {})", b["name"].as_str().unwrap_or(""))
+                                .unwrap();
                         }
                         Some("tool_result") => {
-                            out.push_str(&format!(
-                                "(tool result: {})\n",
+                            writeln!(
+                                out,
+                                "(tool result: {})",
                                 b["content"].as_str().unwrap_or("")
-                            ));
+                            )
+                            .unwrap();
                         }
                         _ => {}
                     }
@@ -169,7 +174,7 @@ pub(crate) fn flatten_conversation(messages: &[Value]) -> String {
 /// `argument` as a generic `{"argument": …}` input when present (the executor maps
 /// it to the action's named parameter, #390).
 #[cfg(any(feature = "local", test))]
-pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
+pub fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
     let v: Value = serde_json::from_str(text)
         .map_err(|e| AiError::ApiMalformed(format!("tool-use choice: {e}")))?;
     let message = v["message"].as_str().unwrap_or("").to_string();
@@ -192,7 +197,7 @@ pub(crate) fn parse_choice_turn(text: &str) -> Result<Turn, AiError> {
 /// The Messages API body for one turn: model, the running messages, and the tools.
 /// Used by the assistant pane's UI-thread turn machine (#307) and the local
 /// backend's `respond` (#310), so both build the request the same way.
-pub(crate) fn build_body(
+pub fn build_body(
     model: &str,
     system: Option<&str>,
     messages: &[Value],

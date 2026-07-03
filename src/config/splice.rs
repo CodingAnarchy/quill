@@ -93,7 +93,7 @@ pub fn set_values(changes: &[(String, String, String)]) -> io::Result<std::path:
 /// Pure (no I/O), so the same splice serves both the home config file and a
 /// project's `book.toml` (#550): the manifest's `[goals]` table is updated in
 /// place this way, leaving the rest of the manifest byte-for-byte.
-pub(crate) fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
+pub fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
     let entry = format!("{key} = {value}");
     let header = format!("[{section}]");
     let mut lines: Vec<String> = existing.lines().map(String::from).collect();
@@ -156,7 +156,7 @@ pub fn remove_value(section: &str, key: &str) -> io::Result<bool> {
 /// Pure (no I/O), so it also serves project `book.toml` edits (#550): clearing an
 /// optional goal (e.g. the daily target) removes its key from `[goals]` rather
 /// than writing a zero.
-pub(crate) fn strip_value(existing: &str, section: &str, key: &str) -> (String, bool) {
+pub fn strip_value(existing: &str, section: &str, key: &str) -> (String, bool) {
     let header = format!("[{section}]");
     let mut lines: Vec<String> = existing.lines().map(String::from).collect();
     let trailing_nl = existing.is_empty() || existing.ends_with('\n');

@@ -9,10 +9,10 @@ use ratatui::text::Line;
 use crate::buffer::FindKind;
 
 mod action;
-pub(crate) use action::*;
+pub use action::*;
 
 mod states;
-pub(crate) use states::*;
+pub use states::*;
 
 /// A full-screen, read-only overlay drawn above any mode: the progress report,
 /// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
@@ -43,7 +43,7 @@ pub enum OverlayKind {
 
 impl Overlay {
     /// A bordered report overlay labelled `label`, scrolled to the top.
-    pub fn report(label: &'static str, lines: Vec<Line<'static>>) -> Self {
+    pub const fn report(label: &'static str, lines: Vec<Line<'static>>) -> Self {
         Self {
             lines,
             kind: OverlayKind::Report(label),
@@ -52,7 +52,7 @@ impl Overlay {
     }
 
     /// The AI answer / summary overlay, scrolled to the top.
-    pub fn ai(lines: Vec<Line<'static>>) -> Self {
+    pub const fn ai(lines: Vec<Line<'static>>) -> Self {
         Self {
             lines,
             kind: OverlayKind::AiPanel,
@@ -61,7 +61,7 @@ impl Overlay {
     }
 
     /// The user's-guide overlay (#281), scrolled to the top.
-    pub fn guide(lines: Vec<Line<'static>>) -> Self {
+    pub const fn guide(lines: Vec<Line<'static>>) -> Self {
         Self {
             lines,
             kind: OverlayKind::Guide,
@@ -70,7 +70,7 @@ impl Overlay {
     }
 
     /// The pre-commit review overlay (#704), scrolled to the top.
-    pub fn commit_review(lines: Vec<Line<'static>>) -> Self {
+    pub const fn commit_review(lines: Vec<Line<'static>>) -> Self {
         Self {
             lines,
             kind: OverlayKind::CommitReview,
@@ -81,14 +81,14 @@ impl Overlay {
     /// Whether this overlay confirms an action (the pre-commit review, #704) rather
     /// than being a press-any-key-to-dismiss read-only surface — so the key handler
     /// knows Enter should proceed and any other key should cancel, not just close.
-    pub fn is_confirm(&self) -> bool {
+    pub const fn is_confirm(&self) -> bool {
         matches!(self.kind, OverlayKind::CommitReview)
     }
 
     /// The report label if this is a [`OverlayKind::Report`] overlay (e.g.
     /// "progress", "analysis") — the base name a saved snapshot (#601) is written
     /// under. `None` for the AI panel and the guide, which don't save to a file.
-    pub fn report_label(&self) -> Option<&'static str> {
+    pub const fn report_label(&self) -> Option<&'static str> {
         match self.kind {
             OverlayKind::Report(label) => Some(label),
             OverlayKind::AiPanel | OverlayKind::Guide | OverlayKind::CommitReview => None,
@@ -252,7 +252,7 @@ pub struct VimState {
 
 /// A recorded Vim search, so `n` / `N` can repeat it (#206).
 #[derive(Clone)]
-pub(crate) struct VimSearch {
+pub struct VimSearch {
     pub(crate) query: String,
     /// The search direction; `n` repeats it, `N` inverts it.
     pub(crate) backward: bool,
@@ -262,14 +262,14 @@ pub(crate) struct VimSearch {
 /// delete / change, and the named registers `"a`–`"z`. Numbered registers and
 /// the system clipboard are out of scope.
 #[derive(Default)]
-pub(crate) struct Registers {
+pub struct Registers {
     pub(crate) unnamed: Option<Yank>,
     pub(crate) named: HashMap<char, Yank>,
 }
 
 /// A Vim Normal-mode command waiting on its next keystroke.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VimPending {
+pub enum VimPending {
     #[default]
     None,
     /// `g` seen — awaiting the second `g` (for `gg`).
@@ -292,7 +292,7 @@ pub(crate) enum VimPending {
 /// A Vim operator (#203): delete leaves Normal mode, change enters Insert, yank
 /// (#204) copies and stays put.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Op {
+pub enum Op {
     Delete,
     Change,
     Yank,
@@ -300,7 +300,7 @@ pub(crate) enum Op {
 
 /// Text captured by a delete / change / yank, for putting back with `p` / `P`.
 #[derive(Clone)]
-pub(crate) struct Yank {
+pub struct Yank {
     pub(crate) text: String,
     /// Whole-line text (from `dd`/`cc`/`yy`/linewise motions), put on its own
     /// lines rather than inline.
@@ -309,7 +309,7 @@ pub(crate) struct Yank {
 
 /// A recorded find-char motion, so `;` / `,` can replay it.
 #[derive(Clone, Copy)]
-pub(crate) struct Find {
+pub struct Find {
     pub(crate) kind: FindKind,
     pub(crate) target: char,
 }
@@ -431,7 +431,7 @@ pub struct DirEntry {
 /// project is created. Each is individually skippable; the AI steps are skipped
 /// outright when AI is off.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum WizardStep {
+pub enum WizardStep {
     /// Writing goals → the manifest (drives the progress report).
     Goals,
     /// Draft a starter cast from a concept (AI) → the character bible.
@@ -444,25 +444,25 @@ pub(crate) enum WizardStep {
 
 impl WizardStep {
     /// The step after this one, or `None` when the wizard is finished.
-    pub(crate) fn next(self) -> Option<WizardStep> {
+    pub(crate) const fn next(self) -> Option<Self> {
         match self {
-            WizardStep::Goals => Some(WizardStep::Characters),
-            WizardStep::Characters => Some(WizardStep::Setting),
-            WizardStep::Setting => Some(WizardStep::Notes),
-            WizardStep::Notes => None,
+            Self::Goals => Some(Self::Characters),
+            Self::Characters => Some(Self::Setting),
+            Self::Setting => Some(Self::Notes),
+            Self::Notes => None,
         }
     }
 
     /// Whether this step needs the AI backend (so it's skipped when AI is off).
-    pub(crate) fn needs_ai(self) -> bool {
-        matches!(self, WizardStep::Characters | WizardStep::Setting)
+    pub(crate) const fn needs_ai(self) -> bool {
+        matches!(self, Self::Characters | Self::Setting)
     }
 }
 
 /// What a [`Mode::Prompt`] resolves to when confirmed. `at` is the chapter index
 /// the action applies to.
 #[derive(Clone, Copy)]
-pub(crate) enum Pending {
+pub enum Pending {
     /// y/N: quit despite unsaved changes.
     Quit,
     /// y/N: delete the chapter at `at`.
@@ -663,7 +663,7 @@ pub(crate) enum Pending {
 /// Which metadata field a [`Pending::SetMeta`] prompt writes. Chapter fields
 /// carry the chapter index; book fields are project-level.
 #[derive(Clone, Copy)]
-pub(crate) enum MetaField {
+pub enum MetaField {
     Summary {
         at: usize,
     },
@@ -704,13 +704,13 @@ impl MetaField {
     /// chapter or book level. These are display prose that ships in the export, so
     /// they get the same smart-typography pass as the body (#519); other metadata
     /// (titles, POV, summaries, goals) is stored verbatim.
-    pub(crate) fn is_epigraph(self) -> bool {
+    pub(crate) const fn is_epigraph(self) -> bool {
         matches!(
             self,
-            MetaField::ChapterEpigraph { .. }
-                | MetaField::ChapterEpigraphBy { .. }
-                | MetaField::BookEpigraph
-                | MetaField::BookEpigraphBy
+            Self::ChapterEpigraph { .. }
+                | Self::ChapterEpigraphBy { .. }
+                | Self::BookEpigraph
+                | Self::BookEpigraphBy
         )
     }
 }
@@ -720,7 +720,7 @@ impl MetaField {
 /// stores it under, so the chained-prompt flow and the chapter-browser
 /// single-letter keys persist (and read back) through the one shared setter.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum BookField {
+pub enum BookField {
     Title,
     Subtitle,
     Author,
@@ -738,32 +738,32 @@ impl BookField {
     /// The [`MetaField`] this book field is stored as — the single mapping that
     /// keeps the run-action flow and the single-letter keys writing to the same
     /// manifest slot.
-    pub(crate) fn meta(self) -> MetaField {
+    pub(crate) const fn meta(self) -> MetaField {
         match self {
-            BookField::Title => MetaField::BookTitle,
-            BookField::Subtitle => MetaField::Subtitle,
-            BookField::Author => MetaField::Author,
-            BookField::Series => MetaField::Series,
-            BookField::Isbn => MetaField::Isbn,
-            BookField::Publisher => MetaField::Publisher,
-            BookField::PubDate => MetaField::PubDate,
-            BookField::Language => MetaField::Language,
-            BookField::Rights => MetaField::Rights,
+            Self::Title => MetaField::BookTitle,
+            Self::Subtitle => MetaField::Subtitle,
+            Self::Author => MetaField::Author,
+            Self::Series => MetaField::Series,
+            Self::Isbn => MetaField::Isbn,
+            Self::Publisher => MetaField::Publisher,
+            Self::PubDate => MetaField::PubDate,
+            Self::Language => MetaField::Language,
+            Self::Rights => MetaField::Rights,
         }
     }
 
     /// The prompt label for this field (matching the chapter-browser key labels).
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
-            BookField::Title => "Book title",
-            BookField::Subtitle => "Subtitle",
-            BookField::Author => "Author",
-            BookField::Series => "Series",
-            BookField::Isbn => "ISBN",
-            BookField::Publisher => "Publisher",
-            BookField::PubDate => "Publication date (YYYY or YYYY-MM-DD)",
-            BookField::Language => "Language (BCP-47 tag, e.g. en, fr)",
-            BookField::Rights => "Rights / copyright line",
+            Self::Title => "Book title",
+            Self::Subtitle => "Subtitle",
+            Self::Author => "Author",
+            Self::Series => "Series",
+            Self::Isbn => "ISBN",
+            Self::Publisher => "Publisher",
+            Self::PubDate => "Publication date (YYYY or YYYY-MM-DD)",
+            Self::Language => "Language (BCP-47 tag, e.g. en, fr)",
+            Self::Rights => "Rights / copyright line",
         }
     }
 }

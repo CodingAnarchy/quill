@@ -18,7 +18,7 @@ macro_rules! status_table {
 
         impl Status {
             /// The `status:` value as written in front matter.
-            pub fn key(self) -> &'static str {
+            pub const fn key(self) -> &'static str {
                 match self { $(Status::$variant => $key),+ }
             }
 
@@ -31,12 +31,12 @@ macro_rules! status_table {
             }
 
             /// Human label for the status bar.
-            pub fn label(self) -> &'static str {
+            pub const fn label(self) -> &'static str {
                 match self { $(Status::$variant => $label),+ }
             }
 
             /// Single-character badge for the chapter pane.
-            pub fn badge(self) -> char {
+            pub const fn badge(self) -> char {
                 match self { $(Status::$variant => $badge),+ }
             }
 
@@ -76,7 +76,7 @@ macro_rules! scene_status_table {
 
         impl SceneStatus {
             /// The value as written in the `scenes:` front matter.
-            pub fn key(self) -> &'static str {
+            pub const fn key(self) -> &'static str {
                 match self { $(SceneStatus::$variant => $key),+ }
             }
 
@@ -89,12 +89,12 @@ macro_rules! scene_status_table {
             }
 
             /// Human label for the corkboard card.
-            pub fn label(self) -> &'static str {
+            pub const fn label(self) -> &'static str {
                 match self { $(SceneStatus::$variant => $label),+ }
             }
 
             /// Single-character badge for the card.
-            pub fn badge(self) -> char {
+            pub const fn badge(self) -> char {
                 match self { $(SceneStatus::$variant => $badge),+ }
             }
 
@@ -129,7 +129,7 @@ macro_rules! role_table {
 
         impl Role {
             /// Which ordering band this section sits in (#180).
-            pub fn band(self) -> Band {
+            pub const fn band(self) -> Band {
                 match self { $(Role::$variant => Band::$band),+ }
             }
 
@@ -140,12 +140,12 @@ macro_rules! role_table {
             /// distinct term in the EPUB Structural Semantics Vocabulary (the
             /// writer falls back to the band's generic `frontmatter`/`backmatter`);
             /// every `Some` value is a term epubcheck/ACE recognize.
-            pub fn epub_type(self) -> Option<&'static str> {
+            pub const fn epub_type(self) -> Option<&'static str> {
                 match self { $(Role::$variant => none_if_empty($epub_type)),+ }
             }
 
             /// The `role:` value as written in front matter.
-            pub fn key(self) -> &'static str {
+            pub const fn key(self) -> &'static str {
                 match self { $(Role::$variant => $key),+ }
             }
 
@@ -160,7 +160,7 @@ macro_rules! role_table {
             }
 
             /// Capitalized label for the chapter pane and messages.
-            pub fn label(self) -> &'static str {
+            pub const fn label(self) -> &'static str {
                 match self { $(Role::$variant => $label),+ }
             }
         }
@@ -211,10 +211,10 @@ pub enum Band {
 
 impl Band {
     /// The band a file belongs to: a role's band, or `Body` when it has no role.
-    pub fn of(role: Option<Role>) -> Band {
+    pub const fn of(role: Option<Role>) -> Self {
         match role {
             Some(r) => r.band(),
-            None => Band::Body,
+            None => Self::Body,
         }
     }
 }

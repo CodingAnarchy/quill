@@ -9,7 +9,7 @@ use std::io::Read;
 use flate2::read::ZlibDecoder;
 
 use super::*;
-use crate::export::{Chapter, ExportStyle, Part};
+use crate::export::{Chapter, ExportStyle, Part, PubMeta};
 
 mod font;
 mod images;
@@ -42,7 +42,7 @@ fn doc() -> Document {
         subtitle: Some("a novel".into()),
         author: Some("A. Writer".into()),
         series: Some("The Cycle".into()),
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: Some(ep("In the beginning.", Some("Anon"))),
         front: vec![ch("Prologue", None, "Before it all.")],
         parts: vec![Part {

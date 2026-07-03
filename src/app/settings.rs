@@ -31,7 +31,7 @@ impl App {
         let items = vec![
             PaletteItem::new(
                 "Theme",
-                format!("Currently: {}", self.current_theme_name()),
+                format!("Currently: {}", Self::current_theme_name()),
                 Command::OpenSettingPicker(SettingPicker::Theme),
             ),
             PaletteItem::new(
@@ -59,7 +59,7 @@ impl App {
             title: "Settings",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -73,7 +73,7 @@ impl App {
 
     /// Open the theme picker (#592): the built-in themes, the active one noted.
     fn open_setting_theme_picker(&mut self) {
-        let current = self.current_theme_name();
+        let current = Self::current_theme_name();
         let items = THEME_NAMES
             .iter()
             .enumerate()
@@ -90,7 +90,7 @@ impl App {
             title: "Theme",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -104,7 +104,7 @@ impl App {
             title: knob.label(),
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -112,7 +112,10 @@ impl App {
     /// shared config machinery, apply it live, and re-open the menu. A bool always
     /// validates, so there's no rejection path.
     pub(crate) fn set_setting_bool(&mut self, knob: SettingBool, on: bool) {
-        let field = knob.key().strip_prefix("editor.").unwrap_or(knob.key());
+        let field = knob
+            .key()
+            .strip_prefix("editor.")
+            .unwrap_or_else(|| knob.key());
         let literal = validate_change(knob.key(), if on { "true" } else { "false" })
             .expect("true/false always validates");
         self.persist_config_setting(
@@ -169,7 +172,7 @@ impl App {
     pub(crate) fn apply_setting_text(&mut self, knob: SettingTextKnob, text: &str) {
         match knob {
             SettingTextKnob::ColumnWidth => {
-                self.apply_validated_editor(knob, "editor.column_width", "column_width", text)
+                self.apply_validated_editor(knob, "editor.column_width", "column_width", text);
             }
             SettingTextKnob::AutosaveSecs => self.apply_validated_editor(
                 knob,
@@ -279,7 +282,7 @@ impl App {
 
     /// The active theme name for the menu / picker — the configured `[theme] name`,
     /// or the default (`dark`) when unset.
-    fn current_theme_name(&self) -> String {
+    fn current_theme_name() -> String {
         config::theme_name().unwrap_or_else(|| "dark".to_string())
     }
 
@@ -314,7 +317,7 @@ fn bool_row(knob: SettingBool, on: bool) -> PaletteItem {
 }
 
 /// "on" / "off" for a toggle's label and status message.
-fn on_off(on: bool) -> &'static str {
+const fn on_off(on: bool) -> &'static str {
     if on {
         "on"
     } else {
@@ -335,10 +338,9 @@ fn autosave_label(secs: u64) -> String {
 /// leads with a knob label ("Column width: expected a width 32–160").
 fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
 
 #[cfg(test)]

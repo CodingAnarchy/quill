@@ -10,7 +10,7 @@ use super::super::*;
 /// reload on open — analysis recall within the AI boundary, never manuscript
 /// prose.
 #[derive(Clone)]
-pub(crate) struct QaEntry {
+pub struct QaEntry {
     /// The question as asked. Empty when the answer arrived without a recorded
     /// question (e.g. a test that drives `apply_qa_result` directly).
     pub(crate) question: String,

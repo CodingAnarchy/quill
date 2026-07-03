@@ -16,7 +16,7 @@ use super::AiAction;
 /// prompts or spawn async work — neither fits the flat, fire-and-forget registry
 /// yet. It can join once the registry models context-dependent availability.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum Action {
+pub enum Action {
     /// Save the active chapter / continuous window (Ctrl-S).
     Save,
     /// Compile and write an export (Ctrl-E).
@@ -145,147 +145,147 @@ impl Action {
     /// Every action, grouped in menu order — the registry. Ordered so each
     /// [`group`](Action::group) is contiguous, so the run-action menu emits one
     /// header per group (#514). Names are stable regardless of this order.
-    pub(crate) const ALL: &'static [Action] = &[
+    pub(crate) const ALL: &'static [Self] = &[
         // Project
-        Action::Save,
-        Action::ProjectFind,
-        Action::SwitchBook,
-        Action::ManageBooks,
-        Action::SeriesTree,
-        Action::RenameProject,
-        Action::BookDetails,
-        Action::SetGoals,
-        Action::ImportNotes,
-        Action::NewProjectFromNotes,
-        Action::ImportManuscript,
-        Action::ArchiveProject,
-        Action::RestoreArchive,
+        Self::Save,
+        Self::ProjectFind,
+        Self::SwitchBook,
+        Self::ManageBooks,
+        Self::SeriesTree,
+        Self::RenameProject,
+        Self::BookDetails,
+        Self::SetGoals,
+        Self::ImportNotes,
+        Self::NewProjectFromNotes,
+        Self::ImportManuscript,
+        Self::ArchiveProject,
+        Self::RestoreArchive,
         // Export
-        Action::Export(ExportFormat::Markdown),
-        Action::Export(ExportFormat::Docx),
-        Action::Export(ExportFormat::Scriv),
-        Action::Export(ExportFormat::Vellum),
-        Action::Export(ExportFormat::Epub),
-        Action::Export(ExportFormat::Pdf),
-        Action::Export(ExportFormat::PdfPrint),
-        Action::ExportBible,
-        Action::BrowseFonts,
-        Action::SetExportStyle,
+        Self::Export(ExportFormat::Markdown),
+        Self::Export(ExportFormat::Docx),
+        Self::Export(ExportFormat::Scriv),
+        Self::Export(ExportFormat::Vellum),
+        Self::Export(ExportFormat::Epub),
+        Self::Export(ExportFormat::Pdf),
+        Self::Export(ExportFormat::PdfPrint),
+        Self::ExportBible,
+        Self::BrowseFonts,
+        Self::SetExportStyle,
         // Reports
-        Action::ProgressReport,
-        Action::AnalysisReport,
-        Action::WritingHistory,
+        Self::ProgressReport,
+        Self::AnalysisReport,
+        Self::WritingHistory,
         // AI
-        Action::EnableAi,
-        Action::Ai(AiAction::Ask),
-        Action::Ai(AiAction::Characters),
-        Action::Ai(AiAction::Continuity),
-        Action::Ai(AiAction::Setting),
-        Action::Ai(AiAction::Plot),
-        Action::Ai(AiAction::Scaffold),
-        Action::Ai(AiAction::Naming),
-        Action::Ai(AiAction::Style),
-        Action::Ai(AiAction::Brainstorm),
-        Action::Ai(AiAction::DraftCharacters),
-        Action::Ai(AiAction::DraftSetting),
-        Action::Ai(AiAction::Voice),
-        Action::Ai(AiAction::Submission),
-        Action::Ai(AiAction::Marketing),
-        Action::Ai(AiAction::Social),
-        Action::Ai(AiAction::AdCreative),
-        Action::Ai(AiAction::Portrait),
-        Action::Ai(AiAction::Scene),
-        Action::Ai(AiAction::Triage),
-        Action::Ai(AiAction::AskHistory),
-        Action::Ai(AiAction::Thesaurus),
-        Action::Ai(AiAction::NameGen),
-        Action::Ai(AiAction::Editorial),
-        Action::RefreshBibles,
-        Action::RefreshSeriesBible,
-        Action::DescribeConfig,
-        Action::SwitchBackend,
-        Action::ManageModels,
-        Action::SetClaudeKey,
-        Action::SetImageKey,
-        Action::Assistant,
-        Action::BrowseBible,
+        Self::EnableAi,
+        Self::Ai(AiAction::Ask),
+        Self::Ai(AiAction::Characters),
+        Self::Ai(AiAction::Continuity),
+        Self::Ai(AiAction::Setting),
+        Self::Ai(AiAction::Plot),
+        Self::Ai(AiAction::Scaffold),
+        Self::Ai(AiAction::Naming),
+        Self::Ai(AiAction::Style),
+        Self::Ai(AiAction::Brainstorm),
+        Self::Ai(AiAction::DraftCharacters),
+        Self::Ai(AiAction::DraftSetting),
+        Self::Ai(AiAction::Voice),
+        Self::Ai(AiAction::Submission),
+        Self::Ai(AiAction::Marketing),
+        Self::Ai(AiAction::Social),
+        Self::Ai(AiAction::AdCreative),
+        Self::Ai(AiAction::Portrait),
+        Self::Ai(AiAction::Scene),
+        Self::Ai(AiAction::Triage),
+        Self::Ai(AiAction::AskHistory),
+        Self::Ai(AiAction::Thesaurus),
+        Self::Ai(AiAction::NameGen),
+        Self::Ai(AiAction::Editorial),
+        Self::RefreshBibles,
+        Self::RefreshSeriesBible,
+        Self::DescribeConfig,
+        Self::SwitchBackend,
+        Self::ManageModels,
+        Self::SetClaudeKey,
+        Self::SetImageKey,
+        Self::Assistant,
+        Self::BrowseBible,
         // Editing
-        Action::AcceptWord,
-        Action::NextMisspelling,
-        Action::PrevMisspelling,
-        Action::AddAnnotation,
-        Action::ReviewAnnotations,
-        Action::InsertSnippet,
-        Action::StartSprint,
-        Action::StopSprint,
+        Self::AcceptWord,
+        Self::NextMisspelling,
+        Self::PrevMisspelling,
+        Self::AddAnnotation,
+        Self::ReviewAnnotations,
+        Self::InsertSnippet,
+        Self::StartSprint,
+        Self::StopSprint,
         // View
-        Action::ToggleTypewriter,
-        Action::ToggleFocus,
-        Action::ToggleParagraphIndent,
-        Action::Corkboard,
-        Action::ManuscriptCorkboard,
-        Action::Settings,
+        Self::ToggleTypewriter,
+        Self::ToggleFocus,
+        Self::ToggleParagraphIndent,
+        Self::Corkboard,
+        Self::ManuscriptCorkboard,
+        Self::Settings,
         // Help
-        Action::UserGuide,
+        Self::UserGuide,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
     /// reference in config — never change these without a migration.
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Action::Save => "save",
-            Action::Export(ExportFormat::Markdown) => "export:markdown",
-            Action::Export(ExportFormat::Docx) => "export:docx",
-            Action::Export(ExportFormat::Scriv) => "export:scriv",
-            Action::Export(ExportFormat::Vellum) => "export:vellum",
-            Action::Export(ExportFormat::Epub) => "export:epub",
-            Action::Export(ExportFormat::Pdf) => "export:pdf",
-            Action::Export(ExportFormat::PdfPrint) => "export:pdf-print",
-            Action::ProgressReport => "report:progress",
-            Action::AnalysisReport => "report:analysis",
-            Action::WritingHistory => "report:history",
+            Self::Save => "save",
+            Self::Export(ExportFormat::Markdown) => "export:markdown",
+            Self::Export(ExportFormat::Docx) => "export:docx",
+            Self::Export(ExportFormat::Scriv) => "export:scriv",
+            Self::Export(ExportFormat::Vellum) => "export:vellum",
+            Self::Export(ExportFormat::Epub) => "export:epub",
+            Self::Export(ExportFormat::Pdf) => "export:pdf",
+            Self::Export(ExportFormat::PdfPrint) => "export:pdf-print",
+            Self::ProgressReport => "report:progress",
+            Self::AnalysisReport => "report:analysis",
+            Self::WritingHistory => "report:history",
             // The AI slugs are the single source in `AiAction::SPECS` (#563).
-            Action::Ai(a) => a.slug(),
-            Action::EnableAi => "ai:enable",
-            Action::UserGuide => "guide",
-            Action::ImportNotes => "import",
-            Action::NewProjectFromNotes => "new-from-notes",
-            Action::ImportManuscript => "import:manuscript",
-            Action::ArchiveProject => "archive",
-            Action::RestoreArchive => "archive:restore",
-            Action::StartSprint => "sprint:start",
-            Action::StopSprint => "sprint:stop",
-            Action::SwitchBook => "book:switch",
-            Action::ManageBooks => "book:manage",
-            Action::SeriesTree => "tree",
-            Action::RenameProject => "project:rename",
-            Action::BookDetails => "book:details",
-            Action::SetGoals => "goals:set",
-            Action::RefreshSeriesBible => "bible:series",
-            Action::RefreshBibles => "bible:refresh-all",
-            Action::ProjectFind => "find:project",
-            Action::DescribeConfig => "config:describe",
-            Action::AcceptWord => "dict:accept",
-            Action::NextMisspelling => "spell:next",
-            Action::PrevMisspelling => "spell:prev",
-            Action::ToggleTypewriter => "view:typewriter",
-            Action::ToggleFocus => "view:focus",
-            Action::ToggleParagraphIndent => "view:paragraph-indent",
-            Action::Corkboard => "view:corkboard",
-            Action::ManuscriptCorkboard => "view:corkboard-all",
-            Action::AddAnnotation => "annotate",
-            Action::ReviewAnnotations => "annotate:review",
-            Action::SwitchBackend => "ai:backend",
-            Action::ManageModels => "ai:models",
-            Action::SetClaudeKey => "ai:set-key",
-            Action::SetImageKey => "image:set-key",
-            Action::Assistant => "assistant",
-            Action::BrowseBible => "bible:browse",
-            Action::InsertSnippet => "snippet",
-            Action::BrowseFonts => "fonts:browse",
-            Action::SetExportStyle => "style:set",
-            Action::Settings => "settings",
-            Action::ExportBible => "export:bible",
+            Self::Ai(a) => a.slug(),
+            Self::EnableAi => "ai:enable",
+            Self::UserGuide => "guide",
+            Self::ImportNotes => "import",
+            Self::NewProjectFromNotes => "new-from-notes",
+            Self::ImportManuscript => "import:manuscript",
+            Self::ArchiveProject => "archive",
+            Self::RestoreArchive => "archive:restore",
+            Self::StartSprint => "sprint:start",
+            Self::StopSprint => "sprint:stop",
+            Self::SwitchBook => "book:switch",
+            Self::ManageBooks => "book:manage",
+            Self::SeriesTree => "tree",
+            Self::RenameProject => "project:rename",
+            Self::BookDetails => "book:details",
+            Self::SetGoals => "goals:set",
+            Self::RefreshSeriesBible => "bible:series",
+            Self::RefreshBibles => "bible:refresh-all",
+            Self::ProjectFind => "find:project",
+            Self::DescribeConfig => "config:describe",
+            Self::AcceptWord => "dict:accept",
+            Self::NextMisspelling => "spell:next",
+            Self::PrevMisspelling => "spell:prev",
+            Self::ToggleTypewriter => "view:typewriter",
+            Self::ToggleFocus => "view:focus",
+            Self::ToggleParagraphIndent => "view:paragraph-indent",
+            Self::Corkboard => "view:corkboard",
+            Self::ManuscriptCorkboard => "view:corkboard-all",
+            Self::AddAnnotation => "annotate",
+            Self::ReviewAnnotations => "annotate:review",
+            Self::SwitchBackend => "ai:backend",
+            Self::ManageModels => "ai:models",
+            Self::SetClaudeKey => "ai:set-key",
+            Self::SetImageKey => "image:set-key",
+            Self::Assistant => "assistant",
+            Self::BrowseBible => "bible:browse",
+            Self::InsertSnippet => "snippet",
+            Self::BrowseFonts => "fonts:browse",
+            Self::SetExportStyle => "style:set",
+            Self::Settings => "settings",
+            Self::ExportBible => "export:bible",
         }
     }
 
@@ -293,150 +293,149 @@ impl Action {
     /// `ALL` is ordered so each group's actions are contiguous, so the menu emits
     /// one header per group as it iterates. AI passes and the AI-powered helpers
     /// gather under one "AI" heading, the large block the grouping is meant to tame.
-    pub(crate) fn group(self) -> &'static str {
+    pub(crate) const fn group(self) -> &'static str {
         match self {
-            Action::Save
-            | Action::ProjectFind
-            | Action::SwitchBook
-            | Action::ManageBooks
-            | Action::SeriesTree
-            | Action::RenameProject
-            | Action::BookDetails
-            | Action::SetGoals
-            | Action::ImportNotes
-            | Action::NewProjectFromNotes
-            | Action::ImportManuscript
-            | Action::ArchiveProject
-            | Action::RestoreArchive => "Project",
-            Action::Export(_)
-            | Action::ExportBible
-            | Action::BrowseFonts
-            | Action::SetExportStyle => "Export",
-            Action::ProgressReport | Action::AnalysisReport | Action::WritingHistory => "Reports",
-            Action::Ai(_)
-            | Action::EnableAi
-            | Action::RefreshBibles
-            | Action::RefreshSeriesBible
-            | Action::DescribeConfig
-            | Action::SwitchBackend
-            | Action::ManageModels
-            | Action::SetClaudeKey
-            | Action::SetImageKey
-            | Action::Assistant
-            | Action::BrowseBible => "AI",
-            Action::AcceptWord
-            | Action::NextMisspelling
-            | Action::PrevMisspelling
-            | Action::AddAnnotation
-            | Action::ReviewAnnotations
-            | Action::InsertSnippet
-            | Action::StartSprint
-            | Action::StopSprint => "Editing",
-            Action::ToggleTypewriter
-            | Action::ToggleFocus
-            | Action::ToggleParagraphIndent
-            | Action::Corkboard
-            | Action::ManuscriptCorkboard
-            | Action::Settings => "View",
-            Action::UserGuide => "Help",
+            Self::Save
+            | Self::ProjectFind
+            | Self::SwitchBook
+            | Self::ManageBooks
+            | Self::SeriesTree
+            | Self::RenameProject
+            | Self::BookDetails
+            | Self::SetGoals
+            | Self::ImportNotes
+            | Self::NewProjectFromNotes
+            | Self::ImportManuscript
+            | Self::ArchiveProject
+            | Self::RestoreArchive => "Project",
+            Self::Export(_) | Self::ExportBible | Self::BrowseFonts | Self::SetExportStyle => {
+                "Export"
+            }
+            Self::ProgressReport | Self::AnalysisReport | Self::WritingHistory => "Reports",
+            Self::Ai(_)
+            | Self::EnableAi
+            | Self::RefreshBibles
+            | Self::RefreshSeriesBible
+            | Self::DescribeConfig
+            | Self::SwitchBackend
+            | Self::ManageModels
+            | Self::SetClaudeKey
+            | Self::SetImageKey
+            | Self::Assistant
+            | Self::BrowseBible => "AI",
+            Self::AcceptWord
+            | Self::NextMisspelling
+            | Self::PrevMisspelling
+            | Self::AddAnnotation
+            | Self::ReviewAnnotations
+            | Self::InsertSnippet
+            | Self::StartSprint
+            | Self::StopSprint => "Editing",
+            Self::ToggleTypewriter
+            | Self::ToggleFocus
+            | Self::ToggleParagraphIndent
+            | Self::Corkboard
+            | Self::ManuscriptCorkboard
+            | Self::Settings => "View",
+            Self::UserGuide => "Help",
         }
     }
 
     /// Human label for the run-action menu.
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
-            Action::Save => "Save",
-            Action::Export(ExportFormat::Markdown) => "Export → Markdown",
-            Action::Export(ExportFormat::Docx) => "Export → Word (.docx)",
-            Action::Export(ExportFormat::Scriv) => "Export → Scrivener",
-            Action::Export(ExportFormat::Vellum) => "Export → Vellum (.docx)",
-            Action::Export(ExportFormat::Epub) => "Export → EPUB",
-            Action::Export(ExportFormat::Pdf) => "Export → PDF",
-            Action::Export(ExportFormat::PdfPrint) => "Export → PDF (print interior)",
-            Action::ProgressReport => "Progress report",
-            Action::AnalysisReport => "Analysis report",
-            Action::WritingHistory => "Writing history",
-            Action::Ai(AiAction::Ask) => "AI · Ask the manuscript",
-            Action::Ai(AiAction::Characters) => "AI · Character bible",
-            Action::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
-            Action::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
-            Action::Ai(AiAction::Plot) => "AI · Plot & arc tracker",
-            Action::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
-            Action::Ai(AiAction::Naming) => "AI · Name & term consistency",
-            Action::Ai(AiAction::Style) => "AI · Prose & style",
-            Action::Ai(AiAction::Brainstorm) => "AI · Brainstorm ideas",
-            Action::Ai(AiAction::DraftCharacters) => "AI · Draft characters",
-            Action::Ai(AiAction::DraftSetting) => "AI · Draft setting",
-            Action::Ai(AiAction::Voice) => "AI · Character voice",
-            Action::Ai(AiAction::Submission) => "AI · Submission material",
-            Action::Ai(AiAction::Marketing) => "AI · Marketing copy",
-            Action::Ai(AiAction::Social) => "AI · Social posts",
-            Action::Ai(AiAction::AdCreative) => "AI · Ad creative",
-            Action::Ai(AiAction::Portrait) => "AI · Character portraits",
-            Action::Ai(AiAction::Scene) => "AI · Scene illustration",
-            Action::Ai(AiAction::Triage) => "Revision triage",
-            Action::Ai(AiAction::AskHistory) => "AI · Ask history",
-            Action::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
-            Action::Ai(AiAction::NameGen) => "AI · Name generator",
-            Action::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
-            Action::EnableAi => "Enable AI assistance",
-            Action::UserGuide => "User's guide",
-            Action::ImportNotes => "Import notes → story bible",
-            Action::NewProjectFromNotes => "New project from a folder of notes",
-            Action::ImportManuscript => "Import a manuscript → new project",
-            Action::ArchiveProject => "Archive project… (.zip backup)",
-            Action::RestoreArchive => "Restore project from archive…",
-            Action::StartSprint => "Start a writing sprint",
-            Action::StopSprint => "Stop the writing sprint",
-            Action::SwitchBook => "Switch book",
-            Action::ManageBooks => "Manage books (series)…",
-            Action::SeriesTree => "Project tree",
-            Action::RenameProject => "Rename project",
-            Action::BookDetails => "Book details…",
-            Action::SetGoals => "Set writing goals",
-            Action::RefreshSeriesBible => "Refresh series bible",
-            Action::RefreshBibles => "Refresh all bibles",
-            Action::ProjectFind => "Find across manuscript",
-            Action::DescribeConfig => "Configure by description",
-            Action::AcceptWord => "Add word to dictionary",
-            Action::NextMisspelling => "Next misspelling",
-            Action::PrevMisspelling => "Previous misspelling",
-            Action::ToggleTypewriter => "Typewriter scrolling (toggle)",
-            Action::ToggleFocus => "Focus mode (toggle)",
-            Action::ToggleParagraphIndent => "Paragraph indent (toggle)",
-            Action::Corkboard => "Corkboard (scene overview)",
-            Action::ManuscriptCorkboard => "Corkboard — whole manuscript",
-            Action::AddAnnotation => "Annotate selection",
-            Action::ReviewAnnotations => "Review annotations",
-            Action::SwitchBackend => "Switch AI backend (Claude / local)",
-            Action::ManageModels => "Local AI models",
-            Action::SetClaudeKey => "Set Claude API key (keychain)",
-            Action::SetImageKey => "Set image API key (keychain)",
-            Action::Assistant => "Authorial assistant",
-            Action::BrowseBible => "Browse story bible",
-            Action::InsertSnippet => "Insert snippet…",
-            Action::BrowseFonts => "Browse & download fonts…",
-            Action::SetExportStyle => "Set export style…",
-            Action::Settings => "Settings…",
-            Action::ExportBible => "Export story bible → Markdown",
+            Self::Save => "Save",
+            Self::Export(ExportFormat::Markdown) => "Export → Markdown",
+            Self::Export(ExportFormat::Docx) => "Export → Word (.docx)",
+            Self::Export(ExportFormat::Scriv) => "Export → Scrivener",
+            Self::Export(ExportFormat::Vellum) => "Export → Vellum (.docx)",
+            Self::Export(ExportFormat::Epub) => "Export → EPUB",
+            Self::Export(ExportFormat::Pdf) => "Export → PDF",
+            Self::Export(ExportFormat::PdfPrint) => "Export → PDF (print interior)",
+            Self::ProgressReport => "Progress report",
+            Self::AnalysisReport => "Analysis report",
+            Self::WritingHistory => "Writing history",
+            Self::Ai(AiAction::Ask) => "AI · Ask the manuscript",
+            Self::Ai(AiAction::Characters) => "AI · Character bible",
+            Self::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
+            Self::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
+            Self::Ai(AiAction::Plot) => "AI · Plot & arc tracker",
+            Self::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
+            Self::Ai(AiAction::Naming) => "AI · Name & term consistency",
+            Self::Ai(AiAction::Style) => "AI · Prose & style",
+            Self::Ai(AiAction::Brainstorm) => "AI · Brainstorm ideas",
+            Self::Ai(AiAction::DraftCharacters) => "AI · Draft characters",
+            Self::Ai(AiAction::DraftSetting) => "AI · Draft setting",
+            Self::Ai(AiAction::Voice) => "AI · Character voice",
+            Self::Ai(AiAction::Submission) => "AI · Submission material",
+            Self::Ai(AiAction::Marketing) => "AI · Marketing copy",
+            Self::Ai(AiAction::Social) => "AI · Social posts",
+            Self::Ai(AiAction::AdCreative) => "AI · Ad creative",
+            Self::Ai(AiAction::Portrait) => "AI · Character portraits",
+            Self::Ai(AiAction::Scene) => "AI · Scene illustration",
+            Self::Ai(AiAction::Triage) => "Revision triage",
+            Self::Ai(AiAction::AskHistory) => "AI · Ask history",
+            Self::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
+            Self::Ai(AiAction::NameGen) => "AI · Name generator",
+            Self::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
+            Self::EnableAi => "Enable AI assistance",
+            Self::UserGuide => "User's guide",
+            Self::ImportNotes => "Import notes → story bible",
+            Self::NewProjectFromNotes => "New project from a folder of notes",
+            Self::ImportManuscript => "Import a manuscript → new project",
+            Self::ArchiveProject => "Archive project… (.zip backup)",
+            Self::RestoreArchive => "Restore project from archive…",
+            Self::StartSprint => "Start a writing sprint",
+            Self::StopSprint => "Stop the writing sprint",
+            Self::SwitchBook => "Switch book",
+            Self::ManageBooks => "Manage books (series)…",
+            Self::SeriesTree => "Project tree",
+            Self::RenameProject => "Rename project",
+            Self::BookDetails => "Book details…",
+            Self::SetGoals => "Set writing goals",
+            Self::RefreshSeriesBible => "Refresh series bible",
+            Self::RefreshBibles => "Refresh all bibles",
+            Self::ProjectFind => "Find across manuscript",
+            Self::DescribeConfig => "Configure by description",
+            Self::AcceptWord => "Add word to dictionary",
+            Self::NextMisspelling => "Next misspelling",
+            Self::PrevMisspelling => "Previous misspelling",
+            Self::ToggleTypewriter => "Typewriter scrolling (toggle)",
+            Self::ToggleFocus => "Focus mode (toggle)",
+            Self::ToggleParagraphIndent => "Paragraph indent (toggle)",
+            Self::Corkboard => "Corkboard (scene overview)",
+            Self::ManuscriptCorkboard => "Corkboard — whole manuscript",
+            Self::AddAnnotation => "Annotate selection",
+            Self::ReviewAnnotations => "Review annotations",
+            Self::SwitchBackend => "Switch AI backend (Claude / local)",
+            Self::ManageModels => "Local AI models",
+            Self::SetClaudeKey => "Set Claude API key (keychain)",
+            Self::SetImageKey => "Set image API key (keychain)",
+            Self::Assistant => "Authorial assistant",
+            Self::BrowseBible => "Browse story bible",
+            Self::InsertSnippet => "Insert snippet…",
+            Self::BrowseFonts => "Browse & download fonts…",
+            Self::SetExportStyle => "Set export style…",
+            Self::Settings => "Settings…",
+            Self::ExportBible => "Export story bible → Markdown",
         }
     }
 
     /// Look up an action by its stable [`name`](Action::name) — the resolver a
     /// workflow (#226) uses to turn a config step token into an action.
-    pub(crate) fn from_name(name: &str) -> Option<Action> {
-        Action::ALL.iter().copied().find(|a| a.name() == name)
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|a| a.name() == name)
     }
 
     /// Whether this action completes synchronously, so a workflow (#226) can run
     /// it and move straight to the next step. The network AI passes are async
     /// (workflow support is #227) and "Ask" waits for typed input; `triage` is
     /// local aggregation, so it counts as synchronous.
-    pub(crate) fn is_sync(self) -> bool {
+    pub(crate) const fn is_sync(self) -> bool {
         match self {
             // Local, no network request — like Triage, these run synchronously.
-            Action::Ai(AiAction::Triage | AiAction::AskHistory) => true,
-            Action::Ai(_) => false,
+            Self::Ai(AiAction::Triage | AiAction::AskHistory) => true,
+            Self::Ai(_) => false,
             _ => true,
         }
     }
@@ -450,24 +449,24 @@ impl Action {
     /// assistant has no way to give), local-only Triage, the modal pickers (book
     /// switch, tree, project find, annotate, model manager, the notes importers),
     /// and the off-manuscript copy generators, kept out of autonomous reach.
-    pub(crate) fn assistant_runnable(self) -> bool {
+    pub(crate) const fn assistant_runnable(self) -> bool {
         matches!(
             self,
-            Action::Save
-                | Action::Export(_)
-                | Action::ExportBible
-                | Action::ProgressReport
-                | Action::AnalysisReport
-                | Action::WritingHistory
-                | Action::UserGuide
-                | Action::AcceptWord
-                | Action::NextMisspelling
-                | Action::PrevMisspelling
-                | Action::ToggleTypewriter
-                | Action::ToggleFocus
-                | Action::ToggleParagraphIndent
-                | Action::SwitchBackend
-                | Action::Ai(
+            Self::Save
+                | Self::Export(_)
+                | Self::ExportBible
+                | Self::ProgressReport
+                | Self::AnalysisReport
+                | Self::WritingHistory
+                | Self::UserGuide
+                | Self::AcceptWord
+                | Self::NextMisspelling
+                | Self::PrevMisspelling
+                | Self::ToggleTypewriter
+                | Self::ToggleFocus
+                | Self::ToggleParagraphIndent
+                | Self::SwitchBackend
+                | Self::Ai(
                     AiAction::Characters
                         | AiAction::Continuity
                         | AiAction::Setting
@@ -490,11 +489,11 @@ impl Action {
     /// Brainstorm, the concept for the bible drafts. `None` for argument-free
     /// actions. The single source the tool schema and the dispatch both read, so a
     /// tool input never drifts from what the action consumes.
-    pub(crate) fn text_arg(self) -> Option<&'static str> {
+    pub(crate) const fn text_arg(self) -> Option<&'static str> {
         match self {
-            Action::Ai(AiAction::Ask) => Some("question"),
-            Action::Ai(AiAction::Brainstorm) => Some("premise"),
-            Action::Ai(AiAction::DraftCharacters | AiAction::DraftSetting) => Some("concept"),
+            Self::Ai(AiAction::Ask) => Some("question"),
+            Self::Ai(AiAction::Brainstorm) => Some("premise"),
+            Self::Ai(AiAction::DraftCharacters | AiAction::DraftSetting) => Some("concept"),
             _ => None,
         }
     }
@@ -502,7 +501,7 @@ impl Action {
 
 /// A manuscript export target (#7), chosen from the export palette.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum ExportFormat {
+pub enum ExportFormat {
     /// A single compiled Markdown document (#190).
     Markdown,
     /// Word `.docx` in standard manuscript format (#191).
@@ -527,7 +526,7 @@ pub(crate) enum ExportFormat {
 /// compiled (and the output filename) differ. A standalone novel only ever
 /// exports its one book.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ExportScope {
+pub enum ExportScope {
     ActiveBook,
     Series,
     /// A single body chapter of the active book, by manifest chapter index (#584).
@@ -552,20 +551,18 @@ impl ExportScope {
     /// The inclusive manifest chapter-index range a *sample* scope (#584) covers,
     /// or `None` for a whole-book / whole-series export. The single place the three
     /// sample scopes resolve to a chapter span — the export loop filters by it.
-    pub(crate) fn chapter_span(&self) -> Option<std::ops::RangeInclusive<usize>> {
+    pub(crate) const fn chapter_span(&self) -> Option<std::ops::RangeInclusive<usize>> {
         match self {
-            ExportScope::ActiveBook | ExportScope::Series => None,
-            ExportScope::Chapter(i) => Some(*i..=*i),
-            ExportScope::Part { start, end, .. } | ExportScope::Range { start, end } => {
-                Some(*start..=*end)
-            }
+            Self::ActiveBook | Self::Series => None,
+            Self::Chapter(i) => Some(*i..=*i),
+            Self::Part { start, end, .. } | Self::Range { start, end } => Some(*start..=*end),
         }
     }
 }
 
 /// The version-control actions reachable from the Git palette (#54).
 #[derive(Clone, Copy)]
-pub(crate) enum GitAction {
+pub enum GitAction {
     /// Initialize a repository (#130).
     Initialize,
     /// Commit the project with a message (#131).

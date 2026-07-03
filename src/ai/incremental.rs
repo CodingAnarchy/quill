@@ -102,7 +102,7 @@ pub fn revise_request(
 // --- The per-project state file (bible/.state.toml) -------------------------
 
 /// What one tracker was last built from.
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 pub struct PassState {
     /// Generation date of the last build (informational).
     #[serde(default)]
@@ -128,7 +128,7 @@ fn state_path(root: &Path) -> PathBuf {
 impl State {
     /// Load the state file, or the empty default when it's missing/unreadable
     /// (best effort — a corrupt file just means the next pass rebuilds).
-    pub fn load(root: &Path) -> State {
+    pub fn load(root: &Path) -> Self {
         std::fs::read_to_string(state_path(root))
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
@@ -149,7 +149,7 @@ impl State {
         built: &str,
         chapters: Digests,
     ) -> std::io::Result<()> {
-        let mut state = State::load(root);
+        let mut state = Self::load(root);
         state.trackers.insert(
             tracker.to_string(),
             PassState {
@@ -177,7 +177,7 @@ impl State {
         chapters: Digests,
         preserve: &BTreeSet<String>,
     ) -> std::io::Result<()> {
-        let mut state = State::load(root);
+        let mut state = Self::load(root);
         let entry = state.trackers.entry(tracker.to_string()).or_default();
         entry.built = built.to_string();
         // Drop this book's prior entries (anything not owned by another book), so a
@@ -187,7 +187,7 @@ impl State {
         Self::save(root, &state)
     }
 
-    fn save(root: &Path, state: &State) -> std::io::Result<()> {
+    fn save(root: &Path, state: &Self) -> std::io::Result<()> {
         let path = state_path(root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -209,7 +209,7 @@ mod tests {
     }
 
     fn preserve(files: &[&str]) -> BTreeSet<String> {
-        files.iter().map(|f| f.to_string()).collect()
+        files.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

@@ -362,11 +362,11 @@ impl App {
             .count()
     }
 
-    fn nav_has_filter(&self) -> bool {
+    const fn nav_has_filter(&self) -> bool {
         matches!(&self.mode, Mode::Nav { filter, .. } if !filter.is_empty())
     }
 
-    fn nav_selected(&self) -> usize {
+    const fn nav_selected(&self) -> usize {
         if let Mode::Nav { selected, .. } = &self.mode {
             *selected
         } else {
@@ -374,7 +374,7 @@ impl App {
         }
     }
 
-    fn set_nav_typing(&mut self, on: bool) {
+    const fn set_nav_typing(&mut self, on: bool) {
         if let Mode::Nav { typing, .. } = &mut self.mode {
             *typing = on;
         }

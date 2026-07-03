@@ -2,13 +2,16 @@
 
 use super::*;
 use crate::workflow::{Triggers, Workflow};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Make the active buffer dirty, then pretend the last input was `secs` ago so a
 /// `tick_autosave` sees `secs` of genuine idle.
 fn dirty_and_idle(app: &mut App, secs: u64) {
     type_str(app, "X"); // an edit → dirty
-    app.last_activity = Instant::now() - Duration::from_secs(secs);
+    app.last_activity = Instant::now()
+        .checked_sub(Duration::from_secs(secs))
+        .unwrap();
 }
 
 #[test]
@@ -60,7 +63,7 @@ fn autosave_does_not_fire_the_on_save_workflow() {
     }];
     app.triggers = Triggers {
         on_save: Some("autosave".into()),
-        keys: Default::default(),
+        keys: HashMap::default(),
     };
     app.autosave_interval_secs = 1;
     dirty_and_idle(&mut app, 2);

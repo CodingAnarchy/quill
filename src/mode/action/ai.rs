@@ -6,7 +6,7 @@
 
 /// The AI actions reachable from the AI palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AiAction {
+pub enum AiAction {
     Ask,
     Characters,
     Continuity,
@@ -56,7 +56,7 @@ pub(crate) enum AiAction {
 /// is for the local / interactive / image actions that issue no costed
 /// whole-manuscript pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AiCost {
+pub enum AiCost {
     /// No costed whole-manuscript pass (interactive, local, or per-image).
     None,
     /// The cheap name/term-consistency pass, billed with its own fixed model.
@@ -71,7 +71,7 @@ pub(crate) enum AiCost {
 /// the cost gate, and the bible trackers all derive from this table rather than
 /// re-encoding the set, so a new or renamed action is described in exactly one
 /// place.
-pub(crate) struct AiActionSpec {
+pub struct AiActionSpec {
     pub(crate) action: AiAction,
     /// The stable token the run-action registry and workflows reference — the AI
     /// half of [`Action::name`](super::Action::name). Never change without a config
@@ -88,139 +88,139 @@ impl AiAction {
     /// bible key, in palette order. The single place the action set is enumerated.
     pub(crate) const SPECS: &'static [AiActionSpec] = &[
         AiActionSpec {
-            action: AiAction::Ask,
+            action: Self::Ask,
             slug: "ai:ask",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Characters,
+            action: Self::Characters,
             slug: "ai:characters",
             cost: AiCost::Manuscript,
             bible_key: Some("characters"),
         },
         AiActionSpec {
-            action: AiAction::Continuity,
+            action: Self::Continuity,
             slug: "ai:continuity",
             cost: AiCost::Manuscript,
             bible_key: Some("timeline"),
         },
         AiActionSpec {
-            action: AiAction::Setting,
+            action: Self::Setting,
             slug: "ai:setting",
             cost: AiCost::Manuscript,
             bible_key: Some("setting"),
         },
         AiActionSpec {
-            action: AiAction::Plot,
+            action: Self::Plot,
             slug: "ai:plot",
             cost: AiCost::Manuscript,
             bible_key: Some("plot"),
         },
         AiActionSpec {
-            action: AiAction::Scaffold,
+            action: Self::Scaffold,
             slug: "ai:scaffold",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Naming,
+            action: Self::Naming,
             slug: "ai:naming",
             cost: AiCost::Naming,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Style,
+            action: Self::Style,
             slug: "ai:style",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Brainstorm,
+            action: Self::Brainstorm,
             slug: "ai:brainstorm",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::DraftCharacters,
+            action: Self::DraftCharacters,
             slug: "ai:draft-characters",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::DraftSetting,
+            action: Self::DraftSetting,
             slug: "ai:draft-setting",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Voice,
+            action: Self::Voice,
             slug: "ai:voice",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Submission,
+            action: Self::Submission,
             slug: "ai:submission",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Marketing,
+            action: Self::Marketing,
             slug: "ai:marketing",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Social,
+            action: Self::Social,
             slug: "ai:social",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::AdCreative,
+            action: Self::AdCreative,
             slug: "ai:ad-creative",
             cost: AiCost::Manuscript,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Portrait,
+            action: Self::Portrait,
             slug: "ai:portrait",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Scene,
+            action: Self::Scene,
             slug: "ai:scene",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Triage,
+            action: Self::Triage,
             slug: "triage",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::AskHistory,
+            action: Self::AskHistory,
             slug: "ai:ask-history",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Thesaurus,
+            action: Self::Thesaurus,
             slug: "ai:thesaurus",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::NameGen,
+            action: Self::NameGen,
             slug: "ai:name",
             cost: AiCost::None,
             bible_key: None,
         },
         AiActionSpec {
-            action: AiAction::Editorial,
+            action: Self::Editorial,
             slug: "ai:editorial",
             cost: AiCost::Manuscript,
             bible_key: None,
@@ -229,7 +229,7 @@ impl AiAction {
 
     /// This action's descriptor — its single source of slug / cost / bible key.
     pub(crate) fn spec(self) -> &'static AiActionSpec {
-        AiAction::SPECS
+        Self::SPECS
             .iter()
             .find(|s| s.action == self)
             .expect("every AiAction has a descriptor in AiAction::SPECS")

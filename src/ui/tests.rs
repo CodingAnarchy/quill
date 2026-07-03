@@ -10,6 +10,7 @@ use crate::syntax::Heading;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use ratatui::{backend::TestBackend, Terminal};
+use std::fmt::Write;
 use std::fs;
 use std::time::Instant;
 
@@ -41,7 +42,7 @@ fn app_with(text: &str) -> App {
 /// work — plus a spread of inline annotations (#302) so their per-row/char
 /// scan is timed. Confirms none of these adds cost that breaks the frame budget.
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn render_stays_within_a_frame() {
     let titles: Vec<String> = (0..150).map(|i| format!("Chapter {i}")).collect();
     let title_refs: Vec<&str> = titles.iter().map(String::as_str).collect();
@@ -220,7 +221,7 @@ fn typewriter_pins_the_cursor_line_to_the_centre() {
         if i > 0 {
             text.push('\n');
         }
-        text.push_str(&format!("Line{i:02}"));
+        write!(text, "Line{i:02}").unwrap();
     }
     let mut app = app_with(&text); // typed in, so the cursor rests at the end
     let h = 21u16;
@@ -268,12 +269,7 @@ fn focus_mode_dims_the_other_paragraphs() {
             .expect("paragraph on screen");
         (0..40)
             .map(|x| &buf[(x, row)])
-            .find(|c| {
-                c.symbol()
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ch.is_alphabetic())
-            })
+            .find(|c| c.symbol().chars().next().is_some_and(char::is_alphabetic))
             .unwrap()
             .style()
             .fg
@@ -455,12 +451,7 @@ fn a_fenced_code_block_renders_in_the_code_colour() {
         })?;
         (0..40)
             .map(|x| &buf[(x, row)])
-            .find(|c| {
-                c.symbol()
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ch.is_alphabetic())
-            })
+            .find(|c| c.symbol().chars().next().is_some_and(char::is_alphabetic))
             .map(|c| c.style().fg)?
     };
 
@@ -583,12 +574,11 @@ fn a_reference_pane_shows_the_concealed_preview_form() {
         })
         .unwrap();
     let buf = terminal.backend().buffer().clone();
-    let screen: String = (0..16)
-        .map(|y| {
-            let l: String = (0..40).map(|x| buf[(x, y)].symbol()).collect();
-            format!("{l}\n")
-        })
-        .collect();
+    let screen = (0..16).fold(String::new(), |mut screen, y| {
+        let l: String = (0..40).map(|x| buf[(x, y)].symbol()).collect();
+        writeln!(screen, "{l}").unwrap();
+        screen
+    });
     assert!(
         !screen.contains("```"),
         "the reference pane hides the fences:\n{screen}"

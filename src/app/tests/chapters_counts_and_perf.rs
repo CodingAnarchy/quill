@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::project::Project;
+use std::fmt::Write;
 use std::fs;
 
 #[test]
@@ -116,7 +117,7 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
 /// future change makes navigation re-read or re-scan other chapters, this catches
 /// it. See `docs/performance.md`.
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn navigation_is_fast_in_a_series_sized_project() {
     use std::time::Instant;
 
@@ -127,9 +128,11 @@ fn navigation_is_fast_in_a_series_sized_project() {
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
-        ));
+        )
+        .unwrap();
         let mut body = String::from("# Chapter\n\n");
         for _ in 0..40 {
             body.push_str("The night was dark and the road was very long indeed.\n");
@@ -161,7 +164,7 @@ fn navigation_is_fast_in_a_series_sized_project() {
 /// that changed (the live active one, plus any whose cache moved), not all of
 /// them (#220). See `docs/performance.md`.
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn tally_is_independent_of_project_size() {
     use std::time::Instant;
 
@@ -171,9 +174,11 @@ fn tally_is_independent_of_project_size() {
     let mut manifest = String::from("title = \"Series\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
-        ));
+        )
+        .unwrap();
         fs::write(dir.join(&file), "Some prose in this chapter.\n").unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

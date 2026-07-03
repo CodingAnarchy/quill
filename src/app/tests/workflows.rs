@@ -9,6 +9,7 @@ use crate::ai;
 use crate::ai::workflow_gen::GeneratedWorkflow;
 use crate::mode::{Action, AiAction};
 use crate::workflow::{Triggers, Workflow};
+use std::collections::HashMap;
 
 fn wf(name: &str, steps: &[&str]) -> Workflow {
     Workflow {
@@ -303,7 +304,7 @@ fn saving_runs_the_on_save_workflow() {
     app.workflows = vec![wf("autosave", &["report:progress"])];
     app.triggers = Triggers {
         on_save: Some("autosave".into()),
-        keys: Default::default(),
+        keys: HashMap::default(),
     };
     app.on_key(ctrl('s'));
     assert!(
@@ -327,7 +328,7 @@ fn a_workflows_own_save_step_does_not_re_trigger_on_save() {
     app.workflows = vec![wf("autosave", &["save", "report:progress"])];
     app.triggers = Triggers {
         on_save: Some("autosave".into()),
-        keys: Default::default(),
+        keys: HashMap::default(),
     };
     app.on_key(key(KeyCode::Char('X'))); // edit so the save has work
     app.on_key(ctrl('s'));

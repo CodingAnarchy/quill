@@ -64,13 +64,13 @@ pub const TEMPLATES: &[ProjectTemplate] = &[
 impl ProjectTemplate {
     /// The template at `index` in [`TEMPLATES`], or the default "Empty" template
     /// when the index is out of range (so a stale picker selection can't panic).
-    pub fn at(index: usize) -> &'static ProjectTemplate {
+    pub fn at(index: usize) -> &'static Self {
         TEMPLATES.get(index).unwrap_or(&TEMPLATES[0])
     }
 
     /// Whether this template scaffolds no structure — the historic "Empty"
     /// default (a single blank chapter, no parts).
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.parts.is_empty()
     }
 }

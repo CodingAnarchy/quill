@@ -35,7 +35,7 @@ impl ImageBackend for FalBackend {
             return Err(api_error(status, &value));
         }
         let (url, content_type) = first_image(&value)?;
-        let bytes = self.download(&url)?;
+        let bytes = Self::download(&url)?;
         Ok(GeneratedImage {
             bytes,
             ext: image::extension_for(&content_type).to_string(),
@@ -60,7 +60,7 @@ impl FalBackend {
 
     /// Download the generated image bytes from its (fal-hosted) URL. Bespoke (not
     /// in `http`) because it reads raw bytes under a size cap, not JSON.
-    fn download(&self, url: &str) -> Result<Vec<u8>, AiError> {
+    fn download(url: &str) -> Result<Vec<u8>, AiError> {
         let mut res = ureq::get(url)
             .config()
             .http_status_as_error(false)

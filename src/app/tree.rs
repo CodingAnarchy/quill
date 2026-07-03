@@ -19,7 +19,7 @@ use crate::report::thousands;
 use super::App;
 
 /// What pressing Enter on a row acts on.
-pub(crate) enum TreeNode {
+pub enum TreeNode {
     /// The series root — no action.
     Series,
     /// A book: Enter toggles its expansion.
@@ -31,7 +31,7 @@ pub(crate) enum TreeNode {
 }
 
 /// One visible row of the tree, in display order.
-pub(crate) struct TreeRow {
+pub struct TreeRow {
     /// Indentation depth (in tree levels).
     pub(crate) indent: u16,
     pub(crate) label: String,
@@ -183,7 +183,7 @@ impl App {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.set_tree_selected(sel.saturating_sub(1)),
             KeyCode::Down | KeyCode::Char('j') => {
-                self.set_tree_selected((sel + 1).min(rows.len().saturating_sub(1)))
+                self.set_tree_selected((sel + 1).min(rows.len().saturating_sub(1)));
             }
             // Expand a book (Right), or collapse the selected node's book (Left).
             KeyCode::Right | KeyCode::Char('l') => {
@@ -237,7 +237,7 @@ impl App {
     /// that book's row.
     fn collapse_selected_book(&mut self, rows: &[TreeRow], sel: usize) {
         let book = match rows.get(sel).map(|r| &r.node) {
-            Some(TreeNode::Book(b)) | Some(TreeNode::Chapter { book: b, .. }) => *b,
+            Some(TreeNode::Book(b) | TreeNode::Chapter { book: b, .. }) => *b,
             _ => return,
         };
         self.set_book_expanded(book, false);

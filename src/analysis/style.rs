@@ -116,8 +116,14 @@ impl WordLists {
     /// behavior, so an unconfigured project's report is unchanged.
     pub fn new() -> Self {
         Self {
-            stopwords: STOPWORDS.iter().map(|s| s.to_string()).collect(),
-            filter_words: FILTER_WORDS.iter().map(|s| s.to_string()).collect(),
+            stopwords: STOPWORDS
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            filter_words: FILTER_WORDS
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
         }
     }
 
@@ -168,7 +174,7 @@ pub struct StyleFlags {
 }
 
 impl StyleFlags {
-    pub fn add(&mut self, other: StyleFlags) {
+    pub const fn add(&mut self, other: Self) {
         self.words += other.words;
         self.adverbs_ly += other.adverbs_ly;
         self.filter_words += other.filter_words;

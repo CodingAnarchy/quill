@@ -1,5 +1,10 @@
 //! Layout tests for the PDF writer: well-formedness, preformatted blocks, print
 //! trim/recto/bleed, justification/hyphenation, style warnings, and the /Info dict.
+
+// The bleed/trim geometry asserts exact point offsets (the bleed, `2.0 * bleed`)
+// from deterministic layout arithmetic — an exact compare is the intended check.
+#![allow(clippy::float_cmp)]
+
 use super::super::wrap::{words_of, wrap_lines, Hyphenate, Word};
 use super::*;
 
@@ -27,7 +32,7 @@ fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -54,7 +59,7 @@ fn a_fenced_block_renders_in_the_embedded_monospace_face() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -136,7 +141,7 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         subtitle: None,
         author: Some("Auth".into()),
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -353,7 +358,7 @@ fn a_paragraph_does_not_orphan_its_first_line_at_a_page_bottom() {
     );
     pdf.start_page();
     // Drop to one line of room above the bottom margin.
-    pdf.y = pdf.layout.text_bottom() + BODY_LEADING * 0.5;
+    pdf.y = BODY_LEADING.mul_add(0.5, pdf.layout.text_bottom());
     let pages_before = pdf.pages.len();
     pdf.paragraph(&[Run::new(
         "This is a paragraph long enough to wrap across at least two full lines of body \
@@ -381,7 +386,7 @@ fn a_paragraph_does_not_widow_its_last_line_at_a_page_top() {
     pdf.start_page();
     // Place y so that exactly four of the five lines fit here — the natural break would
     // strand line five (a widow).
-    pdf.y = pdf.layout.text_bottom() + leading * 3.5;
+    pdf.y = leading.mul_add(3.5, pdf.layout.text_bottom());
     let brk = pdf.widow_orphan_break(n, leading);
     assert_eq!(
         brk,
@@ -389,7 +394,7 @@ fn a_paragraph_does_not_widow_its_last_line_at_a_page_top() {
         "break before the 4th line so lines 4 and 5 travel together"
     );
     // Sanity: a paragraph that splits leaving two lines on each side needs no help.
-    pdf.y = pdf.layout.text_bottom() + leading * 1.5; // two lines fit
+    pdf.y = leading.mul_add(1.5, pdf.layout.text_bottom()); // two lines fit
     assert_eq!(
         pdf.widow_orphan_break(4, leading),
         None,

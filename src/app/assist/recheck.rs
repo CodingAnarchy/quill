@@ -154,6 +154,7 @@ impl App {
     /// produces (#608) — the real parse+map the worker runs, for tests to drive
     /// `apply_recheck` end-to-end without a live backend or a thread.
     #[cfg(test)]
+    #[allow(clippy::unused_self)] // test helper; kept a method for symmetry with recheck_request_for
     pub(crate) fn recheck_findings_from(&self, finding: &Finding, response: &str) -> Vec<Finding> {
         let Some(action) = finding.action else {
             return Vec::new();

@@ -33,6 +33,7 @@
 //! conversation persists for the next request. Claude-only for now (#389).
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 
 use serde_json::{json, Value};
 
@@ -74,7 +75,7 @@ enum Step {
 
 /// Who spoke a transcript line, so the renderer can style it.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Speaker {
+pub enum Speaker {
     /// The author's request.
     You,
     /// The model's prose reply.
@@ -86,7 +87,7 @@ pub(crate) enum Speaker {
 }
 
 /// One rendered line of the conversation transcript.
-pub(crate) struct Entry {
+pub struct Entry {
     pub(crate) who: Speaker,
     pub(crate) text: String,
 }
@@ -113,7 +114,7 @@ impl Entry {
 }
 
 /// The assistant pane's conversation state (#307), scoped to the pane's lifetime.
-pub(crate) struct Assistant {
+pub struct Assistant {
     /// The Messages API conversation: every turn appended and re-sent so context
     /// persists across requests. The manuscript rides the first user block with
     /// `cache_control`, so the cached prefix is reused rather than re-billed.
@@ -177,13 +178,13 @@ impl Assistant {
 
     /// Whether the model (a network turn) or one of its passes is in flight — the
     /// "thinking" state, in which the request line is locked.
-    pub(crate) fn is_running(&self) -> bool {
+    pub(crate) const fn is_running(&self) -> bool {
         self.task.is_busy() || self.awaiting.is_some()
     }
 
     /// Whether anything is in progress, including a pending cost or budget
     /// confirmation — what Esc cancels.
-    fn is_active(&self) -> bool {
+    const fn is_active(&self) -> bool {
         self.is_running() || self.pending_confirm.is_some() || self.pending_continue
     }
 
@@ -204,14 +205,14 @@ impl Assistant {
     }
 
     /// Reset the per-request cost tracking (#309) — a new request starts fresh.
-    fn reset_spend(&mut self) {
+    const fn reset_spend(&mut self) {
         self.spent = 0.0;
         self.over_budget_ok = false;
         self.pending_continue = false;
     }
 
     /// The estimated spend on the current request so far (#309), for the renderer.
-    pub(crate) fn spent(&self) -> f64 {
+    pub(crate) const fn spent(&self) -> f64 {
         self.spent
     }
 
@@ -226,13 +227,13 @@ impl Assistant {
     }
 
     /// How far the transcript is scrolled up from the tail, for the renderer.
-    pub(crate) fn scroll_up(&self) -> u16 {
+    pub(crate) const fn scroll_up(&self) -> u16 {
         self.scroll_up
     }
 
     /// Set the transcript's scroll-up (rows up from the tail), for wheel scrolling
     /// (#764); the caller clamps to the renderer's `assistant_scroll_max`.
-    pub(crate) fn set_scroll_up(&mut self, up: u16) {
+    pub(crate) const fn set_scroll_up(&mut self, up: u16) {
         self.scroll_up = up;
     }
 
@@ -243,7 +244,7 @@ impl Assistant {
     }
 
     /// Jump the transcript back to the tail (after new content).
-    fn follow(&mut self) {
+    const fn follow(&mut self) {
         self.scroll_up = 0;
     }
 }
@@ -267,7 +268,7 @@ impl App {
 
     /// Hand keys back to the editor (so a pass's findings UI is interactive while
     /// the assistant keeps working in the background).
-    fn blur_assistant_pane(&mut self) {
+    const fn blur_assistant_pane(&mut self) {
         if let Some(Split {
             other: OtherPane::Assistant { focused, .. },
             ..
@@ -424,12 +425,14 @@ impl App {
         let body =
             tool_loop::build_body(&model, Some(SYSTEM), &a.messages, &tools, MAX_OUTPUT_TOKENS);
         a.task.spawn(move || match spec.build() {
-            Ok(backend) => match backend.as_converse() {
-                Some(conv) => conv.respond(&body),
-                None => Err(AiError::NotConfigured(
-                    "this backend has no tool-use support".into(),
-                )),
-            },
+            Ok(backend) => backend.as_converse().map_or_else(
+                || {
+                    Err(AiError::NotConfigured(
+                        "this backend has no tool-use support".into(),
+                    ))
+                },
+                |conv| conv.respond(&body),
+            ),
             Err(e) => Err(e),
         });
     }
@@ -618,6 +621,7 @@ impl App {
 
     /// Resume a parked batch once an assistant-initiated pass finishes (#392),
     /// called from [`poll_ai`](App::poll_ai) with the pass's result summary.
+    #[allow(clippy::needless_pass_by_value)] // callers (worker.rs, tests) hand over owned summaries
     pub(super) fn resume_assistant_pass(&mut self, summary: String) {
         let call = self.assistant_mut().and_then(|c| c.awaiting.take());
         let Some(call) = call else { return };
@@ -642,7 +646,7 @@ impl App {
             let answer = crate::ai::parse_answer(&resp.text);
             let mut summary = answer.answer;
             if !answer.citations.is_empty() {
-                summary.push_str(&format!("\n\nCited: {}", answer.citations.join(", ")));
+                write!(summary, "\n\nCited: {}", answer.citations.join(", ")).unwrap();
             }
             return Some(summary);
         }
