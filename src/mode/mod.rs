@@ -246,6 +246,12 @@ pub struct VimState {
     /// The register `"x` chose for the next yank / delete / put; `None` is the
     /// unnamed register.
     pub(crate) selected_register: Option<char>,
+    /// The system-clipboard register `"+` / `"*` was chosen for the next put
+    /// (#811): `p` / `P` then paste the OS clipboard instead of an internal
+    /// register. Cleared when the command that uses it completes, like
+    /// `selected_register`. (Yank / delete already mirror to the clipboard, so the
+    /// flag only needs to redirect the *read* side.)
+    pub(crate) clipboard_register: bool,
     /// The last `/` / `?` / `*` search, replayed by `n` / `N` (#206).
     pub(crate) last_search: Option<VimSearch>,
 }

@@ -18,8 +18,11 @@ character behind the cursor and Delete the one ahead; Ctrl-Backspace (or
 Alt-Backspace) deletes the whole word behind it. The arrows move by character
 and line, Home/End jump to the ends of the row, Ctrl-← and Ctrl-→ move a word at
 a time, and PageUp/PageDown move a screenful. The mouse works too: click to
-place the cursor, and scroll the wheel to scroll the page. (Vim mode, if enabled,
-keeps its own bindings.)
+place the cursor, drag to select a passage, and scroll the wheel to scroll the
+page. Copying works with the system clipboard: a selection you copy (or a Vim
+yank/delete) is placed on the OS clipboard — over SSH and tmux as well — and your
+terminal's paste (Ctrl-Shift-V / Cmd-V / middle-click) inserts the clipboard at
+the cursor as one undoable edit. (Vim mode, if enabled, keeps its own bindings.)
 
 Markdown is understood as you write: emphasis (*italic*, **bold**) renders
 softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
@@ -363,7 +366,8 @@ the cursor verbatim, as a single undo.
 KEY REFERENCE
 
   F1              this guide
-  Mouse           click to position the cursor; scroll-wheel to scroll
+  Mouse           click to position the cursor; drag to select; scroll-wheel to scroll
+  Paste           terminal paste inserts the system clipboard (one undoable edit)
   Ctrl-S          save
   Ctrl-Q / Ctrl-C quit (prompts if unsaved)
   Ctrl-Z / Ctrl-Y undo / redo

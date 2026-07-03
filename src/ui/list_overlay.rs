@@ -17,6 +17,9 @@ use ratatui::{
     Frame,
 };
 
+use std::cell::RefCell;
+
+use crate::app::ListLayout;
 use crate::mode::{
     Corkboard, DirBrowser, Findings, History, ImportPreview, Palette, PaletteRow, ProjectBrowser,
     ProjectSearch, ProjectSearchStage,
@@ -110,6 +113,24 @@ pub(super) fn draw_list_overlay(
     rows: Vec<Line<'static>>,
     selected: Option<usize>,
 ) {
+    draw_list_overlay_recording(frame, area, title, help, rows, selected, None);
+}
+
+/// [`draw_list_overlay`] that also records the drawn row geometry into `recorder`
+/// (#812), so a mouse click can be mapped back to a list index. Passed
+/// `Some(&app.list_layout)` for the click-selectable list modes (findings,
+/// corkboard, history, …); `None` for full-screen chooser lists with no click
+/// target. Rows are treated as single screen rows for the click map (the common
+/// case); a wrapped multi-row entry maps the click to that entry's first row.
+pub(super) fn draw_list_overlay_recording(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    help: &str,
+    rows: Vec<Line<'static>>,
+    selected: Option<usize>,
+    recorder: Option<&RefCell<ListLayout>>,
+) {
     // Interior of the bordered box, then the rows region under the help + blank.
     let width = area.width.saturating_sub(2) as usize;
     let inner_h = area.height.saturating_sub(2) as usize;
@@ -121,6 +142,18 @@ pub(super) fn draw_list_overlay(
         .map(|r| wrapped_rows(row_cells(r), width))
         .collect();
     let offset = scroll_offset(&heights, viewport, selected);
+
+    // Record where the rows landed so a click can invert screen → list index
+    // (#812). The rows start one row past the box's top border, the help line, and
+    // the blank separator; the click map treats each entry as a single row.
+    if let Some(rec) = recorder {
+        *rec.borrow_mut() = ListLayout {
+            first_row: area.y.saturating_add(1 + header_h as u16),
+            height: viewport as u16,
+            first_index: offset,
+            len: heights.len(),
+        };
+    }
 
     // How many rows fit from `offset` — for the hidden-above/below affordance.
     let mut used = 0;
@@ -411,8 +444,15 @@ pub(super) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &ProjectSea
     );
 }
 
-/// Render the findings as a navigable triage list.
-pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, project: &Project) {
+/// Render the findings as a navigable triage list. `recorder` captures the row
+/// geometry for click-to-select (#812).
+pub(super) fn draw_findings(
+    frame: &mut Frame,
+    area: Rect,
+    findings: &Findings,
+    project: &Project,
+    recorder: &RefCell<ListLayout>,
+) {
     let title = format!(" Findings ({}) ", findings.items.len());
     let rows = findings
         .items
@@ -439,20 +479,27 @@ pub(super) fn draw_findings(frame: &mut Frame, area: Rect, findings: &Findings, 
             )
         })
         .collect();
-    draw_list_overlay(
+    draw_list_overlay_recording(
         frame,
         area,
         &title,
         "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · d dismiss · esc close",
         rows,
         Some(findings.selected),
+        Some(recorder),
     );
 }
 
 /// Render the commit history as a navigable list (#587): each row is a commit's
 /// date, short id, and summary. The selected commit is the one the diff / restore
 /// actions address.
-pub(super) fn draw_history(frame: &mut Frame, area: Rect, history: &History, chapter: &str) {
+pub(super) fn draw_history(
+    frame: &mut Frame,
+    area: Rect,
+    history: &History,
+    chapter: &str,
+    recorder: &RefCell<ListLayout>,
+) {
     let title = format!(" History — {chapter} ");
     let rows = history
         .commits
@@ -466,13 +513,14 @@ pub(super) fn draw_history(frame: &mut Frame, area: Rect, history: &History, cha
             )
         })
         .collect();
-    draw_list_overlay(
+    draw_list_overlay_recording(
         frame,
         area,
         &title,
         "History — ↑↓ move · d diff this chapter · r restore this chapter · esc close",
         rows,
         Some(history.selected),
+        Some(recorder),
     );
 }
 
@@ -559,6 +607,7 @@ pub(super) fn draw_annotations(
     area: Rect,
     app: &crate::app::App,
     selected: usize,
+    recorder: &RefCell<ListLayout>,
 ) {
     let buffer = app.edit_buffer();
     let len = buffer.len_bytes();
@@ -577,13 +626,14 @@ pub(super) fn draw_annotations(
             list_row(i == selected, &a.note, Some(snippet))
         })
         .collect();
-    draw_list_overlay(
+    draw_list_overlay_recording(
         frame,
         area,
         &title,
         "Annotations — ↑↓ move · enter jump · d delete · esc close",
         rows,
         Some(selected),
+        Some(recorder),
     );
 }
 
@@ -597,7 +647,12 @@ pub(super) fn draw_annotations(
 /// non-selectable chapter-title header, so the cards read grouped by chapter. Those
 /// header rows shift the selected card's display position, so the highlight index is
 /// re-derived over the interleaved rows rather than reusing the card index.
-pub(super) fn draw_corkboard(frame: &mut Frame, area: Rect, board: &Corkboard) {
+pub(super) fn draw_corkboard(
+    frame: &mut Frame,
+    area: Rect,
+    board: &Corkboard,
+    recorder: &RefCell<ListLayout>,
+) {
     // The selected scene's status reads in words in the title (the per-card badge
     // is the glance version); the count summarizes the board.
     let status = board
@@ -642,13 +697,18 @@ pub(super) fn draw_corkboard(frame: &mut Frame, area: Rect, board: &Corkboard) {
             synopsis,
         ));
     }
-    draw_list_overlay(
+    // Click-to-select maps a screen row to a card index; on the manuscript board
+    // the interleaved chapter headers shift that mapping, so record the layout only
+    // for the single-chapter board where row index == card index (#812).
+    let rec = (!board.manuscript).then_some(recorder);
+    draw_list_overlay_recording(
         frame,
         area,
         &title,
         "Corkboard — ↑↓ move · enter jump · K/J reorder · e synopsis · s status · esc close",
         rows,
         Some(selected_row),
+        rec,
     );
 }
 

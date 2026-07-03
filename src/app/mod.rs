@@ -81,7 +81,7 @@ pub use assistant::{Assistant, Entry, Speaker};
 // `app`-module call sites keep spelling them unqualified / via `super::`.
 use dispatch::{build_keymap, scroll_target};
 use imports::PendingImportSource;
-pub use mouse::EditorLayout;
+pub use mouse::{EditorLayout, ListLayout};
 #[cfg(test)]
 pub use panes::SplitView; // the type name is only spelled in tests
 use panes::{OtherPane, Split};
@@ -247,6 +247,12 @@ pub struct App {
     /// `RefCell` because the renderer borrows `App` immutably; empty until the
     /// first draw or when an overlay replaces the editor.
     pub(crate) editor_layout: std::cell::RefCell<EditorLayout>,
+    /// The focused list overlay's per-frame row layout (#812), recorded by the
+    /// list-overlay renderer so a click can be mapped back to a list index the way
+    /// [`editor_layout`](Self::editor_layout) maps a click to a buffer byte. A
+    /// `RefCell` (the renderer borrows `App` immutably); empty when no navigable
+    /// list overlay is drawn.
+    pub(crate) list_layout: std::cell::RefCell<ListLayout>,
     /// The editor viewport's read-ahead scroll offset (#764): visual rows the view
     /// is shifted down past the cursor-driven top, decoupled from the cursor. The
     /// renderer honors it and writes back the value clamped to the content, so a
@@ -405,6 +411,18 @@ pub struct App {
     pub(crate) pending_qa_question: Option<String>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
+    /// The system-clipboard seam (#811): a yank / delete / Visual copy writes the
+    /// text here (in addition to the internal Vim registers), and paste reads it.
+    /// The running editor uses the OSC 52 terminal clipboard (works over SSH /
+    /// tmux); tests swap in a fake so the suite never touches a real clipboard
+    /// (#531). Behind a trait object so the seam is testable and portable.
+    pub(crate) clipboard: Box<dyn crate::clipboard::Clipboard>,
+    /// The absolute buffer byte a left-button press landed on (#812), held between
+    /// the `Down` and the first `Drag` so a drag can anchor a Visual selection
+    /// there. `Some` only while the button is held after a press in the editor
+    /// text; cleared on button-up. A plain press-and-release (no drag) never uses
+    /// it, so a click still just positions the cursor.
+    pub(crate) mouse_anchor: Option<usize>,
 }
 
 impl App {
@@ -493,6 +511,7 @@ impl App {
             wrap_width: std::cell::Cell::new(72),
             surface_height: std::cell::Cell::new(0),
             editor_layout: std::cell::RefCell::new(EditorLayout::default()),
+            list_layout: std::cell::RefCell::new(ListLayout::default()),
             scroll_offset: std::cell::Cell::new(0),
             added: 0,
             removed: 0,
@@ -534,6 +553,8 @@ impl App {
             qa_store,
             pending_qa_question: None,
             message: None,
+            clipboard: Box::new(crate::clipboard::Osc52Clipboard::new()),
+            mouse_anchor: None,
         };
         // Baselines + per-part counters for the daily word tally (sized to the
         // active book's parts; edits move each chapter from here).
@@ -561,6 +582,30 @@ impl App {
             app.message = Some(warnings.join(" · "));
         }
         app
+    }
+
+    /// Swap in the in-memory [`FakeClipboard`](crate::clipboard::FakeClipboard) so
+    /// tests exercise the copy / paste seam without touching the real OS clipboard
+    /// or emitting a terminal escape (#531, #811). Test-only.
+    #[cfg(test)]
+    pub(crate) fn use_fake_clipboard(&mut self) {
+        self.clipboard = Box::new(crate::clipboard::FakeClipboard::new());
+    }
+
+    /// The current system-clipboard contents (#811) — what a copy last placed
+    /// there, or a `set` from a test's fake. Reads through the seam, so tests can
+    /// assert what a yank / delete / Visual copy wrote without a real clipboard.
+    #[cfg(test)]
+    pub(crate) fn clipboard_contents(&self) -> Option<String> {
+        self.clipboard.get()
+    }
+
+    /// Place `text` on the clipboard through the seam (#811) — a test's stand-in
+    /// for "the OS clipboard already holds this", so the paste path can be driven
+    /// hermetically.
+    #[cfg(test)]
+    pub(crate) fn set_clipboard(&self, text: &str) {
+        self.clipboard.set(text);
     }
 
     /// The buffer the author is currently editing: the continuous-view buffer

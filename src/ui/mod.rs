@@ -70,19 +70,29 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Box overlays each render through the shared `modal` frame (dim + shadow);
     // a prompt lives on the status line, so it only dims the editor behind it.
+    // A fresh frame: clear the click→list-index map (#812); the list modes below
+    // re-record it when they draw, so a click only ever selects a row that's on
+    // screen this frame.
+    app.list_layout.borrow_mut().clear();
     match &app.mode {
         Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
         Mode::Findings(findings) => modal(frame, area, |f, r| {
-            draw_findings(f, r, findings, &app.project);
+            draw_findings(f, r, findings, &app.project, &app.list_layout);
         }),
         Mode::History(history) => {
             let chapter = app.project.active_title().unwrap_or("this chapter");
-            modal(frame, area, |f, r| draw_history(f, r, history, chapter));
+            modal(frame, area, |f, r| {
+                draw_history(f, r, history, chapter, &app.list_layout);
+            });
         }
         Mode::Annotations { selected } => {
-            modal(frame, area, |f, r| draw_annotations(f, r, app, *selected));
+            modal(frame, area, |f, r| {
+                draw_annotations(f, r, app, *selected, &app.list_layout);
+            });
         }
-        Mode::Corkboard(board) => modal(frame, area, |f, r| draw_corkboard(f, r, board)),
+        Mode::Corkboard(board) => modal(frame, area, |f, r| {
+            draw_corkboard(f, r, board, &app.list_layout);
+        }),
         Mode::ModelManager { selected } => {
             modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected));
         }
