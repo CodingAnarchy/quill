@@ -64,7 +64,7 @@ impl LocalBackend {
     /// model the router picked from the author's configured set (#377). Shared
     /// with [`recommended`], which chooses the model from the hardware first.
     pub fn for_model(model: &model_select::Model) -> Result<Self, AiError> {
-        let hub = hf_hub::api::sync::Api::new().map_err(|e| download_error(model, e))?;
+        let hub = build_hub().map_err(|e| download_error(model, e))?;
         let gguf = hub
             .model(model.gguf_repo.to_string())
             .get(model.gguf_file)
@@ -303,6 +303,18 @@ fn internal(msg: String) -> AiError {
     AiError::Internal(msg)
 }
 
+/// Build the `hf-hub` API with its `indicatif` progress bar disabled (#727).
+/// Quill owns the crossterm alternate screen, so any raw progress the library
+/// writes to stderr lands on top of the TUI and corrupts it; download progress
+/// is surfaced through Quill's own UI instead. Matches `Api::new()`'s cache and
+/// token defaults (`ApiBuilder::new()` reads the token from the default cache),
+/// changing only the progress flag.
+fn build_hub() -> Result<hf_hub::api::sync::Api, hf_hub::api::sync::ApiError> {
+    hf_hub::api::sync::ApiBuilder::new()
+        .with_progress(false)
+        .build()
+}
+
 /// An actionable error when a local model can't be fetched from HuggingFace
 /// (#725): name the model and how to fix it (download it deliberately, or route
 /// to Claude), rather than surfacing a bare `hf-hub` string. The underlying cause
@@ -343,7 +355,7 @@ mod tests {
     #[ignore]
     fn auto_download_then_generate() {
         let m = &model_select::MODELS[0]; // 0.5B — keep the download small
-        let hub = hf_hub::api::sync::Api::new().expect("hf-hub");
+        let hub = build_hub().expect("hf-hub");
         let gguf = hub
             .model(m.gguf_repo.into())
             .get(m.gguf_file)

@@ -14,7 +14,7 @@ use candle_transformers::models::stable_diffusion::clip::ClipTextTransformer;
 use candle_transformers::models::stable_diffusion::unet_2d::UNet2DConditionModel;
 use candle_transformers::models::stable_diffusion::vae::AutoEncoderKL;
 use candle_transformers::models::stable_diffusion::{self, StableDiffusionConfig};
-use hf_hub::api::sync::Api;
+use hf_hub::api::sync::ApiBuilder;
 use image::ImageEncoder;
 use tokenizers::Tokenizer;
 
@@ -57,7 +57,13 @@ impl LocalImageBackend {
         // resolution selection is deferred to the local-model epic (#83/#85).
         let config = StableDiffusionConfig::v1_5(None, Some(512), Some(512));
 
-        let hub = Api::new().map_err(|e| internal(format!("hf-hub: {e}")))?;
+        // Disable hf-hub's indicatif progress bar (#727): Quill owns the
+        // alternate screen, so the library's raw stderr writes would corrupt the
+        // TUI. Progress is surfaced through Quill's own UI instead.
+        let hub = ApiBuilder::new()
+            .with_progress(false)
+            .build()
+            .map_err(|e| internal(format!("hf-hub: {e}")))?;
         let fetch = |repo: &str, file: &str| -> Result<std::path::PathBuf, AiError> {
             hub.model(repo.to_string())
                 .get(file)
