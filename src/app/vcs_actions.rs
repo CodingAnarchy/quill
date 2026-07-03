@@ -85,6 +85,16 @@ impl App {
         self.vc_status_dirty || self.vc_status_task.is_busy()
     }
 
+    /// Whether the status has been marked stale (a save happened) — the specific
+    /// invariant pure typing must NOT trip (#779). Unlike `vc_status_settling` this
+    /// ignores an in-flight walk, so a test can assert "typing marked nothing"
+    /// without racing the wall-clock interval fallback, which may legitimately
+    /// spawn a walk on an idle tick regardless of typing.
+    #[cfg(test)]
+    pub(crate) const fn vc_status_marked_dirty(&self) -> bool {
+        self.vc_status_dirty
+    }
+
     /// Backdate the interval clock so the next idle refresh's fallback is due
     /// (#779), letting a test exercise the "catch an external edit" path without
     /// waiting real wall-clock seconds.
@@ -101,12 +111,16 @@ impl App {
     /// the worker thread. Bounded so a stuck walk can't hang the test.
     #[cfg(test)]
     pub(crate) fn settle_vc_status(&mut self) {
+        // Sleep (not `yield_now`) between polls: under heavy parallel test load the
+        // off-thread git walk's worker can be CPU-starved, and a busy spin never
+        // relinquishes the core for it to run. Sleeping yields the CPU so the walk
+        // finishes; a 10s ceiling still fails fast on a genuinely stuck walk.
         for _ in 0..10_000 {
             self.refresh_vc_status_on_idle();
             if !self.vc_status_settling() {
                 return;
             }
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         panic!("vc status never settled");
     }

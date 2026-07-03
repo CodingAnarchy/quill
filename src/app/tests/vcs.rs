@@ -77,15 +77,19 @@ fn idle_typing_does_not_rewalk_git_status_but_a_save_does() {
     commit_via_menu(&mut app, "base"); // clean working tree
     assert_eq!(app.vc_changes, 0, "clean after the initial commit");
 
-    // Pure typing then idle: the status walk must NOT run. The count can't have
-    // changed (nothing was saved), so the idle path leaves the tree unwalked and
-    // has no pending work to settle (#779).
+    // Pure typing then idle: typing must not mark the status stale (that's the
+    // #779 invariant). We assert the dirty flag specifically rather than "settling",
+    // because the wall-clock interval fallback may legitimately spawn a walk on an
+    // idle tick — under heavy parallel test load the thread can be preempted past
+    // the interval — and that walk is harmless here: an unsaved edit changes the
+    // buffer, not the on-disk tree, so git status stays 0 either way.
     type_str(&mut app, "unsaved edits");
     app.on_idle();
     assert!(
-        !app.vc_status_settling(),
-        "pure typing marks no status walk and spawns none"
+        !app.vc_status_marked_dirty(),
+        "pure typing doesn't mark the status stale"
     );
+    app.settle_vc_status(); // drain any interval-triggered walk so the count is settled
     assert_eq!(
         app.vc_changes, 0,
         "an unsaved edit doesn't change git status"
