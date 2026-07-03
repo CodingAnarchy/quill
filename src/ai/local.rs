@@ -423,16 +423,21 @@ fn build_hub() -> Result<hf_hub::api::sync::Api, hf_hub::api::sync::ApiError> {
 }
 
 /// An actionable error when a local model can't be fetched from HuggingFace
-/// (#725): name the model and how to fix it (download it deliberately, or route
-/// to Claude), rather than surfacing a bare `hf-hub` string. The underlying cause
-/// is appended so a genuine failure (offline, disk full) is still diagnosable.
+/// (#725/#726): name the model, the exact repo + file it needed, and how to fix it
+/// (download it deliberately, or route to Claude), rather than surfacing a bare
+/// `hf-hub` string. Naming the repo/file (#726) means a genuine failure — a 404
+/// from a stale catalog filename, an offline machine, a full disk — points at the
+/// concrete resource, so it's diagnosable without reading source; the underlying
+/// cause is appended for the same reason.
 fn download_error(model: &model_select::Model, cause: impl std::fmt::Display) -> AiError {
     AiError::NotConfigured(format!(
-        "couldn't obtain the local model Qwen3-{} (~{:.1} GB) — download it from \
+        "couldn't obtain the local model Qwen3-{} (~{:.1} GB, {}/{}) — download it from \
          \"Local AI models\" (Ctrl-K) while online, or set `backend = \"claude\"` / adjust \
          `[ai] routing`. ({cause})",
         model.id(),
         model.size_gb,
+        model.gguf_repo,
+        model.gguf_file,
     ))
 }
 
