@@ -66,6 +66,7 @@ fn walking_the_flow_persists_every_goal_to_book_toml() {
     enter(&mut app, "80000"); // words
     enter(&mut app, "30"); // chapters
     enter(&mut app, "1000"); // daily
+    enter(&mut app, "2026-12-31"); // deadline (#814)
     enter(&mut app, "250"); // words per page (default, kept)
 
     // The in-memory manifest carries every value.
@@ -73,6 +74,7 @@ fn walking_the_flow_persists_every_goal_to_book_toml() {
     assert_eq!(goals.words, 80_000);
     assert_eq!(goals.chapters, 30);
     assert_eq!(goals.daily, Some(1_000));
+    assert_eq!(goals.deadline.as_deref(), Some("2026-12-31"));
     assert_eq!(goals.words_per_page, 250);
 
     // And the manifest on disk has the `[goals]` table, re-opening identically.
@@ -81,6 +83,52 @@ fn walking_the_flow_persists_every_goal_to_book_toml() {
     assert_eq!(g.words, 80_000);
     assert_eq!(g.chapters, 30);
     assert_eq!(g.daily, Some(1_000));
+    assert_eq!(g.deadline.as_deref(), Some("2026-12-31"));
+}
+
+#[test]
+fn the_deadline_step_accepts_a_date_rejects_garbage_and_clears_on_blank() {
+    let (mut app, dir) = goals_app("goals-deadline");
+    app.run_action(Action::SetGoals, false);
+    enter(&mut app, "80000"); // words
+    enter(&mut app, "30"); // chapters
+    enter(&mut app, ""); // daily: none
+    enter(&mut app, "next spring"); // deadline: rejected as a non-date, re-prompts
+    assert!(matches!(
+        app.mode,
+        Mode::Prompt(PromptState {
+            pending: Pending::SetGoal(GoalField::Deadline),
+            ..
+        })
+    ));
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("YYYY-MM-DD"),
+        "rejection message: {:?}",
+        app.message
+    );
+    // A valid ISO date is accepted and persists as a quoted string.
+    enter(&mut app, "2026-05-01");
+    enter(&mut app, "250"); // words per page
+    assert_eq!(
+        app.project.goals().unwrap().deadline.as_deref(),
+        Some("2026-05-01")
+    );
+    let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+    assert!(
+        toml.contains("deadline = \"2026-05-01\""),
+        "quoted ISO string on disk: {toml}"
+    );
+
+    // Re-running and blanking the deadline clears it (key removed, not empty).
+    app.run_action(Action::SetGoals, false);
+    enter(&mut app, "80000");
+    enter(&mut app, "30");
+    enter(&mut app, "");
+    enter(&mut app, ""); // deadline — blank clears it
+    enter(&mut app, "250");
+    assert_eq!(app.project.goals().unwrap().deadline, None);
+    let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+    assert!(!toml.contains("deadline"), "deadline key removed: {toml}");
 }
 
 #[test]
@@ -91,6 +139,7 @@ fn an_app_set_goal_reads_back_identical_to_a_hand_typed_one() {
     enter(&mut app, "90000");
     enter(&mut app, "40");
     enter(&mut app, ""); // no daily target
+    enter(&mut app, ""); // no deadline
     enter(&mut app, "250");
     let from_app = Project::open(&*dir).unwrap().goals().cloned().unwrap();
 
@@ -130,6 +179,7 @@ fn clearing_the_daily_goal_removes_the_key_not_a_zero() {
     enter(&mut app, "50000"); // words (re-confirmed)
     enter(&mut app, "20"); // chapters
     enter(&mut app, ""); // daily — blank clears it
+    enter(&mut app, ""); // no deadline
     enter(&mut app, "250"); // words per page
 
     assert_eq!(

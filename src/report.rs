@@ -79,7 +79,7 @@ pub fn lines(
     else {
         out.push(Line::raw("No writing goals set."));
         out.push(Line::raw(
-            "Set them in-app: Ctrl-K → \"goals:set\" (target words, chapters, daily).",
+            "Set them in-app: Ctrl-K → \"goals:set\" (target words, chapters, daily, deadline).",
         ));
         return out;
     };
@@ -182,6 +182,13 @@ pub fn lines(
                 rate,
                 today,
             )));
+        }
+        // With a deadline set (#814), read the current pace against the calendar:
+        // where it lands the finish, the words/day the deadline needs, and whether
+        // pace is ahead or behind. No deadline → these lines are simply omitted.
+        if let Some(dl) = DeadlineProjection::of(goals, words, rate, today) {
+            out.push(Line::raw(""));
+            out.extend(dl.lines());
         }
     }
 
@@ -328,6 +335,95 @@ impl Projection {
     }
 }
 
+/// The deadline read (#814): the current word pace measured against a target
+/// completion date. `None` when no deadline is set, when there's no word goal to
+/// measure against (0), or the goal is already met — nothing left to project.
+#[derive(Clone, Copy)]
+struct DeadlineProjection {
+    /// The target completion date the author set.
+    deadline: Date,
+    /// Words still to write to reach the word goal (> 0 by construction).
+    remaining: i64,
+    /// Projected finish date at the current pace, or `None` when the pace is 0
+    /// (no measurable rate yet) so no date can be projected.
+    finish: Option<Date>,
+    /// Words/day needed from `today` to hit the deadline. `None` when the deadline
+    /// is today or already past (no whole days left to spread the work over).
+    required: Option<i64>,
+}
+
+impl DeadlineProjection {
+    /// Read `goals`' deadline against the current `rate` (words/day) as of `today`,
+    /// given `words` written toward the word goal. `None` when there's no deadline,
+    /// no word goal, or the goal is already met (nothing to project).
+    fn of(goals: &crate::project::Goals, words: usize, rate: i64, today: Date) -> Option<Self> {
+        let deadline = goals.deadline_date()?;
+        let remaining = goals.words as i64 - words as i64;
+        if goals.words == 0 || remaining <= 0 {
+            return None;
+        }
+        // Projected finish: today + ceil(remaining / rate) days. Only when there's
+        // a positive measured pace — a zero rate can't reach any date.
+        let finish = (rate > 0).then(|| {
+            let days = (remaining as f64 / rate as f64).ceil() as i64;
+            date::add_days(today, days)
+        });
+        // Required pace: ceil(remaining / days-until-deadline), when the deadline is
+        // still in the future (at least one whole day to spread the work over).
+        let days_left = date::days_between(today, deadline);
+        let required = (days_left > 0).then(|| (remaining as f64 / days_left as f64).ceil() as i64);
+        Some(Self {
+            deadline,
+            remaining,
+            finish,
+            required,
+        })
+    }
+
+    /// Whether the current pace is on track to hit the deadline: the projected
+    /// finish lands on or before it. A past-due deadline (no `required` pace) or an
+    /// unmeasurable pace (no `finish`) is never "on track".
+    fn on_track(&self) -> bool {
+        matches!(self.finish, Some(f) if f <= self.deadline)
+    }
+
+    /// The report's deadline lines: the target date, the projected finish and
+    /// whether pace is ahead/behind, and the words/day the deadline needs.
+    fn lines(&self) -> Vec<Line<'static>> {
+        let mut out = vec![Line::raw(format!(
+            "deadline:          {}",
+            date::human(self.deadline)
+        ))];
+        // Projected finish + an ahead/behind verdict against the deadline.
+        match self.finish {
+            Some(finish) => {
+                let verdict = if self.on_track() {
+                    "on track \u{2713}"
+                } else {
+                    "behind"
+                };
+                out.push(Line::raw(format!(
+                    "projected finish:  {} ( {verdict} )",
+                    date::human(finish)
+                )));
+            }
+            None => out.push(Line::raw("projected finish:  — (no pace yet)".to_string())),
+        }
+        // Words/day the deadline requires from today (or that it's already past).
+        match self.required {
+            Some(req) => out.push(Line::raw(format!(
+                "need for deadline: {} words / day ( {} to go )",
+                thousands(req),
+                thousands(self.remaining),
+            ))),
+            None => out.push(Line::raw(
+                "need for deadline: deadline reached — no days remaining".to_string(),
+            )),
+        }
+        out
+    }
+}
+
 /// A "to go" line: words remaining, days at `rate`, and the projected date.
 fn to_go(label: &str, remaining: i64, rate: i64, today: Date) -> String {
     let words = remaining.max(0);
@@ -402,6 +498,7 @@ mod tests {
                 chapters: 60,
                 words_per_page: 250,
                 daily: None,
+                deadline: None,
             }),
             parts: None,
             chapters: Vec::new(),
@@ -712,5 +809,142 @@ mod tests {
         assert_eq!(thousands(652), "652");
         assert_eq!(thousands(163_204), "163,204");
         assert_eq!(thousands(-1_486), "-1,486");
+    }
+
+    // --- Deadline-aware projection (#814) ----------------------------------
+    //
+    // All hermetic (#531): the report date and the deadline are injected, never
+    // wall-clock. The rate the deadline math reads is the report's own
+    // `words / days_since_start` — with start 2026-01-11 and today 2026-03-12
+    // (60 days), 60,000 body words is exactly 1,000 words/day, so the projected
+    // finish and the ahead/behind verdict are deterministic.
+
+    /// A manifest with a word/chapter goal, a fixed start date, and `deadline`.
+    fn manifest_with_deadline(deadline: Option<&str>) -> Manifest {
+        let mut m = manifest();
+        m.goals.as_mut().unwrap().deadline = deadline.map(str::to_string);
+        m
+    }
+
+    #[test]
+    fn deadline_behind_shows_projected_finish_and_required_pace() {
+        // 60k words at 1,000/day → finish 10 Jun 2026, past the 1 May deadline.
+        let today = date::parse("2026-03-12").unwrap();
+        let rows = lines(
+            &manifest_with_deadline(Some("2026-05-01")),
+            60_000,
+            0,
+            24,
+            0,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        assert!(report.contains("deadline:          1 May 2026"), "{report}");
+        assert!(
+            report.contains("projected finish:  10 Jun 2026 ( behind )"),
+            "{report}"
+        );
+        // 90,000 to go over 50 days = 1,800 words/day required.
+        assert!(
+            report.contains("need for deadline: 1,800 words / day ( 90,000 to go )"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn deadline_ahead_shows_on_track() {
+        // Same 1,000/day pace, but a far-off deadline the finish beats.
+        let today = date::parse("2026-03-12").unwrap();
+        let rows = lines(
+            &manifest_with_deadline(Some("2026-12-31")),
+            60_000,
+            0,
+            24,
+            0,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        assert!(
+            report.contains("projected finish:  10 Jun 2026 ( on track \u{2713} )"),
+            "{report}"
+        );
+        // 90,000 over 294 days rounds up to 307 words/day.
+        assert!(
+            report.contains("need for deadline: 307 words / day ( 90,000 to go )"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn deadline_already_past_reports_no_days_remaining() {
+        let today = date::parse("2026-03-12").unwrap();
+        let rows = lines(
+            &manifest_with_deadline(Some("2026-03-01")),
+            60_000,
+            0,
+            24,
+            0,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        // Past due: still shows the projected finish (behind), but no required pace.
+        assert!(
+            report.contains("projected finish:  10 Jun 2026 ( behind )"),
+            "{report}"
+        );
+        assert!(
+            report.contains("need for deadline: deadline reached — no days remaining"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn no_deadline_omits_the_deadline_lines() {
+        let today = date::parse("2026-03-12").unwrap();
+        let rows = lines(
+            &manifest_with_deadline(None),
+            60_000,
+            0,
+            24,
+            0,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        // The existing projection is untouched; none of the deadline lines appear.
+        assert!(!report.contains("deadline:"), "{report}");
+        assert!(!report.contains("projected finish:"), "{report}");
+        assert!(!report.contains("need for deadline:"), "{report}");
+    }
+
+    #[test]
+    fn deadline_omitted_once_the_word_goal_is_met() {
+        // Goal already reached → nothing to project against the deadline.
+        let today = date::parse("2026-03-12").unwrap();
+        let rows = lines(
+            &manifest_with_deadline(Some("2026-05-01")),
+            150_000,
+            0,
+            24,
+            0,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        assert!(!report.contains("deadline:"), "{report}");
+        assert!(!report.contains("need for deadline:"), "{report}");
     }
 }

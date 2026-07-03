@@ -63,6 +63,8 @@ goals:
   chapters: 60              # target chapter count
   words_per_page: 250        # pages = words / words_per_page
   daily: 1000               # optional daily word-count target (#277); omit to disable
+  deadline: 2026-05-01       # optional target completion date (#814), ISO YYYY-MM-DD;
+                             # omit to disable the deadline projection lines
 markers:
   todo: xxx                 # token counted on the "xxx:" line (case-insensitive)
 unused_heading: Unused        # chapters/sections under this heading are excluded
@@ -160,6 +162,9 @@ nothing is hidden. An all-body project is unaffected (the line is omitted).
 | `average rate` | `floor(W / days_since_start)` words/day |
 | `to go` | words `max(0, Wt - W)`; days `round(words / rate)`; ETA `report_date + days` |
 | `to go (expansion)` | words `Wp - W`; days `round(words / rate)`; ETA `report_date + days` |
+| `deadline` (when `goals.deadline` set, #814) | the target completion date |
+| `projected finish` (with a deadline) | `report_date + ceil((Wt - W) / rate)`, with `on track ✓` when it lands on/before the deadline, else `behind` |
+| `need for deadline` (with a deadline) | words/day the deadline needs: `ceil((Wt - W) / (deadline - report_date))`, with words to go; past-due shows `deadline reached — no days remaining` |
 
 Numbers are grouped with thousands separators; deltas are signed (`+`/`-`) and
 color-coded (green for gains, red for losses) in the TUI.

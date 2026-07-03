@@ -71,6 +71,7 @@ impl App {
                             chapters,
                             words_per_page: 250,
                             daily: None,
+                            deadline: None,
                         });
                         self.message = match self.project.save_manifest() {
                             Ok(()) => Some("Writing goals set.".into()),

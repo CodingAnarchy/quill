@@ -533,6 +533,7 @@ mod tests {
                 chapters: 30,
                 words_per_page: 250,
                 daily: Some(800),
+                deadline: None,
             }),
             parts: Some(vec![Part {
                 name: Some("Act I".into()),

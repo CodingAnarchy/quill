@@ -362,6 +362,7 @@ fn goals_round_trip_through_the_manifest() {
         chapters: 60,
         words_per_page: 250,
         daily: None,
+        deadline: None,
     });
     project.save_manifest().unwrap();
 
@@ -426,6 +427,42 @@ fn set_goal_splices_into_goals_preserving_comments_and_clears_optional_keys() {
     let reopened = Project::open(&dir).unwrap();
     let g = reopened.goals().unwrap();
     assert_eq!((g.words, g.chapters, g.daily), (80_000, 30, None));
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn set_deadline_splices_an_iso_string_and_clears_to_remove_the_key() {
+    // A hand-maintained manifest with a comment and another section (#814).
+    let dir = temp_dir("set-deadline-splice");
+    let mut project = Project::create(&dir).unwrap();
+    let path = Project::manifest_path(&dir);
+    fs::write(
+        &path,
+        "# my book\ntitle = \"Book\"\nauthor = \"Ada\"\n\n\
+         [[chapters]]\ntitle = \"Chapter 1\"\nfile = \"chapter-1.md\"\n",
+    )
+    .unwrap();
+
+    let deadline = crate::date::parse("2026-12-31").unwrap();
+    project.set_deadline(Some(deadline)).unwrap();
+    let toml = fs::read_to_string(&path).unwrap();
+    // Persisted as a quoted ISO string (like `start_date`), the rest intact.
+    assert!(
+        toml.contains("deadline = \"2026-12-31\""),
+        "deadline spliced as a quoted string:\n{toml}"
+    );
+    assert!(toml.contains("# my book") && toml.contains("author = \"Ada\""));
+
+    // It round-trips: a fresh open parses the same date back.
+    let reopened = Project::open(&dir).unwrap();
+    assert_eq!(reopened.goals().unwrap().deadline_date(), Some(deadline));
+
+    // Clearing removes the key rather than writing an empty string.
+    project.set_deadline(None).unwrap();
+    let toml = fs::read_to_string(&path).unwrap();
+    assert!(!toml.contains("deadline"), "deadline key removed:\n{toml}");
+    assert_eq!(project.goals().unwrap().deadline, None);
 
     fs::remove_dir_all(&dir).ok();
 }
