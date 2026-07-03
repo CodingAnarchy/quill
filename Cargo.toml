@@ -96,6 +96,15 @@ strip = true
 # cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
 # usize<->u16 conversions in TUI layout code).
 [lints.clippy]
+# A bare unwrap/expect in the editor turns a violated assumption into a panic that
+# takes the whole session down mid-write (#794). Denied in production code; the
+# `allow-{unwrap,expect}-in-tests` keys in clippy.toml keep test unwraps (they
+# *should* fail loudly). Infallible `write!` into an in-memory buffer uses
+# `let _ = write!(...)`; a genuinely-provable invariant carries a local
+# `#[allow(…, reason = "…")]`.
+unwrap_used = "deny"
+expect_used = "deny"
+
 # Correctness-adjacent — most likely to be actual bugs.
 case_sensitive_file_extension_comparisons = "deny"
 maybe_infinite_iter = "deny"
