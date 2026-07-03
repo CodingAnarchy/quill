@@ -88,8 +88,7 @@ strip = true
 # without breaking the build; promote a category to `deny` once it's clean. Only
 # `cargo clippy` honors these — normal `cargo build` is unaffected.
 #
-# Deliberately NOT enabled (high violation count with low signal, or conflicting
-# with a reasonable existing choice): use_self, redundant_pub_crate,
+# Deliberately NOT enabled (high violation count with low signal): use_self,
 # missing_const_for_fn, doc_markdown, default_trait_access, suboptimal_flops, and
 # the cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
 # usize<->u16 conversions in TUI layout code).
@@ -127,6 +126,9 @@ cast_lossless = "warn"
 uninlined_format_args = "warn"
 unused_self = "warn"
 ignore_without_reason = "warn"
+# Single binary crate with no external consumers, so pub(crate) == pub for us;
+# redundant pub(crate) on items in already-private modules is just noise to strip.
+redundant_pub_crate = "warn"
 
 # Noisier / nursery — useful but flags more debatable cases; drop if too chatty.
 option_if_let_else = "warn"
