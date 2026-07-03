@@ -97,6 +97,33 @@ fn render_stays_within_a_frame() {
     let modal_dt = t.elapsed() / 30;
     println!("render with a modal overlay = {modal_dt:?}");
     assert!(modal_dt.as_millis() < 16, "modal render took {modal_dt:?}");
+
+    // And with a read-ahead wheel-scroll offset active (#764): the cursor sits at
+    // the top of a long chapter while the view is scrolled a screenful down. This
+    // exercises the scroll-clamp walk (#778), which naively counted every visual
+    // row from the cursor-driven top to the end of the buffer once per frame —
+    // O(document) work while the offset is non-zero, which the offset-0 passes
+    // above never hit. The walk is now bounded to ~a screenful past the offset;
+    // confirm the full chapter still renders within budget while scrolled.
+    app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // close the palette
+    assert!(!matches!(app.mode, Mode::Palette(_)));
+    app.buffer.cursor = Cursor { line: 0, col: 0 }; // pin the cursor at the top
+    app.scroll_offset.set(40); // wheel-scrolled a screenful down into the chapter
+    terminal.draw(|f| draw(f, &app)).unwrap(); // warm
+    assert!(
+        app.scroll_offset.get() > 0,
+        "the offset stayed clamped to content"
+    );
+    let t = Instant::now();
+    for _ in 0..30 {
+        terminal.draw(|f| draw(f, &app)).unwrap();
+    }
+    let scrolled_dt = t.elapsed() / 30;
+    println!("render with a wheel-scroll offset = {scrolled_dt:?}");
+    assert!(
+        scrolled_dt.as_millis() < 16,
+        "scrolled render took {scrolled_dt:?}"
+    );
 }
 
 #[test]

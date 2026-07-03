@@ -280,9 +280,19 @@ fn render_body(
     // to the caller so the stored offset can't run away past the last valid row.
     let mut applied_offset = 0usize;
     if scroll_offset > 0 {
-        // Rows from the cursor-driven top to the end of the document.
+        // Rows from the cursor-driven top toward the end of the document. We only
+        // need to know whether at least a screenful plus the requested offset
+        // remains below — `applied_offset` is capped at `scroll_offset` — so stop
+        // counting once we've seen `height + scroll_offset` rows rather than
+        // walking the whole buffer (#778). The clamp result is identical: `room`
+        // is consumed only via `scroll_offset.min(room)`, so any excess past
+        // `height + scroll_offset` never changes the outcome.
+        let enough = height + scroll_offset;
         let mut rows_below = header_rows(top).saturating_sub(to_skip);
         for l in top..total {
+            if rows_below >= enough {
+                break;
+            }
             if l > top {
                 rows_below += header_rows(l);
             }
