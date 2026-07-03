@@ -229,6 +229,11 @@ impl AiAction {
 
     /// This action's descriptor — its single source of slug / cost / bible key.
     pub(crate) fn spec(self) -> &'static AiActionSpec {
+        #[allow(
+            clippy::expect_used,
+            reason = "SPECS is the single hand-maintained table listing every AiAction \
+                      variant, so the lookup for `self` always resolves"
+        )]
         Self::SPECS
             .iter()
             .find(|s| s.action == self)

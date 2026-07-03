@@ -37,64 +37,58 @@ pub(super) fn build_opf(
     images: &[EmbeddedImage],
 ) -> String {
     let mut meta = String::new();
-    write!(
+    let _ = write!(
         meta,
         "<dc:identifier id=\"bookid\">{}</dc:identifier>",
         xml_escape(book.id)
-    )
-    .unwrap();
-    write!(
+    );
+    let _ = write!(
         meta,
         "<dc:title id=\"title\">{}</dc:title>",
         xml_escape(book.title)
-    )
-    .unwrap();
+    );
     meta.push_str("<meta refines=\"#title\" property=\"title-type\">main</meta>");
     if let Some(s) = book.subtitle {
-        write!(
+        let _ = write!(
             meta,
             "<dc:title id=\"subtitle\">{}</dc:title>",
             xml_escape(s)
-        )
-        .unwrap();
+        );
         meta.push_str("<meta refines=\"#subtitle\" property=\"title-type\">subtitle</meta>");
     }
     // The language drives `dc:language` (and the package `xml:lang` below), the
     // `en` fallback now living in `PubMeta::language` rather than hardcoded (#583).
-    write!(
+    let _ = write!(
         meta,
         "<dc:language>{}</dc:language>",
         xml_escape(book.publishing.language())
-    )
-    .unwrap();
+    );
     if let Some(a) = book.author {
-        write!(meta, "<dc:creator>{}</dc:creator>", xml_escape(a)).unwrap();
+        let _ = write!(meta, "<dc:creator>{}</dc:creator>", xml_escape(a));
     }
     // Publishing metadata (#583): publisher, publication date, and the rights line.
     if let Some(p) = &book.publishing.publisher {
-        write!(meta, "<dc:publisher>{}</dc:publisher>", xml_escape(p)).unwrap();
+        let _ = write!(meta, "<dc:publisher>{}</dc:publisher>", xml_escape(p));
     }
     if let Some(d) = &book.publishing.date {
-        write!(meta, "<dc:date>{}</dc:date>", xml_escape(d)).unwrap();
+        let _ = write!(meta, "<dc:date>{}</dc:date>", xml_escape(d));
     }
     if let Some(r) = &book.publishing.rights {
-        write!(meta, "<dc:rights>{}</dc:rights>", xml_escape(r)).unwrap();
+        let _ = write!(meta, "<dc:rights>{}</dc:rights>", xml_escape(r));
     }
     if let Some(s) = book.series {
-        write!(
+        let _ = write!(
             meta,
             "<meta property=\"belongs-to-collection\" id=\"series\">{}</meta>",
             xml_escape(s)
-        )
-        .unwrap();
+        );
         meta.push_str("<meta refines=\"#series\" property=\"collection-type\">series</meta>");
     }
-    write!(
+    let _ = write!(
         meta,
         "<meta property=\"dcterms:modified\">{}</meta>",
         book.modified
-    )
-    .unwrap();
+    );
     // Accessibility metadata (#642): storefronts (Apple Books, Kobo) and the EU
     // Accessibility Act expect the `schema:*` a11y properties. A Quill EPUB is a
     // reflowable, text-only novel — everything is textual, so `textual` alone is
@@ -116,7 +110,7 @@ pub(super) fn build_opf(
     // The EPUB 2 cover hint (#582): older readers (and many storefronts) find the
     // cover via this legacy `<meta name="cover">` pointing at the manifest item id.
     if images.iter().any(|i| i.role == ImageRole::Cover) {
-        write!(meta, "<meta name=\"cover\" content=\"{COVER_IMAGE_ID}\"/>").unwrap();
+        let _ = write!(meta, "<meta name=\"cover\" content=\"{COVER_IMAGE_ID}\"/>");
     }
 
     let mut manifest = String::new();
@@ -168,7 +162,7 @@ pub(super) fn build_opf(
             "application/xhtml+xml",
             None,
         ));
-        write!(spine, "<itemref idref=\"{}\"/>", it.id).unwrap();
+        let _ = write!(spine, "<itemref idref=\"{}\"/>", it.id);
     }
 
     format!(
@@ -233,13 +227,12 @@ pub(super) fn build_nav(entries: &[Nav], landmarks: &Landmarks, lang: &str) -> S
 fn nav_landmarks(landmarks: &Landmarks) -> String {
     let mut lis = String::new();
     let mut li = |kind: &str, href: &str, label: &str| {
-        writeln!(
+        let _ = writeln!(
             lis,
             "<li><a epub:type=\"{kind}\" href=\"{}\">{}</a></li>",
             href,
             xml_escape(label),
-        )
-        .unwrap();
+        );
     };
     if let Some(href) = &landmarks.cover {
         li("cover", href, "Cover");
@@ -268,7 +261,7 @@ fn nav_landmarks(landmarks: &Landmarks) -> String {
 fn nav_ol(entries: &[Nav]) -> String {
     let mut s = String::from("<ol>\n");
     for e in entries {
-        write!(s, "<li><a href=\"{}\">{}</a>", e.href, xml_escape(&e.label)).unwrap();
+        let _ = write!(s, "<li><a href=\"{}\">{}</a>", e.href, xml_escape(&e.label));
         if !e.children.is_empty() {
             s.push('\n');
             s.push_str(&nav_ol(&e.children));
@@ -304,13 +297,12 @@ fn ncx_points(entries: &[Nav], order: &mut usize) -> String {
     let mut s = String::new();
     for e in entries {
         *order += 1;
-        write!(
+        let _ = write!(
             s,
             "<navPoint id=\"np{order}\" playOrder=\"{order}\"><navLabel><text>{}</text></navLabel><content src=\"{}\"/>",
             xml_escape(&e.label),
             e.href
-        )
-        .unwrap();
+        );
         s.push_str(&ncx_points(&e.children, order));
         s.push_str("</navPoint>");
     }

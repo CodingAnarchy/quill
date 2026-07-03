@@ -36,9 +36,9 @@ pub fn bullet_section(body: &mut String, heading: &str, items: &[String]) {
     if items.is_empty() {
         return;
     }
-    writeln!(body, "## {heading}").unwrap();
+    let _ = writeln!(body, "## {heading}");
     for item in items {
-        writeln!(body, "- {item}").unwrap();
+        let _ = writeln!(body, "- {item}");
     }
     body.push('\n');
 }

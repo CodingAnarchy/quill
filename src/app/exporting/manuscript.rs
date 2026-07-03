@@ -473,12 +473,10 @@ impl App {
                         });
                     }
                     // The first body chapter pushes a part (prev starts `None`), so
-                    // `body_parts` is non-empty by the time we reach here.
-                    body_parts
-                        .last_mut()
-                        .expect("a body part was pushed above")
-                        .chapters
-                        .push(chapter);
+                    // `body_parts` is non-empty here; `if let` binds it without a panic.
+                    if let Some(part) = body_parts.last_mut() {
+                        part.chapters.push(chapter);
+                    }
                 }
             }
         }
@@ -584,12 +582,11 @@ impl App {
                         });
                     }
                     // A new part was just pushed on the first body chapter (prev starts
-                    // `None`), so `body_parts` is non-empty here.
-                    body_parts
-                        .last_mut()
-                        .expect("a body part was pushed above")
-                        .chapters
-                        .push(chapter);
+                    // `None`), so `body_parts` is non-empty here; `if let` binds it
+                    // without a panic path.
+                    if let Some(part) = body_parts.last_mut() {
+                        part.chapters.push(chapter);
+                    }
                 }
             }
         }

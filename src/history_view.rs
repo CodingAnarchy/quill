@@ -113,9 +113,11 @@ fn streaks(snaps: &[Snapshot], today: Date) -> (i64, i64) {
         .filter_map(|s| date::parse(&s.date))
         .collect();
     days.sort();
-    if days.is_empty() {
+    // Binds the last writing day and proves `days` non-empty for the loops below;
+    // an empty history has no streak.
+    let Some(&last) = days.last() else {
         return (0, 0);
-    }
+    };
 
     // Longest: the longest run of consecutive calendar days.
     let mut longest = 1i64;
@@ -131,7 +133,6 @@ fn streaks(snaps: &[Snapshot], today: Date) -> (i64, i64) {
 
     // Current: only counts if the last writing day is today or yesterday;
     // otherwise the streak has lapsed. Walk back over consecutive days.
-    let last = *days.last().unwrap();
     let gap = date::days_between(last, today);
     let current = if gap > 1 {
         0

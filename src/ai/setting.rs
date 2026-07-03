@@ -165,9 +165,9 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
     let mut body = String::new();
 
     for cat in &s.categories {
-        writeln!(body, "## {}", cat.name).unwrap();
+        let _ = writeln!(body, "## {}", cat.name);
         for e in &cat.entries {
-            writeln!(body, "- **{}** — {}", e.name, e.detail).unwrap();
+            let _ = writeln!(body, "- **{}** — {}", e.name, e.detail);
         }
         body.push('\n');
     }
@@ -175,7 +175,7 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
     if !s.gazetteer.is_empty() {
         body.push_str("## Gazetteer\n");
         for term in &s.gazetteer {
-            writeln!(body, "- {term}").unwrap();
+            let _ = writeln!(body, "- {term}");
         }
         body.push('\n');
     }
@@ -188,7 +188,7 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            writeln!(body, "- **{}:** {}{}", f.rule, f.violation, where_).unwrap();
+            let _ = writeln!(body, "- **{}:** {}{}", f.rule, f.violation, where_);
         }
         body.push('\n');
     }

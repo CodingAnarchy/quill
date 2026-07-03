@@ -19,12 +19,11 @@ use super::num;
 /// the exported PDF; the bytes round-trip to `data` via zlib inflate.
 pub(super) fn flate_stream(data: &[u8], extra: &str) -> Vec<u8> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder
-        .write_all(data)
-        .expect("zlib encode to an in-memory buffer never fails");
-    let compressed = encoder
-        .finish()
-        .expect("zlib encode to an in-memory buffer never fails");
+    // Both writes target an in-memory `Vec`, so the `io::Write` contract can't
+    // actually fail here; `let _ =` / `unwrap_or_default` keep that off the panic
+    // path (an impossible `Err` would degrade to an empty stream, never abort).
+    let _ = encoder.write_all(data);
+    let compressed = encoder.finish().unwrap_or_default();
     let mut v = format!(
         "<< /Filter /FlateDecode /Length {}{extra} >>\nstream\n",
         compressed.len()
@@ -59,7 +58,7 @@ pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String
             for chunk in hex.as_bytes().chunks(4) {
                 let old =
                     u16::from_str_radix(std::str::from_utf8(chunk).unwrap_or(""), 16).unwrap_or(0);
-                write!(out, "{:04X}", map.get(&old).copied().unwrap_or(0)).unwrap();
+                let _ = write!(out, "{:04X}", map.get(&old).copied().unwrap_or(0));
             }
             out.push_str("> Tj");
         } else {
@@ -126,18 +125,17 @@ pub(super) fn flatten_outline(
             pdf_text_string(&item.title)
         );
         if k > 0 {
-            write!(body, " /Prev {} 0 R", ids[k - 1]).unwrap();
+            let _ = write!(body, " /Prev {} 0 R", ids[k - 1]);
         }
         if k + 1 < ids.len() {
-            write!(body, " /Next {} 0 R", ids[k + 1]).unwrap();
+            let _ = write!(body, " /Next {} 0 R", ids[k + 1]);
         }
         if let (Some(f), Some(l)) = (first, last) {
-            write!(
+            let _ = write!(
                 body,
                 " /First {f} 0 R /Last {l} 0 R /Count {}",
                 item.children.len()
-            )
-            .unwrap();
+            );
         }
         body.push_str(" >>");
         objects.insert(id, body.into_bytes());
@@ -149,11 +147,19 @@ pub(super) fn flatten_outline(
 /// object id of the document `/Info` dictionary (#692), referenced from the trailer
 /// so readers and print tooling can index Title/Author/Producer; `None` omits it.
 pub(super) fn serialize(objects: &ObjMap, info: Option<u32>) -> Vec<u8> {
-    let max_id = *objects.keys().max().expect("at least the catalog");
     let mut out: Vec<u8> = b"%PDF-1.7\n".to_vec();
+    // The caller always populates at least the catalog (id 1); an empty map has no
+    // document to serialize, so emit just the header rather than panicking.
+    let Some(&max_id) = objects.keys().max() else {
+        return out;
+    };
     let mut offsets = vec![0usize; (max_id + 1) as usize];
     for id in 1..=max_id {
-        let body = objects.get(&id).expect("contiguous object ids");
+        // Object ids are assigned contiguously by the builder; skip a gap (which a
+        // valid document never has) rather than panic — its xref slot stays 0.
+        let Some(body) = objects.get(&id) else {
+            continue;
+        };
         offsets[id as usize] = out.len();
         out.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
         out.extend_from_slice(body);

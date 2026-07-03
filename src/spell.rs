@@ -14,6 +14,11 @@ use spellbook::Dictionary;
 /// The bundled en_US dictionary, parsed once on first use (kept off the keystroke
 /// path, so the one-time parse cost lands on the first idle spell pass).
 static DICT: LazyLock<Dictionary> = LazyLock::new(|| {
+    #[allow(
+        clippy::expect_used,
+        reason = "the .aff/.dic are `include_str!`d into the binary at build time, so \
+                  parsing the bundled dictionary can't fail at runtime"
+    )]
     Dictionary::new(
         include_str!("../assets/dictionary/en_US.aff"),
         include_str!("../assets/dictionary/en_US.dic"),

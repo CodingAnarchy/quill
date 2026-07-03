@@ -143,16 +143,18 @@ pub fn flatten_conversation(messages: &[Value]) -> String {
                             out.push('\n');
                         }
                         Some("tool_use") => {
-                            writeln!(out, "(ran the tool: {})", b["name"].as_str().unwrap_or(""))
-                                .unwrap();
+                            let _ = writeln!(
+                                out,
+                                "(ran the tool: {})",
+                                b["name"].as_str().unwrap_or("")
+                            );
                         }
                         Some("tool_result") => {
-                            writeln!(
+                            let _ = writeln!(
                                 out,
                                 "(tool result: {})",
                                 b["content"].as_str().unwrap_or("")
-                            )
-                            .unwrap();
+                            );
                         }
                         _ => {}
                     }

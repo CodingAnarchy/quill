@@ -91,9 +91,9 @@ pub fn render_outline(s: &Scaffold, notes: &str, today: &str) -> String {
     let mut body = String::new();
 
     for item in &s.outline {
-        writeln!(body, "## {}", item.chapter).unwrap();
+        let _ = writeln!(body, "## {}", item.chapter);
         for beat in &item.beats {
-            writeln!(body, "- {beat}").unwrap();
+            let _ = writeln!(body, "- {beat}");
         }
         body.push('\n');
     }
@@ -101,7 +101,7 @@ pub fn render_outline(s: &Scaffold, notes: &str, today: &str) -> String {
     if !s.gaps.is_empty() {
         body.push_str("## Gaps\n");
         for g in &s.gaps {
-            writeln!(body, "- **{}:** {}", g.chapter, g.detail).unwrap();
+            let _ = writeln!(body, "- **{}:** {}", g.chapter, g.detail);
         }
         body.push('\n');
     }

@@ -493,20 +493,27 @@ impl Pdf {
         self.need(dh);
         let x = self.left() + (self.layout.text_w() - dw) / 2.0;
         let bottom = self.y - dh;
-        writeln!(
+        let _ = writeln!(
             self.cur(),
             "q {} 0 0 {} {} {} cm /{name} Do Q",
             num(dw),
             num(dh),
             num(x),
             num(bottom)
-        )
-        .unwrap();
+        );
         self.y -= dh + gap_after;
     }
 
     fn cur(&mut self) -> &mut String {
-        self.pages.last_mut().expect("a page was started")
+        // Drawing always follows a `start_page`, but guard the empty case by
+        // starting one lazily (as `finish` does) rather than risk a panic. The
+        // index it returns is always valid, so no unwrap on the access.
+        let idx = if self.pages.is_empty() {
+            self.start_page()
+        } else {
+            self.pages.len() - 1
+        };
+        &mut self.pages[idx]
     }
 
     const fn page_idx(&self) -> usize {
@@ -523,8 +530,10 @@ impl Pdf {
         self.head_recto = recto.to_string();
     }
 
-    /// Begin a fresh page; the baseline returns to the top of the text area.
-    fn start_page(&mut self) {
+    /// Begin a fresh page, returning its index; the baseline returns to the top of
+    /// the text area. `pages` and `meta` grow in lockstep, so the returned index is
+    /// valid in both for the caller to annotate its `PageMeta`.
+    fn start_page(&mut self) -> usize {
         self.pages.push(String::new());
         self.meta.push(PageMeta {
             verso: self.head_verso.clone(),
@@ -533,18 +542,19 @@ impl Pdf {
             blank: false,
         });
         self.y = self.layout.text_top();
+        self.pages.len() - 1
     }
 
     /// Start a section's first page, returning its index. In the print profile this
     /// lands on a recto, inserting a blank verso when the next page would be a verso.
     fn open_section(&mut self) -> usize {
         if self.layout.recto_starts && self.pages.len() % 2 == 1 {
-            self.start_page();
-            self.meta.last_mut().unwrap().blank = true;
+            let blank = self.start_page();
+            self.meta[blank].blank = true;
         }
-        self.start_page();
-        self.meta.last_mut().unwrap().opener = true;
-        self.page_idx()
+        let idx = self.start_page();
+        self.meta[idx].opener = true;
+        idx
     }
 
     /// Drop to a new page if the next `height` wouldn't fit above the bottom margin.
@@ -835,14 +845,14 @@ impl Pdf {
 
         // Page tree (MediaBox + font resources inherited by every page).
         let kids = page_obj.iter().fold(String::new(), |mut s, id| {
-            write!(s, "{id} 0 R ").unwrap();
+            let _ = write!(s, "{id} 0 R ");
             s
         });
         let xobjects = if image_names.is_empty() {
             String::new()
         } else {
             let entries = image_names.iter().fold(String::new(), |mut s, (name, id)| {
-                write!(s, "/{name} {id} 0 R ").unwrap();
+                let _ = write!(s, "/{name} {id} 0 R ");
                 s
             });
             format!(" /XObject << {entries}>>")
@@ -850,7 +860,7 @@ impl Pdf {
         let fonts = font_names
             .iter()
             .fold(String::new(), |mut s, (name, id, _)| {
-                write!(s, "/{name} {id} 0 R ").unwrap();
+                let _ = write!(s, "/{name} {id} 0 R ");
                 s
             });
         let resources = format!("/Resources << /Font << {fonts}>>{xobjects} >>");
@@ -898,14 +908,14 @@ impl Pdf {
             // `/Filter /FlateDecode` and the compressed `/Length`.
             objects.insert(content_obj[i], flate_stream(content.as_bytes(), ""));
         }
-        let outlines = if item_count == 0 {
-            "<< /Type /Outlines /Count 0 >>".to_string()
-        } else {
-            format!(
-                "<< /Type /Outlines /First {} 0 R /Last {} 0 R /Count {item_count} >>",
-                first.unwrap(),
-                last.unwrap()
-            )
+        let outlines = match (first, last) {
+            // `item_count == 0` iff the outline was empty, iff `flatten_outline`
+            // returned `(None, None)`; matching the ids directly ties the emitted
+            // First/Last to their presence with no panic path.
+            (Some(first), Some(last)) => format!(
+                "<< /Type /Outlines /First {first} 0 R /Last {last} 0 R /Count {item_count} >>"
+            ),
+            _ => "<< /Type /Outlines /Count 0 >>".to_string(),
         };
         objects.insert(3, outlines.into_bytes());
         objects.insert(
@@ -918,12 +928,12 @@ impl Pdf {
         let info_id = next;
         let mut info = String::from("<<");
         if !self.doc_title.is_empty() {
-            write!(info, " /Title {}", pdf_text_string(&self.doc_title)).unwrap();
+            let _ = write!(info, " /Title {}", pdf_text_string(&self.doc_title));
         }
         if !self.doc_author.is_empty() {
-            write!(info, " /Author {}", pdf_text_string(&self.doc_author)).unwrap();
+            let _ = write!(info, " /Author {}", pdf_text_string(&self.doc_author));
         }
-        write!(info, " /Producer {} >>", pdf_text_string("Quill")).unwrap();
+        let _ = write!(info, " /Producer {} >>", pdf_text_string("Quill"));
         objects.insert(info_id, info.into_bytes());
         serialize(&objects, Some(info_id))
     }

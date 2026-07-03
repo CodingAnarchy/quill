@@ -116,8 +116,10 @@ impl App {
             .key()
             .strip_prefix("editor.")
             .unwrap_or_else(|| knob.key());
-        let literal = validate_change(knob.key(), if on { "true" } else { "false" })
-            .expect("true/false always validates");
+        // A bool always validates, so the raw `true`/`false` is the fallback the
+        // validator would return anyway — no panic path needed.
+        let raw = if on { "true" } else { "false" };
+        let literal = validate_change(knob.key(), raw).unwrap_or_else(|_| raw.to_string());
         self.persist_config_setting(
             "editor",
             field,

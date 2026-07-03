@@ -210,10 +210,10 @@ impl Pdf {
         let mut cur_font = "";
         for (name, hex) in glyph_run_mono(&self.layout.fonts, text) {
             if name != cur_font {
-                writeln!(s, "/{name} {} Tf", num(MONO_SIZE)).unwrap();
+                let _ = writeln!(s, "/{name} {} Tf", num(MONO_SIZE));
                 cur_font = name;
             }
-            writeln!(s, "<{hex}> Tj").unwrap();
+            let _ = writeln!(s, "<{hex}> Tj");
         }
         s.push_str("ET\n");
         self.cur().push_str(&s);
@@ -253,15 +253,15 @@ impl Pdf {
             // intended discrete-state check; an epsilon would defeat the NAN trick.
             #[allow(clippy::float_cmp)]
             if shear != cur_shear {
-                writeln!(s, "1 0 {} 1 {} {} Tm", num(shear), num(pen), num(y)).unwrap();
+                let _ = writeln!(s, "1 0 {} 1 {} {} Tm", num(shear), num(pen), num(y));
                 cur_shear = shear;
             }
             for (name, hex) in glyph_run(fonts, text, style, heading) {
                 if name != cur_font {
-                    writeln!(s, "/{name} {} Tf", num(size)).unwrap();
+                    let _ = writeln!(s, "/{name} {} Tf", num(size));
                     cur_font = name;
                 }
-                writeln!(s, "<{hex}> Tj").unwrap();
+                let _ = writeln!(s, "<{hex}> Tj");
             }
             pen += self.layout.measure(text, size, style, heading);
         }

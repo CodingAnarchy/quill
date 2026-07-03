@@ -519,23 +519,22 @@ fn stylesheet(style: &ExportStyle) -> String {
             .css_format()
             .map(|f| format!(" format(\"{f}\")"))
             .unwrap_or_default();
-        writeln!(
+        let _ = writeln!(
             css,
             "@font-face {{ font-family: \"{}\"; font-style: {}; font-weight: 400 700; src: url(\"{}\"){format}; }}",
             font.family,
             if font.italic { "italic" } else { "normal" },
             font.href
-        )
-        .unwrap();
+        );
     }
     if let Some(f) = style.font(FontRole::Body) {
-        writeln!(css, "body {{ font-family: \"{}\", serif; }}", f.family).unwrap();
+        let _ = writeln!(css, "body {{ font-family: \"{}\", serif; }}", f.family);
     }
     if let Some(f) = style.font(FontRole::Heading) {
-        writeln!(css, "h1, h2 {{ font-family: \"{}\", serif; }}", f.family).unwrap();
+        let _ = writeln!(css, "h1, h2 {{ font-family: \"{}\", serif; }}", f.family);
     }
     if let Some(align) = style.heading_align() {
-        writeln!(css, "h1, h2 {{ text-align: {align}; }}").unwrap();
+        let _ = writeln!(css, "h1, h2 {{ text-align: {align}; }}");
     }
     if style.drop_cap() {
         // The first paragraph of each chapter (marked `opening`) gets a drop cap;
@@ -595,7 +594,7 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
     if let Some(img) = style.image(ImageRole::ChapterHeading) {
         push_img(&mut out, "chapter-image", img);
     }
-    writeln!(out, "<h1>{}</h1>", xml_escape(&ch.title)).unwrap();
+    let _ = writeln!(out, "<h1>{}</h1>", xml_escape(&ch.title));
     if let Some(e) = &ch.epigraph {
         out.push_str(&epigraph_xhtml(e));
     }
@@ -692,9 +691,15 @@ fn inline_xhtml(text: &str) -> String {
     for Run { text, bold, italic } in inline_runs(text) {
         let esc = xml_escape(&text);
         match (bold, italic) {
-            (true, true) => write!(out, "<strong><em>{esc}</em></strong>").unwrap(),
-            (true, false) => write!(out, "<strong>{esc}</strong>").unwrap(),
-            (false, true) => write!(out, "<em>{esc}</em>").unwrap(),
+            (true, true) => {
+                let _ = write!(out, "<strong><em>{esc}</em></strong>");
+            }
+            (true, false) => {
+                let _ = write!(out, "<strong>{esc}</strong>");
+            }
+            (false, true) => {
+                let _ = write!(out, "<em>{esc}</em>");
+            }
             (false, false) => out.push_str(&esc),
         }
     }

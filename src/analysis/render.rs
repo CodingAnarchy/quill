@@ -156,7 +156,7 @@ const fn col(label: &'static str, width: usize) -> Col {
 fn header(cols: &[Col]) -> Line<'static> {
     let mut s = name_cell("Chapter");
     for c in cols {
-        write!(s, "{:>w$}", c.label, w = c.width).unwrap();
+        let _ = write!(s, "{:>w$}", c.label, w = c.width);
     }
     dim(s)
 }
@@ -166,7 +166,7 @@ fn header(cols: &[Col]) -> Line<'static> {
 fn data_row(name: &str, cols: &[Col], cells: &[String]) -> String {
     let mut s = name_cell(name);
     for (c, cell) in cols.iter().zip(cells) {
-        write!(s, "{:>w$}", cell, w = c.width).unwrap();
+        let _ = write!(s, "{:>w$}", cell, w = c.width);
     }
     s
 }

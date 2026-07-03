@@ -185,11 +185,11 @@ fn run_markdown(run: &str, dropped: &mut Dropped) -> String {
     // A footnote/endnote reference becomes an inline marker rather than vanishing.
     for _ in 0..count_elements(run, "w:footnoteReference") {
         dropped.footnotes += 1;
-        write!(out, "[^{}]", dropped.footnotes).unwrap();
+        let _ = write!(out, "[^{}]", dropped.footnotes);
     }
     for _ in 0..count_elements(run, "w:endnoteReference") {
         dropped.endnotes += 1;
-        write!(out, "[^e{}]", dropped.endnotes).unwrap();
+        let _ = write!(out, "[^e{}]", dropped.endnotes);
     }
     // Images/drawings and comment references have no flat-prose equivalent; count
     // the drop so the caller can warn. `<w:pict>` is the legacy VML image form;

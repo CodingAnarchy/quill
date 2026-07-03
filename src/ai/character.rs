@@ -257,14 +257,14 @@ pub fn render_profile(c: &Character, notes: &str, today: &str) -> String {
     let mut fm = format!("name: {}\n", bible::yaml(&c.name));
     if !c.aliases.is_empty() {
         let aliases: Vec<String> = c.aliases.iter().map(|a| bible::yaml(a)).collect();
-        writeln!(fm, "aliases: [{}]", aliases.join(", ")).unwrap();
+        let _ = writeln!(fm, "aliases: [{}]", aliases.join(", "));
     }
     if let Some(role) = &c.role {
-        writeln!(fm, "role: {}", bible::yaml(role)).unwrap();
+        let _ = writeln!(fm, "role: {}", bible::yaml(role));
     }
-    writeln!(fm, "mentions: {}", c.mentions).unwrap();
+    let _ = writeln!(fm, "mentions: {}", c.mentions);
     if let Some(last) = &c.last_chapter {
-        writeln!(fm, "last_chapter: {}", bible::yaml(last)).unwrap();
+        let _ = writeln!(fm, "last_chapter: {}", bible::yaml(last));
     }
     bible::render(&fm, &generated_block(c), notes, today)
 }
@@ -273,23 +273,23 @@ pub fn render_profile(c: &Character, notes: &str, today: &str) -> String {
 fn generated_block(c: &Character) -> String {
     let mut s = String::new();
     if let Some(role) = &c.role {
-        writeln!(s, "**Role:** {role}\n").unwrap();
+        let _ = writeln!(s, "**Role:** {role}\n");
     }
     bible::bullet_section(&mut s, "Physical", &c.physical);
     if let Some(voice) = c.voice.as_ref().filter(|v| !v.is_empty()) {
         s.push_str("## Voice\n");
         let labeled = |s: &mut String, label: &str, items: &[String]| {
             if !items.is_empty() {
-                writeln!(s, "- **{label}:** {}", items.join("; ")).unwrap();
+                let _ = writeln!(s, "- **{label}:** {}", items.join("; "));
             }
         };
         labeled(&mut s, "Speech patterns", &voice.patterns);
         if let Some(register) = &voice.register {
-            writeln!(s, "- **Register:** {register}").unwrap();
+            let _ = writeln!(s, "- **Register:** {register}");
         }
         labeled(&mut s, "Verbal tics", &voice.tics);
         if let Some(rhythm) = &voice.rhythm {
-            writeln!(s, "- **Rhythm:** {rhythm}").unwrap();
+            let _ = writeln!(s, "- **Rhythm:** {rhythm}");
         }
         s.push('\n');
     }
@@ -297,7 +297,7 @@ fn generated_block(c: &Character) -> String {
     if !c.relationships.is_empty() {
         s.push_str("## Relationships\n");
         for r in &c.relationships {
-            writeln!(s, "- {} — {}", r.name, r.relation).unwrap();
+            let _ = writeln!(s, "- {} — {}", r.name, r.relation);
         }
         s.push('\n');
     }
@@ -305,7 +305,7 @@ fn generated_block(c: &Character) -> String {
     if !c.arc.is_empty() {
         s.push_str("## Arc\n");
         for beat in &c.arc {
-            writeln!(s, "- **{}:** {}", beat.chapter, beat.state).unwrap();
+            let _ = writeln!(s, "- **{}:** {}", beat.chapter, beat.state);
         }
         s.push('\n');
     }
@@ -317,7 +317,7 @@ fn generated_block(c: &Character) -> String {
             } else {
                 format!(" ({})", d.chapters.join(", "))
             };
-            writeln!(s, "- {}{}", d.detail, where_).unwrap();
+            let _ = writeln!(s, "- {}{}", d.detail, where_);
         }
         s.push('\n');
     }
@@ -411,20 +411,23 @@ pub fn render_index(chars: &[Character], today: &str) -> String {
             continue;
         }
         any = true;
-        writeln!(body, "## {name}").unwrap();
+        let _ = writeln!(body, "## {name}");
         for edge in outgoing {
             let mutual = edge
                 .tracked
                 .then(|| reciprocal(name, edge.target, &edges))
                 .flatten();
             match mutual {
-                Some(back_relation) => writeln!(
-                    body,
-                    "- {} — {} (mutual: {})",
-                    edge.target, edge.relation, back_relation
-                )
-                .unwrap(),
-                None => writeln!(body, "- {} — {}", edge.target, edge.relation).unwrap(),
+                Some(back_relation) => {
+                    let _ = writeln!(
+                        body,
+                        "- {} — {} (mutual: {})",
+                        edge.target, edge.relation, back_relation
+                    );
+                }
+                None => {
+                    let _ = writeln!(body, "- {} — {}", edge.target, edge.relation);
+                }
             }
         }
         // Incoming edges this character doesn't list back — a one-sided reference
@@ -439,7 +442,7 @@ pub fn render_index(chars: &[Character], today: &str) -> String {
                 .iter()
                 .map(|(from, relation)| format!("{from} ({relation})"))
                 .collect();
-            writeln!(body, "- _Also referenced by:_ {}", refs.join(", ")).unwrap();
+            let _ = writeln!(body, "- _Also referenced by:_ {}", refs.join(", "));
         }
         body.push('\n');
     }
