@@ -20,7 +20,7 @@ use candle_transformers::models::quantized_qwen2::ModelWeights as Qwen2;
 use tokenizers::Tokenizer;
 
 use crate::ai::constrain::Constraint;
-use crate::ai::model_select::{self, Accel};
+use crate::ai::model_select::{self, Accel, Hardware};
 use crate::ai::tool_loop::{self, Converse, Turn};
 use crate::ai::{AiError, Backend, Request, Response, Usage};
 
@@ -41,8 +41,7 @@ impl LocalBackend {
     /// tokenizer) via `hf-hub` — cached outside the project, resumable — and load
     /// it. The recommendation is returned so a caller can surface or override it.
     pub fn recommended() -> Result<(Self, model_select::Recommendation), AiError> {
-        let (ram_gb, accel) = detect_hardware();
-        let rec = model_select::recommend(ram_gb, accel);
+        let rec = model_select::recommend(detect_hardware());
         let model = rec
             .model
             .ok_or_else(|| AiError::NotConfigured(rec.reasoning.clone()))?;
@@ -56,8 +55,7 @@ impl LocalBackend {
     /// routes a pass on-device, so an AI pass never triggers an implicit fetch.
     /// `None` when the machine is too small for even the smallest model.
     pub fn recommended_model() -> Option<&'static model_select::Model> {
-        let (ram_gb, accel) = detect_hardware();
-        model_select::recommend(ram_gb, accel).model
+        model_select::recommend(detect_hardware()).model
     }
 
     /// Download (cached, resumable via `hf-hub`) and load a specific Qwen — the
@@ -269,18 +267,71 @@ impl LocalBackend {
     }
 }
 
-/// Probe the machine for model selection: total RAM (GB, rounded down) and
-/// whether candle has a usable GPU (Metal/CUDA) here.
-fn detect_hardware() -> (u32, Accel) {
+/// GiB in bytes, for turning byte counts into whole GB.
+const BYTES_PER_GB: u64 = 1024 * 1024 * 1024;
+
+/// Probe the machine for memory-aware model selection (#728): total system RAM,
+/// which accelerator a model will run on, and — crucially — the memory pool that
+/// accelerator actually draws from, since that (not total RAM) is what bounds the
+/// pick. On Apple Silicon that's Metal's `recommendedMaxWorkingSetSize` (unified
+/// memory, capped below total RAM); on a discrete GPU it's VRAM. `Device::new_*`
+/// only succeeds when candle was built with that backend, so a build without the
+/// CUDA backend never reports `Cuda` — matching what it can load.
+fn detect_hardware() -> Hardware {
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
-    let ram_gb = (sys.total_memory() / 1024 / 1024 / 1024) as u32; // bytes → GiB
-    let accel = if Device::new_metal(0).is_ok() || Device::new_cuda(0).is_ok() {
-        Accel::Gpu
-    } else {
-        Accel::Cpu
-    };
-    (ram_gb, accel)
+    let total_ram_gb = (sys.total_memory() / BYTES_PER_GB) as u32;
+
+    // Prefer Metal (Apple Silicon), then CUDA — the same order `best_device` loads
+    // in — and read each accelerator's own memory pool where we can.
+    if let Ok(dev) = Device::new_metal(0) {
+        return Hardware {
+            accel: Accel::Metal,
+            total_ram_gb,
+            device_mem_gb: metal_working_set_gb(&dev),
+        };
+    }
+    if let Ok(dev) = Device::new_cuda(0) {
+        return Hardware {
+            accel: Accel::Cuda,
+            total_ram_gb,
+            device_mem_gb: cuda_vram_gb(&dev),
+        };
+    }
+    Hardware {
+        accel: Accel::Cpu,
+        total_ram_gb,
+        device_mem_gb: None,
+    }
+}
+
+/// Metal's usable working-set budget in GB — Apple's `recommendedMaxWorkingSetSize`,
+/// the largest single allocation Metal advises, which on Apple Silicon is a
+/// fraction (~⅔–¾) of unified RAM. Read straight off the underlying `metal::Device`
+/// candle exposes. `None` if unavailable, so the picker falls back to a fraction of
+/// total RAM.
+#[cfg(target_os = "macos")]
+fn metal_working_set_gb(dev: &Device) -> Option<f64> {
+    let Device::Metal(m) = dev else { return None };
+    let bytes = m.metal_device().recommended_max_working_set_size();
+    (bytes > 0).then(|| bytes as f64 / BYTES_PER_GB as f64)
+}
+
+/// Off macOS candle's Metal backend can't exist, so `Device::new_metal` never
+/// succeeds and this is never reached; provided so the call site compiles.
+#[cfg(not(target_os = "macos"))]
+fn metal_working_set_gb(_dev: &Device) -> Option<f64> {
+    None
+}
+
+/// VRAM in GB for a discrete CUDA GPU. Quill never builds candle with its CUDA
+/// backend, so `Device::new_cuda` only ever succeeds on a candle configured with
+/// it; querying VRAM needs candle's re-exported cudarc, which is present only in
+/// that build. Here we return `None`, so the picker uses a 0 VRAM budget (→ Claude)
+/// — the safe answer for a CUDA box we can't size. A candle-CUDA build would swap
+/// this for a `cudarc::driver::result::mem_get_info()` probe of total VRAM.
+fn cuda_vram_gb(_dev: &Device) -> Option<f64> {
+    None
 }
 
 fn argmax(logits: &[f32]) -> u32 {
@@ -343,8 +394,12 @@ mod tests {
 
     #[test]
     fn detect_hardware_reports_some_memory() {
-        let (ram_gb, _accel) = detect_hardware();
-        assert!(ram_gb >= 1, "should detect at least 1 GB of RAM");
+        let hw = detect_hardware();
+        assert!(hw.total_ram_gb >= 1, "should detect at least 1 GB of RAM");
+        // A probed GPU pool, when present, is positive; CPU carries none.
+        if let Some(mem) = hw.device_mem_gb {
+            assert!(mem > 0.0, "probed device memory should be positive");
+        }
     }
 
     /// End-to-end of the #85 acquisition path: download a model via `hf-hub` and
