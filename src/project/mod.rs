@@ -699,7 +699,21 @@ impl Project {
 
     /// Whether `word` is in the project's custom dictionary (#358),
     /// case-insensitively — the seam the spell-checker's `accept` predicate uses.
+    ///
+    /// Called once per dictionary-rejected word on the idle spell pass (#780), so
+    /// it avoids allocating: the empty-dictionary case (no custom words — the
+    /// common one) short-circuits at zero cost, and an already-lowercase word is
+    /// looked up by borrow. Only a word that actually has uppercase pays for the
+    /// lowercased key it needs to match the set (whose keys are stored lowercased).
     pub fn is_accepted(&self, word: &str) -> bool {
+        if self.dictionary.is_empty() {
+            return false;
+        }
+        // No uppercase ⇒ the word is already its own lowercase key: look it up by
+        // borrow, no `String`. (Covers the overwhelming majority of tokens.)
+        if !word.chars().any(char::is_uppercase) {
+            return self.dictionary.contains(word);
+        }
         self.dictionary.contains(&word.to_lowercase())
     }
 

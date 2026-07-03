@@ -38,6 +38,26 @@ fn accepts_words_into_the_project_dictionary() {
 }
 
 #[test]
+fn is_accepted_short_circuits_and_matches_case_insensitively() {
+    // The empty-dictionary case (no custom words) accepts nothing — the common
+    // idle-pass path, guarded at zero cost (#780).
+    let dir = temp_dir("dict-empty");
+    let mut p = Project::create(&dir).unwrap();
+    assert!(p.dictionary.is_empty());
+    assert!(!p.is_accepted("anything"));
+    assert!(!p.is_accepted("MiXeD"));
+
+    // With entries, matching is case-insensitive for both lowercase (borrow-lookup)
+    // and uppercase-bearing (lowercased) words, unchanged from before.
+    p.accept_word("Vashti").unwrap();
+    assert!(p.is_accepted("vashti"), "already-lowercase, no alloc path");
+    assert!(p.is_accepted("VASHTI"), "uppercase, lowercased path");
+    assert!(p.is_accepted("VaShTi"), "mixed case");
+    assert!(!p.is_accepted("other"));
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn accepting_a_word_preserves_existing_dictionary_entries() {
     let dir = temp_dir("dict-append");
     let mut p = Project::create(&dir).unwrap();

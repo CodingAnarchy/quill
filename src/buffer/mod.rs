@@ -199,6 +199,18 @@ impl Buffer {
         self.rope.to_string()
     }
 
+    /// Materialize the whole buffer into `out`, reusing its capacity. The idle
+    /// spell pass (#780) keeps a persistent scratch `String` and calls this each
+    /// tick rather than allocating a fresh whole-document copy via [`text`](Self::text);
+    /// appending the rope's chunks skips the intermediate allocation too.
+    pub fn text_into(&self, out: &mut String) {
+        out.clear();
+        out.reserve(self.rope.len_bytes());
+        for chunk in self.rope.chunks() {
+            out.push_str(chunk);
+        }
+    }
+
     /// Replace the entire prose body with `text`, marking the buffer dirty and
     /// resetting the cursor to the start. The path and front matter are left as
     /// they are. Used by crash recovery (#263) to load a previous session's
