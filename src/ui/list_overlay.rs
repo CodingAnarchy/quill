@@ -689,10 +689,12 @@ pub(super) fn draw_model_manager(
             } else {
                 ""
             };
+            // "needs" is the computed footprint at the model's context — weights +
+            // KV cache + overhead (#728), not a fixed floor.
             let stats = format!(
-                "{:.1} GB · needs {} GB RAM · {} ctx{disk}",
+                "{:.1} GB · needs ~{:.1} GB · {} ctx{disk}",
                 m.size_gb,
-                m.min_ram_gb,
+                m.required_mem_gb(m.context_tokens),
                 m.context_label()
             );
             list_row(
