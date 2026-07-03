@@ -171,12 +171,22 @@ impl App {
     /// value (blank when unset). The required fields say their value must be
     /// positive; the optional daily target says blank clears it.
     pub(crate) fn prompt_goal(&mut self, field: GoalField) {
-        let current = self.current_goal(field);
-        let prefill = current.map(|n| n.to_string()).unwrap_or_default();
-        let hint = if field.is_optional() {
-            "blank clears it"
+        // The deadline is a date (#814), prefilled from its stored ISO string; the
+        // other fields are counts prefilled from their current value.
+        let prefill = if field == GoalField::Deadline {
+            self.project
+                .goals()
+                .and_then(|g| g.deadline.clone())
+                .unwrap_or_default()
         } else {
-            "a positive number"
+            self.current_goal(field)
+                .map(|n| n.to_string())
+                .unwrap_or_default()
+        };
+        let hint = match field {
+            GoalField::Deadline => "YYYY-MM-DD, blank clears it",
+            _ if field.is_optional() => "blank clears it",
+            _ => "a positive number",
         };
         let label = format!("{} ({hint}): ", capitalize(field.label()));
         self.open_prompt(Pending::SetGoal(field), label, &prefill, None);
@@ -195,6 +205,9 @@ impl App {
                 Some(goals.map_or(DEFAULT_WORDS_PER_PAGE, |g| g.words_per_page))
             }
             GoalField::Daily => goals.and_then(|g| g.daily),
+            // The deadline is a date, not a count; `prompt_goal` prefills it from
+            // its stored string directly rather than through this numeric path.
+            GoalField::Deadline => None,
         }
     }
 
@@ -204,6 +217,12 @@ impl App {
     /// value, re-open the same prompt with the message shown.
     pub(crate) fn apply_goal(&mut self, field: GoalField, text: &str) {
         let text = text.trim();
+        // The deadline (#814) is a date, not a count: parse/clear it on its own
+        // path, then continue the chain like the numeric fields.
+        if field == GoalField::Deadline {
+            self.apply_deadline(text);
+            return;
+        }
         let value = if text.is_empty() {
             if !field.is_optional() {
                 self.message = Some(format!(
@@ -232,6 +251,37 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
+        self.advance_goal_flow(field);
+    }
+
+    /// Apply the deadline prompt's input (#814): blank clears it, a valid ISO
+    /// `YYYY-MM-DD` sets it, anything else is rejected (message shown, prompt
+    /// re-opened on the same field). On success, continue the chain like the
+    /// numeric fields.
+    fn apply_deadline(&mut self, text: &str) {
+        let date = if text.is_empty() {
+            None // blank clears the optional deadline
+        } else if let Some(d) = date::parse(text) {
+            Some(d)
+        } else {
+            self.message = Some(format!(
+                "Target completion date must be YYYY-MM-DD — got '{text}'."
+            ));
+            self.prompt_goal(GoalField::Deadline);
+            return;
+        };
+        if let Err(e) = self.project.set_deadline(date) {
+            self.message = Some(format!("Couldn't save goals: {e}"));
+            self.mode = self.editing_mode();
+            return;
+        }
+        self.advance_goal_flow(GoalField::Deadline);
+    }
+
+    /// After a goal field is saved, chain to the next field in the flow (#550) or,
+    /// on the last, return to editing with a confirmation. Shared by the numeric
+    /// fields and the deadline (#814).
+    fn advance_goal_flow(&mut self, field: GoalField) {
         if let Some(next) = next_goal_field(field) {
             self.prompt_goal(next);
         } else {
@@ -429,14 +479,16 @@ impl App {
     }
 }
 
-/// The next field in the goal-setting flow (#550): the three motivating goals
-/// first (words → chapters → daily), then words-per-page last (rarely changed,
-/// prefilled with its current/default value, so it's a single Enter to keep).
+/// The next field in the goal-setting flow (#550, #814): the motivating goals
+/// first (words → chapters → daily → deadline), then words-per-page last (rarely
+/// changed, prefilled with its current/default value, so it's a single Enter to
+/// keep).
 const fn next_goal_field(field: GoalField) -> Option<GoalField> {
     match field {
         GoalField::Words => Some(GoalField::Chapters),
         GoalField::Chapters => Some(GoalField::Daily),
-        GoalField::Daily => Some(GoalField::WordsPerPage),
+        GoalField::Daily => Some(GoalField::Deadline),
+        GoalField::Deadline => Some(GoalField::WordsPerPage),
         GoalField::WordsPerPage => None,
     }
 }
