@@ -322,6 +322,11 @@ impl CidFont {
         bold_weight: bool,
         synthetic_oblique: bool,
     ) -> Self {
+        #[allow(
+            clippy::expect_used,
+            reason = "`program` is a bundled `&'static [u8]` font embedded at build \
+                      time, so parsing it can't fail at runtime"
+        )]
         let mut face = Face::parse(program, 0).expect("font parses");
         // Match the instancing done at embed time (#638): pin the parsed face to the
         // bold weight too, so measured advances/metrics reflect the heavier outline
@@ -441,13 +446,12 @@ impl CidFont {
 
         // Widths keyed by the new (subset) glyph id, measured from the original.
         let widths = used.keys().fold(String::new(), |mut s, &old| {
-            write!(
+            let _ = write!(
                 s,
                 "{} [{}] ",
                 gids[&old],
                 self.advance_em(old).round() as i32
-            )
-            .unwrap();
+            );
             s
         });
         let cid = take(next);
@@ -493,9 +497,9 @@ fn to_unicode_cmap(used: &BTreeMap<u16, char>) -> Vec<u8> {
     // bfchar blocks are capped at 100 entries.
     let entries: Vec<(u16, char)> = used.iter().map(|(&g, &c)| (g, c)).collect();
     for chunk in entries.chunks(100) {
-        writeln!(body, "{} beginbfchar", chunk.len()).unwrap();
+        let _ = writeln!(body, "{} beginbfchar", chunk.len());
         for (gid, ch) in chunk {
-            writeln!(body, "<{gid:04X}> <{}>", utf16be_hex(*ch)).unwrap();
+            let _ = writeln!(body, "<{gid:04X}> <{}>", utf16be_hex(*ch));
         }
         body.push_str("endbfchar\n");
     }
@@ -511,7 +515,7 @@ fn utf16be_hex(c: char) -> String {
     c.encode_utf16(&mut units)
         .iter()
         .fold(String::new(), |mut s, u| {
-            write!(s, "{u:04X}").unwrap();
+            let _ = write!(s, "{u:04X}");
             s
         })
 }
@@ -529,7 +533,9 @@ fn glyph_run_with(
             continue;
         };
         match runs.last_mut() {
-            Some((n, hex)) if *n == name => write!(hex, "{gid:04X}").unwrap(),
+            Some((n, hex)) if *n == name => {
+                let _ = write!(hex, "{gid:04X}");
+            }
             _ => runs.push((name, format!("{gid:04X}"))),
         }
     }

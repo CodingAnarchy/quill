@@ -646,7 +646,7 @@ impl App {
             let answer = crate::ai::parse_answer(&resp.text);
             let mut summary = answer.answer;
             if !answer.citations.is_empty() {
-                write!(summary, "\n\nCited: {}", answer.citations.join(", ")).unwrap();
+                let _ = write!(summary, "\n\nCited: {}", answer.citations.join(", "));
             }
             return Some(summary);
         }

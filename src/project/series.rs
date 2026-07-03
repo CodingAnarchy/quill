@@ -87,17 +87,16 @@ impl Manifest {
         if is_series {
             let series: SeriesFile = value.try_into()?;
             // `is_series` was true, so the `[[books]]` array was non-empty and
-            // deserializes to a non-empty Vec — a malformed/empty one would have
-            // failed `try_into` above, not reached here.
-            let first = series
-                .books
-                .first()
-                .expect("is_series guarantees a non-empty [[books]] array");
-            let manifest = Self::from_series(&series, first);
-            Ok((manifest, series.books, 0))
-        } else {
-            Ok((value.try_into()?, Vec::new(), 0))
+            // deserializes to a non-empty Vec; `if let` binds the first book without
+            // a panic path. An (impossible) empty Vec has no active book to hoist, so
+            // fall back to an empty single-book manifest rather than panicking.
+            if let Some(first) = series.books.first() {
+                let manifest = Self::from_series(&series, first);
+                return Ok((manifest, series.books, 0));
+            }
+            return Ok((Self::default(), series.books, 0));
         }
+        Ok((value.try_into()?, Vec::new(), 0))
     }
 
     /// Build the active-book manifest from a series file and one of its books
@@ -377,7 +376,12 @@ impl Project {
             .collect();
         // `used` is finite and disk names are finite, so all but finitely many of
         // the distinct `chapter-{n}.md` names are free — `find` always terminates.
-        #[allow(clippy::maybe_infinite_iter)]
+        #[allow(
+            clippy::maybe_infinite_iter,
+            clippy::expect_used,
+            reason = "the unbounded `1..` range over a finite used/on-disk name set \
+                      always finds a free `chapter-{n}.md`, so `find` yields `Some`"
+        )]
         (1..)
             .map(|n| format!("chapter-{n}.md"))
             .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())

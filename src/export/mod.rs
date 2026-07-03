@@ -158,12 +158,12 @@ pub fn to_markdown(doc: &Document) -> String {
         out.push_str(series);
         out.push_str("\n\n");
     }
-    write!(out, "# {}\n\n", doc.title).unwrap();
+    let _ = write!(out, "# {}\n\n", doc.title);
     if let Some(subtitle) = &doc.subtitle {
-        write!(out, "*{subtitle}*\n\n").unwrap();
+        let _ = write!(out, "*{subtitle}*\n\n");
     }
     if let Some(author) = &doc.author {
-        write!(out, "by {author}\n\n").unwrap();
+        let _ = write!(out, "by {author}\n\n");
     }
     if let Some(epigraph) = &doc.epigraph {
         out.push_str(&epigraph_block(epigraph));
@@ -171,9 +171,11 @@ pub fn to_markdown(doc: &Document) -> String {
 
     for block in doc.blocks() {
         match block {
-            Block::Part(name) => write!(out, "## {name}\n\n").unwrap(),
+            Block::Part(name) => {
+                let _ = write!(out, "## {name}\n\n");
+            }
             Block::Chapter(chapter) => {
-                write!(out, "## {}\n\n", chapter.title).unwrap();
+                let _ = write!(out, "## {}\n\n", chapter.title);
                 if let Some(epigraph) = &chapter.epigraph {
                     out.push_str(&epigraph_block(epigraph));
                 }
@@ -208,7 +210,7 @@ pub fn to_markdown_series(
         out.push_str("\n\n");
     }
     if let Some(author) = author {
-        write!(out, "by {author}\n\n").unwrap();
+        let _ = write!(out, "by {author}\n\n");
     }
     for book in books {
         out.push_str(&to_markdown(book));

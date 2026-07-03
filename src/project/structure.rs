@@ -122,7 +122,12 @@ impl Project {
             .collect();
         // `used` and the on-disk names are finite, so all but finitely many of the
         // distinct `chapter-{n}.md` names are free — `find` always terminates.
-        #[allow(clippy::maybe_infinite_iter)]
+        #[allow(
+            clippy::maybe_infinite_iter,
+            clippy::expect_used,
+            reason = "the unbounded `1..` range over a finite used/on-disk name set \
+                      always finds a free `chapter-{n}.md`, so `find` yields `Some`"
+        )]
         (1..)
             .map(|n| format!("chapter-{n}.md"))
             .find(|f| !used.contains(f.as_str()) && !self.root.join(f).exists())
@@ -142,7 +147,12 @@ pub fn unique_dest(dir: &Path, file: &str) -> PathBuf {
     let ext = path.extension().and_then(|s| s.to_str());
     // Each `k` yields a distinct candidate and the on-disk names are finite, so all
     // but finitely many candidates don't exist — `find` always terminates.
-    #[allow(clippy::maybe_infinite_iter)]
+    #[allow(
+        clippy::maybe_infinite_iter,
+        clippy::expect_used,
+        reason = "the unbounded `1..` range over a finite set of on-disk names always \
+                  finds a non-existent candidate, so `find` yields `Some`"
+    )]
     (1..)
         .map(|k| {
             ext.map_or_else(

@@ -164,11 +164,10 @@ pub(super) fn toc_page() -> String {
         r#"<w:r><w:t>Right-click to update the table of contents.</w:t></w:r>"#,
         r#"<w:r><w:fldChar w:fldCharType="end"/></w:r>"#,
     );
-    write!(
+    let _ = write!(
         out,
         "<w:p><w:pPr><w:spacing w:line=\"240\" w:lineRule=\"auto\"/></w:pPr>{field}</w:p>",
-    )
-    .unwrap();
+    );
     out
 }
 
@@ -268,7 +267,7 @@ pub(super) fn run(text: &str, bold: bool, italic: bool, size: Option<u32>) -> St
         rpr.push_str("<w:i/>");
     }
     if let Some(sz) = size {
-        write!(rpr, "<w:sz w:val=\"{sz}\"/>").unwrap();
+        let _ = write!(rpr, "<w:sz w:val=\"{sz}\"/>");
     }
     let rpr = if rpr.is_empty() {
         String::new()

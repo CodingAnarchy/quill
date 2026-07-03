@@ -153,18 +153,18 @@ pub fn render(p: &Plot, notes: &str, today: &str) -> String {
 
     body.push_str("## Threads\n");
     for t in &p.threads {
-        writeln!(body, "### {} — {}", t.name, t.status).unwrap();
+        let _ = writeln!(body, "### {} — {}", t.name, t.status);
         if !t.setup.is_empty() {
-            writeln!(body, "- **Setup:** {}", t.setup).unwrap();
+            let _ = writeln!(body, "- **Setup:** {}", t.setup);
         }
         if !t.payoff.is_empty() {
-            writeln!(body, "- **Payoff:** {}", t.payoff).unwrap();
+            let _ = writeln!(body, "- **Payoff:** {}", t.payoff);
         }
         if !t.last_seen.is_empty() {
-            writeln!(body, "- **Last seen:** {}", t.last_seen).unwrap();
+            let _ = writeln!(body, "- **Last seen:** {}", t.last_seen);
         }
         if !t.notes.is_empty() {
-            writeln!(body, "- **Notes:** {}", t.notes).unwrap();
+            let _ = writeln!(body, "- **Notes:** {}", t.notes);
         }
         body.push('\n');
     }
@@ -177,7 +177,7 @@ pub fn render(p: &Plot, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            writeln!(body, "- **{}:** {}{}", f.thread, f.issue, where_).unwrap();
+            let _ = writeln!(body, "- **{}:** {}{}", f.thread, f.issue, where_);
         }
         body.push('\n');
     }

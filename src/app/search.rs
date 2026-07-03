@@ -78,8 +78,9 @@ impl App {
         let (target, wrapped) = if backward {
             match matches.iter().rev().find(|&&(start, _)| start < cur) {
                 Some(&(start, _)) => (start, false),
-                // `matches` is non-empty here: an empty match list returned early above.
-                None => (matches.last().expect("matches is non-empty").0, true),
+                // `matches` is non-empty here (an empty list returned early above),
+                // so index the last entry — mirroring the `matches[0]` wrap below.
+                None => (matches[matches.len() - 1].0, true),
             }
         } else {
             match matches.iter().find(|&&(start, _)| start > cur) {

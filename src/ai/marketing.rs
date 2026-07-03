@@ -29,7 +29,7 @@ impl Marketing {
         let blurbs = numbered_sections("Variant", &self.blurbs);
         let mut taglines = String::new();
         for t in &self.taglines {
-            writeln!(taglines, "- {}", t.trim()).unwrap();
+            let _ = writeln!(taglines, "- {}", t.trim());
         }
         [
             ("Back-cover blurbs", "blurbs.md", blurbs),

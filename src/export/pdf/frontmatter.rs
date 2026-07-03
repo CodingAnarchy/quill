@@ -30,9 +30,9 @@ impl Pdf {
         else {
             return;
         };
-        self.start_page();
+        let idx = self.start_page();
         // No running head or folio on the cover.
-        self.meta.last_mut().unwrap().blank = true;
+        self.meta[idx].blank = true;
         let (page_w, page_h) = (self.layout.media_w(), self.layout.media_h());
         // Scale to cover the whole media box (bleed included), keeping the aspect ratio,
         // and center; overflow is cropped so there's no white margin at the trim edge.
@@ -42,7 +42,7 @@ impl Pdf {
         let y = (page_h - dh) / 2.0;
         // Clip to the media box so cover-fill overflow (a differing aspect ratio) is
         // cropped at the page edge rather than spilling past it.
-        writeln!(
+        let _ = writeln!(
             self.cur(),
             "q 0 0 {} {} re W n {} 0 0 {} {} {} cm /{name} Do Q",
             num(page_w),
@@ -51,8 +51,7 @@ impl Pdf {
             num(dh),
             num(x),
             num(y)
-        )
-        .unwrap();
+        );
     }
 
     /// The book title page: series, title, subtitle, author, and the book epigraph,

@@ -29,6 +29,11 @@ const MIN_FRAGMENT: usize = 3;
 fn en_us() -> &'static Standard {
     static DICT: OnceLock<Standard> = OnceLock::new();
     DICT.get_or_init(|| {
+        #[allow(
+            clippy::expect_used,
+            reason = "the en-US patterns are compiled into the binary via the \
+                      `embed_en-us` feature, so this parse can't fail at runtime"
+        )]
         Standard::from_embedded(Language::EnglishUS)
             .expect("embedded en-US hyphenation patterns load")
     })

@@ -364,8 +364,9 @@ impl FrontMatter {
             let trimmed = line.trim_start();
             if let Some(rest) = trimmed.strip_prefix("- ") {
                 // A new sequence item; its first inline `key: value` (if any).
-                out.push(SceneMeta::default());
-                apply_scene_field(out.last_mut().unwrap(), rest);
+                let mut scene = SceneMeta::default();
+                apply_scene_field(&mut scene, rest);
+                out.push(scene);
             } else if let Some(scene) = out.last_mut() {
                 // A continuation key of the current item (`  status: …`).
                 apply_scene_field(scene, trimmed);

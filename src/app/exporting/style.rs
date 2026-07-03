@@ -31,9 +31,12 @@ impl App {
             .unwrap_or(export::pdf::DEFAULT_TRIM);
         export::pdf::trim_points(name).map_or_else(
             || {
+                // `DEFAULT_TRIM` is a known size, so `trim_points` resolves it; the
+                // 6×9 points are the fallback if it somehow didn't, rather than a panic.
+                let default = export::pdf::trim_points(export::pdf::DEFAULT_TRIM)
+                    .unwrap_or((6.0 * 72.0, 9.0 * 72.0));
                 (
-                    export::pdf::trim_points(export::pdf::DEFAULT_TRIM)
-                        .expect("default trim is valid"),
+                    default,
                     Some(format!(
                         "print: unknown trim '{name}' (use 6x9/5x8/5.5x8.5) — using {}",
                         export::pdf::DEFAULT_TRIM

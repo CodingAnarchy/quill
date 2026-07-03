@@ -62,7 +62,7 @@ fn assemble_story_bible(root: &std::path::Path, title: &str) -> String {
             BibleSource::Dir(dir) => clean_bible_dir(&bible.join(dir)),
         };
         if let Some(content) = content {
-            write!(out, "\n## {heading}\n\n{content}\n").unwrap();
+            let _ = write!(out, "\n## {heading}\n\n{content}\n");
         }
     }
     out

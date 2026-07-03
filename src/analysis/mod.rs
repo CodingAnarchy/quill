@@ -467,13 +467,12 @@ fn mattr(tokens: &[String], window: usize) -> f64 {
     for i in window..n {
         let leaving = tokens[i - window].as_str();
         // Every token that enters the window was counted in, so one leaving it is
-        // always present in the map.
-        let c = counts
-            .get_mut(leaving)
-            .expect("a token leaving the window was counted in");
-        *c -= 1;
-        if *c == 0 {
-            distinct -= 1;
+        // always present in the map; `if let` binds it without a panic path.
+        if let Some(c) = counts.get_mut(leaving) {
+            *c -= 1;
+            if *c == 0 {
+                distinct -= 1;
+            }
         }
         let c = counts.entry(tokens[i].as_str()).or_insert(0);
         if *c == 0 {

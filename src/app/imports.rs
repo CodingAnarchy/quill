@@ -226,7 +226,9 @@ impl App {
             KeyCode::Home => preview.scroll = 0,
             KeyCode::End => preview.scroll = last,
             KeyCode::Char(c @ '1'..='6') => {
-                let level = c.to_digit(10).unwrap() as usize;
+                // `c` is an ASCII digit `1`–`6` by the match, so its value is the
+                // byte offset from `'0'` — no fallible digit parse needed.
+                let level = (c as usize) - ('0' as usize);
                 self.repreview_import_at(level);
             }
             KeyCode::Enter => self.confirm_import_preview(),
@@ -337,7 +339,7 @@ impl App {
                 continue;
             }
             preserved += 1;
-            write!(combined, "## {name}\n\n{text}\n\n").unwrap();
+            let _ = write!(combined, "## {name}\n\n{text}\n\n");
         }
         if preserved == 0 {
             self.message = Some(write_failure_message(&failures));

@@ -79,6 +79,11 @@ impl Syntax {
     /// Parse a document from scratch.
     pub fn new(text: &str) -> Self {
         let mut parser = MarkdownParser::default();
+        #[allow(
+            clippy::expect_used,
+            reason = "tree-sitter `parse` returns `None` only on a timeout or \
+                      cancellation, neither of which this call configures"
+        )]
         let tree = parser
             .parse(text.as_bytes(), None)
             .expect("markdown parse should not fail without a timeout/cancellation");

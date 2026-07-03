@@ -66,12 +66,11 @@ fn render_ad(ad: &Ad) -> String {
     bible::bullet_section(&mut s, "Suggested targeting", &ad.targeting);
     let brief = ad.image_brief.trim();
     if !brief.is_empty() {
-        write!(
+        let _ = write!(
             s,
             "## Ad image\n{brief}\n\nUse an image from `marketing/images/` (Character \
              portrait / Scene illustration), or create one to this brief.\n"
-        )
-        .unwrap();
+        );
     }
     s
 }

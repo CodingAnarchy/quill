@@ -209,7 +209,7 @@ pub fn is_ok(status: u16) -> bool {
 pub fn numbered_sections(label: &str, items: &[String]) -> String {
     let mut s = String::new();
     for (i, it) in items.iter().enumerate() {
-        write!(s, "## {label} {}\n\n{}\n\n", i + 1, it.trim()).unwrap();
+        let _ = write!(s, "## {label} {}\n\n{}\n\n", i + 1, it.trim());
     }
     s
 }
@@ -220,7 +220,7 @@ pub fn numbered_sections(label: &str, items: &[String]) -> String {
 pub fn vocab_context(heading: &str, vocab: &[(String, String)]) -> String {
     let mut s = format!("{heading}\n");
     for (token, desc) in vocab {
-        writeln!(s, "- {token}: {desc}").unwrap();
+        let _ = writeln!(s, "- {token}: {desc}");
     }
     s
 }

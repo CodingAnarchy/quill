@@ -49,13 +49,16 @@ fn sentence_spans(text: &str) -> Vec<(usize, usize)> {
             while i < n && is_terminator(chars[i].1) {
                 i += 1;
             }
+            // `start` is set whenever `word_pending` is — a word in progress always
+            // recorded where it began — so `if let` binds it without a panic path
+            // (and leaves `start` untouched when the run isn't a sentence boundary).
             if word_pending && is_boundary(&chars, run, i) {
-                // `start` is set whenever `word_pending` is — a word in progress
-                // always recorded where it began.
-                let s = chars[start.take().expect("a pending word has a recorded start")].0;
-                let e = if i < n { chars[i].0 } else { text.len() };
-                spans.push((s, e));
-                word_pending = false;
+                if let Some(st) = start.take() {
+                    let s = chars[st].0;
+                    let e = if i < n { chars[i].0 } else { text.len() };
+                    spans.push((s, e));
+                    word_pending = false;
+                }
             }
         } else {
             if c.is_alphanumeric() {

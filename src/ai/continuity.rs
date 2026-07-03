@@ -130,7 +130,7 @@ pub fn render_timeline(c: &Continuity, notes: &str, today: &str) -> String {
 
     body.push_str("## Timeline (narrative order)\n");
     for e in &c.events {
-        writeln!(body, "- **{}:** {}", e.chapter, e.description).unwrap();
+        let _ = writeln!(body, "- **{}:** {}", e.chapter, e.description);
     }
     body.push('\n');
 
@@ -138,7 +138,7 @@ pub fn render_timeline(c: &Continuity, notes: &str, today: &str) -> String {
     chrono.sort_by_key(|e| e.story_order);
     body.push_str("## Timeline (story order)\n");
     for e in &chrono {
-        writeln!(body, "- {} _({})_", e.description, e.chapter).unwrap();
+        let _ = writeln!(body, "- {} _({})_", e.description, e.chapter);
     }
     body.push('\n');
 
@@ -150,7 +150,7 @@ pub fn render_timeline(c: &Continuity, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            writeln!(body, "- **{}:** {}{}", f.kind, f.detail, where_).unwrap();
+            let _ = writeln!(body, "- **{}:** {}{}", f.kind, f.detail, where_);
         }
         body.push('\n');
     }
