@@ -83,62 +83,67 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-# Clippy lint policy. All `warn`, not `deny`: these surface existing violations to
-# clean up incrementally (tracked by the idiomatic/perf/correctness cleanup issues)
-# without breaking the build; promote a category to `deny` once it's clean. Only
-# `cargo clippy` honors these — normal `cargo build` is unaffected.
+# Clippy lint policy. All `deny`: the tree is clean of every lint below (the
+# idiomatic/perf/correctness cleanup landed in #793), so these are promoted from
+# `warn` to `deny` to keep it that way — a new violation fails `cargo clippy`
+# instead of scrolling past as a warning. Only `cargo clippy` honors these —
+# normal `cargo build` is unaffected. If a nursery lint (`missing_const_for_fn`,
+# `option_if_let_else`) throws a false positive on a toolchain bump, silence that
+# one site with a local `#[allow(...)]` (with a `reason = "…"`) rather than
+# dropping the whole category back to `warn`.
 #
 # Deliberately NOT enabled: doc_markdown (noisy, low value) and the
 # cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
 # usize<->u16 conversions in TUI layout code).
 [lints.clippy]
 # Correctness-adjacent — most likely to be actual bugs.
-case_sensitive_file_extension_comparisons = "warn"
-maybe_infinite_iter = "warn"
-unchecked_time_subtraction = "warn"
-float_cmp = "warn"
+case_sensitive_file_extension_comparisons = "deny"
+maybe_infinite_iter = "deny"
+unchecked_time_subtraction = "deny"
+float_cmp = "deny"
 
 # Allocation / clone hygiene (perf-adjacent).
-format_push_string = "warn"
-format_collect = "warn"
-redundant_clone = "warn"
-assigning_clones = "warn"
-implicit_clone = "warn"
-needless_collect = "warn"
-or_fun_call = "warn"
+format_push_string = "deny"
+format_collect = "deny"
+redundant_clone = "deny"
+assigning_clones = "deny"
+implicit_clone = "deny"
+needless_collect = "deny"
+or_fun_call = "deny"
 # Small but free FP wins (mul_add, etc.) — don't leave perf on the table.
-suboptimal_flops = "warn"
+suboptimal_flops = "deny"
 
 # Idiom / clarity.
-map_unwrap_or = "warn"
-redundant_closure_for_method_calls = "warn"
-unnested_or_patterns = "warn"
-manual_let_else = "warn"
-single_match_else = "warn"
-match_same_arms = "warn"
-semicolon_if_nothing_returned = "warn"
-derive_partial_eq_without_eq = "warn"
-needless_pass_by_value = "warn"
-needless_pass_by_ref_mut = "warn"
-unnecessary_wraps = "warn"
-needless_continue = "warn"
-items_after_statements = "warn"
-cast_lossless = "warn"
-uninlined_format_args = "warn"
-unused_self = "warn"
-ignore_without_reason = "warn"
+map_unwrap_or = "deny"
+redundant_closure_for_method_calls = "deny"
+unnested_or_patterns = "deny"
+manual_let_else = "deny"
+single_match_else = "deny"
+match_same_arms = "deny"
+semicolon_if_nothing_returned = "deny"
+derive_partial_eq_without_eq = "deny"
+needless_pass_by_value = "deny"
+needless_pass_by_ref_mut = "deny"
+unnecessary_wraps = "deny"
+needless_continue = "deny"
+items_after_statements = "deny"
+cast_lossless = "deny"
+uninlined_format_args = "deny"
+unused_self = "deny"
+ignore_without_reason = "deny"
 # Prefer Self:: over the concrete type name inside impls (~948 sites, pure churn).
-use_self = "warn"
+use_self = "deny"
 # Push toward the T::default() convention over Default::default().
-default_trait_access = "warn"
+default_trait_access = "deny"
 # Single binary crate with no external consumers, so pub(crate) == pub for us;
 # redundant pub(crate) on items in already-private modules is just noise to strip.
-redundant_pub_crate = "warn"
+redundant_pub_crate = "deny"
 
 # const-fn where possible. Nursery lint with occasional false positives (a fn that
 # can't be const on stable yet, or one kept non-const for future flexibility) —
 # silence those case-by-case with a local #[allow(clippy::missing_const_for_fn)].
-missing_const_for_fn = "warn"
+missing_const_for_fn = "deny"
 
-# Noisier / nursery — useful but flags more debatable cases; drop if too chatty.
-option_if_let_else = "warn"
+# Noisier / nursery — useful but flags more debatable cases; silence a false
+# positive with a local #[allow(clippy::option_if_let_else)] if it gets chatty.
+option_if_let_else = "deny"
