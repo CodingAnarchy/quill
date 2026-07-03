@@ -220,7 +220,7 @@ pub const MODELS: &[Model] = &[
 impl Model {
     /// The stable id for this model — its parameter size (`"7B"`), used as the
     /// config key in `[ai] local_models` and the cache key for the loaded model.
-    pub fn id(&self) -> &'static str {
+    pub const fn id(&self) -> &'static str {
         self.params
     }
 
@@ -418,7 +418,7 @@ fn budget_label(gb: f64) -> String {
 }
 
 #[cfg_attr(not(feature = "local"), allow(dead_code))]
-fn accel_label(hw: Hardware) -> &'static str {
+const fn accel_label(hw: Hardware) -> &'static str {
     match hw.accel {
         Accel::Metal => "Apple Silicon (unified memory)",
         Accel::Cuda => "a discrete GPU (VRAM)",
@@ -531,7 +531,12 @@ mod tests {
             m.required_mem_gb(32_768)
         );
         // KV scales linearly with context.
-        assert!((m.kv_cache_gb(65_536) - 2.0 * m.kv_cache_gb(32_768)).abs() < 1e-6);
+        assert!(
+            2.0f64
+                .mul_add(-m.kv_cache_gb(32_768), m.kv_cache_gb(65_536))
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]

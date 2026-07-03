@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a continuity pass: the ordered events and the contradictions.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Continuity {
     #[serde(default)]
     pub events: Vec<Event>,
@@ -21,7 +21,7 @@ pub struct Continuity {
 
 /// One story event. The model returns events in **narrative** order (order of
 /// appearance) and assigns each a `story_order` rank for chronological sorting.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Event {
     pub description: String,
     /// The chapter (title) the event appears in.
@@ -32,7 +32,7 @@ pub struct Event {
 }
 
 /// One continuity contradiction.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Finding {
     /// A short category, e.g. "location", "age", "object", "timeline".
     pub kind: String,

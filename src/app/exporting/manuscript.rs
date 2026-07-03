@@ -227,8 +227,7 @@ impl App {
             ExportScope::Chapter(i) => self
                 .project
                 .chapter_title(*i)
-                .map(bible::slug)
-                .unwrap_or_else(|| format!("chapter-{}", i + 1)),
+                .map_or_else(|| format!("chapter-{}", i + 1), bible::slug),
             ExportScope::Part { name, .. } => bible::slug(name),
             // 1-based, inclusive — what an author counting chapters expects.
             ExportScope::Range { start, end } => format!("chapters-{}-{}", start + 1, end + 1),
@@ -241,7 +240,7 @@ impl App {
     fn write_book(&mut self, format: ExportFormat, doc: &Document, name: &str) {
         match format {
             ExportFormat::Markdown => {
-                self.write_export(name, "md", export::to_markdown(doc).as_bytes())
+                self.write_export(name, "md", export::to_markdown(doc).as_bytes());
             }
             ExportFormat::Docx => self.write_built(
                 export::docx::to_docx(doc, export::docx::Profile::Manuscript),
@@ -278,7 +277,10 @@ impl App {
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
                 let bleed = self.print_bleed();
-                warnings.extend(export::pdf::pdf_dpi_warnings(&style, w + 2.0 * bleed));
+                warnings.extend(export::pdf::pdf_dpi_warnings(
+                    &style,
+                    2.0f32.mul_add(bleed, w),
+                ));
                 self.write_built(
                     export::pdf::to_pdf_print(doc, w, h, bleed, &style),
                     name,
@@ -366,7 +368,10 @@ impl App {
                 warnings.extend(trim_warning);
                 warnings.extend(export::pdf::pdf_style_warnings(&style));
                 let bleed = self.print_bleed();
-                warnings.extend(export::pdf::pdf_dpi_warnings(&style, w + 2.0 * bleed));
+                warnings.extend(export::pdf::pdf_dpi_warnings(
+                    &style,
+                    2.0f32.mul_add(bleed, w),
+                ));
                 self.write_built(
                     export::pdf::to_pdf_series_print(
                         docs,

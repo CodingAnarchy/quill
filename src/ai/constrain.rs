@@ -54,7 +54,7 @@ pub struct Constraint<'a> {
 }
 
 impl<'a> Constraint<'a> {
-    pub fn new(schema: &'a Value) -> Self {
+    pub const fn new(schema: &'a Value) -> Self {
         Self {
             schema,
             text: String::new(),
@@ -424,7 +424,7 @@ fn consume_any(s: &str) -> Outcome<'_> {
         },
         Some(b'{') => consume_object(&serde_json::json!({"type": "object"}), t),
         Some(b'[') => consume_array(&serde_json::json!({"type": "array"}), t),
-        Some(b't') | Some(b'f') => consume_literals(t, &["true", "false"]),
+        Some(b't' | b'f') => consume_literals(t, &["true", "false"]),
         Some(b'n') => consume_literals(t, &["null"]),
         Some(c) if c.is_ascii_digit() || *c == b'-' => consume_number(t, false),
         Some(_) => Outcome::Invalid,

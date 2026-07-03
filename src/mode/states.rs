@@ -115,7 +115,7 @@ pub struct PromptState {
 impl PromptState {
     /// A prompt prefilled with `input`, caret at its end (the natural spot to
     /// keep typing or edit from).
-    pub(crate) fn new(pending: Pending, label: String, input: String) -> Self {
+    pub(crate) const fn new(pending: Pending, label: String, input: String) -> Self {
         let caret = input.len();
         Self {
             pending,
@@ -182,12 +182,12 @@ impl PromptState {
     }
 
     /// Move the caret to the start of the input.
-    pub(crate) fn move_home(&mut self) {
+    pub(crate) const fn move_home(&mut self) {
         self.caret = 0;
     }
 
     /// Move the caret to the end of the input.
-    pub(crate) fn move_end(&mut self) {
+    pub(crate) const fn move_end(&mut self) {
         self.caret = self.input.len();
     }
 
@@ -334,7 +334,7 @@ impl ProjectSearch {
 
 /// One manuscript-wide match (#295): which chapter, the byte range within that
 /// chapter's prose body, and a short context snippet for the results list.
-pub(crate) struct ProjectMatch {
+pub struct ProjectMatch {
     /// Chapter index (the jump target).
     pub(crate) chapter: usize,
     /// Byte range `[start, end)` within the chapter's body (front matter excluded).
@@ -348,7 +348,7 @@ pub(crate) struct ProjectMatch {
 
 /// Which step of the manuscript-wide find / replace interaction is active (#295).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectSearchStage {
+pub enum ProjectSearchStage {
     /// Typing the query; Enter runs the search across every chapter.
     Query,
     /// Results listed; navigate, jump to a match, or start a replace.
@@ -403,7 +403,7 @@ pub struct ImportPreview {
 
 /// Which step of the find / replace interaction is active.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchStage {
+pub enum SearchStage {
     /// Typing the search query (find or replace). Matches update as you type.
     Query,
     /// Find: query entered, stepping through matches with n / N.

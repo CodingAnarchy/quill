@@ -97,7 +97,7 @@ pub struct Status {
 }
 
 impl Status {
-    pub fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.changed.len()
     }
 }

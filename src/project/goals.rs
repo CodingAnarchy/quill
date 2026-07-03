@@ -36,7 +36,7 @@ pub struct Goals {
     pub daily: Option<usize>,
 }
 
-fn default_words_per_page() -> usize {
+const fn default_words_per_page() -> usize {
     250
 }
 
@@ -62,35 +62,35 @@ pub enum GoalField {
 
 impl GoalField {
     /// The `[goals]` table key this field is stored under in `book.toml`.
-    pub fn key(self) -> &'static str {
+    pub const fn key(self) -> &'static str {
         match self {
-            GoalField::Words => "words",
-            GoalField::Chapters => "chapters",
-            GoalField::Daily => "daily",
-            GoalField::WordsPerPage => "words_per_page",
+            Self::Words => "words",
+            Self::Chapters => "chapters",
+            Self::Daily => "daily",
+            Self::WordsPerPage => "words_per_page",
         }
     }
 
     /// A human label for prompts and status messages.
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
-            GoalField::Words => "target words",
-            GoalField::Chapters => "target chapters",
-            GoalField::Daily => "daily word target",
-            GoalField::WordsPerPage => "words per page",
+            Self::Words => "target words",
+            Self::Chapters => "target chapters",
+            Self::Daily => "daily word target",
+            Self::WordsPerPage => "words per page",
         }
     }
 
     /// Whether this goal is optional — cleared (removed from `book.toml`) on blank
     /// input rather than rejected. Only the daily target is optional.
-    pub fn is_optional(self) -> bool {
-        matches!(self, GoalField::Daily)
+    pub const fn is_optional(self) -> bool {
+        matches!(self, Self::Daily)
     }
 }
 
 impl Project {
     /// The author's writing goals, if set (the `[goals]` table of `book.toml`).
-    pub fn goals(&self) -> Option<&Goals> {
+    pub const fn goals(&self) -> Option<&Goals> {
         self.manifest.goals.as_ref()
     }
 
@@ -118,7 +118,7 @@ impl Project {
             GoalField::Words => goals.words = value.unwrap_or(0),
             GoalField::Chapters => goals.chapters = value.unwrap_or(0),
             GoalField::WordsPerPage => {
-                goals.words_per_page = value.unwrap_or(DEFAULT_WORDS_PER_PAGE)
+                goals.words_per_page = value.unwrap_or(DEFAULT_WORDS_PER_PAGE);
             }
             GoalField::Daily => goals.daily = value,
         }

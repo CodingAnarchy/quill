@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::{numbered_sections, AiError, Request};
 
 /// A round of social posts, grouped by platform.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Social {
     #[serde(default)]
     pub x: Vec<String>,

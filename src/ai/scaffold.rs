@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::{bible, AiError, Request};
 
 /// A structural pass: the beat outline plus the gaps found in it.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Scaffold {
     #[serde(default)]
     pub outline: Vec<OutlineItem>,
@@ -20,7 +20,7 @@ pub struct Scaffold {
 }
 
 /// One chapter's beats — short scene notes, not prose.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct OutlineItem {
     pub chapter: String,
     #[serde(default)]
@@ -28,7 +28,7 @@ pub struct OutlineItem {
 }
 
 /// A structural gap (a hole the author should fill), tied to a chapter.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Gap {
     pub detail: String,
     pub chapter: String,

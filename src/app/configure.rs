@@ -166,7 +166,7 @@ impl App {
 /// Settings menu (#592) validates against: a closed vocabulary of real keys, each
 /// with a human description (with allowed values) for the model to map against.
 /// The keys are dotted `section.field`, matching the config file's layout.
-pub(crate) fn settings_vocab() -> Vec<(String, String)> {
+pub fn settings_vocab() -> Vec<(String, String)> {
     let mut v = vec![
         ("editor.vim".to_string(), "Vim-style modal editing — true or false".to_string()),
         (
@@ -220,7 +220,7 @@ pub(crate) fn settings_vocab() -> Vec<(String, String)> {
 /// quoted via the toml serializer so escaping always matches what the loader parses.
 /// The one exception is `dictionary.add`, which returns the bare word (not a TOML
 /// literal) — it's written to the project dictionary, not the config file.
-pub(crate) fn validate_change(key: &str, value: &str) -> Result<String, String> {
+pub fn validate_change(key: &str, value: &str) -> Result<String, String> {
     let bad = |why: &str| Err(format!("{key} ({why})"));
     let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
     match key {

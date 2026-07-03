@@ -106,7 +106,7 @@ impl App {
                 self.message = Some(format!(
                     "Saved {} but couldn't update [style]: {e}",
                     family.name
-                ))
+                ));
             }
         }
     }
@@ -224,7 +224,7 @@ fn fetch(_url: &str) -> std::io::Result<Vec<u8>> {
 }
 
 /// A human label for the `[style]` slot a font was set into, for the status line.
-fn target_label(target: FontTarget) -> &'static str {
+const fn target_label(target: FontTarget) -> &'static str {
     match target {
         FontTarget::Body => "the body font",
         FontTarget::Heading => "the heading font",

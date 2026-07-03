@@ -268,12 +268,7 @@ fn focus_mode_dims_the_other_paragraphs() {
             .expect("paragraph on screen");
         (0..40)
             .map(|x| &buf[(x, row)])
-            .find(|c| {
-                c.symbol()
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ch.is_alphabetic())
-            })
+            .find(|c| c.symbol().chars().next().is_some_and(char::is_alphabetic))
             .unwrap()
             .style()
             .fg
@@ -455,12 +450,7 @@ fn a_fenced_code_block_renders_in_the_code_colour() {
         })?;
         (0..40)
             .map(|x| &buf[(x, row)])
-            .find(|c| {
-                c.symbol()
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ch.is_alphabetic())
-            })
+            .find(|c| c.symbol().chars().next().is_some_and(char::is_alphabetic))
             .map(|c| c.style().fg)?
     };
 

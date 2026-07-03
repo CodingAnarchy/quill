@@ -166,7 +166,7 @@ fn cover_dpi_is_measured_against_the_full_media_box() {
     style.resolve_images(|_| Ok(png_bytes(1800, 2700, 255)));
     let (w, _h) = trim_points("6x9").unwrap();
     let bleed = 0.125 * 72.0;
-    let media_w = w + 2.0 * bleed;
+    let media_w = 2.0f32.mul_add(bleed, w);
     assert!(
         pdf_dpi_warnings(&style, media_w)
             .iter()

@@ -212,7 +212,7 @@ fn encode_png(image: &Tensor) -> Result<Vec<u8>, AiError> {
     Ok(bytes)
 }
 
-fn internal(msg: String) -> AiError {
+const fn internal(msg: String) -> AiError {
     AiError::Internal(msg)
 }
 

@@ -405,6 +405,9 @@ fn the_assistant_action_is_unavailable_in_the_continuous_view() {
 // --- Multi-turn cost control (#309) --------------------------------------
 
 #[test]
+// A local run costs exactly `0.0` — the free-run sentinel is an exact value, so an
+// exact compare is the intended check.
+#[allow(clippy::float_cmp)]
 fn an_on_device_run_is_free_so_never_gated() {
     let (app, _dir) = offline_app("budget-local");
     assert_eq!(

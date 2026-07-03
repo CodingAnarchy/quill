@@ -17,7 +17,7 @@ const MAX_TOKENS: u32 = 1024;
 /// A workflow the model proposed from a description: a name, the ordered step
 /// tokens (each guaranteed to be a valid action / workflow name by the schema),
 /// and any requested steps it couldn't map to an available action.
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct GeneratedWorkflow {
     pub name: String,
     #[serde(default)]

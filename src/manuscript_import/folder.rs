@@ -27,24 +27,21 @@ pub fn parse_markdown_folder(folder: &Path) -> std::io::Result<Imported> {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        match std::fs::read_to_string(file) {
-            Ok(text) => {
-                // Split off any leading `---` front matter (Quill's chapter files
-                // may carry one) so the `# Heading` right after it is still the
-                // title; we keep only the body prose.
-                let (_front, body) = frontmatter::split(&text);
-                let (title, body) = split_leading_heading(body, &stem_title);
-                chapters.push(ImportedChapter { title, body });
-            }
-            Err(_) => {
-                // Listed but unreadable: keep the chapter (from its filename) with
-                // an empty body and count the drop, rather than lose the slot.
-                unreadable_bodies += 1;
-                chapters.push(ImportedChapter {
-                    title: stem_title,
-                    body: String::new(),
-                });
-            }
+        if let Ok(text) = std::fs::read_to_string(file) {
+            // Split off any leading `---` front matter (Quill's chapter files
+            // may carry one) so the `# Heading` right after it is still the
+            // title; we keep only the body prose.
+            let (_front, body) = frontmatter::split(&text);
+            let (title, body) = split_leading_heading(body, &stem_title);
+            chapters.push(ImportedChapter { title, body });
+        } else {
+            // Listed but unreadable: keep the chapter (from its filename) with
+            // an empty body and count the drop, rather than lose the slot.
+            unreadable_bodies += 1;
+            chapters.push(ImportedChapter {
+                title: stem_title,
+                body: String::new(),
+            });
         }
     }
 

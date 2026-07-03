@@ -628,7 +628,7 @@ fn keymap_reports_a_key_bound_twice() {
     ]);
     let (_, errors) = super::super::build_keymap(&cfg);
     assert_eq!(errors.len(), 1, "the collision is reported: {errors:?}");
-    assert!(errors[0].contains("more than one"), "{:?}", errors);
+    assert!(errors[0].contains("more than one"), "{errors:?}");
 }
 
 #[test]

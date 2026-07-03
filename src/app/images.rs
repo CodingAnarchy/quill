@@ -99,8 +99,8 @@ impl ImageBackendSpec {
     /// Build (or fetch the cached) image backend. Runs on the worker thread.
     fn build(self) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
         match self {
-            ImageBackendSpec::Remote(key) => Ok(Arc::new(FalBackend::new(key))),
-            ImageBackendSpec::Local(slot) => build_local_image(slot),
+            Self::Remote(key) => Ok(Arc::new(FalBackend::new(key))),
+            Self::Local(slot) => build_local_image(slot),
         }
     }
 }
@@ -268,7 +268,7 @@ impl App {
                     .image
                     .resolved_key()
                     .ok_or_else(|| ai::AiError::NotConfigured("no image API key".into()))?;
-                ImageBackendSpec::Remote(key.to_string())
+                ImageBackendSpec::Remote(key)
             }
             ai::image::ImageBackendKind::Local => {
                 if cfg!(not(feature = "local")) {

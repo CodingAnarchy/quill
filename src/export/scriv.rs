@@ -163,7 +163,7 @@ fn to_rtf(chapter: &Chapter) -> String {
             // A centered scene divider, the conventional Scrivener separator.
             Prose::SceneBreak => body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n")),
             Prose::Heading(heading) => {
-                body.push_str(&rtf_paragraph(&[Run::new(heading, true, false)]))
+                body.push_str(&rtf_paragraph(&[Run::new(heading, true, false)]));
             }
             Prose::Paragraph(text) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
             // Verbatim, monospaced (`\f1`), line breaks kept as `\line` (#522).

@@ -232,12 +232,11 @@ impl App {
             self.mode = self.editing_mode();
             return;
         }
-        match next_goal_field(field) {
-            Some(next) => self.prompt_goal(next),
-            None => {
-                self.mode = self.editing_mode();
-                self.message = Some("Writing goals updated.".into());
-            }
+        if let Some(next) = next_goal_field(field) {
+            self.prompt_goal(next);
+        } else {
+            self.mode = self.editing_mode();
+            self.message = Some("Writing goals updated.".into());
         }
     }
 
@@ -287,12 +286,11 @@ impl App {
     /// single-letter keys), then chain to the next field — or finish on the last.
     pub(crate) fn apply_book_field(&mut self, field: BookField, text: &str) {
         self.apply_meta(field.meta(), text);
-        match next_book_field(field) {
-            Some(next) => self.prompt_book_field(next),
-            None => {
-                self.mode = self.editing_mode();
-                self.message = Some("Book details updated.".into());
-            }
+        if let Some(next) = next_book_field(field) {
+            self.prompt_book_field(next);
+        } else {
+            self.mode = self.editing_mode();
+            self.message = Some("Book details updated.".into());
         }
     }
 
@@ -433,7 +431,7 @@ impl App {
 /// The next field in the goal-setting flow (#550): the three motivating goals
 /// first (words → chapters → daily), then words-per-page last (rarely changed,
 /// prefilled with its current/default value, so it's a single Enter to keep).
-fn next_goal_field(field: GoalField) -> Option<GoalField> {
+const fn next_goal_field(field: GoalField) -> Option<GoalField> {
     match field {
         GoalField::Words => Some(GoalField::Chapters),
         GoalField::Chapters => Some(GoalField::Daily),
@@ -446,7 +444,7 @@ fn next_goal_field(field: GoalField) -> Option<GoalField> {
 /// fields the chapter-browser `t`/`b`/`w`/`e` keys also set — title → subtitle →
 /// author → series — then the publishing metadata (#583) — ISBN → publisher →
 /// publication date → language → rights — then done.
-fn next_book_field(field: BookField) -> Option<BookField> {
+const fn next_book_field(field: BookField) -> Option<BookField> {
     match field {
         BookField::Title => Some(BookField::Subtitle),
         BookField::Subtitle => Some(BookField::Author),

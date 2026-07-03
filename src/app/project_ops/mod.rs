@@ -185,7 +185,7 @@ impl App {
                 let title = project.manifest.title.clone();
                 // A fresh App resets every per-project field (buffer, manuscript,
                 // splits, tally baselines, caches, VC status) in one move.
-                *self = App::new(buffer, project);
+                *self = Self::new(buffer, project);
                 self.load_history();
                 recent::record(&root, &title);
                 self.message = Some(format!("Opened \u{201c}{title}\u{201d}"));

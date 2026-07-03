@@ -170,42 +170,42 @@ impl Outcome {
     /// the run, without inspecting each variant at the call site.
     pub(crate) fn error(&self) -> Option<&AiError> {
         match self {
-            Outcome::Answer(r) => r.as_ref().err(),
-            Outcome::Characters(r) => r.as_ref().err(),
-            Outcome::Continuity(r) => r.as_ref().err(),
-            Outcome::Setting(r) => r.as_ref().err(),
-            Outcome::Plot(r) => r.as_ref().err(),
-            Outcome::Scaffold(r) => r.as_ref().err(),
-            Outcome::Naming(r) => r.as_ref().err(),
-            Outcome::Style(r) => r.as_ref().err(),
-            Outcome::Submission(r) => r.as_ref().err(),
-            Outcome::Brainstorm(r) => r.as_ref().err(),
-            Outcome::AdCreative(r) => r.as_ref().err(),
-            Outcome::Marketing(r) => r.as_ref().err(),
-            Outcome::Social(r) => r.as_ref().err(),
-            Outcome::Voice(r) => r.as_ref().err(),
-            Outcome::Image(r) => r.as_ref().err(),
-            Outcome::Workflow(r) => r.as_ref().err(),
-            Outcome::Config(r) => r.as_ref().err(),
-            Outcome::Import(r) => r.as_ref().err(),
-            Outcome::Thesaurus(r) => r.as_ref().err(),
-            Outcome::NameGen(r) => r.as_ref().err(),
-            Outcome::Editorial(r) => r.as_ref().err(),
-            Outcome::Recheck(r) => r.as_ref().err(),
-            Outcome::Error(e) => Some(e),
+            Self::Answer(r) => r.as_ref().err(),
+            Self::Characters(r) => r.as_ref().err(),
+            Self::Continuity(r) => r.as_ref().err(),
+            Self::Setting(r) => r.as_ref().err(),
+            Self::Plot(r) => r.as_ref().err(),
+            Self::Scaffold(r) => r.as_ref().err(),
+            Self::Naming(r) => r.as_ref().err(),
+            Self::Style(r) => r.as_ref().err(),
+            Self::Submission(r) => r.as_ref().err(),
+            Self::Brainstorm(r) => r.as_ref().err(),
+            Self::AdCreative(r) => r.as_ref().err(),
+            Self::Marketing(r) => r.as_ref().err(),
+            Self::Social(r) => r.as_ref().err(),
+            Self::Voice(r) => r.as_ref().err(),
+            Self::Image(r) => r.as_ref().err(),
+            Self::Workflow(r) => r.as_ref().err(),
+            Self::Config(r) => r.as_ref().err(),
+            Self::Import(r) => r.as_ref().err(),
+            Self::Thesaurus(r) => r.as_ref().err(),
+            Self::NameGen(r) => r.as_ref().err(),
+            Self::Editorial(r) => r.as_ref().err(),
+            Self::Recheck(r) => r.as_ref().err(),
+            Self::Error(e) => Some(e),
         }
     }
 }
 
 /// Whether an HTTP status is 2xx — shared by the HTTP backends.
-pub(crate) fn is_ok(status: u16) -> bool {
+pub fn is_ok(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
 /// Render a list of items as numbered Markdown sections (`## {label} N`), each
 /// trimmed, with a blank line around it — the shared shape for off-manuscript copy
 /// artifacts (marketing variants #236, social posts #237). Empty input → empty.
-pub(crate) fn numbered_sections(label: &str, items: &[String]) -> String {
+pub fn numbered_sections(label: &str, items: &[String]) -> String {
     items
         .iter()
         .enumerate()
@@ -216,7 +216,7 @@ pub(crate) fn numbered_sections(label: &str, items: &[String]) -> String {
 /// Render a `(token, description)` vocabulary as cached context for a constrained
 /// generation request — `heading` then one `- token: desc` line each. Shared by
 /// describe-a-workflow (#232) and describe-a-config (#303).
-pub(crate) fn vocab_context(heading: &str, vocab: &[(String, String)]) -> String {
+pub fn vocab_context(heading: &str, vocab: &[(String, String)]) -> String {
     let mut s = format!("{heading}\n");
     for (token, desc) in vocab {
         s.push_str(&format!("- {token}: {desc}\n"));
@@ -265,10 +265,10 @@ impl AiError {
     /// Everything else — a definite error status, a malformed body, a
     /// non-compliant model, a config problem, an internal fault — is permanent:
     /// re-sending would only re-pay for the same failure. (#697)
-    pub(crate) fn retryable(&self) -> bool {
+    pub(crate) const fn retryable(&self) -> bool {
         match self {
-            AiError::Network { status: None, .. } => true,
-            AiError::Network {
+            Self::Network { status: None, .. } => true,
+            Self::Network {
                 status: Some(code), ..
             } => retryable_status(*code),
             _ => false,
@@ -280,27 +280,27 @@ impl AiError {
 /// idempotent request: 429 (rate limited) and 529 (overloaded) are the two the
 /// provider explicitly marks retryable. Everything else (other 5xx included) is
 /// treated as permanent here — we only retry what's known-safe. (#697)
-pub(crate) fn retryable_status(status: u16) -> bool {
+pub const fn retryable_status(status: u16) -> bool {
     matches!(status, 429 | 529)
 }
 
 impl fmt::Display for AiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AiError::NotConfigured(m) => write!(f, "{m}"),
-            AiError::Network {
+            Self::NotConfigured(m) => write!(f, "{m}"),
+            Self::Network {
                 status: Some(code),
                 message,
             } => {
                 write!(f, "network error ({code}): {message}")
             }
-            AiError::Network {
+            Self::Network {
                 status: None,
                 message,
             } => write!(f, "network error: {message}"),
-            AiError::ApiMalformed(m) => write!(f, "malformed API response: {m}"),
-            AiError::ModelNonCompliance(m) => write!(f, "model did not comply: {m}"),
-            AiError::Internal(m) => write!(f, "internal error: {m}"),
+            Self::ApiMalformed(m) => write!(f, "malformed API response: {m}"),
+            Self::ModelNonCompliance(m) => write!(f, "model did not comply: {m}"),
+            Self::Internal(m) => write!(f, "internal error: {m}"),
         }
     }
 }
@@ -321,7 +321,7 @@ pub const MAX_OUTPUT_TOKENS: u32 = 8192;
 /// cached context, the model, the default output bound, and the JSON schema.
 /// Passes with extra inputs (naming, voice, ad-creative, thesaurus) keep their
 /// own builders.
-pub(crate) fn manuscript_request(
+pub fn manuscript_request(
     system: &str,
     user: &str,
     cached_context: String,
@@ -341,27 +341,24 @@ pub(crate) fn manuscript_request(
 /// Deserialize a structured AI reply, wrapping a parse failure in a uniform
 /// `bad {kind} JSON` message (#313) so every feature reports it the same way. A
 /// failure here means the model didn't honor the requested schema (#319).
-pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
-    text: &str,
-    kind: &str,
-) -> Result<T, AiError> {
+pub fn parse_json<T: serde::de::DeserializeOwned>(text: &str, kind: &str) -> Result<T, AiError> {
     serde_json::from_str(text)
         .map_err(|e| AiError::ModelNonCompliance(format!("bad {kind} JSON: {e}")))
 }
 
 /// The JSON-Schema fragment for an array of strings — shared by the feature
 /// schemas that previously each re-declared it (#313).
-pub(crate) fn string_array() -> serde_json::Value {
+pub fn string_array() -> serde_json::Value {
     serde_json::json!({ "type": "array", "items": { "type": "string" } })
 }
 
 /// `{ "type": "string" }` — the most common schema leaf (#429).
-pub(crate) fn string_field() -> serde_json::Value {
+pub fn string_field() -> serde_json::Value {
     serde_json::json!({ "type": "string" })
 }
 
 /// `{ "type": "array", "items": <item> }` — an array of `item` (#429).
-pub(crate) fn array_of(item: serde_json::Value) -> serde_json::Value {
+pub fn array_of(item: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "type": "array", "items": item })
 }
 
@@ -369,7 +366,7 @@ pub(crate) fn array_of(item: serde_json::Value) -> serde_json::Value {
 /// false }` envelope every feature schema shares (#429). `required` is omitted
 /// when empty, so an all-optional object matches a hand-written one that left the
 /// key out (constrained decoding is unchanged).
-pub(crate) fn object_schema(
+pub fn object_schema(
     props: Vec<(&str, serde_json::Value)>,
     required: &[&str],
 ) -> serde_json::Value {
@@ -388,7 +385,7 @@ pub(crate) fn object_schema(
 
 /// The common "finding" item — two string fields plus the involved `chapters`
 /// (#429), e.g. `kind`/`detail` or `rule`/`violation`. All three keys required.
-pub(crate) fn chapters_finding(field_a: &str, field_b: &str) -> serde_json::Value {
+pub fn chapters_finding(field_a: &str, field_b: &str) -> serde_json::Value {
     object_schema(
         vec![
             (field_a, string_field()),
@@ -509,7 +506,7 @@ impl Settings {
 
     /// The backend that will actually run, accounting for the privacy switch:
     /// `offline` forces local; otherwise the configured `backend`.
-    pub fn backend(&self) -> BackendKind {
+    pub const fn backend(&self) -> BackendKind {
         if self.offline {
             BackendKind::Local
         } else {
@@ -562,7 +559,7 @@ guessing.";
 /// drawn from, so the author can jump to each cited chapter (like a
 /// [`Finding`](crate::mode::Finding)). The AI answers *about* the manuscript — it
 /// never writes into it; `citations` are retrieval, not prose.
-#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct Answer {
     /// The answer prose, grounded in the manuscript.
     pub answer: String,

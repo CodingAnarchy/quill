@@ -245,6 +245,11 @@ impl Pdf {
             };
             // (Re)set the text matrix when the shear changes, positioning the pen at
             // the segment's start x. `Tm` is absolute, so this preserves placement.
+            // `shear`/`cur_shear` only ever hold one of two exact constants
+            // (`OBLIQUE_SHEAR` or `0.0`, copied by assignment), plus the initial
+            // `NAN` sentinel that forces the first emission — an exact `!=` is the
+            // intended discrete-state check; an epsilon would defeat the NAN trick.
+            #[allow(clippy::float_cmp)]
             if shear != cur_shear {
                 s.push_str(&format!(
                     "1 0 {} 1 {} {} Tm\n",

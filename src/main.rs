@@ -301,9 +301,7 @@ fn new_project_base(
     match projects_home {
         Some(home) => (home, false),
         None => (
-            os_home
-                .map(|h| h.join("Quill"))
-                .unwrap_or_else(|| cwd.to_path_buf()),
+            os_home.map_or_else(|| cwd.to_path_buf(), |h| h.join("Quill")),
             true,
         ),
     }

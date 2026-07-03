@@ -73,13 +73,13 @@ pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String
 pub(super) struct OutlineItem {
     pub(super) title: String,
     pub(super) page: usize,
-    pub(super) children: Vec<OutlineItem>,
+    pub(super) children: Vec<Self>,
 }
 
 impl OutlineItem {
     /// A bookmark to `page`; nest entries by pushing onto `children` afterward.
-    pub(super) fn new(title: String, page: usize) -> Self {
-        OutlineItem {
+    pub(super) const fn new(title: String, page: usize) -> Self {
+        Self {
             title,
             page,
             children: Vec::new(),

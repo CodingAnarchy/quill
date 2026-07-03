@@ -39,7 +39,7 @@ struct Record {
 
 impl Record {
     fn from(entry: &QaEntry) -> Self {
-        Record {
+        Self {
             question: entry.question.clone(),
             answer: entry.answer.answer.clone(),
             citations: entry.answer.citations.clone(),
@@ -72,7 +72,7 @@ fn store_path(root: &Path) -> PathBuf {
 impl QaStore {
     /// Load the store, or the empty default when it's missing/unreadable (best
     /// effort — a corrupt file just starts recall fresh, never blocks the editor).
-    pub(super) fn load(root: &Path) -> QaStore {
+    pub(super) fn load(root: &Path) -> Self {
         std::fs::read_to_string(store_path(root))
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
@@ -120,7 +120,10 @@ mod tests {
             question: question.into(),
             answer: Answer {
                 answer: answer.into(),
-                citations: citations.iter().map(|c| c.to_string()).collect(),
+                citations: citations
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect(),
             },
         }
     }

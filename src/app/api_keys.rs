@@ -133,7 +133,7 @@ impl App {
 }
 
 /// The provider's display name for prompts and messages.
-fn provider(key: Key) -> &'static str {
+const fn provider(key: Key) -> &'static str {
     match key {
         Key::Anthropic => "Claude",
         Key::Fal => "Image (fal.ai)",
@@ -141,7 +141,7 @@ fn provider(key: Key) -> &'static str {
 }
 
 /// The config section that holds this provider's plaintext `api_key`.
-fn section(key: Key) -> &'static str {
+const fn section(key: Key) -> &'static str {
     match key {
         Key::Anthropic => "ai",
         Key::Fal => "image",
@@ -150,7 +150,7 @@ fn section(key: Key) -> &'static str {
 
 /// The environment variable that overrides this provider's key — the headless /
 /// CI escape hatch, surfaced when the keychain can't be written.
-fn env_var(key: Key) -> &'static str {
+const fn env_var(key: Key) -> &'static str {
     match key {
         Key::Anthropic => "ANTHROPIC_API_KEY",
         Key::Fal => "FAL_KEY",

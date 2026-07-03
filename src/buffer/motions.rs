@@ -20,7 +20,7 @@ pub enum FindKind {
 
 impl FindKind {
     /// The opposite direction — for `,`, which repeats a find the other way.
-    pub fn reversed(self) -> Self {
+    pub const fn reversed(self) -> Self {
         match self {
             Self::FindFwd => Self::FindBack,
             Self::FindBack => Self::FindFwd,
@@ -47,7 +47,7 @@ pub enum TextObject {
 /// or a run of punctuation, separated by whitespace. Shared with the prompt line
 /// editor (#706), which reuses this classification for word-delete.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CharClass {
+pub enum CharClass {
     Word,
     Punct,
     Space,

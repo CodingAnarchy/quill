@@ -32,7 +32,7 @@ mod triage;
 mod workflow;
 mod writers;
 
-pub(crate) use ask::QaEntry;
+pub use ask::QaEntry;
 
 /// A one-line status message for one or more failed writes (#153).
 pub(super) fn write_failure_message(failures: &[String]) -> String {
@@ -229,7 +229,7 @@ impl App {
     }
 
     /// Whether an AI request is currently in flight (for the status indicator).
-    pub fn ai_busy(&self) -> bool {
+    pub const fn ai_busy(&self) -> bool {
         self.ai_task.is_busy()
     }
 }

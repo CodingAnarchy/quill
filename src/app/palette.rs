@@ -12,7 +12,7 @@ use crate::mode::{Action, AiAction, AiCost, ExportScope, PaletteRow};
 /// chosen backend, or confirm first (the estimate is over the threshold) — the
 /// confirm optionally offering "run locally instead" as a third choice.
 #[cfg_attr(test, derive(Debug))]
-pub(crate) enum AiStart {
+pub enum AiStart {
     Run(BackendKind),
     Confirm { label: String, offer_local: bool },
 }
@@ -174,7 +174,7 @@ impl App {
     /// passes carry their own opt-in, so neither counts; a keyed-but-off setup
     /// still routes here (the enable confirm chains to the key flow only when a key
     /// is missing). `EnableAi` itself is excluded so its own dispatch runs.
-    fn wants_ai_but_off(&self, action: Action) -> bool {
+    const fn wants_ai_but_off(&self, action: Action) -> bool {
         if self.ai.enabled {
             return false;
         }
@@ -554,13 +554,13 @@ impl App {
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
             AiAction::Brainstorm => {
-                self.open_prompt(Pending::Brainstorm, "Premise or idea: ", "", None)
+                self.open_prompt(Pending::Brainstorm, "Premise or idea: ", "", None);
             }
             AiAction::DraftCharacters => {
-                self.open_prompt(Pending::DraftCharacters, "Concept / premise: ", "", None)
+                self.open_prompt(Pending::DraftCharacters, "Concept / premise: ", "", None);
             }
             AiAction::DraftSetting => {
-                self.open_prompt(Pending::DraftSetting, "Concept / premise: ", "", None)
+                self.open_prompt(Pending::DraftSetting, "Concept / premise: ", "", None);
             }
             AiAction::Voice => self.analyze_voice(),
             AiAction::Submission => self.analyze_submission(),
@@ -582,7 +582,7 @@ impl App {
 /// the action *set* and order come from [`AiAction::SPECS`] (#563), so this is an
 /// exhaustive `match` the compiler checks, not a hand-maintained list that can
 /// silently omit a variant.
-fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
+const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
     match action {
         AiAction::Ask => (
             "Ask the manuscript",
@@ -685,7 +685,7 @@ fn snippet_preview(text: &str) -> String {
 /// author reached for, so confirming enable lands them in the flow they wanted.
 /// `None` for the AI-powered helpers (series bible, describe-config) and the plain
 /// "Enable AI assistance" action — those just enable and stop.
-fn resume_action(action: Action) -> Option<AiAction> {
+const fn resume_action(action: Action) -> Option<AiAction> {
     match action {
         Action::Ai(a) => Some(a),
         _ => None,
@@ -693,7 +693,7 @@ fn resume_action(action: Action) -> Option<AiAction> {
 }
 
 /// "on" / "off" for a toggle's status message.
-fn on_off(on: bool) -> &'static str {
+const fn on_off(on: bool) -> &'static str {
     if on {
         "on"
     } else {

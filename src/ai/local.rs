@@ -189,8 +189,7 @@ impl Converse for LocalBackend {
         let names = tool_loop::tool_names(body);
         let messages = body["messages"]
             .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
+            .map_or([].as_slice(), Vec::as_slice);
         let transcript = tool_loop::flatten_conversation(messages);
         let tool_list = names
             .iter()
@@ -330,7 +329,7 @@ fn metal_working_set_gb(_dev: &Device) -> Option<f64> {
 /// that build. Here we return `None`, so the picker uses a 0 VRAM budget (→ Claude)
 /// — the safe answer for a CUDA box we can't size. A candle-CUDA build would swap
 /// this for a `cudarc::driver::result::mem_get_info()` probe of total VRAM.
-fn cuda_vram_gb(_dev: &Device) -> Option<f64> {
+const fn cuda_vram_gb(_dev: &Device) -> Option<f64> {
     None
 }
 
@@ -339,8 +338,7 @@ fn argmax(logits: &[f32]) -> u32 {
         .iter()
         .enumerate()
         .max_by(|a, b| a.1.total_cmp(b.1))
-        .map(|(i, _)| i as u32)
-        .unwrap_or(0)
+        .map_or(0, |(i, _)| i as u32)
 }
 
 /// All vocabulary indices ordered by logit, highest first.
@@ -350,7 +348,7 @@ fn rank_desc(logits: &[f32]) -> Vec<u32> {
     idx
 }
 
-fn internal(msg: String) -> AiError {
+const fn internal(msg: String) -> AiError {
     AiError::Internal(msg)
 }
 
@@ -471,7 +469,7 @@ mod tests {
                     .into(),
             model: "local-qwen".into(),
             max_tokens: 200,
-            json_schema: Some(schema.clone()),
+            json_schema: Some(schema),
         };
 
         let resp = backend.complete(&req).expect("completion");

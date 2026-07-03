@@ -27,7 +27,7 @@ use super::{
 pub use self::series::to_docx_series;
 
 /// Which export shape a `.docx` takes.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Profile {
     /// Standard manuscript format (#191): a title page, each chapter on a fresh
     /// page under a centered bold title, double-spaced Times New Roman body.

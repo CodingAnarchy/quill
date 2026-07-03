@@ -49,13 +49,13 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
 /// `height` rows: enough to bring the last line into view (the interior is the
 /// height minus the two borders), zero when it already fits. The single source
 /// of the offset bound, shared by the renderer and the key handler.
-pub(crate) fn max_scroll(lines: usize, height: u16) -> u16 {
+pub const fn max_scroll(lines: usize, height: u16) -> u16 {
     (lines as u16).saturating_sub(height.saturating_sub(2))
 }
 
 /// The title hint for a scrollable overlay — mentions scrolling only when the
 /// content is actually taller than the box.
-fn scroll_hint(lines: usize, height: u16) -> &'static str {
+const fn scroll_hint(lines: usize, height: u16) -> &'static str {
     if max_scroll(lines, height) > 0 {
         "↑↓ scroll · any other key to close"
     } else {

@@ -140,7 +140,7 @@ impl App {
 
             // --- Navigating matches (find) ---------------------------------
             (SearchStage::Navigate, KeyCode::Char('n') | KeyCode::Enter | KeyCode::Down) => {
-                self.search_advance(1)
+                self.search_advance(1);
             }
             (SearchStage::Navigate, KeyCode::Char('N') | KeyCode::Up) => self.search_advance(-1),
             // Promote a find into a replace using the same query.
@@ -159,7 +159,7 @@ impl App {
 
             // --- Stepping through replacements -----------------------------
             (SearchStage::Step, KeyCode::Char('y')) => self.replace_current_and_advance(),
-            (SearchStage::Step, KeyCode::Char('n') | KeyCode::Char('s')) => self.search_advance(1),
+            (SearchStage::Step, KeyCode::Char('n' | 's')) => self.search_advance(1),
             (SearchStage::Step, KeyCode::Char('a')) => self.replace_all_remaining(),
             // Done stepping: report what was replaced so far.
             (SearchStage::Step, KeyCode::Enter | KeyCode::Esc) => self.finish_replace(),

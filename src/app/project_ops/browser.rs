@@ -256,7 +256,7 @@ impl App {
                     cwd: dir,
                     entries,
                     selected: 0,
-                }))
+                }));
             }
             Err(e) => self.message = Some(format!("Can't open {}: {e}", dir.display())),
         }
@@ -450,11 +450,10 @@ impl App {
                 Some("That project is open — switch to another before deleting it.".into());
             return;
         }
-        let label = project
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| project.title.clone());
+        let label = project.path.file_name().map_or_else(
+            || project.title.clone(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         self.pending_manage = Some(project.path);
         self.open_prompt(
             Pending::ConfirmDeleteProject,

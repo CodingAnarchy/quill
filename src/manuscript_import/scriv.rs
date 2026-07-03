@@ -105,12 +105,11 @@ fn collect_items(
         let Some(inner) = inner else { return };
         if attr_value(attrs, "Type").as_deref() == Some("Text") {
             let uuid = attr_value(attrs, "UUID").unwrap_or_default();
-            let body = match read_rtf(&uuid) {
-                Some(rtf) => rtf_to_markdown(&rtf, dropped),
-                None => {
-                    *unreadable += 1;
-                    String::new()
-                }
+            let body = if let Some(rtf) = read_rtf(&uuid) {
+                rtf_to_markdown(&rtf, dropped)
+            } else {
+                *unreadable += 1;
+                String::new()
             };
             out.push(ImportedChapter {
                 title: element_text(inner, "Title").unwrap_or_default(),
@@ -176,7 +175,7 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                 let Some(&c) = chars.get(i) else { break };
                 if c.is_ascii_alphabetic() {
                     let start = i;
-                    while chars.get(i).is_some_and(|c| c.is_ascii_alphabetic()) {
+                    while chars.get(i).is_some_and(char::is_ascii_alphabetic) {
                         i += 1;
                     }
                     let word: String = chars[start..i].iter().collect();

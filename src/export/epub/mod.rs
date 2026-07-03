@@ -138,7 +138,7 @@ struct Item {
 struct Nav {
     label: String,
     href: String,
-    children: Vec<Nav>,
+    children: Vec<Self>,
 }
 
 /// Accumulates the package's content files (in spine order) as sections are
@@ -181,7 +181,7 @@ struct RoleLandmark {
 
 impl Builder {
     fn new(style: &ExportStyle, publishing: &PubMeta) -> Self {
-        Builder {
+        Self {
             seq: 0,
             items: Vec::new(),
             style: style.clone(),
@@ -316,7 +316,7 @@ impl Builder {
     fn add_chapter(&mut self, ch: &Chapter, band_type: &str) -> Nav {
         // The section's role gives the precise EPUB term; an untyped (body) section
         // — or a role with no distinct term — keeps the generic band semantic.
-        let role_type = ch.role.and_then(|r| r.epub_type());
+        let role_type = ch.role.and_then(crate::frontmatter::Role::epub_type);
         let epub_type = role_type.unwrap_or(band_type);
         let href = self.add("chap", &ch.title, epub_type, chapter_body(ch, &self.style));
         if band_type == "bodymatter" {

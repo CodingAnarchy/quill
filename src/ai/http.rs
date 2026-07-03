@@ -21,7 +21,7 @@ use serde_json::Value;
 use super::{retryable_status, AiError};
 
 /// A request header as a `(name, value)` pair.
-pub(crate) type Header<'a> = (&'a str, &'a str);
+pub type Header<'a> = (&'a str, &'a str);
 
 /// How many times a single idempotent request is attempted before its last
 /// failure is surfaced — one initial try plus retries. Kept small: a
@@ -46,7 +46,7 @@ const BASE_BACKOFF: Duration = Duration::from_millis(250);
 /// only for the single-request path — the batch submit is deliberately *not*
 /// wrapped, since re-submitting would start a second, separately-billed batch
 /// (see `claude.rs`). (#697)
-pub(crate) fn retry<T>(
+pub fn retry<T>(
     transient: impl Fn(&T) -> bool,
     mut op: impl FnMut() -> Result<T, AiError>,
 ) -> Result<T, AiError> {
@@ -68,7 +68,7 @@ pub(crate) fn retry<T>(
 /// Whether a `(status, _)` transport result carries a transient HTTP status —
 /// the `Ok`-side predicate for [`retry`] on the JSON request paths, which read
 /// the body on any status (so a 429/529 arrives as `Ok`, not `Err`). (#697)
-pub(crate) fn transient_status<V>((status, _): &(u16, V)) -> bool {
+pub const fn transient_status<V>((status, _): &(u16, V)) -> bool {
     retryable_status(*status)
 }
 
@@ -81,16 +81,12 @@ fn backoff(attempt: u32) {
 }
 
 #[cfg(test)]
-fn backoff(_attempt: u32) {}
+const fn backoff(_attempt: u32) {}
 
 /// POST `body` as JSON to `url` with `headers`; returns the HTTP status and the
 /// parsed JSON response.
 #[cfg(not(test))]
-pub(crate) fn post_json(
-    url: &str,
-    headers: &[Header],
-    body: &Value,
-) -> Result<(u16, Value), AiError> {
+pub fn post_json(url: &str, headers: &[Header], body: &Value) -> Result<(u16, Value), AiError> {
     let mut res = with_headers(
         ureq::post(url).config().http_status_as_error(false).build(),
         headers,
@@ -104,7 +100,7 @@ pub(crate) fn post_json(
 
 /// GET `url` as JSON with `headers`; returns the HTTP status and the parsed body.
 #[cfg(not(test))]
-pub(crate) fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> {
+pub fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> {
     let mut res = with_headers(
         ureq::get(url).config().http_status_as_error(false).build(),
         headers,
@@ -119,7 +115,7 @@ pub(crate) fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), Ai
 /// GET `url` as raw text with `headers` (e.g. JSONL batch results, not a JSON
 /// document).
 #[cfg(not(test))]
-pub(crate) fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
+pub fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
     with_headers(
         ureq::get(url).config().http_status_as_error(false).build(),
         headers,
@@ -163,21 +159,17 @@ fn malformed(e: impl std::fmt::Display) -> AiError {
 // so the suite can never reach a live provider API (#528). ---------------------
 
 #[cfg(test)]
-pub(crate) fn post_json(
-    _url: &str,
-    _headers: &[Header],
-    _body: &Value,
-) -> Result<(u16, Value), AiError> {
+pub fn post_json(_url: &str, _headers: &[Header], _body: &Value) -> Result<(u16, Value), AiError> {
     Err(offline())
 }
 
 #[cfg(test)]
-pub(crate) fn get_json(_url: &str, _headers: &[Header]) -> Result<(u16, Value), AiError> {
+pub fn get_json(_url: &str, _headers: &[Header]) -> Result<(u16, Value), AiError> {
     Err(offline())
 }
 
 #[cfg(test)]
-pub(crate) fn get_text(_url: &str, _headers: &[Header]) -> Result<String, AiError> {
+pub fn get_text(_url: &str, _headers: &[Header]) -> Result<String, AiError> {
     Err(offline())
 }
 

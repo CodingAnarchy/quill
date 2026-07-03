@@ -140,12 +140,11 @@ impl App {
     /// Returns whether any text actually changed (a fully-clamped seam edit is a
     /// no-op).
     pub(super) fn edit_replace_range(&mut self, lo: usize, hi: usize, text: &str) -> bool {
-        match &mut self.manuscript {
-            Some(m) => m.replace_byte_range(lo, hi, text),
-            None => {
-                self.buffer.replace_byte_range(lo, hi, text);
-                true
-            }
+        if let Some(m) = &mut self.manuscript {
+            m.replace_byte_range(lo, hi, text)
+        } else {
+            self.buffer.replace_byte_range(lo, hi, text);
+            true
         }
     }
 
@@ -191,7 +190,7 @@ impl App {
     }
 
     /// The editor's current wrap column (#143), in cells.
-    pub(super) fn wrap_w(&self) -> usize {
+    pub(super) const fn wrap_w(&self) -> usize {
         self.wrap_width.get() as usize
     }
 

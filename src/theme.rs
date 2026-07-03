@@ -19,7 +19,7 @@ thread_local! {
     /// tree. Per-thread, and overwritten on each draw, so parallel tests (each
     /// rendering its own `App`) don't interfere; the lazy default is the dark
     /// theme, which is Quill's historical palette.
-    static CURRENT: Cell<Theme> = Cell::new(Theme::dark());
+    static CURRENT: Cell<Theme> = const { Cell::new(Theme::dark()) };
 }
 
 /// Make `theme` the active theme for subsequent rendering on this thread.
@@ -47,7 +47,7 @@ macro_rules! theme_colors {
         /// The editor's color palette — one named [`Color`] per semantic role.
         /// Emphasis (bold / italic) is a text modifier, not a color, so it isn't
         /// themed; prose uses the terminal's default foreground, so it isn't here.
-        #[derive(Clone, Copy, Debug, PartialEq)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub struct Theme {
             $($(#[$attr])* pub $name: Color,)+
         }
@@ -67,12 +67,12 @@ macro_rules! theme_colors {
         /// The overridable color-field keys (the `[theme]` keys other than
         /// `name`), for the describe-to-config vocabulary (#303) and any other
         /// schema-driven caller.
-        pub(crate) const COLOR_FIELDS: &[&str] = &[$(stringify!($name)),+];
+        pub const COLOR_FIELDS: &[&str] = &[$(stringify!($name)),+];
 
         /// A short human description of what a theme color field controls, for
         /// the describe-to-config vocabulary (#303). Falls back to a generic
         /// phrase for an unknown key.
-        pub(crate) fn color_role(field: &str) -> &'static str {
+        pub fn color_role(field: &str) -> &'static str {
             match field {
                 $(stringify!($name) => $role,)+
                 _ => "a theme element",
@@ -119,7 +119,7 @@ theme_colors! {
 
 /// The built-in color themes, in menu order — the values `[theme] name` accepts
 /// and the plain Settings theme picker (#592) offers.
-pub(crate) const THEME_NAMES: &[&str] = &["dark", "light"];
+pub const THEME_NAMES: &[&str] = &["dark", "light"];
 
 impl Default for Theme {
     /// The historical palette, so a project with no `[theme]` set looks exactly
@@ -131,7 +131,7 @@ impl Default for Theme {
 
 impl Theme {
     /// The built-in dark theme — Quill's original hard-coded colors.
-    pub fn dark() -> Self {
+    pub const fn dark() -> Self {
         Self {
             heading: Color::Cyan,
             on_accent: Color::Black,
@@ -154,7 +154,7 @@ impl Theme {
 
     /// A built-in light theme: darker grays and a light status bar for legibility
     /// on a light terminal background.
-    pub fn light() -> Self {
+    pub const fn light() -> Self {
         Self {
             heading: Color::Blue,
             on_accent: Color::Black,
@@ -219,7 +219,7 @@ impl Theme {
 }
 
 /// Whether `s` parses as a color value (for validating a proposed override).
-pub(crate) fn is_color(s: &str) -> bool {
+pub fn is_color(s: &str) -> bool {
     parse_color(s).is_some()
 }
 

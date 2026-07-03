@@ -26,7 +26,7 @@ use super::{series, ChapterEntry, Project};
 ///
 /// Shared with the other splice-then-write manifest/chapter paths outside this
 /// module (the font `[style]` writer, the AI marker inserter).
-pub(crate) fn read_existing(path: &Path) -> std::io::Result<String> {
+pub fn read_existing(path: &Path) -> std::io::Result<String> {
     match fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -48,7 +48,7 @@ fn import_staging_path(root: &Path, file: &str) -> PathBuf {
 /// front-matter metadata (#331). Shared by the active book's caching and the
 /// other books of a series, so every book's counts/roles are populated at open
 /// without re-reading later. One file read; never holds the body text.
-pub(crate) fn cache_chapter(root: &Path, entry: &mut ChapterEntry) {
+pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry) {
     let text = fs::read_to_string(root.join(&entry.file)).unwrap_or_default();
     let (front, body) = frontmatter::split(&text);
     entry.words = count_words(body);

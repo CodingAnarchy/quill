@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::{bible, AiError, Request};
 
 /// A round of brainstorm ideas from a premise.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Brainstorm {
     #[serde(default)]
     pub premises: Vec<String>,

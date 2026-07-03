@@ -48,10 +48,10 @@ pub enum Key {
 
 impl Key {
     /// The keyring username this key is stored under (also its display label).
-    pub fn account(self) -> &'static str {
+    pub const fn account(self) -> &'static str {
         match self {
-            Key::Anthropic => "anthropic",
-            Key::Fal => "fal",
+            Self::Anthropic => "anthropic",
+            Self::Fal => "fal",
         }
     }
 }
@@ -94,6 +94,10 @@ pub fn resolve_lazy(
 ///
 /// In test builds this is a no-op returning `None` (#531): the suite never reads
 /// the real keychain, so it can't prompt, fail in CI, or pollute the user's store.
+// The `cfg(test)` body is a trivially-const no-op, which makes clippy suggest
+// `const fn` — but the real `cfg(not(test))` body calls non-const keyring APIs, so
+// const is impossible in a non-test build.
+#[allow(clippy::missing_const_for_fn)]
 pub fn get(key: Key) -> Option<String> {
     #[cfg(test)]
     {

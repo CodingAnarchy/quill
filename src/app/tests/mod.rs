@@ -122,7 +122,7 @@ fn cont_with(findings: Vec<continuity::Finding>) -> Continuity {
 }
 
 /// A unique-per-process scratch directory for an app-test project (#428).
-pub(crate) fn app_scratch_dir(name: &str) -> PathBuf {
+pub fn app_scratch_dir(name: &str) -> PathBuf {
     crate::testutil::scratch_dir("app", name)
 }
 
@@ -131,7 +131,7 @@ pub(crate) fn app_scratch_dir(name: &str) -> PathBuf {
 /// `App::new` reads the developer's real config, so without these pins a dev with
 /// Vim mode, smart typography, or an on-save trigger would make tests flaky or
 /// config-dependent. Tests that want those opt back in explicitly.
-pub(crate) fn open_test_app(dir: &Path) -> App {
+pub fn open_test_app(dir: &Path) -> App {
     let project = Project::open(dir).unwrap();
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let mut app = App::new(buffer, project);

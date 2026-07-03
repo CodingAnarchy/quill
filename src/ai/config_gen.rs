@@ -18,7 +18,7 @@ const MAX_TOKENS: u32 = 1024;
 /// One proposed setting: a key from the vocabulary and the value to set it to,
 /// both as strings (the value is validated and parsed by the caller before it's
 /// shown or written).
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ConfigChange {
     pub key: String,
     pub value: String,
@@ -27,7 +27,7 @@ pub struct ConfigChange {
 /// The settings the model proposed from a description: the concrete changes (each
 /// key guaranteed valid by the schema) and any requested change it couldn't map
 /// to a real setting.
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct GeneratedConfig {
     #[serde(default)]
     pub changes: Vec<ConfigChange>,

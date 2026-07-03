@@ -36,7 +36,9 @@ impl App {
             self.mode = Mode::ModelManager { selected: s };
             return;
         }
-        let id = MODELS.get(selected).map(|m| m.id());
+        let id = MODELS
+            .get(selected)
+            .map(super::super::ai::model_select::Model::id);
         match key.code {
             KeyCode::Enter | KeyCode::Char(' ') => {
                 if let Some(id) = id {
@@ -90,7 +92,7 @@ impl App {
             .any(|m| m.context_tokens >= input_tokens && worker::model_downloaded(m))
     }
     #[cfg(not(feature = "local"))]
-    pub(crate) fn local_model_present(&self, _input_tokens: u32) -> bool {
+    pub(crate) const fn local_model_present(&self, _input_tokens: u32) -> bool {
         #[cfg(test)]
         if let Some(present) = self.test_local_present {
             return present;
@@ -147,7 +149,7 @@ impl App {
                 self.message = Some(format!("Downloaded Qwen2.5-{id}."));
             }
             Poll::Ready((id, Err(e))) => {
-                self.message = Some(format!("Download of Qwen2.5-{id} failed: {e}"))
+                self.message = Some(format!("Download of Qwen2.5-{id} failed: {e}"));
             }
             Poll::Pending => {}
             Poll::Died => self.message = Some("Model download failed.".into()),
@@ -226,7 +228,7 @@ fn toggled(ids: &[String], id: &str) -> Vec<String> {
 fn local_models_toml(ids: &[String]) -> String {
     let quoted: Vec<String> = MODELS
         .iter()
-        .map(|m| m.id())
+        .map(super::super::ai::model_select::Model::id)
         .filter(|id| ids.iter().any(|x| x == id))
         .map(|id| format!("\"{id}\""))
         .collect();

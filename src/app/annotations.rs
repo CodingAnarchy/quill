@@ -195,7 +195,8 @@ impl App {
         match range {
             Some((start, end)) => self.start_annotation_range(start, end),
             None => {
-                self.message = Some("Select text or place the cursor on a word to annotate.".into())
+                self.message =
+                    Some("Select text or place the cursor on a word to annotate.".into());
             }
         }
     }

@@ -79,7 +79,7 @@ impl Manifest {
     /// [`Project::open`].
     pub(super) fn from_toml_value(
         value: toml::Value,
-    ) -> Result<(Manifest, Vec<Book>, usize), toml::de::Error> {
+    ) -> Result<(Self, Vec<Book>, usize), toml::de::Error> {
         let is_series = value
             .get("books")
             .and_then(|b| b.as_array())
@@ -93,7 +93,7 @@ impl Manifest {
                 .books
                 .first()
                 .expect("is_series guarantees a non-empty [[books]] array");
-            let manifest = Manifest::from_series(&series, first);
+            let manifest = Self::from_series(&series, first);
             Ok((manifest, series.books, 0))
         } else {
             Ok((value.try_into()?, Vec::new(), 0))
@@ -106,7 +106,7 @@ impl Manifest {
     fn from_series(series: &SeriesFile, book: &Book) -> Self {
         // Series-level fields come from the file root; the per-book fields are
         // filled in by `load_book`, and everything else is the manifest default.
-        let mut manifest = Manifest {
+        let mut manifest = Self {
             author: series.author.clone(),
             series: Some(series.title.clone()),
             start_date: series.start_date.clone(),
@@ -178,7 +178,7 @@ impl Project {
     }
 
     /// The index of the active book within the series (0 for a standalone novel).
-    pub fn active_book(&self) -> usize {
+    pub const fn active_book(&self) -> usize {
         self.active_book
     }
 
@@ -296,10 +296,10 @@ impl Project {
             let src = self.root.join(&chapter.file);
             if src.exists() {
                 fs::create_dir_all(&unused)?;
-                let base = Path::new(&chapter.file)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| chapter.file.clone());
+                let base = Path::new(&chapter.file).file_name().map_or_else(
+                    || chapter.file.clone(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
                 let dest = unique_dest(&unused, &base);
                 fs::rename(&src, &dest)?;
             }

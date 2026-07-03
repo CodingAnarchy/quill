@@ -90,7 +90,7 @@ impl App {
         let headings = buffer.syntax().headings();
         let meta = buffer
             .front_matter()
-            .map(|fm| fm.scenes())
+            .map(super::super::frontmatter::FrontMatter::scenes)
             .unwrap_or_default();
         // Per-chapter board: cards belong to the active buffer, so they carry no
         // chapter tag or group header.
@@ -115,7 +115,7 @@ impl App {
                     let text = buffer.text();
                     let meta = buffer
                         .front_matter()
-                        .map(|fm| fm.scenes())
+                        .map(super::super::frontmatter::FrontMatter::scenes)
                         .unwrap_or_default();
                     cards_for(&text, buffer.syntax().headings(), &meta, Some(ch), &title)
                 } else {
@@ -148,10 +148,10 @@ impl App {
         let selected = board.selected;
         match key.code {
             KeyCode::Enter => self.jump_to_card(selected),
-            KeyCode::Char('K') | KeyCode::Char('[') => self.reorder_scene(selected, -1),
-            KeyCode::Char('J') | KeyCode::Char(']') => self.reorder_scene(selected, 1),
+            KeyCode::Char('K' | '[') => self.reorder_scene(selected, -1),
+            KeyCode::Char('J' | ']') => self.reorder_scene(selected, 1),
             KeyCode::Char('e') => self.prompt_scene_synopsis(selected),
-            KeyCode::Char('s') | KeyCode::Char(' ') => self.cycle_scene_status(selected),
+            KeyCode::Char('s' | ' ') => self.cycle_scene_status(selected),
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
         }
@@ -345,7 +345,7 @@ impl App {
         let mut scenes = self
             .edit_buffer()
             .front_matter()
-            .map(|fm| fm.scenes())
+            .map(super::super::frontmatter::FrontMatter::scenes)
             .unwrap_or_default();
         scenes.resize(count, SceneMeta::default());
         scenes
@@ -411,8 +411,7 @@ impl App {
                 .enumerate()
                 .filter(|(_, c)| c.chapter == Some(ch))
                 .nth(scene)
-                .map(|(i, _)| i)
-                .unwrap_or(cards.len() - 1),
+                .map_or(cards.len() - 1, |(i, _)| i),
             None => scene.min(cards.len() - 1),
         };
         self.mode = Mode::Corkboard(Box::new(Corkboard {

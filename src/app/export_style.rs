@@ -221,7 +221,7 @@ impl App {
     pub(crate) fn set_style_preset(&mut self, index: Option<usize>) {
         let value = index
             .and_then(|i| PRESET_NAMES.get(i))
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let outcome = self.set_style_value("preset", value.clone(), |style, v| style.preset = v);
         self.report_style_set(outcome, "preset", value.as_deref());
     }
@@ -231,7 +231,7 @@ impl App {
     pub(crate) fn set_style_align(&mut self, index: Option<usize>) {
         let value = index
             .and_then(|i| HEADING_ALIGNS.get(i))
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let outcome = self.set_style_value("heading_align", value.clone(), |style, v| {
             style.heading_align = v;
         });
@@ -243,7 +243,7 @@ impl App {
     pub(crate) fn set_style_drop_cap(&mut self, value: Option<bool>) {
         // A bool is a bare TOML literal (`true` / `false`), not a quoted string.
         let outcome = self.splice_style("drop_cap", value.map(|b| b.to_string()), |style| {
-            style.drop_cap = value
+            style.drop_cap = value;
         });
         let label = value.map(|b| if b { "on" } else { "off" });
         self.report_style_set(outcome, "drop caps", label);
@@ -381,7 +381,7 @@ impl App {
 }
 
 /// A bool's drop-cap label for the menu (`Some(true)` → "on", `None` → "default").
-fn drop_cap_label(value: Option<bool>) -> &'static str {
+const fn drop_cap_label(value: Option<bool>) -> &'static str {
     match value {
         Some(true) => "on",
         Some(false) => "off",

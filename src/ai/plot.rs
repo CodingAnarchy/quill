@@ -15,7 +15,7 @@ use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a plot pass: the tracked threads and the dangling-thread
 /// findings.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plot {
     #[serde(default)]
     pub threads: Vec<Thread>,
@@ -26,7 +26,7 @@ pub struct Plot {
 /// One plot thread / arc: a subplot or thematic throughline tracked from setup to
 /// payoff. Structured tracking only — a note of where the thread stands, never
 /// prose the author should write.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Thread {
     /// A short name for the thread, e.g. "The stolen locket" or "Trust vs. duty".
     pub name: String,
@@ -48,7 +48,7 @@ pub struct Thread {
 
 /// A dangling-thread finding: a subplot or throughline set up but not paid off,
 /// or otherwise left hanging.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ThreadFinding {
     /// The thread involved, e.g. "The stolen locket".
     pub thread: String,

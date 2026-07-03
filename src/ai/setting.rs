@@ -12,7 +12,7 @@ use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// The result of a setting pass: the categorized bible, the gazetteer, and the
 /// rule-consistency findings.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Setting {
     #[serde(default)]
     pub categories: Vec<Category>,
@@ -24,21 +24,21 @@ pub struct Setting {
 }
 
 /// One bible category (e.g. "Geography", "Magic system", "Factions").
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Category {
     pub name: String,
     #[serde(default)]
     pub entries: Vec<Entry>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
     pub detail: String,
 }
 
 /// A place where the prose breaks an established worldbuilding rule.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuleFinding {
     /// The established rule, e.g. "magic requires a focus object".
     pub rule: String,

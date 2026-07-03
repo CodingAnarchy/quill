@@ -79,8 +79,7 @@ impl App {
         // so the restored folder defaults to the backup's name.
         let stem = path
             .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "restored".into());
+            .map_or_else(|| "restored".into(), |s| s.to_string_lossy().into_owned());
         let prefill = format!("{}/{stem}", self.new_project_base().display());
         self.pending_archive_source = Some(path);
         self.open_prompt(

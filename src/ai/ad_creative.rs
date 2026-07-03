@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::{bible, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// A round of ad creative — one ad per platform.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdCreative {
     #[serde(default)]
     pub amazon: Ad,
@@ -25,7 +25,7 @@ pub struct AdCreative {
 
 /// One platform's ad fields. The shapes are uniform; the platform's conventions
 /// (lengths, what goes where) are applied by the model per the system prompt.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Ad {
     #[serde(default)]
     pub headlines: Vec<String>,

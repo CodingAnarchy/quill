@@ -159,7 +159,7 @@ fn autosave_and_reparse_cant_shift_a_focused_outline_jump() {
     // The buffer is dirty and has gone idle while the outline is up: the event
     // loop would run both the idle-timer autosave and an idle reparse here.
     app.buffer.dirty = true;
-    app.last_activity = Instant::now() - Duration::from_secs(2);
+    app.last_activity = Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
     app.tick_autosave();
     app.on_idle();
 

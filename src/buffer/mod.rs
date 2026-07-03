@@ -20,7 +20,7 @@ use crate::syntax::Syntax;
 mod history;
 mod motions;
 use history::Snapshot;
-pub(crate) use motions::CharClass;
+pub use motions::CharClass;
 pub use motions::{FindKind, TextObject};
 
 /// Initial window size (bytes) [`Buffer::grapheme_after`](Buffer::grapheme_after)
@@ -153,7 +153,7 @@ impl Buffer {
     }
 
     /// The chapter's front matter, if any.
-    pub fn front_matter(&self) -> Option<&FrontMatter> {
+    pub const fn front_matter(&self) -> Option<&FrontMatter> {
         self.front_matter.as_ref()
     }
 
@@ -570,7 +570,7 @@ impl Buffer {
 
     /// Move to the start of the current *logical* line (column 0) — the anchor
     /// for opening a line above (#27).
-    pub fn move_line_start(&mut self) {
+    pub const fn move_line_start(&mut self) {
         self.cursor.col = 0;
         self.goal_x = None;
     }
@@ -710,7 +710,7 @@ impl Buffer {
     // --- Syntax ------------------------------------------------------------
 
     /// The live Markdown parse, for highlighting and (later) the outline.
-    pub fn syntax(&self) -> &Syntax {
+    pub const fn syntax(&self) -> &Syntax {
         &self.syntax
     }
 
@@ -734,8 +734,7 @@ impl Buffer {
 fn col_to_byte(text: &str, col: usize) -> usize {
     text.grapheme_indices(true)
         .nth(col)
-        .map(|(b, _)| b)
-        .unwrap_or(text.len())
+        .map_or(text.len(), |(b, _)| b)
 }
 
 /// Grapheme column of byte offset `byte` within a single line's `text`.

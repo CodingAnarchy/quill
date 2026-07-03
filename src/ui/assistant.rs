@@ -115,7 +115,7 @@ fn wrap_entries(entries: &[crate::app::Entry], width: usize, theme: &Theme) -> V
 }
 
 /// Whether a split along `dir` would leave panes too small to use in `area`.
-pub(super) fn too_cramped_to_split(dir: SplitDir, area: Rect) -> bool {
+pub(super) const fn too_cramped_to_split(dir: SplitDir, area: Rect) -> bool {
     match dir {
         SplitDir::SideBySide => area.width < MIN_PANE_WIDTH * 2,
         SplitDir::Stacked => area.height < MIN_PANE_HEIGHT * 2,

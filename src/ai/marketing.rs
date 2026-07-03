@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::{numbered_sections, AiError, Request};
 
 /// A round of marketing copy: several blurb variants and several taglines.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Marketing {
     #[serde(default)]
     pub blurbs: Vec<String>,

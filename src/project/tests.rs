@@ -750,7 +750,7 @@ fn import_chapters_replaces_the_starter_set() {
     assert!(!dir.join("unused").join(&starter).exists());
     let strays: Vec<_> = fs::read_dir(&dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
         .collect();
     assert!(strays.is_empty(), "staging temp left behind: {strays:?}");
@@ -826,7 +826,7 @@ fn a_failed_import_write_preserves_the_originals() {
     // No staging temp files were left behind.
     let strays: Vec<_> = fs::read_dir(&dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
         .collect();
     assert!(strays.is_empty(), "staging temp left behind: {strays:?}");
@@ -888,7 +888,7 @@ fn starter_chapter_is_written_atomically() {
     );
     let strays: Vec<_> = fs::read_dir(&dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
         .collect();
     assert!(strays.is_empty(), "staging temp left behind: {strays:?}");

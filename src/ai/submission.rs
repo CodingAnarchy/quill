@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::{AiError, Request};
 
 /// The three submission documents.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Submission {
     pub synopsis: String,
     pub blurb: String,

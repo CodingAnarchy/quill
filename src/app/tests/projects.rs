@@ -42,7 +42,7 @@ fn switching_swaps_the_active_project_in_place() {
 
     let mut app = open_app(&a);
     assert_eq!(app.project.manifest.title, "Alpha");
-    app.switch_to(b.clone());
+    app.switch_to(b);
 
     assert_eq!(
         app.project.manifest.title, "Beta",
@@ -68,7 +68,7 @@ fn switching_with_unsaved_work_prompts_then_saves_and_switches() {
     type_str(&mut app, "EDIT ");
     assert!(app.edit_dirty());
 
-    app.request_switch(b.clone());
+    app.request_switch(b);
     assert!(
         matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmSwitch)),
         "an unsaved switch confirms first"
@@ -91,7 +91,7 @@ fn cancelling_the_switch_keeps_the_current_project_and_its_unsaved_work() {
 
     let mut app = open_app(&a);
     type_str(&mut app, "EDIT ");
-    app.request_switch(b.clone());
+    app.request_switch(b);
     app.on_key(key(KeyCode::Esc));
 
     assert_eq!(
@@ -111,7 +111,7 @@ fn switching_to_the_already_open_project_is_a_no_op_with_a_message() {
     let a = make_project("same-a", "Alpha", "alpha\n");
 
     let mut app = open_app(&a);
-    app.request_switch(a.clone());
+    app.request_switch(a);
 
     assert!(
         !matches!(app.mode, Mode::Prompt(_)),
@@ -188,7 +188,7 @@ fn navigator_lists_subfolders_and_marks_projects() {
     fs::create_dir_all(parent.join("plain")).unwrap();
 
     let mut app = open_app(&a);
-    app.browse_into(parent.clone());
+    app.browse_into(parent);
 
     let labels: Vec<String> = match &app.mode {
         Mode::DirBrowser(s) => s.entries.iter().map(|e| e.label.clone()).collect(),
@@ -222,7 +222,7 @@ fn entering_a_project_in_the_navigator_switches_to_it() {
     project_in(&parent, "beta", "Beta", "beta prose\n");
 
     let mut app = open_app(&a);
-    app.browse_into(parent.clone());
+    app.browse_into(parent);
     select_entry(&mut app, "beta");
     app.on_key(key(KeyCode::Enter));
 
@@ -436,7 +436,7 @@ fn creating_with_the_three_act_template_scaffolds_the_skeleton() {
 
     let mut app = open_app(&cur);
     let target = parent.join("Structured Book");
-    app.create_project_at(target.clone());
+    app.create_project_at(target);
     pick_template(&mut app, "Three-act");
 
     assert_eq!(app.project.manifest.title, "Structured Book");
@@ -534,7 +534,7 @@ fn a_new_project_path_with_no_name_is_rejected() {
     let cur = make_project("en-cur", "Current", "c\n");
 
     let mut app = open_app(&cur);
-    app.prompt_new_project(parent.clone()); // input is "<parent>/", no name appended
+    app.prompt_new_project(parent); // input is "<parent>/", no name appended
     app.on_key(key(KeyCode::Enter));
 
     assert_eq!(

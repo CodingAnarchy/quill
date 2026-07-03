@@ -40,7 +40,7 @@ pub struct Stats {
 
 impl Stats {
     /// Accumulate another span's counts (for the whole-manuscript total).
-    pub fn add(&mut self, other: Stats) {
+    pub const fn add(&mut self, other: Self) {
         self.words += other.words;
         self.sentences += other.sentences;
         self.syllables += other.syllables;
@@ -120,10 +120,10 @@ pub fn readability(s: Stats) -> Readability {
     let asw = syllables / words; // average syllables per word
 
     Readability {
-        flesch_reading_ease: 206.835 - 1.015 * asl - 84.6 * asw,
-        flesch_kincaid_grade: 0.39 * asl + 11.8 * asw - 15.59,
-        gunning_fog: 0.4 * (asl + 100.0 * (poly / words)),
-        smog: 1.0430 * (poly * (30.0 / sentences)).sqrt() + 3.1291,
+        flesch_reading_ease: 84.6f64.mul_add(-asw, 1.015f64.mul_add(-asl, 206.835)),
+        flesch_kincaid_grade: 0.39f64.mul_add(asl, 11.8 * asw) - 15.59,
+        gunning_fog: 0.4 * 100.0f64.mul_add(poly / words, asl),
+        smog: 1.0430f64.mul_add((poly * (30.0 / sentences)).sqrt(), 3.1291),
     }
 }
 
@@ -349,7 +349,7 @@ pub struct Dialogue {
 }
 
 impl Dialogue {
-    pub fn add(&mut self, other: Dialogue) {
+    pub const fn add(&mut self, other: Self) {
         self.dialogue_words += other.dialogue_words;
         self.narration_words += other.narration_words;
     }

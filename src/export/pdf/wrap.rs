@@ -48,7 +48,7 @@ pub(super) enum Hyphenate {
 /// pattern break — the caller then leaves the word whole.
 fn hyphen_points(word: &str) -> Vec<usize> {
     let len = word.chars().count();
-    if len < MIN_HYPHENATED_WORD || !word.chars().all(|c| c.is_alphabetic()) {
+    if len < MIN_HYPHENATED_WORD || !word.chars().all(char::is_alphabetic) {
         return Vec::new();
     }
     // Byte offset of each break must leave ≥ MIN_FRAGMENT chars on both sides.
@@ -77,7 +77,7 @@ pub(super) struct Word {
 
 impl Word {
     /// The `(bold, italic)` style this word draws in.
-    pub(super) fn style(&self) -> FontStyle {
+    pub(super) const fn style(&self) -> FontStyle {
         FontStyle {
             bold: self.bold,
             italic: self.italic,
@@ -86,8 +86,8 @@ impl Word {
 
     /// A fragment of this word (same emphasis/face) with `text` — the head (with a
     /// trailing hyphen) or the tail of a hyphenation split (#678).
-    fn fragment(&self, text: String) -> Word {
-        Word {
+    const fn fragment(&self, text: String) -> Self {
+        Self {
             text,
             bold: self.bold,
             italic: self.italic,

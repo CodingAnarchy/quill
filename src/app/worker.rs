@@ -22,7 +22,7 @@ pub(super) fn model_downloaded(model: &ai::model_select::Model) -> bool {
         .is_some()
 }
 #[cfg(not(feature = "local"))]
-pub(super) fn model_downloaded(_model: &ai::model_select::Model) -> bool {
+pub(super) const fn model_downloaded(_model: &ai::model_select::Model) -> bool {
     false
 }
 
@@ -106,7 +106,7 @@ impl BackendSpec {
         slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
         model: Option<&'static ai::model_select::Model>,
     ) -> Self {
-        BackendSpec::Local {
+        Self::Local {
             slot,
             model,
             fallback: None,
@@ -120,8 +120,8 @@ impl BackendSpec {
     /// decision into graceful degradation rather than a hard failure.
     pub(super) fn build(self) -> Result<Arc<dyn Backend>, ai::AiError> {
         match self {
-            BackendSpec::Claude(key) => Ok(Arc::new(ClaudeBackend::new(key))),
-            BackendSpec::Local {
+            Self::Claude(key) => Ok(Arc::new(ClaudeBackend::new(key))),
+            Self::Local {
                 slot,
                 model,
                 fallback,
@@ -644,7 +644,7 @@ impl App {
     /// A human label for the AI backend that will actually run (#371): the active
     /// one, accounting for the `offline` privacy pin. Shown in the run-action menu
     /// and the switch's confirmation.
-    pub(crate) fn ai_backend_label(&self) -> &'static str {
+    pub(crate) const fn ai_backend_label(&self) -> &'static str {
         // `Settings::backend()` is the authoritative resolver — it already folds the
         // `offline` pin into Local — so the mapping lives in one place; `offline` is
         // read here only to word *why* it's local.
@@ -713,7 +713,7 @@ impl App {
                     .ai
                     .resolved_key()
                     .ok_or_else(|| ai::AiError::NotConfigured("no API key".into()))?;
-                BackendSpec::Claude(key.to_string())
+                BackendSpec::Claude(key)
             }
             ai::BackendKind::Local => BackendSpec::local(self.local_backend.clone(), model),
         })
@@ -808,7 +808,7 @@ impl App {
                 self.message = None;
                 self.ai_in_flight.set(None); // the request finished — clear the backend indicator
                 self.overlay = None; // a fresh result supersedes any open overlay
-                let step_error = outcome.error().map(|e| e.to_string());
+                let step_error = outcome.error().map(std::string::ToString::to_string);
                 // If the assistant pane (#392) is waiting on this pass, capture its
                 // result before the outcome is consumed, then resume after applying.
                 let assistant_summary = self.assistant_pass_summary(&outcome);

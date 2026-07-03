@@ -53,7 +53,7 @@ impl Buffer {
 
     /// Close the current edit group so the next edit starts a fresh undo entry.
     /// Called when typing goes idle, so one undo reverses a burst of typing.
-    pub fn seal_undo_group(&mut self) {
+    pub const fn seal_undo_group(&mut self) {
         self.group_open = false;
     }
 
@@ -61,7 +61,7 @@ impl Buffer {
     /// around each edit to snapshot its per-chapter bookkeeping in lockstep with
     /// the buffer's rope stack (#649): a `false → true` transition means a new
     /// group just opened and a fresh segment snapshot belongs on the stack.
-    pub fn group_open(&self) -> bool {
+    pub const fn group_open(&self) -> bool {
         self.group_open
     }
 

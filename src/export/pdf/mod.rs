@@ -17,7 +17,7 @@
 mod draw;
 // `font` is otherwise private to the PDF writer, but the EPUB writer reuses its
 // glyph subsetter for embedded fonts (#709).
-pub(crate) mod font;
+pub mod font;
 mod frontmatter;
 mod images;
 mod layout;
@@ -370,11 +370,11 @@ struct StyleBits {
 
 impl StyleBits {
     fn from_style(style: &ExportStyle) -> Self {
-        StyleBits {
+        Self {
             scene_break: style.scene_break().to_string(),
             // Headings aren't justified; map justify/left to flush-left.
             heading_align: match style.heading_align() {
-                Some("left") | Some("justify") => Align::Left,
+                Some("left" | "justify") => Align::Left,
                 Some("right") => Align::RightInset(0.0),
                 _ => Align::Center,
             },
@@ -408,8 +408,8 @@ struct Pdf {
 }
 
 impl Pdf {
-    fn new(layout: Layout, bits: StyleBits, images: Vec<PdfImage>) -> Self {
-        Pdf {
+    const fn new(layout: Layout, bits: StyleBits, images: Vec<PdfImage>) -> Self {
+        Self {
             layout,
             bits,
             images,
@@ -435,7 +435,7 @@ impl Pdf {
     /// Mark the body as beginning at the next page to be started (#651): everything
     /// laid out so far (cover/title/copyright/Contents) is front matter, numbered in
     /// roman; from here folios run Arabic from 1. Called once, before the body.
-    fn begin_body(&mut self) {
+    const fn begin_body(&mut self) {
         self.body_start = self.pages.len();
     }
 
@@ -497,7 +497,7 @@ impl Pdf {
         self.pages.last_mut().expect("a page was started")
     }
 
-    fn page_idx(&self) -> usize {
+    const fn page_idx(&self) -> usize {
         self.pages.len() - 1
     }
 
@@ -670,7 +670,7 @@ impl Pdf {
         // Reserve the cap block so the initial and its first lines stay together.
         self.need(BODY_LEADING * LINES as f32);
         let left = self.left();
-        let cap_baseline = self.y - (LINES as f32 - 1.0) * BODY_LEADING;
+        let cap_baseline = (LINES as f32 - 1.0).mul_add(-BODY_LEADING, self.y);
         self.draw_line(
             left,
             cap_baseline,
@@ -705,7 +705,7 @@ impl Pdf {
     /// An epigraph: the lines set apart (inset, italic, single-spaced) with the
     /// attribution on its own line.
     fn epigraph(&mut self, e: &Epigraph) {
-        let width = self.layout.text_w() - 2.0 * EPIGRAPH_INSET;
+        let width = 2.0f32.mul_add(-EPIGRAPH_INSET, self.layout.text_w());
         for line in e.text.lines() {
             let words = words_of(&[Run::new(line, false, true)], false);
             self.flow(

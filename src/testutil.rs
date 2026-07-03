@@ -12,7 +12,7 @@ use std::path::PathBuf;
 /// and freshly created. The pid isolates parallel test binaries; `prefix`
 /// (the module) and `name` (the test) keep tests from colliding. Callers that own
 /// a `TempProject` get Drop cleanup on top; the rest remove it at the end.
-pub(crate) fn scratch_dir(prefix: &str, name: &str) -> PathBuf {
+pub fn scratch_dir(prefix: &str, name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("quill-{prefix}-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

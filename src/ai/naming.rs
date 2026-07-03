@@ -17,14 +17,14 @@ pub const MODEL: &str = "claude-haiku-4-5";
 pub const MAX_TOKENS: u32 = 4096;
 
 /// The result of a naming pass: one finding per inconsistent name/term cluster.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Naming {
     #[serde(default)]
     pub findings: Vec<NameFinding>,
 }
 
 /// One name/term spelled inconsistently across the manuscript.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct NameFinding {
     /// The most likely intended spelling.
     pub name: String,

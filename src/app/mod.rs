@@ -48,7 +48,7 @@ mod images;
 mod imports;
 mod meta;
 mod models;
-pub(crate) mod mouse; // the click→byte layout map + mouse handlers (#757/#764)
+pub mod mouse; // the click→byte layout map + mouse handlers (#757/#764)
 mod nav;
 mod outline;
 mod palette;
@@ -57,7 +57,7 @@ mod qa_store;
 mod reports;
 mod search;
 mod settings;
-pub(crate) mod task; // the generic background-task runner, reused by the assistant loop (#306)
+pub mod task; // the generic background-task runner, reused by the assistant loop (#306)
 mod vcs_actions;
 mod worker;
 mod workflows;
@@ -71,21 +71,21 @@ mod project_search;
 mod prompts;
 mod sequenced;
 mod series_bible;
-pub(crate) mod sprint; // the writing-sprint state + status segment, read by the UI (#299)
+pub mod sprint; // the writing-sprint state + status segment, read by the UI (#299)
 mod tree;
 mod vim;
 mod wizard;
 
-pub(crate) use assistant::{Assistant, Entry, Speaker};
+pub use assistant::{Assistant, Entry, Speaker};
 // The key-dispatch helpers moved to `dispatch` (#759); re-imported here so the
 // `app`-module call sites keep spelling them unqualified / via `super::`.
 use dispatch::{build_keymap, scroll_target};
 use imports::PendingImportSource;
-pub(crate) use mouse::EditorLayout;
+pub use mouse::EditorLayout;
 #[cfg(test)]
-pub(crate) use panes::SplitView; // the type name is only spelled in tests
+pub use panes::SplitView; // the type name is only spelled in tests
 use panes::{OtherPane, Split};
-pub(crate) use panes::{SplitContent, SplitDir};
+pub use panes::{SplitContent, SplitDir};
 use task::{Poll, Task};
 use vcs_actions::VcMsg;
 

@@ -84,7 +84,7 @@ impl Layout {
     /// The screen proof (#463): US-Letter, uniform 1" margins; the body serif (or a
     /// configured font) and the fallback embedded (#492).
     pub(super) fn screen(style: &ExportStyle) -> Self {
-        Layout {
+        Self {
             page_w: 612.0,
             page_h: 792.0,
             bleed: 0.0,
@@ -106,7 +106,7 @@ impl Layout {
     /// measured from the trim; the bleed only enlarges the media box so full-bleed art
     /// can run past the trim edge.
     pub(super) fn print(trim_w: f32, trim_h: f32, bleed: f32, style: &ExportStyle) -> Self {
-        Layout {
+        Self {
             page_w: trim_w,
             page_h: trim_h,
             bleed,
@@ -123,19 +123,19 @@ impl Layout {
 
     /// The media-box width — the trim plus a bleed allowance on each side (#652). Equal
     /// to the trim when there's no bleed. This is the `/MediaBox` the page tree records.
-    pub(super) fn media_w(&self) -> f32 {
-        self.page_w + 2.0 * self.bleed
+    pub(super) const fn media_w(&self) -> f32 {
+        2.0f32.mul_add(self.bleed, self.page_w)
     }
 
     /// The media-box height — the trim plus a bleed allowance on each side (#652).
-    pub(super) fn media_h(&self) -> f32 {
-        self.page_h + 2.0 * self.bleed
+    pub(super) const fn media_h(&self) -> f32 {
+        2.0f32.mul_add(self.bleed, self.page_h)
     }
 
     /// The `/BleedBox` rectangle `[x0 y0 x1 y1]` — the full media box (trim + bleed on
     /// every side, #692). A print shop's bleed extends to this edge. Equal to the
     /// `/MediaBox` here, but emitted explicitly so the file states it.
-    pub(super) fn bleed_box(&self) -> (f32, f32, f32, f32) {
+    pub(super) const fn bleed_box(&self) -> (f32, f32, f32, f32) {
         (0.0, 0.0, self.media_w(), self.media_h())
     }
 
@@ -169,20 +169,20 @@ impl Layout {
     /// (#652) — the trim is inset by `bleed`, so this offsets by the bottom bleed. Used
     /// for the fractional placements (title block, copyright, divider) that measure from
     /// the trim, not the media box. With no bleed this is just `frac * page_h`.
-    pub(super) fn trim_y(&self, frac: f32) -> f32 {
-        self.bleed + self.page_h * frac
+    pub(super) const fn trim_y(&self, frac: f32) -> f32 {
+        self.page_h.mul_add(frac, self.bleed)
     }
 
     /// The y-baseline of the running head, in media-box space (#652): trim-relative,
     /// half a top margin down from the trim's top edge.
     pub(super) fn head_baseline(&self) -> f32 {
-        self.bleed + self.page_h - self.margin_top * 0.5
+        self.margin_top.mul_add(-0.5, self.bleed + self.page_h)
     }
 
     /// The y-baseline of the folio, in media-box space (#652): trim-relative, centered
     /// in the bottom margin.
-    pub(super) fn folio_baseline(&self) -> f32 {
-        self.bleed + self.margin_bottom * 0.5
+    pub(super) const fn folio_baseline(&self) -> f32 {
+        self.margin_bottom.mul_add(0.5, self.bleed)
     }
 
     /// The left edge of the text column on page `idx`. Recto pages are even (page 1

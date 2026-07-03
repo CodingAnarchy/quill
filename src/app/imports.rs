@@ -13,7 +13,7 @@ use crate::ai::scaffold;
 /// of notes to seed a new project's bible from (#286), or the manuscript file to
 /// split into chapters (#298). Held in `App::pending_import_source` while the
 /// destination prompt is open, then taken by the matching `finish_*`.
-pub(crate) enum PendingImportSource {
+pub enum PendingImportSource {
     /// A folder of Markdown notes to import into the new project's bible (#286).
     NotesFolder(PathBuf),
     /// A Markdown / Word / Scrivener manuscript to split into chapters (#298).
@@ -328,8 +328,7 @@ impl App {
             };
             let name = f
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "notes.md".into());
+                .map_or_else(|| "notes.md".into(), |n| n.to_string_lossy().into_owned());
             // Two imported folders can each hold a `characters.md`; keying only by
             // filename would let the second silently overwrite the first. Give
             // colliding names unique destinations so no source is lost.
@@ -349,8 +348,7 @@ impl App {
         let label = match &files[..] {
             [one] => one
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "notes".into()),
+                .map_or_else(|| "notes".into(), |n| n.to_string_lossy().into_owned()),
             _ => format!("{preserved} files"),
         };
         // With AI off, the source is safely preserved but the bible can't be built.

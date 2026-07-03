@@ -32,7 +32,7 @@ use list_overlay::{
 pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
 use overlay::{draw_bible_review, draw_overlay, draw_tree};
 // `max_scroll` is shared with the report key handler (`crate::ui::max_scroll`).
-pub(crate) use overlay::max_scroll;
+pub use overlay::max_scroll;
 
 /// A rendered region of the screen. Each pane borrows the [`App`] and draws
 /// itself into a given area. A custom trait rather than ratatui's `Widget`
@@ -73,28 +73,28 @@ pub fn draw(frame: &mut Frame, app: &App) {
     match &app.mode {
         Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
         Mode::Findings(findings) => modal(frame, area, |f, r| {
-            draw_findings(f, r, findings, &app.project)
+            draw_findings(f, r, findings, &app.project);
         }),
         Mode::History(history) => {
             let chapter = app.project.active_title().unwrap_or("this chapter");
-            modal(frame, area, |f, r| draw_history(f, r, history, chapter))
+            modal(frame, area, |f, r| draw_history(f, r, history, chapter));
         }
         Mode::Annotations { selected } => {
-            modal(frame, area, |f, r| draw_annotations(f, r, app, *selected))
+            modal(frame, area, |f, r| draw_annotations(f, r, app, *selected));
         }
         Mode::Corkboard(board) => modal(frame, area, |f, r| draw_corkboard(f, r, board)),
         Mode::ModelManager { selected } => {
-            modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected))
+            modal(frame, area, |f, r| draw_model_manager(f, r, app, *selected));
         }
         Mode::ProjectSearch(ps) => modal(frame, area, |f, r| draw_project_search(f, r, ps)),
         Mode::Palette(palette) => modal(frame, area, |f, r| draw_palette(f, r, palette)),
         Mode::Tree(tree) => modal(frame, area, |f, r| draw_tree(f, r, app, tree)),
         Mode::ProjectBrowser(browser) => modal(frame, area, |f, r| {
-            draw_project_browser(f, r, browser, &app.project.root)
+            draw_project_browser(f, r, browser, &app.project.root);
         }),
         Mode::DirBrowser(browser) => modal(frame, area, |f, r| draw_dir_browser(f, r, browser)),
         Mode::ImportPreview(preview) => {
-            modal(frame, area, |f, r| draw_import_preview(f, r, preview))
+            modal(frame, area, |f, r| draw_import_preview(f, r, preview));
         }
         Mode::Prompt(_) => dim_backdrop(frame, area),
         _ => {}
@@ -177,7 +177,7 @@ fn dim_backdrop(frame: &mut Frame, screen: Rect) {
 /// Render the whole app to a plain-text screen of the given size — a shared
 /// test helper for both the `ui` and `app` test suites.
 #[cfg(test)]
-pub(crate) fn render_to_string(app: &App, w: u16, h: u16) -> String {
+pub fn render_to_string(app: &App, w: u16, h: u16) -> String {
     use ratatui::{backend::TestBackend, Terminal};
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
     terminal.draw(|f| draw(f, app)).unwrap();
@@ -257,7 +257,7 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
             draw_overlay(frame, other_area, &app.project.manifest.title, overlay);
         }
         SplitContent::Assistant { conv, focused } => {
-            draw_assistant_pane(frame, other_area, app, conv, focused)
+            draw_assistant_pane(frame, other_area, app, conv, focused);
         }
     }
 }
@@ -270,7 +270,7 @@ fn current_section(headings: &[Heading], cursor_byte: usize) -> Option<usize> {
 }
 
 /// The accent style for the active/current item in the nav pane.
-pub(super) fn active_style() -> Style {
+pub fn active_style() -> Style {
     Style::default()
         .fg(theme::current().heading)
         .add_modifier(Modifier::BOLD)
@@ -635,7 +635,7 @@ fn search_status(s: &Search) -> String {
 
 /// Save-state indicator (#409): ● when there are unsaved changes, ✓ when the
 /// buffer is on disk — so persistence is legible at a glance.
-fn dirty_marker(dirtied: bool) -> &'static str {
+const fn dirty_marker(dirtied: bool) -> &'static str {
     if dirtied {
         " ●"
     } else {
@@ -701,24 +701,23 @@ fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (St
         };
         (format!(" /{filter}{count}"), format!("{title}{hint}  "))
     } else {
-        let right = match &app.message {
-            Some(m) => format!("{m}  "),
-            None => {
-                let mut parts = Vec::new();
-                if let Some(s) = app.project.chapter_summary(selected) {
-                    parts.push(s.to_string());
-                }
-                if let Some(p) = app.project.chapter_pov(selected) {
-                    parts.push(format!("POV: {p}"));
-                }
-                if let Some(st) = app.project.chapter_status(selected) {
-                    parts.push(st.label().to_string());
-                }
-                if parts.is_empty() {
-                    String::new()
-                } else {
-                    format!("{}  ", parts.join("  ·  "))
-                }
+        let right = if let Some(m) = &app.message {
+            format!("{m}  ")
+        } else {
+            let mut parts = Vec::new();
+            if let Some(s) = app.project.chapter_summary(selected) {
+                parts.push(s.to_string());
+            }
+            if let Some(p) = app.project.chapter_pov(selected) {
+                parts.push(format!("POV: {p}"));
+            }
+            if let Some(st) = app.project.chapter_status(selected) {
+                parts.push(st.label().to_string());
+            }
+            if parts.is_empty() {
+                String::new()
+            } else {
+                format!("{}  ", parts.join("  ·  "))
             }
         };
         (format!(" {title}"), right)

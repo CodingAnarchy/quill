@@ -79,7 +79,7 @@ pub const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
 /// single source of truth: [`preset_base`] resolves each one and the unknown-preset
 /// warning lists them, so the library can't drift between code and the message (a
 /// test asserts every name here resolves).
-pub(crate) const PRESET_NAMES: [&str; 7] = [
+pub const PRESET_NAMES: [&str; 7] = [
     "classic",
     "modern",
     "literary",
@@ -155,7 +155,7 @@ fn preset_base(name: &str) -> Option<ExportStyle> {
 /// A one-line description of a built-in preset's look (#569), for the in-app
 /// preset picker — the same library [`PRESET_NAMES`] enumerates. Returns an empty
 /// string for an unknown name (which the picker never passes).
-pub(crate) fn preset_blurb(name: &str) -> &'static str {
+pub fn preset_blurb(name: &str) -> &'static str {
     match name {
         "classic" => "* * * scene breaks, drop caps, ❦ title/part ornaments",
         "modern" => "left-aligned headings, • scene breaks",
@@ -181,10 +181,10 @@ pub enum FontRole {
 impl FontRole {
     /// The in-package file-name stem for this role (`fonts/<slug>.<ext>`); the
     /// italic face appends `-italic` (see [`ExportStyle::resolve_fonts`]).
-    fn slug(self) -> &'static str {
+    const fn slug(self) -> &'static str {
         match self {
-            FontRole::Body => "body",
-            FontRole::Heading => "heading",
+            Self::Body => "body",
+            Self::Heading => "heading",
         }
     }
 }
@@ -200,19 +200,19 @@ pub struct FontStyle {
 }
 
 impl FontStyle {
-    pub const REGULAR: FontStyle = FontStyle {
+    pub const REGULAR: Self = Self {
         bold: false,
         italic: false,
     };
-    pub const BOLD: FontStyle = FontStyle {
+    pub const BOLD: Self = Self {
         bold: true,
         italic: false,
     };
-    pub const ITALIC: FontStyle = FontStyle {
+    pub const ITALIC: Self = Self {
         bold: false,
         italic: true,
     };
-    pub const BOLD_ITALIC: FontStyle = FontStyle {
+    pub const BOLD_ITALIC: Self = Self {
         bold: true,
         italic: true,
     };
@@ -270,12 +270,12 @@ pub enum ImageRole {
 
 impl ImageRole {
     /// The in-package file slug for this role (`images/<slug>.<ext>`).
-    fn slug(self) -> &'static str {
+    const fn slug(self) -> &'static str {
         match self {
-            ImageRole::SceneBreak => "scene-break",
-            ImageRole::ChapterHeading => "chapter-heading",
-            ImageRole::Title => "title",
-            ImageRole::Cover => "cover",
+            Self::SceneBreak => "scene-break",
+            Self::ChapterHeading => "chapter-heading",
+            Self::Title => "title",
+            Self::Cover => "cover",
         }
     }
 }
@@ -378,8 +378,8 @@ impl ExportStyle {
     /// (no `..`) on purpose: a field added to `ExportStyle` won't compile until it
     /// gets a merge rule here, so a new style knob can't silently skip presets.
     /// `preset` is the input, not a result; `fonts`/`images` are resolved later.
-    fn merged_with(mut self, over: ExportStyle) -> ExportStyle {
-        let ExportStyle {
+    fn merged_with(mut self, over: Self) -> Self {
+        let Self {
             preset: _,
             scene_break,
             body_font,
@@ -466,7 +466,7 @@ impl ExportStyle {
                     "style: unsupported font '{path}' (use .ttf/.otf/.woff/.woff2)"
                 )),
                 Err(AssetError::Read(e)) => {
-                    warnings.push(format!("style: couldn't read font '{path}': {e}"))
+                    warnings.push(format!("style: couldn't read font '{path}': {e}"));
                 }
             }
             // The optional true-italic sibling — best-effort, no warning if absent.
@@ -545,10 +545,10 @@ fn resolve_assets<Role, Asset, const N: usize>(
         match load_asset(&path, &media, &mut load) {
             Ok((media_type, ext, bytes)) => assets.push(embed(role, &path, media_type, ext, bytes)),
             Err(AssetError::Unsupported) => {
-                warnings.push(format!("style: unsupported {kind} '{path}' (use {exts})"))
+                warnings.push(format!("style: unsupported {kind} '{path}' (use {exts})"));
             }
             Err(AssetError::Read(e)) => {
-                warnings.push(format!("style: couldn't read {kind} '{path}': {e}"))
+                warnings.push(format!("style: couldn't read {kind} '{path}': {e}"));
             }
         }
     }

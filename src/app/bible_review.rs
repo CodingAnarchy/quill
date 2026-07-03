@@ -53,7 +53,7 @@ pub(super) struct StagedTally {
 impl StagedTally {
     /// Tally a batch of staged results into write count, conflicts, and failures.
     pub(super) fn from(staged: impl Iterator<Item = Staged>) -> Self {
-        let mut tally = StagedTally {
+        let mut tally = Self {
             written: 0,
             conflicts: Vec::new(),
             failures: Vec::new(),

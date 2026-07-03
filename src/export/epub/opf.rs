@@ -576,7 +576,7 @@ mod tests {
         let opf = part(&bytes, "OEBPS/content.opf");
 
         // The image file is embedded and declared with the cover-image property.
-        let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
+        let zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         assert!(
             zip.file_names().any(|n| n == "OEBPS/images/cover.png"),
             "cover image embedded"
@@ -796,7 +796,7 @@ mod tests {
         // so no later book's rights/ISBN is dropped. Concatenate them and assert
         // both books' distinct notices are present.
         let dividers: String = {
-            let zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
+            let zip = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
                 .filter(|n| n.contains("/book") && n.ends_with(".xhtml"))
@@ -831,7 +831,7 @@ mod tests {
         )
         .unwrap();
         let plain_dividers: String = {
-            let zip = zip::ZipArchive::new(Cursor::new(plain.to_vec())).unwrap();
+            let zip = zip::ZipArchive::new(Cursor::new(plain.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
                 .filter(|n| n.contains("/book") && n.ends_with(".xhtml"))

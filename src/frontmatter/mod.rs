@@ -102,9 +102,9 @@ impl Epigraph {
     /// blank strings as absent. `None` when there's no quotation — an
     /// attribution alone is not an epigraph. Shared by the chapter (front
     /// matter) and book (manifest) accessors.
-    pub fn from_parts(text: Option<String>, attribution: Option<String>) -> Option<Epigraph> {
+    pub fn from_parts(text: Option<String>, attribution: Option<String>) -> Option<Self> {
         let text = text.filter(|s| !s.is_empty())?;
-        Some(Epigraph {
+        Some(Self {
             text,
             attribution: attribution.filter(|s| !s.is_empty()),
         })
@@ -184,7 +184,7 @@ impl FrontMatter {
                     break; // a column-0 line ends the block
                 }
             }
-            while out.last().is_some_and(|l| l.is_empty()) {
+            while out.last().is_some_and(std::string::String::is_empty) {
                 out.pop(); // a `|` block clips trailing blank lines
             }
             Some(out.join("\n"))

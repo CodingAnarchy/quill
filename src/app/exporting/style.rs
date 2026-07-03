@@ -16,8 +16,7 @@ impl App {
             .manifest
             .print
             .as_ref()
-            .map(|p| p.bleed_points())
-            .unwrap_or(0.0)
+            .map_or(0.0, crate::export::pdf::PrintConfig::bleed_points)
     }
 
     /// The print trim (in points) from the manifest `[print]` table, with a warning
@@ -97,7 +96,7 @@ impl App {
                 self.message = Some(format!(
                     "Wrote {} but couldn't open it: {e}",
                     path.display()
-                ))
+                ));
             }
         }
         self.note_export_warnings(warnings);

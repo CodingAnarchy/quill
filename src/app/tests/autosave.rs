@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 /// `tick_autosave` sees `secs` of genuine idle.
 fn dirty_and_idle(app: &mut App, secs: u64) {
     type_str(app, "X"); // an edit → dirty
-    app.last_activity = Instant::now() - Duration::from_secs(secs);
+    app.last_activity = Instant::now()
+        .checked_sub(Duration::from_secs(secs))
+        .unwrap();
 }
 
 #[test]

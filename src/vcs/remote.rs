@@ -221,7 +221,7 @@ fn conflicted_paths(index: &git2::Index) -> String {
         return String::new();
     };
     let mut names: Vec<String> = conflicts
-        .filter_map(|c| c.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|c| c.our.or(c.their).or(c.ancestor))
         .filter_map(|entry| String::from_utf8(entry.path).ok())
         .collect();

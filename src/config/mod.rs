@@ -40,10 +40,10 @@ mod types;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub(crate) use load::load_section;
+pub use load::load_section;
 pub use splice::{add_workflow, remove_value, set_values};
-pub(crate) use splice::{set_value, strip_value};
-pub(crate) use types::theme_name;
+pub use splice::{set_value, strip_value};
+pub use types::theme_name;
 pub use types::{load_snippets, load_theme, EditorConfig, ProjectsConfig, Snippet};
 
 /// Quill's config directory: `$XDG_CONFIG_HOME/quill`, else `$HOME/.config/quill`.
@@ -103,7 +103,7 @@ thread_local! {
 /// test thread (#528). Test-only; production resolves from `$XDG_CONFIG_HOME` /
 /// `$HOME`.
 #[cfg(test)]
-pub(crate) fn set_config_dir(dir: Option<PathBuf>) {
+pub fn set_config_dir(dir: Option<PathBuf>) {
     TEST_CONFIG_DIR.with(|c| *c.borrow_mut() = dir);
 }
 
@@ -112,7 +112,7 @@ pub(crate) fn set_config_dir(dir: Option<PathBuf>) {
 /// project opens (and re-called on a switch); pass `None` to clear it. Per-thread,
 /// so the override is scoped to the running editor and stays hermetic in tests
 /// (#531).
-pub(crate) fn set_project_dir(dir: Option<PathBuf>) {
+pub fn set_project_dir(dir: Option<PathBuf>) {
     PROJECT_CONFIG_DIR.with(|c| *c.borrow_mut() = dir);
 }
 

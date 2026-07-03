@@ -24,7 +24,7 @@ use crate::mode::Mode;
 /// render time so a click can be inverted to a buffer position without redoing the
 /// layout math. Byte offsets are relative to the logical line's start.
 #[derive(Clone, Debug)]
-pub(crate) struct VisualRow {
+pub struct VisualRow {
     /// The logical (buffer) line this visual row belongs to.
     pub line: usize,
     /// Absolute byte offset (in the buffer) of this line's start.
@@ -50,7 +50,7 @@ pub(crate) struct VisualRow {
 /// byte. Rebuilt every render; empty until the first draw or when the editor isn't
 /// the drawn surface (an open overlay replaces it).
 #[derive(Clone, Debug, Default)]
-pub(crate) struct EditorLayout {
+pub struct EditorLayout {
     /// The centered prose column the body was drawn into.
     pub column: Rect,
     /// One entry per on-screen visual row, top to bottom.
@@ -261,9 +261,9 @@ impl App {
 
 /// Clamp `base + delta` to the range `[0, max]` (a `u16` scroll offset moved by a
 /// signed row delta). Shared by the overlay / surface scroll routing.
-pub(crate) fn clamp_add(base: u16, delta: i32, max: u16) -> u16 {
-    let next = base as i32 + delta;
-    next.clamp(0, max as i32) as u16
+pub fn clamp_add(base: u16, delta: i32, max: u16) -> u16 {
+    let next = i32::from(base) + delta;
+    next.clamp(0, i32::from(max)) as u16
 }
 
 /// The byte offset within `text` (relative to the logical line) nearest a click at

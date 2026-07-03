@@ -111,8 +111,7 @@ fn parent(path: &Path) -> &Path {
 fn temp_path(path: &Path) -> PathBuf {
     let name = path
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "quill".into());
+        .map_or_else(|| "quill".into(), |n| n.to_string_lossy().into_owned());
     parent(path).join(format!(".{name}.{}.tmp", std::process::id()))
 }
 
@@ -121,7 +120,7 @@ fn temp_path(path: &Path) -> PathBuf {
 /// filesystem's permissions, and parallel tests can't perturb each other.
 /// Compiled out of production builds.
 #[cfg(test)]
-pub(crate) mod fail_point {
+pub mod fail_point {
     use std::cell::Cell;
 
     thread_local! {
@@ -135,7 +134,7 @@ pub(crate) mod fail_point {
 
     /// Arm a one-shot failure that fires inside the next [`super::write`] on this
     /// thread, after the temp file is written but before the rename.
-    pub(crate) fn arm_pre_rename_failure() {
+    pub fn arm_pre_rename_failure() {
         FAIL_BEFORE_RENAME.with(|f| f.set(true));
     }
 
@@ -144,14 +143,14 @@ pub(crate) mod fail_point {
     /// rename. Lets a test fault a specific step of a multi-write operation
     /// (e.g. [`Project::import_chapters`](crate::project::Project::import_chapters))
     /// without arming between the writes it performs internally.
-    pub(crate) fn arm_pre_rename_failure_on_nth(n: usize) {
+    pub fn arm_pre_rename_failure_on_nth(n: usize) {
         FAIL_ON_NTH.with(|f| f.set(n));
     }
 
     /// Whether the current write should fail before its rename, consuming the
     /// one-shot arming (either the next-write flag or the Nth-write countdown) so
     /// it fires exactly once.
-    pub(crate) fn should_fail_before_rename() -> bool {
+    pub fn should_fail_before_rename() -> bool {
         if FAIL_BEFORE_RENAME.with(|f| f.replace(false)) {
             return true;
         }
@@ -202,7 +201,7 @@ mod tests {
         write(&path, b"body").unwrap();
         let strays: Vec<_> = fs::read_dir(&dir)
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(strays.is_empty(), "temp file left behind: {strays:?}");

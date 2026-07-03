@@ -71,7 +71,7 @@ pub fn days_between(start: Date, end: Date) -> i64 {
 }
 
 /// The date `n` days after `date`.
-pub fn add_days(date: Date, n: i64) -> Date {
+pub const fn add_days(date: Date, n: i64) -> Date {
     date.saturating_add(Duration::days(n))
 }
 

@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn slugs_are_unique_so_cache_files_dont_collide() {
-        let mut slugs: Vec<String> = FAMILIES.iter().map(|f| f.slug()).collect();
+        let mut slugs: Vec<String> = FAMILIES.iter().map(super::FontFamily::slug).collect();
         slugs.sort();
         let before = slugs.len();
         slugs.dedup();

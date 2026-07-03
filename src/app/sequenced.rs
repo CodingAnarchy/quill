@@ -24,12 +24,12 @@ use super::App;
 /// How long a single async step may run before the no-hang guardrail aborts it
 /// and stops the run (#227). Generous — a real AI pass can take many seconds;
 /// this only catches a wedged request, not a slow one.
-pub(crate) const STEP_TIMEOUT: Duration = Duration::from_secs(120);
+pub const STEP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The bookkeeping every sequenced run needs while it walks its queue and
 /// suspends on async steps. The feature-specific queue, names, and extra state
 /// live alongside this in each run-state struct.
-pub(crate) struct SequencedRun {
+pub struct SequencedRun {
     /// The step currently running (or about to run); the queue length when done.
     pub(crate) index: usize,
     /// Steps that completed and sent a request (for the summary). Excludes skips.
@@ -69,7 +69,7 @@ impl SequencedRun {
 /// state — the run lives in `App` — so every method is an associated function
 /// taking `&mut App`. Only step-running (`drive`) and message wording (`stop` /
 /// `finish` / `cancelling_message`) differ between features.
-pub(crate) trait Sequenced {
+pub trait Sequenced {
     /// This feature's run-state bookkeeping, or `None` when it isn't running.
     fn run_mut(app: &mut App) -> Option<&mut SequencedRun>;
     fn run_ref(app: &App) -> Option<&SequencedRun>;
@@ -90,7 +90,7 @@ pub(crate) trait Sequenced {
 /// Resume a run after its in-flight async step finished (from `poll_ai`). A step
 /// error stops it; a pending cancel stops it cleanly with the just-finished step
 /// counted; otherwise it drives on to the next step. A no-op when `T` isn't running.
-pub(crate) fn advance_sequenced<T: Sequenced>(app: &mut App, step_error: Option<String>) {
+pub fn advance_sequenced<T: Sequenced>(app: &mut App, step_error: Option<String>) {
     let Some(run) = T::run_mut(app) else {
         return;
     };
@@ -110,7 +110,7 @@ pub(crate) fn advance_sequenced<T: Sequenced>(app: &mut App, step_error: Option<
 /// The no-hang guardrail: if the in-flight async step has run past the timeout,
 /// drop it (its orphaned worker's result is ignored) and stop the run. Called each
 /// poll; a no-op unless `T` is running and its step is actually stuck.
-pub(crate) fn tick_sequenced_timeout<T: Sequenced>(app: &mut App) {
+pub fn tick_sequenced_timeout<T: Sequenced>(app: &mut App) {
     let Some(run) = T::run_ref(app) else {
         return;
     };
@@ -123,7 +123,7 @@ pub(crate) fn tick_sequenced_timeout<T: Sequenced>(app: &mut App) {
 
 /// Ask a running sequenced run to stop after the in-flight step finishes — the
 /// clean Esc cancel. Sets the flag; `advance_sequenced` sees it and finishes.
-pub(crate) fn cancel_sequenced<T: Sequenced>(app: &mut App) {
+pub fn cancel_sequenced<T: Sequenced>(app: &mut App) {
     let Some(run) = T::run_mut(app) else {
         return;
     };
@@ -132,7 +132,7 @@ pub(crate) fn cancel_sequenced<T: Sequenced>(app: &mut App) {
 }
 
 /// "step" / "steps", "pass" / "passes" — pick the right form for a count.
-pub(crate) fn plural(n: usize, one: &'static str, many: &'static str) -> &'static str {
+pub const fn plural(n: usize, one: &'static str, many: &'static str) -> &'static str {
     if n == 1 {
         one
     } else {
@@ -172,7 +172,7 @@ impl App {
     }
 
     /// Whether any sequenced run is in progress (so Esc routes to its cancel).
-    pub(crate) fn sequenced_run_active(&self) -> bool {
+    pub(crate) const fn sequenced_run_active(&self) -> bool {
         self.workflow_run.is_some() || self.series_bible_run.is_some()
     }
 }

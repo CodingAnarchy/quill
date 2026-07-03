@@ -24,7 +24,7 @@ use crate::mode::{
 use crate::project::Project;
 
 /// The selection marker for a list row.
-pub(super) fn marker(selected: bool) -> &'static str {
+pub(super) const fn marker(selected: bool) -> &'static str {
     if selected {
         "▸ "
     } else {

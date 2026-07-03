@@ -28,7 +28,7 @@ use super::{config_path, project_manifest_path};
 /// section at startup is negligible.
 ///
 /// [`set_project_dir`]: super::set_project_dir
-pub(crate) fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
+pub fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
     let global = read_section(config_path().as_deref(), section);
     let project = read_project_section(section);
     match merge_sections(global, project) {

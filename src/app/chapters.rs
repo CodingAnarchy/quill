@@ -29,7 +29,7 @@ impl App {
         }
     }
 
-    pub(super) fn chapter_count(&self) -> usize {
+    pub(super) const fn chapter_count(&self) -> usize {
         self.project.manifest.chapters.len()
     }
 

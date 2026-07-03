@@ -665,7 +665,7 @@ impl App {
     }
 
     /// Run `motion` `n` times — how a count repeats a simple motion.
-    fn vim_repeat(&mut self, n: usize, mut motion: impl FnMut(&mut App)) {
+    fn vim_repeat(&mut self, n: usize, mut motion: impl FnMut(&mut Self)) {
         for _ in 0..n {
             motion(self);
         }
@@ -709,7 +709,7 @@ impl App {
 /// arms of [`App::on_key_normal`]; a new motion added there must be listed here
 /// to work in Visual mode too (forwarding fails safe — an omission just means the
 /// motion doesn't extend a selection, never a stray edit).
-fn is_motion_key(c: char) -> bool {
+const fn is_motion_key(c: char) -> bool {
     c.is_ascii_digit()
         || matches!(
             c,

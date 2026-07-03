@@ -13,7 +13,7 @@ use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
 
 /// One character's profile. The serde fields the model fills define the JSON
 /// schema; `mentions`/`last_chapter` are enriched locally after extraction.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Character {
     pub name: String,
     #[serde(default)]
@@ -45,7 +45,7 @@ pub struct Character {
 /// An actionable voice profile (#183): the speech fingerprint the voice-analysis
 /// pass checks dialogue and narration against, richer than a one-line summary.
 /// Every field is optional so a thin character still parses.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct VoiceProfile {
     /// How they build sentences — habits of phrasing, syntax, directness.
     #[serde(default)]
@@ -63,7 +63,7 @@ pub struct VoiceProfile {
 
 impl VoiceProfile {
     /// Whether the profile carries anything worth rendering.
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.patterns.is_empty()
             && self.register.is_none()
             && self.tics.is_empty()
@@ -71,19 +71,19 @@ impl VoiceProfile {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Relationship {
     pub name: String,
     pub relation: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ArcBeat {
     pub chapter: String,
     pub state: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Drift {
     pub detail: String,
     #[serde(default)]

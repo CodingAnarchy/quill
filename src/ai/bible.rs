@@ -31,7 +31,7 @@ on the next pass.\n{front}generated: {today}\ndigest: {digest}\n---\n\n\
 /// Append a `## {heading}` section with one `- ` bullet per item and a trailing
 /// blank line, or nothing when `items` is empty — the shared shape for the
 /// bullet-list sections in generated bible / notes blocks.
-pub(crate) fn bullet_section(body: &mut String, heading: &str, items: &[String]) {
+pub fn bullet_section(body: &mut String, heading: &str, items: &[String]) {
     if items.is_empty() {
         return;
     }
@@ -118,7 +118,7 @@ pub fn yaml(value: &str) -> String {
 /// Stable change-detection hash of a block of text (not cryptographic). The one
 /// source of the persisted-hash format, shared by the generated-block digest and
 /// the incremental-scoping chapter digests (#90).
-pub(crate) fn digest(generated: &str) -> String {
+pub fn digest(generated: &str) -> String {
     let mut h = DefaultHasher::new();
     generated.hash(&mut h);
     format!("{:016x}", h.finish())
@@ -126,13 +126,13 @@ pub(crate) fn digest(generated: &str) -> String {
 
 /// An existing single-file bible (`bible/<rel>`) as raw text — the cache for an
 /// incremental revise (#90), empty when absent.
-pub(crate) fn raw_file(root: &Path, rel: &str) -> String {
+pub fn raw_file(root: &Path, rel: &str) -> String {
     std::fs::read_to_string(root.join("bible").join(rel)).unwrap_or_default()
 }
 
 /// The existing `.md` bible files under `bible/<dir>/` (e.g. the per-character
 /// profiles), concatenated as the cache for an incremental revise (#90).
-pub(crate) fn raw_dir(root: &Path, dir: &str) -> String {
+pub fn raw_dir(root: &Path, dir: &str) -> String {
     let mut out = String::new();
     let Ok(entries) = std::fs::read_dir(root.join("bible").join(dir)) else {
         return out;

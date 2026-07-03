@@ -91,10 +91,10 @@ impl App {
         // focus (#164), or a full-screen overlay (progress/analysis report, AI
         // answer). Either way Ctrl-w still starts a window command — switching
         // focus, closing, or (for an overlay) docking it into a split (#164).
-        let surface_key: Option<fn(&mut App, KeyEvent)> = if self.surface_pane_focused() {
-            Some(App::on_key_surface)
+        let surface_key: Option<fn(&mut Self, KeyEvent)> = if self.surface_pane_focused() {
+            Some(Self::on_key_surface)
         } else if self.overlay.is_some() {
-            Some(App::on_key_overlay)
+            Some(Self::on_key_overlay)
         } else {
             None
         };
@@ -138,7 +138,7 @@ impl App {
     /// The editor's resting mode: Vim Normal when Vim mode is on, else the
     /// modeless Insert. Every "return to the editor" path routes through this so
     /// it lands in the right mode for the user's configuration.
-    pub(super) fn editing_mode(&self) -> Mode {
+    pub(super) const fn editing_mode(&self) -> Mode {
         if self.vim {
             Mode::Normal
         } else {
@@ -175,8 +175,8 @@ impl App {
             // work. It only quits from the top-level editor: overlays, prompts,
             // and palettes intercept keys before `on_key_ctrl`, so there Ctrl-C
             // is theirs to handle (Esc-style cancel), which is the least surprising.
-            KeyCode::Char('q') | KeyCode::Char('c') => self.request_quit(),
-            KeyCode::Char('=') | KeyCode::Char('+') => {
+            KeyCode::Char('q' | 'c') => self.request_quit(),
+            KeyCode::Char('=' | '+') => {
                 self.focus_width = (self.focus_width + 4).min(160);
             }
             KeyCode::Char('-') => {
@@ -385,7 +385,7 @@ pub(super) fn scroll_target(
     max: u16,
     page: u16,
 ) -> Option<u16> {
-    let (cur, max, page) = (cur as i32, max as i32, page as i32);
+    let (cur, max, page) = (i32::from(cur), i32::from(max), i32::from(page));
     let target = match (ctrl, code) {
         (false, KeyCode::Down | KeyCode::Char('j')) => cur + 1,
         (false, KeyCode::Up | KeyCode::Char('k')) => cur - 1,

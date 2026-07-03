@@ -169,7 +169,7 @@ impl App {
     pub(crate) fn apply_setting_text(&mut self, knob: SettingTextKnob, text: &str) {
         match knob {
             SettingTextKnob::ColumnWidth => {
-                self.apply_validated_editor(knob, "editor.column_width", "column_width", text)
+                self.apply_validated_editor(knob, "editor.column_width", "column_width", text);
             }
             SettingTextKnob::AutosaveSecs => self.apply_validated_editor(
                 knob,
@@ -314,7 +314,7 @@ fn bool_row(knob: SettingBool, on: bool) -> PaletteItem {
 }
 
 /// "on" / "off" for a toggle's label and status message.
-fn on_off(on: bool) -> &'static str {
+const fn on_off(on: bool) -> &'static str {
     if on {
         "on"
     } else {
