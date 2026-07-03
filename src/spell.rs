@@ -29,17 +29,17 @@ static DICT: LazyLock<Dictionary> = LazyLock::new(|| {
 pub fn misspellings(text: &str, accept: impl Fn(&str) -> bool) -> Vec<(usize, usize)> {
     let dict = &*DICT;
     let mut flags = Vec::new();
-    for (start, word) in words(text) {
+    for_each_word(text, |start, word| {
         if accept(word) || dict.check(word) {
-            continue;
+            return;
         }
         // Smart-quote contractions ("don’t") may be stored with an ASCII
         // apostrophe in the dictionary; try that form before flagging.
         if word.contains('\u{2019}') && dict.check(&word.replace('\u{2019}', "'")) {
-            continue;
+            return;
         }
         flags.push((start, start + word.len()));
-    }
+    });
     flags
 }
 
@@ -55,27 +55,31 @@ pub fn suggestions(word: &str) -> Vec<String> {
     out
 }
 
-/// Split `text` into `(byte_offset, word)` tokens for spell-checking. A token is a
-/// run of letters/digits/apostrophes that contains at least one letter and no
-/// digit (so "3rd", "1990s", and bare numbers are skipped, not flagged);
-/// surrounding apostrophes are trimmed. Letters are Unicode-aware.
-fn words(text: &str) -> Vec<(usize, &str)> {
+/// Call `emit(byte_offset, word)` for each spell-checkable token in `text`. A token
+/// is a run of letters/digits/apostrophes that contains at least one letter and no
+/// digit (so "3rd", "1990s", and bare numbers are skipped, not flagged); surrounding
+/// apostrophes are trimmed. Letters are Unicode-aware.
+///
+/// Iterates `char_indices()` directly rather than collecting the whole document into
+/// a `Vec<(usize, char)>` (#780): the idle spell pass runs on every input burst, so
+/// it does no O(document) allocation of its own.
+fn for_each_word(text: &str, mut emit: impl FnMut(usize, &str)) {
     let is_word = |c: char| c.is_alphanumeric() || c == '\'' || c == '\u{2019}';
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut out = Vec::new();
-    let mut k = 0;
-    while k < chars.len() {
-        if !is_word(chars[k].1) {
-            k += 1;
+    let mut chars = text.char_indices().peekable();
+    while let Some(&(start, c)) = chars.peek() {
+        if !is_word(c) {
+            chars.next();
             continue;
         }
-        let start = chars[k].0;
         let (mut end, mut letter, mut digit) = (start, false, false);
-        while k < chars.len() && is_word(chars[k].1) {
-            letter |= chars[k].1.is_alphabetic();
-            digit |= chars[k].1.is_ascii_digit();
-            end = chars[k].0 + chars[k].1.len_utf8();
-            k += 1;
+        while let Some(&(i, c)) = chars.peek() {
+            if !is_word(c) {
+                break;
+            }
+            letter |= c.is_alphabetic();
+            digit |= c.is_ascii_digit();
+            end = i + c.len_utf8();
+            chars.next();
         }
         if !letter || digit {
             continue;
@@ -85,10 +89,9 @@ fn words(text: &str) -> Vec<(usize, &str)> {
         let trimmed = w.trim_matches(apostrophes);
         if !trimmed.is_empty() {
             let off = w.len() - w.trim_start_matches(apostrophes).len();
-            out.push((start + off, trimmed));
+            emit(start + off, trimmed);
         }
     }
-    out
 }
 
 #[cfg(test)]

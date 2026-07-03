@@ -125,6 +125,10 @@ pub struct App {
     /// recomputed on the idle tick (never the keystroke path) and underlined by
     /// the editor. Empty until the first idle pass.
     pub(crate) spell_flags: Vec<(usize, usize)>,
+    /// Reusable scratch holding the active buffer's text for the idle spell pass
+    /// (#780), so `refresh_spell_flags` doesn't allocate a fresh whole-document
+    /// `String` every idle tick — it refills this in place instead.
+    spell_scratch: String,
     /// One-shot per-action backend override from the hybrid router (#372): set just
     /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
     /// backend. A `Cell` so the read-only `backend_spec` can take it.
@@ -457,6 +461,7 @@ impl App {
             smart_typography,
             theme,
             spell_flags: Vec::new(),
+            spell_scratch: String::new(),
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
@@ -604,12 +609,17 @@ impl App {
     /// keystroke path. The configured TODO marker is never flagged.
     fn refresh_spell_flags(&mut self) {
         let marker = self.project.manifest.todo_marker().to_ascii_lowercase();
-        let text = self.edit_buffer().text();
+        // Refill the persistent scratch in place rather than allocating a fresh
+        // whole-document `String` every idle tick (#780). Take it out so the
+        // buffer read and the write target don't alias `self`, then put it back.
+        let mut scratch = std::mem::take(&mut self.spell_scratch);
+        self.edit_buffer().text_into(&mut scratch);
         // Accept the TODO marker and any word in the project's custom dictionary
         // (#358), so invented names aren't flagged.
-        self.spell_flags = crate::spell::misspellings(&text, |w| {
+        self.spell_flags = crate::spell::misspellings(&scratch, |w| {
             w.eq_ignore_ascii_case(&marker) || self.project.is_accepted(w)
         });
+        self.spell_scratch = scratch;
     }
 
     /// Move the cursor to the next (`dir >= 0`) or previous misspelled word in the
