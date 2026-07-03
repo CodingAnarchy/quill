@@ -195,14 +195,27 @@ impl Project {
         self.books[self.active_book] = self.manifest.to_book();
         self.manifest.load_book(&self.books[index]);
         self.active_book = index;
-        // The old book's pending count changes no longer apply.
-        self.words_changed.clear();
         // Cache the new book's chapters (word count + front matter) once, then
         // band-order them — the same work `open` does for the first book.
-        for i in 0..self.manifest.chapters.len() {
-            self.read_chapter_cache(i);
+        self.activate_hoisted_book(true);
+    }
+
+    /// The bookkeeping every book activation shares once the target book has been
+    /// hoisted into the manifest and `active_book` set: the outgoing book's
+    /// pending count changes no longer apply, so drop them; optionally cache the
+    /// new book's chapters (word count + front matter) and band-order them — the
+    /// bounded work `open` does for the first book — then select the new book's
+    /// first chapter. `add_book` passes `cache = false` because its lone starter
+    /// chapter is already cached and its single-chapter list needs no reorder.
+    fn activate_hoisted_book(&mut self, cache: bool) {
+        // The old book's pending count changes no longer apply.
+        self.words_changed.clear();
+        if cache {
+            for i in 0..self.manifest.chapters.len() {
+                self.read_chapter_cache(i);
+            }
+            self.reorder_by_band();
         }
-        self.reorder_by_band();
         self.active = self
             .manifest
             .chapters
@@ -260,12 +273,9 @@ impl Project {
         // Hoist the new book into the active manifest so the editor opens on it.
         self.manifest.load_book(&self.books[index]);
         self.active_book = index;
-        self.words_changed.clear();
-        self.active = self
-            .manifest
-            .chapters
-            .first()
-            .map_or(String::new(), |c| c.file.clone());
+        // The starter chapter is already cached and its lone-chapter list needs
+        // no reorder, so skip the cache pass `set_active_book` runs.
+        self.activate_hoisted_book(false);
         self.save_manifest()?;
         Ok(index)
     }
@@ -318,16 +328,7 @@ impl Project {
         let active_changed = was_active;
         if active_changed {
             self.manifest.load_book(&self.books[self.active_book]);
-            self.words_changed.clear();
-            for i in 0..self.manifest.chapters.len() {
-                self.read_chapter_cache(i);
-            }
-            self.reorder_by_band();
-            self.active = self
-                .manifest
-                .chapters
-                .first()
-                .map_or(String::new(), |c| c.file.clone());
+            self.activate_hoisted_book(true);
         }
         self.save_manifest()?;
         Ok(active_changed)
@@ -383,12 +384,22 @@ impl Project {
             .expect("an unbounded range always yields a free name")
     }
 
+    /// Whether book `i` is the one currently hoisted into the live manifest, so
+    /// its per-book fields are read from the manifest rather than the stored
+    /// series list. A standalone novel (`books` empty) has its single book at
+    /// index 0, which is always the active one; any other index is out of range.
+    const fn is_active_book(&self, i: usize) -> bool {
+        if self.books.is_empty() {
+            i == 0
+        } else {
+            i == self.active_book
+        }
+    }
+
     /// The title of book `i`. The active book's live title comes from the
     /// manifest; the others from the stored series list. `None` if out of range.
     pub fn book_title(&self, i: usize) -> Option<&str> {
-        if self.books.is_empty() {
-            (i == 0).then_some(self.manifest.title.as_str())
-        } else if i == self.active_book {
+        if self.is_active_book(i) {
             Some(self.manifest.title.as_str())
         } else {
             self.books.get(i).map(|b| b.title.as_str())
@@ -399,7 +410,7 @@ impl Project {
     /// book (band-ordered), or the stored book's list otherwise. Empty if out of
     /// range.
     pub fn book_chapters(&self, i: usize) -> &[ChapterEntry] {
-        if self.books.is_empty() || i == self.active_book {
+        if self.is_active_book(i) {
             &self.manifest.chapters
         } else {
             self.books.get(i).map_or(&[], |b| b.chapters.as_slice())
@@ -408,7 +419,7 @@ impl Project {
 
     /// The `parts` overlay of book `i`, if any (#330).
     pub fn book_parts(&self, i: usize) -> Option<&[Part]> {
-        let parts = if self.books.is_empty() || i == self.active_book {
+        let parts = if self.is_active_book(i) {
             self.manifest.parts.as_ref()
         } else {
             self.books.get(i).and_then(|b| b.parts.as_ref())
@@ -427,7 +438,7 @@ impl Project {
     /// Book `i`'s subtitle, if any (#332): the active book's from the manifest,
     /// the others from the stored series list.
     pub fn book_subtitle(&self, i: usize) -> Option<&str> {
-        if self.books.is_empty() || i == self.active_book {
+        if self.is_active_book(i) {
             self.manifest.subtitle.as_deref()
         } else {
             self.books.get(i).and_then(|b| b.subtitle.as_deref())
@@ -436,7 +447,7 @@ impl Project {
 
     /// Book `i`'s epigraph, if any (#332).
     pub fn book_epigraph(&self, i: usize) -> Option<Epigraph> {
-        if self.books.is_empty() || i == self.active_book {
+        if self.is_active_book(i) {
             self.manifest.epigraph()
         } else {
             self.books
@@ -456,7 +467,7 @@ impl Project {
 
     /// The grouping term ("part", "act", …) for book `i`, defaulting to "part".
     pub fn book_part_label(&self, i: usize) -> &str {
-        if self.books.is_empty() || i == self.active_book {
+        if self.is_active_book(i) {
             self.manifest.part_label()
         } else {
             self.books
