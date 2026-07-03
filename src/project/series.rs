@@ -42,12 +42,39 @@ pub struct Book {
     pub part_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_on_threshold: Option<usize>,
+    /// Per-book publishing metadata (#810): each book in a series is a distinct
+    /// product with its own ISBN (KDP/IngramSpark treat each ISBN as a separate
+    /// title) and often its own copyright year / rights holder, so these ride per
+    /// `[[books]]` entry rather than once at the series root. All optional; a book
+    /// that sets none falls back to the series/active-book metadata at export time
+    /// (see [`Project::book_publishing`]). Language is a package-level concern, so
+    /// it stays series-level on the [`Manifest`] and is not repeated here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isbn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pub_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rights: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goals: Option<Goals>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parts: Option<Vec<Part>>,
     #[serde(default)]
     pub chapters: Vec<ChapterEntry>,
+}
+
+/// A book's resolved publishing metadata (#810) — each field already resolved
+/// per book, falling back to the series/active-book value when the book leaves it
+/// unset. Produced by [`Project::book_publishing`] and turned into an
+/// `export::PubMeta` by the export layer (which adds the package-level language).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BookPublishing {
+    pub isbn: Option<String>,
+    pub publisher: Option<String>,
+    pub pub_date: Option<String>,
+    pub rights: Option<String>,
 }
 
 /// A multi-book project file: series-level metadata plus the ordered list of
@@ -127,6 +154,10 @@ impl Manifest {
         self.epigraph_by.clone_from(&book.epigraph_by);
         self.part_label.clone_from(&book.part_label);
         self.run_on_threshold = book.run_on_threshold;
+        self.isbn.clone_from(&book.isbn);
+        self.publisher.clone_from(&book.publisher);
+        self.pub_date.clone_from(&book.pub_date);
+        self.rights.clone_from(&book.rights);
         self.goals.clone_from(&book.goals);
         self.parts.clone_from(&book.parts);
         self.chapters.clone_from(&book.chapters);
@@ -143,6 +174,10 @@ impl Manifest {
             epigraph_by: self.epigraph_by.clone(),
             part_label: self.part_label.clone(),
             run_on_threshold: self.run_on_threshold,
+            isbn: self.isbn.clone(),
+            publisher: self.publisher.clone(),
+            pub_date: self.pub_date.clone(),
+            rights: self.rights.clone(),
             goals: self.goals.clone(),
             parts: self.parts.clone(),
             chapters: self.chapters.clone(),
@@ -449,6 +484,42 @@ impl Project {
         }
     }
 
+    /// Book `i`'s resolved publishing metadata (#810): its own per-book ISBN,
+    /// publisher, publication date, and rights line, each falling back to the
+    /// series/active-book value (the live [`Manifest`]) when the book leaves that
+    /// field unset. So a book with no per-book metadata reprints the series-level
+    /// metadata (the pre-#810 behavior), while a book that sets its own gets it.
+    ///
+    /// The active book reads its live values straight from the manifest; the
+    /// others read their stored per-book fields, then fall back to the manifest.
+    /// Language is a package-level concern kept once on the manifest, so it is not
+    /// part of this per-book resolution — the caller reads it from the manifest.
+    pub fn book_publishing(&self, i: usize) -> BookPublishing {
+        let m = &self.manifest;
+        if self.is_active_book(i) {
+            // The active book's live values already live on the manifest.
+            return BookPublishing {
+                isbn: m.isbn.clone(),
+                publisher: m.publisher.clone(),
+                pub_date: m.pub_date.clone(),
+                rights: m.rights.clone(),
+            };
+        }
+        let book = self.books.get(i);
+        // Per-book value when set, else the series/active-book value from the manifest.
+        let resolve = |book_field: Option<&str>, series_field: &Option<String>| {
+            book_field
+                .map(str::to_string)
+                .or_else(|| series_field.clone())
+        };
+        BookPublishing {
+            isbn: resolve(book.and_then(|b| b.isbn.as_deref()), &m.isbn),
+            publisher: resolve(book.and_then(|b| b.publisher.as_deref()), &m.publisher),
+            pub_date: resolve(book.and_then(|b| b.pub_date.as_deref()), &m.pub_date),
+            rights: resolve(book.and_then(|b| b.rights.as_deref()), &m.rights),
+        }
+    }
+
     /// Book `i`'s epigraph, if any (#332).
     pub fn book_epigraph(&self, i: usize) -> Option<Epigraph> {
         if self.is_active_book(i) {
@@ -528,6 +599,10 @@ mod tests {
             epigraph_by: Some("Anon".into()),
             part_label: Some("act".into()),
             run_on_threshold: Some(33),
+            isbn: Some("978-1-11-111111-1".into()),
+            publisher: Some("Second Press".into()),
+            pub_date: Some("2026".into()),
+            rights: Some("© 2026 A. Writer".into()),
             goals: Some(Goals {
                 words: 90_000,
                 chapters: 30,

@@ -5,6 +5,7 @@
 use super::*;
 use crate::project::Project;
 use std::fmt::Write;
+use std::io::{Cursor, Read};
 
 // --- Series export (#332) ---------------------------------------------------
 
@@ -207,4 +208,153 @@ fn the_progress_report_shows_a_series_total() {
 fn a_standalone_report_has_no_series_line() {
     let (app, _dir) = two_chapter_app("report-single");
     assert!(!report_text(&app).contains("series:"));
+}
+
+// --- Per-book publishing metadata (#810) ------------------------------------
+
+/// Read one part out of a built `.docx` (a zip) as UTF-8 text — for asserting on
+/// the emitted `word/document.xml` copyright blocks.
+fn docx_part(bytes: &[u8], name: &str) -> String {
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid docx zip");
+    let mut file = zip.by_name(name).expect("part present");
+    let mut text = String::new();
+    file.read_to_string(&mut text).expect("utf-8 part");
+    text
+}
+
+/// A two-book series whose `[[books]]` entries carry the given per-book
+/// publishing fields, for the #810 per-book copyright tests. Each `book_meta` is
+/// the extra TOML lines (ISBN/rights/…) for that book, appended to its title
+/// before its chapters. The active book (book one) starts hoisted, as always.
+fn series_pub_app(name: &str, book_meta: [&str; 2]) -> (App, TempProject) {
+    let dir = crate::testutil::scratch_dir("books", name);
+    for sub in ["b1", "b2"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+    }
+    fs::write(dir.join("b1/one.md"), "alpha one\n").unwrap();
+    fs::write(dir.join("b2/one.md"), "beta one\n").unwrap();
+    let mut manifest = String::from("title = \"The Saga\"\nauthor = \"A. Writer\"\n\n");
+    write!(
+        manifest,
+        "[[books]]\ntitle = \"Book One\"\n{}\n",
+        book_meta[0]
+    )
+    .unwrap();
+    manifest.push_str("[[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n");
+    write!(
+        manifest,
+        "[[books]]\ntitle = \"Book Two\"\n{}\n",
+        book_meta[1]
+    )
+    .unwrap();
+    manifest.push_str("[[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n");
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn series_export_stamps_each_book_its_own_copyright() {
+    use crate::mode::{ExportFormat, ExportScope};
+    // Two books, each with its own distinct ISBN and rights line in `[[books]]`.
+    let (mut app, dir) = series_pub_app(
+        "export-per-book-copyright",
+        [
+            "isbn = \"978-0-00-000000-0\"\nrights = \"© 2024 A. Writer\"",
+            "isbn = \"978-1-11-111111-1\"\nrights = \"© 2026 B. Author\"",
+        ],
+    );
+    app.run_export(ExportFormat::Docx, ExportScope::Series);
+    let xml = docx_part(
+        &fs::read(dir.join("export/the-saga.docx")).unwrap(),
+        "word/document.xml",
+    );
+    // Each book's OWN ISBN and rights reach the document — not the active book's
+    // reused for both. In reading order, book two's follow book one's.
+    for needle in [
+        "© 2024 A. Writer",
+        "ISBN: 978-0-00-000000-0",
+        "© 2026 B. Author",
+        "ISBN: 978-1-11-111111-1",
+    ] {
+        assert!(xml.contains(needle), "missing {needle} in:\n{xml}");
+    }
+    let first = xml.find("ISBN: 978-0-00-000000-0").expect("book one isbn");
+    let second = xml.find("ISBN: 978-1-11-111111-1").expect("book two isbn");
+    assert!(
+        first < second,
+        "each book's own copyright, in reading order"
+    );
+}
+
+#[test]
+fn a_book_with_no_metadata_falls_back_to_the_series_metadata() {
+    use crate::mode::{ExportFormat, ExportScope};
+    // Book one (the active book) carries the metadata; book two carries none, so
+    // its divider copyright falls back to the series/active-book metadata.
+    let (mut app, dir) = series_pub_app(
+        "export-fallback-copyright",
+        [
+            "isbn = \"978-0-00-000000-0\"\nrights = \"© 2024 A. Writer\"",
+            "",
+        ],
+    );
+    app.run_export(ExportFormat::Docx, ExportScope::Series);
+    let xml = docx_part(
+        &fs::read(dir.join("export/the-saga.docx")).unwrap(),
+        "word/document.xml",
+    );
+    // No stray second ISBN — the metadata-less book does not invent one, and it
+    // isn't left blank either: it falls back to the series/active-book copyright.
+    // The series ISBN appears on the front-matter copyright page and under each
+    // book (book one's own, book two's fallback), so it repeats across the books.
+    assert!(
+        xml.matches("ISBN: 978-0-00-000000-0").count() >= 2,
+        "the metadata-less book falls back to the series ISBN under its title:\n{xml}"
+    );
+    assert!(
+        !xml.contains("ISBN: 978-1-11-111111-1"),
+        "no other book's ISBN leaks onto the fallback book:\n{xml}"
+    );
+    // Book two's own title still leads its (fallback) copyright, in reading order.
+    let two = xml.find("Book Two").expect("book two title");
+    let rights_after_two = xml[two..].find("© 2024 A. Writer");
+    assert!(
+        rights_after_two.is_some(),
+        "the fallback copyright is reprinted under book two:\n{xml}"
+    );
+}
+
+#[test]
+fn a_standalone_export_copyright_is_unchanged() {
+    use crate::mode::{ExportFormat, ExportScope};
+    // A standalone novel (no `[[books]]`) with publishing metadata renders exactly
+    // one copyright block, stamped with its single manifest's metadata — the
+    // per-book series plumbing leaves the single-book path untouched.
+    let dir = crate::testutil::scratch_dir("books", "export-standalone-copyright");
+    fs::write(dir.join("one.md"), "alpha\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Solo\"\nauthor = \"A. Writer\"\n\
+         isbn = \"978-0-00-000000-0\"\nrights = \"© 2024 A. Writer\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    let mut app = open_test_app(&dir);
+    let _guard = TempProject::new(dir.clone());
+    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+    let xml = docx_part(
+        &fs::read(dir.join("export/solo.docx")).unwrap(),
+        "word/document.xml",
+    );
+    assert!(
+        xml.contains("978-0-00-000000-0") && xml.contains("© 2024 A. Writer"),
+        "the standalone book's own copyright:\n{xml}"
+    );
+    // Exactly one copyright page — no per-book series reprint on a standalone.
+    assert_eq!(
+        xml.matches("ISBN: 978-0-00-000000-0").count(),
+        1,
+        "one copyright block on a standalone:\n{xml}"
+    );
 }
