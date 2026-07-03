@@ -507,8 +507,11 @@ impl Pane for NavPane<'_> {
 
         // Count each chapter once for this frame, then reuse for the rows and
         // the total — so the active chapter's live count isn't recomputed twice.
+        // Reuse the `active` index resolved above: `chapter_word_count` would
+        // otherwise re-run the O(n) `active_index()` scan per chapter, making
+        // the counts loop O(chapters²) per frame.
         let counts: Vec<usize> = (0..app.project.manifest.chapters.len())
-            .map(|i| app.chapter_word_count(i))
+            .map(|i| app.chapter_word_count_with_active(i, active))
             .collect();
         // Resolve each chapter's band once, like the counts above.
         let bands: Vec<Band> = (0..counts.len())

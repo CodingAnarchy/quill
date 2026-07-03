@@ -107,7 +107,15 @@ impl App {
     /// Word count for chapter `index`: live from the buffer when it's active
     /// (updates as you type), otherwise the count cached on the chapter entry.
     pub fn chapter_word_count(&self, index: usize) -> usize {
-        if index == self.project.active_index() {
+        self.chapter_word_count_with_active(index, self.project.active_index())
+    }
+
+    /// Like [`Self::chapter_word_count`] but with the active index already
+    /// resolved. `active_index()` is an O(n) scan, so callers looping over every
+    /// chapter (e.g. the per-frame outline render) resolve it once and pass it
+    /// in here to avoid an accidental O(chapters²) per frame.
+    pub fn chapter_word_count_with_active(&self, index: usize, active: usize) -> usize {
+        if index == active {
             self.buffer.word_count()
         } else {
             self.project.chapter_words(index)
