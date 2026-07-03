@@ -516,18 +516,16 @@ fn utf16be_hex(c: char) -> String {
         })
 }
 
-/// Glyph ids for `text` in the `style` face (body or `heading`), face→fallback
-/// resolved, as content hex runs grouped by resource name (`<48656C…>`).
+/// Glyph ids for `text`, `resolver` mapping each char to its `(resource name, gid)`
+/// (or `None` to drop it), as content hex runs grouped by resource name (`<48656C…>`).
 /// Unrenderable characters are dropped (#638).
-pub(super) fn glyph_run(
-    fonts: &Fonts,
+fn glyph_run_with(
     text: &str,
-    style: FontStyle,
-    heading: bool,
+    resolver: impl Fn(char) -> Option<(&'static str, u16)>,
 ) -> Vec<(&'static str, String)> {
     let mut runs: Vec<(&'static str, String)> = Vec::new();
     for c in text.chars() {
-        let Some((name, gid)) = fonts.resolve(c, style, heading) else {
+        let Some((name, gid)) = resolver(c) else {
             continue;
         };
         match runs.last_mut() {
@@ -538,20 +536,22 @@ pub(super) fn glyph_run(
     runs
 }
 
+/// Glyph ids for `text` in the `style` face (body or `heading`), face→fallback
+/// resolved, as content hex runs grouped by resource name (`<48656C…>`).
+/// Unrenderable characters are dropped (#638).
+pub(super) fn glyph_run(
+    fonts: &Fonts,
+    text: &str,
+    style: FontStyle,
+    heading: bool,
+) -> Vec<(&'static str, String)> {
+    glyph_run_with(text, |c| fonts.resolve(c, style, heading))
+}
+
 /// Glyph ids for `text` in the monospace face (mono→fallback resolved), as content
 /// hex runs grouped by resource name (#524). Unrenderable characters are dropped.
 pub(super) fn glyph_run_mono(fonts: &Fonts, text: &str) -> Vec<(&'static str, String)> {
-    let mut runs: Vec<(&'static str, String)> = Vec::new();
-    for c in text.chars() {
-        let Some((name, gid)) = fonts.resolve_mono(c) else {
-            continue;
-        };
-        match runs.last_mut() {
-            Some((n, hex)) if *n == name => write!(hex, "{gid:04X}").unwrap(),
-            _ => runs.push((name, format!("{gid:04X}"))),
-        }
-    }
-    runs
+    glyph_run_with(text, |c| fonts.resolve_mono(c))
 }
 
 /// A `/FontFile2` stream: the (already-subset) TrueType program, FlateDecode-
@@ -593,13 +593,13 @@ pub(super) const fn take(next: &mut u32) -> u32 {
 /// ASCII literal, or a UTF-16BE hex string (with BOM) when it has non-ASCII.
 pub(super) fn pdf_text_string(text: &str) -> String {
     if text.is_ascii() {
-        let escaped: String = text
-            .chars()
-            .flat_map(|c| match c {
-                '(' | ')' | '\\' => vec!['\\', c],
-                _ => vec![c],
-            })
-            .collect();
+        let escaped = text.chars().fold(String::new(), |mut s, c| {
+            if matches!(c, '(' | ')' | '\\') {
+                s.push('\\');
+            }
+            s.push(c);
+            s
+        });
         format!("({escaped})")
     } else {
         let hex: String = std::iter::once("FEFF".to_string())
