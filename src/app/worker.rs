@@ -40,7 +40,13 @@ pub(super) fn recommended_model() -> Option<&'static ai::model_select::Model> {
 /// outside the project). Run on a worker thread.
 #[cfg(feature = "local")]
 pub(super) fn download_model(model: &ai::model_select::Model) -> Result<(), String> {
-    let hub = hf_hub::api::sync::Api::new().map_err(|e| format!("hf-hub: {e}"))?;
+    // Disable hf-hub's indicatif progress bar (#727): Quill owns the alternate
+    // screen, so the library's raw stderr writes would corrupt the TUI. Progress
+    // is surfaced through Quill's own UI instead.
+    let hub = hf_hub::api::sync::ApiBuilder::new()
+        .with_progress(false)
+        .build()
+        .map_err(|e| format!("hf-hub: {e}"))?;
     hub.model(model.gguf_repo.to_string())
         .get(model.gguf_file)
         .map_err(|e| format!("download {}: {e}", model.gguf_file))?;
