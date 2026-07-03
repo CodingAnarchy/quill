@@ -35,28 +35,91 @@ pub(super) fn recommended_model() -> Option<&'static ai::model_select::Model> {
     ai::local::LocalBackend::recommended_model()
 }
 
+/// A `hf-hub` progress sink that feeds Quill's shared [`DownloadProgress`] counter
+/// (#813) instead of the disabled indicatif bar (#727). `hf-hub` calls `init` with
+/// each file's byte size and `update` with every chunk read; we fold both into the
+/// combined counter the UI thread renders. `finish` is a no-op — completion is
+/// reported by the download task's terminal poll, not the per-file callback.
+#[cfg(feature = "local")]
+struct ProgressSink(std::sync::Arc<super::models::DownloadProgress>);
+
+#[cfg(feature = "local")]
+impl hf_hub::api::Progress for ProgressSink {
+    fn init(&mut self, size: usize, _filename: &str) {
+        self.0.add_total(size as u64);
+    }
+    fn update(&mut self, size: usize) {
+        self.0.add_done(size as u64);
+    }
+    fn finish(&mut self) {}
+}
+
 /// Fetch `model`'s GGUF + tokenizer into the `hf-hub` cache (#382), without
 /// loading it — the explicit "download now" the manager offers (resumable, cached
-/// outside the project). Run on a worker thread.
+/// outside the project). Run on a worker thread. `progress` is the shared counter
+/// the fetch drives so Quill can render live progress (#813).
 #[cfg(feature = "local")]
-pub(super) fn download_model(model: &ai::model_select::Model) -> Result<(), String> {
+pub(super) fn download_model(
+    model: &ai::model_select::Model,
+    progress: &std::sync::Arc<super::models::DownloadProgress>,
+) -> Result<(), String> {
     // Disable hf-hub's indicatif progress bar (#727): Quill owns the alternate
     // screen, so the library's raw stderr writes would corrupt the TUI. Progress
-    // is surfaced through Quill's own UI instead.
+    // is surfaced through Quill's own UI instead, via the shared counter (#813).
     let hub = hf_hub::api::sync::ApiBuilder::new()
         .with_progress(false)
         .build()
         .map_err(|e| format!("hf-hub: {e}"))?;
-    hub.model(model.gguf_repo.to_string())
-        .get(model.gguf_file)
-        .map_err(|e| format!("download {}: {e}", model.gguf_file))?;
-    hub.model(model.tokenizer_repo.to_string())
-        .get("tokenizer.json")
-        .map_err(|e| format!("download tokenizer: {e}"))?;
+    fetch_with_progress(
+        model.gguf_repo,
+        model.gguf_file,
+        &hub.model(model.gguf_repo.to_string()),
+        progress,
+    )
+    .map_err(|e| format!("download {}: {e}", model.gguf_file))?;
+    fetch_with_progress(
+        model.tokenizer_repo,
+        "tokenizer.json",
+        &hub.model(model.tokenizer_repo.to_string()),
+        progress,
+    )
+    .map_err(|e| format!("download tokenizer: {e}"))?;
     Ok(())
 }
+
+/// Fetch `filename` from the `repo`-named repo, reusing the cached copy if present
+/// (like `ApiRepo::get`) and otherwise downloading it while driving `progress`
+/// (#813). `ApiRepo::download_with_progress` always re-downloads and `ApiRepo::get`
+/// gives no progress, so the cache is probed directly here: a cached file
+/// short-circuits the fetch (preserving the manager's "already downloaded"
+/// resumability) and still adds its size to `done` + `total`, so a partly-cached
+/// multi-file download reads an honest 100%.
+#[cfg(feature = "local")]
+fn fetch_with_progress(
+    repo_id: &str,
+    filename: &str,
+    api_repo: &hf_hub::api::sync::ApiRepo,
+    progress: &std::sync::Arc<super::models::DownloadProgress>,
+) -> Result<std::path::PathBuf, hf_hub::api::sync::ApiError> {
+    if let Some(path) = hf_hub::Cache::from_env()
+        .model(repo_id.to_string())
+        .get(filename)
+    {
+        // Already cached: count its bytes so the combined percentage stays honest.
+        if let Ok(len) = std::fs::metadata(&path).map(|m| m.len()) {
+            progress.add_total(len);
+            progress.add_done(len);
+        }
+        return Ok(path);
+    }
+    api_repo.download_with_progress(filename, ProgressSink(progress.clone()))
+}
+
 #[cfg(not(feature = "local"))]
-pub(super) fn download_model(_model: &ai::model_select::Model) -> Result<(), String> {
+pub(super) fn download_model(
+    _model: &ai::model_select::Model,
+    _progress: &std::sync::Arc<super::models::DownloadProgress>,
+) -> Result<(), String> {
     Err(LOCAL_UNAVAILABLE.to_string())
 }
 
@@ -953,6 +1016,9 @@ mod local_model_files_tests {
     //! `hf-hub` cache. Ignored: needs network + disk. Uses the smallest model
     //! (~400 MB). Run with:
     //! `cargo test --features local download_status_remove -- --ignored --nocapture`
+    use std::sync::Arc;
+
+    use super::super::models::DownloadProgress;
     use crate::ai::model_select::MODELS;
 
     #[test]
@@ -962,7 +1028,15 @@ mod local_model_files_tests {
         super::remove_model_files(model).expect("clean start"); // ignore prior state
         assert!(!super::model_downloaded(model), "absent before download");
 
-        super::download_model(model).expect("download");
+        // The real fetch drives the shared progress counter; a live download ends
+        // with `done == total` (both files fully fetched).
+        let progress = Arc::new(DownloadProgress::new());
+        super::download_model(model, &progress).expect("download");
+        let (done, total) = progress.snapshot();
+        assert!(
+            total > 0 && done == total,
+            "progress reached 100%: {done}/{total}"
+        );
         assert!(super::model_downloaded(model), "present after download");
 
         super::remove_model_files(model).expect("remove");
