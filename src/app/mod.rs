@@ -202,9 +202,25 @@ pub struct App {
     /// author initializes a repository.
     pub under_vc: bool,
     /// Count of uncommitted changes (#132), cached for the status bar. Refreshed
-    /// on idle and after save / commit / init — never per frame. Zero when clean
+    /// after save / commit / init (when it can actually have changed) and on a
+    /// bounded interval to catch external edits — never per idle tick from pure
+    /// typing (#779), which can't change git status until a save. Zero when clean
     /// or not under version control.
     pub vc_changes: usize,
+    /// Whether the working tree may have changed since the last status walk (#779):
+    /// set by a save / commit / init, so the next idle tick recomputes the count
+    /// instead of walking the tree after every input burst. The interval fallback
+    /// ([`Self::last_vc_refresh`]) still catches edits made outside Quill.
+    vc_status_dirty: bool,
+    /// When the working-tree status was last recomputed (#779), for the interval
+    /// fallback that picks up external edits even when nothing in-app marked the
+    /// status dirty.
+    last_vc_refresh: std::time::Instant,
+    /// The off-thread working-tree status walk (#779): a `.gitignore`-respecting
+    /// stat walk is the heaviest thing on the idle tick, so it runs on a worker and
+    /// its resulting change count lands via [`Self::refresh_vc_status_on_idle`],
+    /// never blocking the UI thread.
+    vc_status_task: Task<usize>,
     /// The open full-screen overlay (progress report, analysis report, or AI
     /// answer), if any — read-only, scrollable, dismissed by any other key.
     /// Pre-rendered once on open so it isn't rebuilt per frame. A single slot:
@@ -464,6 +480,9 @@ impl App {
             browser_opened_outline: false,
             under_vc,
             vc_changes: 0,
+            vc_status_dirty: false,
+            last_vc_refresh: std::time::Instant::now(),
+            vc_status_task: Task::idle(),
             overlay: None,
             viewport_height: 0,
             wrap_width: std::cell::Cell::new(72),
@@ -574,7 +593,7 @@ impl App {
         self.refresh_spell_flags();
         self.sync_annotations();
         self.tally_words();
-        self.refresh_vc_status();
+        self.refresh_vc_status_on_idle();
         self.capture_recovery();
         // Mark this input burst's end, so autosave fires only after the
         // configured seconds of genuine idle (#409).

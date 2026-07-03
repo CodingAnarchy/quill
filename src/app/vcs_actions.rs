@@ -15,16 +15,100 @@ pub struct VcMsg {
     reload: bool,
 }
 
+/// How long the cached uncommitted-changes count may stand before the idle path
+/// recomputes it to catch edits made outside Quill (#779). Long enough that pure
+/// typing doesn't re-walk the tree every input burst, short enough that an
+/// external change surfaces promptly.
+const VC_STATUS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(4);
+
 impl App {
-    /// Refresh the cached uncommitted-changes count (#132). Cheap (stat-based) but
-    /// not free, so it's called on idle and after save / commit / init — never per
-    /// frame. Zero when the project isn't under version control.
+    /// Refresh the cached uncommitted-changes count (#132) synchronously — a
+    /// `.gitignore`-respecting working-tree walk. Called after commit / init /
+    /// restore / pull, where the status has demonstrably just changed and the
+    /// count must be current before the next frame. The per-idle-tick refresh
+    /// takes the debounced, off-thread [`refresh_vc_status_on_idle`] path instead
+    /// (#779). Zero when the project isn't under version control.
     pub(crate) fn refresh_vc_status(&mut self) {
         self.vc_changes = if self.under_vc {
             crate::vcs::status(&self.project.root).map_or(0, |s| s.count())
         } else {
             0
         };
+        // The count is current now; reset the interval clock and clear the pending
+        // recompute so the idle path doesn't immediately redo this walk.
+        self.last_vc_refresh = std::time::Instant::now();
+        self.vc_status_dirty = false;
+    }
+
+    /// Mark that the working tree may have changed (#779), so the next idle tick
+    /// recomputes the uncommitted-changes count off-thread. Called from the save
+    /// path, where an in-app edit was just written to disk — the one moment pure
+    /// typing can flip git status — without blocking the save on a status walk.
+    pub(crate) const fn mark_vc_status_dirty(&mut self) {
+        self.vc_status_dirty = true;
+    }
+
+    /// The idle-tick refresh of the uncommitted-changes count (#779). Unlike the
+    /// synchronous [`refresh_vc_status`], this never walks the tree on the UI
+    /// thread and never walks it merely because the author typed: it recomputes
+    /// only when a save marked the status dirty or the bounded interval has
+    /// elapsed (the fallback that catches external edits), and it runs the walk on
+    /// a worker thread so a large repository can't stutter the editor.
+    pub(crate) fn refresh_vc_status_on_idle(&mut self) {
+        // First, land a finished walk's count.
+        if let Poll::Ready(count) = self.vc_status_task.poll() {
+            self.vc_changes = count;
+        }
+        if !self.under_vc {
+            self.vc_changes = 0;
+            return;
+        }
+        // Only walk when the status can have changed (a save marked it dirty) or
+        // the interval fallback is due — never on every idle burst from typing.
+        let due = self.vc_status_dirty || self.last_vc_refresh.elapsed() >= VC_STATUS_INTERVAL;
+        if !due || self.vc_status_task.is_busy() {
+            return;
+        }
+        self.vc_status_dirty = false;
+        self.last_vc_refresh = std::time::Instant::now();
+        let root = self.project.root.clone();
+        self.vc_status_task
+            .spawn(move || crate::vcs::status(&root).map_or(0, |s| s.count()));
+    }
+
+    /// Whether an off-thread status walk is in flight or a save has marked the
+    /// count stale (#779) — the two states in which [`refresh_vc_status_on_idle`]
+    /// still has work to land. Lets a test spin the idle path deterministically to
+    /// a settled count without a timing race.
+    #[cfg(test)]
+    pub(crate) const fn vc_status_settling(&self) -> bool {
+        self.vc_status_dirty || self.vc_status_task.is_busy()
+    }
+
+    /// Backdate the interval clock so the next idle refresh's fallback is due
+    /// (#779), letting a test exercise the "catch an external edit" path without
+    /// waiting real wall-clock seconds.
+    #[cfg(test)]
+    pub(crate) fn expire_vc_status_interval_for_test(&mut self) {
+        self.last_vc_refresh = std::time::Instant::now()
+            .checked_sub(VC_STATUS_INTERVAL)
+            .unwrap_or_else(std::time::Instant::now);
+    }
+
+    /// Drive the debounced idle status refresh (#779) to completion for tests:
+    /// tick the idle path until a save-marked walk has been spawned and its count
+    /// applied, so an assertion sees the settled `vc_changes` rather than racing
+    /// the worker thread. Bounded so a stuck walk can't hang the test.
+    #[cfg(test)]
+    pub(crate) fn settle_vc_status(&mut self) {
+        for _ in 0..10_000 {
+            self.refresh_vc_status_on_idle();
+            if !self.vc_status_settling() {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("vc status never settled");
     }
 
     /// Put the project under version control, or report that it already is (#130).
