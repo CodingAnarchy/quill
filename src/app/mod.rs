@@ -569,7 +569,14 @@ impl App {
     pub fn edit_buffer(&self) -> &Buffer {
         match &self.mode {
             Mode::EditMeta(m) => &m.buffer,
-            Mode::BibleReview(r) if r.editing.is_some() => r.editing.as_ref().unwrap(),
+            Mode::BibleReview(r) => {
+                if let Some(b) = &r.editing {
+                    return b;
+                }
+                self.manuscript
+                    .as_ref()
+                    .map_or(&self.buffer, Manuscript::buffer)
+            }
             _ => self
                 .manuscript
                 .as_ref()
@@ -580,7 +587,15 @@ impl App {
     pub fn edit_buffer_mut(&mut self) -> &mut Buffer {
         match &mut self.mode {
             Mode::EditMeta(m) => &mut m.buffer,
-            Mode::BibleReview(r) if r.editing.is_some() => r.editing.as_mut().unwrap(),
+            Mode::BibleReview(r) => {
+                if let Some(b) = &mut r.editing {
+                    return b;
+                }
+                match &mut self.manuscript {
+                    Some(m) => m.buffer_mut(),
+                    None => &mut self.buffer,
+                }
+            }
             _ => match &mut self.manuscript {
                 Some(m) => m.buffer_mut(),
                 None => &mut self.buffer,
