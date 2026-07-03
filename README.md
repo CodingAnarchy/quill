@@ -43,6 +43,11 @@ keystrokes that stay out of the way.
   flow through it, faint part and front/back-matter section headers mark each
   structural transition (render-only, never in the buffer), so you always know
   which part you're in.
+- **Corkboard** — an index-card overview of a chapter's scenes (one card per
+  heading), run from the command palette (Ctrl-K). Navigate the cards, jump the
+  cursor to a scene, reorder scenes (heading and prose move together), cycle a
+  scene's status, and write a one-line synopsis — all kept in front matter, out
+  of the prose. A manuscript-wide corkboard spans every chapter of the book.
 - **Split panes** — keep a reference beside the prose with Vim-style windows
   (Ctrl-W): split the editor, open another chapter / a story-bible entry / a
   docked report in a second pane, switch focus, resize, and close. Panes collapse
@@ -218,12 +223,14 @@ keystrokes that stay out of the way.
   drafts or rewrites your prose. Talking to the Claude API (prompt caching, the
   Batch API, structured outputs), it keeps a human-readable **story bible** in
   the project and offers: character profiles & arcs; a timeline with continuity
-  findings; a setting / worldbuilding bible with rule-break findings;
-  outline / beat-sheet scaffolding (with `xxx` gap markers); name & term
-  consistency; prose & style and editorial reads (findings, never fixes); an
-  in-context **thesaurus** (candidate words for a slot you pick); notes import
-  into the bible; "ask the manuscript" Q&A; and off-manuscript artifacts
-  (synopsis, blurb, query letter, marketing / social copy). Your hand-edits to
+  findings; a setting / worldbuilding bible with rule-break findings; a
+  **plot-thread / arc tracker** that surfaces dangling threads; outline /
+  beat-sheet scaffolding (with `xxx` gap markers); name & term consistency; a
+  **name generator**; prose & style and editorial reads (findings, never fixes);
+  an in-context **thesaurus** (candidate words for a slot you pick); notes import
+  into the bible; grounded "ask the manuscript" Q&A with jumpable citations; and
+  off-manuscript artifacts (synopsis, blurb, query letter, marketing / social
+  copy). Your hand-edits to
   the bible are ground truth on the next pass — **Browse story bible**
   (`bible:browse`, from the `Ctrl-K` menu) lists the files under `bible/`
   (characters, timeline, setting, outline) and opens the selected one in an
@@ -235,12 +242,11 @@ keystrokes that stay out of the way.
   **routing policy** (`[ai] routing`) that picks per action — keeping cheap,
   frequent work on-device and reserving the paid cloud model for the passes whose
   size needs it, surfacing the choice (cloud $ vs. free local) when it matters.
-  With several local models available (choose them in the **Local AI models**
+  With several **Qwen3** models available (choose them in the **Local AI models**
   manager, `Ctrl-K`, or via `[ai] local_models`), the router also picks the
   right-sized one per request — a small model for a quick lookup, a larger one
-  for a heavy pass — and, with an **extended-context** model downloaded (a
-  ~1M-token Qwen variant), even a whole-manuscript pass can run on-device instead
-  of in the cloud. Full design, model choices, and privacy model in
+  for a heavy pass — and the manager is memory-aware, so it only offers models
+  that fit the machine. Full design, model choices, and privacy model in
   [`docs/ai-features.md`](docs/ai-features.md).
 
 - **Assistant pane** — open a conversational assistant docked beside the prose
@@ -437,16 +443,19 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | -------------- | ------------------------------- |
 | *(typing)*     | insert text                     |
 | Arrows         | move cursor                     |
+| Mouse          | click to position the cursor; scroll-wheel to scroll |
 | Home / End     | start / end of line             |
 | F1             | open the built-in user's guide  |
 | Ctrl-Z / Ctrl-Y| undo / redo                     |
 | Ctrl-F         | find (then `r` to replace)      |
 | Ctrl-S         | save                            |
 | Ctrl-Q / Ctrl-C| quit (prompts if unsaved)       |
-| Ctrl-O         | toggle the chapter pane         |
+| Ctrl-O         | toggle the chapter / outline pane (press again to focus it, then Enter jumps to the selected heading) |
 | Ctrl-R         | progress report (any key closes)|
+| Ctrl-T         | analysis report (any key closes)|
 | Ctrl-L         | toggle continuous manuscript    |
-| Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), Vellum (`.docx`), or EPUB (`.epub`) → `export/` |
+| Ctrl-A         | AI command palette              |
+| Ctrl-E         | export menu: Markdown, Word (`.docx`), Scrivener (`.scriv`), Vellum (`.docx`), EPUB (`.epub`), or PDF (`.pdf`, screen and print-interior) → `export/` |
 | Ctrl-K         | run action: one menu for save, export, the reports, and the AI passes (unavailable ones say why) |
 | Ctrl-X         | run workflow: pick one of your defined action sequences and run it |
 | Ctrl-B         | browse projects: switch to a recently-opened project, or press `b` to browse the filesystem for any project (saves the current first) |
