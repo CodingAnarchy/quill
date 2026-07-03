@@ -73,10 +73,11 @@ const METAL_WORKING_SET_FRACTION: f64 = 0.67;
 const HEADROOM_RESERVE_GB: f64 = 4.0;
 
 /// Bytes per element in the KV cache. The candle path
-/// (`candle_transformers::models::quantized_qwen2`, 0.9) dequantizes to and
+/// (`candle_transformers::models::quantized_qwen2`, 0.11) dequantizes to and
 /// **caches K/V in f32** — there is no `to_dtype(f16/bf16)` in that model — so the
 /// cache is 4 bytes/element, double the fp16 figure often quoted for llama.cpp
-/// (#728). Revisit if a KV-quantized path lands.
+/// (#728). Still holds after the 0.11 bump (#735): even the newer `quantized_qwen3`
+/// path caches f32 (and unbounded) on GPU. Revisit if a KV-quantized path lands.
 const KV_BYTES_PER_ELEM: f64 = 4.0;
 
 /// Runtime overhead beyond weights + KV cache: activation buffers, the compute
