@@ -61,11 +61,67 @@ fn vc_status_reflects_uncommitted_changes() {
     commit_via_menu(&mut app, "snapshot");
     assert_eq!(app.vc_changes, 0, "clean working tree after a commit");
 
-    // Edit a chapter and save → the tree is dirty again (refreshed on idle).
+    // Edit a chapter and save → the tree is dirty again. The save marks the
+    // status stale (#779); the idle path recomputes it off-thread, so settle the
+    // walk before asserting.
     app.on_key(key(KeyCode::Char('X')));
     app.on_key(ctrl('s'));
-    app.on_idle();
+    app.settle_vc_status();
     assert!(app.vc_changes > 0, "dirty after a saved edit");
+}
+
+#[test]
+fn idle_typing_does_not_rewalk_git_status_but_a_save_does() {
+    let (mut app, _dir) = two_chapter_app("vc-idle-debounce");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "base"); // clean working tree
+    assert_eq!(app.vc_changes, 0, "clean after the initial commit");
+
+    // Pure typing then idle: the status walk must NOT run. The count can't have
+    // changed (nothing was saved), so the idle path leaves the tree unwalked and
+    // has no pending work to settle (#779).
+    type_str(&mut app, "unsaved edits");
+    app.on_idle();
+    assert!(
+        !app.vc_status_settling(),
+        "pure typing marks no status walk and spawns none"
+    );
+    assert_eq!(
+        app.vc_changes, 0,
+        "an unsaved edit doesn't change git status"
+    );
+
+    // Saving marks the status stale; the idle path then recomputes it off-thread
+    // and the count reflects the now-dirty tree.
+    app.on_key(ctrl('s'));
+    assert!(
+        app.vc_status_settling(),
+        "a save marks the status stale for the next idle tick"
+    );
+    app.settle_vc_status();
+    assert!(
+        app.vc_changes > 0,
+        "the status refreshes after a save — the saved edit is uncommitted"
+    );
+}
+
+#[test]
+fn the_interval_fallback_picks_up_an_external_edit() {
+    let (mut app, dir) = two_chapter_app("vc-external-edit");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "base"); // clean working tree
+    assert_eq!(app.vc_changes, 0, "clean after the initial commit");
+
+    // A change made outside Quill (no save marks it dirty). Force the interval
+    // fallback due, then let the idle path notice it — external edits still
+    // surface even when nothing in-app flagged the status (#779).
+    fs::write(dir.join("one.md"), "# One\n\nEdited outside Quill.\n").unwrap();
+    app.expire_vc_status_interval_for_test();
+    app.settle_vc_status();
+    assert!(
+        app.vc_changes > 0,
+        "the interval fallback re-walks the tree and sees the external edit"
+    );
 }
 
 /// The commit summaries shown in the open history view, newest first.

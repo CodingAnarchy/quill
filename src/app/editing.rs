@@ -294,6 +294,10 @@ impl App {
     /// buffer means there's nothing left to recover (#263), and either way we
     /// checkpoint today's momentum to the history log.
     fn finalize_save(&mut self) {
+        // A save is the one moment pure typing can change git status; flag it so
+        // the next idle tick recomputes the count off-thread (#779), rather than
+        // re-walking the tree on every idle burst.
+        self.mark_vc_status_dirty();
         if !self.edit_dirty() {
             self.clear_recovery();
         }
