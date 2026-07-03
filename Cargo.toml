@@ -88,9 +88,8 @@ strip = true
 # without breaking the build; promote a category to `deny` once it's clean. Only
 # `cargo clippy` honors these — normal `cargo build` is unaffected.
 #
-# Deliberately NOT enabled (high violation count with low signal): use_self,
-# missing_const_for_fn, doc_markdown, default_trait_access, suboptimal_flops, and
-# the cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
+# Deliberately NOT enabled: doc_markdown (noisy, low value) and the
+# cast_possible_*/cast_precision_loss/cast_sign_loss family (mostly benign
 # usize<->u16 conversions in TUI layout code).
 [lints.clippy]
 # Correctness-adjacent — most likely to be actual bugs.
@@ -107,6 +106,8 @@ assigning_clones = "warn"
 implicit_clone = "warn"
 needless_collect = "warn"
 or_fun_call = "warn"
+# Small but free FP wins (mul_add, etc.) — don't leave perf on the table.
+suboptimal_flops = "warn"
 
 # Idiom / clarity.
 map_unwrap_or = "warn"
@@ -126,9 +127,18 @@ cast_lossless = "warn"
 uninlined_format_args = "warn"
 unused_self = "warn"
 ignore_without_reason = "warn"
+# Prefer Self:: over the concrete type name inside impls (~948 sites, pure churn).
+use_self = "warn"
+# Push toward the T::default() convention over Default::default().
+default_trait_access = "warn"
 # Single binary crate with no external consumers, so pub(crate) == pub for us;
 # redundant pub(crate) on items in already-private modules is just noise to strip.
 redundant_pub_crate = "warn"
+
+# const-fn where possible. Nursery lint with occasional false positives (a fn that
+# can't be const on stable yet, or one kept non-const for future flexibility) —
+# silence those case-by-case with a local #[allow(clippy::missing_const_for_fn)].
+missing_const_for_fn = "warn"
 
 # Noisier / nursery — useful but flags more debatable cases; drop if too chatty.
 option_if_let_else = "warn"
