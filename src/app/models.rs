@@ -126,7 +126,7 @@ impl App {
             return;
         }
         if self.model_is_downloaded(id) {
-            self.message = Some(format!("Qwen2.5-{id} is already downloaded."));
+            self.message = Some(format!("Qwen3-{id} is already downloaded."));
             return;
         }
         if self.download_task.is_busy() {
@@ -137,7 +137,7 @@ impl App {
         self.download_task
             .spawn(move || (id, worker::download_model(model)));
         self.message = Some(format!(
-            "Downloading Qwen2.5-{}… (~{:.1} GB)",
+            "Downloading Qwen3-{}… (~{:.1} GB)",
             model.id(),
             model.size_gb
         ));
@@ -149,10 +149,10 @@ impl App {
         match self.download_task.poll() {
             Poll::Ready((id, Ok(()))) => {
                 self.refresh_downloaded_models();
-                self.message = Some(format!("Downloaded Qwen2.5-{id}."));
+                self.message = Some(format!("Downloaded Qwen3-{id}."));
             }
             Poll::Ready((id, Err(e))) => {
-                self.message = Some(format!("Download of Qwen2.5-{id} failed: {e}"));
+                self.message = Some(format!("Download of Qwen3-{id} failed: {e}"));
             }
             Poll::Pending => {}
             Poll::Died => self.message = Some("Model download failed.".into()),
@@ -162,12 +162,12 @@ impl App {
     /// Confirm removing a downloaded model from disk (#382).
     fn confirm_remove_model(&mut self, id: &'static str) {
         if !self.model_is_downloaded(id) {
-            self.message = Some(format!("Qwen2.5-{id} isn't downloaded."));
+            self.message = Some(format!("Qwen3-{id} isn't downloaded."));
             return;
         }
         self.open_prompt(
             Pending::ConfirmRemoveModel(id),
-            format!("Remove Qwen2.5-{id} from disk? (y/N)"),
+            format!("Remove Qwen3-{id} from disk? (y/N)"),
             "",
             None,
         );
@@ -185,9 +185,9 @@ impl App {
                     cache.remove(id); // forget the loaded model if it was cached
                 }
                 self.refresh_downloaded_models();
-                self.message = Some(format!("Removed Qwen2.5-{id} from disk."));
+                self.message = Some(format!("Removed Qwen3-{id} from disk."));
             }
-            Err(e) => self.message = Some(format!("Couldn't remove Qwen2.5-{id}: {e}")),
+            Err(e) => self.message = Some(format!("Couldn't remove Qwen3-{id}: {e}")),
         }
     }
 
@@ -245,10 +245,10 @@ mod tests {
     #[test]
     fn toggled_adds_then_removes() {
         let empty: Vec<String> = vec![];
-        let added = toggled(&empty, "7B");
-        assert_eq!(added, vec!["7B".to_string()]);
+        let added = toggled(&empty, "8B");
+        assert_eq!(added, vec!["8B".to_string()]);
         assert!(
-            toggled(&added, "7B").is_empty(),
+            toggled(&added, "8B").is_empty(),
             "toggling again removes it"
         );
     }
@@ -256,8 +256,8 @@ mod tests {
     #[test]
     fn local_models_toml_is_a_canonical_array() {
         // Listed out of catalog order and with an unknown id → canonical, filtered.
-        let ids = vec!["7B".to_string(), "0.5B".to_string(), "bogus".to_string()];
-        assert_eq!(local_models_toml(&ids), "[\"0.5B\", \"7B\"]");
+        let ids = vec!["8B".to_string(), "0.6B".to_string(), "bogus".to_string()];
+        assert_eq!(local_models_toml(&ids), "[\"0.6B\", \"8B\"]");
         assert_eq!(local_models_toml(&[]), "[]");
     }
 }

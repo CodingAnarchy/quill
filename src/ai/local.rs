@@ -1,6 +1,15 @@
-//! Local-model backend (#124): runs a quantized Qwen GGUF in-process with candle
-//! (Metal on Apple Silicon, CPU elsewhere), no daemon. Behind the `local` cargo
-//! feature so its heavy deps stay out of default builds.
+//! Local-model backend (#124): runs a quantized Qwen3 dense GGUF in-process with
+//! candle (Metal on Apple Silicon, CPU elsewhere), no daemon. Behind the `local`
+//! cargo feature so its heavy deps stay out of default builds.
+//!
+//! The on-device family is **Qwen3 dense** (#789), loaded through candle 0.11's
+//! `quantized_qwen3` path (drop-in `from_gguf`/`forward`, verified on Metal in
+//! #735). Qwen3 is a hybrid *reasoning* model: by default it prefixes its answer
+//! with a `<think>…</think>` block. That's fine for the constrained path (the
+//! schema rejects `<think>` from the first token, so it can never appear), but on
+//! the **unconstrained** path it would surface raw chain-of-thought as prose — so
+//! we disable it with Qwen3's `/no_think` soft switch in the prompt and strip any
+//! residual `<think>…</think>` span before returning ([`strip_think`]).
 //!
 //! Structured output is enforced by [`crate::ai::constrain`]: when a request
 //! carries a `json_schema`, the decode loop only ever accepts a token that keeps
@@ -16,7 +25,7 @@ use std::sync::Mutex;
 
 use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
-use candle_transformers::models::quantized_qwen2::ModelWeights as Qwen2;
+use candle_transformers::models::quantized_qwen3::ModelWeights as Qwen3;
 use tokenizers::Tokenizer;
 
 use crate::ai::constrain::Constraint;
@@ -30,7 +39,7 @@ const EOS_TOKENS: [u32; 2] = [151645, 151643]; // <|im_end|>, <|endoftext|>
 /// A loaded local model. `forward` mutates the model's KV cache, so it sits behind
 /// a `Mutex` to satisfy the `&self` [`Backend`] trait.
 pub struct LocalBackend {
-    model: Mutex<Qwen2>,
+    model: Mutex<Qwen3>,
     tokenizer: Tokenizer,
     device: Device,
 }
@@ -87,7 +96,7 @@ impl LocalBackend {
             std::fs::File::open(gguf_path).map_err(|e| internal(format!("open gguf: {e}")))?;
         let content =
             gguf_file::Content::read(&mut file).map_err(|e| internal(format!("read gguf: {e}")))?;
-        let model = Qwen2::from_gguf(content, &mut file, &device)
+        let model = Qwen3::from_gguf(content, &mut file, &device)
             .map_err(|e| internal(format!("load gguf: {e}")))?;
         Ok(Self {
             model: Mutex::new(model),
@@ -96,13 +105,27 @@ impl LocalBackend {
         })
     }
 
-    /// Build the Qwen chat-template prompt for a request (manuscript folded into
+    /// Build the Qwen3 chat-template prompt for a request (manuscript folded into
     /// the user turn, since the local backend has no separate cached block).
-    fn prompt(req: &Request) -> String {
-        let system = req
+    ///
+    /// Qwen3 is a hybrid reasoning model that emits a `<think>…</think>` block by
+    /// default. On the **unconstrained** path (`no_think == true`, i.e. no schema
+    /// is active) we append Qwen3's `/no_think` soft switch to the system prompt so
+    /// the model skips reasoning and answers directly — the documented way to turn
+    /// thinking off without a custom chat template. The constrained path leaves the
+    /// prompt untouched: the schema already rejects `<think>` from the first token,
+    /// so the reasoning block can never appear, and we don't want to perturb the
+    /// structured decode.
+    fn prompt(req: &Request, no_think: bool) -> String {
+        let base = req
             .system
             .as_deref()
             .unwrap_or("You are a helpful assistant.");
+        let system = if no_think {
+            format!("{base}\n/no_think")
+        } else {
+            base.to_string()
+        };
         let user = if req.cached_context.is_empty() {
             req.user.clone()
         } else {
@@ -114,9 +137,30 @@ impl LocalBackend {
     }
 }
 
+/// Strip a leading Qwen3 `<think>…</think>` reasoning block (and any surrounding
+/// whitespace) from an unconstrained answer (#789). `/no_think` normally keeps the
+/// model from emitting one at all — Qwen3 then produces an empty `<think></think>`
+/// or none — but this is the belt-and-suspenders that guarantees no chain-of-thought
+/// ever reaches the author as prose, whatever the model does. Only ever applied to
+/// the unconstrained text path; the constrained path can't produce a `<think>` tag
+/// (the schema rejects it) and its accumulated text is returned verbatim.
+fn strip_think(text: &str) -> String {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("<think>") {
+        if let Some(end) = rest.find("</think>") {
+            return rest[end + "</think>".len()..].trim_start().to_string();
+        }
+        // An unterminated <think> means the whole reply was reasoning — drop it.
+        return String::new();
+    }
+    text.trim_start().to_string()
+}
+
 impl Backend for LocalBackend {
     fn complete(&self, req: &Request) -> Result<Response, AiError> {
-        let prompt = Self::prompt(req);
+        // Unconstrained (no schema) → disable Qwen3's <think> reasoning (#789).
+        let no_think = req.json_schema.is_none();
+        let prompt = Self::prompt(req, no_think);
         let prompt_ids = self
             .tokenizer
             .encode(prompt, true)
@@ -129,6 +173,14 @@ impl Backend for LocalBackend {
             .lock()
             .map_err(|_| internal("model lock poisoned".into()))?;
         let mut constraint = req.json_schema.as_ref().map(Constraint::new);
+
+        // Each request is independent, but candle's Qwen3 KV cache is stateful and
+        // persists across `forward` calls — so it must be reset here, or the prompt
+        // pass (which starts at index_pos 0) would attend over stale keys from the
+        // previous completion and candle would fault on the mismatched cache length
+        // (#789). The old single-shot qwen2 test never issued a second completion on
+        // one backend, so this latent reuse bug only surfaced with the family switch.
+        model.clear_kv_cache();
 
         // Prompt pass → logits for the first generated token.
         let mut logits = self.step(&mut model, &prompt_ids, 0)?;
@@ -154,12 +206,17 @@ impl Backend for LocalBackend {
         }
 
         let text = match &constraint {
-            // The constraint accumulated the exact accepted text already.
+            // The constraint accumulated the exact accepted text already; it can't
+            // contain a <think> tag (the schema rejects it), so return it verbatim.
             Some(c) => c.text().to_string(),
-            None => self
-                .tokenizer
-                .decode(&generated, true)
-                .map_err(|e| internal(format!("decode: {e}")))?,
+            // Unconstrained: strip any residual Qwen3 <think>…</think> reasoning so
+            // the author never sees chain-of-thought as prose (#789).
+            None => strip_think(
+                &self
+                    .tokenizer
+                    .decode(&generated, true)
+                    .map_err(|e| internal(format!("decode: {e}")))?,
+            ),
         };
         Ok(Response {
             text,
@@ -182,8 +239,9 @@ impl Backend for LocalBackend {
 /// on-list. So the same [`tool_loop`] drives the assistant offline, and the
 /// prose-boundary guardrail (#308) holds identically: the model can only choose a
 /// vetted tool name (none writes prose), and the execution-layer allowlist
-/// re-checks it. Tool-use quality scales with the chosen model; whole-manuscript
-/// context needs an extended-context model (#378).
+/// re-checks it. Tool-use quality scales with the chosen model; a pass only routes
+/// on-device when it fits the model's window (Qwen3's native 40960, #378/#791) —
+/// a bigger pass than that goes to the cloud, since Qwen3 has no ~1M-context GGUF.
 impl Converse for LocalBackend {
     fn respond(&self, body: &serde_json::Value) -> Result<Turn, AiError> {
         let names = tool_loop::tool_names(body);
@@ -218,7 +276,7 @@ impl Converse for LocalBackend {
 
 impl LocalBackend {
     /// One forward pass; returns the last position's logits as `f32`.
-    fn step(&self, model: &mut Qwen2, tokens: &[u32], pos: usize) -> Result<Vec<f32>, AiError> {
+    fn step(&self, model: &mut Qwen3, tokens: &[u32], pos: usize) -> Result<Vec<f32>, AiError> {
         let input = Tensor::new(tokens, &self.device)
             .and_then(|t| t.unsqueeze(0))
             .map_err(|e| internal(format!("input tensor: {e}")))?;
@@ -370,7 +428,7 @@ fn build_hub() -> Result<hf_hub::api::sync::Api, hf_hub::api::sync::ApiError> {
 /// is appended so a genuine failure (offline, disk full) is still diagnosable.
 fn download_error(model: &model_select::Model, cause: impl std::fmt::Display) -> AiError {
     AiError::NotConfigured(format!(
-        "couldn't obtain the local model Qwen2.5-{} (~{:.1} GB) — download it from \
+        "couldn't obtain the local model Qwen3-{} (~{:.1} GB) — download it from \
          \"Local AI models\" (Ctrl-K) while online, or set `backend = \"claude\"` / adjust \
          `[ai] routing`. ({cause})",
         model.id(),
@@ -400,14 +458,34 @@ mod tests {
         }
     }
 
-    /// End-to-end of the #85 acquisition path: download a model via `hf-hub` and
-    /// generate schema-valid JSON. Forces the smallest model (~400 MB) so it's a
-    /// modest download. Ignored (needs network + disk); run with:
+    #[test]
+    fn strip_think_removes_qwen3_reasoning_from_unconstrained_prose() {
+        // A leading <think>…</think> block is dropped, the answer kept (#789).
+        assert_eq!(
+            strip_think("<think>\nlet me reason...\n</think>\n\nAldermoor is a port."),
+            "Aldermoor is a port."
+        );
+        // The empty block Qwen3 emits under /no_think is stripped to just the answer.
+        assert_eq!(
+            strip_think("<think>\n\n</think>\n\nA quiet town."),
+            "A quiet town."
+        );
+        // No reasoning block → returned as-is (only leading whitespace trimmed).
+        assert_eq!(strip_think("  Just an answer."), "Just an answer.");
+        // An unterminated block means the whole reply was reasoning → nothing to show.
+        assert_eq!(strip_think("<think>\nstill thinking, cut off"), "");
+    }
+
+    /// End-to-end of the #85 acquisition path: download a Qwen3 dense model via
+    /// `hf-hub` and generate schema-valid JSON, then confirm the unconstrained path
+    /// answers *without* leaking `<think>` reasoning (#789). Forces the smallest
+    /// model (Qwen3-0.6B Q8_0, ~640 MB) so it's a modest download. Ignored (needs
+    /// network + disk + Metal); run with:
     /// `cargo test --features local auto_download -- --ignored --nocapture`
     #[test]
     #[ignore = "integration: needs network / a downloaded model; not hermetic"]
     fn auto_download_then_generate() {
-        let m = &model_select::MODELS[0]; // 0.5B — keep the download small
+        let m = &model_select::MODELS[0]; // 0.6B Q8_0 — keep the download small
         let hub = build_hub().expect("hf-hub");
         let gguf = hub
             .model(m.gguf_repo.into())
@@ -420,6 +498,8 @@ mod tests {
         let backend =
             LocalBackend::load(gguf.to_str().unwrap(), tok.to_str().unwrap()).expect("load");
 
+        // 1) The CONSTRAINED-JSON path must still yield schema-valid JSON — the
+        //    constraint rejects <think> from the first token, so it's unaffected.
         let schema = json!({
             "type": "object",
             "properties": {"name": {"type": "string"}, "kind": {"enum": ["person", "place"]}},
@@ -434,10 +514,34 @@ mod tests {
             json_schema: Some(schema),
         };
         let resp = backend.complete(&req).expect("completion");
-        println!("AUTO OUTPUT: {}", resp.text);
+        println!("AUTO CONSTRAINED OUTPUT: {}", resp.text);
         let parsed: serde_json::Value = serde_json::from_str(&resp.text).expect("valid JSON");
         assert!(parsed["name"].is_string());
         assert!(["person", "place"].contains(&parsed["kind"].as_str().unwrap()));
+        assert!(
+            !resp.text.contains("<think>"),
+            "the constrained path never emits a reasoning tag: {}",
+            resp.text
+        );
+
+        // 2) The UNCONSTRAINED path must answer without any <think> leaking through
+        //    (/no_think + strip_think). We don't judge the prose, only that no raw
+        //    chain-of-thought tag survives.
+        let qa = Request {
+            system: Some("Answer in one short sentence.".into()),
+            cached_context: String::new(),
+            user: "What is the capital of France?".into(),
+            model: "auto".into(),
+            max_tokens: 256,
+            json_schema: None,
+        };
+        let ans = backend.complete(&qa).expect("completion");
+        println!("AUTO UNCONSTRAINED OUTPUT: {}", ans.text);
+        assert!(
+            !ans.text.contains("<think>") && !ans.text.contains("</think>"),
+            "no reasoning block should reach the author: {}",
+            ans.text
+        );
     }
 
     /// End-to-end: load a real Qwen GGUF and generate schema-valid JSON. Ignored

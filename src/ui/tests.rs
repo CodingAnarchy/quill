@@ -665,17 +665,20 @@ fn the_model_manager_lists_the_catalog_with_characteristics() {
     app.mode = Mode::ModelManager { selected: 0 };
     let screen = render(&app, 100, 24);
     assert!(screen.contains("Local AI models"), "{screen}");
-    // Models appear with their context window and description.
+    // Models appear as the Qwen3 dense family (#789) with their context window.
     assert!(
-        screen.contains("Qwen2.5-7B"),
+        screen.contains("Qwen3-8B"),
         "the catalog is listed:\n{screen}"
     );
+    // Qwen3's native window is 40k across the family (#791) — no 1M tier.
     assert!(
-        screen.contains("1M ctx"),
-        "the extended-context model's window shows:\n{screen}"
+        screen.contains("40k ctx"),
+        "the native context window shows:\n{screen}"
     );
+    // The mixed-quant catalog surfaces the quant (Q8_0 for the smallest, #789).
+    assert!(screen.contains("Q8_0"), "the quant is shown:\n{screen}");
     assert!(
-        screen.contains("Long context"),
+        screen.contains("Largest"),
         "descriptions are shown:\n{screen}"
     );
 }

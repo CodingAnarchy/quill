@@ -146,16 +146,16 @@ first use, as before.
 
 **Context windows and whole-book passes (#378):** every model carries its real
 context window, and the router routes a pass on-device only when a downloaded
-model can hold it. The standard Qwen2.5 models hold ~32k tokens, so a big
-whole-manuscript or series pass would still fall back to the cloud — *unless* you
-download an **extended-context** variant. The catalog includes `7B-1M`
-(Qwen2.5-7B-Instruct-1M, a ~1,010,000-token window), so a `prefer-local` or
-`cost-ceiling` policy can run whole-book continuity, setting, and character
-passes entirely on-device — free, private, offline — instead of paying the cloud.
-The cloud fallback fires (with its notice) only when no downloaded model's window
-fits the pass. Long context is memory-hungry (the KV cache), so the extended
-models carry a higher RAM floor; the in-editor manager (#379) will surface that
-when choosing.
+model can hold it. The on-device family is Qwen3 dense (#789), whose native
+window is **~40k tokens (40960)** across every size — up from Qwen2.5's 32k, but
+still far short of a whole manuscript. Qwen3 ships **no** ~1M-context GGUF (longer
+windows need runtime YaRN, which candle's quantized path doesn't wire up), so —
+unlike the old Qwen2.5 catalog's `7B-1M` variant — there is no extended-context
+tier (#791): a pass larger than 40k falls back to the cloud (with its notice)
+rather than to a local long-context model. Even at 40k, Qwen3's larger KV cache
+(8 KV heads at every size, vs Qwen2.5's 2 at the small tiers, #790) makes long
+context memory-hungry, so the recommendation is sized against a realistic working
+window and the in-editor manager (#379) surfaces each model's peak footprint.
 
 **Hybrid routing (#372):** instead of one static backend, `[ai] routing` can pick
 local vs remote *per action*, turning the cost estimator from a warning into a
