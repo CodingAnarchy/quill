@@ -134,10 +134,10 @@ impl Project {
         // base would overwrite the entire manifest (title, author, the whole
         // chapter list) while reporting success (#565).
         let existing = read_existing(&path)?;
-        let updated = match value {
-            Some(n) => config::set_value(&existing, "goals", field.key(), &n.to_string()),
-            None => config::strip_value(&existing, "goals", field.key()).0,
-        };
+        let updated = value.map_or_else(
+            || config::strip_value(&existing, "goals", field.key()).0,
+            |n| config::set_value(&existing, "goals", field.key(), &n.to_string()),
+        );
         atomic::write(&path, updated.as_bytes())
     }
 }

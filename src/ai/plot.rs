@@ -8,6 +8,8 @@
 //! shared [`bible`] format and the incremental-scoping machinery (#90); it tracks
 //! and flags only, never writing manuscript prose. See `docs/ai-features.md`.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -151,18 +153,18 @@ pub fn render(p: &Plot, notes: &str, today: &str) -> String {
 
     body.push_str("## Threads\n");
     for t in &p.threads {
-        body.push_str(&format!("### {} — {}\n", t.name, t.status));
+        writeln!(body, "### {} — {}", t.name, t.status).unwrap();
         if !t.setup.is_empty() {
-            body.push_str(&format!("- **Setup:** {}\n", t.setup));
+            writeln!(body, "- **Setup:** {}", t.setup).unwrap();
         }
         if !t.payoff.is_empty() {
-            body.push_str(&format!("- **Payoff:** {}\n", t.payoff));
+            writeln!(body, "- **Payoff:** {}", t.payoff).unwrap();
         }
         if !t.last_seen.is_empty() {
-            body.push_str(&format!("- **Last seen:** {}\n", t.last_seen));
+            writeln!(body, "- **Last seen:** {}", t.last_seen).unwrap();
         }
         if !t.notes.is_empty() {
-            body.push_str(&format!("- **Notes:** {}\n", t.notes));
+            writeln!(body, "- **Notes:** {}", t.notes).unwrap();
         }
         body.push('\n');
     }
@@ -175,7 +177,7 @@ pub fn render(p: &Plot, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            body.push_str(&format!("- **{}:** {}{}\n", f.thread, f.issue, where_));
+            writeln!(body, "- **{}:** {}{}", f.thread, f.issue, where_).unwrap();
         }
         body.push('\n');
     }

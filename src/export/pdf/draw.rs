@@ -4,6 +4,8 @@
 //! free helpers ([`mono_wrap`], [`num`]). The document-assembly methods (title page,
 //! chapter, paragraph, …) and the public entry points stay in the parent module.
 
+use std::fmt::Write;
+
 use super::font::{glyph_run, glyph_run_mono, OBLIQUE_SHEAR};
 use super::layout::Layout;
 use super::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg, Word};
@@ -208,10 +210,10 @@ impl Pdf {
         let mut cur_font = "";
         for (name, hex) in glyph_run_mono(&self.layout.fonts, text) {
             if name != cur_font {
-                s.push_str(&format!("/{name} {} Tf\n", num(MONO_SIZE)));
+                writeln!(s, "/{name} {} Tf", num(MONO_SIZE)).unwrap();
                 cur_font = name;
             }
-            s.push_str(&format!("<{hex}> Tj\n"));
+            writeln!(s, "<{hex}> Tj").unwrap();
         }
         s.push_str("ET\n");
         self.cur().push_str(&s);
@@ -251,20 +253,15 @@ impl Pdf {
             // intended discrete-state check; an epsilon would defeat the NAN trick.
             #[allow(clippy::float_cmp)]
             if shear != cur_shear {
-                s.push_str(&format!(
-                    "1 0 {} 1 {} {} Tm\n",
-                    num(shear),
-                    num(pen),
-                    num(y)
-                ));
+                writeln!(s, "1 0 {} 1 {} {} Tm", num(shear), num(pen), num(y)).unwrap();
                 cur_shear = shear;
             }
             for (name, hex) in glyph_run(fonts, text, style, heading) {
                 if name != cur_font {
-                    s.push_str(&format!("/{name} {} Tf\n", num(size)));
+                    writeln!(s, "/{name} {} Tf", num(size)).unwrap();
                     cur_font = name;
                 }
-                s.push_str(&format!("<{hex}> Tj\n"));
+                writeln!(s, "<{hex}> Tj").unwrap();
             }
             pen += self.layout.measure(text, size, style, heading);
         }

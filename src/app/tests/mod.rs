@@ -3,6 +3,8 @@
 
 use super::*;
 use crate::project::Project;
+use crate::workflow::Triggers;
+use std::fmt::Write;
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -139,7 +141,7 @@ pub fn open_test_app(dir: &Path) -> App {
     app.smart_typography = false;
     app.mode = Mode::Insert;
     app.workflows = Vec::new();
-    app.triggers = Default::default();
+    app.triggers = Triggers::default();
     app
 }
 
@@ -167,9 +169,11 @@ fn three_chapter_app(name: &str) -> (App, TempProject) {
     let dir = app_scratch_dir(name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, body) in ["alpha\n", "beta\n", "gamma\n"].iter().enumerate() {
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"
-        ));
+        )
+        .unwrap();
         fs::write(dir.join(format!("c{i}.md")), body).unwrap();
     }
     fs::write(Project::manifest_path(&dir), manifest).unwrap();

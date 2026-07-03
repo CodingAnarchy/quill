@@ -211,14 +211,14 @@ impl App {
             return;
         };
         if rec.extra.is_empty() {
-            self.restore_single_recovery(rec);
+            self.restore_single_recovery(&rec);
         } else {
-            self.restore_continuous_recovery(rec);
+            self.restore_continuous_recovery(&rec);
         }
     }
 
     /// Restore a single captured chapter into the single-chapter view.
-    fn restore_single_recovery(&mut self, rec: recovery::Recovery) {
+    fn restore_single_recovery(&mut self, rec: &recovery::Recovery) {
         let Some(index) = self.project.index_of_file(&rec.chapter_file) else {
             self.clear_recovery();
             self.message = Some("Could not recover: that chapter no longer exists.".into());
@@ -238,7 +238,7 @@ impl App {
     /// Restore several captured chapters into the continuous view: center the
     /// window on the first recovered chapter, then overlay each recovered body
     /// onto its segment, leaving them dirty for review and save (#566).
-    fn restore_continuous_recovery(&mut self, rec: recovery::Recovery) {
+    fn restore_continuous_recovery(&mut self, rec: &recovery::Recovery) {
         // Resolve the captured chapters to manifest indices that still exist.
         let chapters: Vec<(usize, String)> = rec
             .chapters()

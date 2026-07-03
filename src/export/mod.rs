@@ -5,6 +5,8 @@
 //! (#190); the Word / Scrivener / Vellum writers (#191–#193) consume the same
 //! `Document`.
 
+use std::fmt::Write;
+
 use crate::frontmatter::{Epigraph, Role};
 
 pub mod docx;
@@ -156,12 +158,12 @@ pub fn to_markdown(doc: &Document) -> String {
         out.push_str(series);
         out.push_str("\n\n");
     }
-    out.push_str(&format!("# {}\n\n", doc.title));
+    write!(out, "# {}\n\n", doc.title).unwrap();
     if let Some(subtitle) = &doc.subtitle {
-        out.push_str(&format!("*{subtitle}*\n\n"));
+        write!(out, "*{subtitle}*\n\n").unwrap();
     }
     if let Some(author) = &doc.author {
-        out.push_str(&format!("by {author}\n\n"));
+        write!(out, "by {author}\n\n").unwrap();
     }
     if let Some(epigraph) = &doc.epigraph {
         out.push_str(&epigraph_block(epigraph));
@@ -169,9 +171,9 @@ pub fn to_markdown(doc: &Document) -> String {
 
     for block in doc.blocks() {
         match block {
-            Block::Part(name) => out.push_str(&format!("## {name}\n\n")),
+            Block::Part(name) => write!(out, "## {name}\n\n").unwrap(),
             Block::Chapter(chapter) => {
-                out.push_str(&format!("## {}\n\n", chapter.title));
+                write!(out, "## {}\n\n", chapter.title).unwrap();
                 if let Some(epigraph) = &chapter.epigraph {
                     out.push_str(&epigraph_block(epigraph));
                 }
@@ -206,7 +208,7 @@ pub fn to_markdown_series(
         out.push_str("\n\n");
     }
     if let Some(author) = author {
-        out.push_str(&format!("by {author}\n\n"));
+        write!(out, "by {author}\n\n").unwrap();
     }
     for book in books {
         out.push_str(&to_markdown(book));
@@ -496,7 +498,7 @@ mod tests {
             subtitle: Some("a novel".into()),
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -518,7 +520,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -574,7 +576,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -602,7 +604,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -726,7 +728,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -749,7 +751,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: Some(epigraph("Roses are red\n\nViolets are blue", None)),
             front: vec![],
             parts: vec![],

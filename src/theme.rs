@@ -194,13 +194,12 @@ impl Theme {
         overrides: &HashMap<String, String>,
     ) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
-        let mut theme = match name {
-            Some(n) => Self::builtin(n).unwrap_or_else(|| {
+        let mut theme = name.map_or_else(Self::dark, |n| {
+            Self::builtin(n).unwrap_or_else(|| {
                 warnings.push(format!("unknown theme '{n}' — using 'dark'"));
                 Self::dark()
-            }),
-            None => Self::dark(),
-        };
+            })
+        });
         // Apply overrides in a stable order so warnings read consistently.
         let mut keys: Vec<&String> = overrides.keys().collect();
         keys.sort();

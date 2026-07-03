@@ -5,6 +5,7 @@
 use super::*;
 use crate::mode::Pending;
 use crate::recovery;
+use std::fmt::Write;
 
 /// True while the recovery prompt is open.
 fn at_recovery_prompt(app: &App) -> bool {
@@ -211,9 +212,11 @@ fn a_continuous_crash_is_offered_and_restored_at_relaunch() {
     {
         let mut manifest = String::from("title = \"Book\"\n\n");
         for (i, body) in ["alpha\n", "beta\n", "gamma\n"].iter().enumerate() {
-            manifest.push_str(&format!(
+            write!(
+                manifest,
                 "[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"
-            ));
+            )
+            .unwrap();
             fs::write(dir.join(format!("c{i}.md")), body).unwrap();
         }
         fs::write(Project::manifest_path(&dir), manifest).unwrap();

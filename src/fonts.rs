@@ -180,21 +180,27 @@ mod tests {
             assert!(!f.style.is_empty());
             assert!(!f.sample.is_empty());
             // Only OFL families are offered, fetched from the canonical OFL tree,
-            // and the license always travels with the font.
-            assert!(
-                f.ttf_url.contains("/ofl/") && f.ttf_url.ends_with(".ttf"),
-                "{} has an OFL .ttf url: {}",
-                f.name,
-                f.ttf_url
-            );
-            // The true-italic file (#638): an OFL `.ttf`, distinct from the upright,
-            // and named for an italic face so it embeds as the `-italic` sibling.
-            assert!(
-                f.italic_ttf_url.contains("/ofl/") && f.italic_ttf_url.ends_with(".ttf"),
-                "{} has an OFL italic .ttf url: {}",
-                f.name,
-                f.italic_ttf_url
-            );
+            // and the license always travels with the font. The `.ttf` suffix is
+            // the exact literal these curated URL constants carry, so a case-exact
+            // check on our own data is correct (not a user-supplied extension).
+            #[allow(clippy::case_sensitive_file_extension_comparisons)]
+            {
+                assert!(
+                    f.ttf_url.contains("/ofl/") && f.ttf_url.ends_with(".ttf"),
+                    "{} has an OFL .ttf url: {}",
+                    f.name,
+                    f.ttf_url
+                );
+                // The true-italic file (#638): an OFL `.ttf`, distinct from the
+                // upright, and named for an italic face so it embeds as the
+                // `-italic` sibling.
+                assert!(
+                    f.italic_ttf_url.contains("/ofl/") && f.italic_ttf_url.ends_with(".ttf"),
+                    "{} has an OFL italic .ttf url: {}",
+                    f.name,
+                    f.italic_ttf_url
+                );
+            }
             assert!(
                 f.italic_ttf_url.contains("Italic") && f.italic_ttf_url != f.ttf_url,
                 "{} italic url is a distinct italic face: {}",

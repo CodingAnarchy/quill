@@ -1,6 +1,7 @@
 //! Tests for undo/redo and find/replace over the active chapter.
 
 use super::*;
+use std::fmt::Write;
 
 #[test]
 fn ctrl_z_undoes_and_ctrl_y_redoes_typing() {
@@ -106,7 +107,10 @@ fn page_keys_move_the_cursor_a_screen_in_insert_mode() {
     )
     .unwrap();
     // 40 short lines, one word each, so paging moves whole logical lines.
-    let body: String = (0..40).map(|i| format!("line{i}\n")).collect();
+    let body = (0..40).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
     fs::write(dir.join("one.md"), body).unwrap();
 
     let mut app = open_test_app(&dir);

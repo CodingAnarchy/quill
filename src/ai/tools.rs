@@ -29,14 +29,16 @@ pub fn assistant_tools() -> Vec<Value> {
 /// required string for the actions that take one (a question for Ask, a premise
 /// for Brainstorm, …), the empty object for argument-free actions.
 fn tool_for(action: Action) -> Value {
-    let input_schema = match action.text_arg() {
-        Some(arg) => json!({
-            "type": "object",
-            "properties": { arg: { "type": "string", "description": format!("the {arg} to run this action with") } },
-            "required": [arg],
-        }),
-        None => json!({ "type": "object", "properties": {} }),
-    };
+    let input_schema = action.text_arg().map_or_else(
+        || json!({ "type": "object", "properties": {} }),
+        |arg| {
+            json!({
+                "type": "object",
+                "properties": { arg: { "type": "string", "description": format!("the {arg} to run this action with") } },
+                "required": [arg],
+            })
+        },
+    );
     json!({
         "name": action.name(),
         "description": action.label(),

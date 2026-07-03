@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::buffer::Buffer;
+use std::fmt::Write;
 use std::time::Instant;
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -58,9 +59,11 @@ fn write_chapter_project(dir: &Path, n: usize, title: &str) -> String {
     let mut manifest = format!("title = \"{title}\"\n\n");
     for i in 0..n {
         let file = format!("ch{i}.md");
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
-        ));
+        )
+        .unwrap();
         let mut body = String::from("---\nstatus: draft\npov: Mara\n---\n# Chapter\n\n");
         for _ in 0..50 {
             body.push_str("The night was dark and the road was very long indeed.\n");
@@ -901,7 +904,7 @@ fn starter_chapter_is_written_atomically() {
 /// (word count + front matter); even a large novel must open near-instantly.
 /// Catches a regression to per-chapter re-reads or O(n²) work at open.
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn open_is_fast_for_a_large_novel() {
     let dir = temp_dir("perf-open");
     fs::create_dir_all(&dir).unwrap();
@@ -925,7 +928,7 @@ fn open_is_fast_for_a_large_novel() {
 /// `docs/performance.md`. Catches a regression to O(n²) work at open or to
 /// re-reading files after the initial cache pass.
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn open_is_fast_for_a_series_sized_project() {
     let n = 1500;
     let dir = temp_dir("perf-open-series");

@@ -45,7 +45,11 @@ pub struct SeriesSummary {
 /// #182), `chapters` body chapters, `todo` TODO markers, and today's `momentum`,
 /// as of `today`. Rows are styled (the word delta is colored). Returns a short
 /// hint when no goals are set.
-#[allow(clippy::too_many_arguments)] // the report's measured inputs read clearer flat than boxed
+// The report's measured inputs read clearer flat than boxed.
+#[allow(clippy::too_many_arguments)]
+// `series` is taken by value: the caller (app/reports.rs) builds it fresh and hands
+// it off, and passing `&Option` would ripple a `&` into that out-of-crate call site.
+#[allow(clippy::needless_pass_by_value)]
 pub fn lines(
     manifest: &Manifest,
     words: usize,
@@ -275,10 +279,9 @@ fn part_lines(parts: &[PartDelta], label: &str) -> Vec<Line<'static>> {
     for p in parts {
         // When a part has a goal (#146), show its words against it; otherwise
         // just the count.
-        let target = match p.goal {
-            Some(g) => format!(" / {} ( {} )", thousands(g as i64), percent(p.words, g)),
-            None => String::new(),
-        };
+        let target = p.goal.map_or_else(String::new, |g| {
+            format!(" / {} ( {} )", thousands(g as i64), percent(p.words, g))
+        });
         let mut spans = vec![Span::raw(format!(
             "  {name:<name_w$}  {words:>words_w$} words{target}   ",
             name = p.name,

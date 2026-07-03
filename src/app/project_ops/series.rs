@@ -43,7 +43,7 @@ impl App {
             title: "Switch book",
             items,
             selected: active,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -236,7 +236,7 @@ impl App {
             title: "Manage books",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

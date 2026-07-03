@@ -148,10 +148,7 @@ impl Syntax {
     pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Vec<(usize, usize)> {
         self.markers
             .iter()
-            .filter(|m| match reveal_at {
-                Some(b) => !(m.span_start <= b && b <= m.span_end),
-                None => true,
-            })
+            .filter(|m| reveal_at.is_none_or(|b| !(m.span_start <= b && b <= m.span_end)))
             .map(|m| (m.delim_start, m.delim_end))
             .collect()
     }

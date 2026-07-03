@@ -1,6 +1,7 @@
 //! Type-to-filter / quick-jump in the chapter browser (#410).
 
 use super::*;
+use std::fmt::Write;
 
 /// A project whose chapters have the given `(title, front_matter)` pairs, opened
 /// with the chapter browser focused (Ctrl-G). Front matter is written verbatim
@@ -9,9 +10,11 @@ fn browser_app(name: &str, chapters: &[(&str, &str)]) -> (App, TempProject) {
     let dir = crate::testutil::scratch_dir("filter", name);
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, (title, _)) in chapters.iter().enumerate() {
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"{title}\"\nfile = \"ch{i}.md\"\n\n"
-        ));
+        )
+        .unwrap();
     }
     for (i, (_, fm)) in chapters.iter().enumerate() {
         fs::write(dir.join(format!("ch{i}.md")), format!("{fm}body\n")).unwrap();

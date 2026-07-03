@@ -174,7 +174,7 @@ impl App {
             title: "Version control",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

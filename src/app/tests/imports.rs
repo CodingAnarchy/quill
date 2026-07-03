@@ -448,7 +448,7 @@ fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
 #[test]
 fn importing_a_docx_manuscript_creates_a_chaptered_project() {
     use crate::export::docx::{to_docx, Profile};
-    use crate::export::{Chapter, Document, Part};
+    use crate::export::{Chapter, Document, Part, PubMeta};
     isolate("import-docx");
     let cur = make_project("import-docx-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -459,7 +459,7 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -526,7 +526,7 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
 #[test]
 fn importing_a_scriv_bundle_creates_a_chaptered_project() {
     use crate::export::scriv::write_scriv;
-    use crate::export::{Chapter, Document, Part};
+    use crate::export::{Chapter, Document, Part, PubMeta};
     isolate("import-scriv");
     let cur = make_project("import-scriv-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -537,7 +537,7 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {

@@ -310,15 +310,15 @@ fn chapter_line(
     }
     let marker = if is_active { "▸ " } else { "  " };
     // A grouped body chapter (#181) shows its 1-based number; sections don't.
-    let label = match number {
-        Some(n) => format!("{marker}{n}. {title}"),
-        None => format!("{marker}{title}"),
-    };
+    let label = number.map_or_else(
+        || format!("{marker}{title}"),
+        |n| format!("{marker}{n}. {title}"),
+    );
     // With a goal (#146), show progress (a ✓ once reached); otherwise just the count.
-    let count = match goal {
-        Some(g) => format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
-        None => words.to_string(),
-    };
+    let count = goal.map_or_else(
+        || words.to_string(),
+        |g| format!("{words} / {g}{}", if words >= g { " ✓" } else { "" }),
+    );
     // The selection highlight reverses every span on the row.
     let sel = |s: Style| {
         if is_selected {
@@ -370,7 +370,7 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
             .strip_prefix(&app.project.root)
             .unwrap_or(path)
             .to_string_lossy();
-        lines.push(list_row(i == state.selected, label.to_string(), None));
+        lines.push(list_row(i == state.selected, &label, None));
     }
     lines
 }
@@ -670,13 +670,12 @@ fn vc_tag(app: &App) -> String {
 /// A running writing sprint (#299): live countdown + net words written, always
 /// visible (independent of the transient message on the right).
 fn sprint_tag(app: &App) -> String {
-    match &app.sprint {
-        Some(s) => format!(
+    app.sprint.as_ref().map_or_else(String::new, |s| {
+        format!(
             " · {}",
             crate::app::sprint::status_segment(s.remaining(), s.words(app.project_word_count()))
-        ),
-        None => String::new(),
-    }
+        )
+    })
 }
 
 /// While browsing, the bar describes the *selected* chapter: its title, and
@@ -701,25 +700,26 @@ fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (St
         };
         (format!(" /{filter}{count}"), format!("{title}{hint}  "))
     } else {
-        let right = if let Some(m) = &app.message {
-            format!("{m}  ")
-        } else {
-            let mut parts = Vec::new();
-            if let Some(s) = app.project.chapter_summary(selected) {
-                parts.push(s.to_string());
-            }
-            if let Some(p) = app.project.chapter_pov(selected) {
-                parts.push(format!("POV: {p}"));
-            }
-            if let Some(st) = app.project.chapter_status(selected) {
-                parts.push(st.label().to_string());
-            }
-            if parts.is_empty() {
-                String::new()
-            } else {
-                format!("{}  ", parts.join("  ·  "))
-            }
-        };
+        let right = app.message.as_ref().map_or_else(
+            || {
+                let mut parts = Vec::new();
+                if let Some(s) = app.project.chapter_summary(selected) {
+                    parts.push(s.to_string());
+                }
+                if let Some(p) = app.project.chapter_pov(selected) {
+                    parts.push(format!("POV: {p}"));
+                }
+                if let Some(st) = app.project.chapter_status(selected) {
+                    parts.push(st.label().to_string());
+                }
+                if parts.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}  ", parts.join("  ·  "))
+                }
+            },
+            |m| format!("{m}  "),
+        );
         (format!(" {title}"), right)
     }
 }
@@ -731,22 +731,24 @@ fn editor_status_bar(app: &App) -> (String, String) {
     let buffer = app.edit_buffer();
     // The chapter the cursor is in: in continuous view that's the segment
     // under the cursor (with a marker); otherwise the single active chapter.
-    let (name, dirtied) = match &app.manuscript {
-        Some(m) => (format!("≡ {}", m.current_title()), m.dirty()),
+    let (name, dirtied) = app.manuscript.as_ref().map_or_else(
         // The focused buffer's own title — usually the active chapter, but
         // a reference pane swapped into focus (#165) shows its file name.
-        None => (app.pane_title_for(buffer), buffer.dirty),
-    };
+        || (app.pane_title_for(buffer), buffer.dirty),
+        |m| (format!("≡ {}", m.current_title()), m.dirty()),
+    );
     let dirty = dirty_marker(dirtied);
-    let right = match &app.message {
-        Some(m) => format!("{m}  "),
-        None => format!(
-            "{} words · ln {}/{}  ",
-            buffer.word_count(),
-            buffer.cursor.line + 1,
-            buffer.line_count()
-        ),
-    };
+    let right = app.message.as_ref().map_or_else(
+        || {
+            format!(
+                "{} words · ln {}/{}  ",
+                buffer.word_count(),
+                buffer.cursor.line + 1,
+                buffer.line_count()
+            )
+        },
+        |m| format!("{m}  "),
+    );
     let left = format!(
         " {name}{dirty}{}{}{}",
         vc_tag(app),

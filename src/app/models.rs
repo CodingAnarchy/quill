@@ -91,7 +91,10 @@ impl App {
             .iter()
             .any(|m| m.context_tokens >= input_tokens && worker::model_downloaded(m))
     }
+    // Mirrors the `local` variant's `&self` signature so callers are feature-agnostic;
+    // `self` is only read under `cfg(test)`, so a non-local non-test build sees it unused.
     #[cfg(not(feature = "local"))]
+    #[allow(clippy::unused_self)]
     pub(crate) const fn local_model_present(&self, _input_tokens: u32) -> bool {
         #[cfg(test)]
         if let Some(present) = self.test_local_present {

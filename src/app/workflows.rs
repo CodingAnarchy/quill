@@ -86,7 +86,7 @@ impl App {
             title: "Workflows",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

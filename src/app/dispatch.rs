@@ -15,6 +15,7 @@ use super::App;
 impl App {
     /// Handle a terminal event, dispatching key presses to the active mode.
     /// Non-key events and key releases/repeats are ignored.
+    #[allow(clippy::needless_pass_by_value)] // consumes the event, moving its inner Key/Mouse to handlers
     pub fn handle_event(&mut self, ev: Event) {
         match ev {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),

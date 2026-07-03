@@ -31,10 +31,8 @@ use super::{config_path, project_manifest_path};
 pub fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
     let global = read_section(config_path().as_deref(), section);
     let project = read_project_section(section);
-    match merge_sections(global, project) {
-        Some(value) => value.try_into().unwrap_or_default(),
-        None => T::default(),
-    }
+    merge_sections(global, project)
+        .map_or_else(T::default, |value| value.try_into().unwrap_or_default())
 }
 
 /// The `[section]` table of the TOML file at `path`, as a raw [`toml::Value`], or

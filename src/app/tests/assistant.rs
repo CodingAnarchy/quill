@@ -380,9 +380,9 @@ fn the_assistant_action_is_not_offered_to_the_assistant() {
         "the assistant can't run itself"
     );
     let tools = assistant_tools();
-    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let mut names = tools.iter().map(|t| t["name"].as_str().unwrap());
     assert!(
-        !names.contains(&"assistant"),
+        !names.any(|n| n == "assistant"),
         "the open-assistant action isn't in the tool catalog"
     );
 }

@@ -9,6 +9,7 @@
 //! project; the bundle opens directly in Scrivener.app.
 
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
@@ -33,11 +34,13 @@ pub fn write_scriv_series(books: &[Document], bundle: &Path) -> std::io::Result<
         let mut out = String::new();
         for (i, book) in books.iter().enumerate() {
             let children = book_children(book, data, n)?;
-            out.push_str(&format!(
+            write!(
+                out,
                 "<BinderItem UUID=\"{}\" Type=\"Folder\"><Title>{}</Title><Children>{children}</Children></BinderItem>",
                 uuid(&format!("book:{i}")),
                 xml_escape(&book.title),
-            ));
+            )
+            .unwrap();
         }
         Ok(out)
     })
@@ -67,14 +70,18 @@ fn write_bundle(
     );
     // The two other special folders every Scrivener project carries, so it opens
     // without rebuilding them: a place for research, and the trash.
-    binder.push_str(&format!(
+    write!(
+        binder,
         "<BinderItem UUID=\"{}\" Type=\"ResearchFolder\"><Title>Research</Title></BinderItem>",
         uuid("research")
-    ));
-    binder.push_str(&format!(
+    )
+    .unwrap();
+    write!(
+        binder,
         "<BinderItem UUID=\"{}\" Type=\"TrashFolder\"><Title>Trash</Title></BinderItem>",
         uuid("trash")
-    ));
+    )
+    .unwrap();
 
     let scrivx = format!(
         concat!(
@@ -161,7 +168,7 @@ fn to_rtf(chapter: &Chapter) -> String {
     for prose in prose_blocks(&chapter.body) {
         match prose {
             // A centered scene divider, the conventional Scrivener separator.
-            Prose::SceneBreak => body.push_str(&format!("\\pard\\qc\\sa180 {SCENE_BREAK}\\par\n")),
+            Prose::SceneBreak => writeln!(body, "\\pard\\qc\\sa180 {SCENE_BREAK}\\par").unwrap(),
             Prose::Heading(heading) => {
                 body.push_str(&rtf_paragraph(&[Run::new(heading, true, false)]));
             }
@@ -169,10 +176,7 @@ fn to_rtf(chapter: &Chapter) -> String {
             // Verbatim, monospaced (`\f1`), line breaks kept as `\line` (#522).
             Prose::Preformatted(code) => {
                 let lines: Vec<String> = code.lines().map(rtf_escape).collect();
-                body.push_str(&format!(
-                    "\\pard\\sa180\\f1 {}\\f0\\par\n",
-                    lines.join("\\line ")
-                ));
+                writeln!(body, "\\pard\\sa180\\f1 {}\\f0\\par", lines.join("\\line ")).unwrap();
             }
         }
     }
@@ -218,7 +222,7 @@ fn rtf_escape(s: &str) -> String {
             c if c.is_ascii() => out.push(c),
             c if (c as u32) <= 0xFFFF => {
                 // RTF \u takes a signed 16-bit code unit; > 32767 wraps negative.
-                out.push_str(&format!("\\u{}?", c as u32 as i16));
+                write!(out, "\\u{}?", c as u32 as i16).unwrap();
             }
             _ => out.push('?'),
         }
@@ -250,6 +254,7 @@ fn hash(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::export::PubMeta;
     use crate::frontmatter::Epigraph;
 
     fn epigraph(text: &str, by: Option<&str>) -> Epigraph {
@@ -274,7 +279,7 @@ mod tests {
             subtitle: None,
             author: Some("A. Writer".into()),
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -357,7 +362,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -442,7 +447,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {

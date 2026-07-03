@@ -39,6 +39,7 @@ impl App {
 
     /// Prompt for a new project's path, prefilled with `base` and a trailing
     /// separator so the author just types a name (and can edit the location).
+    #[allow(clippy::needless_pass_by_value)] // callers (browser.rs, tests) hand over an owned base path
     pub(crate) fn prompt_new_project(&mut self, base: PathBuf) {
         let prefill = format!("{}/", base.display());
         self.open_prompt(Pending::NewProject, "New project — path: ", &prefill, None);
@@ -65,7 +66,7 @@ impl App {
             title: "New project — structure",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -151,11 +152,12 @@ impl App {
     /// running editor adopts the new project wholesale, with no state carried
     /// over. A save failure aborts the switch (the current project stays put);
     /// an open failure leaves the current project open with a message.
+    #[allow(clippy::needless_pass_by_value)] // callers (prompts.rs, imports.rs, archive.rs, tests) hand over an owned path
     pub(crate) fn switch_to(&mut self, target: PathBuf) {
         if self.finalize_current_project().is_err() {
             return; // save failed — message set; don't risk the unsaved work
         }
-        self.open_in_place(target);
+        self.open_in_place(&target);
     }
 
     /// Save and finalize the current project before adopting another in its place:
@@ -174,8 +176,8 @@ impl App {
     /// carried over — assuming the current project's work is already saved and
     /// finalized. Shared by switching projects (#270) and renaming the open one
     /// (#424), which both save first and then repoint here.
-    fn open_in_place(&mut self, target: PathBuf) {
-        let opened = Project::open(&target).and_then(|project| {
+    fn open_in_place(&mut self, target: &Path) {
+        let opened = Project::open(target).and_then(|project| {
             let buffer = Buffer::from_path(project.active_path())?;
             Ok((project, buffer))
         });
@@ -268,13 +270,13 @@ impl App {
             self.message = Some(format!(
                 "Renamed folder, but couldn't update the title: {e}"
             ));
-            self.open_in_place(new_root.clone());
+            self.open_in_place(&new_root);
             return;
         }
         // Reopen at the new path (the old recents entry self-prunes — its folder is
         // gone). open_in_place sets an "Opened …" message; replace it with the
         // rename confirmation.
-        self.open_in_place(new_root.clone());
+        self.open_in_place(&new_root);
         if self.project.root == new_root {
             self.message = Some(format!("Renamed project to \u{201c}{name}\u{201d}."));
         }

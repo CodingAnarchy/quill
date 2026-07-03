@@ -44,7 +44,7 @@ impl App {
             title: "Fonts — OFL (open-licensed)",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -71,7 +71,7 @@ impl App {
             title: "Apply font to…",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

@@ -105,12 +105,13 @@ fn collect_items(
         let Some(inner) = inner else { return };
         if attr_value(attrs, "Type").as_deref() == Some("Text") {
             let uuid = attr_value(attrs, "UUID").unwrap_or_default();
-            let body = if let Some(rtf) = read_rtf(&uuid) {
-                rtf_to_markdown(&rtf, dropped)
-            } else {
-                *unreadable += 1;
-                String::new()
-            };
+            let body = read_rtf(&uuid).map_or_else(
+                || {
+                    *unreadable += 1;
+                    String::new()
+                },
+                |rtf| rtf_to_markdown(&rtf, dropped),
+            );
             out.push(ImportedChapter {
                 title: element_text(inner, "Title").unwrap_or_default(),
                 body,
@@ -476,13 +477,13 @@ mod tests {
     #[test]
     fn round_trips_a_quill_scriv_export() {
         use crate::export::scriv::write_scriv;
-        use crate::export::{Chapter, Document, Part};
+        use crate::export::{Chapter, Document, Part, PubMeta};
         let doc = Document {
             title: "Round Trip".into(),
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![Chapter {
                 title: "Prologue".into(),

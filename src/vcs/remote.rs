@@ -63,7 +63,7 @@ pub fn push(root: &Path) -> Result<String, String> {
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     remote
         .push(&[&refspec], Some(&mut opts))
-        .map_err(friendly)?;
+        .map_err(|e| friendly(&e))?;
 
     // A rejection that came back via the callback rather than as an error.
     if rejected.borrow_mut().take().is_some() {
@@ -111,7 +111,7 @@ pub fn pull(root: &Path) -> Result<String, String> {
     opts.remote_callbacks(cbs);
     remote
         .fetch(&[&branch], Some(&mut opts), None)
-        .map_err(friendly)?;
+        .map_err(|e| friendly(&e))?;
 
     let fetch_head = repo
         .find_reference("FETCH_HEAD")
@@ -291,7 +291,7 @@ fn token_from_env() -> Option<String> {
 
 /// Turn a libgit2 network/auth error into author-facing guidance instead of a
 /// cryptic message.
-fn friendly(e: git2::Error) -> String {
+fn friendly(e: &git2::Error) -> String {
     let msg = e.message().to_lowercase();
     if msg.contains("authentication")
         || msg.contains("401")

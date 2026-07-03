@@ -405,7 +405,7 @@ mod tests {
     /// modest download. Ignored (needs network + disk); run with:
     /// `cargo test --features local auto_download -- --ignored --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "integration: needs network / a downloaded model; not hermetic"]
     fn auto_download_then_generate() {
         let m = &model_select::MODELS[0]; // 0.5B — keep the download small
         let hub = build_hub().expect("hf-hub");
@@ -445,7 +445,7 @@ mod tests {
     /// `QUILL_LOCAL_GGUF=…/qwen.gguf QUILL_LOCAL_TOKENIZER=…/tokenizer.json \
     ///  cargo test --features local local_backend -- --ignored --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "integration: needs network / a downloaded model; not hermetic"]
     fn local_backend_produces_schema_valid_json() {
         let gguf = std::env::var("QUILL_LOCAL_GGUF").expect("QUILL_LOCAL_GGUF");
         let tok = std::env::var("QUILL_LOCAL_TOKENIZER").expect("QUILL_LOCAL_TOKENIZER");
@@ -488,7 +488,7 @@ mod tests {
     /// `QUILL_LOCAL_GGUF=… QUILL_LOCAL_TOKENIZER=… \
     ///  cargo test --features local local_assistant -- --ignored --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "integration: needs network / a downloaded model; not hermetic"]
     fn local_assistant_tool_use_picks_a_valid_action() {
         let gguf = std::env::var("QUILL_LOCAL_GGUF").expect("QUILL_LOCAL_GGUF");
         let tok = std::env::var("QUILL_LOCAL_TOKENIZER").expect("QUILL_LOCAL_TOKENIZER");

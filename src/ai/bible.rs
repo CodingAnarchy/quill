@@ -6,6 +6,7 @@
 //! and calls [`render`].
 
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
@@ -35,9 +36,9 @@ pub fn bullet_section(body: &mut String, heading: &str, items: &[String]) {
     if items.is_empty() {
         return;
     }
-    body.push_str(&format!("## {heading}\n"));
+    writeln!(body, "## {heading}").unwrap();
     for item in items {
-        body.push_str(&format!("- {item}\n"));
+        writeln!(body, "- {item}").unwrap();
     }
     body.push('\n');
 }

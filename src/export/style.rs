@@ -360,6 +360,9 @@ impl ExportStyle {
     /// resolution.
     pub fn apply_preset(&mut self) -> Option<String> {
         let name = self.preset.clone()?;
+        // The `Some` arm mutates `self`; a `map_or_else` would borrow `self` in both
+        // the closure and the default, so the explicit match reads clearer here.
+        #[allow(clippy::option_if_let_else)]
         match preset_base(&name) {
             Some(base) => {
                 let overrides = std::mem::take(self);

@@ -248,7 +248,7 @@ impl App {
                     // line always, and — when there are no findings to triage —
                     // the diff itself in the AI overlay. A no-change write (empty
                     // diff) shows nothing.
-                    self.show_bible_delta(name, diff);
+                    self.show_bible_delta(name, &diff);
                 }
             }
             Staged::Conflict(conflict) => {
@@ -276,18 +276,18 @@ impl App {
     /// the `+N/-M` summary in the message line, so triage still leads. With no
     /// findings, show the diff itself in the AI overlay so the delta isn't buried.
     /// A no-change write (empty diff) surfaces nothing new — the plain summary.
-    fn show_bible_delta(&mut self, name: &str, diff: Vec<String>) {
+    fn show_bible_delta(&mut self, name: &str, diff: &[String]) {
         if diff.is_empty() {
             // Nothing changed on disk: keep the historic clean-write behavior.
             self.open_findings();
             return;
         }
-        let summary = delta_summary(name, &diff);
+        let summary = delta_summary(name, diff);
         if self.pending_findings.is_empty() {
             // No triage to lead with — show the delta the author can trust or
             // correct, as a "view changes" diff in the AI overlay.
             let mut lines = vec![Line::raw(summary), Line::raw("")];
-            lines.extend(diff_lines(&diff));
+            lines.extend(diff_lines(diff));
             self.show_ai(lines);
         } else {
             // Findings lead; the summary rides the message line under the overlay.

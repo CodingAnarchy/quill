@@ -100,7 +100,7 @@ impl ImageBackendSpec {
     fn build(self) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
         match self {
             Self::Remote(key) => Ok(Arc::new(FalBackend::new(key))),
-            Self::Local(slot) => build_local_image(slot),
+            Self::Local(slot) => build_local_image(&slot),
         }
     }
 }
@@ -108,7 +108,7 @@ impl ImageBackendSpec {
 /// Load the local image model once and cache it in the shared slot (#240).
 #[cfg(feature = "local")]
 pub(super) fn build_local_image(
-    slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
+    slot: &Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
 ) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
     let mut guard = slot
         .lock()
@@ -123,7 +123,7 @@ pub(super) fn build_local_image(
 
 #[cfg(not(feature = "local"))]
 pub(super) fn build_local_image(
-    _slot: Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
+    _slot: &Arc<Mutex<Option<Arc<dyn ImageBackend>>>>,
 ) -> Result<Arc<dyn ImageBackend>, ai::AiError> {
     Err(ai::AiError::NotConfigured(LOCAL_IMAGE_UNAVAILABLE.into()))
 }
@@ -160,7 +160,7 @@ impl App {
             title: "Character portrait",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

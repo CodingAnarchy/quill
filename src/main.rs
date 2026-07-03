@@ -298,13 +298,15 @@ fn new_project_base(
     os_home: Option<PathBuf>,
     cwd: &Path,
 ) -> (PathBuf, bool) {
-    match projects_home {
-        Some(home) => (home, false),
-        None => (
-            os_home.map_or_else(|| cwd.to_path_buf(), |h| h.join("Quill")),
-            true,
-        ),
-    }
+    projects_home.map_or_else(
+        || {
+            (
+                os_home.map_or_else(|| cwd.to_path_buf(), |h| h.join("Quill")),
+                true,
+            )
+        },
+        |home| (home, false),
+    )
 }
 
 /// Ask the author to name the new book (#423), on the plain terminal before the

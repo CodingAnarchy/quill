@@ -405,15 +405,17 @@ impl App {
         }
         // Re-find the moved scene by its (chapter, within-chapter index) so the
         // highlight follows it even though the flat board index shifted.
-        let selected = match chapter {
-            Some(ch) => cards
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.chapter == Some(ch))
-                .nth(scene)
-                .map_or(cards.len() - 1, |(i, _)| i),
-            None => scene.min(cards.len() - 1),
-        };
+        let selected = chapter.map_or_else(
+            || scene.min(cards.len() - 1),
+            |ch| {
+                cards
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.chapter == Some(ch))
+                    .nth(scene)
+                    .map_or(cards.len() - 1, |(i, _)| i)
+            },
+        );
         self.mode = Mode::Corkboard(Box::new(Corkboard {
             cards,
             selected,
@@ -519,10 +521,7 @@ fn scenes(text: &str, headings: &[Heading]) -> Vec<Scene> {
 /// covers its own line; this finds where the following prose begins.
 fn line_end(text: &str, at: usize) -> usize {
     let at = at.min(text.len());
-    match text[at..].find('\n') {
-        Some(nl) => at + nl + 1,
-        None => text.len(),
-    }
+    text[at..].find('\n').map_or(text.len(), |nl| at + nl + 1)
 }
 
 /// The first non-empty, non-heading line of `body`, trimmed — the card's prose

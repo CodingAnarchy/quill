@@ -8,6 +8,7 @@
 //! epubcheck.
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::io::{Cursor, Write};
 
 use zip::write::SimpleFileOptions;
@@ -70,7 +71,7 @@ pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::
         doc.author.as_deref(),
         doc.series.as_deref(),
         modified,
-        nav,
+        &nav,
     )
 }
 
@@ -123,7 +124,7 @@ pub fn to_epub_series(
             children,
         });
     }
-    b.finish(title, None, author, series, modified, nav)
+    b.finish(title, None, author, series, modified, &nav)
 }
 
 /// One content document in the package — a manifest/spine entry and its XHTML.
@@ -194,11 +195,11 @@ impl Builder {
     /// in reading order, so the items list doubles as the spine order. `epub_type`
     /// tags the `<body>` with EPUB 3 structural semantics (#604) — `cover`,
     /// `titlepage`, `frontmatter`, `bodymatter`, `backmatter`.
-    fn add(&mut self, prefix: &str, head_title: &str, epub_type: &str, body: String) -> String {
+    fn add(&mut self, prefix: &str, head_title: &str, epub_type: &str, body: &str) -> String {
         self.seq += 1;
         let id = format!("{prefix}{:04}", self.seq);
         let href = format!("{id}.xhtml");
-        let xhtml = xhtml_doc(head_title, epub_type, &body, self.publishing.language());
+        let xhtml = xhtml_doc(head_title, epub_type, body, self.publishing.language());
         self.items.push(Item {
             id,
             href: href.clone(),
@@ -219,7 +220,7 @@ impl Builder {
             "<div class=\"cover\"><img src=\"{}\" alt=\"Cover\"/></div>\n",
             img.href
         );
-        let href = self.add("cover", "Cover", "cover", body);
+        let href = self.add("cover", "Cover", "cover", &body);
         self.landmarks.cover = Some(href);
     }
 
@@ -254,7 +255,7 @@ impl Builder {
         if let Some(e) = epigraph {
             body.push_str(&epigraph_xhtml(e));
         }
-        let href = self.add("title", title, "titlepage", body);
+        let href = self.add("title", title, "titlepage", &body);
         self.landmarks.titlepage = Some(href);
     }
 
@@ -273,7 +274,7 @@ impl Builder {
             push_p(&mut body, "copyright", &line);
         }
         body.push_str("</div>\n");
-        self.add("copyright", "Copyright", "copyright-page", body);
+        self.add("copyright", "Copyright", "copyright-page", &body);
     }
 
     /// A series book's divider page: its title, subtitle, epigraph, and — so a
@@ -299,7 +300,7 @@ impl Builder {
             }
             body.push_str("</div>\n");
         }
-        let href = self.add("book", &doc.title, "bodymatter", body);
+        let href = self.add("book", &doc.title, "bodymatter", &body);
         self.landmarks
             .bodymatter
             .get_or_insert_with(|| href.clone());
@@ -318,7 +319,7 @@ impl Builder {
         // — or a role with no distinct term — keeps the generic band semantic.
         let role_type = ch.role.and_then(crate::frontmatter::Role::epub_type);
         let epub_type = role_type.unwrap_or(band_type);
-        let href = self.add("chap", &ch.title, epub_type, chapter_body(ch, &self.style));
+        let href = self.add("chap", &ch.title, epub_type, &chapter_body(ch, &self.style));
         if band_type == "bodymatter" {
             self.landmarks
                 .bodymatter
@@ -356,7 +357,7 @@ impl Builder {
                     );
                     // The part divider begins the body matter (#604) — a candidate
                     // "Begin Reading" landmark ahead of its chapters.
-                    let href = self.add("part", name, "bodymatter", body);
+                    let href = self.add("part", name, "bodymatter", &body);
                     self.landmarks
                         .bodymatter
                         .get_or_insert_with(|| href.clone());
@@ -398,6 +399,12 @@ impl Builder {
         author: Option<&str>,
         series: Option<&str>,
     ) -> BTreeSet<char> {
+        fn walk(nav: &[Nav], used: &mut BTreeSet<char>) {
+            for entry in nav {
+                used.extend(entry.label.chars());
+                walk(&entry.children, used);
+            }
+        }
         let mut used: BTreeSet<char> = (' '..='~').collect();
         for item in &self.items {
             used.extend(item.xhtml.chars());
@@ -407,12 +414,6 @@ impl Builder {
             .flatten()
         {
             used.extend(meta.chars());
-        }
-        fn walk(nav: &[Nav], used: &mut BTreeSet<char>) {
-            for entry in nav {
-                used.extend(entry.label.chars());
-                walk(&entry.children, used);
-            }
         }
         walk(nav, &mut used);
         used
@@ -427,7 +428,7 @@ impl Builder {
         author: Option<&str>,
         series: Option<&str>,
         modified: &str,
-        nav: Vec<Nav>,
+        nav: &[Nav],
     ) -> std::io::Result<Vec<u8>> {
         // A real ISBN is the `dc:identifier` when set (#583); otherwise fall back
         // to the stable minted `urn:quill:` slug so re-exports keep their id.
@@ -449,11 +450,11 @@ impl Builder {
         // as a floor so markup/punctuation and the entity-escaped `& < >` are always
         // covered. Non-ASCII text passes through XML escaping literally, so gathering
         // it here is exact. Used to subset the embedded fonts before they're zipped.
-        let used = self.used_chars(&nav, title, subtitle, author, series);
+        let used = self.used_chars(nav, title, subtitle, author, series);
 
         let opf = build_opf(&meta, &self.items, &self.style.fonts, &self.style.images);
-        let nav_doc = build_nav(&nav, &self.landmarks, self.publishing.language());
-        let ncx = build_ncx(&id, title, &nav);
+        let nav_doc = build_nav(nav, &self.landmarks, self.publishing.language());
+        let ncx = build_ncx(&id, title, nav);
 
         let mut parts: Vec<(String, Vec<u8>)> = vec![
             (
@@ -518,27 +519,23 @@ fn stylesheet(style: &ExportStyle) -> String {
             .css_format()
             .map(|f| format!(" format(\"{f}\")"))
             .unwrap_or_default();
-        css.push_str(&format!(
-            "@font-face {{ font-family: \"{}\"; font-style: {}; font-weight: 400 700; src: url(\"{}\"){format}; }}\n",
+        writeln!(
+            css,
+            "@font-face {{ font-family: \"{}\"; font-style: {}; font-weight: 400 700; src: url(\"{}\"){format}; }}",
             font.family,
             if font.italic { "italic" } else { "normal" },
             font.href
-        ));
+        )
+        .unwrap();
     }
     if let Some(f) = style.font(FontRole::Body) {
-        css.push_str(&format!(
-            "body {{ font-family: \"{}\", serif; }}\n",
-            f.family
-        ));
+        writeln!(css, "body {{ font-family: \"{}\", serif; }}", f.family).unwrap();
     }
     if let Some(f) = style.font(FontRole::Heading) {
-        css.push_str(&format!(
-            "h1, h2 {{ font-family: \"{}\", serif; }}\n",
-            f.family
-        ));
+        writeln!(css, "h1, h2 {{ font-family: \"{}\", serif; }}", f.family).unwrap();
     }
     if let Some(align) = style.heading_align() {
-        css.push_str(&format!("h1, h2 {{ text-align: {align}; }}\n"));
+        writeln!(css, "h1, h2 {{ text-align: {align}; }}").unwrap();
     }
     if style.drop_cap() {
         // The first paragraph of each chapter (marked `opening`) gets a drop cap;
@@ -598,7 +595,7 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
     if let Some(img) = style.image(ImageRole::ChapterHeading) {
         push_img(&mut out, "chapter-image", img);
     }
-    out.push_str(&format!("<h1>{}</h1>\n", xml_escape(&ch.title)));
+    writeln!(out, "<h1>{}</h1>", xml_escape(&ch.title)).unwrap();
     if let Some(e) = &ch.epigraph {
         out.push_str(&epigraph_xhtml(e));
     }
@@ -619,10 +616,10 @@ fn chapter_body(ch: &Chapter, style: &ExportStyle) -> String {
 /// the `opening` class when drop caps are enabled.
 fn prose_xhtml(prose: &Prose, style: &ExportStyle, opening: bool) -> String {
     match prose {
-        Prose::SceneBreak => match style.image(ImageRole::SceneBreak) {
-            Some(img) => img_p("scene-break", img),
-            None => p_class("scene-break", style.scene_break()),
-        },
+        Prose::SceneBreak => style.image(ImageRole::SceneBreak).map_or_else(
+            || p_class("scene-break", style.scene_break()),
+            |img| img_p("scene-break", img),
+        ),
         Prose::Heading(h) => format!("<h2>{}</h2>", xml_escape(h)),
         Prose::Paragraph(text) => {
             let class = if opening { " class=\"opening\"" } else { "" };
@@ -694,12 +691,12 @@ fn inline_xhtml(text: &str) -> String {
     let mut out = String::new();
     for Run { text, bold, italic } in inline_runs(text) {
         let esc = xml_escape(&text);
-        out.push_str(&match (bold, italic) {
-            (true, true) => format!("<strong><em>{esc}</em></strong>"),
-            (true, false) => format!("<strong>{esc}</strong>"),
-            (false, true) => format!("<em>{esc}</em>"),
-            (false, false) => esc,
-        });
+        match (bold, italic) {
+            (true, true) => write!(out, "<strong><em>{esc}</em></strong>").unwrap(),
+            (true, false) => write!(out, "<strong>{esc}</strong>").unwrap(),
+            (false, true) => write!(out, "<em>{esc}</em>").unwrap(),
+            (false, false) => out.push_str(&esc),
+        }
     }
     out
 }

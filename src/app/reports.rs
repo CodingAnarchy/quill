@@ -150,6 +150,10 @@ impl App {
     /// once when it's opened. Scans every chapter's prose (active chapter live,
     /// the rest from disk) — on demand, never per frame.
     pub(crate) fn analysis_lines(&self) -> Vec<Line<'static>> {
+        // Style-flag list sizes / cutoffs (whole-manuscript signals).
+        const TOP_WORDS: usize = 12;
+        const TOP_PHRASES: usize = 8;
+        const PHRASE_MIN: usize = 3; // a phrase must recur at least this often to list
         let threshold = self.project.manifest.run_on_threshold();
         // The effective stopword / filter-word lists: built-in defaults adjusted
         // by the project's `[analysis]` overrides (#119), built once for the report.
@@ -203,10 +207,6 @@ impl App {
         }
         let longest = longest.into_vec();
         let parts = self.analysis_parts();
-        // Style-flag list sizes / cutoffs (whole-manuscript signals).
-        const TOP_WORDS: usize = 12;
-        const TOP_PHRASES: usize = 8;
-        const PHRASE_MIN: usize = 3; // a phrase must recur at least this often to list
         let top_words = analysis::top_counts(&word_counts, TOP_WORDS, 1);
         let top_phrases = analysis::top_counts(&phrase_counts, TOP_PHRASES, PHRASE_MIN);
         let report = analysis::Report {

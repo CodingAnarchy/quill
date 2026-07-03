@@ -33,6 +33,7 @@
 //! conversation persists for the next request. Claude-only for now (#389).
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 
 use serde_json::{json, Value};
 
@@ -424,12 +425,14 @@ impl App {
         let body =
             tool_loop::build_body(&model, Some(SYSTEM), &a.messages, &tools, MAX_OUTPUT_TOKENS);
         a.task.spawn(move || match spec.build() {
-            Ok(backend) => match backend.as_converse() {
-                Some(conv) => conv.respond(&body),
-                None => Err(AiError::NotConfigured(
-                    "this backend has no tool-use support".into(),
-                )),
-            },
+            Ok(backend) => backend.as_converse().map_or_else(
+                || {
+                    Err(AiError::NotConfigured(
+                        "this backend has no tool-use support".into(),
+                    ))
+                },
+                |conv| conv.respond(&body),
+            ),
             Err(e) => Err(e),
         });
     }
@@ -618,6 +621,7 @@ impl App {
 
     /// Resume a parked batch once an assistant-initiated pass finishes (#392),
     /// called from [`poll_ai`](App::poll_ai) with the pass's result summary.
+    #[allow(clippy::needless_pass_by_value)] // callers (worker.rs, tests) hand over owned summaries
     pub(super) fn resume_assistant_pass(&mut self, summary: String) {
         let call = self.assistant_mut().and_then(|c| c.awaiting.take());
         let Some(call) = call else { return };
@@ -642,7 +646,7 @@ impl App {
             let answer = crate::ai::parse_answer(&resp.text);
             let mut summary = answer.answer;
             if !answer.citations.is_empty() {
-                summary.push_str(&format!("\n\nCited: {}", answer.citations.join(", ")));
+                write!(summary, "\n\nCited: {}", answer.citations.join(", ")).unwrap();
             }
             return Some(summary);
         }

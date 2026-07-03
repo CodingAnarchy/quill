@@ -228,10 +228,9 @@ pub fn validate_change(key: &str, value: &str) -> Result<String, String> {
         | "editor.smart_typography"
         | "editor.typewriter"
         | "editor.focus_mode"
-        | "editor.paragraph_indent" => match parse_bool(value) {
-            Some(b) => Ok(b.to_string()),
-            None => bad("expected true/false"),
-        },
+        | "editor.paragraph_indent" => {
+            parse_bool(value).map_or_else(|| bad("expected true/false"), |b| Ok(b.to_string()))
+        }
         "editor.column_width" => match value.trim().parse::<u16>() {
             Ok(w) if (32..=160).contains(&w) => Ok(w.to_string()),
             _ => bad("expected a width 32–160"),

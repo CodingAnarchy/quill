@@ -546,10 +546,10 @@ impl App {
         match &self.mode {
             Mode::EditMeta(m) => &m.buffer,
             Mode::BibleReview(r) if r.editing.is_some() => r.editing.as_ref().unwrap(),
-            _ => match &self.manuscript {
-                Some(m) => m.buffer(),
-                None => &self.buffer,
-            },
+            _ => self
+                .manuscript
+                .as_ref()
+                .map_or(&self.buffer, Manuscript::buffer),
         }
     }
 
@@ -690,7 +690,7 @@ impl App {
             title: "Spelling suggestions \u{2014} pick a correction",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

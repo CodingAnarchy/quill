@@ -126,23 +126,20 @@ impl BackendSpec {
                 model,
                 fallback,
                 notice,
-            } => match build_local(slot, model) {
+            } => match build_local(&slot, model) {
                 Ok(backend) => Ok(backend),
-                Err(local_err) => match fallback {
-                    Some(key) => {
-                        if let Ok(mut slot) = notice.lock() {
-                            *slot = Some(
-                                "Local model isn't available — ran on Claude instead. \
-                                 Download it from \"Local AI models\" (Ctrl-K) to run on-device."
-                                    .to_string(),
-                            );
-                        }
-                        Ok(Arc::new(ClaudeBackend::new(key)))
+                // No fallback (Claude not ready): surface the actionable local error
+                // (which names the model and how to fix it, #725).
+                Err(local_err) => fallback.map_or(Err(local_err), |key| {
+                    if let Ok(mut slot) = notice.lock() {
+                        *slot = Some(
+                            "Local model isn't available — ran on Claude instead. \
+                             Download it from \"Local AI models\" (Ctrl-K) to run on-device."
+                                .to_string(),
+                        );
                     }
-                    // No fallback (Claude not ready): surface the actionable local
-                    // error (which names the model and how to fix it, #725).
-                    None => Err(local_err),
-                },
+                    Ok(Arc::new(ClaudeBackend::new(key)))
+                }),
             },
         }
     }
@@ -154,7 +151,7 @@ impl BackendSpec {
 /// an author who configured no model set keeps the prior behavior (#377).
 #[cfg(feature = "local")]
 fn build_local(
-    slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
+    slot: &Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
     model: Option<&'static ai::model_select::Model>,
 ) -> Result<Arc<dyn Backend>, ai::AiError> {
     let key = model.map_or("auto", ai::model_select::Model::id);
@@ -175,7 +172,7 @@ fn build_local(
 
 #[cfg(not(feature = "local"))]
 fn build_local(
-    _slot: Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
+    _slot: &Arc<Mutex<HashMap<String, Arc<dyn Backend>>>>,
     _model: Option<&'static ai::model_select::Model>,
 ) -> Result<Arc<dyn Backend>, ai::AiError> {
     Err(ai::AiError::NotConfigured(LOCAL_UNAVAILABLE.into()))
@@ -390,6 +387,7 @@ impl App {
     /// or skip (already current). The tracker carries its own request builders and
     /// parse (#510): `t.full`/`t.incr` build the request for each case, `t.finish`
     /// turns the response into the matching [`Outcome`].
+    #[allow(clippy::needless_pass_by_value)] // consumes the tracker: t.finish is moved into spawn_request
     pub(super) fn run_bible_tracker(&mut self, t: BibleTracker, book: usize, force: bool) {
         let (scope, prior, current) = self.plan_bible_pass(&t, book);
         // The AI palette's `R` forces a full rebuild regardless of the delta (#176).
@@ -958,7 +956,7 @@ mod local_model_files_tests {
     use crate::ai::model_select::MODELS;
 
     #[test]
-    #[ignore]
+    #[ignore = "integration: needs network / a downloaded model; not hermetic"]
     fn download_status_remove_round_trip() {
         let model = &MODELS[0]; // 0.5B — keep the download small
         super::remove_model_files(model).expect("clean start"); // ignore prior state

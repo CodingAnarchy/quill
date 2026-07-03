@@ -3,6 +3,8 @@
 //! generated/notes block markers) stripped. Pure local concatenation of files
 //! already on disk; no AI request.
 
+use std::fmt::Write as _;
+
 use super::super::*;
 
 use crate::ai::bible;
@@ -60,7 +62,7 @@ fn assemble_story_bible(root: &std::path::Path, title: &str) -> String {
             BibleSource::Dir(dir) => clean_bible_dir(&bible.join(dir)),
         };
         if let Some(content) = content {
-            out.push_str(&format!("\n## {heading}\n\n{content}\n"));
+            write!(out, "\n## {heading}\n\n{content}\n").unwrap();
         }
     }
     out

@@ -378,6 +378,9 @@ pub fn recommend(hw: Hardware) -> Recommendation {
         .map(|(_, m)| m)
         .next_back(); // table is ascending → last passing entry is the largest
 
+    // Both arms build a multi-line explanation (the Some arm computes a cap note
+    // first); a map_or_else closure would be less readable than this match.
+    #[allow(clippy::option_if_let_else)]
     let reasoning = match choice {
         Some(m) => {
             let cap = if hw.accel == Accel::Cpu && m.params == CPU_MAX_PARAMS {

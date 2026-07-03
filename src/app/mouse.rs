@@ -179,7 +179,7 @@ impl App {
     /// Shift the editor's decoupled read-ahead viewport offset (#764) by `notches`
     /// (positive scrolls down). Clamped to zero at the top; the renderer clamps the
     /// bottom against the real content so no blank space shows past the end.
-    fn scroll_editor(&mut self, notches: i32) {
+    fn scroll_editor(&self, notches: i32) {
         let step = notches * SCROLL_STEP as i32;
         let cur = self.scroll_offset.get();
         // The renderer stores the offset clamped to the content each frame, so `cur`

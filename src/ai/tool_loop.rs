@@ -20,6 +20,9 @@
 //! drives turns on the UI thread (network off-thread, action execution on it),
 //! rather than a single off-thread function, so the orchestration isn't here.
 
+#[cfg(any(feature = "local", test))]
+use std::fmt::Write as _;
+
 use serde_json::{json, Value};
 
 use super::AiError;
@@ -66,6 +69,8 @@ pub fn tool_result_block(id: &str, content: &str) -> Value {
 }
 
 /// The `user` turn carrying the tool results back to the model.
+// takes ownership: `results` is moved into the constructed JSON message
+#[allow(clippy::needless_pass_by_value)]
 pub fn tool_result_message(results: Vec<Value>) -> Value {
     json!({ "role": "user", "content": results })
 }
@@ -138,16 +143,16 @@ pub fn flatten_conversation(messages: &[Value]) -> String {
                             out.push('\n');
                         }
                         Some("tool_use") => {
-                            out.push_str(&format!(
-                                "(ran the tool: {})\n",
-                                b["name"].as_str().unwrap_or("")
-                            ));
+                            writeln!(out, "(ran the tool: {})", b["name"].as_str().unwrap_or(""))
+                                .unwrap();
                         }
                         Some("tool_result") => {
-                            out.push_str(&format!(
-                                "(tool result: {})\n",
+                            writeln!(
+                                out,
+                                "(tool result: {})",
                                 b["content"].as_str().unwrap_or("")
-                            ));
+                            )
+                            .unwrap();
                         }
                         _ => {}
                     }

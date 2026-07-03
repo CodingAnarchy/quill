@@ -60,6 +60,7 @@ pub use submission::Submission;
 use crate::theme;
 use std::cell::OnceCell;
 use std::fmt;
+use std::fmt::Write as _;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -206,11 +207,11 @@ pub fn is_ok(status: u16) -> bool {
 /// trimmed, with a blank line around it — the shared shape for off-manuscript copy
 /// artifacts (marketing variants #236, social posts #237). Empty input → empty.
 pub fn numbered_sections(label: &str, items: &[String]) -> String {
-    items
-        .iter()
-        .enumerate()
-        .map(|(i, it)| format!("## {label} {}\n\n{}\n\n", i + 1, it.trim()))
-        .collect()
+    let mut s = String::new();
+    for (i, it) in items.iter().enumerate() {
+        write!(s, "## {label} {}\n\n{}\n\n", i + 1, it.trim()).unwrap();
+    }
+    s
 }
 
 /// Render a `(token, description)` vocabulary as cached context for a constrained
@@ -219,7 +220,7 @@ pub fn numbered_sections(label: &str, items: &[String]) -> String {
 pub fn vocab_context(heading: &str, vocab: &[(String, String)]) -> String {
     let mut s = format!("{heading}\n");
     for (token, desc) in vocab {
-        s.push_str(&format!("- {token}: {desc}\n"));
+        writeln!(s, "- {token}: {desc}").unwrap();
     }
     s
 }
@@ -358,6 +359,8 @@ pub fn string_field() -> serde_json::Value {
 }
 
 /// `{ "type": "array", "items": <item> }` — an array of `item` (#429).
+// takes ownership: `item` is moved into the constructed JSON value
+#[allow(clippy::needless_pass_by_value)]
 pub fn array_of(item: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "type": "array", "items": item })
 }

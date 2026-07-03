@@ -191,18 +191,17 @@ impl App {
                     self.message = Some("Left the plaintext key in the config.".into());
                 }
             }
-            Pending::ConfirmEnableAi { resume } => match key.code {
+            Pending::ConfirmEnableAi { resume } => {
                 // Confirm: write `[ai] enabled = true`, then chain (key flow or the
                 // pass the author reached for). AI stays off on any other key (#602).
-                KeyCode::Char('y' | 'Y') => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
                     self.mode = closed;
                     self.enable_ai(resume);
-                }
-                _ => {
+                } else {
                     self.mode = closed;
                     self.message = Some("AI left off.".into());
                 }
-            },
+            }
             Pending::ConfirmRestore => match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;

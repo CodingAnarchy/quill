@@ -79,7 +79,10 @@ fn is_ignored(rel: &Path) -> bool {
     if parts == ["bible", ".state.toml"] {
         return true;
     }
-    // OS / editor cruft, anywhere in the tree.
+    // OS / editor cruft, anywhere in the tree. The `.swp`/`.tmp` suffixes are the
+    // exact lowercase names vim and friends write; matching them case-sensitively
+    // is intentional (a `notes.SWP` the author named is not editor cruft).
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     parts
         .iter()
         .any(|p| *p == ".DS_Store" || p.ends_with(".swp") || p.ends_with(".tmp"))
@@ -455,7 +458,11 @@ mod tests {
     fn default_name_carries_the_project_and_a_stamp() {
         let name = default_name(Path::new("/tmp/My Novel"));
         assert!(name.starts_with("My Novel-"));
-        assert!(name.ends_with(".zip"));
+        // `.zip` is the exact literal suffix `default_name` writes — a case-exact
+        // assertion on our own output, not a user-supplied extension.
+        #[allow(clippy::case_sensitive_file_extension_comparisons)]
+        let is_zip = name.ends_with(".zip");
+        assert!(is_zip);
         // The stamp is YYYY-MM-DD-HHMMSS, so the name is well past the prefix.
         assert!(name.len() > "My Novel-.zip".len() + 10);
     }

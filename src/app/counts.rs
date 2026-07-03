@@ -99,10 +99,9 @@ impl App {
 
     /// Whether the active edit target has unsaved changes (either view).
     pub(super) fn edit_dirty(&self) -> bool {
-        match &self.manuscript {
-            Some(m) => m.dirty(),
-            None => self.buffer.dirty,
-        }
+        self.manuscript
+            .as_ref()
+            .map_or(self.buffer.dirty, crate::manuscript::Manuscript::dirty)
     }
 
     /// Word count for chapter `index`: live from the buffer when it's active

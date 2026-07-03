@@ -16,7 +16,7 @@ impl Backend for MockBackend {
         match &self.result {
             Ok(text) => Ok(ai::Response {
                 text: text.clone(),
-                usage: Default::default(),
+                usage: ai::Usage::default(),
             }),
             Err(()) => Err(ai::AiError::Network {
                 status: None,

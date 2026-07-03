@@ -92,7 +92,7 @@ pub fn post_json(url: &str, headers: &[Header], body: &Value) -> Result<(u16, Va
         headers,
     )
     .send_json(body)
-    .map_err(transport)?;
+    .map_err(|e| transport(&e))?;
     let status = res.status().as_u16();
     let value = res.body_mut().read_json().map_err(malformed)?;
     Ok((status, value))
@@ -106,7 +106,7 @@ pub fn get_json(url: &str, headers: &[Header]) -> Result<(u16, Value), AiError> 
         headers,
     )
     .call()
-    .map_err(transport)?;
+    .map_err(|e| transport(&e))?;
     let status = res.status().as_u16();
     let value = res.body_mut().read_json().map_err(malformed)?;
     Ok((status, value))
@@ -121,7 +121,7 @@ pub fn get_text(url: &str, headers: &[Header]) -> Result<String, AiError> {
         headers,
     )
     .call()
-    .map_err(transport)?
+    .map_err(|e| transport(&e))?
     .body_mut()
     .read_to_string()
     .map_err(malformed)
@@ -142,7 +142,7 @@ fn with_headers<B>(
 
 /// A transport failure (the call never completed): no HTTP status to report.
 #[cfg(not(test))]
-fn transport(e: ureq::Error) -> AiError {
+fn transport(e: &ureq::Error) -> AiError {
     AiError::Network {
         status: None,
         message: e.to_string(),

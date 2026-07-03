@@ -79,13 +79,13 @@ pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitMeta>, String> {
 fn format_date(t: git2::Time) -> String {
     let offset = time::UtcOffset::from_whole_seconds(t.offset_minutes() * 60)
         .unwrap_or(time::UtcOffset::UTC);
-    match time::OffsetDateTime::from_unix_timestamp(t.seconds()) {
-        Ok(dt) => {
+    time::OffsetDateTime::from_unix_timestamp(t.seconds()).map_or_else(
+        |_| "????-??-??".to_string(),
+        |dt| {
             let (y, m, d) = dt.to_offset(offset).to_calendar_date();
             format!("{y:04}-{:02}-{d:02}", u8::from(m))
-        }
-        Err(_) => "????-??-??".to_string(),
-    }
+        },
+    )
 }
 
 /// The working-tree status: which tracked-or-untracked (non-ignored) files differ
@@ -173,9 +173,9 @@ pub fn show_file_at(root: &Path, rev: &str, rel_path: &str) -> Result<Option<Str
         .and_then(|obj| obj.peel_to_commit())
         .map_err(|e| format!("resolve {rev}: {e}"))?;
     let tree = commit.tree().map_err(|e| e.to_string())?;
-    let entry = match tree.get_path(Path::new(rel_path)) {
-        Ok(entry) => entry,
-        Err(_) => return Ok(None), // the file isn't in that commit
+    // The file isn't in that commit.
+    let Ok(entry) = tree.get_path(Path::new(rel_path)) else {
+        return Ok(None);
     };
     let blob = entry
         .to_object(&repo)

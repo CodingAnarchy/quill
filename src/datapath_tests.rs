@@ -16,6 +16,7 @@
 //! front matter together).
 
 use proptest::prelude::*;
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 
@@ -143,7 +144,10 @@ proptest! {
         crlf in any::<bool>(),
     ) {
         let nl = if crlf { "\r\n" } else { "\n" };
-        let inner: String = keys.iter().map(|k| format!("{k}{nl}")).collect();
+        let inner = keys.iter().fold(String::new(), |mut s, k| {
+            write!(s, "{k}{nl}").unwrap();
+            s
+        });
         // A conforming body: lines joined by the file's ending, ending in exactly
         // one newline (no trailing blanks), so save's trailing-newline
         // normalization is a no-op and the round-trip is a fixed point.

@@ -7,6 +7,8 @@
 //! image is a *brief*; the author renders one with the image features (#238/#239)
 //! or supplies their own. See `docs/ai-features.md`.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -64,10 +66,12 @@ fn render_ad(ad: &Ad) -> String {
     bible::bullet_section(&mut s, "Suggested targeting", &ad.targeting);
     let brief = ad.image_brief.trim();
     if !brief.is_empty() {
-        s.push_str(&format!(
+        write!(
+            s,
             "## Ad image\n{brief}\n\nUse an image from `marketing/images/` (Character \
              portrait / Scene illustration), or create one to this brief.\n"
-        ));
+        )
+        .unwrap();
     }
     s
 }

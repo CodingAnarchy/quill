@@ -32,7 +32,7 @@ fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -59,7 +59,7 @@ fn a_fenced_block_renders_in_the_embedded_monospace_face() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -141,7 +141,7 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         subtitle: None,
         author: Some("Auth".into()),
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {

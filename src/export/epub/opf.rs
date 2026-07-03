@@ -4,6 +4,8 @@
 //! navigation document, and the EPUB 2 NCX for older readers. Re-exported into
 //! [`super`] so `finish` calls them unqualified.
 
+use std::fmt::Write;
+
 use super::{Item, Landmarks, Nav};
 use crate::export::{xml_escape, EmbeddedFont, EmbeddedImage, ImageRole, PubMeta};
 
@@ -35,52 +37,64 @@ pub(super) fn build_opf(
     images: &[EmbeddedImage],
 ) -> String {
     let mut meta = String::new();
-    meta.push_str(&format!(
+    write!(
+        meta,
         "<dc:identifier id=\"bookid\">{}</dc:identifier>",
         xml_escape(book.id)
-    ));
-    meta.push_str(&format!(
+    )
+    .unwrap();
+    write!(
+        meta,
         "<dc:title id=\"title\">{}</dc:title>",
         xml_escape(book.title)
-    ));
+    )
+    .unwrap();
     meta.push_str("<meta refines=\"#title\" property=\"title-type\">main</meta>");
     if let Some(s) = book.subtitle {
-        meta.push_str(&format!(
+        write!(
+            meta,
             "<dc:title id=\"subtitle\">{}</dc:title>",
             xml_escape(s)
-        ));
+        )
+        .unwrap();
         meta.push_str("<meta refines=\"#subtitle\" property=\"title-type\">subtitle</meta>");
     }
     // The language drives `dc:language` (and the package `xml:lang` below), the
     // `en` fallback now living in `PubMeta::language` rather than hardcoded (#583).
-    meta.push_str(&format!(
+    write!(
+        meta,
         "<dc:language>{}</dc:language>",
         xml_escape(book.publishing.language())
-    ));
+    )
+    .unwrap();
     if let Some(a) = book.author {
-        meta.push_str(&format!("<dc:creator>{}</dc:creator>", xml_escape(a)));
+        write!(meta, "<dc:creator>{}</dc:creator>", xml_escape(a)).unwrap();
     }
     // Publishing metadata (#583): publisher, publication date, and the rights line.
     if let Some(p) = &book.publishing.publisher {
-        meta.push_str(&format!("<dc:publisher>{}</dc:publisher>", xml_escape(p)));
+        write!(meta, "<dc:publisher>{}</dc:publisher>", xml_escape(p)).unwrap();
     }
     if let Some(d) = &book.publishing.date {
-        meta.push_str(&format!("<dc:date>{}</dc:date>", xml_escape(d)));
+        write!(meta, "<dc:date>{}</dc:date>", xml_escape(d)).unwrap();
     }
     if let Some(r) = &book.publishing.rights {
-        meta.push_str(&format!("<dc:rights>{}</dc:rights>", xml_escape(r)));
+        write!(meta, "<dc:rights>{}</dc:rights>", xml_escape(r)).unwrap();
     }
     if let Some(s) = book.series {
-        meta.push_str(&format!(
+        write!(
+            meta,
             "<meta property=\"belongs-to-collection\" id=\"series\">{}</meta>",
             xml_escape(s)
-        ));
+        )
+        .unwrap();
         meta.push_str("<meta refines=\"#series\" property=\"collection-type\">series</meta>");
     }
-    meta.push_str(&format!(
+    write!(
+        meta,
         "<meta property=\"dcterms:modified\">{}</meta>",
         book.modified
-    ));
+    )
+    .unwrap();
     // Accessibility metadata (#642): storefronts (Apple Books, Kobo) and the EU
     // Accessibility Act expect the `schema:*` a11y properties. A Quill EPUB is a
     // reflowable, text-only novel — everything is textual, so `textual` alone is
@@ -102,9 +116,7 @@ pub(super) fn build_opf(
     // The EPUB 2 cover hint (#582): older readers (and many storefronts) find the
     // cover via this legacy `<meta name="cover">` pointing at the manifest item id.
     if images.iter().any(|i| i.role == ImageRole::Cover) {
-        meta.push_str(&format!(
-            "<meta name=\"cover\" content=\"{COVER_IMAGE_ID}\"/>"
-        ));
+        write!(meta, "<meta name=\"cover\" content=\"{COVER_IMAGE_ID}\"/>").unwrap();
     }
 
     let mut manifest = String::new();
@@ -156,7 +168,7 @@ pub(super) fn build_opf(
             "application/xhtml+xml",
             None,
         ));
-        spine.push_str(&format!("<itemref idref=\"{}\"/>", it.id));
+        write!(spine, "<itemref idref=\"{}\"/>", it.id).unwrap();
     }
 
     format!(
@@ -181,10 +193,9 @@ pub(super) fn build_opf(
 /// XML-escaped even though current package-internal values have no special
 /// characters.
 fn manifest_item(id: &str, href: &str, media_type: &str, properties: Option<&str>) -> String {
-    let props = match properties {
-        Some(p) => format!(" properties=\"{}\"", xml_escape(p)),
-        None => String::new(),
-    };
+    let props = properties.map_or_else(String::new, |p| {
+        format!(" properties=\"{}\"", xml_escape(p))
+    });
     format!(
         "<item id=\"{}\" href=\"{}\" media-type=\"{}\"{props}/>",
         xml_escape(id),
@@ -222,11 +233,13 @@ pub(super) fn build_nav(entries: &[Nav], landmarks: &Landmarks, lang: &str) -> S
 fn nav_landmarks(landmarks: &Landmarks) -> String {
     let mut lis = String::new();
     let mut li = |kind: &str, href: &str, label: &str| {
-        lis.push_str(&format!(
-            "<li><a epub:type=\"{kind}\" href=\"{}\">{}</a></li>\n",
+        writeln!(
+            lis,
+            "<li><a epub:type=\"{kind}\" href=\"{}\">{}</a></li>",
             href,
             xml_escape(label),
-        ));
+        )
+        .unwrap();
     };
     if let Some(href) = &landmarks.cover {
         li("cover", href, "Cover");
@@ -255,11 +268,7 @@ fn nav_landmarks(landmarks: &Landmarks) -> String {
 fn nav_ol(entries: &[Nav]) -> String {
     let mut s = String::from("<ol>\n");
     for e in entries {
-        s.push_str(&format!(
-            "<li><a href=\"{}\">{}</a>",
-            e.href,
-            xml_escape(&e.label)
-        ));
+        write!(s, "<li><a href=\"{}\">{}</a>", e.href, xml_escape(&e.label)).unwrap();
         if !e.children.is_empty() {
             s.push('\n');
             s.push_str(&nav_ol(&e.children));
@@ -295,11 +304,13 @@ fn ncx_points(entries: &[Nav], order: &mut usize) -> String {
     let mut s = String::new();
     for e in entries {
         *order += 1;
-        s.push_str(&format!(
+        write!(
+            s,
             "<navPoint id=\"np{order}\" playOrder=\"{order}\"><navLabel><text>{}</text></navLabel><content src=\"{}\"/>",
             xml_escape(&e.label),
             e.href
-        ));
+        )
+        .unwrap();
         s.push_str(&ncx_points(&e.children, order));
         s.push_str("</navPoint>");
     }
@@ -318,6 +329,7 @@ fn nav_depth(entries: &[Nav]) -> usize {
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Read};
+    use std::path::Path;
 
     use crate::export::epub::{to_epub, to_epub_series};
     use crate::export::{Chapter, Document, ExportStyle, Part, PubMeta};
@@ -347,7 +359,7 @@ mod tests {
             subtitle: Some("a novel".into()),
             author: Some("A. Writer".into()),
             series: Some("The Cycle".into()),
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
@@ -714,7 +726,7 @@ mod tests {
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {
@@ -799,7 +811,12 @@ mod tests {
             let zip = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
-                .filter(|n| n.contains("/book") && n.ends_with(".xhtml"))
+                .filter(|n| {
+                    n.contains("/book")
+                        && Path::new(n)
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("xhtml"))
+                })
                 .map(str::to_string)
                 .collect();
             names.iter().map(|n| part(&bytes, n)).collect()
@@ -834,7 +851,12 @@ mod tests {
             let zip = zip::ZipArchive::new(Cursor::new(plain.clone())).unwrap();
             let names: Vec<String> = zip
                 .file_names()
-                .filter(|n| n.contains("/book") && n.ends_with(".xhtml"))
+                .filter(|n| {
+                    n.contains("/book")
+                        && Path::new(n)
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("xhtml"))
+                })
                 .map(str::to_string)
                 .collect();
             names.iter().map(|n| part(&plain, n)).collect()

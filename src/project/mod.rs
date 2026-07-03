@@ -414,7 +414,9 @@ impl Project {
             // Order front matter → body → back matter in memory, whatever order
             // the manifest listed them in (#180).
             project.reorder_by_band();
-            project.active = project.manifest.chapters[0].file.clone();
+            project
+                .active
+                .clone_from(&project.manifest.chapters[0].file);
         }
         // Cache the other books' chapters too (#331), so book and series totals
         // are real without re-reading later. One file read per chapter; the
@@ -522,7 +524,7 @@ impl Project {
         if !path.exists() {
             atomic::write(&path, b"")?;
         }
-        self.active = entry.file.clone();
+        self.active.clone_from(&entry.file);
         self.manifest.chapters.push(entry);
         self.save_manifest()
     }

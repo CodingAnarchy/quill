@@ -4,6 +4,8 @@
 //! `assist.rs` to keep that module under the ~1,000-line convention (#426); a
 //! child module, so it keeps access to `App`'s private fields.
 
+use std::fmt::Write as _;
+
 use super::assist::write_failure_message;
 use super::bible_review::{Staged, StagedTally};
 use super::*;
@@ -183,18 +185,15 @@ impl App {
 
         // For a Markdown source, record which heading level the split used and the
         // levels the manuscript actually uses, so the preview can re-split on them.
-        let (level, levels) = match &markdown {
-            Some(text) => {
-                use crate::manuscript_import as import;
-                let (_, body) = crate::frontmatter::split(text);
-                let level = import::chapter_level(body);
-                let levels: Vec<usize> = (1..=6)
-                    .filter(|&l| import::heading_count(body, l) > 0)
-                    .collect();
-                (Some(level), levels)
-            }
-            None => (None, Vec::new()),
-        };
+        let (level, levels) = markdown.as_ref().map_or((None, Vec::new()), |text| {
+            use crate::manuscript_import as import;
+            let (_, body) = crate::frontmatter::split(text);
+            let level = import::chapter_level(body);
+            let levels: Vec<usize> = (1..=6)
+                .filter(|&l| import::heading_count(body, l) > 0)
+                .collect();
+            (Some(level), levels)
+        });
 
         self.mode = Mode::ImportPreview(Box::new(ImportPreview {
             source,
@@ -338,7 +337,7 @@ impl App {
                 continue;
             }
             preserved += 1;
-            combined.push_str(&format!("## {name}\n\n{text}\n\n"));
+            write!(combined, "## {name}\n\n{text}\n\n").unwrap();
         }
         if preserved == 0 {
             self.message = Some(write_failure_message(&failures));

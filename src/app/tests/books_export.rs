@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::project::Project;
+use std::fmt::Write;
 
 // --- Series export (#332) ---------------------------------------------------
 
@@ -78,9 +79,11 @@ fn parted_app(name: &str) -> (App, TempProject) {
     let bodies = ["alpha\n", "bravo\n", "charlie\n", "delta\n"];
     let mut manifest = String::from("title = \"Book\"\n\n");
     for (i, body) in bodies.iter().enumerate() {
-        manifest.push_str(&format!(
+        write!(
+            manifest,
             "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"c{i}.md\"\n\n"
-        ));
+        )
+        .unwrap();
         fs::write(dir.join(format!("c{i}.md")), body).unwrap();
     }
     // Two parts: chapters 1–2 and 3–4 (1-based body positions, #185).

@@ -3,6 +3,7 @@
 //! Heading 1 paragraphs, turning bold/italic runs into `**`/`*`. See the crate
 //! module doc for the rules; the shared XML scanner lives in `mod.rs`.
 
+use std::fmt::Write;
 use std::io::{Cursor, Read};
 
 use super::{
@@ -113,13 +114,13 @@ fn body_texts(paras: &[Para]) -> Vec<String> {
 fn paragraphs(document: &str, dropped: &mut Dropped) -> Vec<Para> {
     let mut out = Vec::new();
     for_each_element(document, "w:p", |inner| {
-        out.push(match inner {
-            Some(p) => parse_paragraph(p, dropped),
-            None => Para {
+        out.push(inner.map_or_else(
+            || Para {
                 heading: false,
                 text: String::new(),
             },
-        });
+            |p| parse_paragraph(p, dropped),
+        ));
     });
     out
 }
@@ -184,11 +185,11 @@ fn run_markdown(run: &str, dropped: &mut Dropped) -> String {
     // A footnote/endnote reference becomes an inline marker rather than vanishing.
     for _ in 0..count_elements(run, "w:footnoteReference") {
         dropped.footnotes += 1;
-        out.push_str(&format!("[^{}]", dropped.footnotes));
+        write!(out, "[^{}]", dropped.footnotes).unwrap();
     }
     for _ in 0..count_elements(run, "w:endnoteReference") {
         dropped.endnotes += 1;
-        out.push_str(&format!("[^e{}]", dropped.endnotes));
+        write!(out, "[^e{}]", dropped.endnotes).unwrap();
     }
     // Images/drawings and comment references have no flat-prose equivalent; count
     // the drop so the caller can warn. `<w:pict>` is the legacy VML image form;
@@ -214,13 +215,10 @@ fn run_text(xml: &str) -> String {
 /// Whether a run-property toggle (`w:b` / `w:i`) is on: present and not turned
 /// off by `w:val="false|0|none|off"`.
 fn run_toggle(run: &str, name: &str) -> bool {
-    match tag_attrs(run, name) {
-        None => false,
-        Some(attrs) => match attr_value(attrs, "w:val") {
-            Some(v) => !matches!(v.as_str(), "false" | "0" | "none" | "off"),
-            None => true,
-        },
-    }
+    tag_attrs(run, name).is_some_and(|attrs| {
+        attr_value(attrs, "w:val")
+            .is_none_or(|v| !matches!(v.as_str(), "false" | "0" | "none" | "off"))
+    })
 }
 
 #[cfg(test)]
@@ -348,13 +346,13 @@ mod tests {
     #[test]
     fn round_trips_a_quill_docx_export() {
         use crate::export::docx::{to_docx, Profile};
-        use crate::export::{Chapter, Document, Part};
+        use crate::export::{Chapter, Document, Part, PubMeta};
         let doc = Document {
             title: "Round Trip".into(),
             subtitle: None,
             author: None,
             series: None,
-            publishing: Default::default(),
+            publishing: PubMeta::default(),
             epigraph: None,
             front: vec![],
             parts: vec![Part {

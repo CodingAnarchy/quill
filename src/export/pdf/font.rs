@@ -16,6 +16,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 
 use subsetter::{GlyphRemapper, Tag};
 use ttf_parser::{Face, GlyphId};
@@ -254,6 +255,9 @@ fn body_face(
     default: &'static [u8],
     base: &str,
 ) -> CidFont {
+    // The `Some` arm is a multi-statement block; a `map_or_else` closure would read
+    // worse than the explicit match.
+    #[allow(clippy::option_if_let_else)]
     match style.font_face(role, want) {
         Some(f) => {
             let program = leak(&f.bytes);
@@ -379,6 +383,9 @@ impl CidFont {
         } else {
             subsetter::subset(self.program, 0, &remapper)
         };
+        // The `Ok` arm is a multi-line tuple build; a `map_or_else` closure would read
+        // worse than the explicit match.
+        #[allow(clippy::option_if_let_else)]
         let (program, gids): (Vec<u8>, GidMap) = match subset {
             Ok(sub) => (
                 sub,
@@ -433,10 +440,16 @@ impl CidFont {
         );
 
         // Widths keyed by the new (subset) glyph id, measured from the original.
-        let widths: String = used
-            .keys()
-            .map(|&old| format!("{} [{}] ", gids[&old], self.advance_em(old).round() as i32))
-            .collect();
+        let widths = used.keys().fold(String::new(), |mut s, &old| {
+            write!(
+                s,
+                "{} [{}] ",
+                gids[&old],
+                self.advance_em(old).round() as i32
+            )
+            .unwrap();
+            s
+        });
         let cid = take(next);
         out.insert(
             cid,
@@ -480,9 +493,9 @@ fn to_unicode_cmap(used: &BTreeMap<u16, char>) -> Vec<u8> {
     // bfchar blocks are capped at 100 entries.
     let entries: Vec<(u16, char)> = used.iter().map(|(&g, &c)| (g, c)).collect();
     for chunk in entries.chunks(100) {
-        body.push_str(&format!("{} beginbfchar\n", chunk.len()));
+        writeln!(body, "{} beginbfchar", chunk.len()).unwrap();
         for (gid, ch) in chunk {
-            body.push_str(&format!("<{gid:04X}> <{}>\n", utf16be_hex(*ch)));
+            writeln!(body, "<{gid:04X}> <{}>", utf16be_hex(*ch)).unwrap();
         }
         body.push_str("endbfchar\n");
     }
@@ -497,8 +510,10 @@ fn utf16be_hex(c: char) -> String {
     let mut units = [0u16; 2];
     c.encode_utf16(&mut units)
         .iter()
-        .map(|u| format!("{u:04X}"))
-        .collect()
+        .fold(String::new(), |mut s, u| {
+            write!(s, "{u:04X}").unwrap();
+            s
+        })
 }
 
 /// Glyph ids for `text` in the `style` face (body or `heading`), face→fallback
@@ -516,7 +531,7 @@ pub(super) fn glyph_run(
             continue;
         };
         match runs.last_mut() {
-            Some((n, hex)) if *n == name => hex.push_str(&format!("{gid:04X}")),
+            Some((n, hex)) if *n == name => write!(hex, "{gid:04X}").unwrap(),
             _ => runs.push((name, format!("{gid:04X}"))),
         }
     }
@@ -532,7 +547,7 @@ pub(super) fn glyph_run_mono(fonts: &Fonts, text: &str) -> Vec<(&'static str, St
             continue;
         };
         match runs.last_mut() {
-            Some((n, hex)) if *n == name => hex.push_str(&format!("{gid:04X}")),
+            Some((n, hex)) if *n == name => write!(hex, "{gid:04X}").unwrap(),
             _ => runs.push((name, format!("{gid:04X}"))),
         }
     }

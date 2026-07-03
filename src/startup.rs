@@ -118,9 +118,8 @@ where
         if key.kind != KeyEventKind::Press {
             continue;
         }
-        match step(&mut screen, key, projects) {
-            Some(choice) => return Ok(choice),
-            None => continue,
+        if let Some(choice) = step(&mut screen, key, projects) {
+            return Ok(choice);
         }
     }
 }

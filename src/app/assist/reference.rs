@@ -59,10 +59,9 @@ fn thesaurus_desc(word: &ai::thesaurus::Word) -> String {
 fn kind_title(kind: ai::namegen::Kind) -> String {
     let label = kind.label();
     let mut chars = label.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
 
 /// A candidate name's one-line description for the pick list (#610): its note,
@@ -174,7 +173,7 @@ impl App {
             title: "Pick a word to place",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -211,7 +210,7 @@ impl App {
             title: "Name generator — what needs a name?",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -276,7 +275,7 @@ impl App {
             title: "Pick a name to place",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

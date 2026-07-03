@@ -576,7 +576,7 @@ impl Manuscript {
             if recovered.is_some() {
                 s.dirty = true;
                 restored.push(s.index);
-                first_start_line.get_or_insert(text.matches('\n').count());
+                first_start_line.get_or_insert_with(|| text.matches('\n').count());
             }
             s.lines = content.matches('\n').count();
             text.push_str(&content);

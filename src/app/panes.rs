@@ -118,6 +118,7 @@ impl App {
     /// to compare, or a story-bible entry / note to write alongside. It's a normal
     /// editor pane (read, edit, and save independently), reusing the #163 split
     /// machinery. Single-chapter view only.
+    #[allow(clippy::needless_pass_by_value)] // callers (nav.rs) hand over an owned path
     pub(super) fn open_file_in_pane(&mut self, path: PathBuf) {
         self.place_editor_pane(
             &path,

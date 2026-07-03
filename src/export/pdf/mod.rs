@@ -26,6 +26,7 @@ mod wrap;
 mod write;
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use self::draw::{mono_wrap, num};
 use self::font::{pdf_text_string, Fonts, GidMap, ObjMap};
@@ -153,11 +154,16 @@ pub const SCREEN_MEDIA_W: f32 = 612.0;
 
 /// Compile a [`Document`] to a screen PDF (#463): US-Letter, embedded Type0 fonts,
 /// honoring the designed `[style]` (#489/#492).
+// Returns `io::Result` for a uniform export signature (the other writers are
+// fallible and callers in app::exporting drive them through one fallible path).
+#[allow(clippy::unnecessary_wraps)]
 pub fn to_pdf(doc: &Document, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
     Ok(render_book(doc, style, Layout::screen(style)))
 }
 
 /// Compile a whole series to one screen PDF (#332/#463).
+// Fallible signature kept for a uniform export path (see `to_pdf`).
+#[allow(clippy::unnecessary_wraps)]
 pub fn to_pdf_series(
     books: &[Document],
     series: Option<&str>,
@@ -178,6 +184,8 @@ pub fn to_pdf_series(
 /// gutter, running heads, recto starts, embedded fonts, honoring the designed
 /// `[style]` (#489). A non-zero bleed enlarges the media box and lets the cover fill
 /// past the trim edge; body margins are unchanged.
+// Fallible signature kept for a uniform export path (see `to_pdf`).
+#[allow(clippy::unnecessary_wraps)]
 pub fn to_pdf_print(
     doc: &Document,
     trim_w: f32,
@@ -194,6 +202,8 @@ pub fn to_pdf_print(
 
 /// Compile a whole series to one print-ready interior PDF (#464), with a `bleed`
 /// allowance (#652, points; `0` for none).
+// Fallible signature kept for a uniform export path (see `to_pdf`).
+#[allow(clippy::unnecessary_wraps)]
 pub fn to_pdf_series_print(
     books: &[Document],
     series: Option<&str>,
@@ -483,13 +493,15 @@ impl Pdf {
         self.need(dh);
         let x = self.left() + (self.layout.text_w() - dw) / 2.0;
         let bottom = self.y - dh;
-        self.cur().push_str(&format!(
-            "q {} 0 0 {} {} {} cm /{name} Do Q\n",
+        writeln!(
+            self.cur(),
+            "q {} 0 0 {} {} {} cm /{name} Do Q",
             num(dw),
             num(dh),
             num(x),
             num(bottom)
-        ));
+        )
+        .unwrap();
         self.y -= dh + gap_after;
     }
 
@@ -654,9 +666,8 @@ impl Pdf {
         let Some(first_word) = words.first_mut() else {
             return;
         };
-        let initial = match first_word.text.chars().next() {
-            Some(c) => c,
-            None => return,
+        let Some(initial) = first_word.text.chars().next() else {
+            return;
         };
         first_word.text = first_word.text.chars().skip(1).collect();
         if first_word.text.is_empty() {
@@ -823,20 +834,25 @@ impl Pdf {
         );
 
         // Page tree (MediaBox + font resources inherited by every page).
-        let kids: String = page_obj.iter().map(|id| format!("{id} 0 R ")).collect();
+        let kids = page_obj.iter().fold(String::new(), |mut s, id| {
+            write!(s, "{id} 0 R ").unwrap();
+            s
+        });
         let xobjects = if image_names.is_empty() {
             String::new()
         } else {
-            let entries: String = image_names
-                .iter()
-                .map(|(name, id)| format!("/{name} {id} 0 R "))
-                .collect();
+            let entries = image_names.iter().fold(String::new(), |mut s, (name, id)| {
+                write!(s, "/{name} {id} 0 R ").unwrap();
+                s
+            });
             format!(" /XObject << {entries}>>")
         };
-        let fonts: String = font_names
+        let fonts = font_names
             .iter()
-            .map(|(name, id, _)| format!("/{name} {id} 0 R "))
-            .collect();
+            .fold(String::new(), |mut s, (name, id, _)| {
+                write!(s, "/{name} {id} 0 R ").unwrap();
+                s
+            });
         let resources = format!("/Resources << /Font << {fonts}>>{xobjects} >>");
         // Subsetting renumbered glyphs, so remap the content-stream glyph ids.
         let maps: Vec<(&str, &GidMap)> = font_names.iter().map(|(name, _, m)| (*name, m)).collect();
@@ -902,12 +918,12 @@ impl Pdf {
         let info_id = next;
         let mut info = String::from("<<");
         if !self.doc_title.is_empty() {
-            info.push_str(&format!(" /Title {}", pdf_text_string(&self.doc_title)));
+            write!(info, " /Title {}", pdf_text_string(&self.doc_title)).unwrap();
         }
         if !self.doc_author.is_empty() {
-            info.push_str(&format!(" /Author {}", pdf_text_string(&self.doc_author)));
+            write!(info, " /Author {}", pdf_text_string(&self.doc_author)).unwrap();
         }
-        info.push_str(&format!(" /Producer {} >>", pdf_text_string("Quill")));
+        write!(info, " /Producer {} >>", pdf_text_string("Quill")).unwrap();
         objects.insert(info_id, info.into_bytes());
         serialize(&objects, Some(info_id))
     }

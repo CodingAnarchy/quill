@@ -5,6 +5,8 @@
 //! bible file reuses the shared [`bible`] format; the rule violations surface as
 //! triageable findings. See `docs/ai-features.md` §4.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -163,9 +165,9 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
     let mut body = String::new();
 
     for cat in &s.categories {
-        body.push_str(&format!("## {}\n", cat.name));
+        writeln!(body, "## {}", cat.name).unwrap();
         for e in &cat.entries {
-            body.push_str(&format!("- **{}** — {}\n", e.name, e.detail));
+            writeln!(body, "- **{}** — {}", e.name, e.detail).unwrap();
         }
         body.push('\n');
     }
@@ -173,7 +175,7 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
     if !s.gazetteer.is_empty() {
         body.push_str("## Gazetteer\n");
         for term in &s.gazetteer {
-            body.push_str(&format!("- {term}\n"));
+            writeln!(body, "- {term}").unwrap();
         }
         body.push('\n');
     }
@@ -186,7 +188,7 @@ pub fn render(s: &Setting, notes: &str, today: &str) -> String {
             } else {
                 format!(" ({})", f.chapters.join(", "))
             };
-            body.push_str(&format!("- **{}:** {}{}\n", f.rule, f.violation, where_));
+            writeln!(body, "- **{}:** {}{}", f.rule, f.violation, where_).unwrap();
         }
         body.push('\n');
     }

@@ -5,6 +5,8 @@
 //! author can act on. Per Quill's assistant-not-co-writer rule, this never
 //! drafts or suggests prose — only structure and notes. See `docs/ai-features.md`.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -89,9 +91,9 @@ pub fn render_outline(s: &Scaffold, notes: &str, today: &str) -> String {
     let mut body = String::new();
 
     for item in &s.outline {
-        body.push_str(&format!("## {}\n", item.chapter));
+        writeln!(body, "## {}", item.chapter).unwrap();
         for beat in &item.beats {
-            body.push_str(&format!("- {beat}\n"));
+            writeln!(body, "- {beat}").unwrap();
         }
         body.push('\n');
     }
@@ -99,7 +101,7 @@ pub fn render_outline(s: &Scaffold, notes: &str, today: &str) -> String {
     if !s.gaps.is_empty() {
         body.push_str("## Gaps\n");
         for g in &s.gaps {
-            body.push_str(&format!("- **{}:** {}\n", g.chapter, g.detail));
+            writeln!(body, "- **{}:** {}", g.chapter, g.detail).unwrap();
         }
         body.push('\n');
     }

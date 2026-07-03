@@ -107,13 +107,10 @@ pub fn get(key: Key) -> Option<String> {
     #[cfg(not(test))]
     {
         let entry = keyring::Entry::new(SERVICE, key.account()).ok()?;
-        match entry.get_password() {
-            Ok(secret) => {
-                let secret = secret.trim();
-                (!secret.is_empty()).then(|| secret.to_string())
-            }
-            Err(_) => None,
-        }
+        entry.get_password().ok().and_then(|secret| {
+            let secret = secret.trim();
+            (!secret.is_empty()).then(|| secret.to_string())
+        })
     }
 }
 

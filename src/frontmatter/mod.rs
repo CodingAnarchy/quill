@@ -53,13 +53,13 @@ fn strip_open_fence(text: &str) -> Option<&str> {
 /// split-off block used CRLF — so a CRLF chapter round-trips byte-for-byte just
 /// like an LF one.
 pub fn join<'a>(front: Option<&str>, body: &'a str) -> Cow<'a, str> {
-    match front {
-        Some(inner) => {
+    front.map_or_else(
+        || Cow::Borrowed(body),
+        |inner| {
             let nl = fence_newline(inner, body);
             Cow::Owned(format!("---{nl}{inner}---{nl}{body}"))
-        }
-        None => Cow::Borrowed(body),
-    }
+        },
+    )
 }
 
 /// The newline the reconstructed fences should use: CRLF when the chapter uses
@@ -482,12 +482,13 @@ fn unquote(value: &str) -> String {
             match c {
                 '\\' => match chars.next() {
                     Some('"') => out.push('"'),
-                    Some('\\') => out.push('\\'),
+                    // An escaped backslash, or a trailing lone backslash at end of
+                    // input, both yield a single literal backslash.
+                    Some('\\') | None => out.push('\\'),
                     Some(other) => {
                         out.push('\\');
                         out.push(other);
                     }
-                    None => out.push('\\'),
                 },
                 _ => out.push(c),
             }

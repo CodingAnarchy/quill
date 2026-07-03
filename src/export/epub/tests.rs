@@ -43,7 +43,7 @@ fn doc() -> Document {
         subtitle: Some("a novel".into()),
         author: Some("A. Writer".into()),
         series: Some("The Cycle".into()),
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
         front: vec![chapter("Prologue", None, "Before it all.")],
         parts: vec![Part {
@@ -149,7 +149,7 @@ fn smart_typography_glyphs_pass_through() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -179,7 +179,7 @@ fn a_fenced_block_renders_as_verbatim_preformatted_xhtml() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -211,7 +211,7 @@ fn scene_break_renders_the_styled_glyph_default_unchanged() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -252,7 +252,7 @@ fn fonts_are_embedded_and_applied_via_the_stylesheet() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -323,7 +323,7 @@ fn a_true_italic_sibling_embeds_and_gets_an_italic_font_face() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -394,7 +394,7 @@ fn embedded_fonts_are_subset_smaller_than_the_source() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -440,7 +440,7 @@ fn font_face_declarations_carry_a_format_hint() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {
@@ -474,7 +474,7 @@ fn heading_alignment_and_drop_cap_render_via_css() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![Part {

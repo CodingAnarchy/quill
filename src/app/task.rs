@@ -84,7 +84,7 @@ mod tests {
         let value = loop {
             match task.poll() {
                 Poll::Ready(v) => break v,
-                Poll::Pending => continue,
+                Poll::Pending => {}
                 Poll::Died => panic!("worker shouldn't die"),
             }
         };
@@ -99,7 +99,7 @@ mod tests {
         task.spawn(|| panic!("boom"));
         let state = loop {
             match task.poll() {
-                Poll::Pending => continue,
+                Poll::Pending => {}
                 other => break other,
             }
         };

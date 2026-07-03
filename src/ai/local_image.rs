@@ -216,6 +216,8 @@ const fn internal(msg: String) -> AiError {
     AiError::Internal(msg)
 }
 
+// by-value to serve as a `.map_err(weights)` fn argument at ~30 call sites
+#[allow(clippy::needless_pass_by_value)]
 fn weights(e: candle_core::Error) -> AiError {
     AiError::Internal(format!("local image: {e}"))
 }
@@ -227,7 +229,7 @@ mod tests {
     /// End-to-end generation — needs the weights on disk and a capable machine, so
     /// it's ignored by default (run with `cargo test --features local -- --ignored`).
     #[test]
-    #[ignore]
+    #[ignore = "integration: needs network / a downloaded model; not hermetic"]
     fn generates_an_image() {
         let backend = LocalImageBackend::load().expect("load SD weights");
         let img = backend

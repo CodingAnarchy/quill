@@ -4,6 +4,8 @@
 //! blocks), and the low-level `<w:p>`/`<w:r>` builders the rest of the writer
 //! shares.
 
+use std::fmt::Write;
+
 use super::{
     copyright_lines, inline_runs, prose_blocks, render_epigraph, running_header, xml_escape, Block,
     Document, Header, Profile, Prose, PubMeta, SCENE_BREAK,
@@ -162,9 +164,11 @@ pub(super) fn toc_page() -> String {
         r#"<w:r><w:t>Right-click to update the table of contents.</w:t></w:r>"#,
         r#"<w:r><w:fldChar w:fldCharType="end"/></w:r>"#,
     );
-    out.push_str(&format!(
+    write!(
+        out,
         "<w:p><w:pPr><w:spacing w:line=\"240\" w:lineRule=\"auto\"/></w:pPr>{field}</w:p>",
-    ));
+    )
+    .unwrap();
     out
 }
 
@@ -242,6 +246,9 @@ fn epigraph_paras(epigraph: &Epigraph) -> String {
 }
 
 /// A `<w:p>` with the given paragraph properties (omitted when empty) and runs.
+// `runs` by value: taking `&str` would ripple `&` into call sites across other
+// docx modules (series.rs, mod.rs) outside this change's scope.
+#[allow(clippy::needless_pass_by_value)]
 pub(super) fn para(ppr: &str, runs: String) -> String {
     let ppr = if ppr.is_empty() {
         String::new()
@@ -261,7 +268,7 @@ pub(super) fn run(text: &str, bold: bool, italic: bool, size: Option<u32>) -> St
         rpr.push_str("<w:i/>");
     }
     if let Some(sz) = size {
-        rpr.push_str(&format!("<w:sz w:val=\"{sz}\"/>"));
+        write!(rpr, "<w:sz w:val=\"{sz}\"/>").unwrap();
     }
     let rpr = if rpr.is_empty() {
         String::new()

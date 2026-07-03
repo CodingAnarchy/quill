@@ -2,6 +2,7 @@
 //! ~1,000-line convention (#404). Pure move — no behavior change.
 
 use super::*;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -424,14 +425,14 @@ fn typing_a_heading_updates_highlights_incrementally() {
 // the whole novel.
 
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn keystroke_is_decoupled_from_document_size() {
     // A keystroke only *records* the edit; the reparse is deferred. So it
     // must be cheap regardless of buffer size. Stress it far past the real
     // ~3-chapter cap to prove the cost is in the edit, not the document.
     let mut text = String::new();
     for ch in 0..150 {
-        text.push_str(&format!("# Chapter {ch}\n\n"));
+        write!(text, "# Chapter {ch}\n\n").unwrap();
         for _ in 0..50 {
             text.push_str("The night was *dark* and the road was **long** indeed.\n");
         }
@@ -457,12 +458,12 @@ fn keystroke_is_decoupled_from_document_size() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn reparse_is_fast_at_window_size() {
     // Realistic worst case: ~3 long chapters live at once (continuous view).
     let mut text = String::new();
     for ch in 0..3 {
-        text.push_str(&format!("# Chapter {ch}\n\n"));
+        write!(text, "# Chapter {ch}\n\n").unwrap();
         for _ in 0..150 {
             text.push_str("The night was *dark* and the road was **long** indeed.\n");
         }
@@ -498,7 +499,7 @@ fn reparse_is_fast_at_window_size() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn word_motion_is_decoupled_from_document_size() {
     // A word motion scans a bounded window around the cursor (#660), not the
     // whole rope, so its cost can't grow with the document. Before the fix each
@@ -612,7 +613,7 @@ fn grapheme_after_widens_past_a_window_straddling_grapheme() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "release-only perf guard; run via cargo perf"]
 fn grapheme_after_delete_is_decoupled_from_document_size() {
     // `x` (and every inclusive/visual delete) resolves the grapheme under the
     // cursor via `grapheme_after`, which now scans a bounded window (#693) instead

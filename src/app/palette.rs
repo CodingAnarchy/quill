@@ -34,7 +34,7 @@ impl App {
             title: "AI",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -61,7 +61,7 @@ impl App {
             title: "Run action",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 
@@ -70,6 +70,10 @@ impl App {
     /// guards on, and the workflow runner (#226) treats as a step failure. The
     /// per-action runtime guards (AI cost confirm, etc.) still live at the dispatch
     /// layer; this only covers the up-front "can't start" cases.
+    // Some guarded arms share a message (e.g. "leave the continuous view") but are
+    // kept separate, per-action, with their own documenting comments — merging the
+    // patterns would interleave unrelated actions and lose that structure.
+    #[allow(clippy::match_same_arms)]
     pub(crate) fn action_status(&self, action: Action) -> Option<String> {
         match action {
             // Triage and the Ask history are local — they work with the AI backend
@@ -297,7 +301,7 @@ impl App {
             title: "Insert snippet",
             items,
             selected: 0,
-            collapsed: Default::default(),
+            collapsed: std::collections::HashSet::default(),
         }));
     }
 

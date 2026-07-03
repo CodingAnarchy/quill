@@ -20,7 +20,7 @@ fn doc() -> Document {
         subtitle: None,
         author: Some("A. Writer".into()),
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
         front: vec![],
         parts: vec![crate::export::Part {
@@ -52,7 +52,7 @@ fn smart_typography_glyphs_pass_through_to_docx() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![crate::export::Part {
@@ -81,7 +81,7 @@ fn a_fenced_block_renders_as_a_monospace_paragraph_with_breaks() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![crate::export::Part {
@@ -114,7 +114,7 @@ fn series_docx_carries_every_book_in_order() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![crate::export::Part {
@@ -300,7 +300,7 @@ fn a_scene_break_becomes_a_centered_divider_not_literal_dashes() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![crate::export::Part {
@@ -524,7 +524,7 @@ fn series_docx_carries_a_header_and_toc() {
         subtitle: None,
         author: None,
         series: None,
-        publishing: Default::default(),
+        publishing: PubMeta::default(),
         epigraph: None,
         front: vec![],
         parts: vec![crate::export::Part {

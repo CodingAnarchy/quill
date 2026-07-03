@@ -62,10 +62,10 @@ pub fn smarten(text: &str) -> String {
 /// false otherwise, so a quote or apostrophe after a word closes (and contraction
 /// apostrophes become `’`).
 fn opens(before: &str) -> bool {
-    match before.chars().next_back() {
-        None => true,
-        Some(p) => p.is_whitespace() || matches!(p, '(' | '[' | '{' | LSQUO | LDQUO),
-    }
+    before
+        .chars()
+        .next_back()
+        .is_none_or(|p| p.is_whitespace() || matches!(p, '(' | '[' | '{' | LSQUO | LDQUO))
 }
 
 #[cfg(test)]
