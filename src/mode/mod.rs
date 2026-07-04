@@ -35,6 +35,12 @@ pub enum OverlayKind {
     AiPanel,
     /// The built-in user's guide (#281) — a fixed help document.
     Guide,
+    /// The first-run quick-start card (#837): a dismissible tour of the palette,
+    /// the core keys, and the AI on-ramp. Shown once on first launch (then never,
+    /// tracked by a config flag) and reachable on demand from help. Dismissing it
+    /// records the flag, so the key handler needs to tell it apart from the other
+    /// press-any-key surfaces.
+    Onboarding,
     /// The pre-commit review (#704): the changed-file list and the diff of what a
     /// commit would capture. Unlike the read-only reports, this overlay confirms —
     /// Enter proceeds to the commit-message prompt, Esc (or any other key) cancels.
@@ -78,6 +84,21 @@ impl Overlay {
         }
     }
 
+    /// The first-run quick-start card overlay (#837), scrolled to the top.
+    pub const fn onboarding(lines: Vec<Line<'static>>) -> Self {
+        Self {
+            lines,
+            kind: OverlayKind::Onboarding,
+            scroll: 0,
+        }
+    }
+
+    /// Whether this is the first-run onboarding card (#837), so dismissing it can
+    /// record the shown-once config flag before closing.
+    pub const fn is_onboarding(&self) -> bool {
+        matches!(self.kind, OverlayKind::Onboarding)
+    }
+
     /// Whether this overlay confirms an action (the pre-commit review, #704) rather
     /// than being a press-any-key-to-dismiss read-only surface — so the key handler
     /// knows Enter should proceed and any other key should cancel, not just close.
@@ -91,7 +112,10 @@ impl Overlay {
     pub const fn report_label(&self) -> Option<&'static str> {
         match self.kind {
             OverlayKind::Report(label) => Some(label),
-            OverlayKind::AiPanel | OverlayKind::Guide | OverlayKind::CommitReview => None,
+            OverlayKind::AiPanel
+            | OverlayKind::Guide
+            | OverlayKind::Onboarding
+            | OverlayKind::CommitReview => None,
         }
     }
 

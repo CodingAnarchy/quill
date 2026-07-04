@@ -26,6 +26,7 @@ mod lastpos;
 mod manuscript;
 mod manuscript_import;
 mod mode;
+mod onboarding;
 mod project;
 mod recent;
 mod recovery;
@@ -180,6 +181,10 @@ fn main() -> io::Result<()> {
     app.restore_position();
     // If a previous session left unsaved work behind (a crash), offer it back.
     app.offer_recovery();
+    // On the very first launch, show the dismissible quick-start card (#837).
+    // After recovery, so a crash prompt takes precedence and the card waits for a
+    // clean slate (it's a no-op when a prompt/overlay is already up).
+    app.maybe_offer_onboarding();
     recent::record(&root, &title);
 
     // Drop restores the terminal on a normal or `?`-error exit, but the release
