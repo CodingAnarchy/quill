@@ -46,6 +46,7 @@ mod findings_store;
 mod fonts;
 mod images;
 mod imports;
+mod marks;
 mod meta;
 mod models;
 pub mod mouse; // the click→byte layout map + mouse handlers (#757/#764)

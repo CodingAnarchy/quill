@@ -83,6 +83,21 @@ impl App {
                 }
                 return;
             }
+            // `m<x>` records a mark; `` `<x> `` / `'<x>` jumps to it, and `` `` `` /
+            // `''` back-jumps through the jumplist (#825). Any other second key
+            // after a jump cancels; the count is dropped either way.
+            VimPending::Mark { set } => {
+                self.vim_state.pending = VimPending::None;
+                self.vim_state.count = None;
+                if set {
+                    self.set_mark(c);
+                } else if c == '`' || c == '\'' {
+                    self.jump_back();
+                } else {
+                    self.jump_to_mark(c);
+                }
+                return;
+            }
             VimPending::None => {}
         }
 
@@ -132,6 +147,11 @@ impl App {
             // `z=` opens the spelling suggestions for the flagged word (#647) — only
             // as a standalone command, never as an operator motion.
             'z' if self.vim_state.op.is_none() => Some(VimPending::Z),
+            // Marks (#825): `m<x>` sets a mark; `` `<x> `` / `'<x>` jumps to it (or,
+            // as `` `` `` / `''`, back through the jumplist). Standalone commands,
+            // never operator motions — an operator falls through to cancel below.
+            'm' if self.vim_state.op.is_none() => Some(VimPending::Mark { set: true }),
+            '`' | '\'' if self.vim_state.op.is_none() => Some(VimPending::Mark { set: false }),
             _ => None,
         };
         if let Some(p) = prefix {

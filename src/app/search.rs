@@ -75,6 +75,9 @@ impl App {
             return;
         }
         let cur = self.edit_buffer().cursor_byte();
+        // A search repeat (`n`/`N`/`*`) is a jump too (#825): leave the current
+        // position on the jumplist so `` `` `` can return before we move.
+        self.push_jump_from(cur);
         let (target, wrapped) = if backward {
             match matches.iter().rev().find(|&&(start, _)| start < cur) {
                 Some(&(start, _)) => (start, false),
@@ -179,12 +182,18 @@ impl App {
         if s.query.is_empty() {
             self.close_search();
         } else if s.from_vim {
+            // Leave a jump-back target at where the search began (#825), so `` `` ``
+            // returns there rather than to a match navigated past.
+            let origin = s.origin_byte;
             self.vim_state.last_search = Some(VimSearch {
                 query: s.query.clone(),
                 backward: s.backward,
             });
+            self.push_jump_from(origin);
             self.mode = self.editing_mode(); // cursor already on the current match
         } else {
+            let origin = s.origin_byte;
+            self.push_jump_from(origin);
             self.search_mut().stage = SearchStage::Navigate;
         }
     }
