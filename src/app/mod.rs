@@ -15,6 +15,10 @@ use crate::ai::character::{self, Character};
 use crate::ai::continuity::{self, Continuity};
 use crate::ai::plot::{self, Plot};
 use crate::ai::setting::{self, Setting};
+// The AI theme/motif tracker (#828) — aliased `ai_theme` so it doesn't collide
+// with `crate::theme`, the UI color theme used bare as `theme::` throughout `app`.
+use crate::ai::theme as ai_theme;
+use crate::ai::theme::Theme as ThemeBible;
 use crate::ai::{self, bible, Backend, ClaudeBackend, Outcome};
 use crate::analysis;
 use crate::buffer::{self, Buffer, TextObject};

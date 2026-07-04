@@ -500,6 +500,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "ai:continuity",
         "ai:setting",
         "ai:plot",
+        "ai:theme",
         "ai:scaffold",
         "ai:naming",
         "ai:style",

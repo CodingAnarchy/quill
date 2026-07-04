@@ -52,6 +52,7 @@ mod ai_images;
 mod ai_plot;
 mod ai_prose;
 mod ai_qa;
+mod ai_theme;
 mod analysis;
 mod annotations;
 mod archive;

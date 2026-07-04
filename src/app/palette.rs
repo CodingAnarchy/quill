@@ -572,6 +572,7 @@ impl App {
             AiAction::Continuity => self.analyze_continuity(force),
             AiAction::Setting => self.analyze_setting(force),
             AiAction::Plot => self.analyze_plot(force),
+            AiAction::Theme => self.analyze_theme(force),
             AiAction::Scaffold => self.analyze_scaffold(),
             AiAction::Naming => self.analyze_naming(),
             AiAction::Style => self.analyze_style(),
@@ -622,6 +623,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Plot => (
             "Plot & arc tracker",
             "Thread setup→payoff status + dangling-thread findings",
+        ),
+        AiAction::Theme => (
+            "Theme & motif tracker",
+            "Motif → where it recurs / status + dangling-motif findings",
         ),
         AiAction::Scaffold => ("Scaffold / outline", "Beat outline + structural gaps"),
         AiAction::Naming => ("Name & term consistency", "Spelling variants (cheap pass)"),

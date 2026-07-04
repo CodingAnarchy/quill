@@ -14,6 +14,9 @@ pub enum AiAction {
     /// Plot-thread / arc tracker — subplot setup→payoff status + dangling-thread
     /// findings, a fourth persistent bible pass (#606).
     Plot,
+    /// Theme / motif tracker — motif → where it recurs / status + dangling-motif
+    /// findings, a fifth persistent bible pass (#828).
+    Theme,
     Scaffold,
     Naming,
     Style,
@@ -116,6 +119,12 @@ impl AiAction {
             slug: "ai:plot",
             cost: AiCost::Manuscript,
             bible_key: Some("plot"),
+        },
+        AiActionSpec {
+            action: Self::Theme,
+            slug: "ai:theme",
+            cost: AiCost::Manuscript,
+            bible_key: Some("theme"),
         },
         AiActionSpec {
             action: Self::Scaffold,

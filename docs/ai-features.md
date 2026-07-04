@@ -260,6 +260,12 @@ The palette actions:
   and notes, plus **dangling-thread** findings (a setup with no payoff, an
   abandoned subplot) surfaced in revision triage. Incrementally updated like the
   other bibles; tracking and flags only, never prose.
+- **Theme & motif tracker** (#828) — a persistent theme/motif tracker
+  (`bible/theme.md`): each recurring image, symbol, or thematic figure with a
+  status, the meaning it carries, the chapters it appears in, and notes, plus
+  **dangling-motif** findings (an image or symbol set up but never paid off, a
+  motif that drops out mid-book) surfaced in revision triage. Incrementally
+  updated like the other bibles; tracking and flags only, never prose.
 - **Scaffold / outline** (#76) — a structural beat outline (`bible/outline.md`) +
   structural-gap findings (no prose).
 - **Name & term consistency** (#78) — a cheap Haiku scan for spelling variants,
@@ -603,6 +609,22 @@ can edit any bible entry; edits are treated as ground truth on the next pass.
 - **Dangling-thread checks** — flags a setup with no payoff, an unanswered
   promise or mystery, or a subplot abandoned mid-book, surfaced as findings in
   the shared revision triage (author-editable like the other bibles).
+- Reuses the incremental-scoping machinery (#90) and the shared bible file
+  format: a full rebuild the first time, then revised from only the changed
+  chapters. Tracking and flags only — it never writes or suggests prose.
+
+### 6. Theme & motif tracker (#828)
+
+- A fifth persistent, incrementally-updated bible pass (`bible/theme.md`)
+  alongside characters, timeline, setting, and plot: it tracks the manuscript's
+  **motifs** — recurring images, symbols, and thematic figures — as structured
+  entries.
+- Each motif records a **status** (seeded / established / recurring / faded /
+  resolved), the **meaning** or theme it carries, the chapters it **appears in**,
+  and free notes.
+- **Dangling-motif checks** — flags an image or symbol set up but never developed
+  or paid off, or a motif that drops out mid-book, surfaced as findings in the
+  shared revision triage (author-editable like the other bibles).
 - Reuses the incremental-scoping machinery (#90) and the shared bible file
   format: a full rebuild the first time, then revised from only the changed
   chapters. Tracking and flags only — it never writes or suggests prose.
