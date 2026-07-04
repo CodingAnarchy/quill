@@ -434,6 +434,129 @@ fn export_bible_action_writes_a_clean_document() {
     );
 }
 
+// --- Export preflight / publish health check (#815) ------------------------
+
+/// The preflight action is registered under Export and, like the manuscript
+/// exports, is available from the single-chapter view without AI.
+#[test]
+fn preflight_action_is_registered_under_export() {
+    assert!(matches!(
+        Action::from_name("export:preflight"),
+        Some(Action::PreflightExport)
+    ));
+    assert_eq!(Action::PreflightExport.group(), "Export");
+    let (mut app, _dir) = two_chapter_app("action-preflight-avail");
+    app.ai = ai::Settings::default(); // AI off — still available (no request)
+    assert!(app.action_status(Action::PreflightExport).is_none());
+}
+
+/// A book with known issues — no ISBN, no cover, and an empty chapter — produces
+/// the expected fail/warn lines, shown in the overlay and saved to
+/// `export/preflight-<date>.md`.
+#[test]
+fn preflight_flags_a_book_with_known_issues() {
+    let dir = app_scratch_dir("action-preflight-flawed");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Flawed\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Empty\"\nfile = \"empty.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "The night was dark and long.\n").unwrap();
+    fs::write(dir.join("empty.md"), "").unwrap(); // an empty body chapter
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir.clone());
+
+    app.run_action(Action::PreflightExport, false);
+
+    // The overlay shows the report.
+    let shown = app
+        .overlay_lines()
+        .expect("preflight overlay is open")
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(shown.contains("FAIL  no ISBN"), "no-ISBN fails:\n{shown}");
+    assert!(
+        shown.contains("FAIL  no cover image"),
+        "no-cover fails:\n{shown}"
+    );
+    assert!(
+        shown.contains("empty chapter(s): Empty"),
+        "the empty chapter is named:\n{shown}"
+    );
+
+    // And it's saved as an auditable artifact under export/.
+    let saved = fs::read_dir(dir.join("export"))
+        .expect("export dir")
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("preflight-"))
+        .expect("a preflight-<date>.md was written");
+    let written = fs::read_to_string(saved.path()).unwrap();
+    assert!(written.contains("# Export preflight — Flawed"));
+    assert!(written.contains("FAIL  no ISBN"));
+    assert!(written.contains("empty chapter(s): Empty"));
+}
+
+/// A fully-specified book with a high-resolution cover and prose in every chapter
+/// passes the preflight — no failures.
+#[test]
+fn preflight_passes_a_clean_book() {
+    let dir = app_scratch_dir("action-preflight-clean");
+    fs::write(dir.join("cover.png"), png_bytes(3000, 4500)).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Clean\"\n\
+         isbn = \"978-1-234-56789-7\"\n\
+         publisher = \"Quill Press\"\n\
+         pub_date = \"2026\"\n\
+         language = \"en-US\"\n\
+         rights = \"© 2026 A. Writer.\"\n\n\
+         [style]\ncover_image = \"cover.png\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "A balanced *italic* opening.\n").unwrap();
+    fs::write(dir.join("two.md"), "More prose to fill the chapter.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir.clone());
+
+    app.run_action(Action::PreflightExport, false);
+
+    let saved = fs::read_dir(dir.join("export"))
+        .expect("export dir")
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("preflight-"))
+        .expect("a preflight report was written");
+    let written = fs::read_to_string(saved.path()).unwrap();
+    assert!(
+        !written.contains("FAIL"),
+        "a clean book has no failures:\n{written}"
+    );
+    assert!(
+        written.contains("0 failure(s)"),
+        "summary is clean:\n{written}"
+    );
+}
+
+/// A tiny solid-red PNG of `w`×`h` — a real raster the cover DPI check decodes.
+fn png_bytes(w: u32, h: u32) -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 0, 0, 255]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
 /// A blank entry cancels — nothing is stored, no follow-up prompt.
 #[test]
 fn entering_a_blank_key_cancels() {
