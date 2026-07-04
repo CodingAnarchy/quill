@@ -281,10 +281,14 @@ impl App {
 
     /// The autosave write: the same persistence as Ctrl-S minus the "Saved"
     /// message and the on-save trigger (so an autosave-driven workflow can't
-    /// thrash, #228). On failure it stays dirty — the status indicator shows it,
-    /// and the next manual save surfaces the error.
+    /// thrash, #228). On failure it stays dirty and surfaces the error, so a full
+    /// disk or lost write permission can't fail silently every idle tick while the
+    /// author keeps typing, trusting autosave (reliability audit).
     fn autosave(&mut self) {
-        if self.write_active().is_err() {
+        if let Err(e) = self.write_active() {
+            self.message = Some(format!(
+                "Autosave failed: {e} — save with Ctrl-S or check disk"
+            ));
             return;
         }
         self.finalize_save();

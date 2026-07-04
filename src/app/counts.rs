@@ -31,11 +31,12 @@ impl App {
         // (#220). Keyed by file so a reorder between ticks can't misattribute.
         let mut files = self.project.take_words_changed();
         files.insert(self.project.active_file().to_string()); // always re-check the live active chapter
+        let active = self.project.active_index();
         for file in files {
             let Some(i) = self.project.index_of_file(&file) else {
                 continue; // chapter gone (e.g. deleted) since it was recorded
             };
-            let words = self.chapter_word_count(i);
+            let words = self.chapter_word_count_with_active(i, active);
             let last = self.baselines.get(&file).copied().unwrap_or(0);
             let delta = words as i64 - last as i64;
             if delta == 0 {
@@ -91,9 +92,14 @@ impl App {
     }
 
     pub(super) fn part_word_counts(&self) -> Vec<usize> {
+        let active = self.project.active_index();
         self.part_ranges()
             .into_iter()
-            .map(|(_, range)| range.map(|i| self.chapter_word_count(i)).sum())
+            .map(|(_, range)| {
+                range
+                    .map(|i| self.chapter_word_count_with_active(i, active))
+                    .sum()
+            })
             .collect()
     }
 
@@ -125,17 +131,19 @@ impl App {
     /// Total words across the whole project (the active chapter live, the rest
     /// cached). Used by the progress report.
     pub fn project_word_count(&self) -> usize {
+        let active = self.project.active_index();
         (0..self.chapter_count())
-            .map(|i| self.chapter_word_count(i))
+            .map(|i| self.chapter_word_count_with_active(i, active))
             .sum()
     }
 
     /// Words in body chapters only — what the progress report measures against the
     /// goal and projects from (#182), excluding front/back matter.
     pub fn body_word_count(&self) -> usize {
+        let active = self.project.active_index();
         (0..self.chapter_count())
             .filter(|&i| self.project.chapter_band(i) == Band::Body)
-            .map(|i| self.chapter_word_count(i))
+            .map(|i| self.chapter_word_count_with_active(i, active))
             .sum()
     }
 

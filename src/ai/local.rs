@@ -168,10 +168,13 @@ impl Backend for LocalBackend {
             .get_ids()
             .to_vec();
 
+        // A prior inference that panicked mid-decode poisons this lock; recover the
+        // guard rather than wedging local AI for the rest of the session — the KV
+        // cache (the only mutable state) is cleared just below, so reuse is safe.
         let mut model = self
             .model
             .lock()
-            .map_err(|_| internal("model lock poisoned".into()))?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut constraint = req.json_schema.as_ref().map(Constraint::new);
 
         // Each request is independent, but candle's Qwen3 KV cache is stateful and
