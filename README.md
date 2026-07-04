@@ -349,6 +349,19 @@ keystrokes that stay out of the way.
   it. An empty or absent `[snippets]` table changes nothing; a non-string entry
   is reported at startup and skipped, like the rest of the config.
 
+  A snippet may include a single caret marker `$0` to set where the cursor
+  lands after insertion — the marker is consumed, never inserted:
+
+  ```toml
+  [snippets]
+  quote = "“$0”"          # cursor drops between the quotes
+  letter = "Dear $0,\n\nSincerely,\n"
+  ```
+
+  Only the first `$0` is the caret (any later one inserts literally); a snippet
+  with no marker leaves the cursor at the end, as before. To insert a literal
+  `$0`, escape it as `$$0`.
+
 - **Configure by description** — the same idea for *settings*: in the `Ctrl-K`
   command palette, run **Configure by description** and say what you want — "turn
   on Vim mode," "narrow the text column," "give me a warm dark theme," or "add

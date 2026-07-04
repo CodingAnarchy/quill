@@ -329,13 +329,25 @@ impl App {
     /// continuous views) as one undo group — a single Ctrl-Z removes it in the
     /// single-chapter view. No transformation: smart typography is bypassed, the
     /// text lands exactly as configured.
+    ///
+    /// A single caret marker `$0` (#823) is consumed (not inserted), and the
+    /// cursor lands at its position — so a template can place the cursor
+    /// mid-snippet. `$$0` escapes to a literal `$0` (no caret); a snippet with no
+    /// marker inserts as before, cursor at the end.
     pub(crate) fn insert_snippet(&mut self, index: usize) {
         let Some(snippet) = self.snippets.get(index).cloned() else {
             return;
         };
+        let (text, tail) = split_snippet_caret(&snippet.text);
         self.edit_buffer_mut().seal_undo_group();
-        for c in snippet.text.chars() {
+        for c in text.chars() {
             self.edit_insert_raw(c);
+        }
+        // The whole snippet is inserted, then the cursor is stepped back over the
+        // `tail` (the chars after the caret), landing it at the marker — one
+        // motion inside the sealed group, so it's still a single undo.
+        for _ in 0..tail {
+            self.edit_move(Buffer::move_left);
         }
         self.edit_buffer_mut().seal_undo_group();
         self.message = Some(format!("Inserted snippet '{}'", snippet.name));
@@ -696,6 +708,58 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
             "Flag structural / continuity / line issues — no fixes",
         ),
     }
+}
+
+/// Resolve a snippet's caret marker (#823): return the literal text to insert
+/// (marker stripped, escapes resolved) and the number of chars *after* the caret
+/// — how far left the cursor steps back to land on the marker.
+///
+/// The first unescaped `$0` is the caret; it's removed and its position becomes
+/// the cursor. `$$0` is an escape that yields a literal `$0` (never a caret);
+/// only the leading `$$` collapses, so `$$0` → `$0`. Any `$0` after the first
+/// caret inserts literally (a template gets one cursor slot). A snippet with no
+/// caret returns its text unchanged with a `0` tail, so the cursor stays at the
+/// end — exactly the prior behavior.
+fn split_snippet_caret(text: &str) -> (String, usize) {
+    let mut out = String::with_capacity(text.len());
+    let mut tail: Option<usize> = None;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '$' {
+            match chars.peek() {
+                // `$$0` → literal `$0`: consume the second `$` and the `0`, emit
+                // `$0` verbatim (this can't become a caret).
+                Some('$') => {
+                    let mut lookahead = chars.clone();
+                    lookahead.next(); // the second `$`
+                    if lookahead.peek() == Some(&'0') {
+                        chars.next(); // second `$`
+                        chars.next(); // `0`
+                        out.push_str("$0");
+                        // Two literal chars land after any caret already seen.
+                        if let Some(t) = tail.as_mut() {
+                            *t += 2;
+                        }
+                        continue;
+                    }
+                }
+                // The first unescaped `$0` is the caret: drop both chars and mark
+                // the cursor here. Later `$0`s fall through and insert literally.
+                Some('0') if tail.is_none() => {
+                    chars.next(); // `0`
+                    tail = Some(0);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(c);
+        // Count the chars after the caret so the cursor can step back onto it.
+        if let Some(t) = tail.as_mut() {
+            *t += 1;
+        }
+    }
+    (out, tail.unwrap_or(0))
 }
 
 /// A one-line preview of a snippet's text for the picker (#411): newlines shown
