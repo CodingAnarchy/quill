@@ -516,6 +516,111 @@ fn vellum_profile_has_no_header_or_toc() {
 }
 
 #[test]
+fn review_copy_carries_line_numbering_and_generous_margins() {
+    // #834: a review copy numbers every line (`w:lnNumType`) and sets generous
+    // margins for markup — the markup-ready shape a "final" export never takes.
+    let bytes = to_docx_review(&doc(), &[]).unwrap();
+    let xml = part(&bytes, "word/document.xml");
+    assert!(
+        xml.contains(r#"<w:lnNumType w:countBy="1" w:start="1" w:restart="continuous"/>"#),
+        "continuous line numbering on the section: {xml}"
+    );
+    // 2" (2880 twip) margins all round — roomier than the 1" final exports.
+    assert!(
+        xml.contains(r#"<w:pgMar w:top="2880" w:right="2880" w:bottom="2880" w:left="2880"/>"#),
+        "generous margins for markup: {xml}"
+    );
+    // The body still carries the manuscript structure and emphasis.
+    assert!(xml.contains("The Find"), "chapter heading present");
+    assert!(
+        xml.contains("Review copy") && xml.contains("by A. Writer"),
+        "review-copy title block"
+    );
+    // No annotations → no comments part (a clean copy stays minimal).
+    assert!(
+        !has_part(&bytes, "word/comments.xml"),
+        "no comments part without annotations"
+    );
+}
+
+#[test]
+fn review_copy_carries_annotations_as_anchored_comments() {
+    // #834: an annotated range produces a `comments.xml` entry plus the in-body
+    // comment range markers + reference, anchored to exactly that phrase.
+    let notes = vec![vec![ReviewNote {
+        text: "heavy".into(),
+        note: "Is this the right weight? — A.".into(),
+    }]];
+    let bytes = to_docx_review(&doc(), &notes).unwrap();
+
+    // The comments part exists, with its content-type override and relationship.
+    assert!(
+        has_part(&bytes, "word/comments.xml"),
+        "comments part written"
+    );
+    let comments = part(&bytes, "word/comments.xml");
+    assert!(comments.contains("<w:comments"), "comments root element");
+    assert!(
+        comments.contains(r#"<w:comment w:id="0""#),
+        "a comment with id 0: {comments}"
+    );
+    assert!(
+        comments.contains("Is this the right weight? — A."),
+        "the note text: {comments}"
+    );
+
+    let ctypes = part(&bytes, "[Content_Types].xml");
+    assert!(
+        ctypes.contains(r#"PartName="/word/comments.xml""#),
+        "comments content-type override: {ctypes}"
+    );
+    let rels = part(&bytes, "word/_rels/document.xml.rels");
+    assert!(
+        rels.contains(r#"Target="comments.xml""#),
+        "comments relationship: {rels}"
+    );
+
+    // The in-body markers bracket the annotated phrase and point at the comment.
+    let xml = part(&bytes, "word/document.xml");
+    let start = xml
+        .find(r#"<w:commentRangeStart w:id="0"/>"#)
+        .expect("range start");
+    let end = xml
+        .find(r#"<w:commentRangeEnd w:id="0"/>"#)
+        .expect("range end");
+    assert!(
+        xml.contains(r#"<w:commentReference w:id="0"/>"#),
+        "comment reference in the body: {xml}"
+    );
+    // The anchored word "heavy" sits between the range markers.
+    let heavy = xml.find("heavy").expect("annotated word rendered");
+    assert!(
+        start < heavy && heavy < end,
+        "the range brackets the annotated phrase: {xml}"
+    );
+}
+
+#[test]
+fn a_review_copy_without_a_match_carries_no_stray_comment() {
+    // An annotation whose text isn't found in the paragraph (a stale snippet) is
+    // dropped — no orphan comment, no dangling reference.
+    let notes = vec![vec![ReviewNote {
+        text: "nonexistent phrase".into(),
+        note: "orphan".into(),
+    }]];
+    let bytes = to_docx_review(&doc(), &notes).unwrap();
+    let xml = part(&bytes, "word/document.xml");
+    assert!(
+        !xml.contains("<w:commentReference"),
+        "no reference for an unmatched annotation: {xml}"
+    );
+    assert!(
+        !has_part(&bytes, "word/comments.xml"),
+        "no comments part when nothing matched"
+    );
+}
+
+#[test]
 fn series_docx_carries_a_header_and_toc() {
     // #705: the series document (manuscript) also gets a running header
     // (series / author) and a TOC over the book/chapter titles.

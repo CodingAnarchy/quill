@@ -268,6 +268,16 @@ for Vellum import), EPUB, and PDF (screen and print-interior). Files land under
 export/. For a multi-book series, each format is offered twice — the whole series
 (books in reading order, delimited per format) or just the active book.
 
+To hand the manuscript to a beta reader or an editor for markup, run "Export
+review copy" from the Ctrl-K menu (the "export:review" run-action). Unlike the
+"final" exports, the review copy is built to be marked up: it's a .docx with every
+line numbered down the margin and generous 2-inch margins for notes, saved to
+export/<book>-review.review.docx. It's also the one export that carries your
+inline annotations (Ctrl-K "Annotate selection") — every other export strips them,
+but the review copy turns each note into a Word comment anchored to the exact
+phrase you left it on, so your reader sees your questions in context. (Like the
+other exports, run it from the single-chapter view, not the continuous view.)
+
 The export menu also leads with "Set export style…" and "Preview style…". The
 designed exports (EPUB and print PDF) can be lightly styled, and you no longer
 have to hand-edit book.toml to do it: "Set export style…" (also the "style:set"
