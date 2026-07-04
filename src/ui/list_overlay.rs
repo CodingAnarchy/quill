@@ -453,11 +453,28 @@ pub(super) fn draw_findings(
     project: &Project,
     recorder: &RefCell<ListLayout>,
 ) {
-    let title = format!(" Findings ({}) ", findings.items.len());
-    let rows = findings
+    // The type-to-filter query (#822) narrows the list to findings whose summary
+    // or chapters match; the row index is preserved so the selection marker and
+    // the click map land on the right finding.
+    let query = findings.filter.to_lowercase();
+    let matches = |item: &crate::mode::Finding| {
+        query.is_empty()
+            || item.summary.to_lowercase().contains(&query)
+            || item
+                .chapters
+                .iter()
+                .any(|c| c.to_lowercase().contains(&query))
+    };
+    let visible: Vec<(usize, &crate::mode::Finding)> = findings
         .items
         .iter()
         .enumerate()
+        .filter(|(_, item)| matches(item))
+        .collect();
+    let selected_pos = visible.iter().position(|(i, _)| *i == findings.selected);
+    let title = format!(" Findings ({}) ", findings.items.len());
+    let rows = visible
+        .iter()
         .map(|(i, item)| {
             // In a series, a finding carries the book it was found in (#341); show
             // it so cross-book findings are attributed (chapter titles can repeat).
@@ -473,19 +490,31 @@ pub(super) fn draw_findings(
                 (Some(t), false) => format!("  [{t} · {chapters}]"),
             };
             list_row(
-                i == findings.selected,
+                *i == findings.selected,
                 &format!("{}{loc}", item.summary),
                 None,
             )
         })
         .collect();
+    let help = if findings.typing {
+        format!("Filter: {}_", findings.filter)
+    } else if findings.filter.is_empty() {
+        "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · d dismiss · / filter · esc close".to_string()
+    } else {
+        format!(
+            "Filter “{}” — {} match{} · esc clears",
+            findings.filter,
+            visible.len(),
+            if visible.len() == 1 { "" } else { "es" }
+        )
+    };
     draw_list_overlay_recording(
         frame,
         area,
         &title,
-        "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · d dismiss · esc close",
+        &help,
         rows,
-        Some(findings.selected),
+        selected_pos,
         Some(recorder),
     );
 }
@@ -501,25 +530,52 @@ pub(super) fn draw_history(
     recorder: &RefCell<ListLayout>,
 ) {
     let title = format!(" History — {chapter} ");
-    let rows = history
+    // The type-to-filter query (#822) narrows to commits whose summary, id, or
+    // date match; the row index is preserved so the marker and click map align.
+    let query = history.filter.to_lowercase();
+    let matches = |c: &crate::vcs::CommitMeta| {
+        query.is_empty()
+            || c.summary.to_lowercase().contains(&query)
+            || c.id.to_lowercase().contains(&query)
+            || c.when.to_lowercase().contains(&query)
+    };
+    let visible: Vec<(usize, &crate::vcs::CommitMeta)> = history
         .commits
         .iter()
         .enumerate()
+        .filter(|(_, c)| matches(c))
+        .collect();
+    let selected_pos = visible.iter().position(|(i, _)| *i == history.selected);
+    let rows = visible
+        .iter()
         .map(|(i, c)| {
             list_row(
-                i == history.selected,
+                *i == history.selected,
                 &format!("{}  {}  {}", c.when, c.id, c.summary),
                 None,
             )
         })
         .collect();
+    let help = if history.typing {
+        format!("Filter: {}_", history.filter)
+    } else if history.filter.is_empty() {
+        "History — ↑↓ move · d diff this chapter · r restore this chapter · / filter · esc close"
+            .to_string()
+    } else {
+        format!(
+            "Filter “{}” — {} match{} · esc clears",
+            history.filter,
+            visible.len(),
+            if visible.len() == 1 { "" } else { "es" }
+        )
+    };
     draw_list_overlay_recording(
         frame,
         area,
         &title,
-        "History — ↑↓ move · d diff this chapter · r restore this chapter · esc close",
+        &help,
         rows,
-        Some(history.selected),
+        selected_pos,
         Some(recorder),
     );
 }
@@ -612,11 +668,21 @@ pub(super) fn draw_annotations(
     let buffer = app.edit_buffer();
     let len = buffer.len_bytes();
     let title = format!(" Annotations ({}) ", app.annotations.len());
-    let rows = app
-        .annotations
+    // The type-to-filter query (#822) narrows to notes whose text or anchored
+    // snippet match; the row index is preserved so the marker/click map align.
+    let (filter, typing) = match &app.mode {
+        crate::mode::Mode::Annotations { filter, typing, .. } => (filter.clone(), *typing),
+        _ => (String::new(), false),
+    };
+    let query = filter.to_lowercase();
+    let visible: Vec<usize> = (0..app.annotations.len())
+        .filter(|&i| app.annotation_matches(i, &query))
+        .collect();
+    let selected_pos = visible.iter().position(|&i| i == selected);
+    let rows = visible
         .iter()
-        .enumerate()
-        .map(|(i, a)| {
+        .map(|&i| {
+            let a = &app.annotations[i];
             let (s, e) = (a.start.min(len), a.end.min(len));
             let snippet = if s < e {
                 crate::text::ellipsize(&buffer.byte_slice(s, e), 40)
@@ -626,13 +692,25 @@ pub(super) fn draw_annotations(
             list_row(i == selected, &a.note, Some(snippet))
         })
         .collect();
+    let help = if typing {
+        format!("Filter: {filter}_")
+    } else if filter.is_empty() {
+        "Annotations — ↑↓ move · enter jump · d delete · / filter · esc close".to_string()
+    } else {
+        format!(
+            "Filter “{}” — {} match{} · esc clears",
+            filter,
+            visible.len(),
+            if visible.len() == 1 { "" } else { "es" }
+        )
+    };
     draw_list_overlay_recording(
         frame,
         area,
         &title,
-        "Annotations — ↑↓ move · enter jump · d delete · esc close",
+        &help,
         rows,
-        Some(selected),
+        selected_pos,
         Some(recorder),
     );
 }

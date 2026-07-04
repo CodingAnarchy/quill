@@ -485,39 +485,179 @@ impl App {
                 self.mode = Mode::History(Box::new(History {
                     commits,
                     selected: 0,
+                    filter: String::new(),
+                    typing: false,
                 }));
             }
             Err(e) => self.message = Some(format!("Could not read history: {e}")),
         }
     }
 
-    /// Handle a key in the commit-history view (#587): arrows move the selection,
-    /// `d` diffs the current chapter against the selected commit, `r` restores the
-    /// chapter to it (into the editable buffer for review-and-save), Esc closes.
+    /// Handle a key in the commit-history view (#587): arrows move the selection
+    /// (skipping filtered-out commits), `d` diffs the current chapter against the
+    /// selected commit, `r` restores the chapter to it (into the editable buffer
+    /// for review-and-save), Esc closes. `/` starts a type-to-filter query (#822)
+    /// that narrows the list to commits whose summary, id, or date match; Esc
+    /// clears the filter before it closes the view.
     pub(crate) fn on_key_history(&mut self, key: KeyEvent) {
-        let Mode::History(history) = &mut self.mode else {
+        let Mode::History(history) = &self.mode else {
             return;
         };
-        let last = history.commits.len().saturating_sub(1);
+        // In the filter-input sub-mode, keystrokes build the query (#822); the
+        // view's single-key commands are reachable only outside it.
+        if history.typing {
+            self.on_key_history_filter(key);
+            return;
+        }
         match key.code {
+            KeyCode::Char('/') => self.set_history_typing(true),
             KeyCode::Up | KeyCode::Char('k') => {
-                history.selected = history.selected.saturating_sub(1);
+                let s = self.history_filter_step(false);
+                self.set_history_selected(s);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                history.selected = (history.selected + 1).min(last);
+                let s = self.history_filter_step(true);
+                self.set_history_selected(s);
             }
             KeyCode::Char('d') => self.diff_against_selected_commit(),
             KeyCode::Char('r') => self.restore_from_selected_commit(),
-            KeyCode::Esc => self.mode = self.editing_mode(),
+            // Esc clears an active filter first (restoring the full list), then a
+            // second Esc closes the view.
+            KeyCode::Esc => {
+                if self.history_has_filter() {
+                    self.clear_history_filter();
+                } else {
+                    self.mode = self.editing_mode();
+                }
+            }
             _ => {}
         }
     }
 
-    /// The revision id of the commit selected in the history view, or `None` when
-    /// that view isn't open.
-    fn selected_commit_rev(&self) -> Option<String> {
+    /// Keys for the history view's filter-input sub-mode (#822): printable
+    /// characters build the query (live), Backspace edits it, the arrows move
+    /// within the matches, Enter leaves input, and Esc leaves input too — keeping
+    /// the filter so `d`/`r` act on the narrowed list (a second Esc, in command
+    /// mode, clears it).
+    fn on_key_history_filter(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => self.set_history_typing(false),
+            KeyCode::Up => {
+                let s = self.history_filter_step(false);
+                self.set_history_selected(s);
+            }
+            KeyCode::Down => {
+                let s = self.history_filter_step(true);
+                self.set_history_selected(s);
+            }
+            KeyCode::Backspace => self.history_filter_pop(),
+            KeyCode::Char(c) => self.history_filter_push(c),
+            _ => {}
+        }
+    }
+
+    /// The active history filter, lowercased (empty off the view or unfiltered).
+    fn history_query(&self) -> String {
         match &self.mode {
-            Mode::History(h) => h.commits.get(h.selected).map(|c| c.rev.clone()),
+            Mode::History(h) => h.filter.to_lowercase(),
+            _ => String::new(),
+        }
+    }
+
+    fn history_has_filter(&self) -> bool {
+        matches!(&self.mode, Mode::History(h) if !h.filter.is_empty())
+    }
+
+    fn set_history_typing(&mut self, on: bool) {
+        if let Mode::History(h) = &mut self.mode {
+            h.typing = on;
+        }
+    }
+
+    fn set_history_selected(&mut self, selected: usize) {
+        if let Mode::History(h) = &mut self.mode {
+            h.selected = selected;
+        }
+    }
+
+    fn clear_history_filter(&mut self) {
+        if let Mode::History(h) = &mut self.mode {
+            h.filter.clear();
+            h.typing = false;
+        }
+    }
+
+    fn history_filter_push(&mut self, c: char) {
+        if let Mode::History(h) = &mut self.mode {
+            h.filter.push(c);
+        }
+        self.history_snap();
+    }
+
+    fn history_filter_pop(&mut self) {
+        if let Mode::History(h) = &mut self.mode {
+            h.filter.pop();
+        }
+        self.history_snap();
+    }
+
+    /// After the filter changes, keep the selection on a visible commit: if the
+    /// current one no longer matches, jump to the first that does (#822).
+    fn history_snap(&mut self) {
+        let q = self.history_query();
+        let Mode::History(h) = &self.mode else {
+            return;
+        };
+        let stays = h
+            .commits
+            .get(h.selected)
+            .is_some_and(|c| commit_matches(c, &q));
+        if !stays {
+            if let Some(first) = h.commits.iter().position(|c| commit_matches(c, &q)) {
+                self.set_history_selected(first);
+            }
+        }
+    }
+
+    /// The next (or previous, by `forward`) commit that passes the filter, or the
+    /// current selection unchanged when there's no further match that way (#822).
+    fn history_filter_step(&self, forward: bool) -> usize {
+        let q = self.history_query();
+        let Mode::History(h) = &self.mode else {
+            return 0;
+        };
+        let from = h.selected;
+        let n = h.commits.len();
+        let mut i = from;
+        loop {
+            if forward {
+                if i + 1 >= n {
+                    return from;
+                }
+                i += 1;
+            } else {
+                if i == 0 {
+                    return from;
+                }
+                i -= 1;
+            }
+            if h.commits.get(i).is_some_and(|c| commit_matches(c, &q)) {
+                return i;
+            }
+        }
+    }
+
+    /// The revision id of the commit selected in the history view, or `None` when
+    /// that view isn't open — or the selection is hidden by an active filter, so
+    /// `d`/`r` never act on a row the query narrowed out (#822).
+    fn selected_commit_rev(&self) -> Option<String> {
+        let q = self.history_query();
+        match &self.mode {
+            Mode::History(h) => h
+                .commits
+                .get(h.selected)
+                .filter(|c| commit_matches(c, &q))
+                .map(|c| c.rev.clone()),
             _ => None,
         }
     }
@@ -578,6 +718,17 @@ impl App {
         });
         self.refresh_vc_status(); // the tree is clean now (or unchanged on failure)
     }
+}
+
+/// Whether commit `c` passes the history view's active filter (#822): a
+/// case-insensitive substring match on its summary, short id, or date. `q` is the
+/// already-lowercased query (empty = every commit matches). Mirrors the same test
+/// the renderer applies when drawing the filtered list.
+fn commit_matches(c: &crate::vcs::CommitMeta, q: &str) -> bool {
+    q.is_empty()
+        || c.summary.to_lowercase().contains(q)
+        || c.id.to_lowercase().contains(q)
+        || c.when.to_lowercase().contains(q)
 }
 
 /// Color a unified diff for the changes overlay (#135): additions green, removals

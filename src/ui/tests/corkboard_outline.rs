@@ -46,7 +46,7 @@ fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
     let skip = redundant_title_heading(&headings, "The Crossing");
     assert_eq!(skip, Some(0));
 
-    let texts: Vec<String> = heading_outline_lines(&headings, None, None, skip)
+    let texts: Vec<String> = heading_outline_lines(&headings, None, None, skip, "")
         .iter()
         .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
         .collect();
@@ -56,7 +56,10 @@ fn outline_skips_a_leading_h1_that_matches_the_chapter_title() {
 
     // A non-matching title keeps every heading.
     assert_eq!(redundant_title_heading(&headings, "Different"), None);
-    assert_eq!(heading_outline_lines(&headings, None, None, None).len(), 2);
+    assert_eq!(
+        heading_outline_lines(&headings, None, None, None, "").len(),
+        2
+    );
 }
 
 #[test]

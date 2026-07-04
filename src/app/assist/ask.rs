@@ -181,7 +181,11 @@ impl App {
             .iter()
             .position(|f| !f.chapters.is_empty())
             .unwrap_or(0);
-        self.mode = Mode::Findings(Box::new(Findings { items, selected }));
+        self.mode = Mode::Findings(Box::new(Findings {
+            items,
+            selected,
+            ..Default::default()
+        }));
     }
 
     /// Browse the session's "Ask the manuscript" history (#609): every past ask's
@@ -196,6 +200,9 @@ impl App {
             return;
         }
         let items = qa_history_findings(&self.qa_log);
-        self.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
+        self.mode = Mode::Findings(Box::new(Findings {
+            items,
+            ..Default::default()
+        }));
     }
 }

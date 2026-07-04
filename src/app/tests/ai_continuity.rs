@@ -485,6 +485,8 @@ fn recheck_is_a_noop_for_a_finding_without_a_pass() {
             action: None,
         }],
         selected: 0,
+        filter: String::new(),
+        typing: false,
     }));
     app.recheck_finding(0);
     assert!(!app.ai_task.is_busy(), "nothing is sent");
@@ -497,4 +499,102 @@ fn recheck_is_a_noop_for_a_finding_without_a_pass() {
         "{:?}",
         app.message
     );
+}
+
+// --- Findings overlay: type-to-filter (#822) -------------------------------
+
+/// Build a findings overlay over three findings whose summaries name the given
+/// chapters, opened in a two-chapter project so Enter has a real jump target.
+fn findings_over(name: &str, summaries: &[(&str, &str)]) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name);
+    let items = summaries
+        .iter()
+        .map(|(summary, chapter)| crate::mode::Finding {
+            summary: (*summary).into(),
+            chapters: vec![(*chapter).into()],
+            book: None,
+            action: None,
+        })
+        .collect();
+    app.mode = Mode::Findings(Box::new(crate::mode::Findings {
+        items,
+        ..Default::default()
+    }));
+    (app, dir)
+}
+
+fn findings_state(app: &App) -> (usize, String, bool) {
+    match &app.mode {
+        Mode::Findings(f) => (f.selected, f.filter.clone(), f.typing),
+        _ => panic!("expected the findings overlay"),
+    }
+}
+
+#[test]
+fn slash_filters_findings_by_summary_and_moves_within_matches() {
+    let (mut app, _dir) = findings_over(
+        "find-filter-move",
+        &[
+            ("locket color drift", "One"),
+            ("timeline gap", "One"),
+            ("locket ownership", "Two"),
+        ],
+    );
+
+    app.on_key(key(KeyCode::Char('/')));
+    assert!(findings_state(&app).2, "typing after /");
+    type_str(&mut app, "locket"); // matches rows 0 and 2, not "timeline gap"
+    assert_eq!(findings_state(&app).0, 0);
+
+    // Down steps to the next matching finding (2), skipping the hidden row 1.
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(findings_state(&app).0, 2);
+    app.on_key(key(KeyCode::Down)); // no further match — stays
+    assert_eq!(findings_state(&app).0, 2);
+}
+
+#[test]
+fn dismissing_a_filtered_finding_drops_the_right_one() {
+    let (mut app, _dir) = findings_over(
+        "find-filter-dismiss",
+        &[
+            ("keep alpha", "One"),
+            ("drop beta", "Two"),
+            ("keep gamma", "One"),
+        ],
+    );
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "beta");
+    app.on_key(key(KeyCode::Enter)); // leave input, keep filter
+    app.on_key(key(KeyCode::Char('d'))); // dismiss the filtered match
+
+    // Only "drop beta" is gone; the two kept findings remain, filter still on.
+    match &app.mode {
+        Mode::Findings(f) => {
+            let summaries: Vec<&str> = f.items.iter().map(|i| i.summary.as_str()).collect();
+            assert_eq!(summaries, vec!["keep alpha", "keep gamma"]);
+        }
+        _ => panic!("the overlay stays open with matches remaining"),
+    }
+}
+
+#[test]
+fn findings_esc_clears_the_filter_then_closes() {
+    let (mut app, _dir) = findings_over(
+        "find-filter-esc",
+        &[("alpha note", "One"), ("beta note", "Two")],
+    );
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "beta");
+    app.on_key(key(KeyCode::Esc)); // leave input, keep filter
+    assert_eq!(findings_state(&app).1, "beta");
+
+    app.on_key(key(KeyCode::Esc)); // clear the filter, list restored
+    assert_eq!(findings_state(&app).1, "");
+    assert!(matches!(app.mode, Mode::Findings(_)));
+
+    app.on_key(key(KeyCode::Esc)); // close
+    assert!(!matches!(app.mode, Mode::Findings(_)));
 }

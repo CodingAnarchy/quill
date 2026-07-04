@@ -85,7 +85,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 draw_history(f, r, history, chapter, &app.list_layout);
             });
         }
-        Mode::Annotations { selected } => {
+        Mode::Annotations { selected, .. } => {
             modal(frame, area, |f, r| {
                 draw_annotations(f, r, app, *selected, &app.list_layout);
             });
@@ -396,11 +396,16 @@ fn heading_outline_lines(
     current: Option<usize>,
     selected: Option<usize>,
     skip: Option<usize>,
+    query: &str,
 ) -> Vec<Line<'static>> {
     headings
         .iter()
         .enumerate()
         .filter(|(i, _)| Some(*i) != skip)
+        // When the focused outline is filtered (#822), show only headings whose
+        // title matches; the index numbering is untouched so `selected` still
+        // lands on the right heading.
+        .filter(|(_, h)| query.is_empty() || h.title.to_lowercase().contains(query))
         .map(|(i, h)| {
             let indent = "  ".repeat(h.level as usize);
             let mut style = if Some(i) == current {
@@ -495,9 +500,13 @@ impl Pane for NavPane<'_> {
         let current_heading = current_section(headings, app.buffer.cursor_byte());
         // When the outline is focused (#657), draw its selection cursor reversed.
         let outline_selected = match &app.mode {
-            Mode::Outline { selected } => Some(*selected),
+            Mode::Outline { selected, .. } => Some(*selected),
             _ => None,
         };
+        // When the outline is focused with an active filter (#822), the pane shows
+        // only headings whose title matches; the query is lowercased once here.
+        let outline_query = app.outline_query();
+        let outline_typing = matches!(&app.mode, Mode::Outline { typing: true, .. });
 
         // Resolve the active index once: active_index() is an O(n) scan, so
         // calling it per row would be O(n²) per frame.
@@ -579,7 +588,17 @@ impl Pane for NavPane<'_> {
                     current_heading,
                     outline_selected,
                     skip,
+                    &outline_query,
                 ));
+                // While filtering the focused outline (#822), show the query (a
+                // trailing `_` caret while typing) under the narrowed headings.
+                if outline_typing || !outline_query.is_empty() {
+                    let caret = if outline_typing { "_" } else { "" };
+                    lines.push(Line::from(Span::styled(
+                        format!("  filter: {outline_query}{caret}"),
+                        Style::default().fg(theme::current().dim),
+                    )));
+                }
             }
         }
 

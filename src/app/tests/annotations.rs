@@ -118,7 +118,7 @@ fn review_list_jumps_to_and_deletes_annotations() {
     app.create_annotation(6, 13, "second note".into());
 
     app.open_annotation_review();
-    assert!(matches!(app.mode, Mode::Annotations { selected: 0 }));
+    assert!(matches!(app.mode, Mode::Annotations { selected: 0, .. }));
 
     // Move to the second annotation and jump — the cursor lands on its start.
     app.on_key(key(KeyCode::Down));
@@ -231,4 +231,86 @@ fn undo_and_redo_move_annotations_with_the_text() {
         (9, 16),
         "redo re-applies"
     );
+}
+
+/// The annotation list's `(selected, filter, typing)` state.
+fn anno_state(app: &App) -> (usize, String, bool) {
+    match &app.mode {
+        Mode::Annotations {
+            selected,
+            filter,
+            typing,
+        } => (*selected, filter.clone(), *typing),
+        _ => panic!("expected the annotation list"),
+    }
+}
+
+#[test]
+fn slash_filters_annotations_by_note_text_and_enter_jumps() {
+    // "first chapter\n": "first" = 0..5, "chapter" = 6..13.
+    let (mut app, _dir) = two_chapter_app("anno-filter-jump");
+    app.create_annotation(0, 5, "opening beat".into());
+    app.create_annotation(6, 13, "closing beat".into());
+    app.open_annotation_review();
+    assert!(matches!(app.mode, Mode::Annotations { selected: 0, .. }));
+
+    // `/` then "closing" narrows to the second note; the selection snaps to it.
+    app.on_key(key(KeyCode::Char('/')));
+    assert!(anno_state(&app).2);
+    type_str(&mut app, "closing");
+    assert_eq!(anno_state(&app).0, 1, "selection follows the only match");
+
+    // Enter leaves the input sub-mode, then acts on the match: jump to byte 6.
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(app.buffer.cursor_byte(), 6);
+}
+
+#[test]
+fn annotation_filter_matches_the_anchored_snippet_too() {
+    // The snippet ("chapter") should match even when the note text doesn't.
+    let (mut app, _dir) = two_chapter_app("anno-filter-snippet");
+    app.create_annotation(0, 5, "note A".into()); // anchors "first"
+    app.create_annotation(6, 13, "note B".into()); // anchors "chapter"
+    app.open_annotation_review();
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "chapter"); // only the second note's snippet matches
+    assert_eq!(anno_state(&app).0, 1);
+}
+
+#[test]
+fn deleting_a_filtered_annotation_removes_the_right_one() {
+    let (mut app, _dir) = two_chapter_app("anno-filter-delete");
+    app.create_annotation(0, 5, "keep me".into());
+    app.create_annotation(6, 13, "drop me".into());
+    app.open_annotation_review();
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "drop");
+    app.on_key(key(KeyCode::Enter)); // leave input, keep the filter
+    app.on_key(key(KeyCode::Char('d'))); // delete the filtered match
+
+    assert_eq!(app.annotations.len(), 1);
+    assert_eq!(app.annotations[0].note, "keep me");
+}
+
+#[test]
+fn annotation_esc_clears_the_filter_then_closes() {
+    let (mut app, _dir) = two_chapter_app("anno-filter-esc");
+    app.create_annotation(0, 5, "alpha".into());
+    app.create_annotation(6, 13, "beta".into());
+    app.open_annotation_review();
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "beta");
+    app.on_key(key(KeyCode::Esc)); // leave input, keep filter
+    assert_eq!(anno_state(&app).1, "beta");
+
+    app.on_key(key(KeyCode::Esc)); // clear filter; list restored
+    assert_eq!(anno_state(&app).1, "");
+
+    app.on_key(key(KeyCode::Esc)); // close
+    assert!(matches!(app.mode, Mode::Insert));
 }

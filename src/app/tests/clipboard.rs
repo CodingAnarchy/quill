@@ -166,6 +166,8 @@ fn a_paste_in_a_non_editing_mode_is_ignored() {
             action: None,
         }],
         selected: 0,
+        filter: String::new(),
+        typing: false,
     }));
     paste_event(&mut app, "STRAY");
     assert_eq!(

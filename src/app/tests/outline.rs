@@ -82,7 +82,7 @@ fn focus_starts_at_the_current_section() {
 
     // Selection lands on Scene A (index 1), not the H1 title. Enter is a no-op
     // move to the same section start.
-    let Mode::Outline { selected } = app.mode else {
+    let Mode::Outline { selected, .. } = app.mode else {
         panic!("outline should be focused");
     };
     assert_eq!(selected, 1);
@@ -118,13 +118,13 @@ fn selection_clamps_at_the_ends() {
 
     // Up at the top stays at 0.
     app.on_key(key(KeyCode::Up));
-    assert!(matches!(app.mode, Mode::Outline { selected: 0 }));
+    assert!(matches!(app.mode, Mode::Outline { selected: 0, .. }));
 
     // Down past the end clamps to the last heading (index 1).
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::Down));
-    assert!(matches!(app.mode, Mode::Outline { selected: 1 }));
+    assert!(matches!(app.mode, Mode::Outline { selected: 1, .. }));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn autosave_and_reparse_cant_shift_a_focused_outline_jump() {
     app.on_key(ctrl('o')); // focus
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::Down));
-    assert!(matches!(app.mode, Mode::Outline { selected: 2 }));
+    assert!(matches!(app.mode, Mode::Outline { selected: 2, .. }));
 
     // The buffer is dirty and has gone idle while the outline is up: the event
     // loop would run both the idle-timer autosave and an idle reparse here.
@@ -183,7 +183,7 @@ fn selection_clamps_when_the_heading_list_shrinks() {
     // Select the last heading ("## Scene C", index 2).
     app.on_key(key(KeyCode::Down));
     app.on_key(key(KeyCode::Down));
-    assert!(matches!(app.mode, Mode::Outline { selected: 2 }));
+    assert!(matches!(app.mode, Mode::Outline { selected: 2, .. }));
 
     // The heading list shrinks under the focused outline: Scene B and Scene C are
     // gone, leaving only Scene A. A reparse makes the shorter list live.
@@ -197,11 +197,94 @@ fn selection_clamps_when_the_heading_list_shrinks() {
     // The next keystroke re-clamps the stale index (2) to the last live heading
     // (0), so Enter lands on a real scene instead of silently no-op'ing.
     app.on_key(key(KeyCode::Up)); // clamps to 0, then a no-op move at the top
-    assert!(matches!(app.mode, Mode::Outline { selected: 0 }));
+    assert!(matches!(app.mode, Mode::Outline { selected: 0, .. }));
     app.on_key(key(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::Insert));
     // Without the clamp, `selected` (2) would be out of range and Enter would
     // leave the cursor at 0; with it, the cursor jumps to the one live heading.
     assert_eq!(app.buffer.cursor_byte(), shrunk.find("## Scene A").unwrap());
     assert_ne!(app.buffer.cursor_byte(), 0);
+}
+
+/// Helper: the focused outline's `(selected, filter, typing)` state.
+fn outline_state(app: &App) -> (usize, String, bool) {
+    match &app.mode {
+        Mode::Outline {
+            selected,
+            filter,
+            typing,
+        } => (*selected, filter.clone(), *typing),
+        _ => panic!("expected the focused outline"),
+    }
+}
+
+#[test]
+fn slash_filters_the_outline_and_enter_jumps_to_the_match() {
+    // Three scenes; only "Storm" should survive a "storm" filter.
+    let body = "# One\n\n## Calm\n\nText.\n\n## The Storm\n\nText.\n\n## Aftermath\n\nText.\n";
+    let (mut app, _dir) = outline_app("outline-filter-jump", body);
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.on_key(ctrl('o')); // show
+    app.on_key(ctrl('o')); // focus — headings: One(0) Calm(1) Storm(2) Aftermath(3)
+
+    // `/` enters the filter sub-mode; typing narrows to the storm heading.
+    app.on_key(key(KeyCode::Char('/')));
+    assert!(outline_state(&app).2, "typing after /");
+    type_str(&mut app, "storm");
+    let (selected, filter, typing) = outline_state(&app);
+    assert_eq!(filter, "storm");
+    assert!(typing);
+    // The selection snapped onto the one heading that matches (index 2).
+    assert_eq!(selected, 2);
+
+    // Enter jumps the editor cursor to that heading and returns to editing.
+    app.on_key(key(KeyCode::Enter)); // leaves the input sub-mode (keeps filter)
+    assert!(matches!(app.mode, Mode::Outline { .. }));
+    app.on_key(key(KeyCode::Enter)); // acts on the match
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(app.buffer.cursor_byte(), body.find("## The Storm").unwrap());
+}
+
+#[test]
+fn outline_filter_movement_skips_hidden_headings() {
+    let body = "## Alpha\n\nA.\n\n## Alpha Two\n\nB.\n\n## Beta\n\nC.\n";
+    let (mut app, _dir) = outline_app("outline-filter-move", body);
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.on_key(ctrl('o'));
+    app.on_key(ctrl('o')); // Alpha(0) Alpha Two(1) Beta(2)
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "alpha"); // matches 0 and 1, not Beta
+    assert_eq!(outline_state(&app).0, 0);
+
+    // Down within the input sub-mode steps to the next *matching* heading (1),
+    // never landing on the hidden "Beta".
+    app.on_key(key(KeyCode::Down));
+    assert_eq!(outline_state(&app).0, 1);
+    app.on_key(key(KeyCode::Down)); // no further match — stays on 1
+    assert_eq!(outline_state(&app).0, 1);
+}
+
+#[test]
+fn outline_esc_clears_the_filter_then_returns_to_editing() {
+    let body = "## Calm\n\nA.\n\n## Storm\n\nB.\n";
+    let (mut app, _dir) = outline_app("outline-filter-esc", body);
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.on_key(ctrl('o'));
+    app.on_key(ctrl('o'));
+
+    app.on_key(key(KeyCode::Char('/')));
+    type_str(&mut app, "storm");
+    app.on_key(key(KeyCode::Esc)); // leave input, keep the filter
+    assert_eq!(outline_state(&app).1, "storm");
+    assert!(!outline_state(&app).2);
+
+    // First command-mode Esc clears the filter (list restored, still focused).
+    app.on_key(key(KeyCode::Esc));
+    assert_eq!(outline_state(&app).1, "");
+    assert!(matches!(app.mode, Mode::Outline { .. }));
+
+    // Second Esc returns to editing.
+    app.on_key(key(KeyCode::Esc));
+    assert!(matches!(app.mode, Mode::Insert));
 }
