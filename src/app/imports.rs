@@ -93,15 +93,15 @@ impl App {
     pub(crate) fn start_import_manuscript(&mut self) {
         self.open_prompt(
             Pending::ImportManuscriptSource,
-            "Import manuscript — .md, .txt, .docx, .scriv, or a folder of .md chapters:",
+            "Import manuscript — .md, .txt, .docx, .odt, .scriv, or a folder of .md chapters:",
             "",
             None,
         );
     }
 
     /// Validate the chosen path is an importable manuscript, then ask where to
-    /// create the new project. Accepts a `.md` / `.txt` / `.docx` file, a `.scriv`
-    /// bundle directory, or a plain folder of per-chapter `.md` files. Shared by
+    /// create the new project. Accepts a `.md` / `.txt` / `.docx` / `.odt` file, a
+    /// `.scriv` bundle directory, or a plain folder of per-chapter `.md` files. Shared by
     /// the file prompt and the run-action entry point.
     pub(crate) fn begin_import_manuscript(&mut self, file: &str) {
         let path = std::path::Path::new(file.trim());
@@ -116,11 +116,12 @@ impl App {
             path.is_file()
                 && (ext.eq_ignore_ascii_case("md")
                     || ext.eq_ignore_ascii_case("txt")
-                    || ext.eq_ignore_ascii_case("docx"))
+                    || ext.eq_ignore_ascii_case("docx")
+                    || ext.eq_ignore_ascii_case("odt"))
         };
         if !importable {
             self.message = Some(format!(
-                "Not an importable manuscript (.md, .txt, .docx, .scriv, or a folder of .md): {}",
+                "Not an importable manuscript (.md, .txt, .docx, .odt, .scriv, or a folder of .md): {}",
                 path.display()
             ));
             self.mode = self.editing_mode();
@@ -152,7 +153,7 @@ impl App {
             return;
         }
         // A Markdown source is re-splittable at a chosen level, so keep its text;
-        // other formats (`.docx`/`.scriv`/folder/`.txt`) don't split on a Markdown
+        // other formats (`.docx`/`.odt`/`.scriv`/folder/`.txt`) don't split on a Markdown
         // heading level, so the preview offers no level toggle for them.
         let ext = source
             .extension()
@@ -465,15 +466,17 @@ impl App {
 }
 
 /// Read a manuscript into the shared parsed form, dispatching on extension
-/// (#401/#402/#593): a `.docx` from its bytes, a `.scriv` bundle from its
-/// directory, a plain folder as one chapter per `.md` file, a `.txt` as plain
-/// text, anything else (a `.md`) as Markdown. The source is read only — never
-/// altered.
+/// (#401/#402/#593/#836): a `.docx` or `.odt` from its bytes, a `.scriv` bundle
+/// from its directory, a plain folder as one chapter per `.md` file, a `.txt` as
+/// plain text, anything else (a `.md`) as Markdown. The source is read only —
+/// never altered.
 fn read_manuscript(path: &std::path::Path) -> std::io::Result<crate::manuscript_import::Imported> {
     use crate::manuscript_import as import;
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("docx") {
         import::parse_docx(&std::fs::read(path)?)
+    } else if ext.eq_ignore_ascii_case("odt") {
+        import::parse_odt(&std::fs::read(path)?)
     } else if ext.eq_ignore_ascii_case("scriv") {
         import::parse_scriv(path)
     } else if path.is_dir() {

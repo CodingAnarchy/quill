@@ -27,6 +27,12 @@
 //! scanned directly — no XML-parser dependency, mirroring the hand-written XML on
 //! the export side.
 //!
+//! OpenDocument `.odt` is supported too (#836) via [`parse_odt`], mirroring the
+//! `.docx` path: an `.odt` is a zip of XML, so we read `content.xml`, split
+//! chapters on outline-level-1 `text:h` headings, turn bold/italic `text:span`s
+//! (whose emphasis lives in the automatic styles) into `**`/`*`, and read the
+//! title/author from `meta.xml` (or a title-block preamble).
+//!
 //! Scrivener `.scriv` is supported too (#402) via [`parse_scriv`], the inverse of
 //! `export::scriv`: read the `.scrivx` binder for the Manuscript draft folder's
 //! order and titles (folders flatten into their text documents, since the chapter
@@ -41,8 +47,8 @@
 //!
 //! # Layout
 //!
-//! Each import format lives in its own module — [`markdown`], [`docx`], [`scriv`],
-//! [`text`], and [`folder`] — while the shared output types
+//! Each import format lives in its own module — [`markdown`], [`docx`], [`odt`],
+//! [`scriv`], [`text`], and [`folder`] — while the shared output types
 //! ([`Imported`]/[`ImportedChapter`]),
 //! the chapter-assembly helpers ([`finalize_titles`]/[`wrap_emphasis`]/
 //! [`join_paragraphs`]), and the hand-rolled XML scanner the `.docx` and `.scriv`
@@ -52,12 +58,14 @@
 mod docx;
 mod folder;
 mod markdown;
+mod odt;
 mod scriv;
 mod text;
 
 pub use docx::parse_docx;
 pub use folder::parse_markdown_folder;
 pub use markdown::{chapter_level, heading_count, parse_markdown, parse_markdown_at};
+pub use odt::parse_odt;
 pub use scriv::parse_scriv;
 pub use text::parse_text;
 
