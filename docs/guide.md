@@ -420,6 +420,16 @@ turn it off in Settings (below) or set [editor] smart_typography = false.
 Vim-style modal editing is available, off by default; enable it in Settings or
 with [editor] vim = true.
 
+In Vim mode, marks and a jump-back list keep your place across the big jumps. In
+Normal mode, "m" then a letter sets a mark at the cursor (mx); a backtick or a
+single-quote then that letter jumps to it (`x or 'x). Marks are global — a mark
+carries its chapter, so it returns you to the right chapter even after you've
+moved to another. The jumps that used to strand you — the outline, the corkboard,
+find and search (/, ?, n, N, *), and go-to-chapter — now record where you left,
+and a double backtick (``) or double quote ('') jumps back to it, popping one
+step each press. (Vim's usual Ctrl-O back-jump is taken by the outline pane, so
+Quill uses `` / '' instead.)
+
 
 SETTINGS
 

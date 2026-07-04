@@ -166,6 +166,9 @@ impl App {
             self.mode = self.editing_mode();
             return;
         };
+        // Record the jump-back target (#825) before the board sends the cursor to
+        // the scene — possibly in another chapter — so `` `` `` returns here.
+        self.push_jump();
         self.mode = self.editing_mode();
         if let Some(chapter) = chapter {
             self.activate_chapter(chapter);

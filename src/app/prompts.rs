@@ -449,6 +449,9 @@ impl App {
                                 // title substring (#588); a blank entry or no match
                                 // returns to the browser unchanged.
                                 if let Some(index) = self.resolve_chapter_target(text) {
+                                    // Record the jump-back target (#825) so `` `` ``
+                                    // returns to the chapter the author left.
+                                    self.push_jump();
                                     self.activate_chapter(index);
                                     self.browser_opened_outline = false;
                                     self.mode = self.editing_mode();

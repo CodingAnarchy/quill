@@ -268,6 +268,31 @@ pub struct VimState {
     pub(crate) clipboard_register: bool,
     /// The last `/` / `?` / `*` search, replayed by `n` / `N` (#206).
     pub(crate) last_search: Option<VimSearch>,
+    /// Vim marks (#825): a mark letter → the position `m<x>` recorded, jumped back
+    /// to by `` `<x> `` / `'<x>`. Marks are **global** — a position carries its
+    /// chapter, so a mark set in one chapter jumps back there even after moving
+    /// to another. Survives a trip through Insert (it lives on `App`, like the
+    /// other Vim state).
+    pub(crate) marks: HashMap<char, JumpPos>,
+    /// The jump-back list (#825): the positions the big jumps (outline / corkboard
+    /// / find / go-to-chapter, and `` `<x> ``) leave, newest last. `` `` `` /
+    /// `''` pops it to return to where a jump started. Bounded (older entries drop)
+    /// so it can't grow without limit on the nav path.
+    pub(crate) jumplist: std::collections::VecDeque<JumpPos>,
+}
+
+/// A recorded editor position for a Vim mark or the jump-back list (#825): which
+/// chapter (by its manifest index) and the byte offset within that chapter's
+/// buffer. Storing the chapter makes marks and jumps **global** — returning to a
+/// mark or popping the jumplist re-opens the right chapter first, then restores
+/// the cursor. `Copy` (two `usize`s), so recording one is O(1) with no allocation
+/// and no rope work.
+#[derive(Clone, Copy)]
+pub struct JumpPos {
+    /// The chapter's manifest index at the time the position was recorded.
+    pub(crate) chapter: usize,
+    /// The cursor's byte offset within that chapter's buffer.
+    pub(crate) byte: usize,
 }
 
 /// A recorded Vim search, so `n` / `N` can repeat it (#206).
@@ -307,6 +332,10 @@ pub enum VimPending {
     /// `z` seen — awaiting `=` for the spelling-suggestions pick-list (#647),
     /// Vim's own `z=` spell-suggest binding; any other second key cancels.
     Z,
+    /// `m` / `` ` `` / `'` seen — awaiting the mark letter (#825). `set` is the
+    /// `m` form (record a mark); otherwise a jump — `` `` `` / `''` back-jumps
+    /// through the jumplist, and a letter jumps to that mark.
+    Mark { set: bool },
 }
 
 /// A Vim operator (#203): delete leaves Normal mode, change enters Insert, yank

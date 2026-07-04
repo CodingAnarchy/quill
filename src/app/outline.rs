@@ -94,6 +94,9 @@ impl App {
                     .headings()
                     .get(selected)
                     .map(|h| h.start);
+                // Leave a jump-back target (#825) so `` `` `` returns to where the
+                // author was reading before the outline sent them across the chapter.
+                self.push_jump();
                 self.mode = self.editing_mode();
                 if let Some(start) = start {
                     let at = start.min(self.buffer.len_bytes());
