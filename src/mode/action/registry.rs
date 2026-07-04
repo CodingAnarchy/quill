@@ -145,6 +145,15 @@ pub enum Action {
     /// auditable checklist, shown and saved to `export/preflight-<date>.md`.
     /// Aggregates the export path's own signals; changes no export behavior.
     PreflightExport,
+    /// One-click "Prepare for KDP" (#816): set the KDP-sane print defaults (6×9
+    /// trim, 0.125" bleed, a default language when none is set), run the preflight
+    /// (#815), and — unless it fails — emit the print-interior PDF and the
+    /// reflowable EPUB together to `export/`, the KDP publish bundle in one step.
+    PrepareForKdp,
+    /// One-click "Prepare for IngramSpark" (#816): the same publish bundle as
+    /// [`PrepareForKdp`](Self::PrepareForKdp) tuned for IngramSpark — sane print
+    /// defaults, the preflight, and the print PDF + reflowable EPUB to `export/`.
+    PrepareForIngramSpark,
 }
 
 impl Action {
@@ -175,6 +184,8 @@ impl Action {
         Self::Export(ExportFormat::Pdf),
         Self::Export(ExportFormat::PdfPrint),
         Self::PreflightExport,
+        Self::PrepareForKdp,
+        Self::PrepareForIngramSpark,
         Self::ExportBible,
         Self::BrowseFonts,
         Self::SetExportStyle,
@@ -294,6 +305,8 @@ impl Action {
             Self::Settings => "settings",
             Self::ExportBible => "export:bible",
             Self::PreflightExport => "export:preflight",
+            Self::PrepareForKdp => "export:kdp",
+            Self::PrepareForIngramSpark => "export:ingramspark",
         }
     }
 
@@ -318,6 +331,8 @@ impl Action {
             | Self::RestoreArchive => "Project",
             Self::Export(_)
             | Self::PreflightExport
+            | Self::PrepareForKdp
+            | Self::PrepareForIngramSpark
             | Self::ExportBible
             | Self::BrowseFonts
             | Self::SetExportStyle => "Export",
@@ -429,6 +444,8 @@ impl Action {
             Self::Settings => "Settings…",
             Self::ExportBible => "Export story bible → Markdown",
             Self::PreflightExport => "Export preflight (publish health check)",
+            Self::PrepareForKdp => "Prepare for KDP (preflight + print PDF + EPUB)",
+            Self::PrepareForIngramSpark => "Prepare for IngramSpark (preflight + print PDF + EPUB)",
         }
     }
 
@@ -467,6 +484,8 @@ impl Action {
                 | Self::Export(_)
                 | Self::ExportBible
                 | Self::PreflightExport
+                | Self::PrepareForKdp
+                | Self::PrepareForIngramSpark
                 | Self::ProgressReport
                 | Self::AnalysisReport
                 | Self::WritingHistory

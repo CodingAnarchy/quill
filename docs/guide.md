@@ -296,6 +296,21 @@ markers that would print a literal asterisk. The report opens on screen and is
 also saved to export/preflight-<date>.md so you have a dated record to fix against.
 It's a report only — it validates and never changes your export.
 
+When you're ready to publish, "Prepare for KDP" and "Prepare for IngramSpark"
+(from the Ctrl-K menu, or the "export:kdp" / "export:ingramspark" run-actions) do
+the whole print-on-demand bundle in one step. Each sets the sane defaults those
+stores want — a 6x9 trim if you haven't picked one, a 0.125" full-bleed
+allowance, and a default "en" language if you never set one (your ISBN,
+publisher, and rights are left as you have them) — writes them to book.toml, then
+runs the preflight above and saves it to export/preflight-<date>.md. If the
+preflight comes back clean (or with warnings only), it emits both publishing
+artifacts together: the print-interior PDF (export/<book>.print.pdf) and the
+reflowable EPUB (export/<book>.epub). If the preflight *fails* — something a store
+rejects outright, like a missing ISBN — nothing is exported and Quill points you
+at the saved report to fix first, so you never hand a store a bundle it would
+bounce. (Like setting the style from the app, the one-click prepare is for a
+standalone novel; a multi-book series sets [print] and exports per book.)
+
 
 AI ASSISTANCE (opt-in)
 
