@@ -272,6 +272,12 @@ pub struct App {
     /// sums of these plus any edits in chapters outside every part.
     part_added: Vec<usize>,
     part_removed: Vec<usize>,
+    /// The `added` / `removed` totals at the start of the current writing session
+    /// (#835). A session's output is the growth since this checkpoint; recording a
+    /// session (at quit) appends the delta and advances the checkpoint, so the
+    /// per-session log accumulates bursts the coalesced day snapshot can't show.
+    session_base_added: usize,
+    session_base_removed: usize,
     /// Per-chapter word baselines (chapter file → last counted words) the tally
     /// measures against. Keyed by file identity so it survives reordering; an
     /// edit's delta is attributed to the part of the chapter that changed.
@@ -529,6 +535,8 @@ impl App {
             moved_to_unused: 0,
             part_added: Vec::new(),
             part_removed: Vec::new(),
+            session_base_added: 0,
+            session_base_removed: 0,
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
             image: ai::image::ImageSettings::load(),

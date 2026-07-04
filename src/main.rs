@@ -192,6 +192,9 @@ fn main() -> io::Result<()> {
     let result = run(&mut tui, &mut app);
     // Record today's momentum so it survives the next reopen.
     app.persist_snapshot();
+    // Record this session's output to the per-session log (#835) — the calendar
+    // heatmap's per-day breakdown reads it.
+    app.record_session();
     // Remember where the author left off, to resume here next open (#588).
     app.persist_position();
     result
