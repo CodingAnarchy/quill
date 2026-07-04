@@ -539,6 +539,106 @@ fn ex_write_quit_saves_then_quits() {
 }
 
 #[test]
+fn ex_line_number_jumps_to_that_line() {
+    let (mut app, _dir) = vim_app("vim-ex-goto");
+    // A five-line buffer so a mid-file jump has somewhere to land.
+    app.buffer.replace_text("one\ntwo\nthree\nfour\nfive\n");
+    app.mode = Mode::Normal;
+    type_str(&mut app, ":3");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.buffer.cursor.line, 2, "':3' lands on the 3rd line");
+    assert!(matches!(app.mode, Mode::Normal), "back to Normal after :3");
+}
+
+#[test]
+fn ex_line_number_clamps_out_of_range() {
+    let (mut app, _dir) = vim_app("vim-ex-goto-clamp");
+    app.buffer.replace_text("one\ntwo\nthree\n");
+    app.mode = Mode::Normal;
+    // Way past the end clamps to the last content line (index 2).
+    type_str(&mut app, ":999");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.cursor.line, 2,
+        "an out-of-range line clamps to the last line"
+    );
+}
+
+#[test]
+fn ex_substitute_global_replaces_all_and_counts() {
+    let (mut app, _dir) = vim_app("vim-ex-subst");
+    app.buffer.replace_text("a a\naa\n");
+    app.mode = Mode::Normal;
+    type_str(&mut app, ":%s/a/b/g");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        "b b\nbb\n",
+        "'%s/a/b/g' replaced every 'a'"
+    );
+    assert_eq!(
+        app.message.as_deref(),
+        Some("Replaced 4 occurrences."),
+        "it reports the substitution count"
+    );
+}
+
+#[test]
+fn ex_substitute_without_g_replaces_first_per_line() {
+    let (mut app, _dir) = vim_app("vim-ex-subst-first");
+    app.buffer.replace_text("a a\na a\n");
+    app.mode = Mode::Normal;
+    // No `g`: only the first match on each line is replaced (Vim's default).
+    type_str(&mut app, ":%s/a/b/");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        "b a\nb a\n",
+        "without 'g', only the first per line is replaced"
+    );
+    assert_eq!(app.message.as_deref(), Some("Replaced 2 occurrences."));
+}
+
+#[test]
+fn ex_substitute_tolerates_missing_trailing_delimiter() {
+    let (mut app, _dir) = vim_app("vim-ex-subst-nodelim");
+    app.buffer.replace_text("cat\n");
+    app.mode = Mode::Normal;
+    // No trailing '/': still parses pattern + replacement.
+    type_str(&mut app, ":%s/cat/dog");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        "dog\n",
+        "'%s/cat/dog' (no trailing /) works"
+    );
+    assert_eq!(app.message.as_deref(), Some("Replaced 1 occurrence."));
+}
+
+#[test]
+fn ex_substitute_reports_when_no_match() {
+    let (mut app, _dir) = vim_app("vim-ex-subst-nomatch");
+    app.buffer.replace_text("cat\n");
+    app.mode = Mode::Normal;
+    let before = app.buffer.text();
+    type_str(&mut app, ":%s/zzz/qqq/g");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        before,
+        "no match leaves the buffer alone"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Pattern not found"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
 fn ex_unknown_command_reports_and_does_nothing() {
     let (mut app, _dir) = vim_app("vim-ex-unknown");
     type_str(&mut app, ":frobnicate");

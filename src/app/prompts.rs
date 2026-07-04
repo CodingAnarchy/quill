@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::mode::{Mode, Pending, PromptState, WizardStep};
+use crate::text::{match_ranges_opts, MatchOpts};
 
 use super::App;
 
@@ -79,7 +80,9 @@ impl App {
     }
 
     /// Run a typed Ex command (#207). The supported set is the file commands a
-    /// Vim user reaches for first; anything else is reported, like Vim's E492.
+    /// Vim user reaches for first, plus a bare line number (`:{N}`) and a
+    /// whole-buffer substitute (`:%s/pat/rep/[g]`, #826); anything else is
+    /// reported, like Vim's E492.
     fn run_ex_command(&mut self, cmd: &str) {
         match cmd {
             "" => {} // bare `:` — nothing to do
@@ -97,8 +100,97 @@ impl App {
                 self.clear_recovery(); // explicit discard — don't re-offer next launch (#263)
                 self.should_quit = true;
             }
+            // `:{N}` — jump to line N (1-based, clamped to the buffer), like Vim.
+            _ if !cmd.is_empty() && cmd.bytes().all(|b| b.is_ascii_digit()) => {
+                self.ex_goto_line(cmd);
+            }
+            // `:%s/pat/rep/[flags]` — whole-buffer substitute (#826).
+            _ if cmd.starts_with("%s") => self.ex_substitute(&cmd[2..]),
             other => self.message = Some(format!("Not an editor command: {other}")),
         }
+    }
+
+    /// `:{N}` — move the cursor to 1-based line `n`, clamped to the buffer's last
+    /// content line, landing on its first non-blank column like Vim's `{count}G`.
+    fn ex_goto_line(&mut self, digits: &str) {
+        // Only reached with an all-digit `cmd`, but a value too large for a
+        // `usize` still means "past the end", so clamp to the last line.
+        let n: usize = digits.parse().unwrap_or(usize::MAX);
+        // 1-based line → 0-based index. Clamp to the last line with content
+        // (skipping a trailing newline's empty line), so `:999` lands where
+        // Vim's `G` would (#826).
+        let target = n.saturating_sub(1);
+        let last = self.edit_buffer().last_line_index();
+        self.edit_buffer_mut().move_to_line(target.min(last));
+    }
+
+    /// `:%s/pat/rep/[flags]` — substitute `pat` with `rep` across the whole
+    /// buffer, reusing the range-edit path find/replace goes through (#826). The
+    /// `g` flag replaces every match on each line; without it, only the first per
+    /// line (Vim's default). A missing trailing delimiter is tolerated. Reports
+    /// the number of substitutions.
+    fn ex_substitute(&mut self, rest: &str) {
+        // The delimiter is the first character after `%s` (Vim allows any; `/`
+        // is by far the most common). An empty argument is a malformed command.
+        let Some(delim) = rest.chars().next() else {
+            self.message = Some("Not an editor command: %s".into());
+            return;
+        };
+        // Split into pattern / replacement / flags on the delimiter. A trailing
+        // delimiter (and thus the flags field) may be omitted.
+        let body = &rest[delim.len_utf8()..];
+        let mut parts = body.splitn(3, delim);
+        let pattern = parts.next().unwrap_or("");
+        let replacement = parts.next().unwrap_or("");
+        let flags = parts.next().unwrap_or("");
+        if pattern.is_empty() {
+            self.message = Some("E33: No previous substitute pattern".into());
+            return;
+        }
+        let global = flags.contains('g');
+
+        // Match over the whole buffer, then keep either every match (`g`) or the
+        // first on each line (Vim's per-line default). `%s` is case-sensitive by
+        // default, like Vim without `ignorecase`.
+        let text = self.edit_buffer().text();
+        let opts = MatchOpts {
+            case_sensitive: true,
+            whole_word: false,
+        };
+        let ranges = match_ranges_opts(&text, pattern, opts);
+        let targets: Vec<(usize, usize)> = if global {
+            ranges
+        } else {
+            let mut last_line: Option<usize> = None;
+            ranges
+                .into_iter()
+                .filter(|&(start, _)| {
+                    let line = text[..start].bytes().filter(|&b| b == b'\n').count();
+                    if last_line == Some(line) {
+                        false
+                    } else {
+                        last_line = Some(line);
+                        true
+                    }
+                })
+                .collect()
+        };
+
+        // Replace right-to-left so earlier byte offsets stay valid as the text
+        // shifts — the same range-edit path find/replace uses, so it is undoable.
+        let mut replaced = 0usize;
+        for &(start, end) in targets.iter().rev() {
+            self.edit_replace_range(start, end, replacement);
+            replaced += 1;
+        }
+        if replaced > 0 {
+            self.cache_focus_words();
+        }
+        self.message = Some(match replaced {
+            0 => format!("Pattern not found: {pattern}"),
+            1 => "Replaced 1 occurrence.".into(),
+            n => format!("Replaced {n} occurrences."),
+        });
     }
 
     /// The prompt state, while in [`Mode::Prompt`]. Only call from a prompt key
