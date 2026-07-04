@@ -397,6 +397,37 @@ impl App {
         self.message = Some(status.into());
     }
 
+    /// Spawn a VC worker that panics with `cause` (#838), standing in for a push or
+    /// pull whose worker thread dies. Lets a hermetic test drive the `poll_vc`
+    /// death path — the one branch a real remote op can't reach on demand — and
+    /// assert the cause reaches the UI message rather than a generic string.
+    #[cfg(test)]
+    pub(crate) fn spawn_failing_vc_for_test(&mut self, cause: &'static str) {
+        self.start_vc("⟳ Working…", move || panic!("{cause}"));
+    }
+
+    /// Drive [`poll_vc`] to completion for a test (#838): tick until the worker's
+    /// outcome lands, so an assertion sees the settled message rather than racing
+    /// the thread. Silences the panic hook around the wait so a deliberately dying
+    /// worker doesn't print to the test's stderr. Bounded so a stuck worker fails
+    /// fast instead of hanging.
+    #[cfg(test)]
+    pub(crate) fn settle_vc_for_test(&mut self) {
+        use std::panic;
+        let prior = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        for _ in 0..10_000 {
+            self.poll_vc();
+            if !self.vc_task.is_busy() {
+                panic::set_hook(prior);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic::set_hook(prior);
+        panic!("vc task never settled");
+    }
+
     /// Shared guard for the sync actions: under version control with a remote set.
     /// Sets the explanatory message and returns `false` when not.
     fn guard_remote(&mut self) -> bool {
@@ -422,7 +453,14 @@ impl App {
                 self.message = Some(msg.text);
             }
             Poll::Pending => {}
-            Poll::Died => self.message = Some("Remote operation failed.".into()),
+            // The worker panicked; surface its cause (#838) rather than a generic
+            // failure, so an auth/network/rejected push or pull is diagnosable.
+            Poll::Died(cause) => {
+                self.message = Some(cause.map_or_else(
+                    || "Remote operation failed.".into(),
+                    |cause| format!("Remote operation failed: {cause}"),
+                ));
+            }
         }
     }
 

@@ -270,9 +270,12 @@ impl App {
                 self.message = Some(format!("Download of Qwen3-{id} failed: {e}"));
             }
             Poll::Pending => self.tick_download_progress(),
-            Poll::Died => {
+            Poll::Died(cause) => {
                 self.download_progress = None;
-                self.message = Some("Model download failed.".into());
+                self.message = Some(cause.map_or_else(
+                    || "Model download failed.".into(),
+                    |cause| format!("Model download failed: {cause}"),
+                ));
             }
         }
     }
