@@ -224,7 +224,12 @@ fn render_body(
         let start = buffer.line_start_byte(line);
         let text = buffer.line(line);
         let kind = row_kind(syntax, start, &text, hl.conceal);
-        row_count(kind, &text, wrap)
+        row_count(
+            kind,
+            &text,
+            wrap,
+            first_row_indent(paragraph_indent, buffer, line),
+        )
     };
     let body_rows = line_rows;
 
@@ -235,7 +240,11 @@ fn render_body(
     // Where the cursor sits among its own line's visual rows.
     let cline = buffer.line(cursor_line);
     let cline_start = buffer.line_start_byte(cursor_line);
-    let cstarts = crate::wrap::row_starts(&cline, wrap);
+    let cstarts = crate::wrap::row_starts_first_indent(
+        &cline,
+        wrap,
+        first_row_indent(paragraph_indent, buffer, cursor_line),
+    );
     let (cursor_subrow, _) = crate::wrap::visual_pos(&cline, &cstarts, cursor_byte - cline_start);
 
     // Follow the cursor by *visual* row, keeping it near the page centre. Normally
@@ -350,7 +359,12 @@ fn render_body(
         let text = buffer.line(ll);
         let kind = row_kind(syntax, line_start, &text, hl.conceal);
         let verbatim = matches!(kind, RowKind::Code { verbatim: true });
-        let starts = row_starts_for(kind, &text, wrap);
+        let starts = row_starts_for(
+            kind,
+            &text,
+            wrap,
+            if indent { PARAGRAPH_INDENT.len() } else { 0 },
+        );
         let body = styled_line(syntax, line_start, &text, hl, wrap, indent, kind);
         for (sub, line) in body.into_iter().enumerate() {
             if skip > 0 {
@@ -588,11 +602,11 @@ fn row_kind(syntax: &Syntax, line_start: usize, text: &str, conceal: &[(usize, u
 /// treatment (#723): a hidden fence row is zero rows; verbatim code is one row (no
 /// reflow); everything else soft-wraps. Kept in lockstep with [`styled_line`] so
 /// the scroll math and the rendered output always agree on row counts.
-fn row_count(kind: RowKind, text: &str, width: usize) -> usize {
+fn row_count(kind: RowKind, text: &str, width: usize, first_indent: usize) -> usize {
     match kind {
         RowKind::HiddenFence => 0,
         RowKind::Code { verbatim: true } => 1,
-        _ => crate::wrap::row_starts(text, width).len(),
+        _ => crate::wrap::row_starts_first_indent(text, width, first_indent).len(),
     }
 }
 
@@ -601,11 +615,11 @@ fn row_count(kind: RowKind, text: &str, width: usize) -> usize {
 /// render: verbatim preview code is a single row starting at 0; a hidden fence has
 /// none; everything else soft-wraps. A trailing sentinel isn't added — the caller
 /// reads the end of the last row as the line length.
-fn row_starts_for(kind: RowKind, text: &str, width: usize) -> Vec<usize> {
+fn row_starts_for(kind: RowKind, text: &str, width: usize, first_indent: usize) -> Vec<usize> {
     match kind {
         RowKind::HiddenFence => Vec::new(),
         RowKind::Code { verbatim: true } => vec![0],
-        _ => crate::wrap::row_starts(text, width),
+        _ => crate::wrap::row_starts_first_indent(text, width, first_indent),
     }
 }
 
@@ -666,7 +680,11 @@ fn styled_line(
         return vec![Line::raw("")];
     }
     let code = matches!(kind, RowKind::Code { .. });
-    let starts = crate::wrap::row_starts(text, width);
+    let starts = crate::wrap::row_starts_first_indent(
+        text,
+        width,
+        if indent { PARAGRAPH_INDENT.len() } else { 0 },
+    );
     starts
         .iter()
         .enumerate()
@@ -908,6 +926,18 @@ fn starts_paragraph(buffer: &Buffer, line: usize) -> bool {
         prev -= 1;
     }
     !(prev > 0 && is_kind(prev - 1, HighlightKind::Heading))
+}
+
+/// The first visual row's indent width in cells for `line`: the display-only
+/// paragraph indent (#722) when it's enabled and `line` opens a paragraph, else 0.
+/// The wrap math narrows the first row by this (rather than letting the prepended
+/// indent overflow the column and clip the opening line's last word).
+fn first_row_indent(paragraph_indent: bool, buffer: &Buffer, line: usize) -> usize {
+    if paragraph_indent && starts_paragraph(buffer, line) {
+        PARAGRAPH_INDENT.len()
+    } else {
+        0
+    }
 }
 
 /// A `focus_width`-wide prose column centered horizontally in `area` (full width

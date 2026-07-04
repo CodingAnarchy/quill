@@ -20,6 +20,16 @@ use unicode_width::UnicodeWidthStr;
 /// in cells. The first element is always `0`. Breaks at the last space that fits;
 /// a word longer than `width` is hard-broken. A `width` of 0 disables wrapping.
 pub fn row_starts(text: &str, width: usize) -> Vec<usize> {
+    row_starts_first_indent(text, width, 0)
+}
+
+/// Like [`row_starts`], but the **first** visual row is `first_indent` cells
+/// narrower — for a display-only first-line indent (#722). The renderer prepends
+/// the indent to row 0, so its available text width must shrink by the same amount
+/// or the opening row overflows the column and the terminal clips its last word.
+/// Continuation rows use the full `width`. `first_indent` of 0 is exactly
+/// [`row_starts`]. A `width` of 0 disables wrapping.
+pub fn row_starts_first_indent(text: &str, width: usize, first_indent: usize) -> Vec<usize> {
     let mut starts = vec![0];
     if width == 0 || text.is_empty() {
         return starts;
@@ -27,9 +37,11 @@ pub fn row_starts(text: &str, width: usize) -> Vec<usize> {
     let mut row_start = 0;
     let mut row_w = 0; // display width accumulated on the current row
     let mut last_space: Option<usize> = None; // byte just after the most recent space on this row
+                                              // The first row is narrowed by the indent; every continuation row is full width.
+    let mut limit = width.saturating_sub(first_indent).max(1);
     for (b, g) in text.grapheme_indices(true) {
         let gw = UnicodeWidthStr::width(g);
-        if row_w + gw > width && b > row_start {
+        if row_w + gw > limit && b > row_start {
             // Wrap before this grapheme: at the last space if there was one,
             // otherwise hard-break right here.
             let brk = match last_space {
@@ -40,6 +52,7 @@ pub fn row_starts(text: &str, width: usize) -> Vec<usize> {
             row_start = brk;
             row_w = UnicodeWidthStr::width(&text[brk..b]) + gw;
             last_space = None;
+            limit = width; // continuation rows regain the indent's width
         } else {
             row_w += gw;
         }
@@ -104,6 +117,23 @@ mod tests {
     #[test]
     fn width_zero_disables_wrapping() {
         assert_eq!(row_starts("anything at all here", 0), vec![0]);
+    }
+
+    #[test]
+    fn first_indent_narrows_only_the_first_row() {
+        // width 10 with a 4-cell first-line indent: the opening row has only 6
+        // cells of text ("the " fits; "the qu" would reach the limit but breaks at
+        // the last space), and every continuation row regains the full width of 10
+        // (#722). Without the narrowing the first row would render 4 + up-to-10 = 14
+        // cells and the terminal would clip the overflow (the reported "you"→"yo").
+        let text = "the quick brown fox";
+        let starts = row_starts_first_indent(text, 10, 4);
+        assert_eq!(starts, vec![0, 4, 10]);
+        assert_eq!(&text[0..4], "the "); // indented row: 4 cells + 4 indent = 8 ≤ 10
+        assert_eq!(&text[4..10], "quick "); // continuation row wraps at the full 10
+        assert_eq!(&text[10..], "brown fox");
+        // A zero indent is exactly the plain wrap.
+        assert_eq!(row_starts_first_indent(text, 10, 0), row_starts(text, 10));
     }
 
     #[test]
