@@ -55,7 +55,7 @@ pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent:
 /// [`crate::date::utc_timestamp`].
 pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
     let mut b = Builder::new(style, &doc.publishing);
-    b.add_cover_page();
+    b.add_cover_page(&doc.title);
     b.add_title_page(
         doc.series.as_deref(),
         &doc.title,
@@ -111,7 +111,7 @@ pub fn to_epub_series(
             .unwrap_or_default(),
     );
     let title = series.unwrap_or("Series");
-    b.add_cover_page();
+    b.add_cover_page(title);
     b.add_title_page(series, title, None, author, None);
     b.add_copyright_page();
     let mut nav = Vec::new();
@@ -212,13 +212,19 @@ impl Builder {
     /// `<img>` made the first spine entry so storefronts and readers show it on
     /// open. Not a TOC entry. No-op when no cover is set, leaving the package
     /// byte-for-byte unchanged.
-    fn add_cover_page(&mut self) {
+    ///
+    /// The cover's `alt` (#818) is the author-supplied description, falling back to
+    /// the book `title` — a cover is content, not decoration, so it always carries
+    /// a meaningful description rather than the old generic `alt="Cover"`.
+    fn add_cover_page(&mut self, title: &str) {
         let Some(img) = self.style.image(ImageRole::Cover) else {
             return;
         };
+        let alt = img.alt.as_deref().unwrap_or(title);
         let body = format!(
-            "<div class=\"cover\"><img src=\"{}\" alt=\"Cover\"/></div>\n",
-            img.href
+            "<div class=\"cover\"><img src=\"{}\" alt=\"{}\"/></div>\n",
+            img.href,
+            xml_escape(alt)
         );
         let href = self.add("cover", "Cover", "cover", &body);
         self.landmarks.cover = Some(href);
@@ -662,12 +668,28 @@ fn p_class(class: &str, text: &str) -> String {
     format!("<p class=\"{class}\">{}</p>", xml_escape(text))
 }
 
-/// A placed ornament image (#472): a centered `<p>` wrapping a decorative `<img>`
-/// (empty `alt`). The href is package-internal, so it isn't escaped.
+/// A placed image (#472): a centered `<p>` wrapping an `<img>`. The `alt`
+/// attribute follows the author's intent (#818) via [`img_attrs`] — a real
+/// description for a content image, or the empty-alt + `role="presentation"`
+/// decorative convention when none is supplied. The href is package-internal, so
+/// it isn't escaped.
 fn img_p(class: &str, img: &EmbeddedImage) -> String {
     format!(
-        "<p class=\"{class}\"><img src=\"{}\" alt=\"\"/></p>",
-        img.href
+        "<p class=\"{class}\"><img src=\"{}\" {}/></p>",
+        img.href,
+        img_attrs(img.alt.as_deref())
+    )
+}
+
+/// The accessibility attributes for an `<img>` given its author-supplied alt text
+/// (#818). `Some(text)` → a described content image (`alt="…"`, XML-escaped).
+/// `None` → the *decorative* convention: an empty `alt` paired with
+/// `role="presentation"`, which declares the image ornamental (ACE/epubcheck-clean)
+/// rather than leaving a bare empty `alt` on what a reader would treat as content.
+fn img_attrs(alt: Option<&str>) -> String {
+    alt.map_or_else(
+        || String::from("alt=\"\" role=\"presentation\""),
+        |text| format!("alt=\"{}\"", xml_escape(text)),
     )
 }
 

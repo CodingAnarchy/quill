@@ -64,6 +64,25 @@ pub struct ExportStyle {
     /// page 0 in the print/PDF.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover_image: Option<String>,
+    /// Author-supplied alt text for the scene-break image (#818). `None` → the
+    /// image is declared *decorative* (empty `alt` + `role="presentation"`), the
+    /// correct convention for an ornamental divider rather than a bare empty alt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_break_image_alt: Option<String>,
+    /// Author-supplied alt text for the chapter-heading image (#818). `None` →
+    /// decorative.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_heading_image_alt: Option<String>,
+    /// Author-supplied alt text for the title-page image (#818). `None` →
+    /// decorative.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_image_alt: Option<String>,
+    /// Author-supplied alt text (a description) for the cover image (#818). `None`
+    /// → the EPUB cover falls back to the book title: a cover is content, not
+    /// decoration, so it always carries a real description rather than an empty or
+    /// generic `alt` (#642 advertises author-facing alt-text support).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_image_alt: Option<String>,
     /// The images resolved from the paths above at export time (#472) — read from
     /// disk by the app, not persisted in the manifest.
     #[serde(skip)]
@@ -289,6 +308,11 @@ pub struct EmbeddedImage {
     pub href: String,
     pub media_type: &'static str,
     pub bytes: Vec<u8>,
+    /// Author-supplied alt text (#818): `Some(text)` is a content image described
+    /// for assistive tech; `None` declares the image *decorative*, so the writer
+    /// emits the empty-alt + `role="presentation"` convention rather than a bare
+    /// empty `alt` on a content image.
+    pub alt: Option<String>,
 }
 
 /// Why a styling asset (font or image) couldn't be loaded.
@@ -395,6 +419,10 @@ impl ExportStyle {
             chapter_heading_image,
             title_image,
             cover_image,
+            scene_break_image_alt,
+            chapter_heading_image_alt,
+            title_image_alt,
+            cover_image_alt,
             fonts: _,
             images: _,
         } = over;
@@ -409,6 +437,11 @@ impl ExportStyle {
         self.chapter_heading_image = chapter_heading_image.or(self.chapter_heading_image);
         self.title_image = title_image.or(self.title_image);
         self.cover_image = cover_image.or(self.cover_image);
+        self.scene_break_image_alt = scene_break_image_alt.or(self.scene_break_image_alt);
+        self.chapter_heading_image_alt =
+            chapter_heading_image_alt.or(self.chapter_heading_image_alt);
+        self.title_image_alt = title_image_alt.or(self.title_image_alt);
+        self.cover_image_alt = cover_image_alt.or(self.cover_image_alt);
         self
     }
 
@@ -509,6 +542,16 @@ impl ExportStyle {
             (ImageRole::Title, self.title_image.clone()),
             (ImageRole::Cover, self.cover_image.clone()),
         ];
+        // The author-supplied alt text (#818) rides alongside each path by role.
+        // Absent → the image is embedded decorative (`alt: None`); the writer picks
+        // the decorative convention. The cover's fallback to the book title happens
+        // at emit time, where the title is known.
+        let alt = |role: ImageRole| match role {
+            ImageRole::SceneBreak => self.scene_break_image_alt.clone(),
+            ImageRole::ChapterHeading => self.chapter_heading_image_alt.clone(),
+            ImageRole::Title => self.title_image_alt.clone(),
+            ImageRole::Cover => self.cover_image_alt.clone(),
+        };
         let (images, warnings) = resolve_assets(
             targets,
             image_media_type,
@@ -520,6 +563,7 @@ impl ExportStyle {
                 href: format!("images/{}.{ext}", role.slug()),
                 media_type,
                 bytes,
+                alt: alt(role),
             },
         );
         self.images = images;
