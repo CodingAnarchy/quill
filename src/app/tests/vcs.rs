@@ -448,6 +448,27 @@ fn git_palette_configures_a_remote_then_offers_sync() {
     );
 }
 
+#[test]
+fn a_dead_vc_worker_surfaces_its_cause_not_a_generic_message() {
+    // A push/pull worker that dies used to report a bare "Remote operation
+    // failed." — the real reason (auth, network, rejected) was swallowed (#838).
+    // Drive the death path with a failing worker and assert the cause reaches the
+    // author-facing message.
+    let (mut app, _dir) = two_chapter_app("vc-worker-died");
+    git_menu(&mut app, 0); // Initialize
+    app.spawn_failing_vc_for_test("remote authentication failed");
+    app.settle_vc_for_test();
+    let msg = app.message.as_deref().unwrap_or("");
+    assert!(
+        msg.contains("remote authentication failed"),
+        "the message should name the underlying cause, got {msg:?}"
+    );
+    assert_ne!(
+        msg, "Remote operation failed.",
+        "a dead worker must not fall back to the generic message when a cause is known"
+    );
+}
+
 // --- History view: type-to-filter (#822) -----------------------------------
 
 /// The history view's `(selected, filter, typing)` state.

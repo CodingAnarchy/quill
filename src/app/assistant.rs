@@ -500,9 +500,9 @@ impl App {
             Some(a) => match a.task.poll() {
                 Poll::Pending => return,
                 Poll::Ready(r) => r,
-                Poll::Died => Err(AiError::Network {
+                Poll::Died(cause) => Err(AiError::Network {
                     status: None,
-                    message: "the assistant request failed".into(),
+                    message: cause.unwrap_or_else(|| "the assistant request failed".into()),
                 }),
             },
             None => return,

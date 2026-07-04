@@ -919,18 +919,20 @@ impl App {
                 }
             }
             Poll::Pending => {}
-            Poll::Died => {
+            Poll::Died(cause) => {
+                // Surface the worker's real cause (#838) rather than a bare failure.
+                let reason = cause.unwrap_or_else(|| "request failed".into());
                 // Resume the assistant if it was waiting on this (now dead) pass (#392).
                 if let Some(summary) =
                     self.assistant_pass_summary(&Outcome::Error(ai::AiError::Network {
                         status: None,
-                        message: "request failed".into(),
+                        message: reason.clone(),
                     }))
                 {
                     self.resume_assistant_pass(summary);
                 }
-                self.message = Some("AI: request failed".into());
-                self.advance_run(Some("request failed".into()));
+                self.message = Some(format!("AI: {reason}"));
+                self.advance_run(Some(reason));
             }
         }
         // Fire a setup wizard's deferred setting draft once the worker is free (#282).
