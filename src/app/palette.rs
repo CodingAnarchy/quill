@@ -235,6 +235,7 @@ impl App {
             Action::Ai(a) => self.start_ai_action(a, force),
             Action::EnableAi => self.offer_enable_ai(None),
             Action::UserGuide => self.open_guide(),
+            Action::QuickStart => self.open_onboarding(),
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
             Action::ImportManuscript => self.start_import_manuscript(),

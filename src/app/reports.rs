@@ -35,6 +35,29 @@ impl App {
         self.overlay = Some(Overlay::guide(lines));
     }
 
+    /// Open the first-run quick-start card overlay (#837): the dismissible tour of
+    /// the palette, core keys, and the AI on-ramp. Reachable on demand from the
+    /// run-action menu / help, and shown once on first launch via
+    /// [`maybe_offer_onboarding`](Self::maybe_offer_onboarding).
+    pub(crate) fn open_onboarding(&mut self) {
+        self.overlay = Some(Overlay::onboarding(crate::onboarding::card_lines()));
+    }
+
+    /// On first launch, show the quick-start card once (#837). No-op when the card
+    /// has already been shown (the `[general] onboarding_shown` flag is set), or
+    /// when a launch-time prompt (crash recovery, #263) or overlay is already up —
+    /// the card waits for a clean slate rather than stacking over another surface.
+    /// Called from the launch path after recovery is offered.
+    pub fn maybe_offer_onboarding(&mut self) {
+        if crate::onboarding::already_shown()
+            || self.overlay.is_some()
+            || !matches!(self.mode, Mode::Insert | Mode::Normal)
+        {
+            return;
+        }
+        self.open_onboarding();
+    }
+
     /// The progress report's rows, computed once when it's opened.
     pub(crate) fn report_lines(&self) -> Vec<Line<'static>> {
         let momentum = Momentum {
@@ -108,6 +131,11 @@ impl App {
         // Enter proceeds to the action and any non-scroll key cancels rather than
         // silently closing — so the author never commits by mistaking a dismiss.
         let confirm = self.overlay.as_ref().is_some_and(Overlay::is_confirm);
+        // Dismissing the first-run quick-start card records the shown-once flag
+        // (#837), so it never reappears on launch — but only on the close
+        // keystroke, not on a scroll, so the flag is set exactly when the card is
+        // actually dismissed.
+        let onboarding = self.overlay.as_ref().is_some_and(Overlay::is_onboarding);
         // `Some(row)` scrolls to `row`; a non-scroll key resolves the overlay.
         match super::scroll_target(key.code, ctrl, cur, max, page) {
             Some(row) => {
@@ -123,7 +151,12 @@ impl App {
                     self.message = Some("Commit cancelled.".into());
                 }
             }
-            None => self.overlay = None,
+            None => {
+                if onboarding {
+                    crate::onboarding::mark_shown();
+                }
+                self.overlay = None;
+            }
         }
     }
 

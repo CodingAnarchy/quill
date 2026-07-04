@@ -20,6 +20,10 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
         // The guide ships pre-wrapped to a readable width; keep it unwrapped so its
         // key-reference columns stay aligned and the scroll bound stays exact.
         OverlayKind::Guide => (format!(" Quill — user's guide ({hint}) "), false),
+        // The first-run quick-start card (#837): a short, dismissible tour. Wrapped
+        // (trim off, so its leading indents survive) so the key rows stay readable
+        // even on a narrow terminal.
+        OverlayKind::Onboarding => (format!(" Quill — quick start ({hint}) "), true),
         // The pre-commit review (#704) confirms rather than dismisses, so its hint
         // names the commit/cancel keys (not "any key to close"); the scroll marker
         // is added only when the content is actually taller than the box.

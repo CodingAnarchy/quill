@@ -36,6 +36,10 @@ pub enum Action {
     EnableAi,
     /// Open the built-in user's guide (F1) (#281).
     UserGuide,
+    /// Reopen the first-run quick-start card (#837): the dismissible tour of the
+    /// palette, core keys, and the AI on-ramp. Shown once automatically on first
+    /// launch; this makes it reachable again from help at any time.
+    QuickStart,
     /// Import a Markdown notes file (or a folder of them) into the story bible
     /// (#283).
     ImportNotes,
@@ -245,6 +249,7 @@ impl Action {
         Self::Settings,
         // Help
         Self::UserGuide,
+        Self::QuickStart,
     ];
 
     /// The stable name the run-action command matches and workflows (#89)
@@ -266,6 +271,7 @@ impl Action {
             Self::Ai(a) => a.slug(),
             Self::EnableAi => "ai:enable",
             Self::UserGuide => "guide",
+            Self::QuickStart => "quickstart",
             Self::ImportNotes => "import",
             Self::NewProjectFromNotes => "new-from-notes",
             Self::ImportManuscript => "import:manuscript",
@@ -362,7 +368,7 @@ impl Action {
             | Self::Corkboard
             | Self::ManuscriptCorkboard
             | Self::Settings => "View",
-            Self::UserGuide => "Help",
+            Self::UserGuide | Self::QuickStart => "Help",
         }
     }
 
@@ -405,6 +411,7 @@ impl Action {
             Self::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
+            Self::QuickStart => "Quick-start (first-run card)",
             Self::ImportNotes => "Import notes → story bible",
             Self::NewProjectFromNotes => "New project from a folder of notes",
             Self::ImportManuscript => "Import a manuscript → new project",

@@ -76,6 +76,7 @@ mod goals;
 mod imports;
 mod models;
 mod mouse;
+mod onboarding;
 mod outline;
 mod panes;
 mod project_search;

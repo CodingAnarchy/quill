@@ -77,6 +77,27 @@ impl EditorConfig {
     }
 }
 
+/// The `[general]` section (#837): app-level flags that aren't editor behavior,
+/// a theme, or a project setting. Today it carries only the first-run marker.
+#[derive(Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct GeneralConfig {
+    /// Whether the first-run quick-start card (#837) has been shown and dismissed.
+    /// Absent / `false` on a fresh install, so the card shows once on first launch;
+    /// set to `true` the moment it's dismissed, so it never reappears. Lives in the
+    /// global home config (not a project's `book.toml`), so it's per-install: a new
+    /// project doesn't re-trigger onboarding.
+    pub onboarding_shown: bool,
+}
+
+impl GeneralConfig {
+    /// Load the `[general]` section from the home config file. Best-effort: a
+    /// missing or unreadable file yields the defaults (onboarding not yet shown).
+    pub fn load() -> Self {
+        load_section("general")
+    }
+}
+
 /// Load the color theme from the `[theme]` section (#300): an optional `name`
 /// (`dark` / `light`) plus any per-field color overrides, all string values.
 /// Returns the theme and any warnings (bad name / field / color) for the caller
