@@ -1,8 +1,8 @@
 //! Import & setup-wizard flows (#282/#283/#286/#298): the new-project setup
 //! wizard, importing a folder of notes into the bible, creating a new project
 //! from a folder of notes, and importing an existing manuscript (Markdown,
-//! `.txt`, `.docx`, `.scriv`, or a folder of `.md` chapters) into a chaptered
-//! project.
+//! `.txt`, `.docx`, `.odt`, `.scriv`, or a folder of `.md` chapters) into a
+//! chaptered project.
 
 use super::*;
 use crate::mode::WizardStep;
@@ -515,6 +515,86 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
     assert_eq!(ch1, "The sea was *grey*.\n", "emphasis converted from runs");
 
     // The original .docx is read-only.
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        original,
+        "the source is left untouched"
+    );
+    let _ = fs::remove_file(&source);
+}
+
+#[test]
+fn importing_an_odt_manuscript_creates_a_chaptered_project() {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+    isolate("import-odt");
+    let cur = make_project("import-odt-cur", "Current", "c\n");
+    let mut app = open_app(&cur);
+
+    // A minimal but faithful `.odt`: two outline-level-1 headings (chapter breaks)
+    // and an italic span whose style lives in the automatic styles.
+    let content_xml = "<office:document-content>\
+        <office:automatic-styles>\
+        <style:style style:name=\"T1\" style:family=\"text\">\
+        <style:text-properties fo:font-style=\"italic\"/></style:style>\
+        </office:automatic-styles>\
+        <office:body><office:text>\
+        <text:h text:outline-level=\"1\">One</text:h>\
+        <text:p>The sea was <text:span text:style-name=\"T1\">grey</text:span>.</text:p>\
+        <text:h text:outline-level=\"1\">Two</text:h>\
+        <text:p>And it ended.</text:p>\
+        </office:text></office:body></office:document-content>";
+    let meta_xml = "<office:document-meta><office:meta>\
+        <dc:title>Salt and Iron</dc:title></office:meta></office:document-meta>";
+
+    let source = std::env::temp_dir().join(format!("quill-ms-{}.odt", std::process::id()));
+    {
+        let mut zip = zip::ZipWriter::new(fs::File::create(&source).unwrap());
+        let opts = SimpleFileOptions::default();
+        zip.start_file("mimetype", opts).unwrap();
+        zip.write_all(b"application/vnd.oasis.opendocument.text")
+            .unwrap();
+        zip.start_file("content.xml", opts).unwrap();
+        zip.write_all(content_xml.as_bytes()).unwrap();
+        zip.start_file("meta.xml", opts).unwrap();
+        zip.write_all(meta_xml.as_bytes()).unwrap();
+        zip.finish().unwrap();
+    }
+    let original = fs::read(&source).unwrap();
+    let dest = books_dir("import-odt-dest").join("Salt and Iron");
+
+    app.begin_import_manuscript(source.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::ImportManuscriptDest)),
+        "an .odt is accepted"
+    );
+    app.finish_import_manuscript(dest.to_str().unwrap());
+    assert!(
+        matches!(&app.mode, Mode::ImportPreview(_)),
+        "the import preview (#702) is shown before writing"
+    );
+    app.confirm_import_preview(); // confirm the preview → write + open
+
+    assert_eq!(app.project.root, dest);
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["One", "Two"],
+        "split on outline-level-1 headings, titles carried over"
+    );
+    let ch1 = fs::read_to_string(dest.join(&app.project.manifest.chapters[0].file)).unwrap();
+    assert_eq!(
+        ch1, "The sea was *grey*.\n",
+        "emphasis converted from spans"
+    );
+
+    // The original .odt is read-only.
     assert_eq!(
         fs::read(&source).unwrap(),
         original,
