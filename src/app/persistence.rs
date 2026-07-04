@@ -15,11 +15,12 @@ impl App {
     /// tally measures edits from here. Used at startup and after a structural
     /// edit that shouldn't be booked as prose.
     pub(super) fn seed_baselines(&mut self) {
+        let active = self.project.active_index();
         self.baselines = (0..self.chapter_count())
             .map(|i| {
                 (
                     self.project.chapter_file(i).to_string(),
-                    self.chapter_word_count(i),
+                    self.chapter_word_count_with_active(i, active),
                 )
             })
             .collect();

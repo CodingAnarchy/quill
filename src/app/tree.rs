@@ -103,9 +103,16 @@ impl App {
         let front = front_chapter_count(chapters);
         // Word count for the chapter at index `ci`: the active book is counted
         // live (its active chapter from the buffer), the others from the cache.
+        // Resolve the active index once (only the active book needs it) so the
+        // per-chapter word lookups below don't each rescan for it (reliability audit).
+        let active = if active_book {
+            self.project.active_index()
+        } else {
+            0
+        };
         let words_at = |ci: usize| {
             if active_book {
-                self.chapter_word_count(ci)
+                self.chapter_word_count_with_active(ci, active)
             } else {
                 chapters[ci].words
             }

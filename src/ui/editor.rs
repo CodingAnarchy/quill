@@ -751,7 +751,7 @@ fn styled_row(
             Style::default().fg(theme.dim),
         ));
     }
-    let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
+    let has_highlight = syntax.highlights_in(seg_start, seg_end).next().is_some();
     let concealed_here = hl
         .conceal
         .iter()
@@ -772,7 +772,7 @@ fn styled_row(
         .any(|&(s, e)| s < seg_end && e > seg_start);
     // A row fully inside the focused span (or focus off) needs no per-char dimming.
     let focus_covers_row = hl.focus.is_none_or(|(s, e)| s <= seg_start && e >= seg_end);
-    if hls.is_empty()
+    if !has_highlight
         && !concealed_here
         && !match_here
         && !current_here
@@ -782,6 +782,10 @@ fn styled_row(
     {
         return Line::raw(seg.to_string());
     }
+
+    // Past the fast path: some styling applies here, so materialize the highlight
+    // spans now (skipped for the common no-highlight row handled above).
+    let hls: Vec<Highlight> = syntax.highlights_in(seg_start, seg_end).copied().collect();
 
     // Build runs character by character, since concealed chars are dropped and
     // visible runs may not be contiguous in the source.

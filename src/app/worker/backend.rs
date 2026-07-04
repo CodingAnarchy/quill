@@ -86,19 +86,29 @@ fn build_local(
     model: Option<&'static ai::model_select::Model>,
 ) -> Result<Arc<dyn Backend>, ai::AiError> {
     let key = model.map_or("auto", ai::model_select::Model::id);
-    let mut cache = slot
-        .lock()
-        .map_err(|_| ai::AiError::Internal("model lock poisoned".into()))?;
-    if let Some(backend) = cache.get(key) {
-        return Ok(backend.clone());
+    // Fast path: hold the lock only for the cache lookup, never across the load.
+    {
+        let cache = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(backend) = cache.get(key) {
+            return Ok(backend.clone());
+        }
     }
+    // Load WITHOUT the lock held: this can download and parse a multi-GB GGUF and
+    // take minutes, and holding the cache mutex across it would freeze any UI-thread
+    // caller (e.g. `remove_model`) for the whole load (reliability audit).
     let loaded = match model {
         Some(m) => ai::local::LocalBackend::for_model(m)?,
         None => ai::local::LocalBackend::recommended()?.0,
     };
     let backend: Arc<dyn Backend> = Arc::new(loaded);
-    cache.insert(key.to_string(), backend.clone());
-    Ok(backend)
+    // Re-lock to insert. If another thread loaded the same model meanwhile, keep the
+    // one already cached and drop ours, so every caller shares a single instance.
+    let mut cache = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Ok(cache.entry(key.to_string()).or_insert(backend).clone())
 }
 
 #[cfg(not(feature = "local"))]
