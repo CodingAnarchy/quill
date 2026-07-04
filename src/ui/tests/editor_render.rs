@@ -116,6 +116,41 @@ fn visual_selection_draws_a_highlight() {
 }
 
 #[test]
+fn visual_mode_status_bar_shows_the_selected_count() {
+    // Selection tallies only the selected bytes, not the whole document (#824).
+    let mut app = app_with("one two three four\n");
+    app.vim = true;
+    // Non-Visual: the status bar shows the document count, no "selected" tally.
+    let doc = render(&app, 80, 8);
+    assert!(
+        doc.contains("4 words"),
+        "document count when not selecting:\n{doc}"
+    );
+    assert!(
+        !doc.contains("selected"),
+        "no selection tally at rest:\n{doc}"
+    );
+
+    // Visual, anchor at 0, cursor over the last char of "two" (col 6): the
+    // selection spans "one two" inclusively — 2 words, 7 chars.
+    app.mode = Mode::Visual {
+        anchor: 0,
+        linewise: false,
+    };
+    app.buffer.cursor = Cursor { line: 0, col: 6 };
+    let screen = render(&app, 80, 8);
+    assert!(
+        screen.contains("selected 2 words · 7 chars"),
+        "selected count is scoped to the selection:\n{screen}"
+    );
+    // The whole-document count is not shown while a selection is live.
+    assert!(
+        !screen.contains("4 words"),
+        "document count is replaced by the selection count:\n{screen}"
+    );
+}
+
+#[test]
 fn markers_are_hidden_when_cursor_is_outside_the_span() {
     // After typing, the cursor sits past the span, so markers conceal.
     let app = app_with("*italic* word");
