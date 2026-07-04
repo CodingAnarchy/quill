@@ -347,6 +347,8 @@ triage skip it — they're interactive or local. See `src/ai/cost.rs`.
 Each bible file has a regenerated block (`<!-- generated:start/end -->`) and an
 author-owned `<!-- notes:start/end -->` block that survives regeneration; a
 `digest:` detects hand-edits so a pass shows a diff instead of overwriting. The
+generated block opens with a readable provenance line (#832) naming the source
+chapters and the generated / edited state (see Trust & provenance below). The
 findings overlay lets the author jump to a finding's chapter, mark it as an `xxx`
 TODO, or dismiss it. The shared bible machinery lives in `src/ai/bible.rs`.
 
@@ -654,9 +656,11 @@ author's prose is out of scope per the assistant-not-co-writer principle above.)
   (#90), and the on-demand full rebuild + Batch API (#176) all ship; see above.
 - **Trust & provenance** — a clean revise now shows the author what the model
   changed (#607): a `+N/-M` summary and a "view changes" diff on the clean-write
-  path, no longer only on a hand-edit conflict. Still open: a durable source line
-  on each entry ("generated from ch. 1–12, edited by you") so the provenance
-  survives past the moment of the write.
+  path, no longer only on a hand-edit conflict. Each generated entry also carries
+  a durable provenance line at the top of its block (#832) — `> Generated from
+  ch. 1–12 · AI-generated` — refreshed on every incremental pass; a reader
+  relabels the state `edited by you` live from the `digest:` once the block is
+  hand-edited, and the conflict review shows it above the diff.
 - **Local model backend** — define the `quill-ai` trait so a future on-device
   model can satisfy the privacy-first authors who won't send drafts anywhere.
 - **Determinism** — analyses should be re-runnable and diffable; pin model

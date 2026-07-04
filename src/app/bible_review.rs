@@ -130,7 +130,10 @@ impl App {
     ) -> Staged {
         let existing = std::fs::read_to_string(&path).ok();
         let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
-        let proposed = render(&notes);
+        // Stamp a readable provenance line naming the chapters this pass reflects
+        // (#832); refreshed on every incremental write, edited-state derived live
+        // from the digest by a reader.
+        let proposed = bible::with_provenance(&render(&notes), &self.bible_source());
         if let Some(current) = &existing {
             if bible::is_hand_edited(current) {
                 let diff = unified_diff(current, &proposed);
@@ -139,6 +142,7 @@ impl App {
                     name: name.to_string(),
                     proposed,
                     diff,
+                    provenance: bible::provenance(current),
                 });
             }
         }
@@ -153,6 +157,20 @@ impl App {
         match self.write_file(&path, &proposed) {
             Ok(()) => Staged::Wrote(diff),
             Err(msg) => Staged::Failed(msg),
+        }
+    }
+
+    /// A readable descriptor of the chapters a bible pass reflects (#832), for the
+    /// provenance line — `ch. 1–12` for a multi-chapter book, `ch. 1` for one, and
+    /// `no chapters` for an empty book. The generated bible always reflects the
+    /// whole active book (a full rebuild covers it; an incremental revise folds the
+    /// changed chapters into the same complete bible), so the span is 1..=count.
+    pub(super) fn bible_source(&self) -> String {
+        let count = self.project.book_chapters(self.project.active_book()).len();
+        match count {
+            0 => "no chapters".to_string(),
+            1 => "ch. 1".to_string(),
+            n => format!("ch. 1–{n}"),
         }
     }
 
@@ -773,6 +791,7 @@ mod tests {
             name: name.into(),
             proposed: String::new(),
             diff: Vec::new(),
+            provenance: None,
         }
     }
 

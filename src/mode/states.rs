@@ -159,6 +159,10 @@ pub struct BibleConflict {
     /// `+`/`-`/` `. Computed once when the conflict is staged so the overlay
     /// isn't re-diffing every frame.
     pub(crate) diff: Vec<String>,
+    /// The on-disk entry's readable provenance (#832) — where it was generated
+    /// from and that you've edited it — shown above the diff. `None` for a
+    /// pre-#832 / foreign file that carries no provenance line.
+    pub(crate) provenance: Option<String>,
 }
 
 /// State for an open [`Mode::EditMeta`]. `label` is public for the editor's

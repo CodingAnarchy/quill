@@ -40,6 +40,38 @@ fn character_pass_writes_bible_files_and_summarizes() {
 }
 
 #[test]
+fn written_profile_carries_a_provenance_line() {
+    // A generated bible entry records a readable provenance line naming its source
+    // chapters and the AI-generated state (#832); the two-chapter fixture makes the
+    // source `ch. 1–2`.
+    let (mut app, dir) = two_chapter_app("char-provenance");
+    app.apply_characters(Ok(vec![Character {
+        name: "Mara Vance".into(),
+        goals: vec!["escape".into()],
+        ..Default::default()
+    }]));
+
+    let content =
+        fs::read_to_string(dir.join("bible/characters/mara-vance.md")).expect("profile written");
+    assert!(
+        content.contains("> Generated from ch. 1–2 · AI-generated"),
+        "provenance line present: {content}"
+    );
+    assert_eq!(
+        crate::ai::bible::provenance(&content).as_deref(),
+        Some("> Generated from ch. 1–2 · AI-generated"),
+        "reads as AI-generated while unedited"
+    );
+
+    // A hand-edit of the generated body flips the reported state (#832).
+    let edited = content.replace("escape", "flee");
+    assert_eq!(
+        crate::ai::bible::provenance(&edited).as_deref(),
+        Some("> Generated from ch. 1–2 · edited by you")
+    );
+}
+
+#[test]
 fn failed_bible_write_is_reported_not_counted_as_success() {
     let (mut app, dir) = two_chapter_app("char-write-fail");
     // Make `bible` a regular file so the `bible/characters` dir can't be created
