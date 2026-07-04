@@ -242,21 +242,44 @@ impl App {
             self.message = Some("No annotations here.".into());
             return;
         }
-        self.mode = Mode::Annotations { selected: 0 };
+        self.mode = Mode::Annotations {
+            selected: 0,
+            filter: String::new(),
+            typing: false,
+        };
     }
 
-    /// Key handling for the annotation review list: move, jump (Enter), delete
-    /// (`d`), close (Esc).
+    /// Key handling for the annotation review list: move (skipping filtered-out
+    /// notes), jump (Enter), delete (`d`), close (Esc). `/` starts a type-to-filter
+    /// query (#822) that narrows the list to notes whose text or anchored snippet
+    /// match; Esc clears the filter before it closes the list.
     pub(crate) fn on_key_annotations(&mut self, key: KeyEvent) {
-        let Mode::Annotations { selected } = self.mode else {
+        let Mode::Annotations {
+            selected, typing, ..
+        } = self.mode
+        else {
             return;
         };
-        if let Some(s) = super::assist::list_move(selected, self.annotations.len(), key.code) {
-            self.mode = Mode::Annotations { selected: s };
+        // In the filter-input sub-mode, keystrokes build the query (#822); the
+        // list's single-key commands are reachable only outside it.
+        if typing {
+            self.on_key_annotations_filter(key);
             return;
         }
+        // Only act on the selection when it passes the active filter (#822).
+        let acts_on_selected =
+            selected < self.annotations.len() && self.annotation_query_matches(selected);
         match key.code {
-            KeyCode::Enter => {
+            KeyCode::Char('/') => self.set_annotations_typing(true),
+            KeyCode::Up | KeyCode::Char('k') => {
+                let s = self.annotation_step(false);
+                self.set_annotations_selected(s);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let s = self.annotation_step(true);
+                self.set_annotations_selected(s);
+            }
+            KeyCode::Enter if acts_on_selected => {
                 let start = self.annotations.get(selected).map(|a| a.start);
                 self.mode = self.editing_mode();
                 if let Some(start) = start {
@@ -265,21 +288,167 @@ impl App {
                     buf.cursor = buf.cursor_at_byte(at);
                 }
             }
-            KeyCode::Char('d') => {
-                if selected < self.annotations.len() {
-                    self.annotations.remove(selected);
-                    self.persist_annotations();
-                    if self.annotations.is_empty() {
-                        self.mode = self.editing_mode();
-                    } else {
-                        self.mode = Mode::Annotations {
-                            selected: selected.min(self.annotations.len() - 1),
-                        };
-                    }
+            KeyCode::Char('d') if acts_on_selected => {
+                self.annotations.remove(selected);
+                self.persist_annotations();
+                if self.annotations.is_empty() {
+                    self.mode = self.editing_mode();
+                } else {
+                    let s = selected.min(self.annotations.len() - 1);
+                    self.set_annotations_selected(s);
+                    self.annotation_snap();
                 }
             }
-            KeyCode::Esc => self.mode = self.editing_mode(),
+            // Esc clears an active filter first (restoring the full list), then a
+            // second Esc closes the list.
+            KeyCode::Esc => {
+                if self.annotation_has_filter() {
+                    self.clear_annotation_filter();
+                } else {
+                    self.mode = self.editing_mode();
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// Keys for the annotation list's filter-input sub-mode (#822): printable
+    /// characters build the query (live), Backspace edits it, the arrows move
+    /// within the matches, Enter/Esc leave input — keeping the filter so the
+    /// list's commands act on the narrowed set (a second Esc, in command mode,
+    /// clears it).
+    fn on_key_annotations_filter(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => self.set_annotations_typing(false),
+            KeyCode::Up => {
+                let s = self.annotation_step(false);
+                self.set_annotations_selected(s);
+            }
+            KeyCode::Down => {
+                let s = self.annotation_step(true);
+                self.set_annotations_selected(s);
+            }
+            KeyCode::Backspace => self.annotation_filter_pop(),
+            KeyCode::Char(c) => self.annotation_filter_push(c),
+            _ => {}
+        }
+    }
+
+    /// The active annotation filter, lowercased (empty off the list/unfiltered).
+    fn annotation_query(&self) -> String {
+        match &self.mode {
+            Mode::Annotations { filter, .. } => filter.to_lowercase(),
+            _ => String::new(),
+        }
+    }
+
+    const fn annotation_has_filter(&self) -> bool {
+        matches!(&self.mode, Mode::Annotations { filter, .. } if !filter.is_empty())
+    }
+
+    /// Whether the annotation at `index` passes the active filter (#822): a
+    /// case-insensitive substring match on its note text or the snippet of prose it
+    /// anchors. Clamped to the buffer so a stale offset never indexes past the end.
+    pub(crate) fn annotation_matches(&self, index: usize, q: &str) -> bool {
+        if q.is_empty() {
+            return true;
+        }
+        let Some(a) = self.annotations.get(index) else {
+            return false;
+        };
+        if a.note.to_lowercase().contains(q) {
+            return true;
+        }
+        let len = self.edit_buffer().len_bytes();
+        let (s, e) = (a.start.min(len), a.end.min(len));
+        s < e
+            && self
+                .edit_buffer()
+                .byte_slice(s, e)
+                .to_lowercase()
+                .contains(q)
+    }
+
+    fn annotation_query_matches(&self, index: usize) -> bool {
+        let q = self.annotation_query();
+        self.annotation_matches(index, &q)
+    }
+
+    const fn set_annotations_typing(&mut self, on: bool) {
+        if let Mode::Annotations { typing, .. } = &mut self.mode {
+            *typing = on;
+        }
+    }
+
+    const fn set_annotations_selected(&mut self, selected: usize) {
+        if let Mode::Annotations { selected: s, .. } = &mut self.mode {
+            *s = selected;
+        }
+    }
+
+    fn clear_annotation_filter(&mut self) {
+        if let Mode::Annotations { filter, typing, .. } = &mut self.mode {
+            filter.clear();
+            *typing = false;
+        }
+    }
+
+    fn annotation_filter_push(&mut self, c: char) {
+        if let Mode::Annotations { filter, .. } = &mut self.mode {
+            filter.push(c);
+        }
+        self.annotation_snap();
+    }
+
+    fn annotation_filter_pop(&mut self) {
+        if let Mode::Annotations { filter, .. } = &mut self.mode {
+            filter.pop();
+        }
+        self.annotation_snap();
+    }
+
+    /// After the filter changes, keep the selection on a visible note: if the
+    /// current one no longer matches, jump to the first that does (#822).
+    fn annotation_snap(&mut self) {
+        let q = self.annotation_query();
+        let sel = match &self.mode {
+            Mode::Annotations { selected, .. } => *selected,
+            _ => return,
+        };
+        if !self.annotation_matches(sel, &q) {
+            if let Some(first) =
+                (0..self.annotations.len()).find(|&i| self.annotation_matches(i, &q))
+            {
+                self.set_annotations_selected(first);
+            }
+        }
+    }
+
+    /// The next (or previous, by `forward`) note that passes the filter, or the
+    /// current selection unchanged when there's no further match that way (#822).
+    fn annotation_step(&self, forward: bool) -> usize {
+        let q = self.annotation_query();
+        let from = match &self.mode {
+            Mode::Annotations { selected, .. } => *selected,
+            _ => return 0,
+        };
+        let n = self.annotations.len();
+        let mut i = from;
+        loop {
+            if forward {
+                if i + 1 >= n {
+                    return from;
+                }
+                i += 1;
+            } else {
+                if i == 0 {
+                    return from;
+                }
+                i -= 1;
+            }
+            if self.annotation_matches(i, &q) {
+                return i;
+            }
         }
     }
 

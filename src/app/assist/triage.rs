@@ -13,7 +13,7 @@ impl App {
         } else {
             self.mode = Mode::Findings(Box::new(Findings {
                 items: self.triage.clone(),
-                selected: 0,
+                ..Default::default()
             }));
         }
     }

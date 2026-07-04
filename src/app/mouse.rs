@@ -261,7 +261,9 @@ impl App {
             Mode::Findings(f) => f.selected = index,
             Mode::History(h) => h.selected = index,
             Mode::Corkboard(c) => c.selected = index,
-            Mode::Annotations { selected } | Mode::Outline { selected } => *selected = index,
+            Mode::Annotations { selected, .. } | Mode::Outline { selected, .. } => {
+                *selected = index;
+            }
             _ => return false,
         }
         self.message = None;

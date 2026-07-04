@@ -12,18 +12,30 @@ use crate::text::MatchOpts;
 use super::{AiAction, MetaField, Pending};
 
 /// State for an open [`Mode::Findings`]: the findings list and the selected row.
+/// `filter`/`typing` are the type-to-filter query and its input sub-mode (#822),
+/// lifted from the chapter browser: `/` starts typing, keystrokes narrow the list
+/// to findings whose summary or chapters match (case-insensitive substring), Esc
+/// leaves input (keeping the filter) and a second Esc clears it.
+#[derive(Default)]
 pub struct Findings {
     pub(crate) items: Vec<Finding>,
     pub(crate) selected: usize,
+    pub(crate) filter: String,
+    pub(crate) typing: bool,
 }
 
 /// State for the navigable commit-history view (#587): the commits (newest first)
 /// and the selected row. From the selected commit the author diffs the current
 /// chapter against it or restores that chapter to it. The list is captured when
-/// the view opens, so it's a stable target for the arrow keys.
+/// the view opens, so it's a stable target for the arrow keys. `filter`/`typing`
+/// are the type-to-filter query and its input sub-mode (#822): `/` starts typing,
+/// keystrokes narrow the list to commits whose summary, id, or date match, Esc
+/// leaves input (keeping the filter) and a second Esc clears it.
 pub struct History {
     pub(crate) commits: Vec<crate::vcs::CommitMeta>,
     pub(crate) selected: usize,
+    pub(crate) filter: String,
+    pub(crate) typing: bool,
 }
 
 /// One triageable finding (a continuity contradiction, style note, …). UI-shaped

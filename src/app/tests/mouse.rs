@@ -397,7 +397,10 @@ fn a_click_selects_a_findings_row() {
             action: None,
         })
         .collect();
-    app.mode = Mode::Findings(Box::new(Findings { items, selected: 0 }));
+    app.mode = Mode::Findings(Box::new(Findings {
+        items,
+        ..Default::default()
+    }));
     let screen = render_to_string(&app, W, H);
     assert!(screen.contains("finding 0"), "the list rendered");
     // Click the third visible row of the list (findings row indices == screen rows).
