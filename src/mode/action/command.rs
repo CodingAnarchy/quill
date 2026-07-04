@@ -213,6 +213,8 @@ pub enum StyleTextKnob {
     PartOrnament,
     /// The book cover-image path (`cover_image`, #582).
     CoverImage,
+    /// The cover image's alt text / description (`cover_image_alt`, #818).
+    CoverImageAlt,
 }
 
 impl StyleTextKnob {
@@ -223,6 +225,7 @@ impl StyleTextKnob {
             Self::TitleOrnament => "title_ornament",
             Self::PartOrnament => "part_ornament",
             Self::CoverImage => "cover_image",
+            Self::CoverImageAlt => "cover_image_alt",
         }
     }
 
@@ -233,6 +236,7 @@ impl StyleTextKnob {
             Self::TitleOrnament => "title ornament",
             Self::PartOrnament => "part ornament",
             Self::CoverImage => "cover image",
+            Self::CoverImageAlt => "cover image description",
         }
     }
 }

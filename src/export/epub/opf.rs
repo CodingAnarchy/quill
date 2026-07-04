@@ -99,6 +99,16 @@ pub(super) fn build_opf(
     meta.push_str("<meta property=\"schema:accessibilityFeature\">tableOfContents</meta>");
     meta.push_str("<meta property=\"schema:accessibilityFeature\">structuralNavigation</meta>");
     meta.push_str("<meta property=\"schema:accessibilityFeature\">readingOrder</meta>");
+    // When any embedded image carries author-supplied alt text (#818), the package
+    // genuinely provides text alternatives — advertise `alternativeText` so the
+    // metadata stays truthful. The cover always describes itself (it falls back to
+    // the title), so a cover alone earns the feature.
+    if images
+        .iter()
+        .any(|i| i.role == ImageRole::Cover || i.alt.is_some())
+    {
+        meta.push_str("<meta property=\"schema:accessibilityFeature\">alternativeText</meta>");
+    }
     meta.push_str("<meta property=\"schema:accessibilityHazard\">none</meta>");
     meta.push_str(
         "<meta property=\"schema:accessibilitySummary\">This publication is a \

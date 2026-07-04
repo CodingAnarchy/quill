@@ -170,7 +170,15 @@ keystrokes that stay out of the way.
   sets the **book cover** — every storefront requires one: it embeds in the EPUB as
   the `cover-image` item (the first spine page, plus the EPUB 2 `<meta name="cover">`
   legacy hint older readers use) and renders as a full-page page 0 in the print PDF
-  (raster formats only there — an SVG cover is reported and skipped). To start
+  (raster formats only there — an SVG cover is reported and skipped). For
+  accessibility (the EU Accessibility Act, Apple/Kobo), give each image a
+  description via its `*_alt` key — `cover_image_alt`, `scene_break_image_alt`,
+  `chapter_heading_image_alt`, `title_image_alt` — and the EPUB emits it as the
+  image's `alt` text. A described image reads as content; an image left without
+  an `*_alt` is declared *decorative* (empty `alt` + `role="presentation"`),
+  which is the right convention for an ornamental divider. The cover always
+  carries a description — `cover_image_alt`, or the book title as a fallback,
+  never a bare or generic alt. To start
   from a coordinated look instead of setting each key, `preset` selects a
   built-in bundle of these settings, and any explicit `[style]` key you also set
   overrides just that part of the preset. The library:

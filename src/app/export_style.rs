@@ -67,6 +67,11 @@ impl App {
                 Command::EditStyleText(StyleTextKnob::CoverImage),
             ),
             PaletteItem::new(
+                "Cover description (alt text)",
+                format!("Currently: {}", opt_label(style.cover_image_alt.as_deref())),
+                Command::EditStyleText(StyleTextKnob::CoverImageAlt),
+            ),
+            PaletteItem::new(
                 "Print trim size",
                 format!("Currently: {trim}"),
                 Command::OpenStylePicker(StylePicker::Trim),
@@ -200,6 +205,7 @@ impl App {
                 StyleTextKnob::TitleOrnament => &mut style.title_ornament,
                 StyleTextKnob::PartOrnament => &mut style.part_ornament,
                 StyleTextKnob::CoverImage => &mut style.cover_image,
+                StyleTextKnob::CoverImageAlt => &mut style.cover_image_alt,
             } = v;
         }) {
             Ok(()) => {
@@ -293,6 +299,7 @@ impl App {
             StyleTextKnob::TitleOrnament => style.title_ornament.clone(),
             StyleTextKnob::PartOrnament => style.part_ornament.clone(),
             StyleTextKnob::CoverImage => style.cover_image.clone(),
+            StyleTextKnob::CoverImageAlt => style.cover_image_alt.clone(),
         }
     }
 
@@ -449,8 +456,9 @@ mod tests {
         let Mode::Palette(p) = &app.mode else {
             panic!("the setter opens a palette");
         };
-        // Preset, scene break, alignment, drop caps, two ornaments, cover, trim.
-        assert_eq!(p.items.len(), 8);
+        // Preset, scene break, alignment, drop caps, two ornaments, cover, cover
+        // description, trim.
+        assert_eq!(p.items.len(), 9);
         assert_eq!(p.title, "Export style");
     }
 
@@ -672,6 +680,36 @@ mod tests {
         let opf = read_zip_entry(&bytes, "OEBPS/content.opf");
         assert!(opf.contains("properties=\"cover-image\""), "{opf}");
         assert!(opf.contains("<meta name=\"cover\""), "{opf}");
+    }
+
+    #[test]
+    fn setting_the_cover_description_splices_the_alt_text_and_round_trips() {
+        // The in-app "Cover description" knob (#818) splices `cover_image_alt` into
+        // `[style]`, the seam authors use to supply real alt text.
+        let (mut app, dir) = style_app("style-cover-alt");
+        app.apply_style_text(StyleTextKnob::CoverImageAlt, "A lighthouse at dusk");
+
+        assert_eq!(
+            app.project
+                .manifest
+                .style
+                .as_ref()
+                .unwrap()
+                .cover_image_alt
+                .as_deref(),
+            Some("A lighthouse at dusk")
+        );
+        let toml = manifest_text(&dir);
+        assert!(
+            toml.contains("cover_image_alt = \"A lighthouse at dusk\""),
+            "{toml}"
+        );
+        // Re-opening the project reads the same alt text back.
+        let reopened = Project::open(&*dir).unwrap();
+        assert_eq!(
+            reopened.manifest.style.unwrap().cover_image_alt.as_deref(),
+            Some("A lighthouse at dusk")
+        );
     }
 
     /// Read one zip entry's text by name — for inspecting the EPUB the cover test
