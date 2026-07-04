@@ -204,6 +204,7 @@ impl Action {
         Self::Ai(AiAction::Continuity),
         Self::Ai(AiAction::Setting),
         Self::Ai(AiAction::Plot),
+        Self::Ai(AiAction::Theme),
         Self::Ai(AiAction::Scaffold),
         Self::Ai(AiAction::Naming),
         Self::Ai(AiAction::Style),
@@ -391,6 +392,7 @@ impl Action {
             Self::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
             Self::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
             Self::Ai(AiAction::Plot) => "AI · Plot & arc tracker",
+            Self::Ai(AiAction::Theme) => "AI · Theme & motif tracker",
             Self::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
             Self::Ai(AiAction::Naming) => "AI · Name & term consistency",
             Self::Ai(AiAction::Style) => "AI · Prose & style",
@@ -509,6 +511,7 @@ impl Action {
                         | AiAction::Continuity
                         | AiAction::Setting
                         | AiAction::Plot
+                        | AiAction::Theme
                         | AiAction::Scaffold
                         | AiAction::Naming
                         | AiAction::Style

@@ -16,11 +16,12 @@ use crate::mode::AiAction;
 /// The bible trackers a series refresh runs, each accumulated across the books in
 /// reading order. The bibles are independent, so the order between trackers is
 /// free; within a tracker the books must go in order so each builds on the last.
-const TRACKERS: [AiAction; 4] = [
+const TRACKERS: [AiAction; 5] = [
     AiAction::Characters,
     AiAction::Continuity,
     AiAction::Setting,
     AiAction::Plot,
+    AiAction::Theme,
 ];
 
 /// A series-bible refresh in progress (#340): the queue of `(tracker, book)`
@@ -106,10 +107,10 @@ impl App {
         self.run_series_bible_step();
     }
 
-    /// The `(tracker, book)` queue a bible refresh runs — each of the four bible
+    /// The `(tracker, book)` queue a bible refresh runs — each of the five bible
     /// trackers over every book, in reading order within a tracker so each book
     /// builds on the last. Shared by the series refresh (#340) and the all-bibles
-    /// refresh (#655); for a standalone novel it's the four trackers over its one
+    /// refresh (#655); for a standalone novel it's the five trackers over its one
     /// book.
     fn bible_refresh_queue(&self) -> Vec<(AiAction, usize)> {
         let books = self.project.book_count();
@@ -119,9 +120,9 @@ impl App {
             .collect()
     }
 
-    /// Start an all-bibles refresh (#655): run the four bible passes as one batch —
+    /// Start an all-bibles refresh (#655): run the five bible passes as one batch —
     /// over every book of a series — with a single combined cost estimate/confirm
-    /// and combined progress, rather than four (or 4×books) separate confirms and
+    /// and combined progress, rather than five (or 5×books) separate confirms and
     /// spawns. Gates on a ready backend and no other run in flight, then either
     /// confirms the summed estimate or, when it's under the threshold, starts
     /// straight away. `force` rebuilds each bible from the whole manuscript (#176).
@@ -155,7 +156,7 @@ impl App {
     }
 
     /// Begin the confirmed all-bibles batch (#655): seed the shared series-bible run
-    /// with the four-tracker × book queue and drive its first pass. Reached from the
+    /// with the five-tracker × book queue and drive its first pass. Reached from the
     /// combined cost confirm, or directly when the estimate was under the threshold.
     pub(crate) fn refresh_bibles_confirmed(&mut self, force: bool) {
         if self.series_bible_run.is_some() || self.workflow_run.is_some() {
@@ -292,7 +293,7 @@ impl App {
     }
 
     /// The `(tracker, book)` batch a bible refresh would run — for tests to assert
-    /// the all-bibles command (#655) plans the four trackers over every book.
+    /// the all-bibles command (#655) plans the five trackers over every book.
     pub(crate) fn bible_refresh_queue_for_test(&self) -> Vec<(AiAction, usize)> {
         self.bible_refresh_queue()
     }

@@ -41,6 +41,7 @@ pub mod setting;
 pub mod social;
 pub mod style;
 pub mod submission;
+pub mod theme;
 pub mod thesaurus;
 pub mod tool_loop;
 pub mod tools;
@@ -55,9 +56,12 @@ pub use plot::Plot;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
 pub use submission::Submission;
+pub use theme::Theme;
 // `style::Style` is referred to qualified (avoids clashing with ratatui's Style).
 
-use crate::theme;
+// Aliased so it doesn't collide with this module's own `theme` submodule (the AI
+// theme/motif tracker, #828); `crate::theme` is the UI color theme.
+use crate::theme as ui_theme;
 use std::cell::OnceCell;
 use std::fmt;
 use std::fmt::Write as _;
@@ -122,6 +126,8 @@ pub enum Outcome {
     Setting(Result<Setting, AiError>),
     /// Plot-thread / arc tracking + dangling-thread findings (#606).
     Plot(Result<Plot, AiError>),
+    /// Theme / motif tracking + dangling-motif findings (#828).
+    Theme(Result<Theme, AiError>),
     /// Scaffolding: beat outline + structural gaps (#76).
     Scaffold(Result<Scaffold, AiError>),
     /// Naming & term consistency (#78).
@@ -176,6 +182,7 @@ impl Outcome {
             Self::Continuity(r) => r.as_ref().err(),
             Self::Setting(r) => r.as_ref().err(),
             Self::Plot(r) => r.as_ref().err(),
+            Self::Theme(r) => r.as_ref().err(),
             Self::Scaffold(r) => r.as_ref().err(),
             Self::Naming(r) => r.as_ref().err(),
             Self::Style(r) => r.as_ref().err(),
@@ -623,7 +630,7 @@ pub fn answer_to_lines(answer: &Answer, usage: &Usage) -> Vec<Line<'static>> {
             "{} tokens in ({} cached) · {} out",
             usage.input_tokens, usage.cache_read_tokens, usage.output_tokens
         ),
-        Style::default().fg(theme::current().dim),
+        Style::default().fg(ui_theme::current().dim),
     )));
     out
 }

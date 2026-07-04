@@ -120,6 +120,10 @@ impl App {
                 let prior = bible::raw_file(root, "plot.md");
                 plot::build_incremental_request(&prior, &scoped, &model)
             }
+            AiAction::Theme => {
+                let prior = bible::raw_file(root, "theme.md");
+                ai_theme::build_incremental_request(&prior, &scoped, &model)
+            }
             AiAction::Style => style::build_request(scoped, &model),
             AiAction::Scaffold => scaffold::build_request(scoped, &model),
             AiAction::Editorial => ai::editorial::build_request(scoped, &model),

@@ -312,6 +312,15 @@ pub(super) fn bible_tracker(action: AiAction) -> Option<BibleTracker> {
             incr: plot::build_incremental_request,
             finish: |r| Outcome::Plot(r.and_then(|resp| plot::parse(&resp.text))),
         }),
+        AiAction::Theme => Some(BibleTracker {
+            key,
+            source: BibleSource::File("theme.md"),
+            full_msg: "⟳ Tracking themes & motifs…",
+            incr_msg: "⟳ Updating the theme tracker from changed chapters…",
+            full: ai_theme::build_request,
+            incr: ai_theme::build_incremental_request,
+            finish: |r| Outcome::Theme(r.and_then(|resp| ai_theme::parse(&resp.text))),
+        }),
         _ => None,
     }
 }
@@ -879,6 +888,7 @@ impl App {
                     Outcome::Continuity(r) => self.apply_continuity(r),
                     Outcome::Setting(r) => self.apply_setting(r),
                     Outcome::Plot(r) => self.apply_plot(r),
+                    Outcome::Theme(r) => self.apply_theme(r),
                     Outcome::Scaffold(r) => self.apply_scaffold(r),
                     Outcome::Naming(r) => self.apply_naming(r),
                     Outcome::Style(r) => self.apply_style(r),

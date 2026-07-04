@@ -217,11 +217,11 @@ fn enable_local_ai(app: &mut App) {
 }
 
 #[test]
-fn refresh_all_bibles_plans_the_four_trackers_over_every_book() {
+fn refresh_all_bibles_plans_the_five_trackers_over_every_book() {
     use crate::mode::AiAction;
     let (app, _dir) = series_app("bible-all-plan");
     let queue = app.bible_refresh_queue_for_test();
-    // Four trackers × two books = eight passes, each tracker walking the books in
+    // Five trackers × two books = ten passes, each tracker walking the books in
     // reading order so book two builds on book one.
     assert_eq!(
         queue,
@@ -234,6 +234,8 @@ fn refresh_all_bibles_plans_the_four_trackers_over_every_book() {
             (AiAction::Setting, 1),
             (AiAction::Plot, 0),
             (AiAction::Plot, 1),
+            (AiAction::Theme, 0),
+            (AiAction::Theme, 1),
         ]
     );
 }
@@ -242,7 +244,7 @@ fn refresh_all_bibles_plans_the_four_trackers_over_every_book() {
 fn refresh_all_bibles_works_for_a_standalone_novel() {
     use crate::mode::AiAction;
     let (app, _dir) = two_chapter_app("bible-all-standalone");
-    // A standalone novel refreshes its one book's four trackers under the one
+    // A standalone novel refreshes its one book's five trackers under the one
     // command — unlike the series refresh, it isn't gated off for a single book.
     assert_eq!(
         app.bible_refresh_queue_for_test(),
@@ -251,35 +253,36 @@ fn refresh_all_bibles_works_for_a_standalone_novel() {
             (AiAction::Continuity, 0),
             (AiAction::Setting, 0),
             (AiAction::Plot, 0),
+            (AiAction::Theme, 0),
         ]
     );
 }
 
 #[test]
-fn refresh_all_bibles_estimate_sums_the_four_passes() {
+fn refresh_all_bibles_estimate_sums_the_five_passes() {
     let (app, _dir) = two_chapter_app("bible-all-sum");
-    // With no bible yet, each of the four passes rebuilds from the whole book, so
-    // the combined estimate covers four whole-book passes' worth of input — the sum
-    // of the parts, one figure to confirm rather than four separate ones.
+    // With no bible yet, each of the five passes rebuilds from the whole book, so
+    // the combined estimate covers five whole-book passes' worth of input — the sum
+    // of the parts, one figure to confirm rather than five separate ones.
     let combined = app.bibles_refresh_estimate_for_test(false);
     let whole = app.manuscript_text().len();
     // No bible yet + the Claude backend means each pass is a from-scratch full
     // rebuild, which runs through the Batch API at half rate (#691), so the
     // combined figure is priced batched too.
     let expected =
-        crate::ai::cost::estimate(whole * 4, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
+        crate::ai::cost::estimate(whole * 5, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
     assert_eq!(
         combined.tokens, expected.tokens,
-        "combined input = four whole-book passes summed"
+        "combined input = five whole-book passes summed"
     );
-    // And it's four times a single whole-book pass, up to token truncation.
+    // And it's five times a single whole-book pass, up to token truncation.
     let one_pass =
         crate::ai::cost::estimate(whole, crate::ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
     assert!(
-        combined.tokens >= one_pass.tokens * 4,
-        "at least four passes' input: {} vs {}",
+        combined.tokens >= one_pass.tokens * 5,
+        "at least five passes' input: {} vs {}",
         combined.tokens,
-        one_pass.tokens * 4,
+        one_pass.tokens * 5,
     );
     assert!(
         combined.dollars > one_pass.dollars,
@@ -309,17 +312,17 @@ fn one_confirm_gates_the_whole_batch_then_seeds_every_pass() {
     assert!(!app.has_series_bible_run(), "no run before confirm");
     assert!(!app.ai_task.is_busy(), "nothing sent before confirm");
 
-    // Confirming runs the batch as one sequenced run over all eight passes. On this
+    // Confirming runs the batch as one sequenced run over all ten passes. On this
     // hermetic build the local backend isn't compiled, so every pass is skipped and
     // the run drains synchronously — but it ran as a *single* batch (one summary),
-    // never eight separate confirms.
+    // never ten separate confirms.
     app.on_key(key(KeyCode::Char('y')));
     assert!(
         !matches!(app.mode, Mode::Prompt(_)),
         "confirming closes the single prompt — no further confirms"
     );
-    // The batch that ran was the full eight-pass plan.
-    assert_eq!(app.bible_refresh_queue_for_test().len(), 8);
+    // The batch that ran was the full ten-pass plan.
+    assert_eq!(app.bible_refresh_queue_for_test().len(), 10);
 }
 
 #[test]

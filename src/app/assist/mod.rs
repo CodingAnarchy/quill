@@ -89,6 +89,10 @@ pub(super) fn describe_plot(f: &plot::ThreadFinding) -> (String, Vec<String>) {
     (format!("{}: {}", f.thread, f.issue), f.chapters.clone())
 }
 
+pub(super) fn describe_theme(f: &ai_theme::MotifFinding) -> (String, Vec<String>) {
+    (format!("{}: {}", f.motif, f.issue), f.chapters.clone())
+}
+
 pub(super) fn describe_scaffold(g: &scaffold::Gap) -> (String, Vec<String>) {
     (format!("gap: {}", g.detail), vec![g.chapter.clone()])
 }
@@ -190,6 +194,11 @@ pub(super) fn recheck_parser(
         AiAction::Plot => |text, a, book| {
             plot::parse(text)
                 .map(|p| findings_from(&p.findings, book, a, describe_plot))
+                .unwrap_or_default()
+        },
+        AiAction::Theme => |text, a, book| {
+            ai_theme::parse(text)
+                .map(|t| findings_from(&t.findings, book, a, describe_theme))
                 .unwrap_or_default()
         },
         // Non-finding actions never reach here (`recheck_request` returns `None`).

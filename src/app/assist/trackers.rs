@@ -11,7 +11,7 @@ use super::super::*;
 use super::write_failure_message;
 use super::{
     describe_continuity, describe_editorial, describe_naming, describe_plot, describe_scaffold,
-    describe_setting, describe_style, describe_voice, findings_from,
+    describe_setting, describe_style, describe_theme, describe_voice, findings_from,
 };
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
@@ -59,6 +59,12 @@ impl App {
     /// tracker + dangling-thread findings are applied by [`App::poll_ai`].
     pub(crate) fn analyze_plot(&mut self, force: bool) {
         self.run_book_bible_pass(AiAction::Plot, self.project.active_book(), force);
+    }
+
+    /// Start a theme / motif pass (incremental when possible, #90); the theme
+    /// tracker + dangling-motif findings are applied by [`App::poll_ai`].
+    pub(crate) fn analyze_theme(&mut self, force: bool) {
+        self.run_book_bible_pass(AiAction::Theme, self.project.active_book(), force);
     }
 
     /// Start a scaffolding pass; the beat outline + gap findings are applied by
@@ -264,6 +270,25 @@ impl App {
             path,
             "plot",
             |notes| plot::render(&plot, notes, &today),
+            findings,
+        );
+    }
+
+    /// Apply a theme pass (#828): write the theme / motif tracker to
+    /// `bible/theme.md` (conflict-reviewed like any bible file) and surface the
+    /// dangling-motif findings through the existing triage.
+    pub(crate) fn apply_theme(&mut self, result: Result<ThemeBible, ai::AiError>) {
+        let Some(theme) = self.ok_or_report(result) else {
+            return;
+        };
+        let book = self.current_series_bible_book();
+        let findings = findings_from(&theme.findings, book, AiAction::Theme, describe_theme);
+        let today = date::iso(date::today());
+        let path = self.project.root.join("bible").join("theme.md");
+        self.apply_bible_with_findings(
+            path,
+            "theme",
+            |notes| ai_theme::render(&theme, notes, &today),
             findings,
         );
     }
