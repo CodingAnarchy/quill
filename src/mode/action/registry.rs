@@ -585,6 +585,12 @@ pub enum GitAction {
     Diff,
     /// Restore the current chapter to its last committed version (#135).
     RestoreChapter,
+    /// Create a named milestone — an annotated tag over the whole project (#833).
+    Milestone,
+    /// Restore the whole project to its last committed version (#833).
+    RestoreProject,
+    /// Diff the whole working tree against the last commit (#833).
+    DiffProject,
     /// Set (or change) the remote URL the project backs up to (#134).
     SetRemote,
     /// Push local commits to the remote (#134).

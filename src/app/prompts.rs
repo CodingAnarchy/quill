@@ -301,6 +301,15 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            Pending::ConfirmRestoreProject => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.mode = closed;
+                    self.restore_project();
+                } else {
+                    self.pending_restore_rev = None; // cancelled — drop the target
+                    self.mode = closed;
+                }
+            }
             Pending::ConfirmRecovery => match key.code {
                 KeyCode::Char('y' | 'Y' | 'r' | 'R') => {
                     self.mode = closed;
@@ -399,6 +408,7 @@ impl App {
             | Pending::Thesaurus
             | Pending::NameGen(_)
             | Pending::Commit
+            | Pending::Milestone
             | Pending::SetRemote
             | Pending::ExCommand
             | Pending::DescribeWorkflow
@@ -565,6 +575,10 @@ impl App {
                                 } else {
                                     self.commit(text);
                                 }
+                            }
+                            Pending::Milestone => {
+                                self.mode = closed;
+                                self.create_milestone(text);
                             }
                             Pending::SetRemote => {
                                 self.mode = closed;

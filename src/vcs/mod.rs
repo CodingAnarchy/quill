@@ -17,8 +17,8 @@ mod local;
 mod remote;
 
 pub use local::{
-    commit, diff, diff_file_to_worktree, init, is_repo, log, restore, show_file_at, status,
-    CommitMeta,
+    commit, create_tag, diff, diff_file_to_worktree, diff_tree_to_worktree, init, is_repo,
+    list_tags, log, restore, restore_all, show_file_at, status, CommitMeta, TagMeta,
 };
 pub use remote::{pull, push, remote_url, set_remote};
 
