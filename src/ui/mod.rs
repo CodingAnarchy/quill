@@ -13,6 +13,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
+use crate::buffer::count_words;
 use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::SegmentHeader;
 use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
@@ -753,6 +754,20 @@ fn editor_status_bar(app: &App) -> (String, String) {
     let dirty = dirty_marker(dirtied);
     let right = app.message.as_ref().map_or_else(
         || {
+            // In Visual mode, tally the selection itself (#824) — "how long is
+            // this passage I'm about to cut?" — scoped to the selected bytes
+            // rather than the whole document.
+            if let Mode::Visual { anchor, linewise } = app.mode {
+                let (lo, hi) = app.selection_bytes(anchor, linewise);
+                let selected = buffer.byte_slice(lo, hi);
+                let words = count_words(&selected);
+                let chars = selected.chars().count();
+                return format!(
+                    "selected {words} words · {chars} chars · ln {}/{}  ",
+                    buffer.cursor.line + 1,
+                    buffer.line_count()
+                );
+            }
             format!(
                 "{} words · ln {}/{}  ",
                 buffer.word_count(),
