@@ -285,6 +285,17 @@ image ornaments, set a file path by hand or use "Browse & download fonts…" for
 curated open-licensed library. (Setting the style from the app is for a standalone
 novel; a multi-book series sets [style] / [print] per book by hand.)
 
+Before you export for publication, run "Export preflight (publish health check)"
+from the Ctrl-K menu. It checks the book against what print/ebook stores (KDP,
+IngramSpark) reject or flag and gathers the result into one auditable checklist —
+each line marked PASS, WARN, or FAIL: a missing ISBN, no cover image or a cover
+under the 300-DPI print floor, no copyright page, a language tag that isn't valid
+BCP-47 (use "en", "fr", "es-419", not "English"), print bleed set with no
+full-bleed cover to fill it, empty chapters, and stray (unbalanced) emphasis
+markers that would print a literal asterisk. The report opens on screen and is
+also saved to export/preflight-<date>.md so you have a dated record to fix against.
+It's a report only — it validates and never changes your export.
+
 
 AI ASSISTANCE (opt-in)
 

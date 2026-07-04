@@ -12,6 +12,7 @@ use crate::frontmatter::{Epigraph, Role};
 pub mod docx;
 pub mod epub;
 pub mod pdf;
+pub mod preflight;
 pub mod scriv;
 pub mod style;
 

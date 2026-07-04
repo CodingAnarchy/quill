@@ -215,6 +215,69 @@ impl App {
         }
     }
 
+    /// Run the export preflight (#815) and show the checklist: consolidate the
+    /// export path's own signals (cover DPI, trim, copyright presence, front/back
+    /// bands, language) plus the store-facing metadata into one auditable report,
+    /// open it in a report overlay, and save it to `export/preflight-<date>.md`
+    /// through the shared [`write_export`](Self::write_export) path — the same one
+    /// the report snapshots (#601) use. Changes no export behavior; it only reports.
+    ///
+    /// Checked against the print-interior profile — the strictest target (physical
+    /// trim, bleed, and the print-DPI floor apply) — so a clean preflight clears the
+    /// screen/ebook targets too. Runs from the single-chapter view only, like the
+    /// exports, so the active chapter's live edits are read (not the stale window).
+    pub(crate) fn run_preflight(&mut self) {
+        if self.manuscript.is_some() {
+            self.message =
+                Some("Leave the continuous view (Ctrl-l) before the preflight check.".into());
+            return;
+        }
+        let meta = self.publishing_meta();
+        let (style, _warnings) = self.export_style();
+        let ((w, _h), trim_warning) = self.print_trim();
+        let bleed = self.print_bleed();
+        let print = export::preflight::PrintInfo {
+            media_w_pts: 2.0f32.mul_add(bleed, w),
+            bleed_pts: bleed,
+            trim_warning,
+        };
+        // Own each chapter's title and prose so the borrowed [`ChapterInfo`] slice
+        // outlives the `preflight` call; the active chapter reads live from the buffer.
+        let chapters: Vec<(String, usize, bool, String)> = (0..self.chapter_count())
+            .map(|i| {
+                (
+                    self.project
+                        .chapter_title(i)
+                        .unwrap_or("Untitled")
+                        .to_string(),
+                    self.chapter_word_count(i),
+                    self.project.chapter_band(i) == Band::Body,
+                    self.chapter_text(i),
+                )
+            })
+            .collect();
+        let infos: Vec<export::preflight::ChapterInfo<'_>> = chapters
+            .iter()
+            .map(
+                |(title, words, is_body, body)| export::preflight::ChapterInfo {
+                    title,
+                    words: *words,
+                    is_body: *is_body,
+                    body,
+                },
+            )
+            .collect();
+        let report = export::preflight::preflight(&meta, &style, &infos, Some(&print), true);
+        let title = self.project.manifest.title.clone();
+        let md = report.to_markdown(&title);
+        let lines = md.lines().map(|l| Line::raw(l.to_string())).collect();
+        self.overlay = Some(Overlay::report("preflight", lines));
+        // Persist alongside the exports so it's an auditable artifact, not just a
+        // transient overlay — the same dated `export/<label>-<date>.md` path #601 uses.
+        let name = format!("preflight-{}", date::iso(date::today()));
+        self.write_export(&name, "md", md.as_bytes());
+    }
+
     /// The output base name (sans extension) for a scoped export. A whole-book
     /// export is named for the book; a *sample* (#584) appends a scope tag — the
     /// chapter or part slug, or `chapters-N-M` for a range — so a sample never

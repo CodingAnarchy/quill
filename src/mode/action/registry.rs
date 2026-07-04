@@ -139,6 +139,12 @@ pub enum Action {
     /// front matter stripped, written to `export/story-bible.md`. Pure local
     /// concatenation of files already on disk — no AI request.
     ExportBible,
+    /// Run the export preflight / publish health check (#815): validate the book
+    /// against store requirements (ISBN, cover + DPI, copyright page, BCP-47
+    /// language, bleed vs. full-bleed cover, empty chapters, emphasis) into one
+    /// auditable checklist, shown and saved to `export/preflight-<date>.md`.
+    /// Aggregates the export path's own signals; changes no export behavior.
+    PreflightExport,
 }
 
 impl Action {
@@ -168,6 +174,7 @@ impl Action {
         Self::Export(ExportFormat::Epub),
         Self::Export(ExportFormat::Pdf),
         Self::Export(ExportFormat::PdfPrint),
+        Self::PreflightExport,
         Self::ExportBible,
         Self::BrowseFonts,
         Self::SetExportStyle,
@@ -286,6 +293,7 @@ impl Action {
             Self::SetExportStyle => "style:set",
             Self::Settings => "settings",
             Self::ExportBible => "export:bible",
+            Self::PreflightExport => "export:preflight",
         }
     }
 
@@ -308,9 +316,11 @@ impl Action {
             | Self::ImportManuscript
             | Self::ArchiveProject
             | Self::RestoreArchive => "Project",
-            Self::Export(_) | Self::ExportBible | Self::BrowseFonts | Self::SetExportStyle => {
-                "Export"
-            }
+            Self::Export(_)
+            | Self::PreflightExport
+            | Self::ExportBible
+            | Self::BrowseFonts
+            | Self::SetExportStyle => "Export",
             Self::ProgressReport | Self::AnalysisReport | Self::WritingHistory => "Reports",
             Self::Ai(_)
             | Self::EnableAi
@@ -418,6 +428,7 @@ impl Action {
             Self::SetExportStyle => "Set export style…",
             Self::Settings => "Settings…",
             Self::ExportBible => "Export story bible → Markdown",
+            Self::PreflightExport => "Export preflight (publish health check)",
         }
     }
 
@@ -455,6 +466,7 @@ impl Action {
             Self::Save
                 | Self::Export(_)
                 | Self::ExportBible
+                | Self::PreflightExport
                 | Self::ProgressReport
                 | Self::AnalysisReport
                 | Self::WritingHistory

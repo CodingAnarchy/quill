@@ -482,6 +482,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "export:pdf",
         "export:pdf-print",
         "export:bible",
+        "export:preflight",
         "report:progress",
         "report:analysis",
         "report:history",

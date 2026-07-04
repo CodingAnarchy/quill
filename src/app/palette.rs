@@ -89,8 +89,9 @@ impl App {
             // enabled the switch, key, and backend actions cover the rest.
             Action::EnableAi if self.ai.enabled => Some("AI is already enabled".into()),
             // Export compiles per-chapter files; the continuous view holds an
-            // unsaved window, so leave it first.
-            Action::Export(_) if self.manuscript.is_some() => {
+            // unsaved window, so leave it first. The preflight reads the same
+            // per-chapter compile, so it shares the constraint.
+            Action::Export(_) | Action::PreflightExport if self.manuscript.is_some() => {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
             // Switching books only applies to a multi-book series (#329).
@@ -272,6 +273,7 @@ impl App {
             Action::SetExportStyle => self.open_export_style_menu(),
             Action::Settings => self.open_settings_menu(),
             Action::ExportBible => self.export_story_bible(),
+            Action::PreflightExport => self.run_preflight(),
         }
     }
 
