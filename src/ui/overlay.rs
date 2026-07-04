@@ -93,14 +93,20 @@ pub(super) fn draw_bible_review(frame: &mut Frame, area: Rect, review: &BibleRev
     }
 
     // Diff view: current (on disk) → proposed.
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!("'{}' was edited by hand — choose what to keep:", front.name),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::raw(""),
-    ];
     let theme = theme::current();
+    let mut lines = vec![Line::from(Span::styled(
+        format!("'{}' was edited by hand — choose what to keep:", front.name),
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    // The on-disk entry's provenance (#832): where it came from and that it's been
+    // edited — the trust context for the choice below.
+    if let Some(prov) = &front.provenance {
+        lines.push(Line::from(Span::styled(
+            prov.clone(),
+            Style::default().fg(theme.dim),
+        )));
+    }
+    lines.push(Line::raw(""));
     for change in &front.diff {
         let color = match change.chars().next() {
             Some('-') => theme.removed,

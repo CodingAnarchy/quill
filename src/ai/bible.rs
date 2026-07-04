@@ -16,6 +16,17 @@ const NOTES_START: &str = "<!-- notes:start -->";
 const NOTES_END: &str = "<!-- notes:end -->";
 const NOTES_PLACEHOLDER: &str = "## Notes\n\n_Your notes here — preserved across regeneration._\n";
 
+/// The prefix of the human-readable provenance line (#832) at the top of a
+/// generated block — a blockquote so it renders as a callout and is easy to
+/// recognize and strip. The line reads e.g. `> Generated from ch. 1–12 ·
+/// AI-generated`; after a hand-edit a reader relabels the state as `edited by
+/// you`, derived live from the `digest:` rather than stored (writing the new
+/// state would itself count as an edit).
+const PROVENANCE_PREFIX: &str = "> Generated from ";
+const STATE_GENERATED: &str = "AI-generated";
+const STATE_EDITED: &str = "edited by you";
+const STATE_SEP: &str = " · ";
+
 /// Assemble a bible file from caller-built `front` matter lines (each ending in
 /// `\n`, no trailing `---`), the regenerated `generated` body, the author's
 /// `notes`, and the generation date `today`. Adds the `generated`/`digest` front
@@ -27,6 +38,79 @@ pub fn render(front: &str, generated: &str, notes: &str, today: &str) -> String 
 on the next pass.\n{front}generated: {today}\ndigest: {digest}\n---\n\n\
 {GEN_START}\n{generated}{GEN_END}\n\n{NOTES_START}\n{notes}{NOTES_END}\n"
     )
+}
+
+/// The provenance line for a generated block whose source is `source` (a readable
+/// chapter descriptor, e.g. `ch. 1–12`), labeled with the given `state`.
+fn provenance_line(source: &str, state: &str) -> String {
+    format!("{PROVENANCE_PREFIX}{source}{STATE_SEP}{state}")
+}
+
+/// Insert (or refresh) the human-readable provenance line at the top of a rendered
+/// bible file's generated block (#832), naming the `source` chapters it was built
+/// from, and rewrite the `digest:` so a freshly generated file still reads as
+/// clean. The line becomes part of the generated block — rewritten on every pass,
+/// so an incremental update refreshes the source — while the AI-generated / edited
+/// state is left to a reader ([`provenance`]) to derive live from the digest. A
+/// file without a generated block (foreign / import) is returned unchanged.
+pub fn with_provenance(rendered: &str, source: &str) -> String {
+    let Some(body) = between(rendered, GEN_START, GEN_END) else {
+        return rendered.to_string();
+    };
+    let line = provenance_line(source, STATE_GENERATED);
+    let block = format!("{line}\n\n{body}");
+    let start = format!("{GEN_START}\n");
+    let Some(pos) = rendered.find(&start) else {
+        return rendered.to_string();
+    };
+    let head = &rendered[..pos + start.len()];
+    let tail_at = rendered[pos..].find(GEN_END).map(|i| pos + i);
+    let Some(tail_at) = tail_at else {
+        return rendered.to_string();
+    };
+    let rebuilt = format!("{head}{block}{}", &rendered[tail_at..]);
+    // The provenance line is inside the digested block, so re-stamp the digest over
+    // the new block content — otherwise the freshly written file would read as
+    // hand-edited on the very next check.
+    restamp_digest(&rebuilt, &block)
+}
+
+/// Rewrite the `digest:` front-matter field of `file` to the digest of `block`
+/// (the generated block's new content), so a file we just rewrote isn't misread as
+/// hand-edited.
+fn restamp_digest(file: &str, block: &str) -> String {
+    let want = digest(block);
+    let mut out = String::with_capacity(file.len());
+    let mut done = false;
+    for line in file.split_inclusive('\n') {
+        if !done && line.trim_start().starts_with("digest:") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            let _ = writeln!(out, "{indent}digest: {want}");
+            done = true;
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// The human-readable provenance of a generated bible file (#832), or `None` when
+/// it carries no provenance line (a foreign / pre-#832 file). The source-chapter
+/// text is read from the stored line; the state is derived live — `edited by you`
+/// once the block no longer matches its `digest:`, else `AI-generated` — so the
+/// author sees at a glance where an entry came from and whether they've touched it.
+pub fn provenance(existing: &str) -> Option<String> {
+    let block = between(existing, GEN_START, GEN_END).unwrap_or_default();
+    let line = block.lines().next()?;
+    let rest = line.strip_prefix(PROVENANCE_PREFIX)?;
+    // Drop the stored state suffix; the live digest check is the source of truth.
+    let source = rest.rsplit_once(STATE_SEP).map_or(rest, |(s, _)| s);
+    let state = if is_hand_edited(existing) {
+        STATE_EDITED
+    } else {
+        STATE_GENERATED
+    };
+    Some(provenance_line(source, state))
 }
 
 /// Append a `## {heading}` section with one `- ` bullet per item and a trailing
@@ -51,7 +135,9 @@ pub fn bullet_section(body: &mut String, heading: &str, items: &[String]) {
 /// foreign `.md`) falls back to its whole body sans front matter.
 pub fn clean(raw: &str) -> String {
     let body = crate::frontmatter::split(raw).1;
-    let generated = between(body, GEN_START, GEN_END);
+    // Drop the provenance line (#832) — it's metadata about the entry, not part of
+    // the shareable content the export assembles.
+    let generated = between(body, GEN_START, GEN_END).map(|g| strip_provenance(&g));
     let notes = between(body, NOTES_START, NOTES_END);
     match (generated, notes) {
         (None, None) => body.trim().to_string(),
@@ -149,6 +235,21 @@ pub fn raw_dir(root: &Path, dir: &str) -> String {
         }
     }
     out
+}
+
+/// A generated block with its provenance line (#832) and the blank line after it
+/// removed, if present — leaving only the tracked content. The reader counterpart
+/// to [`with_provenance`], used by [`clean`] so exports stay prose-only.
+fn strip_provenance(block: &str) -> String {
+    let Some(rest) = block.strip_prefix(PROVENANCE_PREFIX) else {
+        return block.to_string();
+    };
+    // Drop the provenance line itself and the blank line separating it from the
+    // content; a block that is *only* the line leaves nothing behind.
+    rest.split_once('\n')
+        .map_or_else(String::new, |(_, after)| {
+            after.trim_start_matches('\n').to_string()
+        })
 }
 
 /// The text strictly between `start` and `end` markers, if both are present.
@@ -346,5 +447,117 @@ mod tests {
         assert_eq!(clean("---\ntitle: x\n---\n\nJust prose.\n"), "Just prose.");
         // No front matter and no markers: the whole thing, trimmed.
         assert_eq!(clean("\n\nBare notes.\n\n"), "Bare notes.");
+    }
+
+    #[test]
+    fn provenance_line_names_source_and_reads_generated_when_clean() {
+        // A freshly generated block carries a provenance line naming its source
+        // chapters and the AI-generated state (#832).
+        let file = with_provenance(
+            &render(
+                "name: Mara\n",
+                "## Physical\n- green eyes\n",
+                NOTES_PLACEHOLDER,
+                "2026-06-19",
+            ),
+            "ch. 1–12",
+        );
+        assert!(
+            file.contains("> Generated from ch. 1–12 · AI-generated"),
+            "provenance line present: {file}"
+        );
+        // Stamped inside the digested block, so the fresh file still reads clean.
+        assert!(!is_hand_edited(&file), "freshly stamped file is clean");
+        assert_eq!(
+            provenance(&file).as_deref(),
+            Some("> Generated from ch. 1–12 · AI-generated")
+        );
+    }
+
+    #[test]
+    fn provenance_state_reflects_a_hand_edit() {
+        let file = with_provenance(
+            &render(
+                "name: Mara\n",
+                "## Physical\n- green eyes\n",
+                NOTES_PLACEHOLDER,
+                "2026-06-19",
+            ),
+            "ch. 1–12",
+        );
+        // Hand-edit the generated body: the state flips to "edited by you" while the
+        // source chapters are still reported.
+        let edited = file.replace("green eyes", "blue eyes");
+        assert!(is_hand_edited(&edited));
+        assert_eq!(
+            provenance(&edited).as_deref(),
+            Some("> Generated from ch. 1–12 · edited by you")
+        );
+    }
+
+    #[test]
+    fn incremental_update_refreshes_the_source() {
+        // An incremental pass rewrites the block with a wider source range; the
+        // provenance line refreshes and the file reads clean again (#832).
+        let first = with_provenance(
+            &render(
+                "name: Mara\n",
+                "## Physical\n- green eyes\n",
+                "",
+                "2026-06-19",
+            ),
+            "ch. 1–3",
+        );
+        assert_eq!(
+            provenance(&first).as_deref(),
+            Some("> Generated from ch. 1–3 · AI-generated")
+        );
+        let next = with_provenance(
+            &render(
+                "name: Mara\n",
+                "## Physical\n- blue eyes\n",
+                "",
+                "2026-06-20",
+            ),
+            "ch. 1–7",
+        );
+        assert_eq!(
+            provenance(&next).as_deref(),
+            Some("> Generated from ch. 1–7 · AI-generated")
+        );
+        assert!(!is_hand_edited(&next), "the refreshed file reads clean");
+    }
+
+    #[test]
+    fn provenance_is_none_without_a_line() {
+        // A pre-#832 / foreign generated block has no provenance line.
+        let file = render(
+            "name: Mara\n",
+            "## Physical\n- green eyes\n",
+            "",
+            "2026-06-19",
+        );
+        assert_eq!(provenance(&file), None);
+    }
+
+    #[test]
+    fn clean_strips_the_provenance_line() {
+        // The provenance line is metadata, not shareable content — export drops it.
+        let file = with_provenance(
+            &render(
+                "name: Mara\n",
+                "## Physical\n- green eyes\n",
+                "## Notes\n\nKeep me.\n",
+                "2026-06-19",
+            ),
+            "ch. 1–12",
+        );
+        let clean = clean(&file);
+        assert!(
+            !clean.contains("Generated from"),
+            "provenance dropped: {clean}"
+        );
+        assert!(clean.contains("green eyes"), "content kept: {clean}");
+        assert!(clean.contains("Keep me."), "notes kept: {clean}");
     }
 }
