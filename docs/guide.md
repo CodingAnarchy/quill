@@ -386,7 +386,9 @@ continuity, and export. Workflows can also fire on save or from a Vim key.
 Snippets are fixed text you insert often — a scene break, a tricky name —
 defined once in a [snippets] table in config.toml (name = "literal text"). Run
 "Insert snippet" from the Ctrl-K menu to pick one by name; its text drops in at
-the cursor verbatim, as a single undo.
+the cursor verbatim, as a single undo. Put $0 anywhere in the text to set where
+the cursor lands (the marker itself is not inserted) — e.g. "“$0”" drops the
+cursor between the quotes. Only the first $0 counts; write $$0 for a literal $0.
 
 
 KEY REFERENCE

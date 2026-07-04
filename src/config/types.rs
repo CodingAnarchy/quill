@@ -121,7 +121,15 @@ pub fn theme_name() -> Option<String> {
 
 /// An author-defined text snippet (#411): a `name` and the literal `text` it
 /// expands to. Configured in the `[snippets]` table and inserted verbatim from
-/// the snippet picker — no transformation, no templating.
+/// the snippet picker — no transformation, no templating, with one exception:
+///
+/// The text may contain a single caret marker `$0` (#823). On insertion the
+/// marker is consumed (never inserted) and the cursor lands where it was, so a
+/// template can position the cursor mid-snippet (e.g. `"“$0”"` drops the cursor
+/// between the quotes). Only the first `$0` is a caret; any later ones insert
+/// literally. To insert a literal `$0`, escape it as `$$0` — that yields the two
+/// characters `$0` with no caret. A snippet with no marker inserts exactly as
+/// before, cursor at the end.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snippet {
     pub name: String,
