@@ -547,6 +547,241 @@ fn preflight_passes_a_clean_book() {
     );
 }
 
+// --- One-click "Prepare for KDP / IngramSpark" publish bundle (#816) --------
+
+/// Both publish bundles are registered under Export, and — like the manuscript
+/// exports and the preflight — available from the single-chapter view without AI.
+#[test]
+fn prepare_actions_are_registered_under_export() {
+    assert!(matches!(
+        Action::from_name("export:kdp"),
+        Some(Action::PrepareForKdp)
+    ));
+    assert!(matches!(
+        Action::from_name("export:ingramspark"),
+        Some(Action::PrepareForIngramSpark)
+    ));
+    assert_eq!(Action::PrepareForKdp.group(), "Export");
+    assert_eq!(Action::PrepareForIngramSpark.group(), "Export");
+    let (mut app, _dir) = two_chapter_app("action-kdp-avail");
+    app.ai = ai::Settings::default(); // AI off — still available (no request)
+    assert!(app.action_status(Action::PrepareForKdp).is_none());
+    assert!(app.action_status(Action::PrepareForIngramSpark).is_none());
+}
+
+/// The bundle needs the per-chapter files; in the continuous view the window is
+/// unsaved, so the action reports why instead of running or writing anything.
+#[test]
+fn prepare_unavailable_in_the_continuous_view() {
+    let (mut app, dir) = two_chapter_app("action-kdp-continuous");
+    app.toggle_continuous();
+    assert!(app.manuscript.is_some());
+    app.run_action(Action::PrepareForKdp, false);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("continuous"),
+        "explains the continuous-view guard, got: {:?}",
+        app.message
+    );
+    assert!(
+        !dir.join("export").join("book.print.pdf").exists(),
+        "nothing exported"
+    );
+}
+
+/// A clean book: "Prepare for KDP" sets the KDP print defaults on book.toml (6x9
+/// trim, 0.125" bleed, a default language), runs the preflight, and emits *both*
+/// the print PDF and the reflowable EPUB to export/.
+#[test]
+fn prepare_for_kdp_sets_defaults_and_emits_both_artifacts() {
+    let dir = app_scratch_dir("action-kdp-clean");
+    fs::write(dir.join("cover.png"), png_bytes(3000, 4500)).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Ready\"\n\
+         isbn = \"978-1-234-56789-7\"\n\
+         publisher = \"Quill Press\"\n\
+         pub_date = \"2026\"\n\
+         rights = \"© 2026 A. Writer.\"\n\n\
+         [style]\ncover_image = \"cover.png\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "A balanced opening chapter.\n").unwrap();
+    fs::write(dir.join("two.md"), "More prose to fill the chapter.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir.clone());
+
+    app.run_action(Action::PrepareForKdp, false);
+
+    // Both publishing artifacts landed together.
+    let export = dir.join("export");
+    assert!(
+        export.join("ready.print.pdf").exists(),
+        "print PDF written: {:?}",
+        app.message
+    );
+    assert!(
+        export.join("ready.epub").exists(),
+        "reflowable EPUB written: {:?}",
+        app.message
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Prepared for KDP"),
+        "reports the bundle, got: {:?}",
+        app.message
+    );
+
+    // The KDP-sane print defaults were persisted to book.toml.
+    let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+    assert!(toml.contains("trim = \"6x9\""), "trim default set:\n{toml}");
+    assert!(toml.contains("bleed = 0.125"), "bleed default set:\n{toml}");
+    assert!(
+        toml.contains("language = \"en\""),
+        "a default language was filled in:\n{toml}"
+    );
+
+    // The preflight ran and its report was saved as an auditable artifact.
+    let saved = fs::read_dir(&export)
+        .expect("export dir")
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("preflight-"))
+        .expect("a preflight report was written");
+    let written = fs::read_to_string(saved.path()).unwrap();
+    assert!(
+        written.contains("0 failure(s)"),
+        "clean preflight:\n{written}"
+    );
+}
+
+/// An author's explicit language / trim are honored, not overwritten — the
+/// defaults only fill gaps. IngramSpark drives the same bundle as KDP.
+#[test]
+fn prepare_for_ingramspark_keeps_the_authors_language_and_emits() {
+    let dir = app_scratch_dir("action-ingram-clean");
+    fs::write(dir.join("cover.png"), png_bytes(3000, 4500)).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Ready Two\"\n\
+         isbn = \"978-1-234-56789-7\"\n\
+         publisher = \"Quill Press\"\n\
+         pub_date = \"2026\"\n\
+         language = \"fr\"\n\
+         rights = \"© 2026 A. Writer.\"\n\n\
+         [style]\ncover_image = \"cover.png\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "Assez de prose pour le chapitre.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir.clone());
+
+    app.run_action(Action::PrepareForIngramSpark, false);
+
+    let export = dir.join("export");
+    assert!(
+        export.join("ready-two.print.pdf").exists(),
+        "print PDF: {:?}",
+        app.message
+    );
+    assert!(
+        export.join("ready-two.epub").exists(),
+        "EPUB: {:?}",
+        app.message
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Prepared for IngramSpark"),
+        "reports IngramSpark, got: {:?}",
+        app.message
+    );
+    let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+    assert!(
+        toml.contains("language = \"fr\""),
+        "the author's language is untouched:\n{toml}"
+    );
+}
+
+/// A book that fails the preflight (no ISBN) is *not* exported — the bundle
+/// surfaces the failure count and points at the report, emitting no artifacts.
+#[test]
+fn prepare_blocks_export_when_preflight_fails() {
+    let dir = app_scratch_dir("action-kdp-fails");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Flawed\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "The night was dark and long.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir.clone());
+
+    app.run_action(Action::PrepareForKdp, false);
+
+    // The failure is surfaced and nothing was emitted.
+    let msg = app.message.clone().unwrap_or_default();
+    assert!(
+        msg.contains("failure(s)") && msg.contains("nothing exported"),
+        "surfaces the preflight failures, got: {msg}"
+    );
+    let export = dir.join("export");
+    assert!(
+        !export.join("flawed.print.pdf").exists(),
+        "no print PDF on a failing preflight"
+    );
+    assert!(
+        !export.join("flawed.epub").exists(),
+        "no EPUB on a failing preflight"
+    );
+    // But the preflight report was still saved, so the author can fix against it.
+    let saved = fs::read_dir(&export)
+        .expect("export dir")
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().starts_with("preflight-"));
+    let written = fs::read_to_string(saved.expect("preflight saved").path()).unwrap();
+    assert!(
+        written.contains("FAIL  no ISBN"),
+        "the failure is recorded:\n{written}"
+    );
+}
+
+/// The publish bundle targets a standalone novel: a multi-book series has no single
+/// top-level [print]/language table to set, so the action explains that per book.
+#[test]
+fn prepare_is_unavailable_for_a_multi_book_series() {
+    let dir = app_scratch_dir("action-kdp-series");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Series\"\n\n\
+         [[books]]\ntitle = \"Book One\"\n\n\
+         [[books.chapters]]\ntitle = \"One\"\nfile = \"b1-one.md\"\n\n\
+         [[books]]\ntitle = \"Book Two\"\n\n\
+         [[books.chapters]]\ntitle = \"One\"\nfile = \"b2-one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("b1-one.md"), "Prose one.\n").unwrap();
+    fs::write(dir.join("b2-one.md"), "Prose two.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir.clone());
+    assert!(app.project.book_count() > 1);
+
+    assert!(
+        app.action_status(Action::PrepareForKdp).is_some(),
+        "the series case is gated at status"
+    );
+    app.run_action(Action::PrepareForKdp, false);
+    assert!(
+        !dir.join("export").exists(),
+        "nothing exported for a series"
+    );
+}
+
 /// A tiny solid-red PNG of `w`×`h` — a real raster the cover DPI check decodes.
 fn png_bytes(w: u32, h: u32) -> Vec<u8> {
     let img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 0, 0, 255]));

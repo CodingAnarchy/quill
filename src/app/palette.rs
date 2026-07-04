@@ -91,8 +91,20 @@ impl App {
             // Export compiles per-chapter files; the continuous view holds an
             // unsaved window, so leave it first. The preflight reads the same
             // per-chapter compile, so it shares the constraint.
-            Action::Export(_) | Action::PreflightExport if self.manuscript.is_some() => {
+            Action::Export(_)
+            | Action::PreflightExport
+            | Action::PrepareForKdp
+            | Action::PrepareForIngramSpark
+                if self.manuscript.is_some() =>
+            {
                 Some("leave the continuous view (Ctrl-l) first".into())
+            }
+            // The publish bundles set [print]/language defaults on book.toml, which a
+            // multi-book series has no single top-level table for; guide per-book.
+            Action::PrepareForKdp | Action::PrepareForIngramSpark
+                if self.project.book_count() > 1 =>
+            {
+                Some("standalone novels only — set [print] and export per book".into())
             }
             // Switching books only applies to a multi-book series (#329).
             Action::SwitchBook if self.project.book_count() <= 1 => {
@@ -274,6 +286,10 @@ impl App {
             Action::Settings => self.open_settings_menu(),
             Action::ExportBible => self.export_story_bible(),
             Action::PreflightExport => self.run_preflight(),
+            Action::PrepareForKdp => self.prepare_for_target(exporting::PublishTarget::Kdp),
+            Action::PrepareForIngramSpark => {
+                self.prepare_for_target(exporting::PublishTarget::IngramSpark);
+            }
         }
     }
 

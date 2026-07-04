@@ -11,3 +11,5 @@
 mod manuscript;
 mod story_bible;
 mod style;
+
+pub use manuscript::PublishTarget;
