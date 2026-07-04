@@ -21,8 +21,8 @@ use std::cell::RefCell;
 
 use crate::app::ListLayout;
 use crate::mode::{
-    Corkboard, DirBrowser, Findings, History, ImportPreview, Palette, PaletteRow, ProjectBrowser,
-    ProjectSearch, ProjectSearchStage,
+    Corkboard, DirBrowser, Findings, History, HistoryRow, ImportPreview, Palette, PaletteRow,
+    ProjectBrowser, ProjectSearch, ProjectSearchStage,
 };
 use crate::project::Project;
 
@@ -519,9 +519,10 @@ pub(super) fn draw_findings(
     );
 }
 
-/// Render the commit history as a navigable list (#587): each row is a commit's
-/// date, short id, and summary. The selected commit is the one the diff / restore
-/// actions address.
+/// Render the history as a navigable list (#587): named milestones (#833) lead the
+/// list, each labeled "◆ <name>", above the commits, each a commit's date, short id,
+/// and summary. The selected row is the one the chapter- and project-scoped diff /
+/// restore actions address.
 pub(super) fn draw_history(
     frame: &mut Frame,
     area: Rect,
@@ -530,37 +531,29 @@ pub(super) fn draw_history(
     recorder: &RefCell<ListLayout>,
 ) {
     let title = format!(" History — {chapter} ");
-    // The type-to-filter query (#822) narrows to commits whose summary, id, or
-    // date match; the row index is preserved so the marker and click map align.
+    // The type-to-filter query (#822) narrows to rows whose text matches; the row
+    // index is preserved so the marker and click map align. The combined milestone
+    // + commit list (#833) is the single sequence the selection indexes into.
     let query = history.filter.to_lowercase();
-    let matches = |c: &crate::vcs::CommitMeta| {
-        query.is_empty()
-            || c.summary.to_lowercase().contains(&query)
-            || c.id.to_lowercase().contains(&query)
-            || c.when.to_lowercase().contains(&query)
+    let all = history.rows();
+    let label = |row: &HistoryRow| match row {
+        HistoryRow::Milestone(t) => format!("◆ {}  {}", t.name, t.when),
+        HistoryRow::Commit(c) => format!("{}  {}  {}", c.when, c.id, c.summary),
     };
-    let visible: Vec<(usize, &crate::vcs::CommitMeta)> = history
-        .commits
+    let visible: Vec<(usize, &HistoryRow)> = all
         .iter()
         .enumerate()
-        .filter(|(_, c)| matches(c))
+        .filter(|(_, r)| r.matches(&query))
         .collect();
     let selected_pos = visible.iter().position(|(i, _)| *i == history.selected);
     let rows = visible
         .iter()
-        .map(|(i, c)| {
-            list_row(
-                *i == history.selected,
-                &format!("{}  {}  {}", c.when, c.id, c.summary),
-                None,
-            )
-        })
+        .map(|(i, r)| list_row(*i == history.selected, &label(r), None))
         .collect();
     let help = if history.typing {
         format!("Filter: {}_", history.filter)
     } else if history.filter.is_empty() {
-        "History — ↑↓ move · d diff this chapter · r restore this chapter · / filter · esc close"
-            .to_string()
+        "History — ↑↓ move · d/r chapter · D/R project · / filter · esc close".to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears",

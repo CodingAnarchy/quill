@@ -236,16 +236,35 @@ impl App {
                     GitAction::Pull,
                 ));
             }
-            items.push(git("History", "Browse past commits", GitAction::History));
+            items.push(git(
+                "Milestone",
+                "Mark a named manuscript version (e.g. “first draft”)",
+                GitAction::Milestone,
+            ));
+            items.push(git(
+                "History",
+                "Browse past commits and milestones",
+                GitAction::History,
+            ));
             items.push(git(
                 "Changes",
                 "Diff the working tree against the last commit",
                 GitAction::Diff,
             ));
             items.push(git(
+                "Project changes",
+                "Diff the whole manuscript against the last commit",
+                GitAction::DiffProject,
+            ));
+            items.push(git(
                 "Restore chapter",
                 "Revert the current chapter to its last commit",
                 GitAction::RestoreChapter,
+            ));
+            items.push(git(
+                "Restore project",
+                "Revert the whole manuscript to its last commit",
+                GitAction::RestoreProject,
             ));
             items.push(if has_remote {
                 git(
@@ -283,7 +302,10 @@ impl App {
             GitAction::Commit => self.start_commit(),
             GitAction::History => self.open_history(),
             GitAction::Diff => self.show_diff(),
+            GitAction::DiffProject => self.show_project_diff(),
             GitAction::RestoreChapter => self.start_restore(),
+            GitAction::RestoreProject => self.start_restore_project(None),
+            GitAction::Milestone => self.start_milestone(),
             GitAction::SetRemote => self.start_set_remote(),
             GitAction::Push => self.start_push(),
             GitAction::Pull => self.start_pull(),
@@ -425,6 +447,49 @@ impl App {
         }
     }
 
+    /// Prompt for a milestone name (#833), then create the annotated tag on the
+    /// current HEAD. Flushes unsaved edits and commits nothing itself — a milestone
+    /// marks the last committed state, so it hints when there's uncommitted work
+    /// rather than silently tagging a stale snapshot.
+    fn start_milestone(&mut self) {
+        if !self.under_vc {
+            self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+            return;
+        }
+        self.save_edit();
+        self.open_prompt(Pending::Milestone, "Milestone name: ", "", None);
+    }
+
+    /// Create the named milestone (#833) from the prompt — an annotated tag over the
+    /// whole project on the current HEAD. A blank name cancels.
+    pub(crate) fn create_milestone(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.message = Some("Milestone cancelled — empty name.".into());
+            return;
+        }
+        self.message = Some(
+            match crate::vcs::create_tag(&self.project.root, name, name) {
+                Ok(()) => format!("Milestone '{name}' created."),
+                Err(e) => format!("Milestone: {e}"),
+            },
+        );
+    }
+
+    /// Show the whole-manuscript diff since the last commit as a read-only overlay
+    /// (#833) — the project-scoped counterpart to [`show_diff`], which already spans
+    /// the tree, so this flushes edits and reuses it under a project-scoped title.
+    fn show_project_diff(&mut self) {
+        self.save_edit(); // diff against the latest edits, not the last-saved state
+        match crate::vcs::diff(&self.project.root) {
+            Ok(d) if d.trim().is_empty() => {
+                self.message = Some("No uncommitted changes across the manuscript.".into());
+            }
+            Ok(d) => self.overlay = Some(Overlay::report("project changes", diff_lines(&d))),
+            Err(e) => self.message = Some(format!("Diff failed: {e}")),
+        }
+    }
+
     /// Confirm restoring the current chapter to its last committed version (#135).
     /// Restore is destructive to that file, so it always asks first.
     fn start_restore(&mut self) {
@@ -460,6 +525,54 @@ impl App {
         }
     }
 
+    /// Confirm restoring the *whole project* to a revision (#833) — a milestone or
+    /// commit from the history view (`rev = Some`), or the last commit from the Git
+    /// palette (`rev = None` → HEAD). Restore is destructive across the manuscript,
+    /// so it always asks first; the target waits in `pending_restore_rev`.
+    pub(crate) fn start_restore_project(&mut self, rev: Option<String>) {
+        if !self.under_vc {
+            self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+            return;
+        }
+        self.leave_continuous(); // the post-restore reload targets the active chapter
+        self.save_edit();
+        let target = rev.unwrap_or_else(|| "HEAD".to_string());
+        let label = if target == "HEAD" {
+            "the last commit".to_string()
+        } else {
+            let short: String = target.chars().take(7).collect();
+            format!("'{short}'")
+        };
+        self.pending_restore_rev = Some(target);
+        self.open_prompt(
+            Pending::ConfirmRestoreProject,
+            format!("Restore the whole project to {label}? Discards all changes (y/N)"),
+            "",
+            None,
+        );
+    }
+
+    /// Restore the whole working tree to the pending revision (#833) and reload the
+    /// active chapter — a pull-style refresh, since every file may have changed on
+    /// disk. Unlike the chapter restore (which loads into the editable buffer for
+    /// review), a project restore writes the tree directly, matching how a pull
+    /// lands the remote's files.
+    pub(crate) fn restore_project(&mut self) {
+        let Some(rev) = self.pending_restore_rev.take() else {
+            return;
+        };
+        match crate::vcs::restore_all(&self.project.root, &rev) {
+            Ok(()) => {
+                self.message = Some(match self.reload_active_chapter() {
+                    Ok(()) => "Restored the project.".into(),
+                    Err(e) => format!("Restored, but reload failed: {e}"),
+                });
+                self.refresh_vc_status();
+            }
+            Err(e) => self.message = Some(format!("Restore failed: {e}")),
+        }
+    }
+
     /// The active chapter's path relative to the repo root — the file name, since
     /// chapters live at the project root. The handle the per-file version-control
     /// operations (restore, diff/restore-from-a-commit) address.
@@ -472,18 +585,24 @@ impl App {
             .to_string()
     }
 
-    /// Open the navigable commit-history view (#587). A read-only list until a
-    /// commit is chosen; from the selection the author diffs the current chapter
-    /// against it or restores that chapter to it. Falls back to a message when
-    /// there's nothing to browse (no commits yet, or the log can't be read).
+    /// Open the navigable commit-history view (#587). A read-only list until a row
+    /// is chosen; from the selection the author diffs the current chapter against it
+    /// or restores that chapter to it (`d`/`r`), or diffs/restores the whole project
+    /// against it (`D`/`R`, #833). Named milestones (#833) lead the list, above the
+    /// commits. Falls back to a message when there's nothing to browse (no commits
+    /// yet, or the log can't be read).
     fn open_history(&mut self) {
         match crate::vcs::log(&self.project.root, 200) {
             Ok(commits) if commits.is_empty() => {
                 self.message = Some("No commits yet.".into());
             }
             Ok(commits) => {
+                // Milestones lead the list; a read failure just drops them, so the
+                // history view still opens on the commits alone.
+                let milestones = crate::vcs::list_tags(&self.project.root).unwrap_or_default();
                 self.mode = Mode::History(Box::new(History {
                     commits,
+                    milestones,
                     selected: 0,
                     filter: String::new(),
                     typing: false,
@@ -494,11 +613,12 @@ impl App {
     }
 
     /// Handle a key in the commit-history view (#587): arrows move the selection
-    /// (skipping filtered-out commits), `d` diffs the current chapter against the
-    /// selected commit, `r` restores the chapter to it (into the editable buffer
-    /// for review-and-save), Esc closes. `/` starts a type-to-filter query (#822)
-    /// that narrows the list to commits whose summary, id, or date match; Esc
-    /// clears the filter before it closes the view.
+    /// (skipping filtered-out rows), `d` diffs the current chapter against the
+    /// selected row, `r` restores the chapter to it (into the editable buffer for
+    /// review-and-save). `D`/`R` (#833) diff / restore the *whole project* against
+    /// the selection — a milestone or any commit. Esc closes. `/` starts a
+    /// type-to-filter query (#822) that narrows the list to rows whose summary, id,
+    /// or date match; Esc clears the filter before it closes the view.
     pub(crate) fn on_key_history(&mut self, key: KeyEvent) {
         let Mode::History(history) = &self.mode else {
             return;
@@ -521,6 +641,8 @@ impl App {
             }
             KeyCode::Char('d') => self.diff_against_selected_commit(),
             KeyCode::Char('r') => self.restore_from_selected_commit(),
+            KeyCode::Char('D') => self.diff_project_against_selected(),
+            KeyCode::Char('R') => self.restore_project_from_selected(),
             // Esc clears an active filter first (restoring the full list), then a
             // second Esc closes the view.
             KeyCode::Esc => {
@@ -601,33 +723,32 @@ impl App {
         self.history_snap();
     }
 
-    /// After the filter changes, keep the selection on a visible commit: if the
-    /// current one no longer matches, jump to the first that does (#822).
+    /// After the filter changes, keep the selection on a visible row: if the
+    /// current one no longer matches, jump to the first that does (#822). Spans the
+    /// combined milestone + commit list (#833).
     fn history_snap(&mut self) {
         let q = self.history_query();
         let Mode::History(h) = &self.mode else {
             return;
         };
-        let stays = h
-            .commits
-            .get(h.selected)
-            .is_some_and(|c| commit_matches(c, &q));
+        let stays = h.row(h.selected).is_some_and(|r| r.matches(&q));
         if !stays {
-            if let Some(first) = h.commits.iter().position(|c| commit_matches(c, &q)) {
+            if let Some(first) = h.rows().iter().position(|r| r.matches(&q)) {
                 self.set_history_selected(first);
             }
         }
     }
 
-    /// The next (or previous, by `forward`) commit that passes the filter, or the
+    /// The next (or previous, by `forward`) row that passes the filter, or the
     /// current selection unchanged when there's no further match that way (#822).
+    /// Spans the combined milestone + commit list (#833).
     fn history_filter_step(&self, forward: bool) -> usize {
         let q = self.history_query();
         let Mode::History(h) = &self.mode else {
             return 0;
         };
         let from = h.selected;
-        let n = h.commits.len();
+        let n = h.len();
         let mut i = from;
         loop {
             if forward {
@@ -641,23 +762,23 @@ impl App {
                 }
                 i -= 1;
             }
-            if h.commits.get(i).is_some_and(|c| commit_matches(c, &q)) {
+            if h.row(i).is_some_and(|r| r.matches(&q)) {
                 return i;
             }
         }
     }
 
-    /// The revision id of the commit selected in the history view, or `None` when
-    /// that view isn't open — or the selection is hidden by an active filter, so
-    /// `d`/`r` never act on a row the query narrowed out (#822).
+    /// The revision id of the row selected in the history view, or `None` when that
+    /// view isn't open — or the selection is hidden by an active filter, so the
+    /// diff/restore actions never act on a row the query narrowed out (#822).
+    /// Resolves a milestone or a commit uniformly (#833).
     fn selected_commit_rev(&self) -> Option<String> {
         let q = self.history_query();
         match &self.mode {
             Mode::History(h) => h
-                .commits
-                .get(h.selected)
-                .filter(|c| commit_matches(c, &q))
-                .map(|c| c.rev.clone()),
+                .row(h.selected)
+                .filter(|r| r.matches(&q))
+                .map(|r| r.rev().to_string()),
             _ => None,
         }
     }
@@ -709,6 +830,33 @@ impl App {
         }
     }
 
+    /// Diff the *whole project* against the selected row (#833) — a milestone or any
+    /// commit — showing the unified patch in the read-only diff overlay. The history
+    /// view stays open behind it.
+    fn diff_project_against_selected(&mut self) {
+        let Some(rev) = self.selected_commit_rev() else {
+            return;
+        };
+        self.save_edit(); // diff against the latest edits, not the last-saved state
+        match crate::vcs::diff_tree_to_worktree(&self.project.root, &rev) {
+            Ok(d) if d.trim().is_empty() => {
+                self.message = Some("The manuscript is unchanged since that point.".into());
+            }
+            Ok(d) => self.overlay = Some(Overlay::report("project diff", diff_lines(&d))),
+            Err(e) => self.message = Some(format!("Diff failed: {e}")),
+        }
+    }
+
+    /// Restore the *whole project* to the selected row (#833) — a milestone or any
+    /// commit. Routes through the confirm-first flow, since the restore rewrites the
+    /// entire working tree.
+    fn restore_project_from_selected(&mut self) {
+        let Some(rev) = self.selected_commit_rev() else {
+            return;
+        };
+        self.start_restore_project(Some(rev));
+    }
+
     /// Commit the staged project with `message` and report the result.
     pub(crate) fn commit(&mut self, message: &str) {
         self.message = Some(match crate::vcs::commit(&self.project.root, message) {
@@ -718,17 +866,6 @@ impl App {
         });
         self.refresh_vc_status(); // the tree is clean now (or unchanged on failure)
     }
-}
-
-/// Whether commit `c` passes the history view's active filter (#822): a
-/// case-insensitive substring match on its summary, short id, or date. `q` is the
-/// already-lowercased query (empty = every commit matches). Mirrors the same test
-/// the renderer applies when drawing the filtered list.
-fn commit_matches(c: &crate::vcs::CommitMeta, q: &str) -> bool {
-    q.is_empty()
-        || c.summary.to_lowercase().contains(q)
-        || c.id.to_lowercase().contains(q)
-        || c.when.to_lowercase().contains(q)
 }
 
 /// Color a unified diff for the changes overlay (#135): additions green, removals

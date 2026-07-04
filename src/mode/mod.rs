@@ -542,6 +542,9 @@ pub enum Pending {
     NameGen(crate::ai::namegen::Kind),
     /// Text input: a message for a version-control commit (#131).
     Commit,
+    /// Text input: the name for a manuscript milestone — an annotated tag over the
+    /// whole project (#833). On Enter the milestone is created on the current HEAD.
+    Milestone,
     /// Confirm running an AI action whose estimated cost exceeds the threshold.
     /// `force` is whether to force a full bible rebuild (#176); `offer_local` adds
     /// "run locally instead" as a third choice when the hybrid router (#372) found
@@ -562,6 +565,12 @@ pub enum Pending {
     ConfirmScene,
     /// y/N: restore the current chapter to its last committed version (#135).
     ConfirmRestore,
+    /// y/N: restore the *whole project* to a revision (#833) — a milestone or a
+    /// past commit chosen in the history view, or HEAD from the palette. Destructive
+    /// to uncommitted changes across the manuscript, so it always asks first. The
+    /// target revision waits in `App::pending_restore_rev` (kept off the `Copy`
+    /// `Pending` enum), taken when the restore runs.
+    ConfirmRestoreProject,
     /// Crash recovery (#263): unsaved work from a previous session was found.
     /// `y`/`r` restores it, `d` discards the sidecar, Esc keeps it for later.
     ConfirmRecovery,

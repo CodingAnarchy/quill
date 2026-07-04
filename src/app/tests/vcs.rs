@@ -12,6 +12,20 @@ fn git_menu(app: &mut App, index: usize) {
     app.on_key(key(KeyCode::Enter));
 }
 
+/// Open the Git palette and run the item with `label` (#833) — index-independent, so
+/// adding a palette entry never renumbers the tests that pick a specific action.
+fn git_menu_label(app: &mut App, label: &str) {
+    app.on_key(ctrl('v'));
+    let index = palette_labels(app)
+        .iter()
+        .position(|l| *l == label)
+        .unwrap_or_else(|| panic!("no Git-palette item labelled {label:?}"));
+    for _ in 0..index {
+        app.on_key(key(KeyCode::Down));
+    }
+    app.on_key(key(KeyCode::Enter));
+}
+
 /// Run the Commit action, then confirm the pre-commit review (#704) — Enter on the
 /// review overlay proceeds to the message prompt, type `message`, and submit. The
 /// full author-facing commit flow, reused by the tests that just want a snapshot.
@@ -140,7 +154,7 @@ fn history_summaries(app: &App) -> Vec<String> {
 fn git_palette_shows_commit_history() {
     let (mut app, _dir) = two_chapter_app("vc-log");
     git_menu(&mut app, 0); // Initialize
-    git_menu(&mut app, 1); // History — before any commit: a message, no view
+    git_menu_label(&mut app, "History"); // before any commit: a message, no view
     assert!(!matches!(app.mode, Mode::History(_)));
     assert!(app
         .message
@@ -150,7 +164,7 @@ fn git_palette_shows_commit_history() {
 
     commit_via_menu(&mut app, "first draft");
 
-    git_menu(&mut app, 1); // History — now a navigable view
+    git_menu_label(&mut app, "History"); // now a navigable view
     assert!(
         history_summaries(&app).contains(&"first draft".to_string()),
         "history lists the commit"
@@ -174,7 +188,7 @@ fn history_diffs_the_chapter_against_a_chosen_commit() {
     app.on_key(ctrl('s'));
 
     // Open history, select the "original" commit, and diff.
-    git_menu(&mut app, 1); // History (newest first: [original])
+    git_menu_label(&mut app, "History"); // newest first: [original]
     app.on_key(key(KeyCode::Char('d')));
     let diff = overlay_text(&app);
     assert!(
@@ -203,7 +217,7 @@ fn history_restores_the_chapter_from_a_chosen_commit() {
     );
 
     // Open history (newest first: [draft two, draft one]); pick the older commit.
-    git_menu(&mut app, 1); // History
+    git_menu_label(&mut app, "History");
     app.on_key(key(KeyCode::Down)); // move to "draft one"
     app.on_key(key(KeyCode::Char('r'))); // restore from it
 
@@ -347,7 +361,7 @@ fn git_palette_shows_changes_diff() {
     commit_via_menu(&mut app, "base");
 
     // Clean tree → a message, no overlay.
-    git_menu(&mut app, 2); // Changes
+    git_menu_label(&mut app, "Changes");
     assert!(app.overlay.is_none());
     assert!(app
         .message
@@ -358,7 +372,7 @@ fn git_palette_shows_changes_diff() {
     // Edit + save → the diff overlay shows the changed file.
     app.on_key(key(KeyCode::Char('Q')));
     app.on_key(ctrl('s'));
-    git_menu(&mut app, 2); // Changes
+    git_menu_label(&mut app, "Changes");
     assert!(
         overlay_text(&app).contains("one.md"),
         "diff names the changed file"
@@ -375,7 +389,7 @@ fn git_palette_restores_a_chapter() {
     app.on_key(key(KeyCode::Char('Z')));
     app.on_key(ctrl('s'));
     assert!(app.buffer.text().contains('Z'), "the edit landed");
-    git_menu(&mut app, 3); // Restore chapter
+    git_menu_label(&mut app, "Restore chapter");
     assert!(
         matches!(app.mode, Mode::Prompt(_)),
         "restore asks for confirmation"
@@ -408,8 +422,8 @@ fn git_palette_configures_a_remote_then_offers_sync() {
     );
     app.on_key(key(KeyCode::Esc));
 
-    // Set a remote through the palette (Commit, History, Changes, Restore, Set remote = idx 4).
-    git_menu(&mut app, 4);
+    // Set a remote through the palette.
+    git_menu_label(&mut app, "Set remote");
     assert!(
         matches!(app.mode, Mode::Prompt(_)),
         "set-remote prompts for a URL"
@@ -459,7 +473,7 @@ fn history_over_three(name: &str) -> (App, TempProject) {
     type_str(&mut app, " edit c");
     app.on_key(ctrl('s'));
     commit_via_menu(&mut app, "gamma polish");
-    git_menu(&mut app, 1); // History
+    git_menu_label(&mut app, "History");
     (app, dir)
 }
 
@@ -531,4 +545,184 @@ fn history_restore_acts_on_the_filtered_match() {
     // proving the restore targeted the filtered selection, not the top row.
     assert_eq!(app.buffer.text(), "first chapter\n");
     let _ = &dir;
+}
+
+// --- Milestones + whole-project restore/diff (#833) -------------------------
+
+/// Create a named milestone through the Git palette — the "Milestone" item prompts
+/// for a name, which is typed and submitted.
+fn make_milestone(app: &mut App, name: &str) {
+    git_menu_label(app, "Milestone");
+    assert!(matches!(app.mode, Mode::Prompt(_)), "milestone prompts");
+    type_str(app, name);
+    app.on_key(key(KeyCode::Enter));
+}
+
+#[test]
+fn milestone_is_created_and_listed_in_history() {
+    let (mut app, _dir) = two_chapter_app("vc-milestone");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "first draft");
+
+    make_milestone(&mut app, "beta-readers");
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("beta-readers"),
+        "the milestone is confirmed: {:?}",
+        app.message
+    );
+
+    // The history view lists the milestone alongside the commit.
+    git_menu_label(&mut app, "History");
+    let names: Vec<String> = match &app.mode {
+        Mode::History(h) => h.milestones.iter().map(|t| t.name.clone()).collect(),
+        _ => panic!("history should be open"),
+    };
+    assert!(
+        names.contains(&"beta-readers".to_string()),
+        "the milestone lists in history: {names:?}"
+    );
+}
+
+#[test]
+fn milestone_needs_a_nonempty_name() {
+    let (mut app, _dir) = two_chapter_app("vc-milestone-empty");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "first");
+    git_menu_label(&mut app, "Milestone");
+    app.on_key(key(KeyCode::Enter)); // blank → cancelled
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("cancelled"),
+        "a blank name cancels: {:?}",
+        app.message
+    );
+    assert!(
+        crate::vcs::list_tags(&app.project.root).unwrap().is_empty(),
+        "no milestone was created"
+    );
+}
+
+#[test]
+fn restore_project_from_the_palette_rewinds_the_whole_tree() {
+    let (mut app, dir) = two_chapter_app("vc-restore-project");
+    git_menu(&mut app, 0); // Initialize
+
+    // Commit a baseline for both chapters, then edit and save the active one.
+    commit_via_menu(&mut app, "baseline");
+    type_str(&mut app, "an uncommitted edit");
+    app.on_key(ctrl('s'));
+    assert!(
+        fs::read_to_string(dir.join("one.md"))
+            .unwrap()
+            .contains("uncommitted edit"),
+        "the edit is on disk before the restore"
+    );
+
+    // Restore project → confirm; the working tree returns to the last commit and
+    // the active chapter reloads (no uncommitted edit).
+    git_menu_label(&mut app, "Restore project");
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "restore confirms first"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+    assert!(
+        !app.buffer.text().contains("uncommitted edit"),
+        "the buffer reloaded the restored version: {:?}",
+        app.buffer.text()
+    );
+    assert!(
+        !fs::read_to_string(dir.join("one.md"))
+            .unwrap()
+            .contains("uncommitted edit"),
+        "the file on disk is rewound"
+    );
+    assert_eq!(app.vc_changes, 0, "the tree is clean after the restore");
+}
+
+#[test]
+fn project_changes_diffs_the_whole_tree() {
+    let (mut app, _dir) = two_chapter_app("vc-project-diff");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "baseline");
+
+    // No changes yet → the project diff reports a clean tree.
+    git_menu_label(&mut app, "Project changes");
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No uncommitted changes"),
+        "clean tree: {:?}",
+        app.message
+    );
+
+    // Edit and save, then the project diff shows the change.
+    type_str(&mut app, "a manuscript-wide edit");
+    app.on_key(ctrl('s'));
+    git_menu_label(&mut app, "Project changes");
+    assert!(
+        overlay_text(&app).contains("manuscript-wide edit"),
+        "the project diff shows the edit"
+    );
+}
+
+#[test]
+fn history_restores_the_whole_project_to_a_milestone() {
+    let (mut app, dir) = two_chapter_app("vc-hist-project-restore");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "draft done");
+    make_milestone(&mut app, "first-draft");
+
+    // Move the manuscript on past the milestone.
+    type_str(&mut app, "post-milestone words");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "later work");
+    assert!(app.buffer.text().contains("post-milestone words"));
+
+    // Open history; the milestone leads the list (row 0). Restore the whole
+    // project to it with `R`, confirm.
+    git_menu_label(&mut app, "History");
+    assert!(
+        matches!(&app.mode, Mode::History(h) if !h.milestones.is_empty()),
+        "the milestone is in the list"
+    );
+    app.on_key(key(KeyCode::Char('R'))); // whole-project restore from row 0
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "restore confirms first"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+
+    assert!(
+        !app.buffer.text().contains("post-milestone words"),
+        "the buffer reloaded the milestone version: {:?}",
+        app.buffer.text()
+    );
+    assert!(
+        !fs::read_to_string(dir.join("one.md"))
+            .unwrap()
+            .contains("post-milestone words"),
+        "the file on disk is rewound to the milestone"
+    );
+}
+
+#[test]
+fn history_project_diff_spans_the_whole_manuscript() {
+    let (mut app, _dir) = two_chapter_app("vc-hist-project-diff");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "baseline");
+    make_milestone(&mut app, "mark");
+
+    // Edit and save past the milestone, then diff the whole project against it.
+    type_str(&mut app, "changed since the milestone");
+    app.on_key(ctrl('s'));
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Char('D'))); // whole-project diff against row 0 (the milestone)
+    assert!(
+        overlay_text(&app).contains("changed since the milestone"),
+        "the project diff against the milestone shows the edit"
+    );
 }

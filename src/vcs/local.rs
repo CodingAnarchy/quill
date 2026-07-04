@@ -75,6 +75,131 @@ pub fn log(root: &Path, limit: usize) -> Result<Vec<CommitMeta>, String> {
     Ok(out)
 }
 
+/// One named milestone (#833) — an annotated tag marking a whole-manuscript
+/// version ("first draft", "sent to beta readers"). `rev` is the full object id
+/// the tag points at, the handle the whole-project diff/restore resolve; `message`
+/// is the annotation the author gave it, and `when` the date it was created.
+pub struct TagMeta {
+    pub name: String,
+    pub rev: String,
+    pub message: String,
+    pub when: String,
+}
+
+/// Create an annotated tag `name` on the current `HEAD` (#833), recording
+/// `message` as its annotation — a named milestone for the whole manuscript.
+/// Fails when there's no commit to tag yet, or a tag by that name already exists,
+/// so an author never silently overwrites an earlier milestone.
+pub fn create_tag(root: &Path, name: &str, message: &str) -> Result<(), String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let head = repo
+        .head()
+        .and_then(|h| h.peel(git2::ObjectType::Commit))
+        .map_err(|_| "No commit to tag yet — commit first.".to_string())?;
+    let sig = signature(&repo)?;
+    let msg = if message.trim().is_empty() {
+        name
+    } else {
+        message
+    };
+    repo.tag(name, &head, &sig, msg, false)
+        .map_err(|e| format!("create milestone: {e}"))?;
+    Ok(())
+}
+
+/// Every annotated milestone (#833), newest first by the tag's own creation time.
+/// Empty when the project has no milestones. Lightweight tags (created outside
+/// Quill) are skipped — a milestone always carries a name and annotation.
+pub fn list_tags(root: &Path) -> Result<Vec<TagMeta>, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let mut out = Vec::new();
+    let names = repo.tag_names(None).map_err(|e| e.to_string())?;
+    for name in names.iter().flatten() {
+        // Resolve the tag *ref* to its object without peeling through it: an
+        // annotated tag is a tag object carrying the message + tagger, whereas a
+        // lightweight tag resolves straight to a commit. `revparse_single` on the
+        // tag ref gives the tag object itself, which we can then narrow.
+        let Ok(obj) = repo.revparse_single(&format!("refs/tags/{name}")) else {
+            continue;
+        };
+        // Skip lightweight tags (created outside Quill) — they carry no annotation.
+        let Some(tag) = obj.as_tag() else {
+            continue;
+        };
+        let Ok(target) = tag.target() else {
+            continue;
+        };
+        out.push(TagMeta {
+            name: name.to_string(),
+            rev: target.id().to_string(),
+            message: tag.message().unwrap_or("").trim().to_string(),
+            when: format_date(
+                tag.tagger()
+                    .map_or_else(|| git2::Time::new(0, 0), |t| t.when()),
+            ),
+        });
+    }
+    // Newest first, by the tag's own creation date, so a fresh milestone leads.
+    out.sort_by(|a, b| b.when.cmp(&a.when));
+    Ok(out)
+}
+
+/// Restore the *entire* working tree to the state at `rev` (#833) — a whole-project
+/// restore to a milestone or past commit, the counterpart to the per-chapter
+/// [`restore`]. Forces every tracked path to that revision's version and resets the
+/// index to match, so the working tree is exactly that snapshot. Destructive to
+/// uncommitted changes (the palette flow confirms first); `.gitignore`d editor
+/// state is untouched, since it was never part of the tree.
+pub fn restore_all(root: &Path, rev: &str) -> Result<(), String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let tree = repo
+        .revparse_single(rev)
+        .and_then(|obj| obj.peel_to_tree())
+        .map_err(|e| format!("resolve {rev}: {e}"))?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    // Force overwrites working-tree edits; remove_untracked drops files added since
+    // the target so the tree matches the snapshot exactly, not a superset of it.
+    checkout.force().remove_untracked(true);
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+        .map_err(|e| format!("restore project: {e}"))?;
+    // Point the index at the restored tree so status reads clean against it.
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index
+        .read_tree(&tree)
+        .map_err(|e| format!("reset index: {e}"))?;
+    index.write().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A unified diff of the *whole* working tree against `rev` (#833) — what has
+/// changed across the entire manuscript since that milestone or commit, the
+/// counterpart to the per-chapter [`diff_file_to_worktree`]. Working-tree edits
+/// included; `.gitignore`d paths excluded. Empty string when the tree matches the
+/// revision.
+pub fn diff_tree_to_worktree(root: &Path, rev: &str) -> Result<String, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let tree = repo
+        .revparse_single(rev)
+        .and_then(|obj| obj.peel_to_tree())
+        .map_err(|e| format!("resolve {rev}: {e}"))?;
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+    let diff = repo
+        .diff_tree_to_workdir_with_index(Some(&tree), Some(&mut opts))
+        .map_err(|e| e.to_string())?;
+
+    let mut out = String::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        if matches!(line.origin(), '+' | '-' | ' ') {
+            out.push(line.origin());
+        }
+        out.push_str(std::str::from_utf8(line.content()).unwrap_or(""));
+        true
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 /// Format a commit's time as `YYYY-MM-DD` in the timezone it was committed in.
 fn format_date(t: git2::Time) -> String {
     let offset = time::UtcOffset::from_whole_seconds(t.offset_minutes() * 60)

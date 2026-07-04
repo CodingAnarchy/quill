@@ -382,6 +382,10 @@ pub struct App {
     /// runs. Distinct from `pending_switch` (the switch target) so a manage
     /// action never disturbs a pending switch.
     pending_manage: Option<PathBuf>,
+    /// The revision a whole-project restore confirm (#833) targets — a milestone or
+    /// commit — held while the y/N prompt is open; taken when the restore runs.
+    /// Kept off the `Copy` `Pending` enum so the revision string lives here.
+    pending_restore_rev: Option<String>,
     /// A setup-wizard setting concept (#282) deferred until the characters draft
     /// finishes — only one AI pass runs at a time, so the second is queued here
     /// and fired by `poll_ai` when the first completes.
@@ -552,6 +556,7 @@ impl App {
             recovery_written: false,
             pending_switch: None,
             pending_manage: None,
+            pending_restore_rev: None,
             wizard_pending_setting: None,
             import_source: None,
             pending_import_source: None,

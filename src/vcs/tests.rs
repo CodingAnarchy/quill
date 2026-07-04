@@ -111,6 +111,124 @@ fn diff_file_compares_two_commits() {
 }
 
 #[test]
+fn milestone_is_created_listed_and_restored_and_diffed() {
+    // #833: create a named milestone, list it, whole-project restore to it, and
+    // whole-tree diff against it. Hermetic over a scratch repo.
+    let dir = temp_dir("milestone");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "# One\n\nFirst draft.\n").unwrap();
+    fs::write(dir.join("two.md"), "# Two\n\nAlso here.\n").unwrap();
+    commit(&dir, "first draft done").unwrap();
+
+    // A milestone can be named and lists back with its annotation.
+    create_tag(&dir, "first-draft", "First complete draft").unwrap();
+    let tags = list_tags(&dir).unwrap();
+    let tag = tags
+        .iter()
+        .find(|t| t.name == "first-draft")
+        .expect("the milestone should list back");
+    assert_eq!(tag.message, "First complete draft");
+    assert_eq!(tag.rev.len(), 40, "the full commit id it points at");
+
+    // Move the manuscript on: edit one chapter, delete another, add a third.
+    fs::write(dir.join("one.md"), "# One\n\nHeavily revised.\n").unwrap();
+    fs::remove_file(dir.join("two.md")).unwrap();
+    fs::write(dir.join("three.md"), "# Three\n\nBrand new.\n").unwrap();
+    commit(&dir, "revision pass").unwrap();
+
+    // The whole-tree diff against the milestone spans every changed file, not just
+    // one chapter.
+    let patch = diff_tree_to_worktree(&dir, &tag.rev).unwrap();
+    assert!(patch.contains("-First draft.") && patch.contains("+Heavily revised."));
+    assert!(
+        patch.contains("Brand new."),
+        "the added chapter shows: {patch}"
+    );
+    assert!(
+        patch.contains("two.md"),
+        "the deleted chapter shows: {patch}"
+    );
+
+    // Whole-project restore to the milestone rewinds the entire working tree.
+    restore_all(&dir, &tag.rev).unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "# One\n\nFirst draft.\n",
+        "the edited chapter is rewound"
+    );
+    assert!(dir.join("two.md").exists(), "the deleted chapter is back");
+    assert!(
+        !dir.join("three.md").exists(),
+        "the later-added chapter is removed"
+    );
+    // The working tree now matches the milestone. HEAD still points at the later
+    // commit (restore rewinds the tree, not history — non-destructive), so the
+    // reverted state can be committed on top, recording the revert as a new commit
+    // rather than rewriting history.
+    assert!(
+        commit(&dir, "back to first draft").unwrap().is_some(),
+        "the reverted tree differs from HEAD, so it commits"
+    );
+    // …and immediately after, there's nothing left to commit.
+    assert_eq!(commit(&dir, "clean").unwrap(), None);
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn restore_all_rewinds_the_whole_tree_to_a_past_commit() {
+    // #833: restore_all works against any revision, not only a tag — a plain past
+    // commit rewinds the whole tree the same way. Rows are resolved by summary, not
+    // position, since same-second commits order nondeterministically.
+    let dir = temp_dir("restore-all-commit");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "original\n").unwrap();
+    commit(&dir, "base").unwrap();
+    fs::write(dir.join("one.md"), "changed\n").unwrap();
+    commit(&dir, "edit").unwrap();
+
+    let base = log(&dir, 10)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.summary == "base")
+        .expect("the base commit is in the log");
+    restore_all(&dir, &base.rev).unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "original\n"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn create_tag_refuses_a_duplicate_name() {
+    // #833: a milestone name is claimed once — re-using it errors rather than
+    // silently moving the earlier milestone.
+    let dir = temp_dir("tag-dup");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "x\n").unwrap();
+    commit(&dir, "first").unwrap();
+    create_tag(&dir, "draft", "").unwrap();
+    assert!(
+        create_tag(&dir, "draft", "").is_err(),
+        "a second milestone by the same name is refused"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn create_tag_needs_a_commit() {
+    // #833: there must be something to tag — a milestone marks a committed state.
+    let dir = temp_dir("tag-unborn");
+    init(&dir).unwrap();
+    assert!(
+        create_tag(&dir, "draft", "").is_err(),
+        "no commit yet → no milestone"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn log_is_empty_before_any_commit() {
     let dir = temp_dir("log-empty");
     init(&dir).unwrap();
