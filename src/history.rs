@@ -8,6 +8,14 @@
 //! the save/idle cadence. [`load`] coalesces those lines, keeping the latest per
 //! date, and [`compact`] rewrites the file one-line-per-day at startup so the
 //! within-session duplicates never accumulate across sessions.
+//!
+//! Beside the coalesced per-day log, a separate append-only *session* log at
+//! `.quill/sessions.jsonl` records each individual writing session's output
+//! (#835) — one line per recorded session, never coalesced. It feeds the
+//! calendar heatmap's per-day breakdown (a day written in bursts keeps each
+//! burst) while the per-day rollup keeps driving the sparkline and streaks.
+//! Appending a session is the same O(1), read-free write as [`persist`], so the
+//! idle-tally guard stays flat.
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -20,6 +28,7 @@ use crate::atomic;
 
 const DIR: &str = ".quill";
 const FILE: &str = "history.jsonl";
+const SESSIONS_FILE: &str = "sessions.jsonl";
 
 /// One day's writing snapshot. `date` is an ISO `YYYY-MM-DD` string.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -47,8 +56,33 @@ pub struct Snapshot {
     pub part_removed: Vec<usize>,
 }
 
+/// One writing *session*'s recorded output (#835): the words added and removed
+/// during a single session on `date` (ISO `YYYY-MM-DD`). Unlike [`Snapshot`],
+/// which coalesces to one net figure per day, session records accumulate — a day
+/// the author wrote in several bursts keeps a line per burst, so the calendar
+/// heatmap can break a day down into its sessions.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionRecord {
+    pub date: String,
+    /// Words inserted during the session.
+    pub added: usize,
+    /// Words deleted during the session.
+    pub removed: usize,
+}
+
+impl SessionRecord {
+    /// The session's net words: added − removed.
+    pub const fn net(&self) -> i64 {
+        self.added as i64 - self.removed as i64
+    }
+}
+
 fn log_path(root: &Path) -> PathBuf {
     root.join(DIR).join(FILE)
+}
+
+fn sessions_path(root: &Path) -> PathBuf {
+    root.join(DIR).join(SESSIONS_FILE)
 }
 
 /// Read the recorded snapshots as one logical record per day, newest line for a
@@ -114,6 +148,35 @@ pub fn compact(root: &Path) -> std::io::Result<()> {
         out.push('\n');
     }
     atomic::write(&log_path(root), out.as_bytes())
+}
+
+/// Append one session record as a new line — O(1), no read or rewrite, so it
+/// stays cheap on the save/idle cadence like [`persist`] (#835). Session records
+/// are never coalesced: every recorded session keeps its own line, in write
+/// order. A session with no output (net zero and nothing added or removed) is not
+/// worth recording and is skipped. Creates `.quill/` if needed.
+pub fn persist_session(root: &Path, session: &SessionRecord) -> std::io::Result<()> {
+    if session.added == 0 && session.removed == 0 {
+        return Ok(()); // an empty session isn't worth a line
+    }
+    fs::create_dir_all(root.join(DIR))?;
+    let mut line = serde_json::to_string(session).map_err(std::io::Error::other)?;
+    line.push('\n');
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(sessions_path(root))?;
+    file.write_all(line.as_bytes())
+}
+
+/// Read the recorded session records in write order (oldest first). Malformed
+/// lines are skipped; a missing log loads empty.
+pub fn load_sessions(root: &Path) -> Vec<SessionRecord> {
+    fs::read_to_string(sessions_path(root))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<SessionRecord>(line).ok())
+        .collect()
 }
 
 #[cfg(test)]
@@ -252,5 +315,66 @@ mod tests {
         assert!(load(&dir).is_empty());
         assert_eq!(for_date(&dir, "2026-06-16"), None);
         fs::remove_dir_all(&dir).ok();
+    }
+
+    fn session(date: &str, added: usize, removed: usize) -> SessionRecord {
+        SessionRecord {
+            date: date.into(),
+            added,
+            removed,
+        }
+    }
+
+    #[test]
+    fn sessions_accumulate_rather_than_coalescing() {
+        // Unlike the per-day Snapshot log (latest wins), each recorded session
+        // keeps its own line — a day written in bursts keeps every burst.
+        let dir = temp_dir("sessions-accumulate");
+        persist_session(&dir, &session("2026-06-16", 200, 10)).unwrap();
+        persist_session(&dir, &session("2026-06-16", 150, 0)).unwrap(); // a second burst
+        persist_session(&dir, &session("2026-06-17", 90, 5)).unwrap();
+
+        let all = load_sessions(&dir);
+        assert_eq!(all.len(), 3, "every session kept, none coalesced");
+        assert_eq!(all[0], session("2026-06-16", 200, 10)); // write order preserved
+        assert_eq!(all[2], session("2026-06-17", 90, 5));
+
+        let today: Vec<SessionRecord> = all
+            .iter()
+            .filter(|s| s.date == "2026-06-16")
+            .cloned()
+            .collect();
+        assert_eq!(today.len(), 2, "both of the day's bursts");
+        // The day rolls up to the sum of its sessions.
+        let added: usize = today.iter().map(|s| s.added).sum();
+        let removed: usize = today.iter().map(|s| s.removed).sum();
+        assert_eq!((added, removed), (350, 10));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_empty_session_is_not_recorded() {
+        // A session that produced nothing isn't worth a line.
+        let dir = temp_dir("sessions-empty");
+        persist_session(&dir, &session("2026-06-16", 0, 0)).unwrap();
+        assert!(load_sessions(&dir).is_empty());
+        assert!(!sessions_path(&dir).exists(), "no file created for a no-op");
+        // A pure-deletion session still counts (it's output).
+        persist_session(&dir, &session("2026-06-16", 0, 40)).unwrap();
+        assert_eq!(load_sessions(&dir).len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_session_log_loads_empty() {
+        let dir = temp_dir("sessions-missing");
+        assert!(load_sessions(&dir).is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn session_net_is_added_minus_removed() {
+        assert_eq!(session("2026-06-16", 200, 50).net(), 150);
+        assert_eq!(session("2026-06-16", 10, 40).net(), -30);
     }
 }

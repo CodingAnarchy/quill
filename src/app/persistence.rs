@@ -44,6 +44,27 @@ impl App {
                 self.part_removed = snap.part_removed;
             }
         }
+        // The session starts from today's already-recorded output, so a recorded
+        // session captures only this run's growth (#835) — never a day's worth
+        // re-logged every reopen.
+        self.session_base_added = self.added;
+        self.session_base_removed = self.removed;
+    }
+
+    /// Append the current writing session's output to the session log (#835): the
+    /// growth in `added` / `removed` since the session baseline, dated today.
+    /// Called at quit. Advances the baseline so a second record in the same run
+    /// logs only new growth, and an empty session is skipped by the log itself.
+    /// Best-effort — a failed write just drops one session record.
+    pub fn record_session(&mut self) {
+        let session = history::SessionRecord {
+            date: date::iso(date::today()),
+            added: self.added.saturating_sub(self.session_base_added),
+            removed: self.removed.saturating_sub(self.session_base_removed),
+        };
+        let _ = history::persist_session(&self.project.root, &session);
+        self.session_base_added = self.added;
+        self.session_base_removed = self.removed;
     }
 
     /// Write today's snapshot to the history log (best-effort).

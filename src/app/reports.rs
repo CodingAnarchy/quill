@@ -18,11 +18,13 @@ impl App {
     }
 
     /// Open the writing-history view overlay (the run-action menu, #586): the
-    /// daily net-words graph, the current and longest streak, and the totals,
-    /// built from the recorded per-day log — read-only, no new persistence.
+    /// daily net-words graph, the current and longest streak, the totals, and the
+    /// month calendar heatmap with its per-session breakdown (#835) — built from
+    /// the recorded per-day and per-session logs, read-only.
     pub(crate) fn open_writing_history(&mut self) {
         let snaps = crate::history::load(&self.project.root);
-        let lines = crate::history_view::lines(&snaps, date::today());
+        let sessions = crate::history::load_sessions(&self.project.root);
+        let lines = crate::history_view::lines(&snaps, &sessions, date::today());
         self.overlay = Some(Overlay::report("history", lines));
     }
 
