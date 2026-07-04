@@ -659,6 +659,8 @@ Normal-mode motions:
 - **Characters / lines** — `h` `j` `k` `l` (and the arrows); `0` line start,
   `^` first non-blank, `$` line end.
 - **Words** — `w` / `b` next / previous word start, `e` word end.
+- **Paragraphs** — `}` / `{` jump to the next / previous paragraph (the blank
+  line between them).
 - **Document** — `gg` first line, `G` last line, `{count}G` (or `{count}gg`) a
   specific line.
 - **Find on the line** — `f{char}` / `t{char}` jump to / just before the next
@@ -668,7 +670,8 @@ Normal-mode motions:
 Normal-mode editing:
 
 - **Operators** — `d` (delete) and `c` (change) compose with any motion
-  (`dw`, `d$`, `c3w`, `dG`) and with text objects (`diw`/`daw`, `ci"`, `di(`);
+  (`dw`, `d$`, `c3w`, `dG`, `d}`) and with text objects (`diw`/`daw`, `ci"`,
+  `di(`, and the prose objects `dip`/`dap` paragraph, `cis`/`das` sentence);
   `dd`/`cc` act on whole lines, `D`/`C` to end of line, with counts (`2dd`).
   `c` leaves you in Insert.
 - **Delete a character** — `x` (with a count, `3x`).
@@ -739,7 +742,8 @@ right = "o"
 ```
 
 The action names: `left` `down` `up` `right`; `word_forward` `word_backward`
-`word_end`; `line_start` `first_non_blank` `line_end` `last_line`; `find_forward`
+`word_end`; `line_start` `first_non_blank` `line_end` `paragraph_forward`
+`paragraph_backward` `last_line`; `find_forward`
 `find_backward` `till_forward` `till_backward` `repeat_find`
 `repeat_find_reverse`; `delete` `change` `yank`; `delete_char`
 `delete_to_line_end` `change_to_line_end`; `put_after` `put_before` `undo`;

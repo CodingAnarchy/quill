@@ -332,6 +332,8 @@ const VIM_ACTIONS: &[(&str, char)] = &[
     ("line_start", '0'),
     ("first_non_blank", '^'),
     ("line_end", '$'),
+    ("paragraph_forward", '}'),
+    ("paragraph_backward", '{'),
     ("last_line", 'G'),
     ("find_forward", 'f'),
     ("find_backward", 'F'),

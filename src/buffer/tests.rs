@@ -247,6 +247,120 @@ fn bracket_object_spans_a_large_gap() {
     );
 }
 
+// --- Paragraph and sentence motions / objects (#821) -------------------
+
+#[test]
+fn paragraph_motions_jump_by_blank_line() {
+    // Two paragraphs separated by a blank line, then a trailing paragraph.
+    let text = "one two\nthree four\n\nfive six\n\nseven\n";
+    // lines:     0        1          2   3          4   5       (6 = "")
+    let mut b = Buffer::from_text(text);
+    b.cursor = Cursor { line: 0, col: 2 };
+    b.move_paragraph_forward();
+    assert_eq!(
+        b.cursor.line, 2,
+        "brace-close lands on the blank line after"
+    );
+    b.move_paragraph_forward();
+    assert_eq!(b.cursor.line, 4, "brace-close reaches the next blank line");
+    b.move_paragraph_backward();
+    assert_eq!(
+        b.cursor.line, 2,
+        "brace-open walks back to the previous blank"
+    );
+    b.move_paragraph_backward();
+    assert_eq!(b.cursor.line, 0, "brace-open reaches the document start");
+}
+
+#[test]
+fn paragraph_object_covers_the_paragraph_with_and_without_trailing_blank() {
+    let text = "alpha line\nbeta line\n\nnext para\n";
+    // bytes: "alpha line\n" = 0..11, "beta line\n" = 11..21, "\n" = 21..22, ...
+    let mut b = Buffer::from_text(text);
+    b.cursor = Cursor { line: 1, col: 0 }; // inside the first paragraph
+    assert_eq!(
+        b.text_object(TextObject::Paragraph, false),
+        Some((0, 21)),
+        "ip is the two non-blank lines"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Paragraph, true),
+        Some((0, 22)),
+        "ap also takes the trailing blank line"
+    );
+}
+
+#[test]
+fn paragraph_object_takes_leading_blank_when_none_trails() {
+    // The paragraph runs to the document end with no trailing blank, so `ap` takes
+    // the *leading* blank instead.
+    let text = "intro\n\nlast para line";
+    // "intro\n" = 0..6, "\n" = 6..7, "last para line" = 7..21 (no trailing newline)
+    let mut b = Buffer::from_text(text);
+    b.cursor = Cursor { line: 2, col: 0 };
+    assert_eq!(
+        b.text_object(TextObject::Paragraph, false),
+        Some((7, 21)),
+        "ip is the final paragraph"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Paragraph, true),
+        Some((6, 21)),
+        "ap takes the leading blank when nothing trails"
+    );
+}
+
+#[test]
+fn sentence_object_spans_one_sentence() {
+    let text = "One fish. Two fish! Red fish?";
+    //          0         10        20
+    let mut b = Buffer::from_text(text);
+    b.cursor = Cursor { line: 0, col: 12 }; // inside "Two fish!"
+    assert_eq!(
+        b.text_object(TextObject::Sentence, false),
+        Some((10, 19)),
+        "is is 'Two fish!' with no trailing space"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Sentence, true),
+        Some((10, 20)),
+        "as includes the trailing space"
+    );
+}
+
+#[test]
+fn sentence_object_at_paragraph_end_takes_leading_space() {
+    let text = "First one. Second and last.";
+    //          0         10
+    let mut b = Buffer::from_text(text);
+    b.cursor = Cursor { line: 0, col: 15 }; // inside the last sentence
+    assert_eq!(
+        b.text_object(TextObject::Sentence, false),
+        Some((11, 27)),
+        "is is the final sentence"
+    );
+    assert_eq!(
+        b.text_object(TextObject::Sentence, true),
+        Some((10, 27)),
+        "as takes the leading space when there's no trailing one"
+    );
+}
+
+#[test]
+fn sentence_break_needs_whitespace_after_the_terminator() {
+    // A dot with no whitespace after it (mid-token) is not a break — so the URL's
+    // dots keep the sentence whole; Vim's heuristic is terminator + whitespace.
+    let text = "Visit quill.md today. Then rest.";
+    //          0         10        20        30
+    let mut b = Buffer::from_text(text);
+    b.cursor = Cursor { line: 0, col: 3 }; // inside the first sentence
+    assert_eq!(
+        b.text_object(TextObject::Sentence, false),
+        Some((0, 21)),
+        "the dot in 'quill.md' doesn't split the sentence"
+    );
+}
+
 #[test]
 fn round_trip_is_byte_identical_with_trailing_newline() {
     let path = temp_path("roundtrip.md");

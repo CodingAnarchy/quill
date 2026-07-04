@@ -249,6 +249,88 @@ fn ci_quote_changes_inside_quotes() {
     );
 }
 
+// --- Paragraph and sentence motions / objects (#821) -------------------
+
+#[test]
+fn brace_motions_jump_between_paragraphs() {
+    let (mut app, _dir) = vim_app("vim-para-jump");
+    app.buffer = Buffer::from_text("one\ntwo\n\nthree\n\nfour\n");
+    // lines:                        0    1    2    3      4    5
+    type_str(&mut app, "gg"); // line 0
+    type_str(&mut app, "}"); // to the first blank line
+    assert_eq!(app.buffer.cursor.line, 2, "}} jumps to the blank boundary");
+    type_str(&mut app, "}"); // to the next blank line
+    assert_eq!(app.buffer.cursor.line, 4);
+    type_str(&mut app, "{"); // back to the previous blank line
+    assert_eq!(app.buffer.cursor.line, 2, "{{ jumps back");
+}
+
+#[test]
+fn dap_deletes_a_paragraph_with_its_trailing_blank() {
+    let (mut app, _dir) = vim_app("vim-dap");
+    app.buffer = Buffer::from_text("one\ntwo\n\nkeep this\n");
+    type_str(&mut app, "gg"); // in the first paragraph
+    type_str(&mut app, "dap"); // delete it and the blank line after
+    assert_eq!(app.buffer.text(), "keep this\n", "{}", app.buffer.text());
+    assert!(matches!(app.mode, Mode::Normal));
+}
+
+#[test]
+fn dip_deletes_the_paragraph_but_keeps_the_blank_line() {
+    let (mut app, _dir) = vim_app("vim-dip");
+    app.buffer = Buffer::from_text("one\ntwo\n\nkeep this\n");
+    type_str(&mut app, "gg");
+    type_str(&mut app, "dip"); // just the paragraph, leaving the blank line
+    assert_eq!(app.buffer.text(), "\nkeep this\n", "{}", app.buffer.text());
+}
+
+#[test]
+fn yip_yanks_the_paragraph_and_p_puts_it() {
+    let (mut app, _dir) = vim_app("vim-yip");
+    app.buffer = Buffer::from_text("alpha\nbeta\n\ntail\n");
+    type_str(&mut app, "gg");
+    type_str(&mut app, "yip"); // yank "alpha\nbeta\n"
+                               // Put it below the cursor; the yank was charwise (line-aligned bytes).
+    type_str(&mut app, "P"); // put before the cursor
+    assert_eq!(
+        app.buffer.text(),
+        "alpha\nbeta\nalpha\nbeta\n\ntail\n",
+        "{}",
+        app.buffer.text()
+    );
+}
+
+#[test]
+fn cis_changes_a_sentence_in_the_middle() {
+    let (mut app, _dir) = vim_app("vim-cis");
+    app.buffer = Buffer::from_text("One fish. Two fish. Red fish.\n");
+    type_str(&mut app, "0"); // line start
+    type_str(&mut app, "fT"); // onto the 'T' of "Two", inside the middle sentence
+    type_str(&mut app, "cis"); // change the middle sentence
+    assert!(matches!(app.mode, Mode::Insert));
+    type_str(&mut app, "Blue fish.");
+    assert_eq!(
+        app.buffer.text(),
+        "One fish. Blue fish. Red fish.\n",
+        "{}",
+        app.buffer.text()
+    );
+}
+
+#[test]
+fn das_deletes_a_sentence_with_its_trailing_space() {
+    let (mut app, _dir) = vim_app("vim-das");
+    app.buffer = Buffer::from_text("One fish. Two fish. Red fish.\n");
+    type_str(&mut app, "0");
+    type_str(&mut app, "das"); // delete the first sentence and its trailing space
+    assert_eq!(
+        app.buffer.text(),
+        "Two fish. Red fish.\n",
+        "{}",
+        app.buffer.text()
+    );
+}
+
 #[test]
 fn capital_d_deletes_to_end_of_line_and_u_undoes() {
     let (mut app, _dir) = vim_app("vim-D");

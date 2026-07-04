@@ -41,6 +41,13 @@ pub enum TextObject {
     Quote(char),
     /// `(` `)` `[` `]` `{` `}` `<` `>`: the enclosing matched pair.
     Pair(char, char),
+    /// `p`: the paragraph — the run of non-blank lines around the cursor (or the
+    /// run of blank lines, if the cursor is on one). `around` also takes the
+    /// trailing blank lines (or the leading ones, when there's nothing trailing).
+    Paragraph,
+    /// `s`: the sentence — prose from one sentence terminator (`.`/`!`/`?` + space
+    /// or line end) to the next. `around` also takes the trailing whitespace.
+    Sentence,
 }
 
 /// Vim's character classes for word motions: a word is a run of word-characters
@@ -273,6 +280,8 @@ impl Buffer {
             TextObject::Word => self.word_object(around),
             TextObject::Quote(q) => self.quote_object(q, around),
             TextObject::Pair(open, close) => self.pair_object(open, close, around),
+            TextObject::Paragraph => self.paragraph_object(around),
+            TextObject::Sentence => self.sentence_object(around),
         }
     }
 
@@ -406,4 +415,206 @@ impl Buffer {
             (open_b + open.len_utf8(), close_b)
         })
     }
+
+    /// Whether line `idx` is a paragraph separator — empty or whitespace-only.
+    /// Reads one line, never the whole rope; the paragraph motions/objects only
+    /// walk outward line by line until they hit one of these boundaries, so they
+    /// stay windowed like the word motions (#660).
+    fn line_is_blank(&self, idx: usize) -> bool {
+        self.line(idx).trim().is_empty()
+    }
+
+    /// Move to the start of the next paragraph — Vim's `}`. Scans down: past any
+    /// blank run the cursor sits in, then past the paragraph's non-blank lines, to
+    /// land on the following blank line (or the last line at document end). Lands
+    /// at column 0, as Vim does.
+    pub fn move_paragraph_forward(&mut self) {
+        let last = self.line_count().saturating_sub(1);
+        let mut i = self.cursor.line;
+        // Advance at least one line, then walk to the next boundary.
+        while i < last && self.line_is_blank(i) {
+            i += 1;
+        }
+        while i < last && !self.line_is_blank(i) {
+            i += 1;
+        }
+        self.cursor = self.cursor_at_byte(self.line_start_byte(i));
+        self.goal_x = None;
+    }
+
+    /// Move to the start of the previous paragraph — Vim's `{`. The mirror of
+    /// [`move_paragraph_forward`](Self::move_paragraph_forward), walking up.
+    pub fn move_paragraph_backward(&mut self) {
+        let mut i = self.cursor.line;
+        while i > 0 && self.line_is_blank(i) {
+            i -= 1;
+        }
+        while i > 0 && !self.line_is_blank(i) {
+            i -= 1;
+        }
+        self.cursor = self.cursor_at_byte(self.line_start_byte(i));
+        self.goal_x = None;
+    }
+
+    /// `ip` / `ap`: the paragraph around the cursor. `ip` is the run of like lines
+    /// (all non-blank, or all blank) the cursor is in; `ap` also takes the trailing
+    /// blank lines — or the leading blank lines when there are none trailing —
+    /// matching Vim. The range is linewise (whole lines, ending at a line start).
+    fn paragraph_object(&self, around: bool) -> Option<(usize, usize)> {
+        let last = self.line_count().saturating_sub(1);
+        let cur = self.cursor.line.min(last);
+        let on_blank = self.line_is_blank(cur);
+        // The run of same-kind lines under the cursor.
+        let mut first = cur;
+        while first > 0 && self.line_is_blank(first - 1) == on_blank {
+            first -= 1;
+        }
+        let mut end = cur; // last line of the run (inclusive)
+        while end < last && self.line_is_blank(end + 1) == on_blank {
+            end += 1;
+        }
+        if around {
+            // `ap` extends over the trailing blank lines; if there are none (the
+            // paragraph runs to the document end), it takes the leading blanks.
+            let trailing_end = {
+                let mut e = end;
+                while e < last && self.line_is_blank(e + 1) != on_blank {
+                    e += 1;
+                }
+                e
+            };
+            if trailing_end > end {
+                end = trailing_end;
+            } else {
+                while first > 0 && self.line_is_blank(first - 1) != on_blank {
+                    first -= 1;
+                }
+            }
+        }
+        let (lo, hi) = (self.line_start_byte(first), self.next_line_byte(end));
+        (lo < hi).then_some((lo, hi))
+    }
+
+    /// `is` / `as`: the sentence around the cursor. Sentences end at `.`/`!`/`?`
+    /// followed by whitespace or the line/paragraph end (a standard prose
+    /// heuristic). `is` is the sentence text; `as` also takes the trailing
+    /// whitespace (or leading, when there is none trailing). The scan is bounded to
+    /// the surrounding paragraph — a blank line always ends a sentence — so it
+    /// stays windowed, never serializing the whole rope (#660).
+    fn sentence_object(&self, around: bool) -> Option<(usize, usize)> {
+        let cur = self.cursor_byte();
+        // A sentence never crosses a paragraph boundary; bound the scan to the
+        // paragraph's byte span so a long document only ever reads nearby lines.
+        let (lo_bound, hi_bound) = self.paragraph_bounds();
+        if lo_bound >= hi_bound {
+            return None;
+        }
+        let text = self.byte_slice(lo_bound, hi_bound);
+        let rel = cur.saturating_sub(lo_bound).min(text.len());
+        // Split points carve the paragraph into sentences; each span owns its own
+        // trailing whitespace, so `[start, end)` is the sentence-plus-trailing-space.
+        let splits = sentence_splits(&text);
+        let start = splits
+            .iter()
+            .rev()
+            .find(|&&e| e <= rel)
+            .copied()
+            .unwrap_or(0);
+        let end = splits
+            .iter()
+            .find(|&&e| e > rel)
+            .copied()
+            .unwrap_or(text.len());
+        // The content is the span with its trailing whitespace trimmed off; the
+        // span already begins at the first word (the prior sentence took the
+        // leading space), except a paragraph that opens with whitespace.
+        let content_start = start
+            + text[start..end]
+                .find(|c: char| !c.is_whitespace())
+                .unwrap_or(0);
+        let content_end = content_start + text[content_start..end].trim_end().len();
+        let (lo, hi) = if around {
+            if end > content_end {
+                (content_start, end) // include this sentence's trailing whitespace
+            } else {
+                // No trailing whitespace (paragraph end): take the leading run,
+                // i.e. the whitespace the previous sentence's span held.
+                let lead = text[..content_start].trim_end().len();
+                (lead, content_end)
+            }
+        } else {
+            (content_start, content_end)
+        };
+        if lo >= hi {
+            return None;
+        }
+        Some((lo_bound + lo, lo_bound + hi))
+    }
+
+    /// The byte span `[start, end)` of the paragraph (run of non-blank lines, or of
+    /// blank lines) around the cursor — the window the sentence object scans within.
+    fn paragraph_bounds(&self) -> (usize, usize) {
+        let last = self.line_count().saturating_sub(1);
+        let cur = self.cursor.line.min(last);
+        let on_blank = self.line_is_blank(cur);
+        let mut first = cur;
+        while first > 0 && self.line_is_blank(first - 1) == on_blank {
+            first -= 1;
+        }
+        let mut end = cur;
+        while end < last && self.line_is_blank(end + 1) == on_blank {
+            end += 1;
+        }
+        (self.line_start_byte(first), self.next_line_byte(end))
+    }
+}
+
+/// The byte offsets that split `text` into sentences — the point *after* each
+/// terminator's trailing whitespace, so the sentence before a split owns that
+/// whitespace (Vim's `as`). A sentence ends at `.`/`!`/`?` (with any trailing
+/// closing quotes/brackets) followed by whitespace or the text end — a dot inside
+/// a token like "e.g." isn't a break. A newline splits too, so `is`/`as` don't
+/// span a hard line break. Offsets `0` and `text.len()` are implicit.
+fn sentence_splits(text: &str) -> Vec<usize> {
+    let bytes = text.as_bytes();
+    let mut splits = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        let terminator = if c == b'.' || c == b'!' || c == b'?' {
+            // Consume runs of terminators (…?!) and trailing closers ("')]}.
+            let mut j = i + 1;
+            while j < bytes.len()
+                && matches!(
+                    bytes[j],
+                    b'.' | b'!' | b'?' | b'"' | b'\'' | b')' | b']' | b'}'
+                )
+            {
+                j += 1;
+            }
+            // A sentence break needs whitespace (or the text end) after it —
+            // "e.g." mid-word doesn't split.
+            (j >= bytes.len() || bytes[j].is_ascii_whitespace()).then_some(j)
+        } else {
+            None
+        };
+        if let Some(j) = terminator {
+            // Fold the trailing whitespace into this sentence's span.
+            let mut k = j;
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            if k < bytes.len() {
+                splits.push(k);
+            }
+            i = k;
+        } else if c == b'\n' {
+            // A line break splits too; the newline stays with the line before it.
+            splits.push(i + 1);
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    splits
 }
