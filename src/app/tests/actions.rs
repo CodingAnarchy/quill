@@ -231,6 +231,56 @@ fn export_action_unavailable_in_the_continuous_view() {
     );
 }
 
+/// Review-copy export (#834): registered under Export, and dispatching it writes
+/// a `.docx` whose section carries line numbering and whose body carries the
+/// author's annotation as an anchored Word comment (with a `comments.xml` part).
+#[test]
+fn review_copy_action_writes_a_numbered_docx_with_annotation_comments() {
+    use std::io::{Cursor, Read};
+
+    assert!(matches!(
+        Action::from_name("export:review"),
+        Some(Action::ReviewCopy)
+    ));
+    assert_eq!(Action::ReviewCopy.group(), "Export");
+
+    let (mut app, dir) = two_chapter_app("action-review-copy");
+    // Chapter one is "first chapter\n"; annotate "first" (bytes 0..5).
+    app.create_annotation(0, 5, "check the opening".into());
+
+    app.run_action(Action::ReviewCopy, false);
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Exported to"),
+        "{:?}",
+        app.message
+    );
+    let path = dir.join("export").join("book-review.review.docx");
+    assert!(path.exists(), "review copy written");
+
+    let read_part = |name: &str| {
+        let bytes = fs::read(&path).unwrap();
+        let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut file = zip.by_name(name).unwrap();
+        let mut s = String::new();
+        file.read_to_string(&mut s).unwrap();
+        s
+    };
+    let doc = read_part("word/document.xml");
+    assert!(
+        doc.contains("<w:lnNumType"),
+        "line numbering on the section: {doc}"
+    );
+    assert!(
+        doc.contains("<w:commentRangeStart") && doc.contains("<w:commentReference"),
+        "the annotation is anchored as an in-body comment: {doc}"
+    );
+    let comments = read_part("word/comments.xml");
+    assert!(
+        comments.contains("check the opening"),
+        "the note reaches comments.xml: {comments}"
+    );
+}
+
 /// A network AI action with the backend off opens the in-app enable on-ramp
 /// (#602) rather than a dead-end message, and sends nothing before the author acts.
 #[test]

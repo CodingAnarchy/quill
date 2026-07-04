@@ -92,6 +92,7 @@ impl App {
             // unsaved window, so leave it first. The preflight reads the same
             // per-chapter compile, so it shares the constraint.
             Action::Export(_)
+            | Action::ReviewCopy
             | Action::PreflightExport
             | Action::PrepareForKdp
             | Action::PrepareForIngramSpark
@@ -291,6 +292,7 @@ impl App {
             Action::PrepareForIngramSpark => {
                 self.prepare_for_target(exporting::PublishTarget::IngramSpark);
             }
+            Action::ReviewCopy => self.run_review_copy_export(),
         }
     }
 

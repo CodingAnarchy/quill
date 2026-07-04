@@ -13,6 +13,7 @@
 
 mod body;
 mod package;
+mod review;
 mod series;
 #[cfg(test)]
 mod tests;
@@ -24,6 +25,7 @@ use super::{
     Prose, PubMeta, SCENE_BREAK,
 };
 
+pub use self::review::{to_docx_review, ChapterNotes, ReviewNote};
 pub use self::series::to_docx_series;
 
 /// Which export shape a `.docx` takes.

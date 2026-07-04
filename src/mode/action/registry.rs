@@ -158,6 +158,11 @@ pub enum Action {
     /// [`PrepareForKdp`](Self::PrepareForKdp) tuned for IngramSpark — sane print
     /// defaults, the preflight, and the print PDF + reflowable EPUB to `export/`.
     PrepareForIngramSpark,
+    /// Export a review copy (#834): a `.docx` with numbered lines and generous
+    /// margins for markup, carrying the author's inline annotations (#302) — which
+    /// every other export strips — as Word comments anchored to their ranges. The
+    /// collaboration/handoff artifact for a beta reader or editor. Pure export.
+    ReviewCopy,
 }
 
 impl Action {
@@ -187,6 +192,7 @@ impl Action {
         Self::Export(ExportFormat::Epub),
         Self::Export(ExportFormat::Pdf),
         Self::Export(ExportFormat::PdfPrint),
+        Self::ReviewCopy,
         Self::PreflightExport,
         Self::PrepareForKdp,
         Self::PrepareForIngramSpark,
@@ -314,6 +320,7 @@ impl Action {
             Self::PreflightExport => "export:preflight",
             Self::PrepareForKdp => "export:kdp",
             Self::PrepareForIngramSpark => "export:ingramspark",
+            Self::ReviewCopy => "export:review",
         }
     }
 
@@ -337,6 +344,7 @@ impl Action {
             | Self::ArchiveProject
             | Self::RestoreArchive => "Project",
             Self::Export(_)
+            | Self::ReviewCopy
             | Self::PreflightExport
             | Self::PrepareForKdp
             | Self::PrepareForIngramSpark
@@ -455,6 +463,7 @@ impl Action {
             Self::PreflightExport => "Export preflight (publish health check)",
             Self::PrepareForKdp => "Prepare for KDP (preflight + print PDF + EPUB)",
             Self::PrepareForIngramSpark => "Prepare for IngramSpark (preflight + print PDF + EPUB)",
+            Self::ReviewCopy => "Export review copy (numbered lines + annotations as comments)",
         }
     }
 
@@ -491,6 +500,7 @@ impl Action {
             self,
             Self::Save
                 | Self::Export(_)
+                | Self::ReviewCopy
                 | Self::ExportBible
                 | Self::PreflightExport
                 | Self::PrepareForKdp
