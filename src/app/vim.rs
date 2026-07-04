@@ -210,6 +210,11 @@ impl App {
             'b' => self.charwise(count, false, Buffer::move_word_backward),
             'e' => self.charwise(count, true, Buffer::move_word_end),
 
+            // Paragraph motions (#821): `}` to the next blank-line boundary, `{`
+            // to the previous — exclusive charwise, so `d}` cuts to there.
+            '}' => self.charwise(count, false, Buffer::move_paragraph_forward),
+            '{' => self.charwise(count, false, Buffer::move_paragraph_backward),
+
             // Line motions.
             '0' => self.charwise(1, false, Buffer::move_line_start),
             '^' => self.charwise(1, false, Buffer::move_first_non_blank),
@@ -280,6 +285,10 @@ impl App {
             '[' | ']' => Some(TextObject::Pair('[', ']')),
             '{' | '}' | 'B' => Some(TextObject::Pair('{', '}')),
             '<' | '>' => Some(TextObject::Pair('<', '>')),
+            // `ip`/`ap` paragraph and `is`/`as` sentence objects (#821), the most
+            // useful prose objects. `i{`/`a{` still reach the bracket pair above.
+            'p' => Some(TextObject::Paragraph),
+            's' => Some(TextObject::Sentence),
             _ => None,
         };
         match (object, self.vim_state.op.take()) {
@@ -783,5 +792,7 @@ const fn is_motion_key(c: char) -> bool {
                 | ';'
                 | ','
                 | '"'
+                | '{'
+                | '}'
         )
 }
