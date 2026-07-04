@@ -599,3 +599,93 @@ fn info_dict_omits_an_absent_author_but_still_names_the_producer() {
     assert!(has(&bytes, "/Producer (Quill)"), "producer still present");
     assert!(!has(&bytes, "/Author"), "no /Author when unset");
 }
+#[test]
+fn the_print_interior_is_pdf_x_conformant() {
+    // The print interior is PDF/X-3:2003 conformant (#817): the catalog carries an
+    // /OutputIntent of subtype /GTS_PDFX naming an embedded grayscale ICC destination
+    // profile, /Info stamps /GTS_PDFXVersion, and an /OutputConditionIdentifier names
+    // the print condition — the keys a PDF/X reader validates against.
+    let (w, h) = trim_points("6x9").unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, 0.0, &plain()).unwrap();
+    assert!(
+        has(&bytes, "/OutputIntents ["),
+        "catalog references the output intent(s)"
+    );
+    assert!(
+        has(&bytes, "/Type /OutputIntent /S /GTS_PDFX"),
+        "a GTS_PDFX output intent"
+    );
+    assert!(
+        has(&bytes, "/DestOutputProfile"),
+        "the intent names an embedded destination ICC profile"
+    );
+    assert!(
+        has(&bytes, "/OutputConditionIdentifier "),
+        "the intent identifies its output condition"
+    );
+    assert!(
+        has(&bytes, "/GTS_PDFXVersion (PDF/X-3:2003)"),
+        "/Info stamps the PDF/X version"
+    );
+    // The embedded ICC profile is a 1-component (grayscale) space, flagged /N 1.
+    assert!(has(&bytes, "/N 1"), "the destination profile is grayscale");
+}
+#[test]
+fn the_screen_proof_is_not_pdf_x() {
+    // The screen proof (#463) is an on-screen artifact, not a press file, so it carries
+    // no output intent or PDF/X version — those are print-interior only (#817).
+    let bytes = to_pdf(&doc(), &plain()).unwrap();
+    assert!(!has(&bytes, "/OutputIntent"), "no output intent on screen");
+    assert!(
+        !has(&bytes, "/GTS_PDFXVersion"),
+        "no PDF/X version on screen"
+    );
+}
+#[test]
+fn print_images_are_devicegray_not_devicergb() {
+    // A PDF/X grayscale interior emits image XObjects in DeviceGray, never uncalibrated
+    // DeviceRGB (#817). A gray-flattened cover renders the same, and the file stays
+    // conformant.
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(png_bytes(600, 900, 200)));
+    let (w, h) = trim_points("6x9").unwrap();
+    let bytes = to_pdf_print(&doc(), w, h, 0.0, &style).unwrap();
+    assert!(
+        has(&bytes, "/ColorSpace /DeviceGray"),
+        "image is DeviceGray"
+    );
+    assert!(
+        !has(&bytes, "/ColorSpace /DeviceRGB"),
+        "no DeviceRGB image in a PDF/X interior"
+    );
+}
+#[test]
+fn the_print_interior_flattens_transparency_but_the_screen_proof_keeps_it() {
+    // PDF/X-3:2003 (a PDF 1.3 base) forbids soft-mask transparency (#817), so a
+    // transparent ornament is composited over white and emitted opaque in the print
+    // interior — no /SMask. The screen proof is not PDF/X and keeps the /SMask so the
+    // alpha composites against any viewer background.
+    let art = || {
+        let mut style = ExportStyle {
+            scene_break_image: Some("art/break.png".into()),
+            ..Default::default()
+        };
+        // A part-transparent ornament (alpha 128) → an /SMask unless flattened.
+        style.resolve_images(|_| Ok(png_bytes(8, 8, 128)));
+        style
+    };
+    let (w, h) = trim_points("6x9").unwrap();
+    let print = to_pdf_print(&doc(), w, h, 0.0, &art()).unwrap();
+    assert!(
+        !has(&print, "/SMask"),
+        "the PDF/X print interior carries no transparency"
+    );
+    let screen = to_pdf(&doc(), &art()).unwrap();
+    assert!(
+        has(&screen, "/SMask"),
+        "the screen proof keeps the alpha soft mask"
+    );
+}

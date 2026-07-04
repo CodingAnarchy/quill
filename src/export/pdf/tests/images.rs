@@ -80,8 +80,9 @@ fn a_print_pdf_emits_the_cover_full_page() {
 #[test]
 fn an_embedded_image_stream_is_flate_compressed_and_round_trips() {
     // The cover image XObject ships /Filter /FlateDecode (#696), not a raw sample
-    // stream, and its bytes inflate back to exactly the w×h×3 RGB samples — so the
-    // image renders identically, just smaller on disk.
+    // stream, and its bytes inflate back to exactly the w×h DeviceGray samples — so the
+    // image renders identically, just smaller on disk. Samples are one-per-pixel gray,
+    // not three-per-pixel RGB, since the interior is DeviceGray for PDF/X (#817).
     let (w, h) = (600u32, 900u32);
     let mut style = ExportStyle {
         cover_image: Some("art/cover.png".into()),
@@ -96,20 +97,20 @@ fn an_embedded_image_stream_is_flate_compressed_and_round_trips() {
         "cover embeds as an image XObject"
     );
     // Find the compressed image stream among the FlateDecode streams and confirm it
-    // inflates to the raw RGB sample count.
+    // inflates to the raw grayscale sample count (one 8-bit sample per pixel).
     let image_stream = flate_streams(&bytes)
         .into_iter()
         .find(|(d, _)| d.contains("/Subtype /Image"))
         .expect("the image XObject is a FlateDecode stream");
     assert_eq!(
         image_stream.1.len() as u32,
-        w * h * 3,
-        "inflates to exactly the w×h×3 RGB samples"
+        w * h,
+        "inflates to exactly the w×h DeviceGray samples"
     );
 }
 #[test]
 fn a_compressed_cover_shrinks_the_pdf() {
-    // The FlateDecode cover stream (#696) is a fraction of the raw RGB it inflates to:
+    // The FlateDecode cover stream (#696) is a fraction of the raw gray it inflates to:
     // a solid image compresses hard, so the whole PDF is far smaller than the
     // uncompressed samples alone would be.
     let (w, h) = (600u32, 900u32);
@@ -119,7 +120,7 @@ fn a_compressed_cover_shrinks_the_pdf() {
     };
     style.resolve_images(|_| Ok(png_bytes(w, h, 255)));
     let bytes = to_pdf(&doc(), &style).unwrap();
-    let raw_samples = (w * h * 3) as usize;
+    let raw_samples = (w * h) as usize;
     assert!(
         bytes.len() < raw_samples,
         "the whole PDF ({}) is smaller than the uncompressed cover samples ({raw_samples})",

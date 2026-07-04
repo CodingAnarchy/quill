@@ -19,6 +19,7 @@ mod draw;
 // glyph subsetter for embedded fonts (#709).
 pub mod font;
 mod frontmatter;
+mod icc;
 mod images;
 mod layout;
 mod toc;
@@ -29,7 +30,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use self::draw::{mono_wrap, num};
-use self::font::{pdf_text_string, Fonts, GidMap, ObjMap};
+use self::font::{pdf_text_string, take, Fonts, GidMap, ObjMap};
 use self::images::{decode_images, emit_images, PdfImage};
 use self::layout::Layout;
 use self::toc::{doc_toc_titles, toc_entries};
@@ -822,7 +823,7 @@ impl Pdf {
         // 1 catalog, 2 pages, 3 outlines, then fonts, pages+contents, outline items.
         let mut next = 4u32;
         let font_names = self.layout.fonts.objects(&mut next, &mut objects);
-        let image_names = emit_images(&self.images, &mut next, &mut objects);
+        let image_names = emit_images(&self.images, self.layout.pdf_x, &mut next, &mut objects);
         let mut page_obj = Vec::with_capacity(n_pages);
         let mut content_obj = Vec::with_capacity(n_pages);
         for _ in 0..n_pages {
@@ -918,14 +919,43 @@ impl Pdf {
             _ => "<< /Type /Outlines /Count 0 >>".to_string(),
         };
         objects.insert(3, outlines.into_bytes());
+        // The PDF/X output intent (#817), print interior only: a grayscale
+        // `/OutputIntent` naming an embedded ICC destination profile, referenced from
+        // the catalog's `/OutputIntents`. The screen proof stays plain. Object ids come
+        // off `next` before `/Info` so the intent + ICC stream are numbered first.
+        let output_intents = self.layout.pdf_x.then(|| {
+            let icc_id = take(&mut next);
+            // The ICC profile stream carries `/N 1` (a 1-component, grayscale space) so
+            // a reader knows the destination colour space without parsing the profile.
+            objects.insert(icc_id, flate_stream(icc::GRAY_ICC, " /N 1"));
+            let intent_id = take(&mut next);
+            objects.insert(
+                intent_id,
+                format!(
+                    "<< /Type /OutputIntent /S /GTS_PDFX \
+                     /OutputConditionIdentifier {ident} /OutputCondition {cond} \
+                     /Info {ident} /DestOutputProfile {icc_id} 0 R >>",
+                    ident = pdf_text_string(icc::OUTPUT_CONDITION),
+                    cond = pdf_text_string(icc::OUTPUT_CONDITION),
+                )
+                .into_bytes(),
+            );
+            format!(" /OutputIntents [{intent_id} 0 R]")
+        });
+        let output_intents = output_intents.unwrap_or_default();
         objects.insert(
             1,
-            b"<< /Type /Catalog /Pages 2 0 R /Outlines 3 0 R /PageMode /UseOutlines >>".to_vec(),
+            format!(
+                "<< /Type /Catalog /Pages 2 0 R /Outlines 3 0 R /PageMode /UseOutlines{output_intents} >>"
+            )
+            .into_bytes(),
         );
         // The document `/Info` dictionary (#692): Title/Author from the manifest, and a
         // Producer identifying Quill. CreationDate is omitted here (the export is
-        // deterministic — no wall-clock nondeterminism a test/script would trip on).
-        let info_id = next;
+        // deterministic — no wall-clock nondeterminism a test/script would trip on). The
+        // print interior also stamps `/GTS_PDFXVersion` + `/GTS_PDFXConformance` (#817),
+        // the keys a PDF/X reader keys off to select conformance validation.
+        let info_id = take(&mut next);
         let mut info = String::from("<<");
         if !self.doc_title.is_empty() {
             let _ = write!(info, " /Title {}", pdf_text_string(&self.doc_title));
@@ -933,7 +963,15 @@ impl Pdf {
         if !self.doc_author.is_empty() {
             let _ = write!(info, " /Author {}", pdf_text_string(&self.doc_author));
         }
-        let _ = write!(info, " /Producer {} >>", pdf_text_string("Quill"));
+        let _ = write!(info, " /Producer {}", pdf_text_string("Quill"));
+        if self.layout.pdf_x {
+            let _ = write!(
+                info,
+                " /GTS_PDFXVersion {ver} /GTS_PDFXConformance {ver}",
+                ver = pdf_text_string(icc::PDFX_VERSION)
+            );
+        }
+        info.push_str(" >>");
         objects.insert(info_id, info.into_bytes());
         serialize(&objects, Some(info_id))
     }

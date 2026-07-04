@@ -75,6 +75,10 @@ pub(super) struct Layout {
     pub(super) running_heads: bool,
     /// Begin each section on a recto (odd) page, inserting a blank verso if needed.
     pub(super) recto_starts: bool,
+    /// Emit the file as PDF/X (#817): a grayscale `/OutputIntent`, `/GTS_PDFXVersion`
+    /// in `/Info`, DeviceGray content. Set for the print interior, which is a genuine
+    /// press artifact; the screen profile is an on-screen proof and stays plain.
+    pub(super) pdf_x: bool,
     /// The embedded Type0 fonts (body faces + broad fallback) — both profiles embed
     /// (#492), so the PDF renders the full Unicode its fonts cover.
     pub(super) fonts: Fonts,
@@ -95,6 +99,7 @@ impl Layout {
             mirrored: false,
             running_heads: false,
             recto_starts: false,
+            pdf_x: false,
             fonts: Fonts::new(style),
         }
     }
@@ -117,6 +122,7 @@ impl Layout {
             mirrored: true,
             running_heads: true,
             recto_starts: true,
+            pdf_x: true,
             fonts: Fonts::new(style),
         }
     }
