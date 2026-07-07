@@ -306,11 +306,22 @@ impl Buffer {
     /// the reparse can be incremental. Does not touch the cursor.
     fn edit_insert(&mut self, char_idx: usize, text: &str) {
         self.checkpoint();
-        self.word_count_cache.set(None); // the text changed; recount on next read
         let start_byte = self.rope.char_to_byte(char_idx);
         let start_position = point_at_byte(&self.rope, start_byte);
 
+        // Maintain the word count incrementally (#868): re-segment only the
+        // line(s) the insert touches, not the whole chapter. A word never
+        // straddles a `\n` (UAX #29 makes a newline a word boundary), so the
+        // document total is the sum of the per-line counts — subtract the old
+        // span's words and add the new span's. The edit lands on the line at
+        // `char_idx`; any newlines in `text` extend the new span by that many.
+        let touched_line = self.rope.char_to_line(char_idx);
+        let old_span_words = self.words_in_line_range(touched_line, touched_line);
+        let added_lines = text.bytes().filter(|&b| b == b'\n').count();
+
         self.rope.insert(char_idx, text);
+
+        self.adjust_word_count(touched_line, touched_line + added_lines, old_span_words);
 
         let new_end_byte = start_byte + text.len();
         let edit = InputEdit {
@@ -331,13 +342,21 @@ impl Buffer {
     /// Does not touch the cursor.
     fn edit_remove(&mut self, start: usize, end: usize) {
         self.checkpoint();
-        self.word_count_cache.set(None); // the text changed; recount on next read
         let start_byte = self.rope.char_to_byte(start);
         let old_end_byte = self.rope.char_to_byte(end);
         let start_position = point_at_byte(&self.rope, start_byte);
         let old_end_position = point_at_byte(&self.rope, old_end_byte);
 
+        // Incremental word count (#868): the removal spans lines
+        // `[first, last]`; after it, they collapse onto `first`. Re-segment only
+        // that range, never the whole chapter (see `edit_insert`).
+        let first_line = self.rope.char_to_line(start);
+        let last_line = self.rope.char_to_line(end);
+        let old_span_words = self.words_in_line_range(first_line, last_line);
+
         self.rope.remove(start..end);
+
+        self.adjust_word_count(first_line, first_line, old_span_words);
 
         let edit = InputEdit {
             start_byte,
@@ -351,6 +370,42 @@ impl Buffer {
         self.anchor_edits
             .push((start_byte, old_end_byte, start_byte));
         self.syntax_dirty = true;
+    }
+
+    /// Words in the inclusive line range `[first, last]`, via Unicode word
+    /// segmentation over just those lines. Used to maintain the running word
+    /// count incrementally (#868): the edit paths re-segment only the handful of
+    /// lines an edit touches, not the whole chapter. The materialized slice is
+    /// bounded by the affected lines, so this is independent of document size.
+    fn words_in_line_range(&self, first: usize, last: usize) -> usize {
+        let lines = self.rope.len_lines();
+        if first >= lines {
+            return 0;
+        }
+        let last = last.min(lines.saturating_sub(1));
+        let from = self.rope.line_to_char(first);
+        // Include the last line's trailing newline (up to the next line's start,
+        // or the document end). A newline is never inside a word, so counting
+        // over it can't merge or split a word — the tally is unaffected.
+        let to = if last + 1 < lines {
+            self.rope.line_to_char(last + 1)
+        } else {
+            self.rope.len_chars()
+        };
+        count_words(&self.rope.slice(from..to).to_string())
+    }
+
+    /// Fold an edit's word-count delta into the cache (#868). The edit replaced
+    /// the old lines (whose words were `old_span_words`) with the new lines
+    /// `[first, last]`; recount only those and adjust the running total. When the
+    /// cache is empty (e.g. after undo swapped the whole rope) there is nothing
+    /// to adjust — the next reader recomputes from scratch.
+    fn adjust_word_count(&self, first: usize, last: usize, old_span_words: usize) {
+        if let Some(total) = self.word_count_cache.get() {
+            let new_span_words = self.words_in_line_range(first, last);
+            let updated = total + new_span_words - old_span_words;
+            self.word_count_cache.set(Some(updated));
+        }
     }
 
     /// Take the byte-range edits recorded since the last call (#302), to re-anchor
@@ -714,16 +769,34 @@ impl Buffer {
     // --- Stats -------------------------------------------------------------
 
     /// Total word count across the document.
+    ///
+    /// The cache is maintained incrementally on the edit path (#868), so a
+    /// keystroke never triggers an O(document) recount. This cold path runs only
+    /// when the cache is empty — a fresh buffer, or after undo/redo/replace
+    /// swapped the whole rope — and rebuilds it once from scratch. Even that
+    /// avoids a whole-document `String`: it segments line by line over the rope's
+    /// chunks, buffering only the current line. A word never straddles a `\n`
+    /// (UAX #29), so summing the per-line counts equals segmenting the whole
+    /// text, with no chunk-boundary double-count hazard.
     pub fn word_count(&self) -> usize {
         if let Some(n) = self.word_count_cache.get() {
             return n;
         }
-        // Count over the whole text, not per rope chunk: a word straddling a
-        // chunk boundary would otherwise be counted twice. Cached until the next
-        // edit (#151) so the status bar / outline don't re-segment every frame.
-        let n = count_words(&self.rope.to_string());
-        self.word_count_cache.set(Some(n));
-        n
+        let mut total = 0;
+        let mut line = String::new();
+        for chunk in self.rope.chunks() {
+            let mut rest = chunk;
+            while let Some(nl) = rest.find('\n') {
+                line.push_str(&rest[..nl]);
+                total += count_words(&line);
+                line.clear();
+                rest = &rest[nl + 1..];
+            }
+            line.push_str(rest);
+        }
+        total += count_words(&line); // the final line, which has no trailing `\n`
+        self.word_count_cache.set(Some(total));
+        total
     }
 
     // --- Syntax ------------------------------------------------------------
