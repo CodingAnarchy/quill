@@ -24,6 +24,7 @@ use crate::analysis;
 use crate::buffer::{self, Buffer, TextObject};
 use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
+use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
     BookField, Command, Finding, FindingKind, Findings, GitAction, History, ImportPreview,
@@ -226,6 +227,11 @@ pub struct App {
     /// fallback that picks up external edits even when nothing in-app marked the
     /// status dirty.
     last_vc_refresh: std::time::Instant,
+    /// The current interval before the fallback re-walks the tree (#869). Starts at
+    /// the base and backs off (doubling to a cap) each idle walk that finds the
+    /// count unchanged, so an untouched editor stops re-walking on a fixed short
+    /// clock; any change (or a save marking the status dirty) resets it to the base.
+    vc_status_idle_interval: std::time::Duration,
     /// The off-thread working-tree status walk (#779): a `.gitignore`-respecting
     /// stat walk is the heaviest thing on the idle tick, so it runs on a worker and
     /// its resulting change count lands via [`Self::refresh_vc_status_on_idle`],
@@ -253,6 +259,11 @@ pub struct App {
     /// `RefCell` because the renderer borrows `App` immutably; empty until the
     /// first draw or when an overlay replaces the editor.
     pub(crate) editor_layout: std::cell::RefCell<EditorLayout>,
+    /// The focused editor's cached display-only header blocks (#869), rebuilt only
+    /// when an input to them changes (a resize, theme switch, edited epigraph, paged
+    /// manuscript window, or entering/leaving epigraph editing) rather than every
+    /// frame. A `RefCell` because the renderer borrows `App` immutably.
+    pub(crate) header_cache: std::cell::RefCell<crate::ui::HeaderCache>,
     /// The focused list overlay's per-frame row layout (#812), recorded by the
     /// list-overlay renderer so a click can be mapped back to a list index the way
     /// [`editor_layout`](Self::editor_layout) maps a click to a buffer byte. A
@@ -283,6 +294,11 @@ pub struct App {
     /// per-session log accumulates bursts the coalesced day snapshot can't show.
     session_base_added: usize,
     session_base_removed: usize,
+    /// The last snapshot [`persist_snapshot`](Self::persist_snapshot) actually wrote
+    /// to the history log, so an autosave whose totals are unchanged skips appending
+    /// a duplicate day line (#869). A `RefCell` because the best-effort persist runs
+    /// off `&self`; `None` until the first write this session.
+    last_history_snapshot: std::cell::RefCell<Option<history::Snapshot>>,
     /// Per-chapter word baselines (chapter file → last counted words) the tally
     /// measures against. Keyed by file identity so it survives reordering; an
     /// edit's delta is attributed to the part of the chapter that changed.
@@ -533,12 +549,14 @@ impl App {
             vc_changes: 0,
             vc_status_dirty: false,
             last_vc_refresh: std::time::Instant::now(),
+            vc_status_idle_interval: vcs_actions::VC_STATUS_INTERVAL,
             vc_status_task: Task::idle(),
             overlay: None,
             viewport_height: 0,
             wrap_width: std::cell::Cell::new(72),
             surface_height: std::cell::Cell::new(0),
             editor_layout: std::cell::RefCell::new(EditorLayout::default()),
+            header_cache: std::cell::RefCell::new(crate::ui::HeaderCache::default()),
             list_layout: std::cell::RefCell::new(ListLayout::default()),
             scroll_offset: std::cell::Cell::new(0),
             added: 0,
@@ -548,6 +566,7 @@ impl App {
             part_removed: Vec::new(),
             session_base_added: 0,
             session_base_removed: 0,
+            last_history_snapshot: std::cell::RefCell::new(None),
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
             image: ai::image::ImageSettings::load(),

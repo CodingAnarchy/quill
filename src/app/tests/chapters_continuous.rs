@@ -388,6 +388,40 @@ fn momentum_persists_and_resumes_across_a_reopen() {
     assert_eq!(reopened.moved_to_unused, 3);
 }
 
+#[test]
+fn an_unchanged_autosave_appends_no_duplicate_history_line() {
+    // `persist` appends and the loader coalesces per day, so a run of autosaves
+    // with unchanged totals would stack identical lines. The unchanged one is
+    // skipped (#869): the first write lands, repeats add nothing, and a genuine
+    // change appends again — the log tracks real momentum without churn.
+    let (mut app, dir) = two_chapter_app("history-dedup");
+    let log = dir.join(".quill").join("history.jsonl");
+    let raw_lines =
+        |path: &std::path::Path| fs::read_to_string(path).map_or(0, |t| t.lines().count());
+
+    app.added = 100;
+    app.persist_snapshot();
+    assert_eq!(raw_lines(&log), 1, "the first snapshot is written");
+
+    // Same totals: nothing new appended.
+    app.persist_snapshot();
+    app.persist_snapshot();
+    assert_eq!(
+        raw_lines(&log),
+        1,
+        "unchanged autosaves append no duplicate"
+    );
+
+    // A real change appends a fresh line again.
+    app.added = 150;
+    app.persist_snapshot();
+    assert_eq!(raw_lines(&log), 2, "a changed snapshot appends");
+
+    // The coalesced view reflects the latest totals.
+    let snap = crate::history::for_date(&dir, &crate::date::iso(crate::date::today())).unwrap();
+    assert_eq!(snap.added, 150);
+}
+
 /// A two-chapter project where each chapter is its own part ("Beginning",
 /// "End"), for exercising per-part attribution.
 fn parts_app(name: &str) -> (App, TempProject) {

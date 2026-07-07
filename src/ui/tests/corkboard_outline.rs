@@ -141,6 +141,44 @@ fn epigraphs_render_above_the_body() {
 }
 
 #[test]
+fn header_blocks_are_cached_across_frames_and_invalidate_on_change() {
+    // The display-only header blocks are built once and reused per frame (#869):
+    // an unchanged frame reuses the same allocation, and the render output is
+    // byte-identical. Changing an input (the epigraph, the width) rebuilds them.
+    let mut app = app_with("# Chapter\n\nBody.\n");
+    app.buffer
+        .front_matter_mut()
+        .set_epigraph_text("First quote.");
+    app.buffer.front_matter_mut().set_epigraph_by("A");
+
+    let first = render(&app, 80, 20);
+    let id1 = app.header_cache.borrow().identity();
+
+    // A second frame with nothing changed reuses the cached blocks and renders
+    // identically — no rebuild, no drift.
+    let second = render(&app, 80, 20);
+    let id2 = app.header_cache.borrow().identity();
+    assert_eq!(first, second, "unchanged frame renders identically");
+    assert_eq!(id1, id2, "unchanged frame reuses the cached header blocks");
+
+    // Editing the epigraph invalidates the cache (different blocks, and the new
+    // quote shows on screen).
+    app.buffer
+        .front_matter_mut()
+        .set_epigraph_text("Second quote.");
+    let changed = render(&app, 80, 20);
+    let id3 = app.header_cache.borrow().identity();
+    assert_ne!(id2, id3, "an edited epigraph rebuilds the header blocks");
+    assert!(changed.contains("Second quote."), "screen:\n{changed}");
+    assert!(!changed.contains("First quote."), "screen:\n{changed}");
+
+    // A resize also invalidates the cache (the epigraph wraps to the new width).
+    render(&app, 60, 20);
+    let id4 = app.header_cache.borrow().identity();
+    assert_ne!(id3, id4, "a resize rebuilds the header blocks");
+}
+
+#[test]
 fn a_multiline_epigraph_renders_one_line_each() {
     let mut app = app_with("# Chapter\n\nBody.\n");
     let fm = app.buffer.front_matter_mut();

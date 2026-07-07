@@ -671,9 +671,16 @@ impl Buffer {
         loop {
             let hi = (byte + radius).min(len);
             let hi = self.rope.char_to_byte(self.rope.byte_to_char(hi));
-            let text = self.rope.byte_slice(byte..hi).to_string();
-            match text.grapheme_indices(true).nth(1) {
-                Some((b, _)) => return byte + b,
+            let slice = self.rope.byte_slice(byte..hi);
+            // The window is short (#693), so it almost always lands inside a single
+            // rope chunk — borrow it with no allocation; only the rare chunk-straddling
+            // window falls back to a copy (#869).
+            let second_grapheme = |text: &str| text.grapheme_indices(true).nth(1).map(|(b, _)| b);
+            let boundary = slice
+                .as_str()
+                .map_or_else(|| second_grapheme(&slice.to_string()), second_grapheme);
+            match boundary {
+                Some(b) => return byte + b,
                 // No boundary within the window. If it reaches the document end,
                 // that end *is* the boundary; otherwise widen and rescan.
                 None if hi >= len => return len,

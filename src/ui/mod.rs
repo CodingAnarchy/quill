@@ -25,6 +25,7 @@ mod editor;
 mod list_overlay;
 mod overlay;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
+pub use editor::HeaderCache;
 use list_overlay::{
     draw_annotations, draw_corkboard, draw_dashboard, draw_dir_browser, draw_findings,
     draw_history, draw_import_preview, draw_list_overlay, draw_model_manager, draw_palette,

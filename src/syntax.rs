@@ -15,6 +15,8 @@
 //! kept available for the upcoming in-chapter outline (issue #11) to consume
 //! rather than re-parsing.
 
+use std::rc::Rc;
+
 use ropey::Rope;
 use tree_sitter::{InputEdit, Node, Point};
 use tree_sitter_md::{MarkdownParseOptions, MarkdownParser, MarkdownTree};
@@ -71,6 +73,11 @@ pub struct Syntax {
     highlights: Vec<Highlight>,
     /// Emphasis delimiters, for soft-rendering (concealing) the markers.
     markers: Vec<Marker>,
+    /// Every marker's conceal range (all delimiters hidden), start-sorted — the
+    /// full list [`conceal_ranges`](Self::conceal_ranges) returns when nothing is
+    /// revealed. Built once per parse/reparse (markers change only then) and shared
+    /// via `Rc` so per-frame rendering neither rebuilds nor clones it (#869).
+    conceal_all: Rc<[(usize, usize)]>,
     /// Headings in document order — the in-chapter outline (#11).
     headings: Vec<Heading>,
 }
@@ -88,11 +95,13 @@ impl Syntax {
             .parse(text.as_bytes(), None)
             .expect("markdown parse should not fail without a timeout/cancellation");
         let (highlights, markers, headings) = collect(&tree, |s, e| text[s..e].to_string());
+        let conceal_all = conceal_all_from(&markers);
         Self {
             parser,
             tree,
             highlights,
             markers,
+            conceal_all,
             headings,
         }
     }
@@ -131,6 +140,7 @@ impl Syntax {
             let (highlights, markers, headings) =
                 collect(&self.tree, |s, e| rope.byte_slice(s..e).to_string());
             self.highlights = highlights;
+            self.conceal_all = conceal_all_from(&markers);
             self.markers = markers;
             self.headings = headings;
         }
@@ -150,10 +160,28 @@ impl Syntax {
     /// concealed unless `reveal_at` (the cursor's byte offset) lies within the
     /// delimiter's enclosing span — so the markers reappear for editing only on
     /// the span the cursor is in. Pass `None` to conceal every delimiter.
-    pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Vec<(usize, usize)> {
+    ///
+    /// Returns a shared `Rc` so the renderer neither rebuilds the list per frame
+    /// nor clones it into the click-inversion layout (#869). The common cases —
+    /// `None`, or a cursor not inside any emphasis span — hand back the cached
+    /// full list (a refcount bump, no allocation); only a cursor actually sitting
+    /// on a span (which reveals that span's markers) builds a filtered list.
+    pub fn conceal_ranges(&self, reveal_at: Option<usize>) -> Rc<[(usize, usize)]> {
+        let Some(b) = reveal_at else {
+            return Rc::clone(&self.conceal_all);
+        };
+        // Reveal only when the cursor is actually within some span; otherwise the
+        // filtered result is byte-for-byte the full list, so reuse the cache.
+        let reveals_any = self
+            .markers
+            .iter()
+            .any(|m| m.span_start <= b && b <= m.span_end);
+        if !reveals_any {
+            return Rc::clone(&self.conceal_all);
+        }
         self.markers
             .iter()
-            .filter(|m| reveal_at.is_none_or(|b| !(m.span_start <= b && b <= m.span_end)))
+            .filter(|m| !(m.span_start <= b && b <= m.span_end))
             .map(|m| (m.delim_start, m.delim_end))
             .collect()
     }
@@ -162,6 +190,15 @@ impl Syntax {
     pub fn headings(&self) -> &[Heading] {
         &self.headings
     }
+}
+
+/// The full conceal list (every marker's delimiter range) as a shared slice, in
+/// the markers' start-sorted order. Cached on [`Syntax`] per parse/reparse (#869).
+fn conceal_all_from(markers: &[Marker]) -> Rc<[(usize, usize)]> {
+    markers
+        .iter()
+        .map(|m| (m.delim_start, m.delim_end))
+        .collect()
 }
 
 /// Walk the block tree (headings) and every inline tree (emphasis/strong) into a
@@ -397,8 +434,8 @@ mod tests {
     // Collect the concealed substrings for readability in the assertions below.
     fn concealed(text: &str, s: &Syntax, reveal_at: Option<usize>) -> Vec<String> {
         s.conceal_ranges(reveal_at)
-            .into_iter()
-            .map(|(a, b)| text[a..b].to_string())
+            .iter()
+            .map(|&(a, b)| text[a..b].to_string())
             .collect()
     }
 
@@ -489,6 +526,60 @@ mod tests {
         // Cursor in the first block reveals only its two fences; the second's stay.
         let in_first = text.find("a\n").unwrap();
         assert_eq!(s.conceal_ranges(Some(in_first)).len(), 2);
+    }
+
+    #[test]
+    fn conceal_list_is_computed_once_per_parse_and_shared() {
+        // The full conceal list (nothing revealed) is cached per parse (#869): two
+        // calls hand back the *same* allocation, so a frame reuses it rather than
+        // rebuilding an O(markers) vec. The cursor-outside-any-span case reuses it
+        // too, and the value is byte-identical to the old per-call filter.
+        let text = "a *ital* and **bold** z\n";
+        let s = Syntax::new(text);
+        let full = s.conceal_ranges(None);
+        let full_len = full.len();
+        assert!(full_len > 0, "the emphasis/strong delimiters are concealed");
+
+        let again = s.conceal_ranges(None);
+        assert!(
+            Rc::ptr_eq(&full, &again),
+            "the full list is cached, not rebuilt"
+        );
+
+        // The cursor at document end sits in no span, so nothing is revealed — the
+        // same cached list is returned rather than a fresh filtered copy.
+        let outside = s.conceal_ranges(Some(text.len()));
+        assert!(
+            Rc::ptr_eq(&full, &outside),
+            "no reveal reuses the cached list"
+        );
+
+        // The cursor inside the *ital* span reveals that span's markers, so the
+        // result differs — a freshly built (shorter) list, matching the old filter.
+        let inside = s.conceal_ranges(Some(text.find("ital").unwrap()));
+        assert!(inside.len() < full_len, "the ital markers are revealed");
+        assert!(!inside.is_empty(), "the bold markers stay concealed");
+        assert!(
+            !Rc::ptr_eq(&full, &inside),
+            "a reveal builds a filtered list"
+        );
+    }
+
+    #[test]
+    fn reparse_refreshes_the_cached_conceal_list() {
+        // A reparse rebuilds the cached full list so it tracks the current markers
+        // (#869) — here the emphasis is gone, so the list empties and is shared.
+        let mut s = Syntax::new("plain *text* here\n");
+        assert!(
+            !s.conceal_ranges(None).is_empty(),
+            "the emphasis is concealed"
+        );
+        let rope = Rope::from_str("plain text here\n");
+        s.reparse(&rope);
+        assert!(
+            s.conceal_ranges(None).is_empty(),
+            "the removed emphasis leaves nothing to conceal after reparse"
+        );
     }
 
     #[test]
