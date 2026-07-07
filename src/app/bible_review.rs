@@ -344,6 +344,24 @@ impl App {
         }
     }
 
+    /// Jump the editor to a finding's target chapter (#827): switch to its book
+    /// (a series finding may live in another, #341), then activate its first
+    /// chapter. A no-op for a finding with no chapters (a Q&A answer row); reports
+    /// when the chapter can't be found. Shared by the triage list's Enter and the
+    /// manuscript-health dashboard, so both jump identically.
+    pub(crate) fn jump_to_finding(&mut self, finding: &Finding) {
+        self.focus_finding_book(finding.book);
+        if let Some(title) = finding.chapters.first() {
+            if let Some(i) = (0..self.chapter_count())
+                .find(|&i| self.project.chapter_title(i) == Some(title.as_str()))
+            {
+                self.activate_chapter(i);
+            } else {
+                self.message = Some(format!("Chapter '{title}' not found"));
+            }
+        }
+    }
+
     pub(crate) fn on_key_bible_review(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let editing = matches!(&self.mode, Mode::BibleReview(r) if r.editing.is_some());
@@ -488,16 +506,7 @@ impl App {
                 let item = self.finding_at(selected).cloned();
                 self.mode = self.editing_mode();
                 if let Some(item) = item {
-                    self.focus_finding_book(item.book);
-                    if let Some(title) = item.chapters.first() {
-                        if let Some(i) = (0..self.chapter_count())
-                            .find(|&i| self.project.chapter_title(i) == Some(title.as_str()))
-                        {
-                            self.activate_chapter(i);
-                        } else {
-                            self.message = Some(format!("Chapter '{title}' not found"));
-                        }
-                    }
+                    self.jump_to_finding(&item);
                 }
             }
             // Turn the finding into an `xxx` TODO marker in its chapter (a note,

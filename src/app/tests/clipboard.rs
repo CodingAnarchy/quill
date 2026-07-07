@@ -161,6 +161,7 @@ fn a_paste_in_a_non_editing_mode_is_ignored() {
     app.mode = Mode::Findings(Box::new(Findings {
         items: vec![Finding {
             summary: "a".into(),
+            kind: crate::mode::FindingKind::Other,
             chapters: Vec::new(),
             book: None,
             action: None,

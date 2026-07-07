@@ -78,6 +78,7 @@ fn theme_findings_flow_through_triage_deduped() {
 fn theme_ui_finding(chapter: &str, motif: &str, issue: &str) -> crate::mode::Finding {
     crate::mode::Finding {
         summary: format!("{motif}: {issue}"),
+        kind: crate::mode::FindingKind::Theme,
         chapters: vec![chapter.into()],
         book: None,
         action: Some(AiAction::Theme),

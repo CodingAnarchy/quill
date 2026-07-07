@@ -178,6 +178,11 @@ pub enum Mode {
     /// (open its chapter) or dismissed. Read-only over the prose. Boxed (carries
     /// the findings list).
     Findings(Box<Findings>),
+    /// The manuscript-health dashboard (#827): open findings grouped by kind/pass
+    /// then chapter, each group headed by its count, with the individual findings
+    /// jumpable (Enter opens the chapter). A read of the standing triage state,
+    /// read-only over the prose. Boxed (carries the grouped rows).
+    Dashboard(Box<Dashboard>),
     /// Browsing the commit history (#587): a navigable list of past commits where
     /// the selected one can be diffed against the current chapter, or the chapter
     /// restored to it (into the editable buffer for review-and-save). Boxed (carries

@@ -107,12 +107,96 @@ impl History {
     }
 }
 
+/// The category / lens a [`Finding`] belongs to (#827) — which analysis pass it
+/// speaks for, kept on the finding so the pass survives the map to a summary
+/// string and a round-trip through the durable store (where `action` is lost).
+/// The manuscript-health dashboard groups by this, and cross-pass dedup keys on
+/// it, so two passes flagging the same span with the same text stay distinct.
+///
+/// [`Other`](Self::Other) is the catch-all for findings not tied to an analysis
+/// pass — the "Ask the manuscript" citations and answer rows — and the fallback
+/// for a slug the store can't resolve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FindingKind {
+    Continuity,
+    Setting,
+    Plot,
+    Theme,
+    Scaffold,
+    Naming,
+    Style,
+    Editorial,
+    Voice,
+    /// Not a re-runnable analysis pass (Q&A citations / answer rows), or an
+    /// unrecognized persisted slug.
+    Other,
+}
+
+impl FindingKind {
+    /// The stable slug persisted in the durable store and matched back on load —
+    /// never change one without a migration. Also the dashboard's group key.
+    pub(crate) const fn slug(self) -> &'static str {
+        match self {
+            Self::Continuity => "continuity",
+            Self::Setting => "setting",
+            Self::Plot => "plot",
+            Self::Theme => "theme",
+            Self::Scaffold => "scaffold",
+            Self::Naming => "naming",
+            Self::Style => "style",
+            Self::Editorial => "editorial",
+            Self::Voice => "voice",
+            Self::Other => "other",
+        }
+    }
+
+    /// The human label shown in the dashboard's group headers.
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Continuity => "Continuity",
+            Self::Setting => "Setting",
+            Self::Plot => "Plot & arc",
+            Self::Theme => "Theme & motif",
+            Self::Scaffold => "Scaffold / outline",
+            Self::Naming => "Names & terms",
+            Self::Style => "Prose & style",
+            Self::Editorial => "Editorial",
+            Self::Voice => "Character voice",
+            Self::Other => "Other",
+        }
+    }
+
+    /// Resolve a persisted slug back to a kind; an unknown slug (a future or
+    /// corrupt value) falls back to [`Other`](Self::Other) rather than failing.
+    pub(crate) fn from_slug(slug: &str) -> Self {
+        [
+            Self::Continuity,
+            Self::Setting,
+            Self::Plot,
+            Self::Theme,
+            Self::Scaffold,
+            Self::Naming,
+            Self::Style,
+            Self::Editorial,
+            Self::Voice,
+        ]
+        .into_iter()
+        .find(|k| k.slug() == slug)
+        .unwrap_or(Self::Other)
+    }
+}
+
 /// One triageable finding (a continuity contradiction, style note, …). UI-shaped
 /// — the AI layer maps its typed findings into this for display.
 #[derive(Clone, Debug)]
 pub struct Finding {
     /// One-line summary shown in the list (e.g. "object: the locket …").
     pub(crate) summary: String,
+    /// The category / lens this finding belongs to (#827) — which pass it speaks
+    /// for. Survives the map to a summary string and the durable-store round-trip
+    /// (where `action` is lost), so the dashboard can group by it and cross-pass
+    /// dedup can key on it.
+    pub(crate) kind: FindingKind,
     /// Chapters involved; the first is the jump target.
     pub(crate) chapters: Vec<String>,
     /// The book the finding belongs to in a multi-book series (#341):
@@ -129,14 +213,75 @@ pub struct Finding {
     pub(crate) action: Option<AiAction>,
 }
 
-/// Identity is the finding's *content* — summary, chapters, and book — not the
-/// originating pass (#608). This mirrors the durable store's content key
-/// ([`crate::app`]): a re-produced finding is the same finding, and a finding
-/// restored from disk (which carries no `action`) still matches the one a fresh
-/// pass produces, so triage dedup and dismiss-matching stay intact.
+/// Identity is the finding's *content* — kind, summary, chapters, and book — not
+/// the originating `action` handle (#608). This mirrors the durable store's
+/// content key ([`crate::app`]): a re-produced finding is the same finding, and a
+/// finding restored from disk (which carries no `action`, but does carry its
+/// persisted `kind`) still matches the one a fresh pass produces, so triage dedup
+/// and dismiss-matching stay intact. `kind` sharpens cross-pass dedup (#827): two
+/// passes flagging the same span with coincidentally identical text stay distinct.
 impl PartialEq for Finding {
     fn eq(&self, other: &Self) -> bool {
-        self.summary == other.summary && self.chapters == other.chapters && self.book == other.book
+        self.kind == other.kind
+            && self.summary == other.summary
+            && self.chapters == other.chapters
+            && self.book == other.book
+    }
+}
+
+/// One row of the manuscript-health dashboard (#827): a group header (a
+/// kind/pass, or a chapter within it) carrying its open-finding count, or a
+/// jumpable finding under the current group. The dashboard is a flat, ordered
+/// list of these — headers give the at-a-glance counts, finding rows are the
+/// jump targets. Only [`Finding`](Self::Finding) rows are selectable.
+pub enum DashboardRow {
+    /// A kind/pass group header: the pass label and how many open findings it has.
+    Kind { label: &'static str, count: usize },
+    /// A chapter sub-header within the current kind group, with its count.
+    Chapter { title: String, count: usize },
+    /// A jumpable finding under the current kind + chapter.
+    Finding(Finding),
+}
+
+impl DashboardRow {
+    /// The finding this row addresses, or `None` for a header row (headers aren't
+    /// selectable or jumpable).
+    pub(crate) const fn finding(&self) -> Option<&Finding> {
+        match self {
+            Self::Finding(f) => Some(f),
+            Self::Kind { .. } | Self::Chapter { .. } => None,
+        }
+    }
+}
+
+/// State for an open [`Mode::Dashboard`] — the manuscript-health overview (#827):
+/// open findings grouped by kind/pass then chapter, each group headed by its
+/// count, with the individual findings jumpable. `rows` is the flat, ordered
+/// render/selection list ([`DashboardRow`]); `selected` is the currently
+/// highlighted *finding* row (headers are skipped). `total` is the open-finding
+/// count shown in the title. Built once when the overview opens — a read of the
+/// standing triage state, never a fresh pass.
+pub struct Dashboard {
+    pub(crate) rows: Vec<DashboardRow>,
+    pub(crate) selected: usize,
+    pub(crate) total: usize,
+}
+
+impl Dashboard {
+    /// The indices of the selectable (finding) rows, in order — the stops the
+    /// arrow keys move between and the selection resolves against.
+    pub(crate) fn finding_rows(&self) -> Vec<usize> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.finding().is_some())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// The finding at the given row index, if that row is a jumpable finding.
+    pub(crate) fn finding_at(&self, row: usize) -> Option<&Finding> {
+        self.rows.get(row).and_then(DashboardRow::finding)
     }
 }
 

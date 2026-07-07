@@ -26,8 +26,8 @@ use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BookField, Command, Finding, Findings, GitAction, History, ImportPreview, MetaEdit, MetaField,
-    Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
+    BookField, Command, Finding, FindingKind, Findings, GitAction, History, ImportPreview,
+    MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
 };
 use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::recovery;
@@ -48,6 +48,7 @@ mod export_style;
 mod exporting;
 mod findings_store;
 mod fonts;
+mod health;
 mod images;
 mod imports;
 mod marks;
