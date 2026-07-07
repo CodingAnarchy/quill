@@ -499,7 +499,7 @@ pub(super) fn draw_findings(
     let help = if findings.typing {
         format!("Filter: {}_", findings.filter)
     } else if findings.filter.is_empty() {
-        "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · d dismiss · / filter · esc close".to_string()
+        "Findings — ↑↓ move · enter jump · i mark xxx · r re-check · R re-check all · d dismiss · s save · / filter · esc close".to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears",

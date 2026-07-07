@@ -166,6 +166,12 @@ pub enum Outcome {
     /// pass now produces (so the one being rechecked is cleared if it's gone, or
     /// kept if it's still flagged). Analysis-only — it writes no bible file.
     Recheck(Result<Vec<crate::mode::Finding>, AiError>),
+    /// Re-check of every open triage finding in one pass (#830): each open
+    /// finding's originating pass re-run scoped to its chapters (grouped by
+    /// pass + chapters to avoid redundant runs), parsed to the combined fresh UI
+    /// findings across all groups (so each rechecked finding is cleared if it's
+    /// gone or kept if still flagged). Analysis-only — it writes no bible file.
+    RecheckAll(Result<Vec<crate::mode::Finding>, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -200,7 +206,7 @@ impl Outcome {
             Self::Thesaurus(r) => r.as_ref().err(),
             Self::NameGen(r) => r.as_ref().err(),
             Self::Editorial(r) => r.as_ref().err(),
-            Self::Recheck(r) => r.as_ref().err(),
+            Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),
             Self::Error(e) => Some(e),
         }
     }

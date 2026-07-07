@@ -415,6 +415,7 @@ impl App {
                     Outcome::NameGen(r) => self.apply_namegen(r),
                     Outcome::Editorial(r) => self.apply_editorial(r),
                     Outcome::Recheck(r) => self.apply_recheck(r),
+                    Outcome::RecheckAll(r) => self.apply_recheck_all(r),
                     Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
                 }
                 // If a routed-local pass fell back to Claude (#725), surface why —

@@ -341,6 +341,12 @@ pub struct App {
     /// clears it if it's gone or keeps it if still flagged. `Some` only while a
     /// recheck request is in flight; taken when its result applies.
     pending_recheck: Option<Finding>,
+    /// The findings a re-check-all is verifying (#830): every open finding whose
+    /// originating pass was re-run (grouped by pass + chapters into one worker
+    /// batch), so when the batch lands [`App::apply_recheck_all`] can reconcile
+    /// each — clearing the ones the fresh pass no longer produces, keeping the
+    /// rest. `Some` only while a re-check-all is in flight; taken when it applies.
+    pending_recheck_all: Option<Vec<Finding>>,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
     /// cleanly. `(tracker, digests, merge)` — `merge` is `Some(preserve)` for one
@@ -557,6 +563,7 @@ impl App {
             triage,
             findings_store,
             pending_recheck: None,
+            pending_recheck_all: None,
             pending_pass: None,
             workflows: loaded.workflows,
             triggers: loaded.triggers,
