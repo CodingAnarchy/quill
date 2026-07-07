@@ -59,6 +59,13 @@ pub struct ChapterEntry {
     /// need to ignore counts).
     #[serde(skip)]
     pub words: usize,
+    /// Cached count of the TODO marker (#867) in this chapter's prose, populated
+    /// from the file at open (alongside `words`) and refreshed as the chapter is
+    /// edited. Transient like `words` — never written to `book.toml` (`serde(skip)`);
+    /// lets the save-path TODO roll-up sum cached counts instead of re-reading and
+    /// re-scanning every chapter from disk on every save.
+    #[serde(skip)]
+    pub todo: usize,
     /// Cached chapter metadata, read from the file's front matter at open and
     /// kept current as the author edits it. Transient like `words` — the chapter
     /// files are the source of truth; these power the pane without re-reading.
@@ -87,6 +94,7 @@ impl ChapterEntry {
             title,
             file,
             words: 0,
+            todo: 0,
             status: None,
             summary: None,
             pov: None,
@@ -338,6 +346,15 @@ pub struct Project {
     /// chapters that moved — not the whole project — every idle tick. Keyed by
     /// file so it survives reordering.
     words_changed: HashSet<String>,
+    /// Running sum of the active book's cached per-chapter word counts (#867), so
+    /// the save-path snapshot's project word total is read from a maintained total
+    /// rather than re-summed across every chapter on each save. Kept in step with
+    /// the caches: the single-chapter cache writes ([`set_chapter_words`](Self::set_chapter_words),
+    /// [`read_chapter_cache`](Self::read_chapter_cache)) adjust it by the delta, and
+    /// bulk re-caches (open, a book switch, an import) recompute it wholesale via
+    /// [`sync_words_total`](Self::sync_words_total). Excludes the active chapter's
+    /// live buffer edits — the snapshot folds those in from the buffer.
+    words_total: usize,
     /// The books of a multi-book series (#328), in series order. **Empty for a
     /// standalone novel** — its single book lives entirely in `manifest`. When
     /// non-empty, the entry at `active_book` mirrors `manifest` (kept in sync on
@@ -397,6 +414,7 @@ impl Project {
             manifest,
             active: String::new(),
             words_changed: HashSet::new(),
+            words_total: 0,
             books,
             active_book,
             dictionary,
@@ -423,12 +441,15 @@ impl Project {
         // active book is already cached above (it lives in the manifest).
         let active = project.active_book;
         let root = project.root.clone();
+        // The TODO marker is series-wide (folded into the active manifest), so it's
+        // the right marker for every book's cached counts (#867).
+        let marker = project.manifest.todo_marker().to_string();
         for (b, book) in project.books.iter_mut().enumerate() {
             if b == active {
                 continue;
             }
             for entry in &mut book.chapters {
-                cache_chapter(&root, entry);
+                cache_chapter(&root, entry, &marker);
             }
         }
         Ok(project)
@@ -466,6 +487,7 @@ impl Project {
             },
             active: String::new(),
             words_changed: HashSet::new(),
+            words_total: 0,
             books: Vec::new(),
             active_book: 0,
             dictionary: HashSet::new(),
@@ -605,12 +627,48 @@ impl Project {
     pub fn set_chapter_words(&mut self, index: usize, words: usize) {
         if let Some(chapter) = self.manifest.chapters.get_mut(index) {
             if chapter.words != words {
+                // Keep the running project total in step by the delta (#867), so
+                // the save-path snapshot reads a maintained total, not a re-sum.
+                self.words_total = self.words_total + words - chapter.words;
                 chapter.words = words;
                 // Record the change so the daily tally re-checks just this chapter
                 // (#220) rather than the whole project.
                 self.words_changed.insert(chapter.file.clone());
             }
         }
+    }
+
+    /// Cached TODO-marker count for chapter `index` (#867), 0 if out of range.
+    /// Populated from the file at open and refreshed for the active chapter on
+    /// its save, so the save-path roll-up ([`App::count_todo`]) sums cached counts
+    /// instead of re-reading every chapter from disk.
+    pub fn chapter_todo(&self, index: usize) -> usize {
+        self.manifest.chapters.get(index).map_or(0, |c| c.todo)
+    }
+
+    /// Refresh the cached TODO-marker count for chapter `index` (#867), no-op if
+    /// out of range. Set alongside the word count on an active-chapter save so the
+    /// cached roll-up stays current without a disk read.
+    pub fn set_chapter_todo(&mut self, index: usize, todo: usize) {
+        if let Some(chapter) = self.manifest.chapters.get_mut(index) {
+            chapter.todo = todo;
+        }
+    }
+
+    /// The maintained running total of the active book's cached per-chapter word
+    /// counts (#867) — every chapter counted from its cache, *including* the active
+    /// one (whose live buffer edits the caller folds in separately). Used by the
+    /// save-path snapshot so the project word total is read, not re-summed.
+    pub const fn words_total(&self) -> usize {
+        self.words_total
+    }
+
+    /// Recompute the running word total from the active book's caches (#867). O(n)
+    /// in the chapter count; call it after a bulk re-cache (open, a book switch, an
+    /// import) rather than the per-chapter delta path, so the total resets cleanly
+    /// to the freshly cached counts.
+    pub(super) fn sync_words_total(&mut self) {
+        self.words_total = self.manifest.chapters.iter().map(|c| c.words).sum();
     }
 
     /// Take the files whose cached word count changed since the last call — what
@@ -848,6 +906,7 @@ impl Project {
             },
             active,
             words_changed: HashSet::new(),
+            words_total: 0,
             books: Vec::new(),
             active_book: 0,
             dictionary: HashSet::new(),

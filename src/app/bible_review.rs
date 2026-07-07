@@ -14,8 +14,10 @@ use ratatui::text::{Line, Span};
 use crate::ai::bible;
 use crate::atomic;
 use crate::buffer::Buffer;
+use crate::frontmatter;
 use crate::mode::{BibleConflict, BibleReview, Finding, Findings, Mode};
 use crate::project::read_existing;
+use crate::text::count_matches;
 use crate::theme;
 
 use super::assist::write_failure_message;
@@ -836,10 +838,17 @@ impl App {
                 self.buffer = buffer;
             }
             self.cache_focus_words();
+        } else {
+            // Non-active chapters: the marker is on disk. The TODO roll-up now reads
+            // the cached per-chapter count (#867), so refresh this chapter's cached
+            // TODO count to include the note. The word cache is left untouched, so an
+            // AI-inserted note still stays out of the author's word tally.
+            let todo = count_matches(
+                frontmatter::split(&body).1,
+                self.project.manifest.todo_marker(),
+            );
+            self.project.set_chapter_todo(i, todo);
         }
-        // Non-active chapters: the marker is on disk; the report's `xxx` count
-        // reads bodies live, and leaving the word cache untouched keeps an
-        // AI-inserted note out of the author's word tally.
         self.message = Some(format!("Marked xxx in '{title}'"));
         true
     }

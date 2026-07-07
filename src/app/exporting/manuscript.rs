@@ -329,8 +329,11 @@ impl App {
         let mut front = Vec::new();
         let mut body = Vec::new();
         let mut back = Vec::new();
+        // Resolve the active index once — `active_index()` is O(n), so reading it
+        // per chapter (via `chapter_text`) would make this O(chapters²) (#865, #867).
+        let active = self.project.active_index();
         for i in 0..self.chapter_count() {
-            let notes = self.chapter_review_notes(i);
+            let notes = self.chapter_review_notes(i, active);
             match self.project.chapter_band(i) {
                 Band::Front => front.push(notes),
                 Band::Body => body.push(notes),
@@ -346,8 +349,8 @@ impl App {
     /// resolved against the chapter's body text to the exact snippet it anchors, so
     /// the review writer can locate and comment it. A range that no longer falls
     /// within the body (a stale side-file entry) is skipped.
-    fn chapter_review_notes(&self, i: usize) -> export::docx::ChapterNotes {
-        let text = self.chapter_text(i);
+    fn chapter_review_notes(&self, i: usize, active: usize) -> export::docx::ChapterNotes {
+        let text = self.chapter_text_with_active(i, active);
         let file = self.project.chapter_file(i).to_string();
         self.project
             .annotations_for(&file)
@@ -407,6 +410,9 @@ impl App {
         };
         // Own each chapter's title and prose so the borrowed [`ChapterInfo`] slice
         // outlives the `preflight` call; the active chapter reads live from the buffer.
+        // Resolve the active index once — `active_index()` is O(n), so the per-chapter
+        // count/text reads would otherwise make this O(chapters²) (#865, #867).
+        let active = self.project.active_index();
         let chapters: Vec<(String, usize, bool, String)> = (0..self.chapter_count())
             .map(|i| {
                 (
@@ -414,9 +420,9 @@ impl App {
                         .chapter_title(i)
                         .unwrap_or("Untitled")
                         .to_string(),
-                    self.chapter_word_count(i),
+                    self.chapter_word_count_with_active(i, active),
                     self.project.chapter_band(i) == Band::Body,
-                    self.chapter_text(i),
+                    self.chapter_text_with_active(i, active),
                 )
             })
             .collect();
@@ -792,12 +798,16 @@ impl App {
         // A fresh group opens whenever the part changes (`prev` starts unset so the
         // first body chapter always opens one).
         let mut prev: Option<Option<usize>> = None;
+        // Resolve the active index once — `active_index()` is O(n), so reading it per
+        // chapter (via `export_chapter` → `chapter_text`) would make this a
+        // O(chapters²) compile on a large book (#865, #867).
+        let active = self.project.active_index();
         for i in 0..self.chapter_count() {
             // A sample keeps only its chapters; the rest of the book is skipped.
             if span.is_some_and(|s| !s.contains(&i)) {
                 continue;
             }
-            let chapter = self.export_chapter(i);
+            let chapter = self.export_chapter(i, active);
             match self.project.chapter_band(i) {
                 Band::Front => front.push(chapter),
                 Band::Back => back.push(chapter),
@@ -890,14 +900,15 @@ impl App {
     }
 
     /// Build one chapter for export: its title, epigraph, and prose (front matter
-    /// stripped, a repeated title heading dropped).
-    fn export_chapter(&self, i: usize) -> Chapter {
+    /// stripped, a repeated title heading dropped). `active` is the pre-resolved
+    /// active index so the caller's per-chapter loop stays O(chapters) (#865, #867).
+    fn export_chapter(&self, i: usize, active: usize) -> Chapter {
         let title = self
             .project
             .chapter_title(i)
             .unwrap_or("Untitled")
             .to_string();
-        let body = export::strip_repeated_title(&self.chapter_text(i), &title);
+        let body = export::strip_repeated_title(&self.chapter_text_with_active(i, active), &title);
         Chapter {
             title,
             epigraph: self.chapter_epigraph(i),

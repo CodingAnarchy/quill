@@ -129,12 +129,17 @@ impl App {
     }
 
     /// Total words across the whole project (the active chapter live, the rest
-    /// cached). Used by the progress report.
+    /// cached). Used by the progress report and the save-path snapshot (#867).
+    ///
+    /// Reads the maintained running total ([`Project::words_total`]) rather than
+    /// re-summing every chapter, so a save costs O(1) here — the total is kept in
+    /// step as chapters are cached, saved, added, and removed. The total counts the
+    /// active chapter from its *cache*, so swap in the live buffer count to reflect
+    /// unsaved edits (the buffer's word count updates as you type).
     pub fn project_word_count(&self) -> usize {
         let active = self.project.active_index();
-        (0..self.chapter_count())
-            .map(|i| self.chapter_word_count_with_active(i, active))
-            .sum()
+        let cached_active = self.project.chapter_words(active);
+        (self.project.words_total() + self.buffer.word_count()).saturating_sub(cached_active)
     }
 
     /// Words in body chapters only — what the progress report measures against the
