@@ -19,6 +19,7 @@ pub mod constrain;
 pub mod continuity;
 pub mod cost;
 pub mod editorial;
+pub mod embed;
 pub mod fal;
 mod http;
 pub mod image;
@@ -438,6 +439,12 @@ pub struct Settings {
     pub offline: bool,
     /// Model id sent to the Claude backend (the local backend picks its own).
     pub model: String,
+    /// The on-device embedding model id for grounded-Ask semantic retrieval (#831),
+    /// by id (`"minilm"`). Empty ⇒ the default [`embed::EmbedModel::default_model`].
+    /// Only consumed by the `local` build; when its weights aren't on disk, Ask
+    /// degrades gracefully to sending the whole book (the pre-#831 path).
+    #[serde(default)]
+    pub embed_model: String,
     /// API key, if set in the config file. The `ANTHROPIC_API_KEY` env var
     /// overrides this (see [`Settings::load`]).
     pub api_key: Option<String>,
@@ -468,6 +475,7 @@ impl Default for Settings {
             local_models: Vec::new(),
             offline: false,
             model: default_model(),
+            embed_model: String::new(),
             api_key: None,
             cost_threshold: 0.20,
             refresh_after_changes: 5,
@@ -590,6 +598,14 @@ pub fn qa_schema() -> serde_json::Value {
 /// Build a Q&A request: the manuscript as the cacheable context, `question` as
 /// the prompt, constrained to the [`qa_schema`] so the reply carries jumpable
 /// chapter citations (#609).
+///
+/// `manuscript` is either the whole active book (the default, unchanged path) or —
+/// when the semantic index is available — just the retrieved passages under their
+/// chapter titles ([`retrieved_context`], #831). Either way it's the same request
+/// shape and the same schema, so there's one Q&A path: retrieval changes only *what
+/// context* is fed, not how the answer is produced or how its citations jump. The
+/// `QA_SYSTEM` prompt still asks the model to cite the exact chapter titles it drew
+/// from, so a retrieved passage's chapter stays a jumpable citation.
 pub fn build_qa_request(manuscript: String, question: &str, model: &str) -> Request {
     Request {
         system: Some(QA_SYSTEM.to_string()),
@@ -599,6 +615,36 @@ pub fn build_qa_request(manuscript: String, question: &str, model: &str) -> Requ
         max_tokens: 1024,
         json_schema: Some(qa_schema()),
     }
+}
+
+/// Serialize retrieved passages ([`embed::Hit`]) into the manuscript-shaped context
+/// [`build_qa_request`] feeds (#831): each passage under its chapter title heading,
+/// most-relevant first, exactly the `# Title\n\n<prose>` shape the whole-book render
+/// uses — so the model cites the same chapter titles and every citation stays
+/// jumpable. Consecutive hits from the same chapter share one heading. This is the
+/// retrieval step that lets Ask scale past one book's window: instead of the whole
+/// book, only the passages the query actually pulled up are sent, with their
+/// citations preserved. Reads prose to retrieve + cite it; never writes it.
+///
+/// Its only non-test caller is the `local`-gated Ask retrieval step (retrieval
+/// needs the candle embedder), so it's unreachable in a default non-test build;
+/// the scoped allow silences that without deleting logic the tests + `local` build
+/// use (#406).
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
+pub fn retrieved_context(hits: &[embed::Hit]) -> String {
+    let mut out = String::new();
+    let mut last_title: Option<&str> = None;
+    for hit in hits {
+        if last_title != Some(hit.passage.title.as_str()) {
+            out.push_str("# ");
+            out.push_str(&hit.passage.title);
+            out.push_str("\n\n");
+            last_title = Some(hit.passage.title.as_str());
+        }
+        out.push_str(hit.passage.text.trim());
+        out.push_str("\n\n");
+    }
+    out
 }
 
 /// Parse a Q&A reply into an [`Answer`] (#609). The schema guarantees the JSON
@@ -778,6 +824,48 @@ mod tests {
             schema["required"],
             serde_json::json!(["answer", "citations"])
         );
+    }
+
+    #[test]
+    fn retrieved_context_renders_passages_under_chapter_headings() {
+        // Retrieved hits become the same `# Title\n\n<prose>` shape the whole-book
+        // render uses, so the model cites the same chapter titles and hits jump (#831).
+        let hits = vec![
+            embed::Hit {
+                passage: embed::Passage {
+                    title: "The Harbor".into(),
+                    file: "two.md".into(),
+                    text: "Ships crowded the harbor.".into(),
+                },
+                score: 0.9,
+            },
+            embed::Hit {
+                passage: embed::Passage {
+                    title: "The Harbor".into(),
+                    file: "two.md".into(),
+                    text: "The tide came in.".into(),
+                },
+                score: 0.8,
+            },
+            embed::Hit {
+                passage: embed::Passage {
+                    title: "The Locket".into(),
+                    file: "one.md".into(),
+                    text: "She held the locket.".into(),
+                },
+                score: 0.5,
+            },
+        ];
+        let ctx = retrieved_context(&hits);
+        // Both passages from the same chapter share one heading; the whole-book render
+        // wraps under the same `# Title` heading so the citation titles match exactly.
+        assert_eq!(ctx.matches("# The Harbor").count(), 1);
+        assert!(ctx.contains("Ships crowded the harbor."));
+        assert!(ctx.contains("The tide came in."));
+        assert!(ctx.contains("# The Locket"));
+        // A whole-book render feeds `build_qa_request` the same shape — one path.
+        let req = build_qa_request(ctx, "where?", "m");
+        assert!(req.cached_context.contains("# The Harbor"));
     }
 
     #[test]

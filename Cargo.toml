@@ -35,6 +35,9 @@ git2 = { version = "0.20", default-features = false, features = ["https", "ssh",
 # with `--features local`.
 candle-core = { version = "0.11", optional = true }
 candle-transformers = { version = "0.11", optional = true }
+# candle-nn's `VarBuilder` loads the BERT embedding model's safetensors for the
+# on-device semantic retrieval index (#831); only the `local` embedder needs it.
+candle-nn = { version = "0.11", optional = true }
 tokenizers = { version = "0.22", optional = true }
 # Hardware detection + direct model download for hardware-aware selection (#85).
 sysinfo = { version = "0.33", optional = true }
@@ -69,12 +72,13 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 proptest = "1"
 
 [features]
-local = ["dep:candle-core", "dep:candle-transformers", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
+local = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:tokenizers", "dep:sysinfo", "dep:hf-hub"]
 
 # On macOS, give candle the Metal backend (GPU). Cargo unions these features into
 # the optional deps above, so `--features local` is CPU elsewhere and Metal here.
 [target.'cfg(target_os = "macos")'.dependencies]
 candle-core = { version = "0.11", optional = true, features = ["metal"] }
+candle-nn = { version = "0.11", optional = true, features = ["metal"] }
 candle-transformers = { version = "0.11", optional = true, features = ["metal"] }
 
 [profile.release]

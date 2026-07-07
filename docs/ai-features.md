@@ -44,6 +44,7 @@ offline = false                # true forces the local backend (nothing leaves t
 model = "claude-opus-4-8"      # Claude model; the local backend picks its own
 cost_threshold = 0.20          # confirm before a Claude pass estimated above this (USD)
 refresh_after_changes = 5      # rebuild a bible fully once this many chapters change (else revise incrementally)
+embed_model = "minilm"         # on-device embedding model for grounded-Ask retrieval (#831); empty ⇒ the default
 # The key is NOT kept here — run "Set Claude API key" from the Ctrl-K menu to
 # store it in the OS keychain (see "Where the API key lives" below). A legacy
 # plaintext `api_key = "sk-ant-..."` still works but is the lowest precedence.
@@ -230,6 +231,18 @@ The palette actions:
   in-session **Q&A history**, browsable (and re-jumpable) from the AI menu's "Ask
   history" — no re-asking, no new request. Retrieval + citations only; the AI
   answers *about* the manuscript, never writes into it.
+
+  When an on-device **embedding model** is available (#831; `--features local`,
+  weights downloaded, `[ai] embed_model`), Ask first *retrieves* the passages most
+  relevant to the question from a local semantic index over the chapters — ranked
+  by embedding similarity, so it catches paraphrase/synonym matches lexical search
+  misses — and sends only those (with their chapter citations) instead of the whole
+  book. That lets Ask scale past a single model's context window and cite tighter.
+  The index refreshes incrementally, keyed to chapter content digests like the bible
+  state (#90), so re-indexing costs only the chapters that changed. When no
+  embedding model is on disk (or the build has no `local` feature), Ask degrades
+  gracefully to sending the whole active book, exactly as before — the citations
+  stay jumpable either way. The index only ever reads prose to retrieve and cite it.
 - **Word search** (#290) — an in-context thesaurus: name a word or phrase (the
   word under the cursor is prefilled) plus optional plain-language constraints
   (count, closeness, syllable count, language of origin, rarity); the current

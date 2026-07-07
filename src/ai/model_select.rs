@@ -249,6 +249,77 @@ pub const MODELS: &[Model] = &[
     },
 ];
 
+/// One on-device **text-embedding** option for the grounded-Ask retrieval index
+/// (#831). Unlike the generative [`Model`] table (quantized GGUF Qwen), an
+/// embedding model is a small BERT-family encoder loaded from safetensors + its
+/// `config.json` + `tokenizer.json` — the standard sentence-transformers layout
+/// candle's `bert` model reads. It emits one fixed-width vector per passage, which
+/// the index ranks by cosine similarity; it never generates prose, so it sits
+/// squarely inside the AI boundary (it indexes prose to *retrieve* it, #831).
+///
+/// The whole struct is data only, always compiled (so the catalog and the index's
+/// pure logic are unit-tested in the normal suite); the candle loader that acts on
+/// a row lives in the `local`-gated [`crate::ai::embed`] backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmbedModel {
+    /// The stable id / config key (`"minilm"`), used in `[ai] embed_model` and as
+    /// the index's model tag so a model swap invalidates a stale index.
+    pub id: &'static str,
+    /// The HuggingFace repo holding `model.safetensors`, `config.json`, and
+    /// `tokenizer.json` — the sentence-transformers layout candle's `bert` reads.
+    pub repo: &'static str,
+    /// The safetensors weights file in `repo` (usually `model.safetensors`).
+    pub weights_file: &'static str,
+    /// Output embedding width (the BERT hidden size), for a caller that pre-sizes
+    /// buffers or sanity-checks a fake embedder in tests.
+    pub dim: usize,
+    /// Approximate download / on-disk size, MB — surfaced in the model manager.
+    pub size_mb: u32,
+    /// A one-line characterization for the model manager.
+    pub description: &'static str,
+}
+
+/// On-device text-embedding options for the retrieval index (#831). One small,
+/// well-tested sentence-transformers encoder to start: `all-MiniLM-L6-v2`
+/// (22M params, 384-dim, ~90 MB) — the canonical candle `bert` embedding model,
+/// fast on CPU and tiny to fetch. Each row's `weights_file` is release-gate-vetted
+/// against its HuggingFace repo by the `#[ignore]`d
+/// `embed_catalog_files_exist_on_huggingface` check (#726), so a row naming a file
+/// that doesn't exist is caught before a user's download 404s.
+pub const EMBED_MODELS: &[EmbedModel] = &[EmbedModel {
+    id: "minilm",
+    repo: "sentence-transformers/all-MiniLM-L6-v2",
+    weights_file: "model.safetensors",
+    dim: 384,
+    size_mb: 90,
+    description: "MiniLM-L6 — 384-dim, ~90 MB, fast on CPU",
+}];
+
+impl EmbedModel {
+    /// The default embedding model — the first (and smallest) catalog row.
+    pub fn default_model() -> &'static Self {
+        &EMBED_MODELS[0]
+    }
+
+    /// The embedding model with the given [`id`](Self::id), or `None` if unknown.
+    pub fn by_id(id: &str) -> Option<&'static Self> {
+        EMBED_MODELS.iter().find(|m| m.id == id)
+    }
+
+    /// The HuggingFace `resolve` URL for this row's safetensors weights — the exact
+    /// file [`crate::ai::embed`] fetches. Used by the release-gated catalog vetting
+    /// check to HEAD every row and catch a filename that doesn't exist *before* a
+    /// user's download 404s (#726), exactly like [`Model::gguf_resolve_url`]. A live
+    /// file answers with a `302` redirect to the CDN.
+    #[cfg(test)]
+    pub fn weights_resolve_url(&self) -> String {
+        format!(
+            "https://huggingface.co/{}/resolve/main/{}",
+            self.repo, self.weights_file
+        )
+    }
+}
+
 impl Model {
     /// The stable id for this model — its parameter size (`"4B"`), used as the
     /// config key in `[ai] local_models` and the cache key for the loaded model.
@@ -762,6 +833,59 @@ mod tests {
         assert!(
             missing.is_empty(),
             "catalog rows point at GGUF files that don't exist on HuggingFace \
+             (a user's download would 404): {missing:?}"
+        );
+    }
+
+    #[test]
+    fn embed_catalog_is_well_formed() {
+        // The default is the first row, every id resolves, every dim is positive.
+        assert_eq!(EmbedModel::default_model().id, "minilm");
+        assert_eq!(EmbedModel::by_id("minilm"), Some(&EMBED_MODELS[0]));
+        assert!(EmbedModel::by_id("does-not-exist").is_none());
+        assert!(EMBED_MODELS
+            .iter()
+            .all(|m| m.dim > 0 && !m.description.is_empty()));
+    }
+
+    /// Release gate for the embedding catalog, mirroring
+    /// [`catalog_gguf_files_exist_on_huggingface`] (#726): every [`EMBED_MODELS`]
+    /// row's safetensors file actually exists in its HuggingFace repo, so a bad
+    /// filename is caught here rather than in a user's failed download. HEAD without
+    /// following the redirect — a present file answers `302` (→ CDN), a missing one
+    /// `404`. **Opt-in / non-hermetic on purpose** (reaches HuggingFace), so it's
+    /// `#[ignore]`d and kept out of the default and `--features local` suites (they
+    /// must never touch the network, #531). Run it before a release, and whenever an
+    /// `EMBED_MODELS` row's `repo`/`weights_file` changes:
+    /// `cargo test embed_catalog_files_exist_on_huggingface -- --ignored --nocapture`
+    #[test]
+    #[ignore = "release gate: reaches HuggingFace to vet catalog filenames; not hermetic (#726)"]
+    fn embed_catalog_files_exist_on_huggingface() {
+        let mut missing = Vec::new();
+        for m in EMBED_MODELS {
+            let url = m.weights_resolve_url();
+            let status = ureq::head(&url)
+                .config()
+                .http_status_as_error(false)
+                .max_redirects(0)
+                .max_redirects_will_error(false)
+                .build()
+                .call()
+                .map_or_else(
+                    |e| {
+                        missing.push(format!("{} — request error: {e}", m.id));
+                        0
+                    },
+                    |r| r.status().as_u16(),
+                );
+            println!("{:>7}  HTTP {status}  {url}", m.id);
+            if status != 302 && status != 200 {
+                missing.push(format!("{} — HTTP {status} at {url}", m.id));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "embed catalog rows point at files that don't exist on HuggingFace \
              (a user's download would 404): {missing:?}"
         );
     }

@@ -111,11 +111,19 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
 }
 
 impl App {
-    /// Start an "Ask the manuscript" request on a worker thread. The manuscript
-    /// is assembled here (on the main thread) and moved into the thread with the
-    /// question and a backend; the result returns via `ai_rx`, polled each tick.
-    /// A no-op with a status message when AI isn't ready or a request is already
-    /// in flight.
+    /// Start an "Ask the manuscript" request on a worker thread (#609). The
+    /// manuscript is assembled here (on the main thread) and moved into the thread
+    /// with the question and a backend; the result returns via `ai_rx`, polled each
+    /// tick. A no-op with a status message when AI isn't ready or a request is
+    /// already in flight.
+    ///
+    /// When a local embedding model is available (#831), the worker first *retrieves*
+    /// the passages most relevant to the question from the semantic index and sends
+    /// only those (with their chapter citations) instead of the whole book — so Ask
+    /// scales past one model's context window and cites tighter. If retrieval isn't
+    /// available or turns up nothing, it falls back to the whole-book context
+    /// unchanged. Either way it's the one `build_qa_request` path, so the answer's
+    /// citations stay jumpable exactly as today.
     pub(crate) fn ask_ai(&mut self, question: &str) {
         let question = question.trim().to_string();
         if question.is_empty() {
@@ -125,12 +133,24 @@ impl App {
         // Q&A log when it returns (#609). Set before the spawn so it's recorded
         // even if the request is a no-op (the spawn clears it on a not-ready gate).
         self.pending_qa_question = Some(question.clone());
+        // Retrieval inputs, assembled on the UI thread and moved into the worker: the
+        // active book's chapters to (re-)index, the index dir, and the embedding model
+        // — `None` when none is on disk, which keeps Ask on the whole-book path (#831).
+        let embed_model = self.ask_embed_model();
+        let chapters = embed_model.is_some().then(|| self.ask_index_chapters());
+        let root = self.project.root.clone();
         self.spawn_ai(
             "⟳ Sending to Claude…",
             move |backend, manuscript, model| {
-                Outcome::Answer(
-                    backend.complete(&ai::build_qa_request(manuscript, &question, &model)),
-                )
+                // Try semantic retrieval first; fall back to the whole book (#831).
+                let context = match (embed_model, chapters) {
+                    (Some(m), Some(chapters)) => {
+                        super::retrieve::retrieve_context(&root, &chapters, m, &question)
+                            .unwrap_or(manuscript)
+                    }
+                    _ => manuscript,
+                };
+                Outcome::Answer(backend.complete(&ai::build_qa_request(context, &question, &model)))
             },
         );
     }
