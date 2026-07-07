@@ -601,3 +601,191 @@ fn findings_esc_clears_the_filter_then_closes() {
     app.on_key(key(KeyCode::Esc)); // close
     assert!(!matches!(app.mode, Mode::Findings(_)));
 }
+
+// --- Export the findings list (#829) ---------------------------------------
+
+#[test]
+fn s_saves_the_flat_findings_list_to_export() {
+    // `s` on the findings overlay writes the open findings to
+    // `export/findings-<date>.md` — the flat triage list, each with its
+    // pass/kind + chapters + summary.
+    let (mut app, dir) = findings_over(
+        "find-export",
+        &[
+            ("object: the locket changes color", "One"),
+            ("time: sunset twice", "Two"),
+        ],
+    );
+    app.on_key(key(KeyCode::Char('s')));
+
+    let name = format!("findings-{}.md", crate::date::iso(crate::date::today()));
+    let body = fs::read_to_string(dir.join("export").join(&name))
+        .expect("the findings file is written under export/");
+    // The list leads with the open count and carries each finding's kind label,
+    // chapters, and summary.
+    assert!(body.contains("# Findings — 2 open"), "{body}");
+    assert!(body.contains("## Continuity"), "kind label shown: {body}");
+    assert!(
+        body.contains("- Chapters: One") && body.contains("- Chapters: Two"),
+        "each finding's chapters are listed: {body}"
+    );
+    assert!(
+        body.contains("object: the locket changes color") && body.contains("time: sunset twice"),
+        "each finding's summary is listed: {body}"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Exported to"),
+        "{:?}",
+        app.message
+    );
+}
+
+// --- Re-check all open findings (#830) -------------------------------------
+
+/// A findings overlay over the given continuity UI findings (each on its own
+/// chapter), tagged to the continuity pass so a re-check-all can re-run them.
+fn recheckable_findings(name: &str, findings: &[(&str, &str)]) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name);
+    let items = findings
+        .iter()
+        .map(|(chapter, detail)| continuity_ui_finding(chapter, detail))
+        .collect();
+    app.mode = Mode::Findings(Box::new(Findings {
+        items,
+        selected: 0,
+        filter: String::new(),
+        typing: false,
+    }));
+    // Seed durable triage too, so a cleared finding can actually leave it.
+    let seeded: Vec<crate::mode::Finding> = findings
+        .iter()
+        .map(|(chapter, detail)| continuity_ui_finding(chapter, detail))
+        .collect();
+    app.accumulate_triage(&seeded);
+    (app, dir)
+}
+
+#[test]
+fn recheck_all_builds_one_scoped_request_per_finding() {
+    // Two continuity findings, one per chapter. A re-check-all builds a scoped
+    // request for each, carrying only that finding's chapter prose — the whole
+    // point of re-running scoped, not a whole-manuscript sweep.
+    let (app, _dir) = recheckable_findings(
+        "recheck-all-scope",
+        &[
+            ("One", "the locket changes color"),
+            ("Two", "the candle relights"),
+        ],
+    );
+    let reqs = app.recheck_all_requests();
+    assert_eq!(
+        reqs.len(),
+        2,
+        "one request per distinct pass + chapters group"
+    );
+    let joined: String = reqs.iter().map(|r| r.cached_context.clone()).collect();
+    assert!(
+        joined.contains("first chapter") && joined.contains("second chapter"),
+        "both chapters' prose is covered across the scoped requests: {joined}"
+    );
+    // Each request is scoped to a single chapter, never both at once.
+    for r in &reqs {
+        let both = r.cached_context.contains("first chapter")
+            && r.cached_context.contains("second chapter");
+        assert!(
+            !both,
+            "a request is scoped to one finding's chapter: {}",
+            r.cached_context
+        );
+    }
+}
+
+#[test]
+fn recheck_all_dedups_findings_sharing_a_pass_and_chapters() {
+    // Two continuity findings in the *same* chapter re-run as one request, not two.
+    let (app, _dir) = recheckable_findings(
+        "recheck-all-dedup",
+        &[
+            ("One", "the locket changes color"),
+            ("One", "the candle relights"),
+        ],
+    );
+    let reqs = app.recheck_all_requests();
+    assert_eq!(reqs.len(), 1, "same pass + chapters is queued once");
+}
+
+#[test]
+fn recheck_all_clears_the_fixed_and_keeps_the_rest() {
+    // Two findings verified at once; the fresh runs re-produce only the first, so
+    // it's kept and the second is cleared from triage and the overlay.
+    let (mut app, _dir) = recheckable_findings(
+        "recheck-all-reconcile",
+        &[
+            ("One", "the locket changes color"),
+            ("Two", "the candle relights"),
+        ],
+    );
+    let still = continuity_ui_finding("One", "the locket changes color");
+    let fixed = continuity_ui_finding("Two", "the candle relights");
+    let verifying = vec![still.clone(), fixed.clone()];
+
+    // The combined fresh findings across the grouped runs re-produce only `still`.
+    app.pending_recheck_all = Some(verifying);
+    app.apply_recheck_all(Ok(vec![still.clone()]));
+
+    assert!(
+        app.triage.contains(&still),
+        "still-flagged finding stays in triage"
+    );
+    assert!(
+        !app.triage.contains(&fixed),
+        "the cleared finding leaves triage"
+    );
+    assert!(
+        matches!(&app.mode, Mode::Findings(f) if f.items.contains(&still) && !f.items.contains(&fixed)),
+        "the overlay keeps the flagged one and drops the cleared one"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("1 cleared"),
+        "the summary reports what cleared: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn recheck_all_skips_a_finding_without_a_pass() {
+    // A restored finding carries no re-runnable pass (`action: None`). A
+    // re-check-all skips it gracefully — it isn't queued and stays in triage.
+    let (mut app, _dir) = two_chapter_app("recheck-all-noaction");
+    let restored = crate::mode::Finding {
+        summary: "object: the locket changes color".into(),
+        kind: crate::mode::FindingKind::Continuity,
+        chapters: vec!["One".into()],
+        book: None,
+        action: None, // as if restored from the durable store
+    };
+    app.accumulate_triage(std::slice::from_ref(&restored));
+    app.mode = Mode::Findings(Box::new(Findings {
+        items: vec![restored.clone()],
+        selected: 0,
+        filter: String::new(),
+        typing: false,
+    }));
+
+    // No re-runnable findings, so nothing is sent and it stays put.
+    assert!(app.recheck_all_requests().is_empty(), "no request is built");
+    app.recheck_all();
+    assert!(
+        !app.ai_task.is_busy(),
+        "nothing is sent for a pass-less finding"
+    );
+    assert!(app.pending_recheck_all.is_none());
+    assert!(
+        app.triage.contains(&restored),
+        "the skipped finding stays in triage"
+    );
+    assert!(
+        matches!(&app.mode, Mode::Findings(f) if f.items.contains(&restored)),
+        "and stays in the overlay"
+    );
+}

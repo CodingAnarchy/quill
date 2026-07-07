@@ -92,6 +92,33 @@ fn finding_matches(f: &Finding, q: &str) -> bool {
         || f.chapters.iter().any(|c| c.to_lowercase().contains(q))
 }
 
+/// The open findings as plain Markdown text for the `export/findings-<date>.md`
+/// snapshot (#829): a title with the open count, then one section per finding
+/// carrying its pass/kind, the chapters it spans, and its one-line summary — the
+/// flat triage list an author can hand off or track outside the editor. Pure over
+/// the input, so it's directly testable. Within the AI boundary: flags only,
+/// never prose.
+fn findings_plain_text(findings: &[Finding]) -> String {
+    let mut out = vec![
+        format!("# Findings — {} open", findings.len()),
+        String::new(),
+    ];
+    for f in findings {
+        // The pass label the finding speaks for (#827), or "Other" for a finding
+        // not tied to a re-runnable pass.
+        out.push(format!("## {}", f.kind.label()));
+        let chapters = if f.chapters.is_empty() {
+            "(no chapter)".to_string()
+        } else {
+            f.chapters.join(", ")
+        };
+        out.push(format!("- Chapters: {chapters}"));
+        out.push(format!("- {}", f.summary));
+        out.push(String::new());
+    }
+    out.join("\n")
+}
+
 /// A one-line `+N/-M` summary of a unified diff (#607), e.g.
 /// `Updated character/Ada: +3/-1`. Counts the added and removed lines (context
 /// lines are ignored), so the author sees the size of a clean revise at a glance.
@@ -536,6 +563,15 @@ impl App {
             KeyCode::Char('r') if acts_on_selected => {
                 self.recheck_finding(selected);
             }
+            // Re-check *all* open findings (#830): re-run each one's pass scoped to
+            // its chapters (grouped by pass + chapters) and reconcile the whole list
+            // at once — clearing the fixed, keeping the rest. Acts on every open
+            // finding, not just the selection, so it ignores the filter.
+            KeyCode::Char('R') => self.recheck_all(),
+            // Save the open findings to `export/findings-<date>.md` (#829): the flat
+            // triage list — each finding's pass + chapters + summary — filed as a
+            // durable revision to-do, distinct from the grouped health dashboard.
+            KeyCode::Char('s') => self.save_findings(),
             // Esc clears an active filter first (restoring the full list), then a
             // second Esc closes the overlay.
             KeyCode::Esc => {
@@ -547,6 +583,27 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Save the open findings to `export/findings-<date>.md` (#829): the flat
+    /// triage list — each finding's pass + chapters + summary — through the same
+    /// [`write_export`](Self::write_export) path the report snapshots (#601) and
+    /// the health dashboard (#827) use, so a revision to-do can leave the editor as
+    /// a durable file a co-author can act on. Distinct from the grouped health
+    /// dashboard: this is the flat list exactly as the overlay shows it. A no-op
+    /// off the findings overlay. Within the AI boundary — it writes flags to an
+    /// off-manuscript file, never prose.
+    fn save_findings(&mut self) {
+        let Mode::Findings(f) = &self.mode else {
+            return;
+        };
+        if f.items.is_empty() {
+            self.message = Some("No findings to save".into());
+            return;
+        }
+        let body = findings_plain_text(&f.items);
+        let name = format!("findings-{}", crate::date::iso(crate::date::today()));
+        self.write_export(&name, "md", body.as_bytes());
     }
 
     /// Keys for the findings overlay's filter-input sub-mode (#822): printable
