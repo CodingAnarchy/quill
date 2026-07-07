@@ -83,6 +83,19 @@ pub struct ExportStyle {
     /// generic `alt` (#642 advertises author-facing alt-text support).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover_image_alt: Option<String>,
+    /// Whether a bare **half-title page** — the book title alone — is generated
+    /// ahead of the full title page (#820), the conventional first printed leaf of
+    /// a trade book. `None`/`false` → off, so an unstyled export's front matter
+    /// (cover → title → copyright → body) is byte-for-byte unchanged. Read via
+    /// [`Self::half_title`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub half_title: Option<bool>,
+    /// Whether a series export generates an **"also in this series" page** from the
+    /// `[[books]]` list (#820). `None` → on (a professional default for series
+    /// fiction; a standalone book has no other titles, so the page is omitted
+    /// regardless); `Some(false)` → off. Read via [`Self::series_list`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series_list: Option<bool>,
     /// The images resolved from the paths above at export time (#472) — read from
     /// disk by the app, not persisted in the manifest.
     #[serde(skip)]
@@ -377,6 +390,20 @@ impl ExportStyle {
         self.drop_cap.unwrap_or(false)
     }
 
+    /// Whether a bare half-title page is generated ahead of the full title page
+    /// (#820) — off unless explicitly enabled, so an unstyled export's front
+    /// matter is unchanged.
+    pub fn half_title(&self) -> bool {
+        self.half_title.unwrap_or(false)
+    }
+
+    /// Whether a series export generates the "also in this series" page (#820) —
+    /// on by default (a standalone book still omits it, having no other titles),
+    /// off only when the author sets `series_list = false`.
+    pub fn series_list(&self) -> bool {
+        self.series_list.unwrap_or(true)
+    }
+
     /// Apply the named `preset` (#473): start from its bundled values and overlay
     /// the explicitly-set keys on top, so an author can pick a look and still tweak
     /// individual knobs. No-op when no preset is set; returns a warning (and leaves
@@ -423,6 +450,8 @@ impl ExportStyle {
             chapter_heading_image_alt,
             title_image_alt,
             cover_image_alt,
+            half_title,
+            series_list,
             fonts: _,
             images: _,
         } = over;
@@ -442,6 +471,8 @@ impl ExportStyle {
             chapter_heading_image_alt.or(self.chapter_heading_image_alt);
         self.title_image_alt = title_image_alt.or(self.title_image_alt);
         self.cover_image_alt = cover_image_alt.or(self.cover_image_alt);
+        self.half_title = half_title.or(self.half_title);
+        self.series_list = series_list.or(self.series_list);
         self
     }
 
@@ -687,6 +718,49 @@ fn font_family(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn half_title_is_off_and_series_list_is_on_by_default() {
+        // #820: the half-title is opt-in (an unstyled export's front matter is
+        // unchanged); the series list is on by default (a professional default for
+        // series fiction — a standalone book omits it regardless).
+        let d = ExportStyle::default();
+        assert!(!d.half_title(), "half-title opt-in");
+        assert!(d.series_list(), "series list on by default");
+
+        assert!(ExportStyle {
+            half_title: Some(true),
+            ..Default::default()
+        }
+        .half_title());
+        assert!(!ExportStyle {
+            series_list: Some(false),
+            ..Default::default()
+        }
+        .series_list());
+    }
+
+    #[test]
+    fn half_title_and_series_list_survive_the_preset_merge() {
+        // The two knobs (#820) merge like every other style key: an explicit value
+        // overrides the preset's, an unset one keeps the preset's. This guards the
+        // destructured `merged_with` against a field being forgotten.
+        let mut style = ExportStyle {
+            preset: Some("classic".into()),
+            half_title: Some(true),
+            series_list: Some(false),
+            ..Default::default()
+        };
+        assert!(style.apply_preset().is_none());
+        assert!(
+            style.half_title(),
+            "explicit half-title survives the preset"
+        );
+        assert!(
+            !style.series_list(),
+            "explicit series-list survives the preset"
+        );
+    }
 
     #[test]
     fn export_style_scene_break_defaults_to_the_plain_glyph() {

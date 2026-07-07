@@ -363,6 +363,8 @@ mod tests {
             series: Some("The Cycle".into()),
             publishing: PubMeta::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
                 name: Some("Part One".into()),
@@ -730,6 +732,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,
@@ -772,6 +776,8 @@ mod tests {
             series: None,
             publishing,
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,

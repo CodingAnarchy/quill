@@ -9,7 +9,13 @@
 use std::borrow::Cow;
 
 mod roles;
-pub use roles::{Band, Role, SceneStatus, Status};
+pub use roles::{series_list_lines, Band, Role, SceneStatus, Status};
+// The generated series-list heading (#820) is part of the public front-matter API
+// (the export writers key their pages off `series_list_lines`, which embeds it) and
+// is asserted on directly by the writer tests; the binary itself references it only
+// through `series_list_lines`, so silence the unused re-export lint in that build.
+#[cfg_attr(not(test), allow(unused_imports))]
+pub use roles::SERIES_LIST_HEADING;
 
 /// Split chapter-file `text` into its front matter and the body beneath it.
 ///

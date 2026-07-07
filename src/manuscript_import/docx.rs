@@ -354,6 +354,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,

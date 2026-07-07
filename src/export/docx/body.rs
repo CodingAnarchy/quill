@@ -18,12 +18,53 @@ pub(super) fn document_xml(doc: &Document, profile: Profile) -> String {
     let header = running_header(doc.author.as_deref(), Some(&doc.title), profile);
     let mut body = String::new();
     if profile == Profile::Manuscript {
+        // The half-title (#820) is the leaf ahead of the full title page, when
+        // enabled — the manuscript profile's front matter (Vellum splits on
+        // Heading 1 and applies its own front matter, so both new pages sit out).
+        if doc.half_title {
+            body.push_str(&half_title_page(&doc.title));
+        }
         body.push_str(&title_page(doc));
         body.push_str(&copyright_page(&doc.publishing));
+        // The "also in this series" page (#820), when this is a series title's book.
+        body.push_str(&series_list_page(&doc.series_list_lines()));
         body.push_str(&toc_page());
     }
     body.push_str(&book_body(doc, profile));
     wrap_document(&body, &header)
+}
+
+/// The half-title page (#820), when enabled: the book title alone on a fresh page
+/// ahead of the full title page — the conventional first printed leaf of a trade
+/// book. Manuscript profile only. A bare page, so just the centered title.
+fn half_title_page(title: &str) -> String {
+    para(
+        r#"<w:pageBreakBefore/><w:spacing w:before="3600"/><w:jc w:val="center"/>"#,
+        run(title, true, false, Some(28)),
+    )
+}
+
+/// The "also in this series" page (#820), when a series title's book supplies the
+/// list: a fresh page with the heading, then each *other* book of the series by
+/// title, centered. `lines` is [`Document::series_list_lines`] — the heading
+/// followed by the book titles — so an empty slice (a standalone book, or the page
+/// disabled) yields an empty string that leaves the output unchanged. Manuscript
+/// profile only.
+fn series_list_page(lines: &[String]) -> String {
+    let Some((heading, books)) = lines.split_first() else {
+        return String::new();
+    };
+    let mut out = para(
+        r#"<w:pageBreakBefore/><w:spacing w:before="2400" w:after="240"/><w:jc w:val="center"/>"#,
+        run(heading, true, false, Some(28)),
+    );
+    for book in books {
+        out.push_str(&para(
+            r#"<w:jc w:val="center"/>"#,
+            run(book, false, true, None),
+        ));
+    }
+    out
 }
 
 /// The copyright page (#583), when publishing metadata warrants one: the rights

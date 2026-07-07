@@ -44,6 +44,8 @@ fn doc() -> Document {
         series: Some("The Cycle".into()),
         publishing: PubMeta::default(),
         epigraph: Some(ep("In the beginning.", Some("Anon"))),
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![ch("Prologue", None, "Before it all.")],
         parts: vec![Part {
             name: Some("Part One".into()),

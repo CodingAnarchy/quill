@@ -661,6 +661,8 @@ mod tests {
                 series: None,
                 publishing: crate::export::PubMeta::default(),
                 epigraph: None,
+                half_title: false,
+                series_books: Vec::new(),
                 front: vec![],
                 parts: vec![crate::export::Part {
                     name: None,

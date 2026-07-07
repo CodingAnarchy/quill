@@ -41,6 +41,11 @@ h1 + p, h2 + p, .epigraph p, .title-page p, p.scene-break { text-indent: 0; }
 .title-page .title { font-size: 2em; font-weight: bold; margin: 0.5em 0; }
 .title-page .subtitle { font-style: italic; }
 .title-page .series { letter-spacing: 0.15em; text-transform: uppercase; }
+.half-title-page { text-align: center; margin-top: 30%; }
+.half-title-page .title { font-size: 1.6em; font-weight: bold; }
+.series-list-page { text-align: center; margin-top: 20%; }
+.series-list-page .heading { font-size: 1.3em; font-weight: bold; margin-bottom: 1em; }
+.series-list-page .book { font-style: italic; margin: 0.4em 0; text-indent: 0; }
 .copyright-page { text-align: center; margin-top: 30%; font-size: 0.9em; }
 .copyright-page p { text-indent: 0; margin: 0.4em 0; }
 .epigraph { margin: 2em 10%; font-style: italic; }
@@ -56,6 +61,10 @@ pre { font-family: monospace; white-space: pre-wrap; margin: 1em 0; text-indent:
 pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::Result<Vec<u8>> {
     let mut b = Builder::new(style, &doc.publishing);
     b.add_cover_page(&doc.title);
+    // The half-title (#820) is the leaf ahead of the full title page, when enabled.
+    if doc.half_title {
+        b.add_half_title_page(&doc.title);
+    }
     b.add_title_page(
         doc.series.as_deref(),
         &doc.title,
@@ -64,6 +73,8 @@ pub fn to_epub(doc: &Document, modified: &str, style: &ExportStyle) -> std::io::
         doc.epigraph.as_ref(),
     );
     b.add_copyright_page();
+    // The "also in this series" page (#820), when this is a series title's book.
+    b.add_series_list_page(&doc.series_list_lines());
     let nav = b.book_sections(doc);
     b.finish(
         &doc.title,
@@ -112,6 +123,11 @@ pub fn to_epub_series(
     );
     let title = series.unwrap_or("Series");
     b.add_cover_page(title);
+    // A half-title ahead of the omnibus title page, when the first book enables it
+    // (#820) — the omnibus's own front matter, so it carries no series-list page.
+    if books.first().is_some_and(|d| d.half_title) {
+        b.add_half_title_page(title);
+    }
     b.add_title_page(series, title, None, author, None);
     b.add_copyright_page();
     let mut nav = Vec::new();
@@ -263,6 +279,35 @@ impl Builder {
         }
         let href = self.add("title", title, "titlepage", &body);
         self.landmarks.titlepage = Some(href);
+    }
+
+    /// The half-title page (#820): the book title alone, ahead of the full title
+    /// page — the conventional first printed leaf of a trade book. Tagged with the
+    /// EPUB `halftitlepage` structural term. Not a TOC entry.
+    fn add_half_title_page(&mut self, title: &str) {
+        let mut body = String::from("<div class=\"half-title-page\">\n");
+        push_p(&mut body, "title", title);
+        body.push_str("</div>\n");
+        self.add("halftitle", title, "halftitlepage", &body);
+    }
+
+    /// The "also in this series" page (#820), when a series title's book supplies
+    /// the list: the heading, then each *other* book of the series by title,
+    /// centered. `lines` is [`Document::series_list_lines`] — the heading followed
+    /// by the book titles — so an empty slice (a standalone book, or the page
+    /// disabled) is a no-op that leaves the package unchanged. Slots into the front
+    /// matter after the copyright page; not a TOC entry.
+    fn add_series_list_page(&mut self, lines: &[String]) {
+        let Some((heading, books)) = lines.split_first() else {
+            return;
+        };
+        let mut body = String::from("<div class=\"series-list-page\">\n");
+        push_p(&mut body, "heading", heading);
+        for book in books {
+            push_p(&mut body, "book", book);
+        }
+        body.push_str("</div>\n");
+        self.add("series", heading, "frontmatter", &body);
     }
 
     /// The copyright page (#583), when publishing metadata warrants one: the

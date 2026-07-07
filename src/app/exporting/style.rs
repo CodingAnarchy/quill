@@ -135,6 +135,14 @@ fn style_preview_document() -> Document {
             text: "A book opens on an epigraph.".into(),
             attribution: Some("Anon.".into()),
         }),
+        // Show the generated front matter (#820): a half-title leaf and an "also in
+        // this series" page (the sample novel's own title is filtered out of the list).
+        half_title: true,
+        series_books: vec![
+            "The Sample Novel".into(),
+            "The Second Sample".into(),
+            "The Third Sample".into(),
+        ],
         front: Vec::new(),
         parts: vec![Part {
             name: Some("Part One".into()),

@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::export::{Chapter, Document, ExportStyle, Part};
-use crate::frontmatter::Role;
+use crate::frontmatter::{Role, SERIES_LIST_HEADING};
 use std::io::Read;
 
 const MODIFIED: &str = "2026-06-27T00:00:00Z";
@@ -45,6 +45,8 @@ fn doc() -> Document {
         series: Some("The Cycle".into()),
         publishing: PubMeta::default(),
         epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![chapter("Prologue", None, "Before it all.")],
         parts: vec![Part {
             name: Some("Part One".into()),
@@ -151,6 +153,8 @@ fn smart_typography_glyphs_pass_through() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -181,6 +185,8 @@ fn a_fenced_block_renders_as_verbatim_preformatted_xhtml() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -213,6 +219,8 @@ fn scene_break_renders_the_styled_glyph_default_unchanged() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -254,6 +262,8 @@ fn fonts_are_embedded_and_applied_via_the_stylesheet() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -325,6 +335,8 @@ fn a_true_italic_sibling_embeds_and_gets_an_italic_font_face() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -396,6 +408,8 @@ fn embedded_fonts_are_subset_smaller_than_the_source() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -442,6 +456,8 @@ fn font_face_declarations_carry_a_format_hint() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -476,6 +492,8 @@ fn heading_alignment_and_drop_cap_render_via_css() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -803,6 +821,8 @@ fn role_sections_carry_their_specific_epub_type() {
     // Semantics term — not the generic front/back-matter band — while an
     // untyped body chapter stays `bodymatter`.
     let d = Document {
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![
             section("For E.", Role::Dedication, "For everyone."),
             section("Foreword", Role::Foreword, "A word before."),
@@ -849,6 +869,8 @@ fn a_role_without_a_distinct_epub_type_keeps_the_band_fallback() {
     // (#695): they stay generic `backmatter` and raise no role landmark, so an
     // untyped section is unchanged from before roles reached the writer.
     let d = Document {
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         back: vec![section("Also by", Role::AlsoBy, "Other books.")],
         ..doc()
@@ -909,5 +931,112 @@ fn a_stable_identifier_is_derived_from_the_title() {
     assert!(
         opf.contains("urn:quill:the-cycle"),
         "series+title slug: {opf}"
+    );
+}
+
+#[test]
+fn a_half_title_page_precedes_the_title_page_when_enabled() {
+    // #820: with `half_title` on, a bare half-title leaf carrying only the book
+    // title is generated ahead of the full title page — spine order cover →
+    // half-title → title → copyright → body.
+    let d = Document {
+        half_title: true,
+        ..doc()
+    };
+    let bytes = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+    // The default style configures no cover image, so the half-title is the first
+    // spine entry (`halftitle0001`) and the full title page follows (`title0002`).
+    let half = part(&bytes, "OEBPS/halftitle0001.xhtml");
+    assert!(
+        half.contains("<body epub:type=\"halftitlepage\">"),
+        "the half-title carries the EPUB structural term: {half}"
+    );
+    assert!(
+        half.contains("half-title-page") && half.contains("Red &lt;State&gt; Earth"),
+        "the half-title shows only the book title: {half}"
+    );
+    // It sits ahead of the full title page in the spine (the OPF item order is the
+    // spine order): halftitle0001 before title0002.
+    let opf = part(&bytes, "OEBPS/content.opf");
+    assert!(
+        opf.find("halftitle0001").unwrap() < opf.find("title0002").unwrap(),
+        "half-title precedes the full title page: {opf}"
+    );
+    // And it is a bare page — no author, subtitle, or series line leaks onto it.
+    assert!(
+        !half.contains("by A. Writer") && !half.contains("The Cycle"),
+        "the half-title is bare: {half}"
+    );
+}
+
+#[test]
+fn a_half_title_page_is_absent_by_default() {
+    // The default leaves the front matter unchanged (cover → title → …), so the
+    // conventional half-title stays opt-in.
+    let bytes = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
+    assert!(
+        !names(&bytes).iter().any(|n| n.contains("halftitle")),
+        "no half-title page unless enabled"
+    );
+}
+
+#[test]
+fn a_series_book_generates_an_also_in_this_series_page() {
+    // #820: a book that is part of a series carries an "also in this series" page
+    // listing the *other* books — never itself.
+    let d = Document {
+        series_books: vec![
+            "Red <State> Earth".into(),
+            "Blue State Moon".into(),
+            "Green State Sun".into(),
+        ],
+        ..doc()
+    };
+    let bytes = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+    // No cover / no copyright metadata, so: title0001 → series0002 → body.
+    let page = part(&bytes, "OEBPS/series0002.xhtml");
+    assert!(
+        page.contains(SERIES_LIST_HEADING),
+        "the page carries the heading: {page}"
+    );
+    assert!(
+        page.contains("Blue State Moon") && page.contains("Green State Sun"),
+        "the other books are listed: {page}"
+    );
+    assert!(
+        !page.contains("Red &lt;State&gt; Earth"),
+        "the book never lists itself: {page}"
+    );
+    // It slots into the front matter after the title page.
+    let opf = part(&bytes, "OEBPS/content.opf");
+    assert!(
+        opf.find("series0002").unwrap() > opf.find("title0001").unwrap(),
+        "series list follows the title page: {opf}"
+    );
+    assert!(
+        page.contains("<body epub:type=\"frontmatter\">"),
+        "the series list is front matter: {page}"
+    );
+}
+
+#[test]
+fn a_standalone_book_omits_the_series_page() {
+    // A book with no other series titles (a standalone novel) generates no "also
+    // in this series" page, so a standalone export is unchanged.
+    let bytes = to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap();
+    assert!(
+        !names(&bytes).iter().any(|n| n.contains("series0")),
+        "no series-list page for a standalone book"
+    );
+    // Even when the list holds only the book's own title, it lists nothing — so no
+    // page is emitted.
+    let only_self = Document {
+        series_books: vec!["Red <State> Earth".into()],
+        ..doc()
+    };
+    let bytes = to_epub(&only_self, MODIFIED, &ExportStyle::default()).unwrap();
+    assert!(
+        !names(&bytes).iter().any(|n| n.contains("series0")),
+        "a lone self-title lists nothing, so no page"
     );
 }

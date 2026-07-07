@@ -43,6 +43,66 @@ fn exporting_just_the_active_book_is_scoped_to_it() {
 }
 
 #[test]
+fn exporting_a_series_book_generates_the_also_in_this_series_page() {
+    // #820: exporting one book of a series compiles an "also in this series" page
+    // from the `[[books]]` list — it names the *other* book, not itself. Assert on
+    // the emitted `.docx` XML (hermetic, #531).
+    use crate::frontmatter::SERIES_LIST_HEADING;
+    use crate::mode::{ExportFormat, ExportScope};
+    use std::io::{Cursor, Read};
+
+    let (mut app, dir) = series_app("export-series-page");
+    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+
+    let bytes = fs::read(dir.join("export/book-one.docx")).unwrap();
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut xml = String::new();
+    zip.by_name("word/document.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    assert!(
+        xml.contains(SERIES_LIST_HEADING),
+        "the series book carries the 'also in this series' heading: {xml}"
+    );
+    assert!(
+        xml.contains("Book Two"),
+        "it lists the other book of the series: {xml}"
+    );
+    // It lists the *other* book, never itself: "Book One" appears once (the title
+    // block), not again in the list.
+    assert_eq!(
+        xml.matches("Book One").count(),
+        1,
+        "the book does not list itself: {xml}"
+    );
+}
+
+#[test]
+fn a_standalone_book_omits_the_series_page() {
+    // #820: a standalone project (one book) has no other titles, so no "also in
+    // this series" page is generated — the export is unchanged.
+    use crate::frontmatter::SERIES_LIST_HEADING;
+    use crate::mode::{ExportFormat, ExportScope};
+    use std::io::{Cursor, Read};
+
+    let (mut app, dir) = two_chapter_app("export-standalone-no-series");
+    app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
+
+    let bytes = fs::read(dir.join("export/book.docx")).unwrap();
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    let mut xml = String::new();
+    zip.by_name("word/document.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    assert!(
+        !xml.contains(SERIES_LIST_HEADING),
+        "a standalone book has no series page: {xml}"
+    );
+}
+
+#[test]
 fn the_export_menu_offers_series_and_book_scopes() {
     let (mut app, _dir) = series_app("export-menu");
     app.open_export_palette();
