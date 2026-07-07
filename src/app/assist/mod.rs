@@ -27,6 +27,7 @@ use crate::mode::AiAction;
 mod ask;
 mod recheck;
 mod reference;
+mod retrieve;
 mod trackers;
 mod triage;
 mod workflow;

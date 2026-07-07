@@ -14,7 +14,7 @@ mod download;
 pub(in crate::app) use backend::BackendSpec;
 pub(in crate::app) use bible::bible_tracker;
 pub(in crate::app) use download::{
-    download_model, model_downloaded, remove_model_files, LOCAL_UNAVAILABLE,
+    download_model, embed_model_downloaded, model_downloaded, remove_model_files, LOCAL_UNAVAILABLE,
 };
 
 #[cfg(feature = "local")]

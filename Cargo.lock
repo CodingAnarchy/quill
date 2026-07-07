@@ -2896,6 +2896,7 @@ name = "quill"
 version = "0.3.0"
 dependencies = [
  "candle-core",
+ "candle-nn",
  "candle-transformers",
  "crossterm",
  "flate2",

@@ -75,6 +75,39 @@ fn manuscript_text_includes_every_chapter() {
 }
 
 #[test]
+fn ask_index_chapters_assembles_the_active_book() {
+    // The retrieval index's input covers every chapter of the active book with its
+    // title, file, and live body (#831) — the same coverage `manuscript_text` has.
+    let (app, _dir) = two_chapter_app("ai-index-src");
+    let chapters = app.ask_index_chapters();
+    assert_eq!(chapters.len(), 2, "both chapters feed the index");
+    assert_eq!(chapters[0].title, "One");
+    assert!(
+        chapters[0].body.contains("first chapter"),
+        "{:?}",
+        chapters[0]
+    );
+    assert_eq!(chapters[1].title, "Two");
+    assert!(
+        chapters[1].body.contains("second chapter"),
+        "{:?}",
+        chapters[1]
+    );
+}
+
+#[test]
+#[cfg(not(feature = "local"))]
+fn ask_falls_back_to_whole_book_without_an_embedder() {
+    // No `local` feature → no on-device embedder is available, so grounded-Ask can't
+    // retrieve and stays on the whole-book path (#831): `ask_embed_model` finds none.
+    let (app, _dir) = two_chapter_app("ai-no-embed");
+    assert!(
+        app.ask_embed_model().is_none(),
+        "retrieval is unavailable without an embedding model on disk"
+    );
+}
+
+#[test]
 fn qa_answer_opens_the_overlay() {
     let (mut app, _dir) = two_chapter_app("ai-answer");
     // Drive the Q&A core with a mock backend (no network): build the request from

@@ -34,6 +34,22 @@ pub(in crate::app) fn recommended_model() -> Option<&'static ai::model_select::M
     ai::local::LocalBackend::recommended_model()
 }
 
+/// Whether the embedding `model`'s weights are already in the `hf-hub` cache
+/// (#831) — a no-download lookup, so grounded-Ask can decide whether to use the
+/// semantic retrieval index or fall back to sending the whole book. Always `false`
+/// without the `local` feature (nothing on-device can embed there).
+#[cfg(feature = "local")]
+pub(in crate::app) fn embed_model_downloaded(model: &ai::model_select::EmbedModel) -> bool {
+    hf_hub::Cache::from_env()
+        .model(model.repo.to_string())
+        .get(model.weights_file)
+        .is_some()
+}
+#[cfg(not(feature = "local"))]
+pub(in crate::app) const fn embed_model_downloaded(_model: &ai::model_select::EmbedModel) -> bool {
+    false
+}
+
 /// A `hf-hub` progress sink that feeds Quill's shared [`DownloadProgress`] counter
 /// (#813) instead of the disabled indicatif bar (#727). `hf-hub` calls `init` with
 /// each file's byte size and `update` with every chunk read; we fold both into the
