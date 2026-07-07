@@ -76,9 +76,10 @@ impl App {
     #[allow(clippy::match_same_arms)]
     pub(crate) fn action_status(&self, action: Action) -> Option<String> {
         match action {
-            // Triage and the Ask history are local — they work with the AI backend
-            // off (browsing already-collected findings / past answers, #609).
-            Action::Ai(AiAction::Triage | AiAction::AskHistory) => None,
+            // Triage, the health dashboard, and the Ask history are local — they
+            // work with the AI backend off (browsing already-collected findings /
+            // past answers, #609/#827).
+            Action::Ai(AiAction::Triage | AiAction::Dashboard | AiAction::AskHistory) => None,
             // Image generation has its own opt-in / key, separate from the text AI
             // (and its own "local not compiled" fail-fast).
             Action::Ai(AiAction::Portrait | AiAction::Scene) => {
@@ -608,6 +609,7 @@ impl App {
             AiAction::Portrait => self.start_portrait(),
             AiAction::Scene => self.start_scene(),
             AiAction::Triage => self.open_triage(),
+            AiAction::Dashboard => self.open_health_dashboard(),
             AiAction::AskHistory => self.open_qa_history(),
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::NameGen => self.start_namegen(),
@@ -692,6 +694,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Triage => (
             "Revision triage",
             "All findings so far, in one list (local)",
+        ),
+        AiAction::Dashboard => (
+            "Manuscript health",
+            "Open findings by kind & chapter, with counts (local)",
         ),
         AiAction::AskHistory => (
             "Ask history",

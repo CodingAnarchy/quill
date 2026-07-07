@@ -74,6 +74,7 @@ mod corkboard;
 mod editing;
 mod export_styling;
 mod goals;
+mod health;
 mod imports;
 mod models;
 mod mouse;

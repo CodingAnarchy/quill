@@ -78,6 +78,7 @@ fn plot_findings_flow_through_triage_deduped() {
 fn plot_ui_finding(chapter: &str, thread: &str, issue: &str) -> crate::mode::Finding {
     crate::mode::Finding {
         summary: format!("{thread}: {issue}"),
+        kind: crate::mode::FindingKind::Plot,
         chapters: vec![chapter.into()],
         book: None,
         action: Some(AiAction::Plot),

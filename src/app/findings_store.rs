@@ -14,19 +14,21 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::atomic;
-use crate::mode::Finding;
+use crate::mode::{Finding, FindingKind};
 
 /// A content key for a finding — stable across sessions and re-runs, derived from
-/// what the finding *says* (summary + chapters + book), not its list position. A
-/// re-produced finding hashes to the same key, so a prior dismissal still
-/// applies.
+/// what the finding *says* (kind + summary + chapters + book), not its list
+/// position. A re-produced finding hashes to the same key, so a prior dismissal
+/// still applies; the `kind` prefix (#827) keeps two passes that flag the same
+/// span with coincidentally identical text from colliding.
 fn key(f: &Finding) -> String {
-    // Book index, then summary, then chapters — joined with control-character
-    // separators that can't occur in the fields' own text, so distinct findings
-    // never collide.
+    // Kind, then book index, then summary, then chapters — joined with
+    // control-character separators that can't occur in the fields' own text, so
+    // distinct findings never collide.
     let book = f.book.map(|b| b.to_string()).unwrap_or_default();
     format!(
-        "{book}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{book}\u{1f}{}\u{1f}{}",
+        f.kind.slug(),
         f.summary,
         f.chapters.join("\u{1e}")
     )
@@ -38,6 +40,11 @@ fn key(f: &Finding) -> String {
 #[derive(Serialize, Deserialize, Clone)]
 struct Record {
     summary: String,
+    /// The finding's category slug (#827) — persisted so a restored finding keeps
+    /// its pass even though `action` is lost. Absent in a pre-#827 file, defaulting
+    /// to `"other"` there (unknown slugs resolve to [`FindingKind::Other`]).
+    #[serde(default)]
+    kind: String,
     #[serde(default)]
     chapters: Vec<String>,
     #[serde(default)]
@@ -52,6 +59,7 @@ impl Record {
     fn from(f: &Finding, dismissed: bool) -> Self {
         Self {
             summary: f.summary.clone(),
+            kind: f.kind.slug().to_string(),
             chapters: f.chapters.clone(),
             book: f.book,
             dismissed,
@@ -61,6 +69,7 @@ impl Record {
     fn finding(&self) -> Finding {
         Finding {
             summary: self.summary.clone(),
+            kind: FindingKind::from_slug(&self.kind),
             chapters: self.chapters.clone(),
             book: self.book,
             // The store records content, not the originating pass, so a restored
@@ -159,11 +168,12 @@ impl FindingsStore {
 mod tests {
     use super::{store_path, FindingsStore};
     use crate::atomic;
-    use crate::mode::Finding;
+    use crate::mode::{Finding, FindingKind};
 
     fn finding(summary: &str) -> Finding {
         Finding {
             summary: summary.into(),
+            kind: FindingKind::Continuity,
             chapters: vec!["One".into()],
             book: None,
             action: None,

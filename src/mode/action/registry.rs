@@ -225,6 +225,7 @@ impl Action {
         Self::Ai(AiAction::Portrait),
         Self::Ai(AiAction::Scene),
         Self::Ai(AiAction::Triage),
+        Self::Ai(AiAction::Dashboard),
         Self::Ai(AiAction::AskHistory),
         Self::Ai(AiAction::Thesaurus),
         Self::Ai(AiAction::NameGen),
@@ -415,6 +416,7 @@ impl Action {
             Self::Ai(AiAction::Portrait) => "AI · Character portraits",
             Self::Ai(AiAction::Scene) => "AI · Scene illustration",
             Self::Ai(AiAction::Triage) => "Revision triage",
+            Self::Ai(AiAction::Dashboard) => "Manuscript health dashboard",
             Self::Ai(AiAction::AskHistory) => "AI · Ask history",
             Self::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
             Self::Ai(AiAction::NameGen) => "AI · Name generator",
@@ -480,7 +482,7 @@ impl Action {
     pub(crate) const fn is_sync(self) -> bool {
         match self {
             // Local, no network request — like Triage, these run synchronously.
-            Self::Ai(AiAction::Triage | AiAction::AskHistory) => true,
+            Self::Ai(AiAction::Triage | AiAction::Dashboard | AiAction::AskHistory) => true,
             Self::Ai(_) => false,
             _ => true,
         }

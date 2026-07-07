@@ -259,6 +259,16 @@ impl App {
     fn select_list_index(&mut self, index: usize) -> bool {
         match &mut self.mode {
             Mode::Findings(f) => f.selected = index,
+            // Only the finding rows of the dashboard are selectable; a click on a
+            // header row (a kind/chapter heading) is ignored so the selection stays
+            // on a jump target (#827).
+            Mode::Dashboard(d) => {
+                if d.finding_at(index).is_some() {
+                    d.selected = index;
+                } else {
+                    return false;
+                }
+            }
             Mode::History(h) => h.selected = index,
             Mode::Corkboard(c) => c.selected = index,
             Mode::Annotations { selected, .. } | Mode::Outline { selected, .. } => {
@@ -355,6 +365,7 @@ impl App {
             self.mode,
             Mode::Nav { .. }
                 | Mode::Findings(_)
+                | Mode::Dashboard(_)
                 | Mode::History(_)
                 | Mode::Annotations { .. }
                 | Mode::Outline { .. }

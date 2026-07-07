@@ -350,6 +350,7 @@ fn setting_with_no_violations_summarizes() {
 fn continuity_ui_finding(chapter: &str, detail: &str) -> crate::mode::Finding {
     crate::mode::Finding {
         summary: format!("object: {detail}"),
+        kind: crate::mode::FindingKind::Continuity,
         chapters: vec![chapter.into()],
         book: None,
         action: Some(crate::mode::AiAction::Continuity),
@@ -480,6 +481,7 @@ fn recheck_is_a_noop_for_a_finding_without_a_pass() {
     app.mode = Mode::Findings(Box::new(Findings {
         items: vec![crate::mode::Finding {
             summary: "cited: One".into(),
+            kind: crate::mode::FindingKind::Other,
             chapters: vec!["One".into()],
             book: None,
             action: None,
@@ -511,6 +513,7 @@ fn findings_over(name: &str, summaries: &[(&str, &str)]) -> (App, TempProject) {
         .iter()
         .map(|(summary, chapter)| crate::mode::Finding {
             summary: (*summary).into(),
+            kind: crate::mode::FindingKind::Continuity,
             chapters: vec![(*chapter).into()],
             book: None,
             action: None,

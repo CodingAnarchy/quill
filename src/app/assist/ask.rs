@@ -34,6 +34,7 @@ fn qa_citation_findings(answer: &ai::Answer) -> Vec<Finding> {
         seen.push(title);
         out.push(Finding {
             summary: format!("cited: {title}"),
+            kind: FindingKind::Other, // a Q&A citation isn't an analysis-pass finding (#827)
             chapters: vec![title.to_string()],
             book: None,
             action: None, // a Q&A citation isn't a re-runnable analysis finding (#608)
@@ -53,6 +54,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
         .filter(|l| !l.is_empty())
         .map(|l| Finding {
             summary: l.to_string(),
+            kind: FindingKind::Other,
             chapters: Vec::new(),
             book: None,
             action: None,
@@ -61,6 +63,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
     if !rows.is_empty() {
         rows.push(Finding {
             summary: String::new(),
+            kind: FindingKind::Other,
             chapters: Vec::new(),
             book: None,
             action: None,
@@ -91,6 +94,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
         if cited.is_empty() {
             out.push(Finding {
                 summary: format!("{label} — (no chapter cited)"),
+                kind: FindingKind::Other,
                 chapters: Vec::new(),
                 book: None,
                 action: None,
@@ -100,6 +104,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                 let title = title.trim();
                 out.push(Finding {
                     summary: format!("{label} → {title}"),
+                    kind: FindingKind::Other,
                     chapters: vec![title.to_string()],
                     book: None,
                     action: None,

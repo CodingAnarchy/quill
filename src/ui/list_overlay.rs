@@ -21,8 +21,8 @@ use std::cell::RefCell;
 
 use crate::app::ListLayout;
 use crate::mode::{
-    Corkboard, DirBrowser, Findings, History, HistoryRow, ImportPreview, Palette, PaletteRow,
-    ProjectBrowser, ProjectSearch, ProjectSearchStage,
+    Corkboard, Dashboard, DashboardRow, DirBrowser, Findings, History, HistoryRow, ImportPreview,
+    Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage,
 };
 use crate::project::Project;
 
@@ -508,6 +508,52 @@ pub(super) fn draw_findings(
             if visible.len() == 1 { "" } else { "es" }
         )
     };
+    draw_list_overlay_recording(
+        frame,
+        area,
+        &title,
+        &help,
+        rows,
+        selected_pos,
+        Some(recorder),
+    );
+}
+
+/// Render the manuscript-health dashboard (#827): open findings grouped by
+/// kind/pass then chapter, each group headed by its count, with the individual
+/// findings as selectable/jumpable rows. Kind headers are bold; chapter
+/// sub-headers are dimmed; only finding rows carry the selection marker. `recorder`
+/// captures the row geometry for click-to-select — a click on a header row is
+/// ignored by the handler, keeping the selection on a jump target.
+pub(super) fn draw_dashboard(
+    frame: &mut Frame,
+    area: Rect,
+    dashboard: &Dashboard,
+    recorder: &RefCell<ListLayout>,
+) {
+    let title = format!(" Manuscript health ({} open) ", dashboard.total);
+    let rows: Vec<Line<'static>> = dashboard
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| match row {
+            DashboardRow::Kind { label, count } => Line::from(Span::styled(
+                format!("{label}  ({count})"),
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            DashboardRow::Chapter { title, count } => Line::from(Span::styled(
+                format!("  {title}  ({count})"),
+                Style::default().fg(theme::current().dim),
+            )),
+            DashboardRow::Finding(f) => {
+                list_row(i == dashboard.selected, &format!("    {}", f.summary), None)
+            }
+        })
+        .collect();
+    // The scroll window keeps the selected finding row in view; the marker is
+    // already baked into that row above, so this only drives scrolling.
+    let selected_pos = Some(dashboard.selected);
+    let help = "Health — ↑↓ move · enter jump · s save · esc close".to_string();
     draw_list_overlay_recording(
         frame,
         area,

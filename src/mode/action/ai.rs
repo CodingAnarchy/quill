@@ -41,6 +41,9 @@ pub enum AiAction {
     Scene,
     /// Open the accumulated revision-triage findings (local; no request).
     Triage,
+    /// Open the manuscript-health dashboard (#827): open findings grouped by
+    /// kind/pass and chapter with counts, jumpable (local; no request).
+    Dashboard,
     /// Browse the session's "Ask the manuscript" history — past asks, answers, and
     /// their jumpable citations (local; no request) (#609).
     AskHistory,
@@ -211,6 +214,12 @@ impl AiAction {
             bible_key: None,
         },
         AiActionSpec {
+            action: Self::Dashboard,
+            slug: "health",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
             action: Self::AskHistory,
             slug: "ai:ask-history",
             cost: AiCost::None,
@@ -266,5 +275,26 @@ impl AiAction {
     /// `worker.rs`) and the series-rollup label (#340, `series_bible.rs`) read it.
     pub(crate) fn bible_key(self) -> Option<&'static str> {
         self.spec().bible_key
+    }
+
+    /// The [`FindingKind`](crate::mode::FindingKind) a pass's findings carry (#827)
+    /// — the category that survives the map to a summary string and the durable
+    /// store, so the health dashboard can group by pass. Only the passes that
+    /// surface findings have a distinct kind; every other action maps to
+    /// [`Other`](crate::mode::FindingKind::Other) (they produce no triage findings).
+    pub(crate) const fn finding_kind(self) -> crate::mode::FindingKind {
+        use crate::mode::FindingKind;
+        match self {
+            Self::Continuity => FindingKind::Continuity,
+            Self::Setting => FindingKind::Setting,
+            Self::Plot => FindingKind::Plot,
+            Self::Theme => FindingKind::Theme,
+            Self::Scaffold => FindingKind::Scaffold,
+            Self::Naming => FindingKind::Naming,
+            Self::Style => FindingKind::Style,
+            Self::Editorial => FindingKind::Editorial,
+            Self::Voice => FindingKind::Voice,
+            _ => FindingKind::Other,
+        }
     }
 }

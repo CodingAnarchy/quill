@@ -61,6 +61,7 @@ pub(super) fn findings_from<T>(
             let (summary, chapters) = describe(it);
             Finding {
                 summary,
+                kind: action.finding_kind(),
                 chapters,
                 book,
                 action: Some(action),

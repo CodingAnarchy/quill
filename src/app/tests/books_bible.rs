@@ -410,6 +410,7 @@ fn jumping_to_a_cross_book_finding_switches_books() {
     // A finding in book two, surfaced in the (session-wide) triage list.
     app.triage.push(Finding {
         summary: "object: the locket".into(),
+        kind: crate::mode::FindingKind::Continuity,
         chapters: vec!["Dusk".into()],
         book: Some(1),
         action: None,
