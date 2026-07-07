@@ -190,7 +190,9 @@ than one book.
 When you create a project, a short setup wizard offers to scaffold it: writing
 goals, a starter cast and setting (drafted by the AI when it's enabled), and a
 first note. Every step is skippable and the whole wizard is dismissible with
-Esc — turn it off with "setup_wizard = false" under [projects].
+Esc — turn it off with "setup_wizard = false" under [projects]. On a first run a
+dismissible quick-start card also points at the core keys and next steps, so a
+new project isn't a blank page with no signposts.
 
 
 SAVING & SAFETY
@@ -211,6 +213,18 @@ buffer is on disk, ● when you have unsaved changes. Set [editor]
 autosave_interval_secs = N in your config to save automatically after N seconds
 of idle (0, the default, is off); autosave uses the same atomic path as Ctrl-S
 but doesn't run on_save workflows.
+
+For a coarser checkpoint than the per-chapter save/recovery, "Milestones" (in the
+Ctrl-K menu) marks a named point in the whole project's history — "first draft
+done", say — that you can come back to: restore the entire project to a milestone,
+or diff the current manuscript against one to see everything that's changed since.
+
+Quill guards your files against the ways they can go wrong quietly: an atomic save
+through a symlinked chapter replaces the real target rather than orphaning it; a
+project you open while another Quill already has it opens read-only (an advisory
+lock keeps two processes from racing writes and clobbering the shared sidecars);
+and a transient read error is told apart from an empty file, so a hiccup never
+zero-word-caches a chapter or wrongly offers recovery.
 
 
 ARCHIVE & BACKUP
@@ -236,7 +250,9 @@ empty folder — so a stray path can never clobber work in progress.
 REPORTS
 
 Ctrl-R opens the progress report: completion against your goals, a projected
-final length and finish date from your writing pace, and today's word delta.
+final length and finish date from your writing pace, and today's word delta. Set
+a deadline date under [goals] and the projection is deadline-aware — it shows the
+daily pace your target date implies against the pace you're keeping.
 Set your goals without leaving Quill: run "Set writing goals" from the Ctrl-K
 menu (or "goals:set"). It walks you through the target word count, the target
 chapter count, the daily word target, and the words-per-page used for the page
@@ -257,7 +273,9 @@ single day off but lapses after that), your best day, the totals across every
 recorded day, and a sparkline graph of daily net words — green bars for gaining
 days, red for losing ones — under the date range it spans. It only reads the
 history log; nothing new is recorded. Like the other reports, it's scrollable and
-any other key closes it.
+any other key closes it. The same view carries a month calendar heatmap of your
+daily activity and your per-session records — the words, elapsed time, and
+words-per-minute of each writing session Quill logs.
 
 
 EXPORT
@@ -365,10 +383,19 @@ it writes the setting for you, then asks for your API key. You can also run
 With AI enabled, Ctrl-A opens the AI command palette. The
 assistant is a helper, never a co-writer: it tracks, outlines, marks, and
 observes, but it never writes or rewrites your manuscript prose. It can build a
-story bible (characters, timeline, setting), flag continuity and naming issues,
-observe style, brainstorm ideas, draft a starter cast or setting from a concept,
-and produce off-manuscript material (a synopsis, query letter, blurbs, social
-posts). Revision triage collects every finding into one list to work through.
+story bible (characters, timeline, setting, plot threads, and a theme/motif
+tracker that follows a book's recurring themes), flag continuity and naming
+issues, observe style, brainstorm ideas, draft a starter cast or setting from a
+concept, and produce off-manuscript material (a synopsis, query letter, blurbs,
+social posts). Revision triage collects every finding into one list to work
+through, and the "Manuscript health" dashboard gives a one-screen overview of
+the open findings grouped by kind (continuity, consistency, style, and the
+rest); you can export the findings list to a file and re-check every open
+finding in one pass.
+
+"Ask the manuscript" retrieves the most relevant chapters for your question
+through an on-device semantic index, so its grounded, citable answer points at
+the right passages without a cloud round-trip.
 
 Each pass runs off the editor thread, so the editor never freezes, and a pass
 that would cost more than your threshold asks before spending.

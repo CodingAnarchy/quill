@@ -81,8 +81,16 @@ keystrokes that stay out of the way.
   deleted), broken down **per part** (a configurable grouping of chapters),
   backed by an append-only snapshot log so the day's progress survives a reopen.
   Set a **daily word-count target** (`daily` under `[goals]`) and the report
-  shows today's net words against it — met, or how many remain. Full spec in
+  shows today's net words against it — met, or how many remain. Set a **deadline
+  date** and the report projects your finish date and the daily pace it implies.
+  Full spec in
   [`docs/progress-reports.md`](docs/progress-reports.md).
+- **Writing analytics** — a **month calendar heatmap** of daily activity plus
+  **per-session records** (words, elapsed time, words-per-minute), alongside the
+  writing-streak history, all read from Quill's append-only day/session log.
+- **Named milestones** — mark a point in the project's history by name, then
+  **restore the whole project** to it or **diff** the current manuscript against
+  it — a coarse, whole-project checkpoint above the per-chapter save/recovery.
 - **Writing sprints** — start a timed session (**Start a writing sprint** in the
   Ctrl-K menu; pick a length in minutes) and the status bar shows a live countdown
   and the words written since you began — the word-war / Pomodoro ritual a lot of
@@ -232,13 +240,20 @@ keystrokes that stay out of the way.
   Batch API, structured outputs), it keeps a human-readable **story bible** in
   the project and offers: character profiles & arcs; a timeline with continuity
   findings; a setting / worldbuilding bible with rule-break findings; a
-  **plot-thread / arc tracker** that surfaces dangling threads; outline /
+  **plot-thread / arc tracker** that surfaces dangling threads; a **theme /
+  motif tracker** (a fifth incremental bible) that follows a book's themes and
+  where they recur; outline /
   beat-sheet scaffolding (with `xxx` gap markers); name & term consistency; a
   **name generator**; prose & style and editorial reads (findings, never fixes);
   an in-context **thesaurus** (candidate words for a slot you pick); notes import
-  into the bible; grounded "ask the manuscript" Q&A with jumpable citations; and
+  into the bible; grounded "ask the manuscript" Q&A with jumpable citations,
+  retrieved through an **on-device semantic index** so the right chapters are
+  cited without a cloud round-trip; and
   off-manuscript artifacts (synopsis, blurb, query letter, marketing / social
-  copy). Your hand-edits to
+  copy). Findings surface in a **manuscript-health dashboard** — a one-screen
+  overview grouped by kind (continuity, consistency, style, …); you can **export
+  the findings list** to a file and **re-check every open finding** in one pass.
+  Your hand-edits to
   the bible are ground truth on the next pass — **Browse story bible**
   (`bible:browse`, from the `Ctrl-K` menu) lists the files under `bible/`
   (characters, timeline, setting, outline) and opens the selected one in an
@@ -521,7 +536,8 @@ Ctrl-K menu) creates a project and imports every Markdown file in the folder int
 its story bible in one step — preserving the originals.
 
 Already have a **manuscript**? **Import a manuscript → new project** (in the
-Ctrl-K menu) turns an existing **Markdown (`.md`)**, **Word (`.docx`)**, or
+Ctrl-K menu) turns an existing **Markdown (`.md`)**, **Word (`.docx`)**,
+**OpenDocument Text (`.odt`)**, or
 **Scrivener (`.scriv`)** manuscript into a chaptered Quill project: point it at
 the file (or the `.scriv` bundle), give the new project a path, and Quill splits
 it into chapters and carries the chapter titles into the manifest. A Markdown file
@@ -542,6 +558,10 @@ When you create a project, a short setup wizard offers to scaffold it — writin
 goals, a starter cast and setting (with AI, when enabled), and a first note.
 Every step is skippable and the whole thing is dismissible (Esc); turn it off
 entirely with `setup_wizard = false` under `[projects]`.
+
+On a first run, a dismissible **onboarding / quick-start card** points at the
+core keys and the next steps to take, so a new project isn't a blank page with
+no signposts.
 
 Want an offline backup — no git, no remote, no account? **Archive project…** (in
 the Ctrl-K menu, or `archive`) writes a single timestamped `.zip` of the whole
