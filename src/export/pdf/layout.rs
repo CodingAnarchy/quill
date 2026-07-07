@@ -29,6 +29,12 @@ pub struct PrintConfig {
     /// unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bleed: Option<f32>,
+    /// The per-page paper thickness (caliper) in inches (#819) — the wrap cover's
+    /// spine is `interior page count × caliper`. Absent → the writer's sane default
+    /// (see [`DEFAULT_CALIPER_INCHES`](super::DEFAULT_CALIPER_INCHES)); authors on a
+    /// known stock (KDP white ≈ 0.00225", cream ≈ 0.0025") set it here. Cover-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caliper: Option<f32>,
 }
 
 impl PrintConfig {
@@ -36,6 +42,12 @@ impl PrintConfig {
     /// unset. Screen exports never call this — bleed is a print-only allowance.
     pub fn bleed_points(&self) -> f32 {
         (self.bleed.unwrap_or(0.0) * 72.0).max(0.0)
+    }
+
+    /// The configured per-page caliper in inches (#819), or the writer's sane default
+    /// when unset. Feeds the wrap cover's spine width (`page_count × caliper`).
+    pub fn caliper_inches(&self) -> f32 {
+        self.caliper.unwrap_or(super::DEFAULT_CALIPER_INCHES)
     }
 }
 

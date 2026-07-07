@@ -481,6 +481,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "export:epub",
         "export:pdf",
         "export:pdf-print",
+        "export:pdf-wrap-cover",
         "export:review",
         "export:bible",
         "export:preflight",

@@ -14,6 +14,7 @@
 //! glyphs used (#495), so files stay small. Designed typography (font choice,
 //! ornaments) is the styling epic; cover/bleed are a separate artifact.
 
+mod cover;
 mod draw;
 // `font` is otherwise private to the PDF writer, but the EPUB writer reuses its
 // glyph subsetter for embedded fonts (#709).
@@ -42,6 +43,7 @@ use super::{
 };
 use crate::frontmatter::Epigraph;
 
+pub use self::cover::{to_wrap_cover, WrapGeometry, DEFAULT_CALIPER_INCHES};
 pub use self::layout::{trim_points, PrintConfig, DEFAULT_TRIM, TRIM_NAMES};
 
 // Type sizes and vertical rhythm, shared by both profiles (in points).
@@ -225,6 +227,31 @@ pub fn to_pdf_series_print(
 
 /// Lay out one standalone book onto a fresh `Pdf` with `layout` and serialize it.
 fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
+    lay_out_book(doc, style, layout).finish()
+}
+
+/// The number of interior pages a standalone book lays out to at the given trim
+/// (points) with a `bleed` allowance (#464/#652) — what the wrap cover's spine width is
+/// derived from (#819). Lays the print interior out exactly as [`to_pdf_print`] does
+/// (so the count matches the emitted interior, blank recto-start pages included) and
+/// reads `pages.len()` instead of serializing. The cover generator calls this to size
+/// the spine to the very book that ships beside it.
+pub fn print_page_count(
+    doc: &Document,
+    trim_w: f32,
+    trim_h: f32,
+    bleed: f32,
+    style: &ExportStyle,
+) -> usize {
+    lay_out_book(doc, style, Layout::print(trim_w, trim_h, bleed, style))
+        .pages
+        .len()
+}
+
+/// Lay out one standalone book onto a fresh `Pdf` with `layout`, returning the built
+/// builder ahead of serialization — shared by [`render_book`] (which finishes it) and
+/// [`print_page_count`] (which reads the page count off it, #819).
+fn lay_out_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Pdf {
     let mut pdf = Pdf::new(layout, StyleBits::from_style(style), decode_images(style));
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
     pdf.set_info(&doc.title, doc.author.as_deref().unwrap_or(""));
@@ -252,7 +279,7 @@ fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
     pdf.outline = book_outline(&mut pdf, doc);
     let entries = toc_entries(&pdf.outline);
     pdf.fill_contents(toc, &entries);
-    pdf.finish()
+    pdf
 }
 
 /// Lay out a series (a series title page, then each book behind a divider) and

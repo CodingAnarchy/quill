@@ -163,6 +163,12 @@ pub enum Action {
     /// every other export strips — as Word comments anchored to their ranges. The
     /// collaboration/handoff artifact for a beta reader or editor. Pure export.
     ReviewCopy,
+    /// Export the print **wrap cover** (#819): a single full-bleed PDF at
+    /// `2×trim + spine + 2×bleed` with the front-cover art on the front panel, a
+    /// reserved barcode/ISBN zone on the back, and a spine sized from the interior
+    /// page count × the paper caliper. The other half of "print-ready" beside the
+    /// print interior (#464). Standalone only. Pure export.
+    PdfWrapCover,
 }
 
 impl Action {
@@ -192,6 +198,7 @@ impl Action {
         Self::Export(ExportFormat::Epub),
         Self::Export(ExportFormat::Pdf),
         Self::Export(ExportFormat::PdfPrint),
+        Self::PdfWrapCover,
         Self::ReviewCopy,
         Self::PreflightExport,
         Self::PrepareForKdp,
@@ -272,6 +279,7 @@ impl Action {
             Self::Export(ExportFormat::Epub) => "export:epub",
             Self::Export(ExportFormat::Pdf) => "export:pdf",
             Self::Export(ExportFormat::PdfPrint) => "export:pdf-print",
+            Self::PdfWrapCover => "export:pdf-wrap-cover",
             Self::ProgressReport => "report:progress",
             Self::AnalysisReport => "report:analysis",
             Self::WritingHistory => "report:history",
@@ -345,6 +353,7 @@ impl Action {
             | Self::ArchiveProject
             | Self::RestoreArchive => "Project",
             Self::Export(_)
+            | Self::PdfWrapCover
             | Self::ReviewCopy
             | Self::PreflightExport
             | Self::PrepareForKdp
@@ -393,6 +402,7 @@ impl Action {
             Self::Export(ExportFormat::Epub) => "Export → EPUB",
             Self::Export(ExportFormat::Pdf) => "Export → PDF",
             Self::Export(ExportFormat::PdfPrint) => "Export → PDF (print interior)",
+            Self::PdfWrapCover => "Export → PDF wrap cover (front + spine + back)",
             Self::ProgressReport => "Progress report",
             Self::AnalysisReport => "Analysis report",
             Self::WritingHistory => "Writing history",
@@ -502,6 +512,7 @@ impl Action {
             self,
             Self::Save
                 | Self::Export(_)
+                | Self::PdfWrapCover
                 | Self::ReviewCopy
                 | Self::ExportBible
                 | Self::PreflightExport
