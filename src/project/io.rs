@@ -51,8 +51,16 @@ fn import_staging_path(root: &Path, file: &str) -> PathBuf {
 /// populated at open without re-reading later. One file read; never holds the
 /// body text. `marker` is the series-wide TODO marker (#867), so the save-path
 /// TODO roll-up sums cached counts instead of re-scanning each file.
+///
+/// A *hard* read failure (permissions, a transient I/O fault) leaves the cache
+/// untouched rather than recording the chapter as 0 words with its metadata
+/// dropped, which would corrupt the word/TODO rollups until the next good read
+/// (#871). A missing file is the legitimate "starts empty" case and caches as
+/// empty, exactly as before — [`read_existing`] draws that line.
 pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry, marker: &str) {
-    let text = fs::read_to_string(root.join(&entry.file)).unwrap_or_default();
+    let Ok(text) = read_existing(&root.join(&entry.file)) else {
+        return; // hard read error — keep the last good cache, don't zero it out
+    };
     let (front, body) = frontmatter::split(&text);
     entry.words = count_words(body);
     entry.todo = count_matches(body, marker);
@@ -77,6 +85,9 @@ impl Project {
         author: Option<&str>,
         chapters: &[(String, String)],
     ) -> std::io::Result<()> {
+        if self.is_read_only() {
+            return Err(Self::read_only_error()); // #871: don't race another instance
+        }
         // Stage every new file to a hidden temp path first. Nothing destructive
         // happens here, so a failure returns with the originals still on disk and
         // `self` unmodified — we clean up whatever we already staged.
@@ -150,25 +161,42 @@ impl Project {
         }
     }
 
-    /// Read chapter `index`'s file from disk, or "" if it can't be read. The
-    /// shared front of the off-the-per-frame-path chapter readers.
-    fn read_chapter(&self, index: usize) -> String {
-        fs::read_to_string(self.chapter_path(index)).unwrap_or_default()
+    /// Read chapter `index`'s file from disk. A missing file is the legitimate
+    /// "empty chapter" case and yields `""`; any *hard* failure (permissions, a
+    /// transient I/O fault) is propagated so a caller can tell an empty chapter
+    /// from an unreadable one, rather than a blanket "" that makes a read error
+    /// look like real content (#871). Routes through [`read_existing`], the same
+    /// line the splice-then-write paths draw. Off the per-frame path.
+    fn try_read_chapter(&self, index: usize) -> std::io::Result<String> {
+        read_existing(&self.chapter_path(index))
     }
 
-    /// The front matter of chapter `index` as written on disk (`None` if the
-    /// file has no block). For reading a chapter's metadata that isn't cached —
-    /// keep it off the per-frame path.
+    /// The front matter of chapter `index` as written on disk (`None` if the file
+    /// has no block, empty, or can't be read). For reading a chapter's metadata
+    /// that isn't cached — keep it off the per-frame path.
     pub fn chapter_front_matter(&self, index: usize) -> Option<FrontMatter> {
-        let text = self.read_chapter(index);
+        let text = self.try_read_chapter(index).unwrap_or_default();
         let (front, _) = frontmatter::split(&text);
         front.map(FrontMatter::from_raw)
     }
 
     /// The prose body of chapter `index` from disk (front matter stripped),
     /// empty if it can't be read. Off the per-frame path (used by the report).
+    /// Callers that must distinguish an unreadable chapter from an empty one —
+    /// e.g. the recovery offer — use [`try_chapter_body`](Self::try_chapter_body).
     pub fn chapter_body(&self, index: usize) -> String {
-        frontmatter::split(&self.read_chapter(index)).1.to_string()
+        self.try_chapter_body(index).unwrap_or_default()
+    }
+
+    /// The prose body of chapter `index` from disk, distinguishing a hard read
+    /// failure (`Err`) from a missing/empty file (`Ok("")`) (#871). The recovery
+    /// offer relies on this: on a hard read error it must *not* treat the chapter
+    /// as differing from disk (an empty body compared against captured prose looks
+    /// "changed"), which would spuriously re-offer content that was never lost.
+    pub fn try_chapter_body(&self, index: usize) -> std::io::Result<String> {
+        Ok(frontmatter::split(&self.try_read_chapter(index)?)
+            .1
+            .to_string())
     }
 
     /// Edit a (non-active) chapter's front matter on disk: read the file, apply
@@ -180,6 +208,9 @@ impl Project {
         index: usize,
         f: impl FnOnce(&mut FrontMatter),
     ) -> std::io::Result<()> {
+        if self.is_read_only() {
+            return Err(Self::read_only_error()); // #871: don't race another instance
+        }
         let path = self.chapter_path(index);
         // A failed read must abort: splicing onto an empty body would blank the
         // chapter's prose while reporting success (#565).
@@ -207,6 +238,9 @@ impl Project {
         ranges: &[(usize, usize)],
         replacement: &str,
     ) -> std::io::Result<()> {
+        if self.is_read_only() {
+            return Err(Self::read_only_error()); // #871: don't race another instance
+        }
         let path = self.chapter_path(index);
         // A failed read must abort: splicing onto an empty body would wipe the
         // chapter's prose while the replace reported success (#565).
@@ -231,6 +265,9 @@ impl Project {
     /// flat manifest exactly as before; a multi-book series (#328) folds the live
     /// active book back into the series list and writes the `[[books]]` form.
     pub fn save_manifest(&self) -> std::io::Result<()> {
+        if self.is_read_only() {
+            return Err(Self::read_only_error()); // #871: don't race another instance
+        }
         let err = |e| std::io::Error::other(format!("could not serialize manifest: {e}"));
         let text = if self.books.is_empty() {
             toml::to_string_pretty(&self.manifest).map_err(err)?

@@ -247,6 +247,14 @@ impl App {
     /// message on failure. No status message and no on-save trigger, so it's
     /// shared by the explicit save (which adds those) and autosave (#409).
     fn write_active(&mut self) -> Result<(), String> {
+        // The project is open read-only because another live instance holds it
+        // (#871): refuse the write rather than race the owner's saves and clobber
+        // the shared chapter files. The open-time warning already told the author.
+        if self.project.is_read_only() {
+            return Err(
+                "Read-only: this project is open in another Quill instance; not saved.".to_string(),
+            );
+        }
         if let Some(mut m) = self.manuscript.take() {
             let result = m.save(&mut self.project);
             self.manuscript = Some(m);

@@ -20,7 +20,14 @@ use std::path::{Path, PathBuf};
 /// bytes are durable before the swap, then renames it over `path`. On any
 /// failure before the rename, the temp file is removed and `path` is left
 /// untouched, so the previous good version always survives a failed write.
+///
+/// When `path` is a symlink (a chapter symlinked into a synced/shared folder),
+/// the write follows it: the temp is staged beside — and the rename lands on —
+/// the link's **real target**, so the target's content updates and the link
+/// itself is preserved. A plain rename onto the link path would instead replace
+/// the link with a regular file and orphan the target, silently stale (#871).
 pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let path = &resolve_symlink(path)?;
     let tmp = temp_path(path);
 
     // Stage into the temp file, flush it durable, then swap it in — all in one
@@ -67,6 +74,7 @@ pub fn write_with<F>(path: &Path, fill: F) -> io::Result<()>
 where
     F: FnOnce(&mut File) -> io::Result<()>,
 {
+    let path = &resolve_symlink(path)?;
     let tmp = temp_path(path);
 
     // Stage into the temp file, flush it durable, then swap it in — all in one
@@ -94,6 +102,60 @@ where
         let _ = dir.sync_all();
     }
     Ok(())
+}
+
+/// Resolve `path` to the real file the write should land on: if `path` is a
+/// symlink, follow it to its target so the temp is staged beside — and the
+/// rename replaces — the target rather than the link (#871). A non-symlink (or a
+/// missing path, the create-new case) is returned unchanged.
+///
+/// Only the final component is a link here (a chapter file symlinked into a
+/// synced folder); [`fs::read_link`] gives that target, resolved relative to the
+/// link's own directory so a relative link (`../shared/ch1.md`) points where it
+/// should. A dangling link (target's directory is gone) surfaces as the write's
+/// own error at `File::create`, never a silent replacement of the link.
+fn resolve_symlink(path: &Path) -> io::Result<PathBuf> {
+    // `symlink_metadata` does not follow the link, so this distinguishes a
+    // symlink from a regular file; a `NotFound` (nothing there yet) is the
+    // ordinary create case and leaves the path unchanged.
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            let target = fs::read_link(path)?;
+            let resolved = if target.is_absolute() {
+                target
+            } else {
+                parent(path).join(target)
+            };
+            // Follow a chain of links to the real file (each hop staged+renamed on
+            // the final target's filesystem). Bounded so a self-referential link
+            // cycle errors out instead of looping forever.
+            resolve_symlink_depth(resolved, 32)
+        }
+        _ => Ok(path.to_path_buf()),
+    }
+}
+
+/// [`resolve_symlink`] with a remaining-hops budget, so a link cycle terminates
+/// with an error rather than recursing without bound.
+fn resolve_symlink_depth(path: PathBuf, hops: u32) -> io::Result<PathBuf> {
+    if hops == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "too many levels of symbolic links",
+        ));
+    }
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            let target = fs::read_link(&path)?;
+            let resolved = if target.is_absolute() {
+                target
+            } else {
+                parent(&path).join(target)
+            };
+            resolve_symlink_depth(resolved, hops - 1)
+        }
+        _ => Ok(path),
+    }
 }
 
 /// The directory holding `path`, defaulting to the current directory for a bare
@@ -234,5 +296,66 @@ mod tests {
             "the good version\n",
             "the previous good version must survive a failed write"
         );
+    }
+
+    // #871: a chapter symlinked into a synced/shared folder must have its *target*
+    // updated by a save, and the link itself preserved — never replaced with a
+    // regular file that orphans the target as silently stale. Unix-only (relies on
+    // `std::os::unix::fs::symlink`); the CLAUDE.md platforms (macOS/Linux) have it.
+    #[cfg(unix)]
+    #[test]
+    fn writing_through_a_symlink_updates_the_target_not_the_link() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tmpdir("symlink");
+        let target = dir.join("real-chapter.md");
+        let link = dir.join("chapter.md");
+        write(&target, b"original\n").unwrap();
+        symlink(&target, &link).unwrap();
+
+        write(&link, b"revised\n").unwrap();
+
+        // The link is still a link, and the real target carries the new content.
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the save must not replace the symlink with a regular file"
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), "revised\n");
+        assert_eq!(fs::read_to_string(&link).unwrap(), "revised\n");
+        // And no temp file is orphaned beside the target.
+        let strays: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(strays.is_empty(), "temp file left behind: {strays:?}");
+    }
+
+    // A relative symlink target resolves against the link's own directory, not the
+    // process cwd — otherwise a save through it would write to the wrong place.
+    #[cfg(unix)]
+    #[test]
+    fn writing_through_a_relative_symlink_resolves_against_the_link_dir() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tmpdir("symlink_rel");
+        let sub = dir.join("synced");
+        fs::create_dir_all(&sub).unwrap();
+        let target = sub.join("real.md");
+        write(&target, b"before\n").unwrap();
+        let link = dir.join("chapter.md");
+        // A link relative to `dir` (the link's parent), pointing into `synced/`.
+        symlink(Path::new("synced/real.md"), &link).unwrap();
+
+        write(&link, b"after\n").unwrap();
+
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "after\n");
     }
 }

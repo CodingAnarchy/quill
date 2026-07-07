@@ -190,7 +190,12 @@ impl App {
                 *self = Self::new(buffer, project);
                 self.load_history();
                 recent::record(&root, &title);
-                self.message = Some(format!("Opened \u{201c}{title}\u{201d}"));
+                // Preserve the read-only warning `Self::new` set (#871) rather than
+                // overwriting it with "Opened …" — the author needs to know saves
+                // are disabled. A normally-owned project shows the open confirmation.
+                if !self.project.is_read_only() {
+                    self.message = Some(format!("Opened \u{201c}{title}\u{201d}"));
+                }
                 self.offer_recovery(); // honor the incoming project's unsaved work, if any
             }
             Err(e) => {
