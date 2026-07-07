@@ -142,6 +142,46 @@ fn the_interval_fallback_picks_up_an_external_edit() {
     );
 }
 
+#[test]
+fn the_idle_fallback_backs_off_when_the_tree_is_unchanged() {
+    // On an untouched editor the fallback walk keeps finding the same count, so the
+    // interval stretches (doubles) rather than re-walking the whole tree on a fixed
+    // short clock (#869). A real change (or a save) resets it to the base.
+    let (mut app, dir) = two_chapter_app("vc-backoff");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "base"); // clean working tree
+    assert_eq!(app.vc_changes, 0, "clean after the initial commit");
+
+    let base = app.vc_status_idle_interval_for_test();
+
+    // Two unchanged fallback walks: each lands the same count, so the interval grows.
+    app.expire_vc_status_interval_for_test();
+    app.settle_vc_status();
+    let after_one = app.vc_status_idle_interval_for_test();
+    assert!(
+        after_one > base,
+        "an unchanged walk backs off ({base:?} -> {after_one:?})"
+    );
+
+    app.expire_vc_status_interval_for_test();
+    app.settle_vc_status();
+    assert!(
+        app.vc_status_idle_interval_for_test() > after_one,
+        "successive unchanged walks keep backing off"
+    );
+
+    // A change surfaces via the (stretched) fallback and snaps the interval back.
+    fs::write(dir.join("one.md"), "# One\n\nEdited outside Quill.\n").unwrap();
+    app.expire_vc_status_interval_for_test();
+    app.settle_vc_status();
+    assert!(app.vc_changes > 0, "the change is still picked up");
+    assert_eq!(
+        app.vc_status_idle_interval_for_test(),
+        base,
+        "a real change resets the backoff to the base interval"
+    );
+}
+
 /// The commit summaries shown in the open history view, newest first.
 fn history_summaries(app: &App) -> Vec<String> {
     match &app.mode {

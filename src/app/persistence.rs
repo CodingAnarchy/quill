@@ -69,6 +69,14 @@ impl App {
     }
 
     /// Write today's snapshot to the history log (best-effort).
+    ///
+    /// [`history::persist`] appends, and `load`/`compact` coalesce to one line per
+    /// day — so a run of autosaves with unchanged totals would leave a stack of
+    /// identical day lines to tidy later. Skip the append when this snapshot equals
+    /// the last one we wrote (#869): the same totals produce the same coalesced
+    /// record, so nothing is lost, and an untouched idle autosave stops growing the
+    /// log. (Only equal snapshots are skipped, so the first write of the day and any
+    /// changed write still land.)
     pub fn persist_snapshot(&self) {
         let snapshot = history::Snapshot {
             date: date::iso(date::today()),
@@ -81,7 +89,12 @@ impl App {
             part_added: self.part_added.clone(),
             part_removed: self.part_removed.clone(),
         };
-        let _ = history::persist(&self.project.root, &snapshot);
+        if self.last_history_snapshot.borrow().as_ref() == Some(&snapshot) {
+            return;
+        }
+        if history::persist(&self.project.root, &snapshot).is_ok() {
+            *self.last_history_snapshot.borrow_mut() = Some(snapshot);
+        }
     }
 
     /// Record where the author is editing right now, so the next clean open can

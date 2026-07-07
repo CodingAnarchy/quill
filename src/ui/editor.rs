@@ -3,6 +3,8 @@
 //! markers. The most involved renderer, split out of `ui`. `use super::*` pulls
 //! in the shared types and the `Pane` trait.
 
+use std::rc::Rc;
+
 use super::*;
 use crate::app::mouse::{EditorLayout, VisualRow};
 use crate::buffer::Buffer;
@@ -22,8 +24,10 @@ const PARAGRAPH_INDENT: &str = "    ";
 /// reference through `render_body → styled_line → styled_row`, so a new overlay
 /// kind is one field rather than a parameter added to three signatures.
 struct SpanHighlights<'a> {
-    /// Emphasis-marker ranges to hide, except on the cursor's span (#296).
-    conceal: &'a [(usize, usize)],
+    /// Emphasis-marker ranges to hide, except on the cursor's span (#296). Held as
+    /// the `Rc` the parse caches (#869) so the layout recorder shares it for click
+    /// inversion rather than cloning the ranges each frame.
+    conceal: Rc<[(usize, usize)]>,
     /// Search/replace matches or the Visual selection, dim-highlighted (#144/#205).
     matches: &'a [ByteRange],
     /// The current search match / live selection, highlighted brighter (#144/#205).
@@ -89,7 +93,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
     let focus = app.focus_mode.then(|| focus_paragraph(buffer));
     let highlights = SpanHighlights {
-        conceal: &conceal,
+        conceal,
         matches: search_matches,
         current: current_match,
         spell,
@@ -166,7 +170,7 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
     let conceal = buffer.syntax().conceal_ranges(None);
     // A reference pane isn't where you write — no annotations, typewriter, or focus.
     let highlights = SpanHighlights {
-        conceal: &conceal,
+        conceal,
         matches: &[],
         current: None,
         spell: &[],
@@ -223,7 +227,7 @@ fn render_body(
     let line_rows = |line: usize| {
         let start = buffer.line_start_byte(line);
         let text = buffer.line(line);
-        let kind = row_kind(syntax, start, &text, hl.conceal);
+        let kind = row_kind(syntax, start, &text, &hl.conceal);
         row_count(
             kind,
             &text,
@@ -330,7 +334,7 @@ fn render_body(
     // entry per drawn visual row.
     if let Some(map) = layout.as_deref_mut() {
         map.column = column;
-        map.conceal = hl.conceal.to_vec();
+        map.conceal = Rc::clone(&hl.conceal);
         map.last_line = total.saturating_sub(1);
         map.rows.clear();
     }
@@ -357,7 +361,7 @@ fn render_body(
         let indent = paragraph_indent && starts_paragraph(buffer, ll);
         let line_start = buffer.line_start_byte(ll);
         let text = buffer.line(ll);
-        let kind = row_kind(syntax, line_start, &text, hl.conceal);
+        let kind = row_kind(syntax, line_start, &text, &hl.conceal);
         let verbatim = matches!(kind, RowKind::Code { verbatim: true });
         let starts = row_starts_for(
             kind,
@@ -407,7 +411,7 @@ fn render_body(
                 &cline[row_start..],
                 cline_start + row_start,
                 cursor_byte,
-                hl.conceal,
+                &hl.conceal,
             );
             // The first-line indent shifts the cursor right too, but only on the
             // paragraph's first visual row (#722) — continuation rows aren't indented.
@@ -422,32 +426,129 @@ fn render_body(
     applied_offset
 }
 
+/// Everything the display-only header blocks (#412/#518) are built from — the
+/// cache key (#869). Rebuilding the blocks wraps and formats every epigraph line
+/// into owned [`Line`]s each frame; comparing this cheap signature against the
+/// last one lets an untouched editor reuse the built blocks instead. It captures
+/// exactly the inputs [`build_header_inserts`] reads, so any change (an edited
+/// epigraph, a paged manuscript window, a resize, a theme switch, entering/leaving
+/// epigraph editing) misses the cache and rebuilds.
+#[derive(Clone, PartialEq)]
+struct HeaderSignature {
+    width: u16,
+    /// Epigraph editing hides all headers, so it's part of the key.
+    edit_meta: bool,
+    theme: Theme,
+    book_epigraph: Option<Epigraph>,
+    /// One entry per segment header: `(start, index, title, structure, epigraph)`.
+    headers: Vec<HeaderKey>,
+}
+
+type HeaderKey = (
+    usize,
+    usize,
+    Option<String>,
+    Option<String>,
+    Option<Epigraph>,
+);
+
+/// Cached header blocks and the signature they were built for (#869), stored on
+/// the `App` and consulted by [`header_inserts`] each frame. Shared via `Rc` so a
+/// cache hit is a refcount bump, never a re-wrap of the epigraph lines.
+#[derive(Default)]
+pub struct HeaderCache {
+    signature: Option<HeaderSignature>,
+    inserts: Rc<Vec<(usize, Vec<Line<'static>>)>>,
+}
+
+impl HeaderCache {
+    /// The identity of the currently cached blocks (#869), for tests to assert a
+    /// frame reused them (same pointer) or rebuilt them (different) — without
+    /// exposing the blocks themselves.
+    #[cfg(test)]
+    pub(crate) fn identity(&self) -> *const Vec<(usize, Vec<Line<'static>>)> {
+        Rc::as_ptr(&self.inserts)
+    }
+}
+
 /// The display-only header blocks to inject above the body, keyed by the buffer
 /// line each precedes: per chapter, a divider (continuous view, not the first
 /// chapter), the book epigraph (above chapter 0), then the chapter's epigraph.
-fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
+///
+/// Cached on the `App` (#869): the blocks change only when an input does (an edited
+/// epigraph, a paged window, a resize, a theme switch, entering/leaving epigraph
+/// editing), so a signature check lets an untouched frame reuse them rather than
+/// re-wrapping every epigraph line.
+fn header_inserts(app: &App, width: u16) -> Rc<Vec<(usize, Vec<Line<'static>>)>> {
+    let edit_meta = matches!(app.mode, Mode::EditMeta(_));
     // When editing an epigraph in the editor, the buffer *is* the epigraph —
     // don't inject chapter/book headers above it.
-    if matches!(app.mode, Mode::EditMeta(_)) {
-        return Vec::new();
-    }
-    let book_epigraph = app.project.manifest.epigraph();
-    let headers = app.manuscript.as_ref().map_or_else(
-        // Single-chapter view: one header for the active chapter at line 0.
-        || {
-            vec![SegmentHeader {
-                start: 0,
-                index: app.project.active_index(),
-                title: None,
-                structure: None,
-                epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),
-            }]
-        },
-        Manuscript::segment_headers,
-    );
+    let book_epigraph = if edit_meta {
+        None
+    } else {
+        app.project.manifest.epigraph()
+    };
+    let headers = if edit_meta {
+        Vec::new()
+    } else {
+        app.manuscript.as_ref().map_or_else(
+            // Single-chapter view: one header for the active chapter at line 0.
+            || {
+                vec![SegmentHeader {
+                    start: 0,
+                    index: app.project.active_index(),
+                    title: None,
+                    structure: None,
+                    epigraph: app.buffer.front_matter().and_then(FrontMatter::epigraph),
+                }]
+            },
+            Manuscript::segment_headers,
+        )
+    };
 
+    let signature = HeaderSignature {
+        width,
+        edit_meta,
+        theme: theme::current(),
+        book_epigraph: book_epigraph.clone(),
+        headers: headers
+            .iter()
+            .map(|h| {
+                (
+                    h.start,
+                    h.index,
+                    h.title.clone(),
+                    h.structure.clone(),
+                    h.epigraph.clone(),
+                )
+            })
+            .collect(),
+    };
+
+    let mut cache = app.header_cache.borrow_mut();
+    if cache.signature.as_ref() == Some(&signature) {
+        return Rc::clone(&cache.inserts);
+    }
+    let inserts = Rc::new(build_header_inserts(
+        &headers,
+        book_epigraph.as_ref(),
+        width,
+    ));
+    cache.signature = Some(signature);
+    cache.inserts = Rc::clone(&inserts);
+    inserts
+}
+
+/// Wrap and format the header blocks from the resolved segment headers and book
+/// epigraph — the allocating half of [`header_inserts`], split out so the cache
+/// runs it only when the signature changes (#869).
+fn build_header_inserts(
+    headers: &[SegmentHeader],
+    book_epigraph: Option<&Epigraph>,
+    width: u16,
+) -> Vec<(usize, Vec<Line<'static>>)> {
     let mut inserts = Vec::new();
-    for header in &headers {
+    for header in headers {
         let mut block = Vec::new();
         // The part/section name sits above the chapter divider, where the
         // structure changes (#412) — render-only, never in the buffer.
@@ -458,7 +559,7 @@ fn header_inserts(app: &App, width: u16) -> Vec<(usize, Vec<Line<'static>>)> {
             block.push(divider_line(title, width));
         }
         if header.index == 0 {
-            if let Some(epigraph) = &book_epigraph {
+            if let Some(epigraph) = book_epigraph {
                 block.extend(epigraph_lines(epigraph, width));
             }
         }
@@ -812,7 +913,7 @@ fn styled_row(
     let mut run_style = Style::default();
     for (local_byte, ch) in seg.char_indices() {
         let abs = seg_start + local_byte;
-        if is_concealed(abs, hl.conceal) {
+        if is_concealed(abs, &hl.conceal) {
             continue;
         }
         let mut style = search_style(

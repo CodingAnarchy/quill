@@ -15,11 +15,19 @@ pub struct VcMsg {
     reload: bool,
 }
 
-/// How long the cached uncommitted-changes count may stand before the idle path
-/// recomputes it to catch edits made outside Quill (#779). Long enough that pure
-/// typing doesn't re-walk the tree every input burst, short enough that an
-/// external change surfaces promptly.
-const VC_STATUS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(4);
+/// Base interval the cached uncommitted-changes count may stand before the idle
+/// path recomputes it to catch edits made outside Quill (#779). Long enough that
+/// pure typing doesn't re-walk the tree every input burst, short enough that an
+/// external change surfaces promptly. The fallback backs off past this when
+/// successive walks find nothing changed (#869), so an untouched editor doesn't
+/// re-walk the whole tree on a fixed short clock — see
+/// [`vc_status_idle_interval`](App::vc_status_idle_interval).
+pub const VC_STATUS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The ceiling the idle fallback backs off to when successive walks are unchanged
+/// (#869): an idle editor still re-checks for external edits, just at most this
+/// often instead of every base interval.
+const VC_STATUS_INTERVAL_MAX: std::time::Duration = std::time::Duration::from_secs(300);
 
 impl App {
     /// Refresh the cached uncommitted-changes count (#132) synchronously — a
@@ -35,9 +43,12 @@ impl App {
             0
         };
         // The count is current now; reset the interval clock and clear the pending
-        // recompute so the idle path doesn't immediately redo this walk.
+        // recompute so the idle path doesn't immediately redo this walk. A commit /
+        // restore / pull is a real change, so drop the idle backoff back to the base
+        // interval (#869) — the tree is active again.
         self.last_vc_refresh = std::time::Instant::now();
         self.vc_status_dirty = false;
+        self.vc_status_idle_interval = VC_STATUS_INTERVAL;
     }
 
     /// Mark that the working tree may have changed (#779), so the next idle tick
@@ -46,6 +57,9 @@ impl App {
     /// typing can flip git status — without blocking the save on a status walk.
     pub(crate) const fn mark_vc_status_dirty(&mut self) {
         self.vc_status_dirty = true;
+        // A save just changed the tree, so stop backing off — the next walk should
+        // run at the base interval, not a stretched idle one (#869).
+        self.vc_status_idle_interval = VC_STATUS_INTERVAL;
     }
 
     /// The idle-tick refresh of the uncommitted-changes count (#779). Unlike the
@@ -55,8 +69,17 @@ impl App {
     /// elapsed (the fallback that catches external edits), and it runs the walk on
     /// a worker thread so a large repository can't stutter the editor.
     pub(crate) fn refresh_vc_status_on_idle(&mut self) {
-        // First, land a finished walk's count.
+        // First, land a finished walk's count. An interval-fallback walk that finds
+        // the count unchanged means the tree is idle, so back off (double, to a cap)
+        // before the next fallback re-walk (#869); any actual change snaps back to
+        // the base interval so a freshly-active tree is picked up promptly again.
         if let Poll::Ready(count) = self.vc_status_task.poll() {
+            if count == self.vc_changes {
+                self.vc_status_idle_interval =
+                    (self.vc_status_idle_interval * 2).min(VC_STATUS_INTERVAL_MAX);
+            } else {
+                self.vc_status_idle_interval = VC_STATUS_INTERVAL;
+            }
             self.vc_changes = count;
         }
         if !self.under_vc {
@@ -65,7 +88,8 @@ impl App {
         }
         // Only walk when the status can have changed (a save marked it dirty) or
         // the interval fallback is due — never on every idle burst from typing.
-        let due = self.vc_status_dirty || self.last_vc_refresh.elapsed() >= VC_STATUS_INTERVAL;
+        let due =
+            self.vc_status_dirty || self.last_vc_refresh.elapsed() >= self.vc_status_idle_interval;
         if !due || self.vc_status_task.is_busy() {
             return;
         }
@@ -95,13 +119,23 @@ impl App {
         self.vc_status_dirty
     }
 
+    /// The current idle-fallback interval (#869), so a test can assert the backoff
+    /// stretches it when successive walks find nothing changed and resets it on a
+    /// real change.
+    #[cfg(test)]
+    pub(crate) const fn vc_status_idle_interval_for_test(&self) -> std::time::Duration {
+        self.vc_status_idle_interval
+    }
+
     /// Backdate the interval clock so the next idle refresh's fallback is due
     /// (#779), letting a test exercise the "catch an external edit" path without
     /// waiting real wall-clock seconds.
     #[cfg(test)]
     pub(crate) fn expire_vc_status_interval_for_test(&mut self) {
+        // Backdate past the *current* effective interval, not just the base, so the
+        // fallback is due even after the idle backoff has stretched it (#869).
         self.last_vc_refresh = std::time::Instant::now()
-            .checked_sub(VC_STATUS_INTERVAL)
+            .checked_sub(self.vc_status_idle_interval)
             .unwrap_or_else(std::time::Instant::now);
     }
 
