@@ -330,6 +330,30 @@ at the saved report to fix first, so you never hand a store a bundle it would
 bounce. (Like setting the style from the app, the one-click prepare is for a
 standalone novel; a multi-book series sets [print] and exports per book.)
 
+The print-interior PDF is only half of a print-on-demand book — the block that
+goes between the covers. The other half is the wrap cover, the single sheet that
+folds around the whole book: back cover, spine, and front cover in one PDF.
+"PDF wrap cover (front + spine + back)" in the export menu (or the
+"export:pdf-wrap-cover" run-action) generates it. The sheet is sized to
+2×trim + spine + bleed wide and trim + bleed tall — big enough that, once the
+printer trims and folds it, the front and back land exactly on your trim size and
+any full-bleed art runs clean off the edge. Your cover image (the same one the
+interior and EPUB use) fills the front panel; the back panel carries a reserved
+barcode/ISBN box in its lower-outside corner for the retailer's barcode, and thin
+guides mark where the cover folds around the spine. It's written to
+export/<book>.cover.pdf as a PDF/X-3 grayscale press file, the same conformance as
+the interior.
+
+The spine width is the part you can't eyeball: it's the interior page count times
+the paper's per-page thickness (its caliper). Quill lays your interior out at your
+trim and bleed to count the pages, then multiplies by the caliper, so the spine
+always matches the exact block that ships beside it — add a chapter and re-export
+and the spine widens to suit. The default caliper (0.0025"/page) suits typical
+uncoated book stock; if your printer publishes a different figure for your paper,
+set caliper = 0.00225 (or whatever they list, in inches) in the [print] table and
+the spine follows. Like the one-click prepare, the wrap cover is a standalone-novel
+artifact — a series wraps each book on its own page count, so export it per book.
+
 
 AI ASSISTANCE (opt-in)
 

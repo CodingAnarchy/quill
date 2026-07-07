@@ -19,6 +19,15 @@ impl App {
             .map_or(0.0, crate::export::pdf::PrintConfig::bleed_points)
     }
 
+    /// The per-page paper caliper in inches (#819) from the manifest `[print] caliper`,
+    /// or the writer's sane default when unset. Sizes the wrap cover's spine.
+    pub(super) fn print_caliper(&self) -> f32 {
+        self.project.manifest.print.as_ref().map_or(
+            export::pdf::DEFAULT_CALIPER_INCHES,
+            crate::export::pdf::PrintConfig::caliper_inches,
+        )
+    }
+
     /// The print trim (in points) from the manifest `[print]` table, with a warning
     /// when the configured size is unknown (the default is used instead).
     pub(super) fn print_trim(&self) -> ((f32, f32), Option<String>) {

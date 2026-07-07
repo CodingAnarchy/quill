@@ -94,6 +94,7 @@ impl App {
             // per-chapter compile, so it shares the constraint.
             Action::Export(_)
             | Action::ReviewCopy
+            | Action::PdfWrapCover
             | Action::PreflightExport
             | Action::PrepareForKdp
             | Action::PrepareForIngramSpark
@@ -102,8 +103,10 @@ impl App {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
             // The publish bundles set [print]/language defaults on book.toml, which a
-            // multi-book series has no single top-level table for; guide per-book.
-            Action::PrepareForKdp | Action::PrepareForIngramSpark
+            // multi-book series has no single top-level table for; guide per-book. The
+            // wrap cover's spine comes from one book's interior page count, so it's a
+            // standalone artifact too (a series wraps per book).
+            Action::PrepareForKdp | Action::PrepareForIngramSpark | Action::PdfWrapCover
                 if self.project.book_count() > 1 =>
             {
                 Some("standalone novels only — set [print] and export per book".into())
@@ -294,6 +297,7 @@ impl App {
                 self.prepare_for_target(exporting::PublishTarget::IngramSpark);
             }
             Action::ReviewCopy => self.run_review_copy_export(),
+            Action::PdfWrapCover => self.run_wrap_cover_export(),
         }
     }
 

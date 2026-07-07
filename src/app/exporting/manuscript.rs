@@ -128,6 +128,14 @@ impl App {
             for (f, label, desc) in FORMATS {
                 items.push(item(label.to_string(), desc, f, ExportScope::ActiveBook));
             }
+            // The print wrap cover (#819) — a standalone artifact whose spine is sized
+            // from this book's interior page count, so it sits with the whole-book
+            // formats (a series wraps per book). Runs the action, not a Document compile.
+            items.push(PaletteItem::new(
+                "PDF wrap cover (front + spine + back)",
+                "Print wrap — spine sized from the interior page count",
+                Command::Run(Action::PdfWrapCover),
+            ));
         }
         // Sample exports (#584): a single chapter, a part, or a contiguous range of
         // the active book, in any format — for a beta reader or a submission. Each
@@ -242,6 +250,48 @@ impl App {
             let name = self.export_name(&scope);
             self.write_book(format, &doc, &name);
         }
+    }
+
+    /// Export the print wrap cover (#819): a single full-bleed PDF at
+    /// `2×trim + spine + 2×bleed` with the front-cover art on the front panel, a
+    /// reserved barcode/ISBN zone on the back, and a spine sized from *this book's*
+    /// interior page count × the paper caliper. Lays the print interior out at the same
+    /// trim/bleed the print-interior export uses to read the page count (so the spine
+    /// matches the block that ships beside it), then renders the wrap. Standalone only —
+    /// the spine is one book's, so a series wraps per book (guarded in the palette).
+    /// Compiles from the single-chapter view, like the other exports, so nothing is read
+    /// stale. Writes to `export/<book>.cover.pdf`.
+    pub(crate) fn run_wrap_cover_export(&mut self) {
+        if self.manuscript.is_some() {
+            self.message =
+                Some("Leave the continuous view (Ctrl-l) before exporting the wrap cover.".into());
+            return;
+        }
+        let doc = self.export_document(None);
+        let (style, mut warnings) = self.export_style();
+        let ((w, h), trim_warning) = self.print_trim();
+        warnings.extend(trim_warning);
+        warnings.extend(export::pdf::pdf_style_warnings(&style));
+        let bleed = self.print_bleed();
+        // The front panel is one trim wide (+ bleed); check the cover DPI against that
+        // width, the same floor the interior cover check uses (#696).
+        warnings.extend(export::pdf::pdf_dpi_warnings(&style, bleed + w));
+        // A cover with no front-cover image is a hollow wrap — surface it (not a hard
+        // fail; the geometry, barcode zone, and spine guides are still useful to a
+        // designer who'll drop the art in).
+        if style.image(crate::export::ImageRole::Cover).is_none() {
+            warnings
+                .push("cover: no cover image set — the wrap's front panel is left blank".into());
+        }
+        // Lay the interior out at the very trim/bleed the print export uses so the spine
+        // width matches the page count of the block that ships with this cover (#819).
+        let page_count = export::pdf::print_page_count(&doc, w, h, bleed, &style);
+        let geo = export::pdf::WrapGeometry::new(w, h, bleed, page_count, self.print_caliper());
+        let author = doc.author.as_deref().unwrap_or_default();
+        let built = export::pdf::to_wrap_cover(geo, &style, &doc.title, author);
+        let name = bible::slug(&self.project.manifest.title);
+        self.write_built(built, &name, "cover.pdf");
+        self.note_export_warnings(&warnings);
     }
 
     /// Export a review copy (#834): a `.docx` with numbered lines and generous
