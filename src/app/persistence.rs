@@ -192,19 +192,41 @@ impl App {
             return;
         };
         // Keep only the chapters that still exist and actually differ from disk.
-        let live: Vec<recovery::Chapter> = rec
-            .chapters()
-            .filter(|c| match self.project.index_of_file(&c.chapter_file) {
-                Some(index) => {
-                    let disk = self.project.chapter_body(index);
-                    buffer::normalize_trailing_newline(&disk)
-                        != buffer::normalize_trailing_newline(&c.body)
+        // Track whether any captured chapter was skipped because its file couldn't
+        // be *read* (a hard error, not a missing file): that chapter's fate is
+        // unknown this launch, so the sidecar must be preserved rather than cleared.
+        //
+        // A hard read error (`Err`) is *not* grounds to offer recovery: we can't
+        // prove the captured body differs from disk, and treating an unreadable
+        // chapter as "changed" would spuriously re-offer content that may never
+        // have been lost (#871). Only a readable file whose content genuinely
+        // differs keeps the captured chapter; an unreadable one is skipped now but
+        // preserved for a later launch.
+        let mut unreadable = false;
+        let mut live: Vec<recovery::Chapter> = Vec::new();
+        for c in rec.chapters() {
+            let Some(index) = self.project.index_of_file(&c.chapter_file) else {
+                continue; // the captured chapter is gone — nothing to restore
+            };
+            match self.project.try_chapter_body(index) {
+                Ok(disk) => {
+                    let differs = buffer::normalize_trailing_newline(&disk)
+                        != buffer::normalize_trailing_newline(&c.body);
+                    if differs {
+                        live.push(c);
+                    }
                 }
-                None => false,
-            })
-            .collect();
+                Err(_) => unreadable = true,
+            }
+        }
         let Some(pruned) = recovery::Recovery::from_chapters(live) else {
-            recovery::clear(&self.project.root); // nothing left to recover
+            // Nothing to offer. Clear the sidecar only if every captured chapter
+            // was genuinely resolved (matched disk or is gone); if any was merely
+            // unreadable this launch, keep the sidecar so a later launch — when the
+            // file may read again — can still recover it (#871).
+            if !unreadable {
+                recovery::clear(&self.project.root);
+            }
             return;
         };
         let descriptor = self.recovery_descriptor(&pruned);

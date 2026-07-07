@@ -65,6 +65,11 @@ subsetter = { version = "0.2.6", features = ["variable-fonts"] }
 # The platform-native + sync-secret-service stores cover desktop; env vars cover
 # headless (where there's no login session to unlock the store).
 keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
+# Advisory project instance lock (#871): a `kill(pid, 0)` liveness probe on Unix
+# lets the O_EXCL lockfile distinguish a still-running Quill from a crashed one
+# (a stale lock), so a second instance opens read-only rather than racing writes.
+# Already in the tree transitively (keyring/git2), so this adds no new download.
+libc = "0.2"
 
 [dev-dependencies]
 # Property / round-trip and adversarial-input testing for the data path (#265).

@@ -615,6 +615,15 @@ impl App {
         // Surface dropped config — bad key remaps (#208) and bad workflow triggers
         // (#228) — rather than ignoring them silently.
         let mut warnings = Vec::new();
+        // The project is open in another live Quill instance (#871): warn up front
+        // that it's read-only, so the author knows saves are refused rather than
+        // discovering it at the first Ctrl-S. Leads the warnings — it's the most
+        // consequential thing to know.
+        if let Some(holder) = app.project.busy_holder() {
+            warnings.push(format!(
+                "Read-only: this project is already open in {holder}. Saves are disabled."
+            ));
+        }
         if vim && !key_errors.is_empty() {
             warnings.push(format!("Vim keymap ignored: {}", key_errors.join("; ")));
         }

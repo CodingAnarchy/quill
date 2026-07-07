@@ -2905,6 +2905,7 @@ dependencies = [
  "hyphenation",
  "image",
  "keyring",
+ "libc",
  "proptest",
  "ratatui",
  "ropey",

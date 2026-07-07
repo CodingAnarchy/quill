@@ -27,6 +27,7 @@ use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 
 mod goals;
 mod io;
+mod lock;
 mod series;
 mod structure;
 mod template;
@@ -34,6 +35,7 @@ mod template;
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 use io::cache_chapter;
 pub use io::read_existing;
+use lock::{InstanceLock, LockOutcome};
 use series::Book;
 pub use structure::unique_dest;
 pub use template::{ProjectTemplate, TEMPLATES};
@@ -370,6 +372,25 @@ pub struct Project {
     /// keyed by chapter file name. Loaded from `annotations.toml` at the project
     /// root at open; kept out of the chapter `.md` files so exports stay clean.
     annotations: Vec<Annotation>,
+    /// The advisory single-instance lock (#871), held from open until the project
+    /// is dropped. `Some` when this process owns the project; `None` when it was
+    /// opened read-only because another instance already held it (see `read_only`),
+    /// or for a project created in-process (no contention to guard). Dropping it
+    /// releases the lockfile — the lifecycle lives with the project, never in the
+    /// quit path.
+    #[allow(
+        dead_code,
+        reason = "held purely for its Drop (RAII lock release); never read"
+    )]
+    lock: Option<InstanceLock>,
+    /// Whether this project was opened read-only because another live instance
+    /// already holds it (#871). Writes are refused rather than racing the other
+    /// instance's saves and clobbering the shared sidecars. `busy_holder` carries a
+    /// human-readable description of the other instance for a warning to the author.
+    read_only: bool,
+    /// A description of the instance that already holds the project, set alongside
+    /// `read_only`, for the open-time warning. `None` when this instance owns it.
+    busy_holder: Option<String>,
 }
 
 impl Project {
@@ -409,6 +430,14 @@ impl Project {
 
         let dictionary = load_dictionary(&root);
         let annotations = load_annotations(&root);
+        // Take the advisory instance lock (#871). If another live instance already
+        // holds the project, open read-only rather than racing its writes and
+        // clobbering the shared sidecars; the App warns the author. A crashed
+        // instance's stale lock is reclaimed inside `acquire`.
+        let (lock, read_only, busy_holder) = match lock::acquire(&root) {
+            LockOutcome::Held(l) => (Some(l), false, None),
+            LockOutcome::Busy { holder } => (None, true, Some(holder)),
+        };
         let mut project = Self {
             root,
             manifest,
@@ -419,6 +448,9 @@ impl Project {
             active_book,
             dictionary,
             annotations,
+            lock,
+            read_only,
+            busy_holder,
         };
         if project.manifest.chapters.is_empty() {
             project.add_default_chapter()?;
@@ -455,6 +487,28 @@ impl Project {
         Ok(project)
     }
 
+    /// Whether this project was opened read-only because another live instance
+    /// already holds it (#871). Writes are refused in that state to avoid racing
+    /// the other instance and clobbering the shared sidecars.
+    pub const fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// A human-readable description of the instance that already holds the project,
+    /// for the open-time warning — `None` when this instance owns it (#871).
+    pub fn busy_holder(&self) -> Option<&str> {
+        self.busy_holder.as_deref()
+    }
+
+    /// The error a write returns when the project is read-only (another instance
+    /// holds it), so a save reports "not saved" rather than racing the owner.
+    fn read_only_error() -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "project is open in another Quill instance (read-only); not saved",
+        )
+    }
+
     /// Initialize a new project in `dir` (creating the directory if needed): a
     /// manifest plus one empty starter chapter, ready to edit. The historic
     /// "Empty" behavior, kept as the default; [`Project::create_with_template`]
@@ -479,6 +533,12 @@ impl Project {
             .file_name()
             .map_or_else(|| "Untitled".into(), |n| n.to_string_lossy().into_owned());
 
+        // A freshly created project is owned by this process: hold the lock so a
+        // second instance that opens it right after creation is serialized too.
+        let lock = match lock::acquire(&root) {
+            LockOutcome::Held(l) => Some(l),
+            LockOutcome::Busy { .. } => None,
+        };
         let mut project = Self {
             root,
             manifest: Manifest {
@@ -492,6 +552,9 @@ impl Project {
             active_book: 0,
             dictionary: HashSet::new(),
             annotations: Vec::new(),
+            lock,
+            read_only: false,
+            busy_holder: None,
         };
         if template.is_empty() {
             project.add_default_chapter()?;
@@ -911,6 +974,11 @@ impl Project {
             active_book: 0,
             dictionary: HashSet::new(),
             annotations: Vec::new(),
+            // An in-memory scratch project owns nothing on disk, so it holds no
+            // instance lock and is writable (never read-only).
+            lock: None,
+            read_only: false,
+            busy_holder: None,
         }
     }
 }
@@ -963,3 +1031,6 @@ fn collect_markdown(dir: &Path, chapters: &[PathBuf], out: &mut Vec<PathBuf>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod hardening_tests;

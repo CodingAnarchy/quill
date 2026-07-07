@@ -144,6 +144,39 @@ fn a_sidecar_for_a_missing_chapter_is_cleared() {
     assert!(recovery::read(&dir).is_none());
 }
 
+// #871: a *hard* read error on a captured chapter (permissions / an I/O fault)
+// must not be mistaken for "the chapter differs from disk" and over-offer a
+// restore of content that was never actually lost. The sidecar is kept for a
+// later launch (when the file may read again), not spuriously offered now.
+#[cfg(unix)]
+#[test]
+fn a_hard_read_error_does_not_over_offer_recovery() {
+    let (mut app, dir) = two_chapter_app("rec-read-fail");
+    recovery::write(
+        &dir,
+        &recovery::Recovery::single("one.md".into(), "captured prose\n".into()),
+    )
+    .unwrap();
+
+    // Make chapter one unreadable — a directory in its place is a hard read error,
+    // distinct from a missing file (which is the legitimate "gone" case above).
+    let chapter = dir.join("one.md");
+    fs::remove_file(&chapter).unwrap();
+    fs::create_dir(&chapter).unwrap();
+
+    app.offer_recovery();
+    assert!(
+        !at_recovery_prompt(&app),
+        "a hard read error must not spuriously offer recovery"
+    );
+    assert!(
+        recovery::read(&dir).is_some(),
+        "the sidecar is kept for a later launch, not cleared or offered"
+    );
+
+    fs::remove_dir(&chapter).ok();
+}
+
 // --- Continuous view (#566) -----------------------------------------------
 
 #[test]
