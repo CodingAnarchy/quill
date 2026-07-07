@@ -97,6 +97,56 @@ fn the_book_switcher_lists_every_book_with_the_active_one_marked() {
     assert!(p.items[1].label.contains("Book Two") && !p.items[1].label.contains("current"));
 }
 
+/// Switching books while an AI pass is in flight is refused with a clear message
+/// (#870). A bible pass records its digests under whatever book is active when it
+/// lands, so a mid-pass switch would file one book's result under another and
+/// mis-scope the next incremental pass. The switch is refused, not queued.
+#[test]
+fn switching_book_is_refused_while_an_ai_pass_runs() {
+    use crate::ai;
+    let (mut app, _dir) = series_app("switch-mid-pass");
+    // A spawned-but-unpolled task keeps `ai_task` busy — a request in flight.
+    app.ai_task.spawn(|| {
+        ai::Outcome::Error(ai::AiError::Network {
+            status: None,
+            message: "in flight".into(),
+        })
+    });
+    assert!(app.ai_task.is_busy());
+
+    app.switch_book(1);
+
+    assert_eq!(
+        app.project.active_book(),
+        0,
+        "the switch was refused while the pass ran"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("AI pass is running"),
+        "the author is told why the switch was refused: {:?}",
+        app.message
+    );
+
+    // Once the pass lands (poll consumes it), the switch goes through again.
+    for _ in 0..10_000 {
+        app.poll_ai();
+        if !app.ai_task.is_busy() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(!app.ai_task.is_busy(), "the in-flight pass settled");
+    app.switch_book(1);
+    assert_eq!(
+        app.project.active_book(),
+        1,
+        "the switch works after the pass"
+    );
+}
+
 // --- Series management: create / add / remove / reorder (#648) ---------------
 
 /// Converting a standalone novel to a series in-app (#648): the convert prompt

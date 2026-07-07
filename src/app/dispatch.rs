@@ -162,8 +162,14 @@ impl App {
         }
     }
 
-    /// Quit, or — when there are unsaved changes — open the confirm prompt first.
-    /// Shared by Ctrl-Q and `:q`.
+    /// Quit, or — when there are unsaved changes or a background task is still
+    /// running — open the confirm prompt first. Shared by Ctrl-Q and `:q`.
+    ///
+    /// A busy `ai_task`/`vc_task`/`download_task` means work the quit would
+    /// silently drop (#870): a Claude pass or batch that may already be billing, a
+    /// push/pull mid-flight, or a partial model download. Since the `Task` threads
+    /// are detached and never joined, quitting abandons the result; so a busy task
+    /// warns and asks before exiting rather than dropping it without a word.
     pub(super) fn request_quit(&mut self) {
         if self.edit_dirty() {
             self.open_prompt(
@@ -172,8 +178,32 @@ impl App {
                 "",
                 None,
             );
+        } else if let Some(work) = self.busy_task_label() {
+            self.open_prompt(
+                Pending::Quit,
+                format!("{work} still running — quit anyway? (y/N)"),
+                "",
+                None,
+            );
         } else {
             self.should_quit = true;
+        }
+    }
+
+    /// A label for an in-flight background task the quit path would abandon (#870),
+    /// or `None` when nothing is running. The AI request is named first (a pass or
+    /// batch is the costliest thing to drop), then a remote push/pull, then a model
+    /// download. Also the shared "a `Task` is busy" guard behind the navigation
+    /// checks that keep a late-landing result from applying to a stale context.
+    pub(super) const fn busy_task_label(&self) -> Option<&'static str> {
+        if self.ai_task.is_busy() {
+            Some("An AI request is")
+        } else if self.vc_task.is_busy() {
+            Some("A version-control sync is")
+        } else if self.download_task.is_busy() {
+            Some("A model download is")
+        } else {
+            None
         }
     }
 

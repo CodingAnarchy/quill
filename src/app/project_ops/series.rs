@@ -54,6 +54,19 @@ impl App {
         if index == self.project.active_book() || index >= self.project.book_count() {
             return;
         }
+        // Refuse the switch while an AI pass is in flight (#870). A bible pass
+        // records its digests under whatever book is active *when it lands*
+        // (`record_pass_state` via `bible_source` / the merge set), so switching
+        // books mid-pass would file Book 1's result under Book 2 and mis-scope the
+        // next incremental pass's changed/removed set (the #645 hazard, re-opened).
+        // The switch is refused rather than queued: the author re-switches once the
+        // pass ends.
+        if self.ai_task.is_busy() {
+            self.message = Some(
+                "An AI pass is running — wait for it to finish before switching books.".into(),
+            );
+            return;
+        }
         // The continuous view windows one book; drop to single-chapter, saving it.
         self.leave_continuous();
         // Persist the chapter we're leaving before swapping books — never drop work.

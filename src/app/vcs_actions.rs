@@ -410,6 +410,11 @@ impl App {
             self.message = Some("Commit your changes before pulling.".into());
             return;
         }
+        // Stamp the chapter this pull started on (#870). A network-slow pull can
+        // land after the author has navigated away (and typed unsaved edits);
+        // [`poll_vc`] reloads only when the buffer is still on this origin and
+        // clean, so a late pull never overwrites edits made in the meantime.
+        self.pull_origin = Some(self.project.active_path());
         let root = self.project.root.clone();
         self.start_vc(
             "⟳ Pulling from the remote…",
@@ -438,6 +443,20 @@ impl App {
     #[cfg(test)]
     pub(crate) fn spawn_failing_vc_for_test(&mut self, cause: &'static str) {
         self.start_vc("⟳ Working…", move || panic!("{cause}"));
+    }
+
+    /// Spawn a stand-in *pull* whose worker succeeds and asks for a reload (#870),
+    /// stamping the current active chapter as its origin — exactly as
+    /// [`start_pull`] does before crossing to the network. Lets a hermetic test
+    /// drive the "a pull lands after the author navigated / typed" path (no real
+    /// remote required) and assert [`poll_vc`] never clobbers unsaved edits.
+    #[cfg(test)]
+    pub(crate) fn spawn_landing_pull_for_test(&mut self) {
+        self.pull_origin = Some(self.project.active_path());
+        self.start_vc("⟳ Pulling from the remote…", || VcMsg {
+            text: "Pulled from the remote.".into(),
+            reload: true,
+        });
     }
 
     /// Drive [`poll_vc`] to completion for a test (#838): tick until the worker's
@@ -480,22 +499,58 @@ impl App {
     pub fn poll_vc(&mut self) {
         match self.vc_task.poll() {
             Poll::Ready(msg) => {
-                if msg.reload {
-                    let _ = self.reload_active_chapter(); // a pull can rewrite files on disk
-                }
+                // A pull can rewrite files on disk; reload the buffer unless doing so
+                // would clobber unsaved edits (#870). The skip note rides alongside
+                // the pull's own message so the author learns their open chapter was
+                // left untouched rather than silently not refreshed.
+                let note = if msg.reload {
+                    self.reload_after_pull()
+                } else {
+                    None
+                };
+                self.pull_origin = None; // this pull is done
                 self.refresh_vc_status();
-                self.message = Some(msg.text);
+                self.message = Some(match note {
+                    Some(note) => format!("{} {note}", msg.text),
+                    None => msg.text,
+                });
             }
             Poll::Pending => {}
             // The worker panicked; surface its cause (#838) rather than a generic
             // failure, so an auth/network/rejected push or pull is diagnosable.
             Poll::Died(cause) => {
+                self.pull_origin = None;
                 self.message = Some(cause.map_or_else(
                     || "Remote operation failed.".into(),
                     |cause| format!("Remote operation failed: {cause}"),
                 ));
             }
         }
+    }
+
+    /// Reload the buffer from disk after a pull landed (#870) — but never over
+    /// unsaved edits. The pull dropped to single-chapter view at spawn and stamped
+    /// its origin chapter (`pull_origin`); if the author navigated away during a
+    /// network-slow pull, or typed edits the buffer hasn't saved, the reload is
+    /// skipped so the just-pulled disk state can't clobber work with no undo, and a
+    /// short note (returned to ride alongside the pull's message) says so. In that
+    /// case the pulled files are already on disk and the next visit to a changed
+    /// chapter reads them; only the buffer the author is actively editing is
+    /// protected. On the clean, common path (still on the origin, no unsaved edits)
+    /// this reloads exactly as before and returns no note.
+    fn reload_after_pull(&mut self) -> Option<String> {
+        let on_origin = self
+            .pull_origin
+            .as_deref()
+            .is_some_and(|origin| origin == self.project.active_path());
+        if !on_origin {
+            return Some("You'd navigated away, so your open chapter was left untouched.".into());
+        }
+        if self.edit_dirty() {
+            return Some("Kept your unsaved edits — save or commit, then pull again.".into());
+        }
+        let _ = self.reload_active_chapter();
+        None
     }
 
     /// Re-read the active chapter from disk into the buffer, after something (a

@@ -356,3 +356,58 @@ fn ctrl_c_prompts_before_quitting_with_unsaved_changes() {
         "it opens the quit-confirm prompt, the same guard as Ctrl-Q"
     );
 }
+
+/// Quitting while a background task is in flight warns rather than silently
+/// dropping it (#870): the `Task` threads are detached, so Ctrl-Q mid pass /
+/// push-pull / download would lose the result (a Claude batch may be billing) or
+/// leave a partial download. A busy task opens the quit-confirm prompt naming the
+/// running work; confirming still quits.
+#[test]
+fn ctrl_q_warns_before_dropping_an_in_flight_task() {
+    use crate::ai;
+    let (mut app, _dir) = one_chapter_app("ctrl-q-busy", "settled prose\n");
+    assert!(!app.edit_dirty(), "the fixture opens clean");
+    // A spawned-but-unpolled task keeps `ai_task` busy — a request in flight.
+    app.ai_task.spawn(|| {
+        ai::Outcome::Error(ai::AiError::Network {
+            status: None,
+            message: "in flight".into(),
+        })
+    });
+
+    app.on_key(ctrl('q'));
+
+    assert!(
+        !app.should_quit,
+        "Ctrl-Q with a running task doesn't quit outright"
+    );
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::Quit)),
+        "it opens a quit-confirm prompt instead of dropping the task"
+    );
+    let label = match &app.mode {
+        Mode::Prompt(s) => s.label.clone(),
+        _ => String::new(),
+    };
+    assert!(
+        label.contains("still running"),
+        "the prompt names the in-flight work: {label:?}"
+    );
+
+    // Confirming quits despite the running task — the author chose to.
+    app.on_key(key(KeyCode::Char('y')));
+    assert!(app.should_quit, "confirming quits");
+}
+
+/// With nothing running and no unsaved edits, Ctrl-Q still quits straight away —
+/// the busy-task warning (#870) doesn't add a prompt to the clean path.
+#[test]
+fn ctrl_q_quits_immediately_with_no_task_and_no_edits() {
+    let (mut app, _dir) = one_chapter_app("ctrl-q-idle", "settled prose\n");
+    assert!(!app.edit_dirty());
+
+    app.on_key(ctrl('q'));
+
+    assert!(app.should_quit, "a clean, idle editor quits at once");
+    assert!(!matches!(app.mode, Mode::Prompt(_)), "no prompt in the way");
+}

@@ -315,6 +315,13 @@ pub struct App {
     /// In-flight remote push/pull (#134/#152), run on a worker thread. Polled each
     /// loop tick by [`App::poll_vc`].
     vc_task: Task<VcMsg>,
+    /// The active chapter's path when a pull was spawned (#870), so the post-pull
+    /// reload targets the chapter that started the pull — not whatever the author
+    /// navigated to during a network-slow pull. `Some` only while a pull is in
+    /// flight; cleared when the result lands. A pull that lands after the author
+    /// moved on (or typed unsaved edits) skips the destructive reload rather than
+    /// overwriting a now-active chapter's buffer from the just-pulled disk state.
+    pull_origin: Option<PathBuf>,
     /// A background local-model download (#382): `(model id, result)`, polled in
     /// the event loop so a multi-gigabyte fetch never blocks the editor.
     download_task: Task<(String, Result<(), String>)>,
@@ -572,6 +579,7 @@ impl App {
             image: ai::image::ImageSettings::load(),
             ai_task: Task::idle(),
             vc_task: Task::idle(),
+            pull_origin: None,
             download_task: Task::idle(),
             download_progress: None,
             downloaded_models: Vec::new(),
