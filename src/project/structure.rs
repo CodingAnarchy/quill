@@ -108,6 +108,10 @@ impl Project {
             let dest = unique_dest(&unused, &self.manifest.chapters[at].file);
             fs::rename(&src, &dest)?;
         }
+        // Drop the removed chapter's words from the running project total (#867).
+        self.words_total = self
+            .words_total
+            .saturating_sub(self.manifest.chapters[at].words);
         self.manifest.chapters.remove(at);
         self.save_manifest()
     }

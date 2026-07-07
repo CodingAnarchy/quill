@@ -33,6 +33,28 @@ fn continuous_view_edits_persist_to_the_right_chapter() {
 }
 
 #[test]
+fn continuous_view_save_refreshes_the_cached_todo_count() {
+    // A continuous-view save writes each dirty chapter and refreshes its cached word
+    // and TODO counts (#867), so the save-path roll-up reads the cache, never disk.
+    let (mut app, _dir) = two_chapter_app("cont-todo"); // no markers yet
+    app.on_key(ctrl('l')); // enter continuous view
+
+    // Append a marker to chapter two, then leave (which saves).
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::End));
+    type_str(&mut app, " xxx");
+    app.on_key(ctrl('l'));
+    assert_eq!(app.project.active_index(), 1);
+
+    // Chapter two's cache holds the marker the save wrote.
+    assert_eq!(app.project.chapter_todo(1), 1);
+    // From chapter 0 active, chapter two is counted from that cache — roll-up sees it.
+    app.on_key(ctrl('p'));
+    assert_eq!(app.project.active_index(), 0);
+    assert_eq!(app.count_todo(), 1);
+}
+
+#[test]
 fn continuous_view_undo_and_redo_revert_an_edit() {
     // #649: undo/redo must work in the continuous view, not be refused.
     let (mut app, dir) = three_chapter_app("cont-undo"); // alpha / beta / gamma

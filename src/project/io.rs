@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::atomic;
 use crate::buffer::count_words;
 use crate::frontmatter::{self, FrontMatter};
+use crate::text::count_matches;
 
 use super::{series, ChapterEntry, Project};
 
@@ -44,14 +45,17 @@ fn import_staging_path(root: &Path, file: &str) -> PathBuf {
     root.join(format!(".import.{file}.{}.tmp", std::process::id()))
 }
 
-/// Read `entry`'s file under `root` and refresh its cached word count and
-/// front-matter metadata (#331). Shared by the active book's caching and the
-/// other books of a series, so every book's counts/roles are populated at open
-/// without re-reading later. One file read; never holds the body text.
-pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry) {
+/// Read `entry`'s file under `root` and refresh its cached word count, TODO
+/// count, and front-matter metadata (#331, #867). Shared by the active book's
+/// caching and the other books of a series, so every book's counts/roles are
+/// populated at open without re-reading later. One file read; never holds the
+/// body text. `marker` is the series-wide TODO marker (#867), so the save-path
+/// TODO roll-up sums cached counts instead of re-scanning each file.
+pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry, marker: &str) {
     let text = fs::read_to_string(root.join(&entry.file)).unwrap_or_default();
     let (front, body) = frontmatter::split(&text);
     entry.words = count_words(body);
+    entry.todo = count_matches(body, marker);
     entry.cache_meta(front.map(FrontMatter::from_raw).as_ref());
 }
 
@@ -131,11 +135,18 @@ impl Project {
         self.save_manifest()
     }
 
-    /// Read chapter `index` from disk once and refresh its cached word count and
-    /// front-matter metadata (status / summary / POV). Used at open.
+    /// Read chapter `index` from disk once and refresh its cached word count, TODO
+    /// count, and front-matter metadata (status / summary / POV). Used at open and
+    /// after an off-buffer edit to a single chapter. Adjusts the running word total
+    /// by the delta (#867), so caching every chapter at open stays O(n) rather than
+    /// a full re-sum per chapter.
     pub(super) fn read_chapter_cache(&mut self, index: usize) {
         if index < self.manifest.chapters.len() {
-            cache_chapter(&self.root, &mut self.manifest.chapters[index]);
+            let marker = self.manifest.todo_marker().to_string();
+            let before = self.manifest.chapters[index].words;
+            cache_chapter(&self.root, &mut self.manifest.chapters[index], &marker);
+            let after = self.manifest.chapters[index].words;
+            self.words_total = self.words_total + after - before;
         }
     }
 

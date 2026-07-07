@@ -12,6 +12,8 @@ use super::*;
 
 use std::path::Path;
 
+use crate::text::count_matches;
+
 /// How the two panes are arranged.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SplitDir {
@@ -386,15 +388,19 @@ impl App {
         })
     }
 
-    /// Refresh the cached word count for the *focused* buffer's own chapter
-    /// (#165). A reference pane on a bible file or note has no manifest entry, so
-    /// caching the active chapter's count from it would corrupt the cache — this
-    /// is a no-op unless the focused buffer is itself a chapter. For the ordinary
-    /// single-chapter case the focused buffer is the active chapter, so the
-    /// cached count is refreshed exactly as before.
+    /// Refresh the cached word count and TODO count for the *focused* buffer's own
+    /// chapter (#165, #867). A reference pane on a bible file or note has no manifest
+    /// entry, so caching the active chapter's counts from it would corrupt the cache
+    /// — this is a no-op unless the focused buffer is itself a chapter. For the
+    /// ordinary single-chapter case the focused buffer is the active chapter, so the
+    /// cached counts are refreshed exactly as before. Keeping the cached TODO count
+    /// current here is what lets the save-path roll-up ([`Self::count_todo`]) stay
+    /// off the per-chapter disk reads.
     pub(super) fn cache_focus_words(&mut self) {
         if let Some(i) = self.chapter_index_of(&self.buffer) {
+            let todo = count_matches(&self.buffer.text(), self.project.manifest.todo_marker());
             self.project.set_chapter_words(i, self.buffer.word_count());
+            self.project.set_chapter_todo(i, todo);
         }
     }
 

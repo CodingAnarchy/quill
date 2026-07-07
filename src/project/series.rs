@@ -245,6 +245,9 @@ impl Project {
         // The old book's pending count changes no longer apply.
         self.words_changed.clear();
         if cache {
+            // The running word total (#867) tracks the active book; reset it so the
+            // per-chapter delta path rebuilds it from the newly hoisted book.
+            self.words_total = 0;
             for i in 0..self.manifest.chapters.len() {
                 self.read_chapter_cache(i);
             }
@@ -297,7 +300,7 @@ impl Project {
         let file = self.unique_book_chapter_file();
         atomic::write(&self.root.join(&file), b"")?;
         let mut chapter = ChapterEntry::new("Chapter 1".to_string(), file);
-        cache_chapter(&self.root, &mut chapter);
+        cache_chapter(&self.root, &mut chapter, self.manifest.todo_marker());
         let index = self.books.len();
         self.books.push(Book {
             title: title.trim().to_string(),
@@ -310,6 +313,9 @@ impl Project {
         // The starter chapter is already cached and its lone-chapter list needs
         // no reorder, so skip the cache pass `set_active_book` runs.
         self.activate_hoisted_book(false);
+        // The new active book is the empty starter, so its running word total (#867)
+        // is just that chapter's cached count — reset from the outgoing book's.
+        self.sync_words_total();
         self.save_manifest()?;
         Ok(index)
     }

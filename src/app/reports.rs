@@ -202,6 +202,9 @@ impl App {
         let mut word_counts = HashMap::new();
         let mut phrase_counts = HashMap::new();
         let mut tokens = Vec::new();
+        // Resolve the active index once for the whole scan — `active_index()` is an
+        // O(n) lookup, so calling it per chapter would make this O(chapters²) (#867).
+        let active = self.project.active_index();
         for i in 0..self.chapter_count() {
             let title = self
                 .project
@@ -210,7 +213,7 @@ impl App {
                 .to_string();
             // Measure prose only — drop heading lines so a chapter/scene title
             // doesn't glue onto its first sentence or skew readability.
-            let text = analysis::prose(&self.chapter_text(i));
+            let text = analysis::prose(&self.chapter_text_with_active(i, active));
             let stats = analysis::stats(&text);
             let sentences = analysis::sentences(&text);
             let sentence_lengths: Vec<usize> =
@@ -231,7 +234,7 @@ impl App {
             // matching the chapter list and progress report.
             chapters.push(analysis::ChapterAnalysis {
                 title,
-                words: self.chapter_word_count(i),
+                words: self.chapter_word_count_with_active(i, active),
                 stats,
                 sentence_lengths,
                 style: analysis::style_flags(&text, &lists),
@@ -289,7 +292,16 @@ impl App {
     /// from disk. The shared basis for whole-manuscript reads (TODO counting,
     /// the AI request).
     pub(crate) fn chapter_text(&self, index: usize) -> String {
-        if index == self.project.active_index() {
+        self.chapter_text_with_active(index, self.project.active_index())
+    }
+
+    /// Like [`Self::chapter_text`] but with the active index already resolved.
+    /// `active_index()` is an O(n) scan, so a caller looping over every chapter
+    /// (the one-shot export / report builders) resolves it once and passes it in
+    /// here, keeping the loop O(chapters) rather than an accidental O(chapters²)
+    /// (#865, #867).
+    pub(crate) fn chapter_text_with_active(&self, index: usize, active: usize) -> String {
+        if index == active {
             self.buffer.text()
         } else {
             self.project.chapter_body(index)
@@ -297,10 +309,21 @@ impl App {
     }
 
     /// Count the configured TODO marker across the manuscript (case-insensitive).
+    /// Reads the cached per-chapter TODO counts (#867) — populated at open and
+    /// refreshed for the active chapter on its save — so a save's roll-up costs no
+    /// per-chapter disk reads. The active chapter is counted live from the buffer,
+    /// since its cache lags the in-flight edits until the next save.
     pub(crate) fn count_todo(&self) -> usize {
+        let active = self.project.active_index();
         let marker = self.project.manifest.todo_marker();
         (0..self.chapter_count())
-            .map(|i| count_matches(&self.chapter_text(i), marker))
+            .map(|i| {
+                if i == active {
+                    count_matches(&self.buffer.text(), marker)
+                } else {
+                    self.project.chapter_todo(i)
+                }
+            })
             .sum()
     }
 }

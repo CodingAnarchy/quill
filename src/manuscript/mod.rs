@@ -22,6 +22,7 @@ use crate::atomic;
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
 use crate::frontmatter::{self, Epigraph, FrontMatter, Role};
 use crate::project::Project;
+use crate::text::count_matches;
 
 /// Maximum chapters held in memory at once (a window around the edit point).
 const WINDOW: usize = 3;
@@ -516,8 +517,14 @@ impl Manuscript {
                     .map(FrontMatter::as_str);
                 let content = frontmatter::join(front, &body);
                 atomic::write(&project.chapter_path(s.index), content.as_bytes())?;
-                // Count the prose only, not the front matter keys.
+                // Count the prose only, not the front matter keys. The TODO count is
+                // refreshed alongside the word count (#867) so the save-path roll-up
+                // reads the cache instead of re-reading this chapter from disk.
                 project.set_chapter_words(s.index, count_words(&body));
+                project.set_chapter_todo(
+                    s.index,
+                    count_matches(&body, project.manifest.todo_marker()),
+                );
                 s.dirty = false;
             }
             start = end;
