@@ -54,6 +54,46 @@ impl Pdf {
         );
     }
 
+    /// The half-title page (#820): the book title alone, set in the heading font a
+    /// third of the way down, on the leaf ahead of the full title page — the
+    /// conventional first printed page of a trade book. No running head or folio (it
+    /// belongs to the roman-numbered front matter but carries no visible number). A
+    /// bare page, so no ornament, subtitle, or author; those stay on the full title
+    /// page below. Not a bookmark.
+    pub(super) fn half_title_page(&mut self, title: &str) {
+        let idx = self.open_section();
+        self.meta[idx].blank = true;
+        self.y = self.layout.trim_y(0.4);
+        self.centered(title, true, false, true, TITLE_SIZE, TITLE_SIZE * 1.4);
+    }
+
+    /// The "also in this series" page (#820), when a series export supplies the
+    /// list: the heading, then each *other* book of the series by title, centered.
+    /// Slots into the front matter after the copyright page. `lines` is
+    /// [`Document::series_list_lines`](crate::export::Document::series_list_lines) —
+    /// the heading followed by the book titles — so an empty slice (a standalone
+    /// book, or the page disabled) is a no-op that leaves the output unchanged. Not
+    /// a bookmark.
+    pub(super) fn series_list_page(&mut self, lines: &[String]) {
+        let Some((heading, books)) = lines.split_first() else {
+            return;
+        };
+        self.open_section();
+        self.y = self.layout.trim_y(0.6);
+        // The heading in the heading font, the titles beneath it in body size.
+        self.centered(
+            heading,
+            false,
+            false,
+            true,
+            HEADING_SIZE,
+            HEADING_SIZE * 1.6,
+        );
+        for book in books {
+            self.centered(book, false, true, false, BODY_SIZE, BODY_LEADING * 1.4);
+        }
+    }
+
     /// The book title page: series, title, subtitle, author, and the book epigraph,
     /// centered and set a third of the way down.
     pub(super) fn title_page(

@@ -34,6 +34,8 @@ fn a_fenced_code_block_exports_to_a_well_formed_pdf() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -61,6 +63,8 @@ fn a_fenced_block_renders_in_the_embedded_monospace_face() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -143,6 +147,8 @@ fn print_pdf_starts_chapters_on_a_recto_inserting_a_blank() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,

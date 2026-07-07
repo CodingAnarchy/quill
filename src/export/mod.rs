@@ -7,7 +7,7 @@
 
 use std::fmt::Write;
 
-use crate::frontmatter::{Epigraph, Role};
+use crate::frontmatter::{series_list_lines, Epigraph, Role};
 
 pub mod docx;
 pub mod epub;
@@ -33,6 +33,18 @@ pub struct Document {
     pub publishing: PubMeta,
     /// The book epigraph, rendered at the start.
     pub epigraph: Option<Epigraph>,
+    /// Whether a bare **half-title page** — the book title alone — is generated
+    /// ahead of the full title page, the conventional first printed leaf of a
+    /// trade book (#820). Opt-in via the `[style]` `half_title` key; `false`
+    /// leaves the front matter (cover → title → copyright → body) unchanged.
+    pub half_title: bool,
+    /// The full `[[books]]` series list by title (#820), used to generate the
+    /// "also in this series" front-matter page. Empty for a standalone book (or
+    /// when the `series_list` style key disables it), so the page is omitted and
+    /// a standalone export is unchanged. The book's own title is filtered out at
+    /// render time (see [`crate::frontmatter::series_list_lines`]) so it never
+    /// lists itself.
+    pub series_books: Vec<String>,
     /// Front-matter sections (foreword, prologue, …), in order.
     pub front: Vec<Chapter>,
     /// The body, grouped into parts. A book with no defined parts has a single
@@ -147,6 +159,16 @@ impl Document {
         }
         out.extend(self.back.iter().map(Block::Chapter));
         out
+    }
+
+    /// The lines of this book's generated "also in this series" front-matter page
+    /// (#820) — the heading, then every *other* book of the series — or an empty
+    /// vector when [`Self::series_books`] holds no other title (a standalone book,
+    /// or the list disabled), so a writer can skip the page. The book's own title
+    /// is dropped so it never lists itself. See
+    /// [`series_list_lines`](crate::frontmatter::series_list_lines).
+    pub fn series_list_lines(&self) -> Vec<String> {
+        series_list_lines(&self.series_books, &self.title)
     }
 }
 
@@ -503,6 +525,8 @@ mod tests {
             series: Some("The Cycle".into()),
             publishing: PubMeta::default(),
             epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![chapter("Prologue", None, "Before it all.")],
             parts: vec![Part {
                 name: Some("Part One".into()),
@@ -525,6 +549,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,
@@ -581,6 +607,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,
@@ -609,6 +637,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,
@@ -733,6 +763,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: None,
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![Part {
                 name: None,
@@ -756,6 +788,8 @@ mod tests {
             series: None,
             publishing: PubMeta::default(),
             epigraph: Some(epigraph("Roses are red\n\nViolets are blue", None)),
+            half_title: false,
+            series_books: Vec::new(),
             front: vec![],
             parts: vec![],
             back: vec![],

@@ -5,7 +5,7 @@
 use std::io::{Cursor, Read};
 
 use super::*;
-use crate::frontmatter::Epigraph;
+use crate::frontmatter::{Epigraph, SERIES_LIST_HEADING};
 
 fn epigraph(text: &str, by: Option<&str>) -> Epigraph {
     Epigraph {
@@ -22,6 +22,8 @@ fn doc() -> Document {
         series: None,
         publishing: PubMeta::default(),
         epigraph: Some(epigraph("In the beginning.", Some("Anon"))),
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: Some("Part One".into()),
@@ -54,6 +56,8 @@ fn smart_typography_glyphs_pass_through_to_docx() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: None,
@@ -83,6 +87,8 @@ fn a_fenced_block_renders_as_a_monospace_paragraph_with_breaks() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: None,
@@ -116,6 +122,8 @@ fn series_docx_carries_every_book_in_order() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: None,
@@ -158,6 +166,8 @@ fn series_docx_reprints_each_books_copyright_not_just_the_first() {
         series: None,
         publishing,
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: None,
@@ -302,6 +312,8 @@ fn a_scene_break_becomes_a_centered_divider_not_literal_dashes() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: None,
@@ -631,6 +643,8 @@ fn series_docx_carries_a_header_and_toc() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![crate::export::Part {
             name: None,
@@ -660,5 +674,92 @@ fn series_docx_carries_a_header_and_toc() {
     assert!(
         xml.contains(r#"<w:headerReference w:type="default" r:id="rId2"/>"#),
         "series header reference"
+    );
+}
+
+#[test]
+fn a_half_title_page_precedes_the_title_page_when_enabled() {
+    // #820: with `half_title` on, a bare half-title carrying only the book title is
+    // page-broken ahead of the full title page. The default (off) is unchanged.
+    let title = "Red &lt;State&gt; Earth"; // xml-escaped in the output
+    let off = part(
+        &to_docx(&doc(), Profile::Manuscript).unwrap(),
+        "word/document.xml",
+    );
+    assert_eq!(off.matches(title).count(), 1, "one title block by default");
+
+    let on = Document {
+        half_title: true,
+        ..doc()
+    };
+    let xml = part(
+        &to_docx(&on, Profile::Manuscript).unwrap(),
+        "word/document.xml",
+    );
+    // Two title blocks now: the half-title and the full title page.
+    assert_eq!(
+        xml.matches(title).count(),
+        2,
+        "half-title adds a title block"
+    );
+    // The first (half-title) is its own page-broken paragraph, ahead of the full
+    // title page's `w:before="2400"` block.
+    let first = xml.find(title).unwrap();
+    let full = xml.find(r#"<w:spacing w:before="2400"/>"#).unwrap();
+    assert!(first < full, "the half-title precedes the full title page");
+    let before_first = &xml[..first];
+    assert!(
+        before_first.rfind("<w:pageBreakBefore/>").unwrap()
+            > before_first.rfind("<w:body>").map_or(0, |i| i),
+        "the half-title opens a fresh page"
+    );
+}
+
+#[test]
+fn a_series_book_generates_an_also_in_this_series_page() {
+    // #820: a book that is part of a series carries an "also in this series" page
+    // listing the *other* books; a standalone book omits it.
+    let series = Document {
+        series_books: vec![
+            "Red <State> Earth".into(),
+            "Blue State Moon".into(),
+            "Green State Sun".into(),
+        ],
+        ..doc()
+    };
+    let xml = part(
+        &to_docx(&series, Profile::Manuscript).unwrap(),
+        "word/document.xml",
+    );
+    assert!(
+        xml.contains(SERIES_LIST_HEADING),
+        "the heading is present: {xml}"
+    );
+    assert!(
+        xml.contains("Blue State Moon") && xml.contains("Green State Sun"),
+        "the other books are listed: {xml}"
+    );
+    // The book lists the two *other* titles, not a third "Red <State> Earth" beyond
+    // its own title block (the half-title is off here, so exactly one title block).
+    assert_eq!(
+        xml.matches("Red &lt;State&gt; Earth").count(),
+        1,
+        "the book never lists itself: {xml}"
+    );
+    // The page follows the copyright/title block and precedes the body TOC.
+    let list = xml.find(SERIES_LIST_HEADING).unwrap();
+    assert!(
+        list < xml.find(" TOC ").unwrap(),
+        "series list is front matter"
+    );
+
+    // A standalone book (no other series titles) omits the page entirely.
+    let standalone = part(
+        &to_docx(&doc(), Profile::Manuscript).unwrap(),
+        "word/document.xml",
+    );
+    assert!(
+        !standalone.contains(SERIES_LIST_HEADING),
+        "no series list for a standalone book"
     );
 }

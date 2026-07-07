@@ -229,6 +229,10 @@ fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
     pdf.set_heads(&doc.title, doc.author.as_deref().unwrap_or(&doc.title));
     pdf.set_info(&doc.title, doc.author.as_deref().unwrap_or(""));
     pdf.cover_page();
+    // The half-title (#820) is the leaf ahead of the full title page, when enabled.
+    if doc.half_title {
+        pdf.half_title_page(&doc.title);
+    }
     pdf.title_page(
         doc.series.as_deref(),
         &doc.title,
@@ -237,6 +241,8 @@ fn render_book(doc: &Document, style: &ExportStyle, layout: Layout) -> Vec<u8> {
         doc.epigraph.as_ref(),
     );
     pdf.copyright_page(&doc.publishing);
+    // The "also in this series" page (#820), when this is a series title's book.
+    pdf.series_list_page(&doc.series_list_lines());
     // Reserve the Contents page(s) in the front matter before the body is laid out,
     // so the body lands on the right pages; fill them once the folios are known.
     let titles = doc_toc_titles(doc);
@@ -263,6 +269,11 @@ fn render_series(
     pdf.set_heads(title, author.unwrap_or(title));
     pdf.set_info(title, author.unwrap_or(""));
     pdf.cover_page();
+    // A half-title ahead of the omnibus title page, when the first book enables it
+    // (#820) — the omnibus's own front matter, so it carries no series-list page.
+    if books.first().is_some_and(|b| b.half_title) {
+        pdf.half_title_page(title);
+    }
     pdf.title_page(None, title, None, author, None);
     // The omnibus's front-matter copyright page is series-level — the first book's
     // (#711). Each book's own copyright is reprinted on its divider page below, so a

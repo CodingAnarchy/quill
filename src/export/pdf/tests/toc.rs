@@ -34,6 +34,8 @@ fn a_series_bookmarks_every_book_in_order() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -68,6 +70,8 @@ fn a_series_reprints_each_books_copyright_not_just_the_first() {
         series: None,
         publishing,
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -133,6 +137,80 @@ fn a_copyright_page_adds_a_front_matter_page() {
         count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent"),
         baseline,
         "no copyright page by default"
+    );
+}
+#[test]
+fn a_half_title_adds_a_front_matter_page_ahead_of_the_title() {
+    // #820: `half_title` on renders a bare half-title page — one extra front-matter
+    // page over the baseline — and it comes first, ahead of the full title page.
+    // Content is Identity-H glyph ids, so assert on the page count (like copyright).
+    let baseline = count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent");
+    let d = Document {
+        half_title: true,
+        ..doc()
+    };
+    let bytes = to_pdf(&d, &plain()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    assert_eq!(
+        count(&bytes, "/Type /Page /Parent"),
+        baseline + 1,
+        "the half-title adds a front-matter page"
+    );
+    // The half-title carries no folio/running head (a `blank` page), like the cover:
+    // the first content stream draws only the title (one centered glyph run).
+    let s = content(&bytes);
+    let first_page = &s[..s.find("BT").map_or(s.len(), |i| i + 200.min(s.len() - i))];
+    assert!(
+        first_page.contains("Tj"),
+        "the half-title draws the title glyphs"
+    );
+
+    // Off by default → no extra page.
+    assert_eq!(
+        count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent"),
+        baseline,
+        "no half-title page by default"
+    );
+}
+#[test]
+fn a_series_book_adds_an_also_in_this_series_page() {
+    // #820: a book that is part of a series renders an "also in this series" page
+    // (one extra front-matter page); a standalone book renders none.
+    let baseline = count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent");
+    let d = Document {
+        series_books: vec![
+            "Red State Earth".into(), // the book's own title (doc() uses this)
+            "Blue State Moon".into(),
+            "Green State Sun".into(),
+        ],
+        ..doc()
+    };
+    let bytes = to_pdf(&d, &plain()).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7") && bytes.ends_with(b"%%EOF\n"));
+    assert_eq!(
+        count(&bytes, "/Type /Page /Parent"),
+        baseline + 1,
+        "the series list adds a front-matter page"
+    );
+
+    // A standalone book (no other titles) → no extra page. A list holding only the
+    // book's own title lists nothing, so still no page.
+    assert_eq!(
+        count(&to_pdf(&doc(), &plain()).unwrap(), "/Type /Page /Parent"),
+        baseline,
+        "no series page for a standalone book"
+    );
+    let only_self = Document {
+        series_books: vec!["Red State Earth".into()],
+        ..doc()
+    };
+    assert_eq!(
+        count(
+            &to_pdf(&only_self, &plain()).unwrap(),
+            "/Type /Page /Parent"
+        ),
+        baseline,
+        "a lone self-title lists nothing, so no page"
     );
 }
 #[test]
@@ -209,6 +287,8 @@ fn a_long_contents_flows_onto_a_second_page() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,

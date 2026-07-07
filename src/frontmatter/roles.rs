@@ -189,6 +189,35 @@ role_table! {
     Colophon => "colophon", "Colophon", Back, "colophon";
 }
 
+/// The heading of the generated "also in this series" front-matter page (#820) —
+/// the one place the wording lives, so the PDF, EPUB, and DOCX writers set the
+/// same label. The list of book titles is supplied by the caller (from the
+/// project's `[[books]]` manifest); this is only the heading.
+pub const SERIES_LIST_HEADING: &str = "Also in This Series";
+
+/// The lines of the generated "also in this series" page (#820), in order: the
+/// [`SERIES_LIST_HEADING`], then each *other* book of the series by title.
+/// `books` is the full series list and `current` the title of the book being
+/// exported, which is dropped so a book never lists itself. Returns an empty
+/// vector when the series holds no other book (a standalone novel), so a writer
+/// can skip the page entirely and a standalone export stays unchanged.
+///
+/// Like [`copyright_lines`](crate::export::copyright_lines), the wording is
+/// generated once here and each writer renders these lines in its own markup, so
+/// the page reads the same across the PDF, EPUB, and DOCX outputs.
+pub fn series_list_lines(books: &[String], current: &str) -> Vec<String> {
+    let mut lines: Vec<String> = books
+        .iter()
+        .filter(|t| t.as_str() != current)
+        .cloned()
+        .collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    lines.insert(0, SERIES_LIST_HEADING.to_string());
+    lines
+}
+
 /// `None` for an empty string, else `Some(s)` — lets a [`role_table!`] row leave
 /// the EPUB-type column blank to mean "no distinct term, use the band default".
 const fn none_if_empty(s: &'static str) -> Option<&'static str> {
@@ -216,5 +245,45 @@ impl Band {
             Some(r) => r.band(),
             None => Self::Body,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{series_list_lines, SERIES_LIST_HEADING};
+
+    #[test]
+    fn series_list_lines_drops_the_current_book_and_leads_with_the_heading() {
+        // #820: the generated "also in this series" page lists every *other* book of
+        // the series, headed by the standard label, in the manifest order.
+        let books = vec![
+            "Book One".to_string(),
+            "Book Two".to_string(),
+            "Book Three".to_string(),
+        ];
+        let lines = series_list_lines(&books, "Book Two");
+        assert_eq!(
+            lines,
+            vec![
+                SERIES_LIST_HEADING.to_string(),
+                "Book One".to_string(),
+                "Book Three".to_string(),
+            ],
+            "heading, then the other books in order — never the current one"
+        );
+    }
+
+    #[test]
+    fn series_list_lines_is_empty_when_no_other_book_remains() {
+        // A standalone book (or a series-of-one) lists nothing, so the writer skips
+        // the page and a standalone export is unchanged.
+        assert!(
+            series_list_lines(&[], "Solo").is_empty(),
+            "an empty series lists nothing"
+        );
+        assert!(
+            series_list_lines(&["Solo".to_string()], "Solo").is_empty(),
+            "a book that is the only title lists nothing"
+        );
     }
 }

@@ -461,6 +461,8 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: None,
@@ -619,6 +621,8 @@ fn importing_a_scriv_bundle_creates_a_chaptered_project() {
         series: None,
         publishing: PubMeta::default(),
         epigraph: None,
+        half_title: false,
+        series_books: Vec::new(),
         front: vec![],
         parts: vec![Part {
             name: Some("Part One".into()),

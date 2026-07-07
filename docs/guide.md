@@ -295,6 +295,15 @@ image ornaments, set a file path by hand or use "Browse & download fonts…" for
 curated open-licensed library. (Setting the style from the app is for a standalone
 novel; a multi-book series sets [style] / [print] per book by hand.)
 
+Quill also generates two standard front-matter pages on request, the same way it
+already generates a copyright page from your publishing metadata. Set half_title =
+true in the [style] table to add a bare half-title page — the book title alone —
+ahead of the full title page, the conventional first printed leaf of a trade book;
+it's off by default. And when you export one book of a multi-book series (its
+[[books]] list), Quill adds an "also in this series" page listing the other books
+by title; a standalone novel has no other titles, so it never gets one. That page
+is on by default for a series; set series_list = false in [style] to suppress it.
+
 Before you export for publication, run "Export preflight (publish health check)"
 from the Ctrl-K menu. It checks the book against what print/ebook stores (KDP,
 IngramSpark) reject or flag and gathers the result into one auditable checklist —

@@ -769,6 +769,9 @@ impl App {
             }
         }
 
+        // The generated front-matter options (#820) are `[style]`-driven; resolve
+        // the style once for both the half-title flag and the series-list gate.
+        let style = self.export_style().0;
         Document {
             title: m.title.clone(),
             subtitle: m.subtitle.clone(),
@@ -776,10 +779,32 @@ impl App {
             series: m.series.clone(),
             publishing: self.publishing_meta(),
             epigraph: m.epigraph(),
+            // A half-title page is opt-in via the `[style]` `half_title` key (#820).
+            // The "also in this series" list is generated when this active book is
+            // part of a multi-book series (a standalone project lists nothing).
+            half_title: style.half_title(),
+            series_books: self.series_book_titles(style.series_list()),
             front,
             parts: body_parts,
             back,
         }
+    }
+
+    /// The series book list for the generated "also in this series" page (#820):
+    /// every book of the project by title when it is a multi-book series and the
+    /// caller's `series_list` gate (from `[style]`) is on, else empty. Empty for a
+    /// standalone project (one book) — its own title is the only entry, which
+    /// [`Document::series_list_lines`](crate::export::Document::series_list_lines)
+    /// filters out, so the page is omitted. The omnibus series export renders each
+    /// book in full, so it carries no such page; this drives the single-book export
+    /// of a series title.
+    fn series_book_titles(&self, enabled: bool) -> Vec<String> {
+        if !enabled || self.project.book_count() <= 1 {
+            return Vec::new();
+        }
+        (0..self.project.book_count())
+            .map(|b| self.project.book_title(b).unwrap_or("Untitled").to_string())
+            .collect()
     }
 
     /// The book-level publishing metadata (#583) read from the manifest, for the
@@ -843,9 +868,13 @@ impl App {
                     self.export_book_document(b)
                 };
                 // The series title and author are rendered once by the series
-                // writer, not repeated above every book.
+                // writer, not repeated above every book. The omnibus renders every
+                // book in full, so no book carries an "also in this series" page
+                // (#820) — that page is for the single-book export of a series
+                // title, driven by `export_document`.
                 doc.series = None;
                 doc.author = None;
+                doc.series_books = Vec::new();
                 doc
             })
             .collect()
@@ -908,6 +937,10 @@ impl App {
             // data rather than the active book's reused for every book.
             publishing: self.book_publishing_meta(b),
             epigraph: self.project.book_epigraph(b),
+            // Opt-in half-title (#820). A non-active series book is only ever part
+            // of the omnibus export, which carries no "also in this series" page.
+            half_title: self.export_style().0.half_title(),
+            series_books: Vec::new(),
             front,
             parts: body_parts,
             back,

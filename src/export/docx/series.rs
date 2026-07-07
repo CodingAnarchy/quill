@@ -29,6 +29,16 @@ pub fn to_docx_series(
     // Series title page (manuscript only — Vellum splits on Heading 1, so stray
     // leading text would import as junk).
     if profile == Profile::Manuscript {
+        // A half-title ahead of the omnibus title, when the first book enables it
+        // (#820) — the omnibus's own front matter, so it carries no series-list page.
+        if books.first().is_some_and(|b| b.half_title) {
+            if let Some(series) = series {
+                body.push_str(&para(
+                    r#"<w:pageBreakBefore/><w:spacing w:before="3600"/><w:jc w:val="center"/>"#,
+                    run(series, true, false, Some(28)),
+                ));
+            }
+        }
         if let Some(series) = series {
             body.push_str(&para(
                 r#"<w:spacing w:before="2400"/><w:jc w:val="center"/>"#,
