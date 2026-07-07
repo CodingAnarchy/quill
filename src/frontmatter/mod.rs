@@ -201,10 +201,17 @@ impl FrontMatter {
 
     /// Write `key`: a single line for a scalar, a `|` literal block for a
     /// multi-line value. Replaces the key's existing entry in place (or appends).
+    ///
+    /// A value carrying any line break — LF, a bare CR (an old-Mac paste), or
+    /// CRLF — takes the `|` block path: a lone CR left on the scalar path would
+    /// have `quote_scalar` emit a literal carriage return inside `"…"`, which is
+    /// not a valid one-line YAML scalar and which the block reader then mangles.
+    /// [`split_lines`] treats CR, LF, and CRLF each as one break, so a `\r\n`
+    /// paste yields one line per visual line rather than a spurious blank one.
     fn set(&mut self, key: &str, value: &str) {
-        let entry = if value.contains('\n') {
+        let entry = if value.contains(['\n', '\r']) {
             let mut block = format!("{key}: |\n");
-            for line in value.split('\n') {
+            for line in split_lines(value) {
                 if line.is_empty() {
                     block.push('\n');
                 } else {
@@ -230,6 +237,15 @@ impl FrontMatter {
     /// plus its indented/blank continuation — replacing it with `replacement`
     /// (or removing it when `None`); appends when the key is absent and a
     /// replacement is given.
+    ///
+    /// Duplicates collapse to one canonical entry: the *first* occurrence is
+    /// replaced (or removed), and every later occurrence of the key — with its
+    /// own block span — is dropped. A hand-edited/pasted/imported block with the
+    /// same key twice would otherwise leave a stale second entry that a real YAML
+    /// parser (or the export path) reads as the *last* value, contradicting the
+    /// author's change; a "clear" would leave a ghost that resurrects on the next
+    /// [`get`](Self::get), which reads the first. Collapsing keeps `get` and an
+    /// external parser in agreement.
     fn replace_key(&mut self, key: &str, replacement: Option<&str>) {
         let prefix = format!("{key}:");
         let segments: Vec<&str> = self.raw.split_inclusive('\n').collect();
@@ -238,22 +254,23 @@ impl FrontMatter {
         let mut done = false;
         while i < segments.len() {
             let seg = segments[i];
-            if !done {
-                if let Some(value) = bare(seg).strip_prefix(&prefix) {
-                    // Found it: skip this entry's whole span.
-                    let mut end = i + 1;
-                    if value.trim().starts_with(['|', '>']) {
-                        while end < segments.len() && is_block_continuation(segments[end]) {
-                            end += 1;
-                        }
+            if let Some(value) = bare(seg).strip_prefix(&prefix) {
+                // A match: skip this entry's whole span. The first occurrence
+                // takes the replacement (once); later duplicates are just dropped.
+                let mut end = i + 1;
+                if value.trim().starts_with(['|', '>']) {
+                    while end < segments.len() && is_block_continuation(segments[end]) {
+                        end += 1;
                     }
+                }
+                if !done {
                     if let Some(rep) = replacement {
                         out.push_str(rep);
                     }
-                    i = end;
                     done = true;
-                    continue;
                 }
+                i = end;
+                continue;
             }
             out.push_str(seg);
             i += 1;
@@ -414,7 +431,9 @@ impl FrontMatter {
     /// indented/blank continuation — replacing it with `replacement` (or removing
     /// it when `None`); appends when the key is absent and a replacement is given.
     /// The sequence's continuation is indented like a `|` block, so the span rule
-    /// is the same as [`replace_key`](Self::replace_key)'s block case.
+    /// is the same as [`replace_key`](Self::replace_key)'s block case — including
+    /// its duplicate collapse: the first `scenes:` block is replaced, any later
+    /// one is dropped, so `get`/`scenes` and an external parser agree.
     fn replace_scenes(&mut self, replacement: Option<&str>) {
         let segments: Vec<&str> = self.raw.split_inclusive('\n').collect();
         let mut out = String::with_capacity(self.raw.len());
@@ -422,16 +441,18 @@ impl FrontMatter {
         let mut done = false;
         while i < segments.len() {
             let seg = segments[i];
-            if !done && bare(seg).trim_end() == "scenes:" {
+            if bare(seg).trim_end() == "scenes:" {
                 let mut end = i + 1;
                 while end < segments.len() && is_block_continuation(segments[end]) {
                     end += 1;
                 }
-                if let Some(rep) = replacement {
-                    out.push_str(rep);
+                if !done {
+                    if let Some(rep) = replacement {
+                        out.push_str(rep);
+                    }
+                    done = true;
                 }
                 i = end;
-                done = true;
                 continue;
             }
             out.push_str(seg);
@@ -464,6 +485,38 @@ fn apply_scene_field(scene: &mut SceneMeta, pair: &str) {
 
 /// Indent for the lines of a `|` literal block scalar.
 const BLOCK_INDENT: &str = "  ";
+
+/// Split a value into its visual lines, treating CR, LF, and CRLF each as a
+/// single break (so a `\r\n` value doesn't produce a spurious empty line
+/// between the CR and LF, and an old-Mac lone `\r` still breaks). Interior
+/// blank lines survive as empty entries. Used when writing a multi-line value
+/// as a `|` block, so no block line carries an interior carriage return.
+fn split_lines(value: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                out.push(&value[start..i]);
+                i += 1;
+                start = i;
+            }
+            b'\r' => {
+                out.push(&value[start..i]);
+                i += 1;
+                if i < bytes.len() && bytes[i] == b'\n' {
+                    i += 1; // consume the LF of a CRLF pair as part of one break
+                }
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    out.push(&value[start..]);
+    out
+}
 
 /// A line without its trailing newline (LF or CRLF), so a `---\r\n` fence line
 /// compares equal to `---` just like a `---\n` one.
@@ -904,5 +957,100 @@ mod tests {
         fm.set_epigraph_text("");
         assert!(fm.epigraph().is_none());
         assert!(!fm.as_str().contains("epigraph:"));
+    }
+
+    #[test]
+    fn set_on_a_duplicated_key_collapses_to_one_canonical_entry() {
+        // A hand-edited/pasted/imported block with the same key twice: `get`
+        // reads the first, but a real YAML parser reads the last. A `set` must
+        // collapse them so both agree — the first is replaced, the stale second
+        // dropped, leaving exactly one entry.
+        let mut fm = FrontMatter::from_raw("status: draft\npov: Mara\nstatus: final\n");
+        fm.set_status(Status::Revised);
+        assert_eq!(fm.as_str(), "status: revised\npov: Mara\n");
+        assert_eq!(fm.status(), Some(Status::Revised));
+        // Only one `status:` line survives, so no parser can read a stale value.
+        assert_eq!(fm.as_str().matches("status:").count(), 1);
+    }
+
+    #[test]
+    fn removing_a_duplicated_key_leaves_no_ghost_that_resurrects() {
+        // Clearing a key that appears twice must drop *both* — otherwise the
+        // second is a ghost that `get` reads on the next round.
+        let mut fm = FrontMatter::from_raw("summary: first\nstatus: draft\nsummary: second\n");
+        fm.set_summary("   "); // blank clears the key
+        assert_eq!(fm.summary(), None);
+        assert!(!fm.as_str().contains("summary"));
+        assert_eq!(fm.status(), Some(Status::Draft)); // sibling untouched
+    }
+
+    #[test]
+    fn set_collapses_a_duplicated_block_key_and_its_span() {
+        // The stale duplicate is a `|` block: its whole indented span must be
+        // dropped, not just its `key:` line, or continuation lines linger.
+        let raw =
+            "epigraph: |\n  Old A\n  Old B\nstatus: draft\nepigraph: |\n  Ghost one\n  Ghost two\n";
+        let mut fm = FrontMatter::from_raw(raw);
+        fm.set_epigraph_text("Fresh line");
+        assert_eq!(fm.epigraph().unwrap().text, "Fresh line");
+        assert_eq!(fm.as_str().matches("epigraph:").count(), 1);
+        assert!(!fm.as_str().contains("Ghost"));
+        assert!(!fm.as_str().contains("Old B"));
+        assert_eq!(fm.status(), Some(Status::Draft));
+    }
+
+    #[test]
+    fn set_scenes_collapses_a_duplicated_scenes_block() {
+        // Two `scenes:` sequences: writing collapses to one so `scenes()` and an
+        // external parser don't disagree on which the author meant.
+        let raw = "scenes:\n  - synopsis: old\n    status: draft\nstatus: draft\nscenes:\n  - synopsis: ghost\n    status: done\n";
+        let mut fm = FrontMatter::from_raw(raw);
+        fm.set_scenes(&[SceneMeta {
+            synopsis: "fresh".into(),
+            status: SceneStatus::Done,
+        }]);
+        let read = fm.scenes();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].synopsis, "fresh");
+        assert_eq!(fm.as_str().matches("scenes:").count(), 1);
+        assert!(!fm.as_str().contains("ghost"));
+    }
+
+    #[test]
+    fn a_value_with_a_bare_cr_round_trips_as_valid_yaml() {
+        // An old-Mac paste with a lone `\r`: it must take the safe `|`-block
+        // path, not a one-line quoted scalar with a literal carriage return.
+        let mut fm = FrontMatter::from_raw("status: draft\n");
+        fm.set_summary("first\rsecond");
+        // Written as a `|` block, one line per visual line — no interior CR/LF.
+        assert_eq!(
+            fm.as_str(),
+            "status: draft\nsummary: |\n  first\n  second\n"
+        );
+        assert!(!fm.as_str().contains('\r'));
+        // The value reads back as newline-joined lines.
+        assert_eq!(fm.summary().as_deref(), Some("first\nsecond"));
+        assert_eq!(fm.status(), Some(Status::Draft));
+    }
+
+    #[test]
+    fn a_value_with_crlf_round_trips_without_a_spurious_blank_line() {
+        // A CRLF value: the CR+LF pair is one break, so the block has one line
+        // per visual line — not a blank line between each.
+        let mut fm = FrontMatter::default();
+        fm.set_summary("alpha\r\nbeta\r\ngamma");
+        assert_eq!(fm.as_str(), "summary: |\n  alpha\n  beta\n  gamma\n");
+        assert!(!fm.as_str().contains('\r'));
+        assert_eq!(fm.summary().as_deref(), Some("alpha\nbeta\ngamma"));
+    }
+
+    #[test]
+    fn split_lines_treats_cr_lf_and_crlf_each_as_one_break() {
+        assert_eq!(split_lines("a\nb"), vec!["a", "b"]);
+        assert_eq!(split_lines("a\rb"), vec!["a", "b"]);
+        assert_eq!(split_lines("a\r\nb"), vec!["a", "b"]);
+        // Interior blank lines survive (verse stanza break).
+        assert_eq!(split_lines("a\r\n\r\nb"), vec!["a", "", "b"]);
+        assert_eq!(split_lines("solo"), vec!["solo"]);
     }
 }
