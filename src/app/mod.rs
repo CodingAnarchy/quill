@@ -43,6 +43,7 @@ mod assist;
 mod assistant;
 mod backup;
 mod backup_browser;
+mod batch_update;
 mod bible_review;
 mod corkboard;
 mod dispatch;
@@ -468,6 +469,17 @@ pub struct App {
     /// chapter-granular fold steps and for one-shot passes (which show pass-level
     /// progress only). Shared so the worker can write while the UI thread reads.
     pass_progress: Arc<Mutex<Option<(usize, usize)>>>,
+    /// The opt-in background batch bible update's in-flight worker (#950): submits
+    /// the full-manuscript rebuild batches, or polls the persisted ones to reconcile
+    /// them. Its own task, separate from [`ai_task`](App::ai_task), so a background
+    /// submit/reconcile never blocks — nor is blocked by — an interactive AI pass.
+    /// Polled each loop tick by [`App::poll_batch_update`].
+    batch_task: Task<Vec<batch_update::BatchTaskResult>>,
+    /// The book a reconciled batch pass's bible write is being applied for (#950),
+    /// so its findings are attributed to that book — the batch counterpart of the
+    /// series-refresh / pass-queue `current_pass_book`. Set only while a reconciled
+    /// batch is being applied off the normal run path; `None` otherwise.
+    batch_apply_book: std::cell::Cell<Option<usize>>,
     /// Crash recovery (#263): unsaved work found at launch, awaiting the author's
     /// restore/discard choice. `Some` only while the recovery prompt is open;
     /// taken when they restore, cleared when they discard or defer.
@@ -683,6 +695,8 @@ impl App {
             series_bible_run: None,
             pass_queue_run: None,
             pass_progress: Arc::new(Mutex::new(None)),
+            batch_task: Task::idle(),
+            batch_apply_book: std::cell::Cell::new(None),
             pending_recovery: None,
             recovery_written: false,
             pending_switch: None,
@@ -822,6 +836,9 @@ impl App {
         self.refresh_vc_status_on_idle();
         self.recheck_instance_lock();
         self.capture_recovery();
+        // Poll any in-flight background bible batches (#950) — cheap: a no-op unless
+        // the opt-in is on and the durable record has batches to reconcile.
+        self.reconcile_batch_update();
         // Mark this input burst's end, so autosave fires only after the
         // configured seconds of genuine idle (#409).
         self.last_activity = std::time::Instant::now();

@@ -297,6 +297,9 @@ impl App {
     pub(crate) fn current_pass_book(&self) -> Option<usize> {
         self.current_series_bible_book()
             .or_else(|| self.current_pass_queue_book())
+            // A reconciled background batch update (#950) applies outside any run, so
+            // it sets its own book here for finding attribution.
+            .or_else(|| self.batch_apply_book.get())
     }
 
     /// Clear the run and report what it did — the [`PassQueueDriver`]'s

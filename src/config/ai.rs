@@ -33,6 +33,15 @@ const fn default_echo_detection() -> bool {
     true
 }
 
+/// The background batch bible update (#950) is opt-in and off by default: it sends
+/// a full-manuscript rebuild off-machine to the asynchronous Message Batches API
+/// (half price, but a window of up to ~24h), so an author enables it deliberately
+/// with `[ai] background-batch-update = true`. A field default keeps an existing
+/// config (which never mentions the key) at the safe off state.
+const fn default_background_batch_update() -> bool {
+    false
+}
+
 /// The fal.ai FLUX model used when no `[image] model` is configured — fast and
 /// inexpensive. It seeds [`ImageConfig::model`] (#809).
 fn default_image_model() -> String {
@@ -137,6 +146,17 @@ pub struct AiConfig {
     /// durable store already keeps from re-surfacing.
     #[serde(default = "default_echo_detection")]
     pub echo_detection: bool,
+    /// Opt-in for the background batch bible update (#950). When true, the
+    /// "Queue a background bible update" run-action becomes available: it submits a
+    /// full-manuscript bible rebuild through the asynchronous Message Batches API
+    /// (half the per-token price, but a processing window of up to ~24h), persists
+    /// the batch id, and reconciles the result on a later launch or idle tick —
+    /// decoupled from the interactive refresh path (#655/#955), which is unchanged.
+    /// Off by default: the manuscript only ever goes to the batch endpoint on this
+    /// explicit opt-in *and* an explicit run-action. A field default keeps an
+    /// existing config that never mentions the key at the safe off state.
+    #[serde(default = "default_background_batch_update")]
+    pub background_batch_update: bool,
     /// Memoized OS-keychain read for the Claude key, so the store is consulted at
     /// most once per session rather than on every palette-gating check (and, on a
     /// changed dev binary, prompts at most once). Not config — skipped on load and
@@ -162,6 +182,7 @@ impl Default for AiConfig {
             cost_threshold: 0.20,
             refresh_after_changes: 5,
             echo_detection: true,
+            background_batch_update: false,
             keychain_cache: OnceCell::new(),
         }
     }

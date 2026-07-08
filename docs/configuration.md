@@ -88,6 +88,7 @@ are in [`ai-features.md`](ai-features.md).
 | `api_key` | *(unset)* | a Claude API key string | Your Claude API key. The `ANTHROPIC_API_KEY` environment variable and the OS keychain both take precedence over this, so you rarely need to store the key in plaintext here. |
 | `cost_threshold` | `0.20` | a dollar amount (float) | Confirm before any Claude pass whose estimated cost exceeds this many dollars. Cheaper passes — and the free local backend — run without a prompt. |
 | `refresh_after_changes` | `5` | a whole number | Rebuild the story bible from the whole manuscript (instead of an incremental revise) once this many chapters have changed since its last pass. `0` makes every pass a full rebuild. |
+| `background-batch-update` | `false` | `true` / `false` | Opt in to the **background bible update** (#950): a "Queue a background bible update" run-action that rebuilds every story bible through Claude's asynchronous Message Batches API — **half the per-token price**, but a processing window of up to ~24h. It submits and returns immediately (never blocking writing), persists the batch ids to `bible/.batch.toml`, and applies the results on a later launch or idle tick, so it survives restarts. A pass whose chapters changed while the batch was in flight is skipped as stale (re-queue to refresh) rather than overwriting your edited bible. Needs the Claude (cloud) backend; the interactive refreshes stay synchronous. |
 
 ```toml
 [ai]
@@ -96,6 +97,7 @@ backend = "claude"
 model = "claude-opus-4-8"
 cost_threshold = 0.50
 refresh_after_changes = 10
+background-batch-update = true   # opt in to the async, half-price batch update (#950)
 ```
 
 The easiest way to turn AI on and set a key is in-app (the run-action menu's

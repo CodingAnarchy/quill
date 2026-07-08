@@ -188,6 +188,10 @@ fn main() -> io::Result<()> {
     // If a durable pass queue was interrupted (a crash mid-run), offer to resume it
     // (#923) — after the recovery/backup offers, which take precedence.
     app.offer_pass_queue_resume();
+    // Reconcile any background bible batches submitted in a previous session (#950):
+    // a batch can take hours, so its results are polled and applied at launch (and on
+    // idle) rather than in-session. Non-blocking — it just kicks off the poll worker.
+    app.reconcile_batch_update();
     // On the very first launch, show the dismissible quick-start card (#837).
     // After recovery, so a crash prompt takes precedence and the card waits for a
     // clean slate (it's a no-op when a prompt/overlay is already up).
@@ -450,6 +454,7 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         app.poll_local_backup(); // surface a finished local archive (worker thread) (#888)
         app.poll_vc(); // surface a finished push/pull (worker thread) before drawing
         app.poll_model_download(); // surface a finished local-model download (#382)
+        app.poll_batch_update(); // apply/report a finished background bible batch (#950)
         tui.draw(app)?;
 
         // Poll so we can stay responsive without busy-spinning.
