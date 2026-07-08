@@ -82,6 +82,7 @@ fn theme_ui_finding(chapter: &str, motif: &str, issue: &str) -> crate::mode::Fin
         chapters: vec![chapter.into()],
         book: None,
         action: Some(AiAction::Theme),
+        corroborators: Vec::new(),
     }
 }
 

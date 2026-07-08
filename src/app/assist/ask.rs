@@ -38,6 +38,7 @@ fn qa_citation_findings(answer: &ai::Answer) -> Vec<Finding> {
             chapters: vec![title.to_string()],
             book: None,
             action: None, // a Q&A citation isn't a re-runnable analysis finding (#608)
+            corroborators: Vec::new(),
         });
     }
     out
@@ -58,6 +59,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
             chapters: Vec::new(),
             book: None,
             action: None,
+            corroborators: Vec::new(),
         })
         .collect();
     if !rows.is_empty() {
@@ -67,6 +69,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
             chapters: Vec::new(),
             book: None,
             action: None,
+            corroborators: Vec::new(),
         });
     }
     rows
@@ -98,6 +101,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                 chapters: Vec::new(),
                 book: None,
                 action: None,
+                corroborators: Vec::new(),
             });
         } else {
             for title in cited {
@@ -108,6 +112,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                     chapters: vec![title.to_string()],
                     book: None,
                     action: None,
+                    corroborators: Vec::new(),
                 });
             }
         }

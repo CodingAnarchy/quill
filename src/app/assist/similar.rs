@@ -193,6 +193,7 @@ fn hit_finding(hit: &Hit) -> Finding {
         chapters: vec![hit.passage.title.clone()],
         book: None,
         action: None,
+        corroborators: Vec::new(),
     }
 }
 
@@ -220,6 +221,7 @@ fn echo_finding(pair: &EchoPair) -> Finding {
         chapters: vec![pair.a.title.clone(), pair.b.title.clone()],
         book: None,
         action: Some(AiAction::Echo),
+        corroborators: Vec::new(),
     }
 }
 
