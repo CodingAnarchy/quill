@@ -30,6 +30,11 @@ pub enum HighlightKind {
     /// A fenced code block (#522), rendered verbatim and set apart — no emphasis
     /// concealment or smart typography applies inside it.
     Code,
+    /// A CommonMark thematic break (#908) — the author's scene divider (`---`,
+    /// `***`, `* * *`, …). Rendered as a centered `* * *` divider with breathing
+    /// room, and drives the flush-left rule for the paragraph that resumes after
+    /// it. The raw markers reveal on cursor, like a fenced-code fence line.
+    SceneBreak,
 }
 
 /// A styled range of the document, in absolute byte offsets.
@@ -244,6 +249,29 @@ fn collect(
                     span_end: node.end_byte(),
                 });
             }
+        } else if node.kind() == "thematic_break" {
+            // A scene break (#908). Driving this off the tree-sitter node (not a
+            // regex over line text) is what keeps a setext-heading underline —
+            // `---` on the line below a title — from being misread as a break: the
+            // grammar parses that underline as part of the `setext_heading`, so no
+            // `thematic_break` node is emitted there.
+            out.push(Highlight {
+                start: node.start_byte(),
+                end: node.end_byte(),
+                kind: HighlightKind::SceneBreak,
+            });
+            // Conceal the raw markers so the line renders as a centered divider,
+            // reusing the fenced-code reveal-on-cursor path (#723): the marker range
+            // is the break line itself and the reveal span is the same node, so the
+            // divider becomes the raw text only while the cursor sits on it. The
+            // range runs to the byte after the line's newline (clamped to the node)
+            // so it lines up with the whole logical line the renderer conceals.
+            markers.push(Marker {
+                delim_start: node.start_byte(),
+                delim_end: node.end_byte(),
+                span_start: node.start_byte(),
+                span_end: node.end_byte(),
+            });
         }
     });
 
@@ -515,6 +543,54 @@ mod tests {
         // whole node), so the fences show while editing there too.
         let on_open = outside[0].0;
         assert!(s.conceal_ranges(Some(on_open)).is_empty());
+    }
+
+    #[test]
+    fn detects_thematic_break_and_conceals_it_reveal_on_cursor() {
+        // Every CommonMark thematic-break form gets a `SceneBreak` highlight and a
+        // conceal marker over its line, revealed only when the cursor sits on it.
+        for marker in ["---", "***", "___", "* * *", "- - -"] {
+            let text = format!("Para one.\n\n{marker}\n\nPara two.\n");
+            let s = Syntax::new(&text);
+            let brk = all(&s)
+                .into_iter()
+                .find(|h| h.kind == HighlightKind::SceneBreak)
+                .unwrap_or_else(|| panic!("scene break for {marker:?}"));
+            assert_eq!(text[brk.start..brk.end].trim_end(), marker);
+
+            // Cursor away from the break: the raw markers are concealed (so it can
+            // render as a divider). Cursor on the break line: they reveal for editing.
+            let away = text.find("Para two").unwrap();
+            assert!(
+                concealed(&text, &s, Some(away))
+                    .iter()
+                    .any(|d| d.trim() == marker),
+                "the break conceals for {marker:?}"
+            );
+            let on_break = brk.start;
+            assert!(
+                !concealed(&text, &s, Some(on_break))
+                    .iter()
+                    .any(|d| d.trim() == marker),
+                "the break reveals under the cursor for {marker:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_setext_heading_underline_is_not_a_scene_break() {
+        // `---` under a title is a setext heading, not a thematic break — driving off
+        // the tree-sitter node (not a line regex) keeps them apart.
+        let text = "A Title\n---\n\nBody.\n";
+        let s = Syntax::new(text);
+        assert!(
+            all(&s).iter().all(|h| h.kind != HighlightKind::SceneBreak),
+            "the setext underline is not read as a scene break"
+        );
+        assert!(
+            all(&s).iter().any(|h| h.kind == HighlightKind::Heading),
+            "it is a heading"
+        );
     }
 
     #[test]

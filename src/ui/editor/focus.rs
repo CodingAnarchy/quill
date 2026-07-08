@@ -52,16 +52,27 @@ pub(super) fn starts_paragraph(buffer: &Buffer, line: usize) -> bool {
             .any(|h| h.kind == kind && h.start <= start && h.end > start)
     };
     let blank = |l: usize| buffer.line(l).trim().is_empty();
-    if blank(line) || is_kind(line, HighlightKind::Heading) || is_kind(line, HighlightKind::Code) {
+    // Blank lines, headings, fenced code, and scene breaks are never indented — the
+    // break line is a divider, not prose (#908).
+    if blank(line)
+        || is_kind(line, HighlightKind::Heading)
+        || is_kind(line, HighlightKind::Code)
+        || is_kind(line, HighlightKind::SceneBreak)
+    {
         return false;
     }
-    // The first paragraph after a heading gets no indent: walk up past the blank
-    // separator lines; if the nearest non-blank line above is a heading, skip it.
+    // The first paragraph that resumes after a heading, a scene break, or a code
+    // block gets no indent (the manuscript convention the exports follow — a break
+    // or preformatted section reads flush-left after it). Walk up past the blank
+    // separator lines; if the nearest non-blank line above is one of those, skip it.
     let mut prev = line;
     while prev > 0 && blank(prev - 1) {
         prev -= 1;
     }
-    !(prev > 0 && is_kind(prev - 1, HighlightKind::Heading))
+    !(prev > 0
+        && (is_kind(prev - 1, HighlightKind::Heading)
+            || is_kind(prev - 1, HighlightKind::SceneBreak)
+            || is_kind(prev - 1, HighlightKind::Code)))
 }
 
 /// The first visual row's indent width in cells for `line`: the display-only

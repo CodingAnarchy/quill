@@ -15,6 +15,7 @@ use std::rc::Rc;
 use super::*;
 use crate::app::mouse::EditorLayout;
 use crate::buffer::Buffer;
+use crate::syntax::HighlightKind;
 
 mod focus;
 mod header;
@@ -73,7 +74,10 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Visual { anchor, linewise } => (&[], Some(app.selection_bytes(*anchor, *linewise))),
         _ => (&[], None),
     };
-    let inserts = header_inserts(app, column.width);
+    let inserts = merge_inserts(
+        header_inserts(app, column.width).as_ref(),
+        &scene_break_inserts(buffer),
+    );
     // Misspelled-word flags (#357), computed on idle; underlined under the prose.
     let spell = app.spell_flags.as_slice();
     // Inline author annotations (#302/#370): the anchored spans get a tinted
@@ -174,11 +178,12 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         annotations: &[],
         focus: None,
     };
+    let inserts = scene_break_inserts(buffer);
     render_body(
         frame,
         column,
         buffer,
-        &[],
+        &inserts,
         &highlights,
         false,
         false,
@@ -421,6 +426,52 @@ fn render_body(
     }
 
     applied_offset
+}
+
+/// Render-only blank rows for extra breathing room around each scene break (#908),
+/// keyed by the buffer line each precedes — one before the break line and one
+/// before the line right after it. Modeled on the chapter-title `header_inserts`
+/// mechanism: the fill loop threads them in as non-editable rows and accounts their
+/// counts in the scroll math, so a scene division stands apart while scrolling
+/// without ever touching the buffer. The break's raw `---` stays the real, editable
+/// line — these are only the surrounding whitespace.
+fn scene_break_inserts(buffer: &Buffer) -> Vec<(usize, Vec<Line<'static>>)> {
+    let syntax = buffer.syntax();
+    let mut inserts: Vec<(usize, Vec<Line<'static>>)> = Vec::new();
+    let gap = || vec![Line::raw("")];
+    for h in syntax.highlights_in(0, usize::MAX) {
+        if h.kind != HighlightKind::SceneBreak {
+            continue;
+        }
+        let line = buffer.cursor_at_byte(h.start).line;
+        // One blank above the divider, and one before the line that resumes after
+        // it — symmetric breathing room larger than a normal paragraph gap.
+        inserts.push((line, gap()));
+        if line + 1 < buffer.line_count() {
+            inserts.push((line + 1, gap()));
+        }
+    }
+    inserts
+}
+
+/// Merge two insert lists (each keyed by the buffer line it precedes) into one
+/// keyed list, concatenating the blocks of any shared line so the `render_body`
+/// fill loop — which finds a single entry per line — sees both (#908). Kept sorted
+/// by line for a stable, predictable order.
+fn merge_inserts(
+    a: &[(usize, Vec<Line<'static>>)],
+    b: &[(usize, Vec<Line<'static>>)],
+) -> Vec<(usize, Vec<Line<'static>>)> {
+    let mut merged: Vec<(usize, Vec<Line<'static>>)> = a.to_vec();
+    for (line, block) in b {
+        if let Some(entry) = merged.iter_mut().find(|(at, _)| at == line) {
+            entry.1.extend(block.iter().cloned());
+        } else {
+            merged.push((*line, block.clone()));
+        }
+    }
+    merged.sort_by_key(|(at, _)| *at);
+    merged
 }
 
 /// A `focus_width`-wide prose column centered horizontally in `area` (full width
