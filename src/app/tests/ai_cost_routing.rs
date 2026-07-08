@@ -353,6 +353,55 @@ fn offline_routes_costed_actions_on_device() {
     );
 }
 
+/// A project with a single chapter big enough that its estimated tokens
+/// (`bytes / 4`) exceed the on-device window (40960) — the offline-oversized case
+/// (#849). ~250 KB of body ⇒ ~64k estimated tokens.
+fn oversized_offline_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Big\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "word ".repeat(50_000)).unwrap();
+    let mut app = open_test_app(&dir);
+    app.ai.enabled = true;
+    app.ai.offline = true; // the hard privacy pin
+    app.test_local_present = Some(true); // a usable local model is on disk
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn offline_refuses_a_non_foldable_oversized_pass() {
+    // Prose/style is a one-shot manuscript pass with no incremental-revise path, so
+    // an oversized offline run can't fold → the graceful refusal (#849), never a run
+    // that would feed candle a pass it can't hold.
+    let (app, _dir) = oversized_offline_app("offline-oversized-refuse");
+    match app.ai_action_start(AiAction::Style, false) {
+        AiStart::Refuse(msg) => {
+            assert!(msg.contains("40960"), "states the window: {msg}");
+            assert!(msg.contains("offline"), "names the remedy: {msg}");
+            assert!(msg.contains("narrow"), "offers the scope remedy: {msg}");
+        }
+        other => panic!("expected a refusal for an oversized non-foldable pass, got {other:?}"),
+    }
+}
+
+#[test]
+fn offline_folds_an_oversized_bible_pass_on_device() {
+    // A persistent-bible pass (continuity) has an incremental-revise path, so an
+    // oversized offline rebuild folds on-device instead of refusing (#849): it
+    // routes Local and the fold runs chapter-by-chapter under the window.
+    let (app, _dir) = oversized_offline_app("offline-oversized-fold");
+    assert!(
+        matches!(
+            app.ai_action_start(AiAction::Continuity, false),
+            AiStart::Run(ai::BackendKind::Local)
+        ),
+        "a foldable oversized offline pass runs on-device (folds), not refused",
+    );
+}
+
 #[test]
 fn ask_policy_confirms_when_over_the_threshold() {
     let (mut app, _dir) = two_chapter_app("route-ask");

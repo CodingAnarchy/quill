@@ -164,6 +164,18 @@ impl App {
         // the Claude backend; the local backend has no batch path.
         let claude = self.ai.backend() == ai::BackendKind::Claude;
         let model = self.ai.model.clone();
+        // Offline-oversized full rebuild (#849): if this pass is pinned `offline`,
+        // is a from-scratch full rebuild, and doesn't fit the on-device window,
+        // rebuild it by *folding* — walk the chapters in order, revising the bible
+        // one window-sized chunk at a time. Schema-equivalent to a one-shot rebuild;
+        // the model never sees more than a window. A hard limit (the running bible
+        // itself outgrows the window) falls through to the graceful refusal.
+        let full_from_scratch =
+            matches!(scope, ai::incremental::Scope::Full) && (prior.trim().is_empty() || !series);
+        if full_from_scratch && self.offline_oversized(book) {
+            self.run_folded_rebuild(&t, book, &model, current, series);
+            return;
+        }
         let (req, base_msg, batch) = match scope {
             ai::incremental::Scope::UpToDate => {
                 self.message = Some(format!(
@@ -209,6 +221,86 @@ impl App {
             base_msg.to_string()
         };
         self.spawn_request(&message, req, batch, t.finish);
+    }
+
+    /// Whether a full rebuild of `action` for `book` is pinned `offline` yet too
+    /// big for the on-device window (#849) — the condition that turns a from-scratch
+    /// rebuild into a fold. Uses the same `context_len / 4` estimate and
+    /// `local_fits` window math the router consults, so the fold triggers exactly
+    /// when the router would otherwise refuse.
+    fn offline_oversized(&self, book: usize) -> bool {
+        if !self.ai.offline {
+            return false;
+        }
+        let est = (self.book_render(book, None).len() / 4) as u32;
+        !self.local_fits(est)
+    }
+
+    /// The window a folded rebuild targets (#849) — the largest on-device model's
+    /// context, the same bound `local_fits` uses.
+    fn fold_window(&self) -> u32 {
+        ai::model_select::local_window(&self.ai.local_models)
+    }
+
+    /// The active-book chapters in manuscript order with their estimated token
+    /// sizes (#849), for the fold planner. Each chapter is rendered exactly as the
+    /// full pass renders it (title heading + body), so a fold's chunks reproduce the
+    /// one-shot serialization on chapter seams.
+    fn fold_chapters(&self, book: usize) -> Vec<(String, u32)> {
+        self.project
+            .book_chapters(book)
+            .iter()
+            .filter(|c| !c.file.is_empty())
+            .map(|c| {
+                let rendered = self.book_render_files(book, std::slice::from_ref(&c.file));
+                let tokens = (rendered.len() / 4) as u32;
+                (rendered, tokens)
+            })
+            .collect()
+    }
+
+    /// Rebuild a bible for `book` by folding (#849): seed an empty bible, then walk
+    /// the chapters in manuscript order, each step revising the running bible with
+    /// as many whole chapters as fit the window. The running bible is carried as the
+    /// prior JSON between steps, so the final response is schema-equivalent to a
+    /// one-shot rebuild and `t.finish` parses it unchanged. The whole fold runs in
+    /// one worker spawn (each step is a `complete` on the held backend); a hard limit
+    /// — the running bible outgrows the window — surfaces the graceful refusal.
+    #[allow(clippy::needless_pass_by_value)] // consumes current: moved into pending_pass
+    fn run_folded_rebuild(
+        &mut self,
+        t: &BibleTracker,
+        book: usize,
+        model: &str,
+        current: ai::incremental::Digests,
+        series: bool,
+    ) {
+        let chapters = self.fold_chapters(book);
+        let window = self.fold_window();
+        let model = model.to_string();
+        let incr = t.incr;
+        let finish = t.finish;
+        // `est(system + running bible + MAX_OUTPUT_TOKENS)`: the request overhead
+        // besides the chapter chunk. The system prompt is bounded and small; the
+        // running bible grows, so it's measured per step inside the loop.
+        let system_tokens = fold_request_system_tokens(incr, &model);
+        let out_tokens = ai::MAX_OUTPUT_TOKENS;
+
+        let merge = series.then(|| self.other_books_files(book));
+        self.pending_pass = Some((t.key.to_string(), current, merge));
+        let message = format!("{} (folding on-device — chapter by chapter)", t.full_msg);
+        self.spawn_outcome(&message, move |backend| {
+            fold_rebuild(
+                backend,
+                &chapters,
+                window,
+                system_tokens,
+                out_tokens,
+                &model,
+                incr,
+                finish,
+            )
+        });
     }
 
     /// The chapter `file → content-digest` map for the active book (#90). Used by
@@ -397,4 +489,80 @@ impl App {
         out.dedup();
         out
     }
+}
+
+/// Estimate the fixed request overhead a revise pass carries besides the chapter
+/// chunk and the running bible (#849): the system prompt, roughly, via the same
+/// `bytes / 4` estimate the router uses. Built with an empty prior + empty chunk so
+/// only the framing is measured; the running bible is added per step.
+fn fold_request_system_tokens(incr: fn(&str, &str, &str) -> ai::Request, model: &str) -> u32 {
+    let framing = incr("", "", model);
+    let bytes = framing.system.as_deref().map_or(0, str::len) + framing.user.len();
+    (bytes / 4) as u32
+}
+
+/// Drive a full-by-folding rebuild on the worker thread (#849): seed an empty
+/// bible, then fold the chapters in order, revising the running bible with each
+/// window-sized chunk. The running bible is carried as the prior JSON between
+/// steps; the final response is returned through `finish` (schema-equivalent to a
+/// one-shot rebuild). A hard limit — even one chapter can't fit beside the running
+/// bible — becomes a graceful `NotConfigured` error the caller surfaces.
+#[allow(clippy::too_many_arguments)] // one call site; grouping into a struct would only obscure it
+fn fold_rebuild(
+    backend: &dyn Backend,
+    chapters: &[(String, u32)],
+    window: u32,
+    system_tokens: u32,
+    out_tokens: u32,
+    model: &str,
+    incr: fn(&str, &str, &str) -> ai::Request,
+    finish: fn(Result<ai::Response, ai::AiError>) -> Outcome,
+) -> Outcome {
+    // Position-indexed sizes so the planner packs whole chapters on seams; the
+    // "file" id is just the index, since we drain by count.
+    let ids: Vec<String> = (0..chapters.len()).map(|i| i.to_string()).collect();
+    let mut remaining: Vec<ai::incremental::ChapterSize> = ids
+        .iter()
+        .zip(chapters)
+        .map(|(id, (_, tokens))| ai::incremental::ChapterSize {
+            file: id.as_str(),
+            tokens: *tokens,
+        })
+        .collect();
+
+    let mut running_bible = String::new();
+    let mut next = 0usize; // index of the next chapter to fold
+    let mut last: Option<ai::Response> = None;
+    while !remaining.is_empty() {
+        let bible_tokens = (running_bible.len() / 4) as u32;
+        let overhead = system_tokens
+            .saturating_add(bible_tokens)
+            .saturating_add(out_tokens);
+        let count = match ai::incremental::next_fold_chunk(&remaining, window, overhead) {
+            ai::incremental::FoldStep::Chunk(files) => files.len(),
+            ai::incremental::FoldStep::HardLimit => {
+                return finish(Err(ai::AiError::NotConfigured(
+                    ai::router::offline_too_big_message(bible_tokens),
+                )));
+            }
+        };
+        // The chunk's text: the chosen chapters, concatenated in order.
+        let chunk: String = chapters[next..next + count]
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect();
+        let resp = match backend.complete(&incr(&running_bible, &chunk, model)) {
+            Ok(r) => r,
+            Err(e) => return finish(Err(e)),
+        };
+        running_bible.clone_from(&resp.text);
+        last = Some(resp);
+        remaining.drain(0..count);
+        next += count;
+    }
+    // The last step's response is the complete folded bible (or an empty
+    // manuscript, which yields no chapters and so no fold — an empty result).
+    finish(last.ok_or_else(|| {
+        ai::AiError::NotConfigured("nothing to analyze: the manuscript is empty".into())
+    }))
 }

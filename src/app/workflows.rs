@@ -263,6 +263,12 @@ impl App {
                     self.start_async_step(ai_action);
                     return;
                 }
+                // Offline and too big to run/fold on-device (#849): the step can't
+                // run, so stop the workflow with the actionable reason.
+                AiStart::Refuse(message) => {
+                    self.stop_run(&message);
+                    return;
+                }
             }
         }
     }

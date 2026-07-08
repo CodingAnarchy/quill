@@ -14,7 +14,14 @@ use crate::mode::{Action, AiAction, AiCost, ExportScope, PaletteRow};
 #[cfg_attr(test, derive(Debug))]
 pub enum AiStart {
     Run(BackendKind),
-    Confirm { label: String, offer_local: bool },
+    Confirm {
+        label: String,
+        offer_local: bool,
+    },
+    /// The pass can't run as routed and is refused with this actionable message
+    /// (#849): an `offline`-pinned pass too big for the on-device window, where
+    /// there's no cloud to fall back to. Surfaced as a status message; nothing runs.
+    Refuse(String),
 }
 
 impl App {
@@ -487,6 +494,9 @@ impl App {
                 "",
                 None,
             ),
+            // Offline and too big to run or fold on-device (#849): surface the
+            // actionable refusal, run nothing.
+            AiStart::Refuse(message) => self.message = Some(message),
         }
     }
 
@@ -525,10 +535,20 @@ impl App {
     /// With no model set configured, the single recommended model is the candidate;
     /// otherwise it's the configured set, so a long-context model lets a
     /// whole-manuscript pass run locally.
-    fn local_fits(&self, input_tokens: u32) -> bool {
+    pub(crate) fn local_fits(&self, input_tokens: u32) -> bool {
         cfg!(feature = "local")
             && input_tokens <= ai::model_select::local_window(&self.ai.local_models)
             && self.local_model_present(input_tokens)
+    }
+
+    /// Whether an oversized `offline` pass for `action` can be folded on-device
+    /// instead of refused (#849): the persistent-bible passes (character, setting,
+    /// timeline-continuity, plot, theme) have an incremental-revise path, so a full
+    /// rebuild that doesn't fit is walked chapter-by-chapter through the window.
+    /// A one-shot pass with no merge step (whole-manuscript Q&A, the findings-only
+    /// scans) can't fold and takes the graceful-report path.
+    fn foldable_offline(action: AiAction) -> bool {
+        super::worker::bible_tracker(action).is_some()
     }
 
     /// The cost decision for a network AI action (#82): run it now, or confirm
@@ -555,9 +575,22 @@ impl App {
             offline: self.ai.offline,
             local_available: cfg!(feature = "local"),
             local_fits: self.local_fits(est.tokens),
+            est_tokens: est.tokens,
             est,
             threshold: self.ai.cost_threshold,
         });
+        // An offline pass too big for the on-device window is refused (#849) —
+        // *unless* it can be folded: a persistent-bible pass runs incrementally,
+        // window-sized chunk by chunk, so it still completes on-device. The fold is
+        // driven by `run_bible_tracker`, which re-detects the oversized-offline
+        // condition; here we only decline to refuse a foldable pass.
+        if let Some(message) = route.refuse {
+            return if Self::foldable_offline(action) {
+                AiStart::Run(BackendKind::Local)
+            } else {
+                AiStart::Refuse(message)
+            };
+        }
         match route.confirm {
             None => AiStart::Run(route.backend),
             Some(c) if c.offer_local => AiStart::Confirm {
