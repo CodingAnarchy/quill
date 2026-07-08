@@ -269,6 +269,12 @@ pub enum Mode {
     /// jumpable (Enter opens the chapter). A read of the standing triage state,
     /// read-only over the prose. Boxed (carries the grouped rows).
     Dashboard(Box<Dashboard>),
+    /// The motif / character co-occurrence report (#922): co-occurring pairs and
+    /// notable absences drawn from the character and theme bibles' chapter-
+    /// appearance data, each jumpable to its relevant chapter. A combinatorial read
+    /// of the standing bible data, read-only over the prose. Boxed (carries the
+    /// row list).
+    CoOccurrence(Box<CoOccurrence>),
     /// Browsing the commit history (#587): a navigable list of past commits where
     /// the selected one can be diffed against the current chapter, or the chapter
     /// restored to it (into the editable buffer for review-and-save). Boxed (carries

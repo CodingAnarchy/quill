@@ -343,6 +343,59 @@ impl Dashboard {
     }
 }
 
+/// One row of the motif / character co-occurrence report (#922): a section header,
+/// a co-occurring pair (with its shared chapters, the jump target), or a notable
+/// absence (with the gap chapters). Only the pair and absence rows are jumpable;
+/// `chapter` is the row's jump target (its first shared / missing chapter), which
+/// the report's Enter activates.
+pub enum CoOccurrenceRow {
+    /// A section header (e.g. "Co-occurring" / "Notable absences").
+    Header(&'static str),
+    /// A co-occurring pair: the display line and the chapter it jumps to.
+    Pair { line: String, chapter: String },
+    /// A notable absence: the display line and the first missing chapter it jumps to.
+    Absence { line: String, chapter: String },
+}
+
+impl CoOccurrenceRow {
+    /// The chapter this row jumps to, or `None` for a header (headers aren't
+    /// selectable).
+    pub(crate) fn chapter(&self) -> Option<&str> {
+        match self {
+            Self::Pair { chapter, .. } | Self::Absence { chapter, .. } => Some(chapter),
+            Self::Header(_) => None,
+        }
+    }
+}
+
+/// State for an open [`Mode::CoOccurrence`] — the motif / character co-occurrence
+/// report (#922): co-occurring pairs and notable absences drawn from the bibles'
+/// chapter-appearance data, each jumpable to its relevant chapter. `rows` is the
+/// flat, ordered render/selection list; `selected` is the current jumpable row
+/// (headers are skipped). A read of the standing bible data — no request.
+pub struct CoOccurrence {
+    pub(crate) rows: Vec<CoOccurrenceRow>,
+    pub(crate) selected: usize,
+}
+
+impl CoOccurrence {
+    /// The indices of the selectable (jumpable) rows, in order — the stops the
+    /// arrow keys move between.
+    pub(crate) fn jump_rows(&self) -> Vec<usize> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.chapter().is_some())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// The jump-target chapter at the given row index, if that row is jumpable.
+    pub(crate) fn chapter_at(&self, row: usize) -> Option<&str> {
+        self.rows.get(row).and_then(CoOccurrenceRow::chapter)
+    }
+}
+
 /// State for an open [`Mode::BibleReview`]: the queue of conflicting bible files
 /// (front of the queue is the one shown), and a scratch buffer while the author
 /// edits the proposed version before saving.

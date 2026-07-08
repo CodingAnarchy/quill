@@ -273,6 +273,15 @@ impl App {
                     return false;
                 }
             }
+            // Only the pair / absence rows of the co-occurrence report are
+            // selectable; a click on a section header is ignored (#922).
+            Mode::CoOccurrence(c) => {
+                if c.chapter_at(index).is_some() {
+                    c.selected = index;
+                } else {
+                    return false;
+                }
+            }
             Mode::History(h) => h.selected = index,
             Mode::Corkboard(c) => c.selected = index,
             Mode::BackupBrowser(b) => b.selected = index,
@@ -378,6 +387,7 @@ impl App {
             Mode::Nav { .. }
                 | Mode::Findings(_)
                 | Mode::Dashboard(_)
+                | Mode::CoOccurrence(_)
                 | Mode::History(_)
                 | Mode::Annotations { .. }
                 | Mode::Outline { .. }

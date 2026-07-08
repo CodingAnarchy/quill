@@ -86,7 +86,12 @@ impl App {
             // Triage, the health dashboard, and the Ask history are local — they
             // work with the AI backend off (browsing already-collected findings /
             // past answers, #609/#827).
-            Action::Ai(AiAction::Triage | AiAction::Dashboard | AiAction::AskHistory) => None,
+            Action::Ai(
+                AiAction::Triage
+                | AiAction::Dashboard
+                | AiAction::CoOccurrence
+                | AiAction::AskHistory,
+            ) => None,
             // Image generation has its own opt-in / key, separate from the text AI
             // (and its own "local not compiled" fail-fast).
             Action::Ai(AiAction::Portrait | AiAction::Scene) => {
@@ -699,6 +704,7 @@ impl App {
             AiAction::Echo => self.start_echo_detection(),
             AiAction::Triage => self.open_triage(),
             AiAction::Dashboard => self.open_health_dashboard(),
+            AiAction::CoOccurrence => self.open_cooccurrence(),
             AiAction::AskHistory => self.open_qa_history(),
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::NameGen => self.start_namegen(),
@@ -787,6 +793,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Dashboard => (
             "Manuscript health",
             "Open findings by kind & chapter, with counts (local)",
+        ),
+        AiAction::CoOccurrence => (
+            "Motif & character co-occurrence",
+            "Which entries cluster & which are conspicuously apart (local)",
         ),
         AiAction::AskHistory => (
             "Ask history",
