@@ -67,6 +67,7 @@ pub(super) fn findings_from<T>(
                 chapters,
                 book,
                 action: Some(action),
+                corroborators: Vec::new(),
             }
         })
         .collect()

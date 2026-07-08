@@ -11,8 +11,11 @@ impl App {
         if self.triage.is_empty() {
             self.message = Some("No findings yet — run a continuity / setting / style pass".into());
         } else {
+            // Collapse cross-pass agreement (#921) so a span several passes flag is
+            // one row weighted by consensus; identity is unchanged (corroborators
+            // aren't part of it), so re-check / dismiss / jump still match by content.
             self.mode = Mode::Findings(Box::new(Findings {
-                items: self.triage.clone(),
+                items: super::super::health::consensus(&self.triage),
                 ..Default::default()
             }));
         }

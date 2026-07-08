@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::app::health::dashboard_rows;
+use crate::app::health::{consensus, dashboard_rows};
 use crate::mode::{DashboardRow, Finding, FindingKind};
 
 /// A UI finding of `kind` on `chapter` with the given summary — the shape a pass
@@ -17,6 +17,7 @@ fn finding(kind: FindingKind, chapter: &str, summary: &str) -> Finding {
         chapters: vec![chapter.into()],
         book: None,
         action: None,
+        corroborators: Vec::new(),
     }
 }
 
@@ -106,6 +107,32 @@ fn cross_pass_dedup_uses_the_kind() {
 }
 
 #[test]
+fn a_dismissal_suppresses_the_same_span_from_a_later_pass() {
+    // The author dismisses a dangling thread the continuity pass raised; a later
+    // plot pass flags the identical span and must not re-surface it — across a
+    // reload — because the dismissal is span-anchored (#921).
+    let (mut app, dir) = two_chapter_app("health-cross-dismiss");
+    let same = "a dangling thread";
+    app.accumulate_triage(&[finding(FindingKind::Continuity, "One", same)]);
+    app.open_triage();
+    app.on_key(key(KeyCode::Char('d'))); // dismiss the only (continuity) finding
+    assert!(app.triage.is_empty(), "dismissed leaves the session list");
+
+    // A fresh session: the plot pass raises the same span, which stays suppressed.
+    let mut reopened = open_test_app(&dir);
+    reopened.accumulate_triage(&[finding(FindingKind::Plot, "One", same)]);
+    assert!(
+        reopened.triage.is_empty(),
+        "another pass's finding on the dismissed span stays suppressed"
+    );
+
+    // But a different span the plot pass flags is unaffected.
+    reopened.accumulate_triage(&[finding(FindingKind::Plot, "One", "a separate issue")]);
+    assert_eq!(reopened.triage.len(), 1, "an unrelated span still surfaces");
+    drop(dir);
+}
+
+#[test]
 fn kind_persists_through_the_durable_store() {
     // A finding restored from disk keeps its kind even though the store drops the
     // re-runnable `action` handle.
@@ -115,6 +142,51 @@ fn kind_persists_through_the_durable_store() {
     let reopened = open_test_app(&dir);
     assert_eq!(reopened.triage.len(), 1);
     assert_eq!(reopened.triage[0].kind, FindingKind::Style);
+}
+
+#[test]
+fn consensus_merges_a_span_two_passes_flag_and_weights_it_by_agreement() {
+    // Continuity and plot independently flag the same dangling thread (identical
+    // summary + chapter). Consensus collapses them to one finding weighted by the
+    // agreement, keeping the first pass as the primary lens (#921).
+    let same = "One — a dangling thread";
+    let merged = consensus(&[
+        finding(FindingKind::Continuity, "One", same),
+        finding(FindingKind::Plot, "One", same),
+    ]);
+    assert_eq!(merged.len(), 1, "the shared span collapses to one finding");
+    assert_eq!(
+        merged[0].kind,
+        FindingKind::Continuity,
+        "primary is first-seen"
+    );
+    assert_eq!(
+        merged[0].agreement(),
+        vec![FindingKind::Continuity, FindingKind::Plot],
+        "both passes are recorded as agreeing"
+    );
+    assert_eq!(
+        merged[0].agreement_signal().as_deref(),
+        Some("flagged by continuity + plot & arc"),
+        "the consensus signal names both passes"
+    );
+
+    // A lone finding carries no signal.
+    let lone = consensus(&[finding(FindingKind::Style, "One", "pov: head-hop")]);
+    assert_eq!(lone.len(), 1);
+    assert_eq!(lone[0].agreement_signal(), None, "one pass → no consensus");
+}
+
+#[test]
+fn consensus_keeps_distinct_spans_apart() {
+    // Two passes flag *different* spans (different summaries): no merge, each stays
+    // its own finding with no cross-pass signal.
+    let merged = consensus(&[
+        finding(FindingKind::Continuity, "One", "object: locket"),
+        finding(FindingKind::Plot, "One", "thread: the letter"),
+    ]);
+    assert_eq!(merged.len(), 2, "distinct spans don't merge");
+    assert!(merged.iter().all(|f| f.agreement_signal().is_none()));
 }
 
 #[test]

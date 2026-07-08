@@ -165,6 +165,7 @@ fn a_paste_in_a_non_editing_mode_is_ignored() {
             chapters: Vec::new(),
             book: None,
             action: None,
+            corroborators: Vec::new(),
         }],
         selected: 0,
         filter: String::new(),

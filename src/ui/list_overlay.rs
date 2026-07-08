@@ -489,9 +489,15 @@ pub(super) fn draw_findings(
                 (Some(t), true) => format!("  [{t}]"),
                 (Some(t), false) => format!("  [{t} · {chapters}]"),
             };
+            // The cross-pass agreement signal (#921) trails the location when more
+            // than one pass flagged this span ("flagged by continuity + plot").
+            let signal = item
+                .agreement_signal()
+                .map(|s| format!("  · {s}"))
+                .unwrap_or_default();
             list_row(
                 *i == findings.selected,
-                &format!("{}{loc}", item.summary),
+                &format!("{}{loc}{signal}", item.summary),
                 None,
             )
         })
@@ -546,7 +552,17 @@ pub(super) fn draw_dashboard(
                 Style::default().fg(theme::current().dim),
             )),
             DashboardRow::Finding(f) => {
-                list_row(i == dashboard.selected, &format!("    {}", f.summary), None)
+                // The cross-pass agreement signal (#921) trails the summary when
+                // more than one pass flagged the span ("flagged by continuity + plot").
+                let signal = f
+                    .agreement_signal()
+                    .map(|s| format!("  · {s}"))
+                    .unwrap_or_default();
+                list_row(
+                    i == dashboard.selected,
+                    &format!("    {}{signal}", f.summary),
+                    None,
+                )
             }
         })
         .collect();
