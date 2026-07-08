@@ -4,10 +4,6 @@
 //! opt-in and key-gated, the generated images saved as off-manuscript files the
 //! author owns. See `docs/ai-features.md`.
 
-use std::cell::OnceCell;
-
-use serde::Deserialize;
-
 use super::AiError;
 
 /// One image to generate: a text prompt and the provider's model id.
@@ -57,70 +53,23 @@ pub fn extension_for(content_type: &str) -> &'static str {
     }
 }
 
-/// The fal.ai FLUX model used when none is configured — fast and inexpensive.
-pub fn default_model() -> String {
-    "fal-ai/flux/schnell".to_string()
-}
+/// Which image provider to generate with (#240). The config *value* lives in
+/// [`config::ImageBackendKind`](crate::config::ImageBackendKind) alongside the rest
+/// of the `[image]` data (#809); re-exported here so `image::ImageBackendKind` is
+/// unchanged for callers.
+pub use crate::config::ImageBackendKind;
 
-/// Which image provider to generate with (#240).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ImageBackendKind {
-    /// The remote fal.ai API (needs a key; sends the prompt off-machine).
-    #[default]
-    Remote,
-    /// A local Stable-Diffusion model (runs offline; nothing leaves the machine,
-    /// no per-image cost). Behind the `local` cargo feature.
-    Local,
-}
-
-/// Image-generation settings from the `[image]` config section. Off by default;
-/// its own opt-in and key, separate from the text `[ai]` settings.
-#[derive(Clone, Deserialize)]
-#[serde(default)]
-pub struct ImageSettings {
-    /// Opt-in for image generation.
-    pub enabled: bool,
-    /// Which provider to use (`remote` or `local`).
-    pub backend: ImageBackendKind,
-    /// Privacy switch: when true, force the local backend so nothing ever leaves
-    /// the machine, regardless of `backend`.
-    pub offline: bool,
-    /// The remote provider API key (env `FAL_KEY` overrides this, see
-    /// [`load`](ImageSettings::load)). Unused by the local backend.
-    pub api_key: Option<String>,
-    /// The remote provider model id (a fal.ai model, e.g. `fal-ai/flux/schnell`).
-    pub model: String,
-    /// Memoized OS-keychain read for the fal.ai key (mirrors [`Settings`'s
-    /// cache](super::Settings)): consulted at most once per session, only when the
-    /// env var is absent. Not config — skipped on load, reset on reload.
-    /// `pub(crate)` only so tests can build the struct literal; treat as private.
-    #[serde(skip)]
-    pub(crate) keychain_cache: OnceCell<Option<String>>,
-}
-
-impl Default for ImageSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            backend: ImageBackendKind::Remote,
-            offline: false,
-            api_key: None,
-            model: default_model(),
-            keychain_cache: OnceCell::new(),
-        }
-    }
-}
+/// Image-generation settings data from the `[image]` config section. The struct and
+/// its fields live in [`config::ImageConfig`](crate::config::ImageConfig) so
+/// `config` is the single typed home for every section (#809); re-exported here as
+/// `image::ImageSettings` so existing callers are unchanged. Its *behavior*
+/// ([`resolved_key`](ImageSettings::resolved_key), [`backend`](ImageSettings::backend),
+/// [`check_ready`](ImageSettings::check_ready)) is defined below as inherent impls on
+/// that config-owned type, so the keychain logic stays in `ai` and the dependency
+/// direction stays `ai → config`.
+pub use crate::config::ImageConfig as ImageSettings;
 
 impl ImageSettings {
-    /// Load the `[image]` section from the home config file. Best-effort (a
-    /// missing/unreadable file yields the defaults, off). The key is resolved
-    /// lazily in [`resolved_key`](Self::resolved_key) — env → keychain → plaintext
-    /// (#530) — so this just parses the file.
-    pub fn load() -> Self {
-        crate::config::load_section("image")
-    }
-
     /// The resolved fal.ai API key, if any: `FAL_KEY` → OS keychain → the
     /// plaintext `api_key` in config (#530). Mirrors the text key's precedence.
     /// Test builds read neither the env var nor the keychain (#528/#531).

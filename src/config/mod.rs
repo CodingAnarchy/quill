@@ -23,16 +23,22 @@
 //! a shared project directory — the AI keys, for instance, live only in the global
 //! file, never in a committed `book.toml`.
 //!
-//! Each feature owns its own section; this module owns both file locations and
-//! the `[editor]` section.
+//! This module owns the file locations and the typed home for every config
+//! section, so "what is Quill's config shape?" is answerable by reading one place
+//! (#809). Each feature still owns its section's *behavior*, but the section's
+//! *data* — the serde-`Deserialize` fields — lives here, including the `[ai]` and
+//! `[image]` sections ([`AiConfig`], [`ImageConfig`]) whose key-resolution and
+//! backend logic stays in the `ai` module as inherent impls on these types.
 //!
 //! The module is split into cohesive submodules, re-exported here so every caller
 //! keeps addressing them through `config::` unchanged: [`load`] holds the section
-//! load/merge, [`splice`] the in-place TOML writers, and [`types`] the typed
-//! config structs. Dir resolution and the per-thread test/project overrides
+//! load/merge, [`splice`] the in-place TOML writers, [`types`] the `[editor]`,
+//! `[projects]`, `[snippets]`, and `[theme]` types, and [`ai`] the `[ai]`/`[image]`
+//! config data. Dir resolution and the per-thread test/project overrides
 //! (#528/#531/#710) stay in this file, since both the loaders and the writers key
 //! off them.
 
+mod ai;
 mod load;
 mod splice;
 mod types;
@@ -40,6 +46,7 @@ mod types;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+pub use ai::{AiConfig, BackendKind, ImageBackendKind, ImageConfig, Policy};
 pub use load::load_section;
 pub use splice::{add_workflow, remove_value, set_values};
 pub use splice::{set_value, strip_value};
@@ -203,8 +210,10 @@ mod tests {
     #[test]
     fn config_resolution_is_hermetic_by_default() {
         assert_eq!(config_dir(), None, "no real ~/.config is read in tests");
-        let ai = crate::ai::Settings::load();
+        let ai = AiConfig::load();
         assert!(!ai.enabled, "AI defaults off");
+        // `resolved_key` is defined in the `ai` module as an inherent impl on the
+        // config-owned `AiConfig` (#809) — data here, behavior there.
         assert!(ai.resolved_key().is_none(), "no API key leaks into tests");
     }
 
