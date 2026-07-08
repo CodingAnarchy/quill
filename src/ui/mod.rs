@@ -14,10 +14,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::App;
 use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
 use crate::buffer::count_words;
-use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
-use crate::manuscript::SegmentHeader;
+use crate::frontmatter::{Band, Role, Status};
 use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Search, SearchStage, Tree};
-use crate::syntax::{Heading, Highlight, HighlightKind, Syntax};
+use crate::syntax::Heading;
 use crate::theme::{self, Theme};
 
 mod assistant;
