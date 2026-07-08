@@ -156,6 +156,7 @@ impl App {
         let opts = MatchOpts {
             case_sensitive: true,
             whole_word: false,
+            regex: false,
         };
         let ranges = match_ranges_opts(&text, pattern, opts);
         let targets: Vec<(usize, usize)> = if global {

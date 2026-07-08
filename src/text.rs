@@ -3,16 +3,28 @@
 //! count, and character-mention counting. One folding rule (per-character
 //! Unicode lowercase) so the three features can never disagree.
 //!
-//! Find & replace can refine the rule with two toggles (#570): a case-sensitive
-//! mode (compare codepoints as typed, no folding) and a whole-word mode (match
-//! only when both boundaries are non-word characters). "Word character" is
-//! defined for prose as alphanumeric plus the apostrophe `'`, so a whole-word
-//! search for "Will" skips "willing" but a search for "don't" still matches the
-//! contraction as one word. The other callers keep the default rule
-//! (case-insensitive substring) unchanged via [`match_ranges`] / [`count_matches`].
+//! Find & replace can refine the rule with three toggles (#570, #891): a
+//! case-sensitive mode (compare codepoints as typed, no folding), a whole-word
+//! mode (match only when both boundaries are non-word characters), and a regex
+//! mode (#891) that treats the query as a regular expression rather than a
+//! literal. "Word character" is defined for prose as alphanumeric plus the
+//! apostrophe `'`, so a whole-word search for "Will" skips "willing" but a
+//! search for "don't" still matches the contraction as one word. The other
+//! callers keep the default rule (case-insensitive substring) unchanged via
+//! [`match_ranges`] / [`count_matches`].
+//!
+//! Regex matching (#891) is layered on top: the same [`MatchOpts`] carries a
+//! `regex` flag, and case-sensitive / whole-word compose with it (a
+//! case-insensitive regex, or one anchored at word boundaries). An invalid
+//! pattern is a normal outcome — a live find recomputes on every keystroke, so
+//! most of the time the query is a half-typed expression — and is reported via
+//! [`try_match_ranges`] rather than panicking; the infallible entry points
+//! ([`match_ranges_opts`] and friends) treat a bad pattern as "no matches".
 
-/// The two refinements find & replace can apply to the base substring rule
-/// (#570). The default — both `false` — is case-insensitive substring matching,
+use regex::{Regex, RegexBuilder};
+
+/// The refinements find & replace can apply to the base substring rule (#570,
+/// #891). The default — all `false` — is case-insensitive substring matching,
 /// byte-for-byte what every caller did before the toggles existed.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct MatchOpts {
@@ -20,11 +32,14 @@ pub struct MatchOpts {
     pub case_sensitive: bool,
     /// Match only when both boundaries are non-word characters.
     pub whole_word: bool,
+    /// Treat the query as a regular expression rather than a literal (#891).
+    pub regex: bool,
 }
 
 impl MatchOpts {
-    /// A short, stable label for the active modes, e.g. `[Aa]`, `[w]`, `[Aa w]`,
-    /// or empty when both are off — for the find prompt / overlay (#570).
+    /// A short, stable label for the active modes, e.g. `[Aa]`, `[w]`, `[re]`,
+    /// `[Aa w re]`, or empty when all are off — for the find prompt / overlay
+    /// (#570, #891).
     pub fn label(self) -> String {
         let mut parts = Vec::new();
         if self.case_sensitive {
@@ -32,6 +47,9 @@ impl MatchOpts {
         }
         if self.whole_word {
             parts.push("w");
+        }
+        if self.regex {
+            parts.push("re");
         }
         if parts.is_empty() {
             String::new()
@@ -93,12 +111,67 @@ pub fn match_ranges(text: &str, needle: &str) -> Vec<(usize, usize)> {
 }
 
 /// Byte ranges of every non-overlapping match of `needle` in `text` honoring
-/// `opts` (#570), in order. With [`MatchOpts::default`] this is exactly
-/// [`match_ranges`].
+/// `opts` (#570, #891), in order. With [`MatchOpts::default`] this is exactly
+/// [`match_ranges`]. An invalid regex (`opts.regex` on) yields no matches — the
+/// infallible path a live/incremental find rides; callers that must surface the
+/// error to the author use [`try_match_ranges`].
 pub fn match_ranges_opts(text: &str, needle: &str, opts: MatchOpts) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    scan(text, needle, opts, |start, end| out.push((start, end)));
-    out
+    try_match_ranges(text, needle, opts).unwrap_or_default()
+}
+
+/// Byte ranges of every non-overlapping match of `needle` in `text` honoring
+/// `opts` (#570, #891), in order — the fallible entry point. Substring modes
+/// never fail (`Ok`); regex mode returns `Err(message)` when `needle` is not a
+/// valid regular expression, so the find UI can report it instead of silently
+/// finding nothing (#891).
+pub fn try_match_ranges(
+    text: &str,
+    needle: &str,
+    opts: MatchOpts,
+) -> Result<Vec<(usize, usize)>, String> {
+    if opts.regex {
+        regex_ranges(text, needle, opts)
+    } else {
+        let mut out = Vec::new();
+        scan(text, needle, opts, |start, end| out.push((start, end)));
+        Ok(out)
+    }
+}
+
+/// Byte ranges of every non-overlapping regex match of `needle` in `text` (#891).
+/// `case_sensitive` maps to the regex crate's case flag (default off = folded,
+/// like the literal path); `whole_word` wraps the pattern in `\b…\b` so it only
+/// matches at word boundaries. An empty needle finds nothing (as with the
+/// literal path); a compile error is returned as a human-readable message.
+fn regex_ranges(text: &str, needle: &str, opts: MatchOpts) -> Result<Vec<(usize, usize)>, String> {
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pattern = if opts.whole_word {
+        format!(r"\b(?:{needle})\b")
+    } else {
+        needle.to_string()
+    };
+    let re: Regex = RegexBuilder::new(&pattern)
+        .case_insensitive(!opts.case_sensitive)
+        .build()
+        .map_err(|e| regex_error_message(&e))?;
+    // Skip zero-width matches (e.g. `a*` against "bbb"): they'd otherwise yield a
+    // run of empty ranges the caller can't navigate to or replace meaningfully.
+    Ok(re
+        .find_iter(text)
+        .filter(|m| m.start() != m.end())
+        .map(|m| (m.start(), m.end()))
+        .collect())
+}
+
+/// A short, single-line message from a regex compile error, for the find prompt.
+/// The crate's `Display` is multi-line (it underlines the offending span); the
+/// author only needs to know the pattern is invalid, so keep the first line.
+fn regex_error_message(err: &regex::Error) -> String {
+    let full = err.to_string();
+    let first = full.lines().next().unwrap_or("invalid regex").trim();
+    format!("Invalid regex: {first}")
 }
 
 /// How many times `needle` occurs in `text` under the default rule
@@ -175,6 +248,7 @@ mod tests {
         MatchOpts {
             case_sensitive,
             whole_word,
+            regex: false,
         }
     }
 
@@ -244,5 +318,84 @@ mod tests {
         assert_eq!(opts(true, false).label(), "[Aa]");
         assert_eq!(opts(false, true).label(), "[w]");
         assert_eq!(opts(true, true).label(), "[Aa w]");
+    }
+
+    // --- #891: regex mode -------------------------------------------------
+
+    fn re_opts(case_sensitive: bool, whole_word: bool) -> MatchOpts {
+        MatchOpts {
+            case_sensitive,
+            whole_word,
+            regex: true,
+        }
+    }
+
+    #[test]
+    fn regex_label_reflects_the_mode() {
+        assert_eq!(re_opts(false, false).label(), "[re]");
+        assert_eq!(re_opts(true, false).label(), "[Aa re]");
+        assert_eq!(re_opts(true, true).label(), "[Aa w re]");
+    }
+
+    #[test]
+    fn regex_matches_a_pattern() {
+        // `Chap\. \d+` — the manuscript-cleanup case from the issue.
+        let text = "See Chap. 3 and Chap. 12, but not Chapter 4.";
+        let m = match_ranges_opts(text, r"Chap\. \d+", re_opts(false, false));
+        assert_eq!(m.len(), 2);
+        assert_eq!(&text[m[0].0..m[0].1], "Chap. 3");
+        assert_eq!(&text[m[1].0..m[1].1], "Chap. 12");
+    }
+
+    #[test]
+    fn regex_is_case_insensitive_by_default() {
+        let text = "Foo foo FOO";
+        assert_eq!(
+            match_ranges_opts(text, "foo", re_opts(false, false)).len(),
+            3
+        );
+        // Case-sensitive regex only matches the exact casing.
+        assert_eq!(
+            match_ranges_opts(text, "foo", re_opts(true, false)).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn regex_whole_word_anchors_at_boundaries() {
+        let text = "cat cats category cat.";
+        // Without whole-word, `cat` matches inside "cats"/"category" too.
+        assert_eq!(
+            match_ranges_opts(text, "cat", re_opts(false, false)).len(),
+            4
+        );
+        // With whole-word, only the two standalone "cat"s.
+        assert_eq!(
+            match_ranges_opts(text, "cat", re_opts(false, true)).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn invalid_regex_is_reported_not_panicked() {
+        // An unbalanced group is a compile error, not a panic.
+        let err = try_match_ranges("abc", "a(", re_opts(false, false)).unwrap_err();
+        assert!(err.starts_with("Invalid regex:"), "got: {err}");
+        // The infallible path treats it as no matches.
+        assert!(match_ranges_opts("abc", "a(", re_opts(false, false)).is_empty());
+    }
+
+    #[test]
+    fn zero_width_regex_matches_are_dropped() {
+        // `a*` matches the empty string everywhere; those are unnavigable, so the
+        // find drops them and keeps only the non-empty run.
+        let m = match_ranges_opts("baab", "a*", re_opts(false, false));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0], (1, 3));
+    }
+
+    #[test]
+    fn empty_regex_matches_nothing() {
+        assert!(match_ranges_opts("anything", "", re_opts(false, false)).is_empty());
     }
 }

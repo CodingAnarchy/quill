@@ -130,6 +130,16 @@ impl App {
                 self.search_mut().opts.whole_word ^= true;
                 self.requery();
             }
+            // Ctrl-R flips regex mode (#891): the query is read as a regular
+            // expression rather than a literal, composing with case/whole-word.
+            // Guarded on `ctrl`, so a plain `r` at Navigate still promotes to
+            // replace (below).
+            (SearchStage::Query | SearchStage::Navigate, KeyCode::Char('r'))
+                if ctrl && !self.search().from_vim =>
+            {
+                self.search_mut().opts.regex ^= true;
+                self.requery();
+            }
 
             // --- Typing the query ------------------------------------------
             (SearchStage::Query, KeyCode::Char(c)) if !ctrl => {
