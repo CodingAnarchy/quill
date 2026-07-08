@@ -330,6 +330,7 @@ impl App {
             Action::SetImageKey => self.start_set_api_key(ai::keychain::Key::Fal),
             Action::Assistant => self.open_assistant(),
             Action::BrowseBible => self.open_bible_files(),
+            Action::ViewResearch => self.open_research_notebook(),
             Action::InsertSnippet => self.open_snippet_picker(),
             Action::BrowseFonts => self.open_font_browser(),
             Action::SetExportStyle => self.open_export_style_menu(),

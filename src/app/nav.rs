@@ -479,6 +479,19 @@ impl App {
         }));
     }
 
+    /// Open the author's research notebook (#932): `bible/research.md`, an
+    /// author-maintained worldbuilding journal the AI's trackers *cite* but never
+    /// write. Seeds an empty template on first use (structure only — the author
+    /// authors every note), then opens it in an editable pane so the author can
+    /// read and edit it and save it back with Ctrl-S. Reports when the pane can't
+    /// be created (e.g. the template write fails).
+    pub(super) fn open_research_notebook(&mut self) {
+        match crate::ai::bible::scaffold_research(&self.project.root) {
+            Ok(path) => self.open_file_in_pane(path),
+            Err(e) => self.message = Some(format!("Couldn't open research notebook: {e}")),
+        }
+    }
+
     /// Navigate the reference-file browser (#165/#590): arrows move, Enter opens
     /// the selected file in an editable side pane. In the all-files view (#165)
     /// `f`/Esc return to the chapter browser; in the bible-only view (#590) Esc

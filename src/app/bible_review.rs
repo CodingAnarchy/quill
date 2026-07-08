@@ -70,6 +70,29 @@ impl StagedTally {
     }
 }
 
+/// Whether a generated tracker `line` names the research note titled `note` (#932)
+/// as a whole word — the test the write path uses to decide a bullet should carry a
+/// citation. A substring alone would false-match ("Timeline" inside "Timelines"),
+/// so the match is bounded by non-alphanumeric neighbors on each side.
+fn line_names_note(line: &str, note: &str) -> bool {
+    if note.is_empty() {
+        return false;
+    }
+    let is_word = |c: char| c.is_alphanumeric();
+    let mut from = 0;
+    while let Some(rel) = line[from..].find(note) {
+        let at = from + rel;
+        let before_ok = line[..at].chars().next_back().is_none_or(|c| !is_word(c));
+        let after = at + note.len();
+        let after_ok = line[after..].chars().next().is_none_or(|c| !is_word(c));
+        if before_ok && after_ok {
+            return true;
+        }
+        from = at + note.len();
+    }
+    false
+}
+
 pub(super) fn unified_diff(current: &str, proposed: &str) -> Vec<String> {
     TextDiff::from_lines(current, proposed)
         .iter_all_changes()
@@ -159,10 +182,15 @@ impl App {
     ) -> Staged {
         let existing = std::fs::read_to_string(&path).ok();
         let notes = bible::extract_notes(existing.as_deref().unwrap_or(""));
+        // Ground the generated entry against the author's research notebook (#932):
+        // a tracker line that names one of the author's research notes gets a
+        // readable citation appended. The AI only *cites* the notebook — this reads
+        // `bible/research.md` and edits the tracker text, never the notebook.
+        let cited = self.cite_research_notes(&render(&notes));
         // Stamp a readable provenance line naming the chapters this pass reflects
         // (#832); refreshed on every incremental write, edited-state derived live
         // from the digest by a reader.
-        let proposed = bible::with_provenance(&render(&notes), &self.bible_source());
+        let proposed = bible::with_provenance(&cited, &self.bible_source());
         if let Some(current) = &existing {
             if bible::is_hand_edited(current) {
                 let diff = unified_diff(current, &proposed);
@@ -187,6 +215,39 @@ impl App {
             Ok(()) => Staged::Wrote(diff),
             Err(msg) => Staged::Failed(msg),
         }
+    }
+
+    /// Ground a generated tracker `body` against the author's research notebook
+    /// (#932): append a readable citation to every bullet line that names one of the
+    /// author's research notes and doesn't already carry a citation, so a bible
+    /// entry reads `… (per research note 'Feudal Timeline')`. Reads the notebook's
+    /// `## ` note titles once and rewrites only the tracker text — it never writes
+    /// the notebook. With no authored notes (or none named) the body is returned
+    /// unchanged.
+    fn cite_research_notes(&self, body: &str) -> String {
+        let notes = bible::research_notes(&self.project.root);
+        if notes.is_empty() {
+            return body.to_string();
+        }
+        body.split_inclusive('\n')
+            .map(|line| {
+                // Only annotate bullet lines that don't already cite a note; a note
+                // is cited when the line names it (whole word, to avoid a partial
+                // match) and the entry isn't itself the notebook's heading.
+                if !line.trim_start().starts_with("- ") || bible::has_research_citation(line) {
+                    return line.to_string();
+                }
+                notes.iter().find(|n| line_names_note(line, n)).map_or_else(
+                    || line.to_string(),
+                    |note| {
+                        let (text, nl) = line
+                            .strip_suffix('\n')
+                            .map_or((line, ""), |stripped| (stripped, "\n"));
+                        format!("{text} ({}){nl}", bible::cite_research(note))
+                    },
+                )
+            })
+            .collect()
     }
 
     /// A readable descriptor of the chapters a bible pass reflects (#832), for the
@@ -856,7 +917,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{delta_summary, unified_diff, Staged, StagedTally};
+    use super::{delta_summary, line_names_note, unified_diff, Staged, StagedTally};
     use crate::mode::BibleConflict;
     use std::path::PathBuf;
 
@@ -868,6 +929,22 @@ mod tests {
             diff: Vec::new(),
             provenance: None,
         }
+    }
+
+    #[test]
+    fn line_names_note_matches_whole_words_only() {
+        // A bullet naming the note as a whole word matches; a partial does not
+        // (#932), so "Timeline" doesn't false-match inside "Timelines".
+        assert!(line_names_note(
+            "- Lord Grey, per the Feudal Timeline.\n",
+            "Feudal Timeline"
+        ));
+        assert!(!line_names_note(
+            "- The Feudal Timelines diverge.\n",
+            "Feudal Timeline"
+        ));
+        assert!(!line_names_note("- Unrelated entry.\n", "Feudal Timeline"));
+        assert!(!line_names_note("- anything\n", ""));
     }
 
     #[test]
