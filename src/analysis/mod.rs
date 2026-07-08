@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::buffer::count_words;
+use crate::export::is_thematic_break;
 
 mod sentence;
 pub use sentence::{count_sentences, sentences};
@@ -58,17 +59,19 @@ pub struct Readability {
     pub smog: f64,
 }
 
-/// A chapter's prose with Markdown heading lines removed, so the analysis
-/// measures what a reader actually reads. A chapter title (`# The Dark`) or a
-/// scene heading (`## Later`) is structure, not a sentence — left in, its words
-/// glue onto the following sentence and skew the length and readability figures.
-/// Heading lines become blank lines (paragraph/sentence boundaries are
-/// unaffected); every other line is kept verbatim. Front matter is already
-/// stripped upstream.
+/// A chapter's prose with Markdown heading lines and thematic-break (scene-break)
+/// lines removed, so the analysis measures what a reader actually reads. A chapter
+/// title (`# The Dark`) or a scene heading (`## Later`) is structure, not a
+/// sentence — left in, its words glue onto the following sentence and skew the
+/// length and readability figures. A thematic break (`***`, `---`, …) is likewise
+/// structure: left in, its marks sit mid-sentence and fuse the paragraph before it
+/// to the one after (#910). Both become blank lines, which also separates the
+/// surrounding paragraphs so the sentence splitter closes across the break. Every
+/// other line is kept verbatim. Front matter is already stripped upstream.
 pub fn prose(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.lines() {
-        if !is_heading(line) {
+        if !is_heading(line) && !is_thematic_break(line) {
             out.push_str(line);
         }
         out.push('\n');

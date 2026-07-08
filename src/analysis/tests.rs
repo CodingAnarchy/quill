@@ -37,6 +37,19 @@ fn prose_drops_heading_lines() {
 }
 
 #[test]
+fn prose_blanks_thematic_break_lines() {
+    // A scene break must not sit mid-sentence and fuse the surrounding paragraphs
+    // (#910); `prose()` blanks it, leaving the paragraphs separated.
+    for br in ["***", "---", "* * *", "___"] {
+        let p = prose(&format!("She left.\n\n{br}\n\nHe stayed."));
+        assert!(!p.contains(br), "{br:?} should be blanked: {p:?}");
+        assert!(p.contains("She left.") && p.contains("He stayed."));
+    }
+    // "5 * 3" is prose, not a break — it stays.
+    assert!(prose("The answer is 5 * 3 = 15.").contains("5 * 3"));
+}
+
+#[test]
 fn stats_measure_prose_without_headings() {
     let text = "# Title\n\nThe night was dark. It was very long.";
     let s = stats(&prose(text));
