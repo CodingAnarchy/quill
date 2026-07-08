@@ -74,6 +74,21 @@ fn action_groups_are_contiguous_in_the_registry() {
 }
 
 #[test]
+fn bible_and_reference_views_group_under_bible_not_ai_or_view() {
+    // The bible browser and research notebook are local reference-file views (not AI
+    // operations), and the corkboards are structural views — all four live under the
+    // "Bible" group, out of "AI"/"View" (#590 follow-up).
+    for a in [
+        Action::BrowseBible,
+        Action::ViewResearch,
+        Action::Corkboard,
+        Action::ManuscriptCorkboard,
+    ] {
+        assert_eq!(a.group(), "Bible", "{a:?} should be in the Bible group");
+    }
+}
+
+#[test]
 fn the_action_palette_groups_actions_under_collapsible_headers() {
     let (mut app, _dir) = two_chapter_app("palette-groups");
     app.open_action_palette();

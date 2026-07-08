@@ -226,6 +226,7 @@ const MIN_PANE_HEIGHT: u16 = 6;
 /// ratio set by `Ctrl-w </>` (#166).
 fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
     let Some(view) = app.split_view() else {
+        app.pane_rects.set(None);
         Editor(app).render(frame, area);
         return;
     };
@@ -234,6 +235,8 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
     // only the focused pane (#166). The split state survives, so widening the
     // terminal restores it; this mirrors how the outline pane yields when narrow.
     if too_cramped_to_split(view.dir, area) {
+        app.pane_rects.set(None); // only one pane is on screen — no click target
+
         match &view.content {
             // A docked report with scroll focus takes the full area.
             SplitContent::Surface(overlay) if app.surface_pane_focused() => {
@@ -253,22 +256,35 @@ fn draw_editor_region(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let direction = match view.dir {
-        SplitDir::SideBySide => Direction::Horizontal,
-        SplitDir::Stacked => Direction::Vertical,
+    let (direction, divider_borders) = match view.dir {
+        SplitDir::SideBySide => (Direction::Horizontal, Borders::LEFT),
+        SplitDir::Stacked => (Direction::Vertical, Borders::TOP),
     };
+    // Reserve a one-cell divider between the panes (#163 follow-up) so the editor and
+    // the reference/second pane read as distinct regions: a dim vertical rule side by
+    // side, a horizontal one when stacked.
     let halves = Layout::default()
         .direction(direction)
         .constraints([
             Constraint::Percentage(view.first_ratio),
-            Constraint::Percentage(100 - view.first_ratio),
+            Constraint::Length(1),
+            Constraint::Min(0),
         ])
         .split(area);
     let (focused_area, other_area) = if view.focused_first {
-        (halves[0], halves[1])
+        (halves[0], halves[2])
     } else {
-        (halves[1], halves[0])
+        (halves[2], halves[0])
     };
+    frame.render_widget(
+        Block::default()
+            .borders(divider_borders)
+            .border_style(Style::default().fg(app.theme.dim)),
+        halves[1],
+    );
+    // Record the pane rects so a mouse click in the other pane can switch focus to it
+    // (#163 follow-up); the divider column is excluded, so a click on it is ignored.
+    app.pane_rects.set(Some((focused_area, other_area)));
 
     // The focused editor (`App::buffer`) always draws in `focused_area`; the other
     // pane shows a second editor or a docked surface.

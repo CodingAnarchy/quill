@@ -266,6 +266,10 @@ pub struct App {
     /// Height of a docked surface pane (#164), set by the renderer so its scroll
     /// bound matches what's drawn.
     pub(crate) surface_height: std::cell::Cell<u16>,
+    /// The two pane rectangles `(focused, other)` when a split is drawn (#163/#165),
+    /// set by the renderer each frame (`None` when not split or too cramped to show
+    /// both). Read by the mouse handler to switch focus on a click in the other pane.
+    pub(crate) pane_rects: std::cell::Cell<Option<(ratatui::layout::Rect, ratatui::layout::Rect)>>,
     /// The focused editor's per-visual-row screen layout (#757), recorded by the
     /// renderer each frame and read by the mouse-click handler to invert screen
     /// coordinates back to a buffer position without redoing the layout math. A
@@ -648,6 +652,7 @@ impl App {
             viewport_height: 0,
             wrap_width: std::cell::Cell::new(72),
             surface_height: std::cell::Cell::new(0),
+            pane_rects: std::cell::Cell::new(None),
             editor_layout: std::cell::RefCell::new(EditorLayout::default()),
             header_cache: std::cell::RefCell::new(crate::ui::HeaderCache::default()),
             list_layout: std::cell::RefCell::new(ListLayout::default()),

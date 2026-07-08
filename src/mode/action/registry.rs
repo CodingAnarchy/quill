@@ -282,8 +282,11 @@ impl Action {
         Self::SetClaudeKey,
         Self::SetImageKey,
         Self::Assistant,
+        // Bible
         Self::BrowseBible,
         Self::ViewResearch,
+        Self::Corkboard,
+        Self::ManuscriptCorkboard,
         // Editing
         Self::AcceptWord,
         Self::ViewDictionary,
@@ -298,8 +301,6 @@ impl Action {
         Self::ToggleTypewriter,
         Self::ToggleFocus,
         Self::ToggleParagraphIndent,
-        Self::Corkboard,
-        Self::ManuscriptCorkboard,
         Self::Settings,
         // Help
         Self::UserGuide,
@@ -420,9 +421,13 @@ impl Action {
             | Self::ManageModels
             | Self::SetClaudeKey
             | Self::SetImageKey
-            | Self::Assistant
-            | Self::BrowseBible
-            | Self::ViewResearch => "AI",
+            | Self::Assistant => "AI",
+            // Reference views into the story: the bible browser and research
+            // notebook (local reads/edits, not AI operations) and the corkboards.
+            Self::BrowseBible
+            | Self::ViewResearch
+            | Self::Corkboard
+            | Self::ManuscriptCorkboard => "Bible",
             Self::AcceptWord
             | Self::ViewDictionary
             | Self::NextMisspelling
@@ -435,8 +440,6 @@ impl Action {
             Self::ToggleTypewriter
             | Self::ToggleFocus
             | Self::ToggleParagraphIndent
-            | Self::Corkboard
-            | Self::ManuscriptCorkboard
             | Self::Settings => "View",
             Self::UserGuide | Self::QuickStart => "Help",
         }

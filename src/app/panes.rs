@@ -220,8 +220,9 @@ impl App {
     }
 
     /// Move focus to the other pane: swap editors (#163), hand scroll input to a
-    /// docked surface (#164), or focus the assistant pane (#307).
-    fn focus_other_pane(&mut self) {
+    /// docked surface (#164), or focus the assistant pane (#307). Reached from
+    /// `Ctrl-w w` and a mouse click in the other pane (#163 follow-up).
+    pub(super) fn focus_other_pane(&mut self) {
         let is_editor = matches!(
             self.split.as_ref(),
             Some(Split {
@@ -294,9 +295,47 @@ impl App {
     /// first so its edits aren't lost; a surface is read-only).
     fn close_split(&mut self) {
         if self.split.is_some() {
-            self.close_split_if_any();
-            self.message = Some("Closed the split.".into());
+            self.close_focused_pane(false);
+            self.message = Some("Closed the pane.".into());
         }
+    }
+
+    /// Close the currently focused pane, keeping the other — Vim's `:q`/`Ctrl-w c`
+    /// (#163/#165). For two editors the *other* editor becomes the sole editor
+    /// (the focused pane is flushed first, unless `discard`, so its edits persist);
+    /// a read-only surface / the assistant can't be a sole view, so closing with one
+    /// of those focused just drops it and keeps the editor. A no-op when not split.
+    pub(super) fn close_focused_pane(&mut self, discard: bool) {
+        let Some(split) = self.split.as_ref() else {
+            return;
+        };
+        // A docked surface / assistant is never `App::buffer`, so "keep the other"
+        // would mean keeping a non-editor as the sole view — instead keep the editor
+        // and drop the surface/assistant, exactly as replacing a pane does.
+        if !matches!(split.other, OtherPane::Editor(_)) {
+            self.close_split_if_any();
+            return;
+        }
+        // Two editors: discard the focused buffer (flushed so edits persist unless
+        // `discard`) and promote the other editor to the sole focused pane.
+        if !discard {
+            let _ = self.flush_active();
+        }
+        let closed_path = self.buffer.path.clone();
+        let Some(split) = self.split.take() else {
+            return;
+        };
+        let OtherPane::Editor(other) = split.other else {
+            return;
+        };
+        self.buffer = other;
+        // If the closed pane was the project dictionary's edit pane (#935), re-read it
+        // into the checker so a removed/fixed word takes effect right away.
+        if closed_path.as_deref() == Some(self.project.dictionary_path().as_path()) {
+            self.project.reload_dictionary();
+            self.refresh_spell_flags();
+        }
+        self.sync_active_to_focus();
     }
 
     /// Drop the split, flushing an editor pane. Quiet (no message) — for callers
@@ -360,6 +399,19 @@ impl App {
             &self.split,
             Some(Split {
                 other: OtherPane::Surface { focused: true, .. },
+                ..
+            })
+        )
+    }
+
+    /// Whether the other pane is a second editor (#163/#165) rather than a docked
+    /// surface / assistant — an editor pane is never "focused" in place (the focused
+    /// editor is always `App::buffer`), so a click on it always swaps focus in.
+    pub(super) const fn other_pane_is_editor(&self) -> bool {
+        matches!(
+            &self.split,
+            Some(Split {
+                other: OtherPane::Editor(_),
                 ..
             })
         )
