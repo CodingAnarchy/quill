@@ -148,6 +148,13 @@ pub struct App {
     /// beside `routed_backend` when routing on-device and consumed by
     /// `backend_spec`. `None` ⇒ the single hardware-recommended model.
     routed_model: std::cell::Cell<Option<&'static ai::model_select::Model>>,
+    /// One-shot *cloud* model the per-action router picked for the next request
+    /// (#930): the Claude model this pass's weight + estimate resolved to, set in
+    /// `route_request` and consumed by `spawn_ai` so the actual request runs on the
+    /// chosen tier (a heavy pass on the top model, a light small one on a cheaper
+    /// one). `None` ⇒ the session `[ai] model`, as before — so a pass that never
+    /// went through the per-action picker (interactive, local) is unchanged.
+    routed_cloud_model: std::cell::Cell<Option<String>>,
     /// A one-line notice the worker sets when a routed-local request couldn't
     /// obtain its model (download/init failed) and fell back to Claude (#725), so
     /// the fallback is never silent. Shared with the worker thread; read and
@@ -574,6 +581,7 @@ impl App {
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
+            routed_cloud_model: std::cell::Cell::new(None),
             ai_routing_notice: std::sync::Arc::new(std::sync::Mutex::new(None)),
             #[cfg(test)]
             test_local_present: None,
