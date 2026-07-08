@@ -204,6 +204,11 @@ impl App {
     /// Apply a cursor movement to the active edit buffer, then page the window
     /// if the continuous view's cursor crossed into another chapter.
     pub(super) fn edit_move(&mut self, mv: impl FnOnce(&mut Buffer)) {
+        // Remember where the cursor sat before the move: if the move crosses a
+        // chapter boundary but the reslide then fails, the window can't page and
+        // the cursor would be stranded across the seam, so we rewind to here
+        // (#892).
+        let before = self.edit_buffer().cursor;
         mv(self.edit_buffer_mut());
         // A reslide rebuilds the buffer, resetting every offset, so flush the
         // current annotation offsets to disk first — the next idle reloads and
@@ -217,9 +222,16 @@ impl App {
         }
         if let Some(mut m) = self.manuscript.take() {
             // reslide flushes pending edits then pages the window; either the save
-            // or a chapter read (#154) can fail. The window is left intact on a
-            // failed read, so the view simply doesn't page.
+            // or a chapter read (#154) can fail. On a failed read the window is
+            // left intact — but the cursor has already crossed into the chapter
+            // that couldn't page in, so it now straddles unloaded/stale space.
+            // Rewind it to the pre-move position (still valid against the intact
+            // window) so the visible buffer stays consistent and the next
+            // keystroke can't land in a stale chapter or blindly re-trigger the
+            // failing read; once the file reads again the same move reslides
+            // normally (#892).
             if let Err(e) = m.reslide(&mut self.project) {
+                m.buffer_mut().cursor = before;
                 self.message = Some(format!("Continuous view: {e}"));
             }
             self.manuscript = Some(m);
