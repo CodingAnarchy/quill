@@ -742,6 +742,20 @@ fn local_backup_tag(app: &App) -> String {
     })
 }
 
+/// Persistent read-only indicator (#885): while the project is open read-only —
+/// held by a live other Quill instance (#871) — a "read-only" chip stays in the
+/// status bar regardless of the transient message. The open-time explanation
+/// (and the first-run onboarding card that can overlay it) is momentary; this
+/// tag keeps the author aware that saves are refused for as long as the state
+/// lasts, and disappears the moment a stale lock is reclaimed (#890).
+fn read_only_tag(app: &App) -> String {
+    if app.project.is_read_only() {
+        " · read-only".to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// A running writing sprint (#299): live countdown + net words written, always
 /// visible (independent of the transient message on the right).
 fn sprint_tag(app: &App) -> String {
@@ -795,7 +809,7 @@ fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (St
             },
             |m| format!("{m}  "),
         );
-        (format!(" {title}"), right)
+        (format!(" {title}{}", read_only_tag(app)), right)
     }
 }
 
@@ -839,7 +853,8 @@ fn editor_status_bar(app: &App) -> (String, String) {
         |m| format!("{m}  "),
     );
     let left = format!(
-        " {name}{dirty}{}{}{}{}",
+        " {name}{dirty}{}{}{}{}{}",
+        read_only_tag(app),
         vc_tag(app),
         local_backup_tag(app),
         ai_tag(app),

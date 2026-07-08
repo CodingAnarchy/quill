@@ -18,6 +18,38 @@ fn onboarding_app(tag: &str) -> (App, TempProject) {
     (app, TempProject::new(dir))
 }
 
+/// This host's name, matching the lock module's derivation, so a seeded lockfile
+/// reads as same-host (mirrors the project hardening tests).
+#[cfg(unix)]
+fn host() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .unwrap_or_else(|| "unknown-host".to_string())
+}
+
+/// Like [`onboarding_app`], but seeds a *live* other-instance lock before opening
+/// so the project opens read-only (#871/#885): a lockfile owned by pid 1 (always
+/// alive on Unix), the shape a genuine second Quill's lock drives. A unit test
+/// can't fork a second editor, so this stands in for one. Unix-only, matching the
+/// lock's platform coverage.
+#[cfg(unix)]
+fn read_only_onboarding_app(tag: &str) -> (App, TempProject) {
+    let cfg = crate::testutil::scratch_dir("onboarding-cfg", tag);
+    crate::config::set_config_dir(Some(cfg));
+    let dir = make_project(tag, "Book", "first chapter\n");
+    std::fs::create_dir_all(dir.join(".quill")).unwrap();
+    let body = format!("1\n{}\n0\n", host());
+    std::fs::write(dir.join(".quill").join("lock"), body).unwrap();
+    let app = open_test_app(&dir);
+    assert!(
+        app.project.is_read_only(),
+        "the seeded live lock opens the project read-only"
+    );
+    (app, TempProject::new(dir))
+}
+
 /// Whether the open overlay (if any) is the quick-start card.
 fn onboarding_open(app: &App) -> bool {
     app.overlay
@@ -106,6 +138,103 @@ fn the_offer_waits_when_a_launch_prompt_is_already_up() {
     assert!(
         !crate::onboarding::already_shown(),
         "a deferred card leaves the flag unset"
+    );
+
+    crate::config::set_config_dir(None);
+}
+
+/// Whether the currently-open onboarding card (if any) carries the read-only
+/// banner, flattened to plain text so the check isn't coupled to styling.
+fn onboarding_shows_read_only(app: &App) -> bool {
+    app.overlay_lines().is_some_and(|lines| {
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        text.contains("Read-only") && text.contains("another Quill instance")
+    })
+}
+
+/// #885: a project opened read-only (a live other-instance lock) must surface the
+/// read-only state to a first-run author even though the onboarding card would
+/// overlay the momentary open-time warning. The card leads with the read-only
+/// banner, and the status bar carries a persistent read-only tag underneath — so
+/// the state is visible while the card is up.
+#[cfg(unix)]
+#[test]
+fn read_only_state_is_visible_even_when_onboarding_shows() {
+    let (mut app, _dir) = read_only_onboarding_app("readonly-onboarding");
+
+    // First run: the card auto-opens, and it leads with the read-only banner so
+    // the author sees why saves are refused rather than only the tour.
+    app.maybe_offer_onboarding();
+    assert!(
+        onboarding_open(&app),
+        "the quick-start card is still shown on a read-only first run"
+    );
+    assert!(
+        onboarding_shows_read_only(&app),
+        "the read-only banner leads the onboarding card"
+    );
+
+    crate::config::set_config_dir(None);
+}
+
+/// #885: dismissing the onboarding card must leave the read-only state visible —
+/// the transient open-time message clears on the next keystroke, so the status
+/// bar keeps a persistent "read-only" tag for as long as the lock is held.
+#[cfg(unix)]
+#[test]
+fn dismissing_onboarding_leaves_the_read_only_state_visible() {
+    let (mut app, _dir) = read_only_onboarding_app("readonly-persists");
+
+    app.maybe_offer_onboarding();
+    assert!(
+        onboarding_open(&app),
+        "card shows on the read-only first run"
+    );
+
+    // Dismiss the card, then step the buffer so any transient open-time message
+    // would clear — the persistent status-bar tag must remain.
+    app.viewport_height = 24;
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.overlay.is_none(), "the card is dismissed");
+    app.on_key(key(KeyCode::Char('x')));
+
+    let screen = crate::ui::render_to_string(&app, 100, 24);
+    assert!(
+        screen.contains("read-only"),
+        "the status bar keeps a persistent read-only tag after dismissal:\n{screen}"
+    );
+
+    crate::config::set_config_dir(None);
+}
+
+/// #885 guard: a normal (writable) first run still shows the onboarding card as
+/// before, with no read-only banner and no read-only tag in the status bar — the
+/// fix must not leak the read-only surface onto a project that isn't locked.
+#[test]
+fn a_writable_first_run_still_shows_plain_onboarding() {
+    let (mut app, _dir) = onboarding_app("writable-first-run");
+    assert!(!app.project.is_read_only(), "a free project opens writable");
+
+    app.maybe_offer_onboarding();
+    assert!(
+        onboarding_open(&app),
+        "the card shows on a writable first run"
+    );
+    assert!(
+        !onboarding_shows_read_only(&app),
+        "no read-only banner on a writable project"
+    );
+
+    app.viewport_height = 24;
+    app.on_key(key(KeyCode::Esc));
+    let screen = crate::ui::render_to_string(&app, 100, 24);
+    assert!(
+        !screen.contains("read-only"),
+        "no read-only tag in the status bar for a writable project:\n{screen}"
     );
 
     crate::config::set_config_dir(None);
