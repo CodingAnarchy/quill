@@ -63,7 +63,6 @@ pub use theme::Theme;
 // Aliased so it doesn't collide with this module's own `theme` submodule (the AI
 // theme/motif tracker, #828); `crate::theme` is the UI color theme.
 use crate::theme as ui_theme;
-use std::cell::OnceCell;
 use std::fmt;
 use std::fmt::Write as _;
 
@@ -320,11 +319,6 @@ impl fmt::Display for AiError {
     }
 }
 
-/// The default Claude model (1M context — a whole novel fits in one request).
-pub fn default_model() -> String {
-    "claude-opus-4-8".to_string()
-}
-
 /// Output bound shared by the structured analysis passes (continuity, setting,
 /// scaffold, character, style, submission). The cheap naming pass overrides it
 /// with its own smaller bound. One source of truth so the cost estimate and the
@@ -413,93 +407,24 @@ pub fn chapters_finding(field_a: &str, field_b: &str) -> serde_json::Value {
     )
 }
 
-/// Which provider the AI features run against (#87).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum BackendKind {
-    /// The Claude HTTP API (needs an API key; sends the manuscript off-machine).
-    #[default]
-    Claude,
-    /// The local candle model (runs offline; nothing leaves the machine).
-    Local,
-}
+/// Which provider the AI features run against (#87). The config *value* lives in
+/// [`config::BackendKind`](crate::config::BackendKind) alongside the rest of the
+/// `[ai]` data (#809); re-exported here so `ai::BackendKind` is unchanged for
+/// callers.
+pub use crate::config::BackendKind;
 
-/// AI configuration, loaded from the user's home config — never the project dir,
-/// so an unpublished draft and the key stay separate. Off by default.
-#[derive(Clone, Deserialize)]
-#[serde(default)]
-pub struct Settings {
-    /// Master opt-in. When false, no AI feature is reachable.
-    pub enabled: bool,
-    /// Which backend to use (`claude` or `local`).
-    pub backend: BackendKind,
-    /// Hybrid routing policy (#372): how to pick local vs remote per action.
-    /// Defaults to `configured` (always `backend`), so routing is opt-in.
-    pub routing: router::Policy,
-    /// The local models the author wants available (#377), by id (`["1.7B",
-    /// "8B"]`); the router picks the best of these per request. Empty ⇒ the single
-    /// hardware-recommended model, as before.
-    pub local_models: Vec<String>,
-    /// Privacy switch: when true, force the local backend so nothing ever leaves
-    /// the machine, regardless of `backend`.
-    pub offline: bool,
-    /// Model id sent to the Claude backend (the local backend picks its own).
-    pub model: String,
-    /// The on-device embedding model id for grounded-Ask semantic retrieval (#831),
-    /// by id (`"minilm"`). Empty ⇒ the default [`embed::EmbedModel::default_model`].
-    /// Only consumed by the `local` build; when its weights aren't on disk, Ask
-    /// degrades gracefully to sending the whole book (the pre-#831 path).
-    #[serde(default)]
-    pub embed_model: String,
-    /// API key, if set in the config file. The `ANTHROPIC_API_KEY` env var
-    /// overrides this (see [`Settings::load`]).
-    pub api_key: Option<String>,
-    /// Confirm before any Claude pass whose estimated cost exceeds this many
-    /// dollars. Cheaper passes (and the free local backend) run without a prompt.
-    pub cost_threshold: f64,
-    /// Rebuild a bible from the whole manuscript (instead of an incremental
-    /// revise) once this many chapters have changed since its last pass (#90).
-    /// 0 disables incremental updates — every pass is a full rebuild.
-    pub refresh_after_changes: usize,
-    /// Memoized OS-keychain read for the Claude key, so the store is consulted at
-    /// most once per session rather than on every palette-gating check (and, on a
-    /// changed dev binary, prompts at most once). Not config — skipped on load and
-    /// reset whenever settings are reloaded (a fresh `Settings`). Only populated
-    /// when the env var is absent, so an env key never triggers the read.
-    /// `pub(crate)` only so tests can build a `Settings { .. }` literal; treat it
-    /// as private (write nothing but `OnceCell::new()`).
-    #[serde(skip)]
-    pub(crate) keychain_cache: OnceCell<Option<String>>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            backend: BackendKind::Claude,
-            routing: router::Policy::Configured,
-            local_models: Vec::new(),
-            offline: false,
-            model: default_model(),
-            embed_model: String::new(),
-            api_key: None,
-            cost_threshold: 0.20,
-            refresh_after_changes: 5,
-            keychain_cache: OnceCell::new(),
-        }
-    }
-}
+/// AI configuration data, loaded from the user's home config. The struct and its
+/// `[ai]` fields live in [`config::AiConfig`](crate::config::AiConfig) so `config`
+/// is the single typed home for every section (#809); re-exported here as
+/// `ai::Settings` so existing callers are unchanged. Its *behavior*
+/// ([`resolved_key`](Settings::resolved_key), [`backend`](Settings::backend),
+/// [`check_ready`](Settings::check_ready)) is defined below as inherent impls on
+/// that config-owned type — an inherent impl may live in any module of the crate
+/// that defines the type — so the keychain/router logic stays here in `ai` and the
+/// dependency direction stays `ai → config` (config gains no dependency on `ai`).
+pub use crate::config::AiConfig as Settings;
 
 impl Settings {
-    /// Load AI settings from `$XDG_CONFIG_HOME/quill/config.toml` (else
-    /// `$HOME/.config/quill/config.toml`). Best-effort: a missing or unreadable
-    /// file yields the defaults (AI off). The key itself is resolved lazily in
-    /// [`resolved_key`](Self::resolved_key) — env var → OS keychain → the plaintext
-    /// `api_key` here (#530) — so this just parses the file.
-    pub fn load() -> Self {
-        crate::config::load_section("ai")
-    }
-
     /// The resolved Claude API key, if any: `ANTHROPIC_API_KEY` → OS keychain →
     /// the plaintext `api_key` in config (#530). The env var is the headless / CI
     /// escape hatch; the keychain keeps the secret out of the synced config; the

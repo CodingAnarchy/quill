@@ -12,29 +12,14 @@
 //! only ever changes *where* an action runs — never *what* it does, and never the
 //! manuscript-prose boundary.
 
-use serde::Deserialize;
-
 use crate::ai::cost::Estimate;
 use crate::ai::BackendKind;
 
-/// The author's routing preference, from `[ai] routing`. The default keeps the
-/// historical behavior — always the configured/session backend — so routing is
-/// strictly opt-in and an unset config behaves exactly as before.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum Policy {
-    /// Always the configured (session) backend; the router is off.
-    #[default]
-    Configured,
-    /// Prefer the local model whenever it's available and big enough for the pass.
-    PreferLocal,
-    /// Prefer the cloud (Claude) backend.
-    PreferCloud,
-    /// Route to local when the remote estimate exceeds the cost threshold.
-    CostCeiling,
-    /// When the remote estimate exceeds the threshold, ask which backend to use.
-    Ask,
-}
+/// The author's routing preference, from `[ai] routing`. It's a config *value*, so
+/// the enum now lives in [`config::Policy`](crate::config::Policy) alongside the
+/// rest of the `[ai]` data (#809); re-exported here so `router::Policy` is
+/// unchanged for callers and the routing *logic* below still reads it as `Policy`.
+pub use crate::config::Policy;
 
 /// The live inputs the host resolves before calling [`route`].
 #[derive(Clone, Copy, Debug)]
