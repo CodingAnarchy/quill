@@ -202,11 +202,17 @@ impl App {
                     false,
                 )
             }
-            ai::incremental::Scope::Incremental(changed) => (
-                (t.incr)(&prior, &self.book_render(book, Some(&changed)), &model),
-                t.incr_msg,
-                false,
-            ),
+            ai::incremental::Scope::Incremental(changed) => {
+                // Retrieval-backed incremental pass (#929): when a usable embedding
+                // model is on disk, fold the prior passages the changed chapters bear
+                // on into the revise context (off the worker thread, since embedding
+                // is CPU-bound), so the pass sees the scenes that matter — where a
+                // character/place last appeared — instead of being blind to
+                // everything outside the diff. Falls back to the plain
+                // changed-chapters-only context when embeddings aren't available.
+                self.spawn_incremental_pass(&t, book, &prior, &model, changed, current, series);
+                return;
+            }
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
         // A series merges the book's digests into the state (carrying the other
@@ -221,6 +227,68 @@ impl App {
             base_msg.to_string()
         };
         self.spawn_request(&message, req, batch, t.finish);
+    }
+
+    /// Spawn a retrieval-backed incremental bible pass (#929). Assembles everything
+    /// off-thread retrieval needs on the UI thread — the changed chapters' rendered
+    /// text (the revise material and the retrieval query), the whole-book index
+    /// input, the index dir, and the embedding model (`None` when none is on disk) —
+    /// then, off the worker thread, retrieves the prior passages the changed chapters
+    /// bear on and folds them into the revise context via
+    /// [`incremental::with_prior_passages`](ai::incremental::with_prior_passages)
+    /// before building + completing the request. When retrieval isn't available or
+    /// turns up nothing, the context is the changed chapters alone — the exact prior
+    /// incremental request — so the pass degrades gracefully. The request shape,
+    /// schema, and `t.finish` parse are identical either way; retrieval changes only
+    /// *what prior context* the revise sees.
+    #[allow(clippy::too_many_arguments)] // one call site; a struct would only obscure the flow
+    fn spawn_incremental_pass(
+        &mut self,
+        t: &BibleTracker,
+        book: usize,
+        prior: &str,
+        model: &str,
+        changed: Vec<String>,
+        current: ai::incremental::Digests,
+        series: bool,
+    ) {
+        // The changed chapters, rendered once: the material the pass revises from and
+        // the query retrieval ranks the prior passages against.
+        let changed_text = self.book_render(book, Some(&changed));
+        // Retrieval inputs, moved into the worker: the whole book to (re-)index, the
+        // index dir, and the embedding model — `None` keeps the pass on the plain
+        // incremental context (#929).
+        let embed_model = self.ask_embed_model();
+        let chapters = embed_model.is_some().then(|| self.ask_index_chapters());
+        let root = self.project.root.clone();
+        let prior = prior.to_string();
+        let model = model.to_string();
+        let incr = t.incr;
+        let finish = t.finish;
+
+        let merge = series.then(|| self.other_books_files(book));
+        self.pending_pass = Some((t.key.to_string(), current, merge));
+        let message = t.incr_msg.to_string();
+        self.spawn_outcome(&message, move |backend| {
+            // Retrieve the relevant prior passages (best effort); fall back to the
+            // changed chapters alone when embeddings aren't available or find nothing.
+            let retrieved = match (embed_model, chapters) {
+                (Some(m), Some(chapters)) => {
+                    super::super::assist::retrieve::retrieve_prior_context(
+                        &root,
+                        &chapters,
+                        m,
+                        &changed,
+                        &changed_text,
+                    )
+                    .unwrap_or_default()
+                }
+                _ => String::new(),
+            };
+            let context = ai::incremental::with_prior_passages(&retrieved, &changed_text);
+            let req = incr(&prior, &context, &model);
+            finish(backend.complete(&req))
+        });
     }
 
     /// Whether a full rebuild of `action` for `book` is pinned `offline` yet too
