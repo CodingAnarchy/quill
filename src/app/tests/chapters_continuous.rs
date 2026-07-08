@@ -514,3 +514,79 @@ fn resume_ignores_per_part_counts_when_the_parts_config_changed() {
     reopened.load_history();
     assert_eq!(reopened.part_added, vec![0]); // one part, fresh
 }
+
+/// A five-chapter project (`c0..c4.md`, one word each) with the standard test
+/// pins — enough chapters that moving off the loaded window forces a reslide.
+fn five_chapter_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    let mut manifest = String::from("title = \"Book\"\n\n");
+    for (i, body) in ["a\n", "b\n", "c\n", "d\n", "e\n"].iter().enumerate() {
+        write!(
+            manifest,
+            "[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"
+        )
+        .unwrap();
+        fs::write(dir.join(format!("c{i}.md")), body).unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+    (open_test_app(&dir), TempProject::new(dir))
+}
+
+#[test]
+fn continuous_view_read_failure_at_a_boundary_rewinds_the_cursor_and_recovers() {
+    // #892: crossing a chapter boundary pages the window (reslide). If the
+    // chapter that would page in can't be read, the window stays put — the
+    // cursor must not be left stranded across the seam in unloaded/stale space.
+    let (mut app, dir) = five_chapter_app("cont-reslide-fail");
+    app.on_key(ctrl('l')); // enter continuous view: window [0,3) = c0/c1/c2
+    let m = app.manuscript.as_ref().unwrap();
+    assert_eq!(m.loaded_chapters(), vec![0, 1, 2]);
+
+    // Chapter 3 is what pages in when the cursor centers on chapter 2. Make it
+    // unreadable, then step down across the c1→c2 boundary to trigger the reslide.
+    fs::remove_file(dir.join("c3.md")).unwrap();
+    app.on_key(key(KeyCode::Down)); // into c1
+    app.on_key(key(KeyCode::Down)); // into c2 — reslide would page in c3, which fails
+
+    // The failure is reported clearly...
+    assert!(
+        app.message
+            .as_deref()
+            .is_some_and(|s| s.starts_with("Continuous view:")),
+        "the read failure is surfaced: {:?}",
+        app.message
+    );
+    // ...the window is intact (didn't page), and the cursor was rewound to a
+    // valid position — it must not point past the loaded content.
+    let m = app.manuscript.as_ref().unwrap();
+    assert_eq!(m.loaded_chapters(), vec![0, 1, 2]);
+    let buf = app.edit_buffer();
+    assert!(
+        buf.cursor.line < buf.line_count(),
+        "cursor stays within the loaded buffer, not in unloaded space"
+    );
+    // The rewound cursor is in a still-loaded chapter (0..3), never a stale one.
+    assert!(app.manuscript.as_ref().unwrap().current_chapter() < 3);
+    // ...and it sits back out of the pending-page zone: the next keystroke won't
+    // blindly re-trigger the same failing read. Without the rewind the cursor
+    // would still be in chapter 2, and `would_reslide` would stay true, so every
+    // subsequent move would re-hit the unreadable chapter.
+    assert!(
+        !app.manuscript.as_ref().unwrap().would_reslide(&app.project),
+        "the rewound cursor no longer wants to page the window"
+    );
+
+    // Recovery: restore the file, cross the boundary again — now the reslide
+    // succeeds, the window pages forward, and no error is shown. The cursor was
+    // rewound into chapter 1, so a single step down re-crosses into chapter 2.
+    fs::write(dir.join("c3.md"), "d\n").unwrap();
+    app.message = None;
+    app.on_key(key(KeyCode::Down)); // into c2 — reslide now pages in c3
+    assert_eq!(app.message, None, "a later successful read is clean");
+    let m = app.manuscript.as_ref().unwrap();
+    assert_eq!(
+        m.loaded_chapters(),
+        vec![1, 2, 3],
+        "the window paged forward once the chapter was readable again"
+    );
+}
