@@ -41,12 +41,71 @@ use serde::{Deserialize, Serialize};
 use super::incremental::{digest, Digests};
 use super::AiError;
 
-/// The maximum characters a single passage carries. Chapters are split into
-/// passages at paragraph boundaries and packed up to this width, so each embedded
-/// unit is a coherent span the embedder's context window can hold and a citation
-/// points at a real, jumpable chapter. Small enough that the vector captures one
-/// idea, large enough that a passage isn't a fragment.
+/// The maximum characters a single passage carries at [`Breadth::Normal`], the
+/// default. Chapters are split into passages at paragraph boundaries and packed up
+/// to this width, so each embedded unit is a coherent span the embedder's context
+/// window can hold and a citation points at a real, jumpable chapter. Small enough
+/// that the vector captures one idea, large enough that a passage isn't a fragment.
+/// [`Breadth`] scales this per question.
 const PASSAGE_CHARS: usize = 1_200;
+
+/// The retrieval breadth a grounded-Ask question requests (#931): how coarsely the
+/// manuscript is chunked and how many passages the answer is grounded in. One
+/// question wants the *arc* of a thread (broad, few large spans); another wants a
+/// *specific* word or fact (fine, many small spans). Breadth trades passage size
+/// against passage count so both read well, and it's a property of the built index
+/// (a breadth change re-chunks, like an embedder-model change), so the vectors
+/// always match the granularity the answer is asked at.
+///
+/// [`Normal`](Breadth::Normal) is the default and reproduces the pre-#931 behavior
+/// exactly ([`PASSAGE_CHARS`] wide, the caller's base top-K).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Breadth {
+    /// Finer detail: smaller passages, more of them retrieved — for a question that
+    /// hinges on a specific word, line, or fact.
+    Fine,
+    /// The default: unchanged from before #931 — [`PASSAGE_CHARS`]-wide passages and
+    /// the caller's base top-K.
+    #[default]
+    Normal,
+    /// Broader context: larger passages, fewer of them retrieved — for a question
+    /// about the arc or shape of a thread across scenes.
+    Broad,
+}
+
+impl Breadth {
+    /// The passage width this breadth chunks at. Fine is a fraction of
+    /// [`PASSAGE_CHARS`] (tighter spans, finer citations); Broad a multiple (whole
+    /// scenes in one span); Normal is [`PASSAGE_CHARS`] unchanged.
+    pub const fn passage_chars(self) -> usize {
+        match self {
+            Self::Fine => PASSAGE_CHARS / 2,
+            Self::Normal => PASSAGE_CHARS,
+            Self::Broad => PASSAGE_CHARS * 3,
+        }
+    }
+
+    /// How many passages to retrieve, scaled from the caller's `base` top-K so the
+    /// *amount of prose* fed to the answer stays comparable across breadths: Fine
+    /// retrieves more (its passages are smaller), Broad fewer (its passages are
+    /// larger), Normal the base unchanged. Always at least one when `base > 0`.
+    pub const fn top_k(self, base: usize) -> usize {
+        match self {
+            Self::Fine => base * 2,
+            Self::Normal => base,
+            // Halve, but never below 1 when the caller asked for any.
+            Self::Broad if base == 0 => 0,
+            Self::Broad => {
+                let k = base / 2;
+                if k == 0 {
+                    1
+                } else {
+                    k
+                }
+            }
+        }
+    }
+}
 
 /// A retrievable span of a chapter (#831): the chapter it came from (title + file,
 /// so a hit stays a jumpable citation exactly like today's Ask) and the prose the
@@ -114,12 +173,15 @@ pub trait Embedder {
     fn model_tag(&self) -> String;
 }
 
-/// Split a chapter's prose into passages of at most [`PASSAGE_CHARS`], breaking at
-/// paragraph boundaries (blank lines) so each passage is a coherent span. A
-/// paragraph longer than the cap becomes its own passage (rather than being split
-/// mid-sentence) — the embedder truncates to its window if need be. Empty/whitespace
-/// chapters yield no passages.
-pub fn chunk_chapter(title: &str, file: &str, body: &str) -> Vec<Passage> {
+/// Split a chapter's prose into passages of at most `breadth`'s width
+/// ([`Breadth::passage_chars`]), breaking at paragraph boundaries (blank lines) so
+/// each passage is a coherent span. A paragraph longer than the cap becomes its own
+/// passage (rather than being split mid-sentence) — the embedder truncates to its
+/// window if need be. Empty/whitespace chapters yield no passages. A broader breadth
+/// packs more paragraphs per passage (coarser scene context); a finer one fewer
+/// (tighter detail).
+pub fn chunk_chapter(title: &str, file: &str, body: &str, breadth: Breadth) -> Vec<Passage> {
+    let cap = breadth.passage_chars();
     let mut out = Vec::new();
     let mut current = String::new();
     let mut flush = |buf: &mut String| {
@@ -141,14 +203,14 @@ pub fn chunk_chapter(title: &str, file: &str, body: &str) -> Vec<Passage> {
         // Adding this paragraph would overflow the passage → flush what we have and
         // start fresh (unless the current passage is empty, so a single oversized
         // paragraph still lands in its own passage rather than being dropped).
-        if !current.is_empty() && current.len() + para.len() + 2 > PASSAGE_CHARS {
+        if !current.is_empty() && current.len() + para.len() + 2 > cap {
             flush(&mut current);
         }
         if !current.is_empty() {
             current.push_str("\n\n");
         }
         current.push_str(para);
-        if current.len() >= PASSAGE_CHARS {
+        if current.len() >= cap {
             flush(&mut current);
         }
     }
@@ -195,6 +257,12 @@ pub struct Index {
     /// The embedder model tag the index was built with; a mismatch forces a rebuild.
     #[serde(default)]
     model_tag: String,
+    /// The [`Breadth`] the passages were chunked at (#931); a change forces a
+    /// re-chunk, since a different-width passage set isn't comparable. Absent in a
+    /// pre-#931 index → [`Breadth::Normal`], the width those passages were built at,
+    /// so an old index isn't needlessly rebuilt.
+    #[serde(default)]
+    breadth: Breadth,
     /// Every indexed passage, across all chapters.
     #[serde(default)]
     passages: Vec<IndexedPassage>,
@@ -220,23 +288,28 @@ impl Index {
         self.passages.len()
     }
 
-    /// Refresh the index against `chapters` using `embedder`, re-embedding only what
-    /// changed (#90): a chapter whose digest already matches keeps its passages
-    /// untouched; a changed/new chapter is re-chunked and re-embedded; a chapter no
-    /// longer present is dropped. A changed embedder model (tag mismatch) rebuilds
-    /// everything. Returns how many chapters were (re-)embedded, so the caller can
-    /// report the cost. The embedder is called **once** for all changed passages, so
-    /// a big refresh is one batched inference.
+    /// Refresh the index against `chapters` using `embedder`, chunked at `breadth`
+    /// (#931), re-embedding only what changed (#90): a chapter whose digest already
+    /// matches keeps its passages untouched; a changed/new chapter is re-chunked and
+    /// re-embedded; a chapter no longer present is dropped. A changed embedder model
+    /// (tag mismatch) *or a changed breadth* rebuilds everything — the stored vectors
+    /// were built at a different granularity and aren't comparable. Returns how many
+    /// chapters were (re-)embedded, so the caller can report the cost. The embedder is
+    /// called **once** for all changed passages, so a big refresh is one batched
+    /// inference.
     pub fn refresh(
         &mut self,
         chapters: &[Chapter],
+        breadth: Breadth,
         embedder: &dyn Embedder,
     ) -> Result<usize, AiError> {
         let tag = embedder.model_tag();
-        if self.model_tag != tag {
-            // A different embedder model → the old vectors aren't comparable; rebuild.
+        if self.model_tag != tag || self.breadth != breadth {
+            // A different embedder model or breadth → the old vectors aren't
+            // comparable (different model, or different chunk granularity); rebuild.
             self.passages.clear();
             self.model_tag = tag;
+            self.breadth = breadth;
         }
 
         // Digest every current chapter; decide which are unchanged (keep) vs stale.
@@ -265,7 +338,7 @@ impl Index {
                 continue;
             }
             changed_chapters += 1;
-            for passage in chunk_chapter(&chapter.title, &chapter.file, &chapter.body) {
+            for passage in chunk_chapter(&chapter.title, &chapter.file, &chapter.body, breadth) {
                 new_passages.push((passage, dig.clone()));
             }
         }
@@ -578,7 +651,7 @@ mod tests {
     #[test]
     fn chunk_splits_on_paragraphs_and_caps_length() {
         let body = "First paragraph.\n\nSecond paragraph.";
-        let passages = chunk_chapter("One", "one.md", body);
+        let passages = chunk_chapter("One", "one.md", body, Breadth::Normal);
         // Both short paragraphs pack into a single passage.
         assert_eq!(passages.len(), 1);
         assert!(passages[0].text.contains("First") && passages[0].text.contains("Second"));
@@ -588,14 +661,133 @@ mod tests {
         // A body far over the cap yields multiple passages, none empty.
         let big = "word ".repeat(PASSAGE_CHARS); // ~5x the cap
         let paras = format!("{big}\n\n{big}\n\n{big}");
-        let many = chunk_chapter("Big", "big.md", &paras);
+        let many = chunk_chapter("Big", "big.md", &paras, Breadth::Normal);
         assert!(many.len() >= 3, "oversized chapter splits: {}", many.len());
         assert!(many.iter().all(|p| !p.text.trim().is_empty()));
     }
 
     #[test]
     fn empty_chapter_yields_no_passages() {
-        assert!(chunk_chapter("Empty", "e.md", "   \n\n  ").is_empty());
+        assert!(chunk_chapter("Empty", "e.md", "   \n\n  ", Breadth::Normal).is_empty());
+    }
+
+    #[test]
+    fn breadth_controls_passage_granularity() {
+        // Same body chunked at each breadth (#931): finer → more, smaller passages;
+        // broader → fewer, larger ones; normal in between. A paragraph a bit under the
+        // Fine cap, so several pack into one Normal/Broad passage but each fills a
+        // Fine one.
+        let para = "word ".repeat(Breadth::Fine.passage_chars() * 3 / 4 / 5);
+        let body = format!("{para}\n\n{para}\n\n{para}\n\n{para}\n\n{para}\n\n{para}");
+
+        let fine = chunk_chapter("C", "c.md", &body, Breadth::Fine);
+        let normal = chunk_chapter("C", "c.md", &body, Breadth::Normal);
+        let broad = chunk_chapter("C", "c.md", &body, Breadth::Broad);
+
+        // Finer breadth splits into strictly more passages than broader breadth.
+        assert!(
+            fine.len() > normal.len(),
+            "fine yields more passages than normal: {} vs {}",
+            fine.len(),
+            normal.len()
+        );
+        assert!(
+            normal.len() > broad.len(),
+            "normal yields more passages than broad: {} vs {}",
+            normal.len(),
+            broad.len()
+        );
+        // Every breadth still covers the whole body (no prose dropped) and each
+        // passage honors its breadth's cap.
+        for (b, passages) in [
+            (Breadth::Fine, &fine),
+            (Breadth::Normal, &normal),
+            (Breadth::Broad, &broad),
+        ] {
+            assert!(!passages.is_empty());
+            assert!(
+                passages.iter().all(|p| p.text.len() <= b.passage_chars()),
+                "passages fit the {b:?} cap"
+            );
+        }
+    }
+
+    #[test]
+    fn breadth_scales_top_k_around_the_base() {
+        // Broad retrieves fewer passages (they're larger), Fine more (smaller),
+        // Normal the base unchanged — so the prose fed to the answer stays comparable.
+        assert_eq!(
+            Breadth::Normal.top_k(12),
+            12,
+            "normal is the base unchanged"
+        );
+        assert!(Breadth::Broad.top_k(12) < 12, "broad retrieves fewer");
+        assert!(Breadth::Fine.top_k(12) > 12, "fine retrieves more");
+        // Broad never drops to zero when the caller asked for any passages.
+        assert_eq!(Breadth::Broad.top_k(1), 1, "broad keeps at least one");
+        assert_eq!(Breadth::Broad.top_k(0), 0, "top_k(0) stays zero");
+    }
+
+    #[test]
+    fn changing_breadth_rebuilds_the_index() {
+        // A breadth change re-chunks the manuscript at the new granularity (#931),
+        // exactly like an embedder-model swap — the stored vectors aren't comparable
+        // across widths. One long chapter so Fine and Broad chunk it differently.
+        let embedder = FakeEmbedder {
+            keywords: vec!["a"],
+        };
+        let para = "alpha ".repeat(Breadth::Fine.passage_chars() / 6);
+        let body = format!("{para}\n\n{para}\n\n{para}\n\n{para}");
+        let chapters = vec![chapter("Long", "long.md", &body)];
+
+        let mut index = Index::default();
+        index.refresh(&chapters, Breadth::Broad, &embedder).unwrap();
+        let broad_count = index.passage_count();
+
+        // Re-refreshing at the same breadth over an unchanged manuscript is a no-op.
+        let n = index.refresh(&chapters, Breadth::Broad, &embedder).unwrap();
+        assert_eq!(
+            n, 0,
+            "same breadth + unchanged manuscript re-embeds nothing"
+        );
+
+        // A finer breadth rebuilds everything at the finer granularity.
+        let n = index.refresh(&chapters, Breadth::Fine, &embedder).unwrap();
+        assert_eq!(n, 1, "the breadth change re-embeds the chapter");
+        assert!(
+            index.passage_count() > broad_count,
+            "finer breadth yields more passages: {} vs {broad_count}",
+            index.passage_count()
+        );
+    }
+
+    #[test]
+    fn search_at_any_breadth_resolves_jumpable_citations() {
+        // Retrieval at each breadth still ranks the right chapter first and keeps its
+        // title/file, so the answer's citations stay jumpable exactly as today (#931).
+        let embedder = FakeEmbedder {
+            keywords: vec!["locket", "harbor"],
+        };
+        let chapters = vec![
+            chapter("The Locket", "one.md", "She clutched the silver locket."),
+            chapter("The Harbor", "two.md", "Ships crowded the busy harbor."),
+        ];
+        for breadth in [Breadth::Fine, Breadth::Normal, Breadth::Broad] {
+            let mut index = Index::default();
+            index.refresh(&chapters, breadth, &embedder).unwrap();
+            let hits = index
+                .search("where is the locket", breadth.top_k(4), &embedder)
+                .unwrap();
+            assert!(!hits.is_empty(), "{breadth:?} retrieves passages");
+            assert_eq!(
+                hits[0].passage.title, "The Locket",
+                "{breadth:?} ranks the locket chapter first"
+            );
+            assert_eq!(
+                hits[0].passage.file, "one.md",
+                "{breadth:?} keeps the citation's file"
+            );
+        }
     }
 
     #[test]
@@ -621,7 +813,9 @@ mod tests {
             ),
         ];
         let mut index = Index::default();
-        let embedded = index.refresh(&chapters, &embedder).unwrap();
+        let embedded = index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         assert_eq!(embedded, 3, "all three chapters embedded on first build");
         assert_eq!(index.passage_count(), 3);
 
@@ -644,11 +838,15 @@ mod tests {
             chapter("B", "b.md", "beta content here"),
         ];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         assert_eq!(embedder.calls.get(), 2, "both chapters embedded first time");
 
         // No change → nothing re-embedded.
-        let n = index.refresh(&chapters, &embedder).unwrap();
+        let n = index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         assert_eq!(n, 0);
         assert_eq!(
             embedder.calls.get(),
@@ -658,7 +856,9 @@ mod tests {
 
         // Change one chapter → only it re-embeds.
         chapters[1].body = "beta content, revised".into();
-        let n = index.refresh(&chapters, &embedder).unwrap();
+        let n = index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         assert_eq!(n, 1);
         assert_eq!(
             embedder.calls.get(),
@@ -675,12 +875,14 @@ mod tests {
         };
         let chapters = vec![chapter("A", "a.md", "aaa"), chapter("B", "b.md", "bbb")];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         assert_eq!(index.passage_count(), 2);
 
         // Drop chapter B → its passage leaves the index.
         let fewer = vec![chapter("A", "a.md", "aaa")];
-        index.refresh(&fewer, &embedder).unwrap();
+        index.refresh(&fewer, Breadth::Normal, &embedder).unwrap();
         assert_eq!(index.passage_count(), 1);
         assert!(index.digests().contains_key("a.md"));
         assert!(!index.digests().contains_key("b.md"));
@@ -693,11 +895,11 @@ mod tests {
         };
         let chapters = vec![chapter("A", "a.md", "xxx")];
         let mut index = Index::default();
-        index.refresh(&chapters, &a).unwrap();
+        index.refresh(&chapters, Breadth::Normal, &a).unwrap();
         let tag_before = index.model_tag.clone();
 
         // A different embedder (different tag) forces a full rebuild.
-        let n = index.refresh(&chapters, &Other).unwrap();
+        let n = index.refresh(&chapters, Breadth::Normal, &Other).unwrap();
         assert_eq!(n, 1, "the model swap re-embeds every chapter");
         assert_ne!(index.model_tag, tag_before);
     }
@@ -736,6 +938,7 @@ mod tests {
         .collect();
         let index = Index {
             model_tag: "fake".into(),
+            breadth: Breadth::Normal,
             passages,
         };
         // Query aligned with the x-axis: a.md is nearest, then the diagonal c.md.
@@ -756,7 +959,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let chapters = vec![chapter("Gold", "g.md", "The gold coin gleamed.")];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         index.save(&dir).unwrap();
 
         let loaded = Index::load(&dir);
@@ -787,7 +992,9 @@ mod tests {
             chapter("Calm", "three.md", "The calm, calm morning was still."),
         ];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
 
         // Query with chapter one's exact prose: it must not return itself, and the
         // other storm-heavy passage ranks above the calm one.
@@ -817,7 +1024,9 @@ mod tests {
             chapter("Harbor", "two.md", "Ships filled the harbor."),
         ];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         let hits = index
             .similar("something about a locket", 2, &embedder)
             .unwrap();
@@ -852,7 +1061,9 @@ mod tests {
             ),
         ];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
 
         // Chapter three changed; its own prose is the query. The prior locket scene
         // (one.md) is the passage that bears on the change and must rank first; the
@@ -885,7 +1096,9 @@ mod tests {
             chapter("Ch3", "three.md", "aaa aaa aaa"), // the changed chapter
         ];
         let mut index = Index::default();
-        index.refresh(&chapters, &embedder).unwrap();
+        index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .unwrap();
         let changed = vec!["three.md".to_string()];
         let hits = index.relevant_prior("aaa", &changed, 2, &embedder).unwrap();
         assert_eq!(hits.len(), 2, "two prior hits despite the excluded chapter");
@@ -936,6 +1149,7 @@ mod tests {
         .collect();
         let index = Index {
             model_tag: "fake".into(),
+            breadth: Breadth::Normal,
             passages,
         };
 
@@ -985,6 +1199,7 @@ mod tests {
         };
         let index = Index {
             model_tag: "fake".into(),
+            breadth: Breadth::Normal,
             passages: vec![
                 make("a.md", "the refrain", vec![1.0, 0.0]),
                 make("a.md", "the refrain again", vec![1.0, 0.0]), // same chapter → skipped
@@ -1036,7 +1251,9 @@ mod tests {
             ),
         ];
         let mut index = Index::default();
-        let embedded = index.refresh(&chapters, &embedder).expect("index");
+        let embedded = index
+            .refresh(&chapters, Breadth::Normal, &embedder)
+            .expect("index");
         assert_eq!(embedded, 3);
 
         // A paraphrase — none of these words appear in the passage — should still
@@ -1056,6 +1273,11 @@ mod tests {
         );
 
         // A refresh over the unchanged manuscript re-embeds nothing (incremental #90).
-        assert_eq!(index.refresh(&chapters, &embedder).expect("refresh"), 0);
+        assert_eq!(
+            index
+                .refresh(&chapters, Breadth::Normal, &embedder)
+                .expect("refresh"),
+            0
+        );
     }
 }

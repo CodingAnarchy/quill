@@ -20,7 +20,7 @@ use crate::mode::AiAction;
 use crate::text::ellipsize;
 
 #[cfg(feature = "local")]
-use crate::ai::embed::{Index, LocalEmbedder};
+use crate::ai::embed::{Breadth, Index, LocalEmbedder};
 
 /// How many similar passages a semantic find returns (#924) — enough to see the
 /// resonant scenes, few enough to scan at a glance. Only the `local` retrieval
@@ -248,7 +248,9 @@ fn find_similar_passages(
         return Ok(None);
     };
     let mut index = Index::load(root);
-    index.refresh(chapters, &embedder)?;
+    // Find-similar retrieves at the default granularity (#924); breadth is a
+    // grounded-Ask control (#931).
+    index.refresh(chapters, Breadth::Normal, &embedder)?;
     let _ = index.save(root);
     Ok(Some(index.similar(query, FIND_TOP_K, &embedder)?))
 }
@@ -285,7 +287,8 @@ fn detect_echoes(
         return Ok(None);
     };
     let mut index = Index::load(root);
-    index.refresh(chapters, &embedder)?;
+    // Echo detection scans the whole index at the default granularity (#920).
+    index.refresh(chapters, Breadth::Normal, &embedder)?;
     let _ = index.save(root);
     Ok(Some(index.echo_pairs(SOFT_ECHO)))
 }
