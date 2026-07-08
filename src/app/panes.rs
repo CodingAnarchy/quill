@@ -307,6 +307,13 @@ impl App {
                 if other.dirty {
                     let _ = other.save(); // best effort; the focused pane is unaffected
                 }
+                // If this was the project dictionary's own edit pane (#935), re-read
+                // it into the checker so an edit made here — a removed or fixed word —
+                // takes effect right away. Off the idle path: only on this close.
+                if other.path.as_deref() == Some(self.project.dictionary_path().as_path()) {
+                    self.project.reload_dictionary();
+                    self.refresh_spell_flags();
+                }
             }
             // A surface is read-only and the assistant's conversation lives in the
             // variant, so both drop with the split — nothing else to clean up.

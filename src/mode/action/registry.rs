@@ -83,6 +83,8 @@ pub enum Action {
     DescribeConfig,
     /// Accept the flagged word at the cursor into the project dictionary (#358).
     AcceptWord,
+    /// Open the project's custom dictionary in a pane to view and edit it (#935).
+    ViewDictionary,
     /// Jump the cursor to the next misspelled word (#359).
     NextMisspelling,
     /// Jump the cursor to the previous misspelled word (#359).
@@ -254,6 +256,7 @@ impl Action {
         Self::BrowseBible,
         // Editing
         Self::AcceptWord,
+        Self::ViewDictionary,
         Self::NextMisspelling,
         Self::PrevMisspelling,
         Self::AddAnnotation,
@@ -313,6 +316,7 @@ impl Action {
             Self::ProjectFind => "find:project",
             Self::DescribeConfig => "config:describe",
             Self::AcceptWord => "dict:accept",
+            Self::ViewDictionary => "dict:view",
             Self::NextMisspelling => "spell:next",
             Self::PrevMisspelling => "spell:prev",
             Self::ToggleTypewriter => "view:typewriter",
@@ -382,6 +386,7 @@ impl Action {
             | Self::Assistant
             | Self::BrowseBible => "AI",
             Self::AcceptWord
+            | Self::ViewDictionary
             | Self::NextMisspelling
             | Self::PrevMisspelling
             | Self::AddAnnotation
@@ -461,6 +466,7 @@ impl Action {
             Self::ProjectFind => "Find across manuscript",
             Self::DescribeConfig => "Configure by description",
             Self::AcceptWord => "Add word to dictionary",
+            Self::ViewDictionary => "View project dictionary",
             Self::NextMisspelling => "Next misspelling",
             Self::PrevMisspelling => "Previous misspelling",
             Self::ToggleTypewriter => "Typewriter scrolling (toggle)",

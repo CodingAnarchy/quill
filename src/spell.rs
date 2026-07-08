@@ -28,9 +28,12 @@ static DICT: LazyLock<Dictionary> = LazyLock::new(|| {
 
 /// The byte ranges of misspelled words in `text` (#357) — words not in the
 /// bundled dictionary and not accepted by `accept` (the configured TODO marker,
-/// and the per-project custom dictionary once #358 lands). Tokens containing
-/// digits aren't spell-checkable and are skipped, not flagged. Pure: the caller
-/// runs it on idle and caches the result per chapter.
+/// and the per-project custom dictionary, #358/#935). The per-project word list
+/// lives in `Project` (durable in `dictionary.txt`, viewable/editable in-app) and
+/// reaches this pure function only through the `accept` predicate, so the bundled
+/// engine here stays global and stateless. Tokens containing digits aren't
+/// spell-checkable and are skipped, not flagged. Pure: the caller runs it on idle
+/// and caches the result per chapter.
 pub fn misspellings(text: &str, accept: impl Fn(&str) -> bool) -> Vec<(usize, usize)> {
     let dict = &*DICT;
     let mut flags = Vec::new();
@@ -130,6 +133,28 @@ mod tests {
         assert_eq!(flagged.len(), 1);
         let accepted = misspellings("Vashti walked on", |w| w == "Vashti");
         assert!(accepted.is_empty(), "accepting the name clears its flag");
+    }
+
+    #[test]
+    fn a_per_project_word_list_clears_only_its_words() {
+        // The durable per-project dictionary reaches the checker as an `accept`
+        // predicate over a set (#358/#935): words in the list clear, words outside
+        // it — invented or misspelled — are still flagged, and the bundled engine
+        // is unchanged.
+        let list: std::collections::HashSet<&str> = ["Vashti", "Aerendil"].into_iter().collect();
+        let accept = |w: &str| list.contains(w);
+        // Two invented names in the list clear; a third, absent from it, is flagged.
+        let text = "Vashti met Aerendil but not Zzqxx";
+        let flags = misspellings(text, accept);
+        assert_eq!(flags.len(), 1, "{flags:?}");
+        let (s, e) = flags[0];
+        assert_eq!(&text[s..e], "Zzqxx");
+        // The list never suppresses a real typo, and real words still pass.
+        assert_eq!(
+            misspellings("Vashti quikc", accept).len(),
+            1,
+            "typo still flagged"
+        );
     }
 
     #[test]
