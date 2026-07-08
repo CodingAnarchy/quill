@@ -709,6 +709,14 @@ pub enum Pending {
     /// the four bible passes over every book. `force` rebuilds each bible from the
     /// whole manuscript (#176). `y` runs the batch, anything else cancels.
     ConfirmRefreshBibles { force: bool },
+    /// Confirm a durable pass queue (#923) — one aggregate cost confirm gating the
+    /// whole bible-suite run. `force` rebuilds each bible from the whole manuscript
+    /// (#176). `y` runs the queue, anything else cancels.
+    ConfirmQueuePasses { force: bool },
+    /// y/Esc: resume an interrupted pass queue found at launch (#923) — a crashed
+    /// run picks up its remaining passes rather than losing the completed ones. `y`
+    /// resumes; anything else discards the persisted queue.
+    ResumePassQueue,
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,

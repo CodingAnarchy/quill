@@ -353,11 +353,11 @@ impl App {
         match self.stage_bible(path, name, render) {
             Staged::Wrote(diff) => {
                 self.record_pass_state(); // the bible now reflects this manuscript state (#90)
-                if self.series_bible_running() {
-                    // Mid series-bible refresh (#341): the findings are already in
-                    // revision triage. Don't pop an overlay the next book's pass
-                    // would immediately clobber — the driver's summary points the
-                    // author to triage when the whole run finishes.
+                if self.series_bible_running() || self.pass_queue_running() {
+                    // Mid series-bible refresh (#341) or pass queue (#923): the
+                    // findings are already in revision triage. Don't pop an overlay
+                    // the next pass would immediately clobber — the driver's summary
+                    // points the author to triage when the whole run finishes.
                     self.pending_findings.clear();
                 } else {
                     // Surface what the revise changed (#607) so the author can

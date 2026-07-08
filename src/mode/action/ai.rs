@@ -349,6 +349,15 @@ impl AiAction {
         self.spec().slug
     }
 
+    /// Resolve an AI action from its stable [`slug`](Self::slug) — the inverse used
+    /// to rehydrate a durable pass queue (#923) from the slugs it stores.
+    pub(crate) fn from_slug(slug: &str) -> Option<Self> {
+        Self::SPECS
+            .iter()
+            .find(|s| s.slug == slug)
+            .map(|s| s.action)
+    }
+
     /// This pass's cost profile — the data the cost gate resolves against live AI
     /// settings.
     pub(crate) fn cost(self) -> AiCost {

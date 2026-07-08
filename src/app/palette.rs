@@ -170,6 +170,9 @@ impl App {
             // The all-bibles refresh (#655) spawns the four bible passes, so it
             // needs a ready AI backend, but works for a standalone novel too.
             Action::RefreshBibles => self.ai.check_ready().err().map(|e| e.to_string()),
+            // The durable pass queue (#923) spawns the bible passes, so it needs a
+            // ready AI backend; works for a standalone novel too.
+            Action::QueuePasses => self.ai.check_ready().err().map(|e| e.to_string()),
             // Describe-to-config needs the AI to propose the settings (#303).
             Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
             // The assistant pane is a single-chapter-view feature, like the splits.
@@ -269,6 +272,7 @@ impl App {
                     | AiAction::Editorial
             ) | Action::RefreshSeriesBible
                 | Action::RefreshBibles
+                | Action::QueuePasses
                 | Action::DescribeConfig
         )
     }
@@ -304,6 +308,7 @@ impl App {
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::RefreshBibles => self.start_refresh_bibles(force),
+            Action::QueuePasses => self.start_queue_passes(force),
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),
             Action::AcceptWord => self.accept_word_at_cursor(),

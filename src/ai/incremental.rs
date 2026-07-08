@@ -292,6 +292,102 @@ impl State {
     }
 }
 
+// --- The durable multi-pass queue (bible/.queue.toml, #923) ------------------
+
+/// One queued pass: the action's stable slug and the book it runs against. Stored
+/// by slug (not the `AiAction` enum) so this module stays provider-agnostic — the
+/// app layer resolves the slug back to an action when it drives the queue.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct QueuedPass {
+    /// The action's stable run-action slug (e.g. `"ai:continuity"`).
+    pub slug: String,
+    /// The book index the pass runs against (0 for a standalone novel).
+    pub book: usize,
+}
+
+/// A durable queue of passes run back-to-back (#923): the ordered passes and a
+/// cursor marking how many have completed. Persisted to `bible/.queue.toml` after
+/// each pass lands, so an interrupted or crashed run resumes from the cursor
+/// rather than losing the passes already done. `force` is remembered so a resumed
+/// run rebuilds exactly as the original did.
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+pub struct PassQueue {
+    /// The passes in run order.
+    #[serde(default)]
+    pub passes: Vec<QueuedPass>,
+    /// How many passes (from the front) have completed. The next to run is
+    /// `passes[done]`; the queue is finished when `done == passes.len()`.
+    #[serde(default)]
+    pub done: usize,
+    /// Whether the run rebuilds each bible from the whole manuscript (#176).
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// The queue file path for a project.
+fn queue_path(root: &Path) -> PathBuf {
+    root.join("bible").join(".queue.toml")
+}
+
+impl PassQueue {
+    /// A fresh queue over `passes` (nothing done yet).
+    pub const fn new(passes: Vec<QueuedPass>, force: bool) -> Self {
+        Self {
+            passes,
+            done: 0,
+            force,
+        }
+    }
+
+    /// Load a persisted queue, or `None` when there's no (readable) queue file —
+    /// best effort, so a corrupt file is treated as "no queue to resume".
+    pub fn load(root: &Path) -> Option<Self> {
+        let text = std::fs::read_to_string(queue_path(root)).ok()?;
+        toml::from_str(&text).ok()
+    }
+
+    /// The passes not yet completed, in run order (`passes[done..]`).
+    pub fn remaining(&self) -> &[QueuedPass] {
+        self.passes.get(self.done..).unwrap_or(&[])
+    }
+
+    /// Whether every pass has completed.
+    pub const fn is_finished(&self) -> bool {
+        self.done >= self.passes.len()
+    }
+
+    /// Persist the queue (creating `bible/`). Best effort — a write failure is
+    /// returned for the caller to surface, but never blocks the run in progress.
+    pub fn save(&self, root: &Path) -> std::io::Result<()> {
+        let path = queue_path(root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let body = toml::to_string(self).map_err(std::io::Error::other)?;
+        std::fs::write(path, body)
+    }
+
+    /// Mark the current pass done, bump the cursor, and persist so a crash after
+    /// this point resumes from the next pass. Removes the queue file once the last
+    /// pass completes, so a finished run leaves nothing to resume.
+    pub fn complete_current(&mut self, root: &Path) -> std::io::Result<()> {
+        if self.done < self.passes.len() {
+            self.done += 1;
+        }
+        if self.is_finished() {
+            Self::clear(root);
+            Ok(())
+        } else {
+            self.save(root)
+        }
+    }
+
+    /// Remove the queue file (a clean finish or a cancel). Best effort.
+    pub fn clear(root: &Path) {
+        let _ = std::fs::remove_file(queue_path(root));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -598,6 +694,78 @@ mod tests {
         let prior = digests(&[("one.md", "a"), ("two.md", "b")]);
         let cur = digests(&[("one.md", "a")]); // two removed
         assert_eq!(decide(Some(&prior), &cur, 5), Scope::Full);
+    }
+
+    fn queued(pairs: &[(&str, usize)]) -> Vec<QueuedPass> {
+        pairs
+            .iter()
+            .map(|&(slug, book)| QueuedPass {
+                slug: slug.to_string(),
+                book,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pass_queue_persists_the_cursor_and_resumes_from_it() {
+        let dir = std::env::temp_dir().join(format!("quill-queue-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut q = PassQueue::new(
+            queued(&[
+                ("ai:characters", 0),
+                ("ai:continuity", 0),
+                ("ai:setting", 0),
+            ]),
+            false,
+        );
+        q.save(&dir).unwrap();
+        // First pass completes → cursor advances and the file survives (more remain).
+        q.complete_current(&dir).unwrap();
+        let resumed = PassQueue::load(&dir).expect("a persisted queue to resume");
+        assert_eq!(resumed.done, 1, "the completed pass is recorded");
+        assert_eq!(
+            resumed.remaining(),
+            queued(&[("ai:continuity", 0), ("ai:setting", 0)]),
+            "resume picks up from the cursor, not from the top — completed work isn't lost"
+        );
+        assert_eq!(
+            resumed.remaining().first().map(|p| p.slug.as_str()),
+            Some("ai:continuity")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pass_queue_clears_the_file_when_the_last_pass_completes() {
+        let dir = std::env::temp_dir().join(format!("quill-queue-done-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut q = PassQueue::new(queued(&[("ai:characters", 0), ("ai:continuity", 0)]), false);
+        q.save(&dir).unwrap();
+        q.complete_current(&dir).unwrap(); // 1 of 2
+        assert!(PassQueue::load(&dir).is_some(), "still one pass to resume");
+        q.complete_current(&dir).unwrap(); // 2 of 2 → finished
+        assert!(q.is_finished());
+        assert!(
+            PassQueue::load(&dir).is_none(),
+            "a finished run leaves no queue file to resume"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pass_queue_remembers_force_across_a_reload() {
+        let dir = std::env::temp_dir().join(format!("quill-queue-force-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        PassQueue::new(queued(&[("ai:characters", 0)]), true)
+            .save(&dir)
+            .unwrap();
+        assert!(
+            PassQueue::load(&dir).expect("queue").force,
+            "a resumed run rebuilds exactly as the original did"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

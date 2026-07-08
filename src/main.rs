@@ -185,6 +185,9 @@ fn main() -> io::Result<()> {
     // files), offer to restore from the latest local backup (#934). After recovery,
     // which takes precedence — it's a no-op while that prompt is up.
     app.offer_backup_restore_on_damage();
+    // If a durable pass queue was interrupted (a crash mid-run), offer to resume it
+    // (#923) — after the recovery/backup offers, which take precedence.
+    app.offer_pass_queue_resume();
     // On the very first launch, show the dismissible quick-start card (#837).
     // After recovery, so a crash prompt takes precedence and the card waits for a
     // clean slate (it's a no-op when a prompt/overlay is already up).

@@ -62,6 +62,7 @@ mod nav;
 mod outline;
 mod palette;
 mod panes;
+mod pass_queue;
 mod qa_store;
 mod reports;
 mod search;
@@ -456,6 +457,17 @@ pub struct App {
     /// per-book bible passes and where it is. `Some` while the book-by-book
     /// refresh is running (including suspended on an in-flight pass).
     series_bible_run: Option<series_bible::SeriesBibleRun>,
+    /// A durable multi-pass queue run in progress (#923), if any: the ordered
+    /// passes (persisted to `bible/.queue.toml`), the cursor, and the shared
+    /// sequenced-run bookkeeping. `Some` while the queue runs (including suspended
+    /// on an in-flight pass); a crash mid-run leaves the file to resume from.
+    pass_queue_run: Option<pass_queue::PassQueueRun>,
+    /// Per-pass sub-progress (#923): the `(done, total)` chapter counter the
+    /// in-flight fold pass updates on the worker thread as it walks chapters, so
+    /// the run's status can read "continuity: chapter 5/12". `None` between the
+    /// chapter-granular fold steps and for one-shot passes (which show pass-level
+    /// progress only). Shared so the worker can write while the UI thread reads.
+    pass_progress: Arc<Mutex<Option<(usize, usize)>>>,
     /// Crash recovery (#263): unsaved work found at launch, awaiting the author's
     /// restore/discard choice. `Some` only while the recovery prompt is open;
     /// taken when they restore, cleared when they discard or defer.
@@ -669,6 +681,8 @@ impl App {
             pending_config: None,
             workflow_run: None,
             series_bible_run: None,
+            pass_queue_run: None,
+            pass_progress: Arc::new(Mutex::new(None)),
             pending_recovery: None,
             recovery_written: false,
             pending_switch: None,
