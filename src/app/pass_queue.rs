@@ -435,6 +435,17 @@ impl App {
         PassQueue::load(&self.project.root).map(|q| q.done)
     }
 
+    /// The `(action, book)` pass the run currently sits on — the one in flight when
+    /// parked, or the next to run (test inspection). `None` when no run is active or
+    /// the queue has drained past its end. Lets a resume test assert the run picked
+    /// up from the cursor (the second pass) rather than restarting at the top,
+    /// independent of whether a backend is actually compiled in.
+    pub(crate) fn pass_queue_current_for_test(&self) -> Option<(AiAction, usize)> {
+        let run = self.pass_queue_run.as_ref()?;
+        let pass = run.queue.passes.get(run.seq.index)?;
+        AiAction::from_slug(&pass.slug).map(|a| (a, pass.book))
+    }
+
     /// The planned `(action, book)` queue for the current project — for tests to
     /// assert the queue command plans the five trackers over every book.
     pub(crate) fn pass_queue_plan_for_test(&self) -> Vec<(AiAction, usize)> {

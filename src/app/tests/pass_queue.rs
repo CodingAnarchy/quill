@@ -239,6 +239,19 @@ fn resuming_picks_up_from_the_cursor_not_the_top() {
     queue.save(&dir).unwrap();
     enable_local_ai(&mut app);
 
+    // Inject a held (spawned-but-unpolled) task so the resumed run parks on the pass
+    // at the cursor rather than draining — deterministic in both build configs. (On
+    // the default build a Local pass would skip for want of a compiled backend and
+    // the run would drain; under `--features local` it would spawn real inference and
+    // park. Holding a task here makes the run park identically either way, so the
+    // assertion tests the resume invariant, not the backend that happens to be built.)
+    app.ai_task.spawn(|| {
+        crate::ai::Outcome::Error(crate::ai::AiError::Network {
+            status: None,
+            message: "held".into(),
+        })
+    });
+
     // A fresh launch offers to resume, and confirming rehydrates from the cursor.
     app.offer_pass_queue_resume();
     match &app.mode {
@@ -249,14 +262,18 @@ fn resuming_picks_up_from_the_cursor_not_the_top() {
         _ => panic!("expected the resume offer"),
     }
     app.on_key(key(KeyCode::Char('y')));
-    // The run rehydrated; because the local backend isn't compiled in this hermetic
-    // build, the remaining passes skip and the run drains — but it resumed from the
-    // cursor (the first pass was NOT re-run), and the queue file is now cleared.
-    assert!(!app.has_pass_queue_run(), "the resumed run drained");
-    assert!(
-        PassQueue::load(&dir).is_none(),
-        "a finished resume clears the queue file"
+    // The run rehydrated from the cursor: it picks up on the SECOND pass in the plan
+    // (characters · book 1, since a series runs each tracker across both books), not
+    // the top — the completed first pass (characters · book 0) was NOT re-run.
+    assert!(app.has_pass_queue_run(), "the resumed run is active");
+    assert_eq!(
+        app.pass_queue_current_for_test(),
+        Some((AiAction::Characters, 1)),
+        "resume picks up from the cursor (the second pass), not the top"
     );
+    // The durable cursor still records the one completed pass — resume never rewound
+    // it, so a second crash here would still lose nothing already done.
+    assert_eq!(app.pass_queue_done(), Some(1), "the cursor wasn't rewound");
 }
 
 #[test]
