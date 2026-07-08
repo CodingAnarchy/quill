@@ -382,6 +382,8 @@ fn an_annotated_span_is_marked_in_the_editor() {
         start: 0,
         end: 5,
         note: "check".into(),
+        replies: Vec::new(),
+        resolved: false,
     }];
 
     let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();

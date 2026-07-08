@@ -427,6 +427,7 @@ impl App {
             | Pending::ImportNotes
             | Pending::NewFromNotesSource
             | Pending::Annotate { .. }
+            | Pending::AnnotateReply { .. }
             | Pending::SetSceneSynopsis { .. }
             | Pending::NewFromNotesDest
             | Pending::ImportManuscriptSource
@@ -545,6 +546,11 @@ impl App {
                                 // Back to editing; the note anchors to its range (#302).
                                 self.mode = closed;
                                 self.create_annotation(start, end, text.to_string());
+                            }
+                            Pending::AnnotateReply { index } => {
+                                // Append the reply and re-open the review list (#889);
+                                // the setter drives the mode, so don't reset it here.
+                                self.add_annotation_reply(index, text.to_string());
                             }
                             Pending::SetSceneSynopsis {
                                 chapter,
@@ -772,6 +778,10 @@ impl App {
                         if matches!(pending, Pending::RenameBrowserProject) {
                             self.pending_manage = None;
                             self.reopen_project_browser();
+                        } else if let Pending::AnnotateReply { index } = pending {
+                            // A cancelled reply returns to the review list, not the
+                            // editor, so the author stays with the thread (#889).
+                            self.reopen_annotation_review(index);
                         } else {
                             self.mode = closed;
                         }

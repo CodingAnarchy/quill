@@ -878,6 +878,8 @@ impl Project {
                 start: a.start,
                 end: a.end,
                 note: a.note.clone(),
+                replies: a.replies.clone(),
+                resolved: a.resolved,
             })
             .collect();
         live.sort_by_key(|a| (a.start, a.end));
@@ -899,6 +901,8 @@ impl Project {
                 start: a.start,
                 end: a.end,
                 note: a.note.clone(),
+                replies: a.replies.clone(),
+                resolved: a.resolved,
             });
         }
         let path = self.root.join(ANNOTATIONS_NAME);

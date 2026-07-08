@@ -14,7 +14,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::App;
-use crate::annotation::{remap, Live};
+use crate::annotation::{Live, Remapper, Reply};
 use crate::mode::{Mode, Pending};
 
 impl App {
@@ -46,18 +46,22 @@ impl App {
         if edits.is_empty() {
             return;
         }
-        // Re-anchor every note through each edit, dropping any whose text is gone.
-        for edit in edits {
-            self.annotations
-                .retain_mut(|a| match remap((a.start, a.end), edit) {
-                    Some((s, e)) => {
-                        a.start = s;
-                        a.end = e;
-                        true
-                    }
-                    None => false,
-                });
-        }
+        // Re-anchor every note through the whole edit burst in one pass (#893):
+        // compose the deltas into a single coordinate map, then remap each note
+        // once. This is linear in the notes (plus near-linear in the edits to build
+        // the map), rather than the old walk-all-notes-per-edit — which was
+        // O(edits × notes) and turned an annotation-heavy chapter's idle remap
+        // quadratic. The result is identical to folding `remap` per edit.
+        let mapper = Remapper::new(&edits);
+        self.annotations
+            .retain_mut(|a| match mapper.remap_range(a.start, a.end) {
+                Some((s, e)) => {
+                    a.start = s;
+                    a.end = e;
+                    true
+                }
+                None => false,
+            });
         self.annotations.sort_by_key(|a| (a.start, a.end));
     }
 
@@ -86,6 +90,8 @@ impl App {
                     start: base + a.start,
                     end: base + a.end,
                     note: a.note,
+                    replies: a.replies,
+                    resolved: a.resolved,
                 });
             }
         }
@@ -229,6 +235,8 @@ impl App {
             start,
             end,
             note,
+            replies: Vec::new(),
+            resolved: false,
         });
         self.annotations.sort_by_key(|a| (a.start, a.end));
         self.persist_annotations();
@@ -246,13 +254,88 @@ impl App {
             selected: 0,
             filter: String::new(),
             typing: false,
+            show: crate::mode::AnnoShow::default(),
         };
     }
 
+    /// Re-open the review list with `index` selected (#889): the landing spot after
+    /// a reply prompt closes (confirmed or cancelled), so the author stays on the
+    /// thread. Falls back to the editor if every annotation is gone.
+    pub(crate) fn reopen_annotation_review(&mut self, index: usize) {
+        if self.annotations.is_empty() {
+            self.mode = self.editing_mode();
+            return;
+        }
+        let selected = index.min(self.annotations.len() - 1);
+        self.mode = Mode::Annotations {
+            selected,
+            filter: String::new(),
+            typing: false,
+            show: crate::mode::AnnoShow::default(),
+        };
+    }
+
+    /// Open the reply prompt for the annotation at `index` (#889): the author types
+    /// a follow-up that's appended to the thread on Enter. The thread's opening note
+    /// is shown as the prompt label so it's clear what's being replied to.
+    pub(crate) fn start_annotation_reply(&mut self, index: usize) {
+        let Some(a) = self.annotations.get(index) else {
+            return;
+        };
+        let label = format!("Reply to \"{}\": ", crate::text::ellipsize(&a.note, 30));
+        self.open_prompt(Pending::AnnotateReply { index }, label, "", None);
+    }
+
+    /// Append a reply to the annotation at `index` (#889) and re-open the review
+    /// list on it. An empty reply adds nothing but still returns to the list.
+    #[allow(clippy::needless_pass_by_value)] // the prompt hands over an owned string
+    pub(crate) fn add_annotation_reply(&mut self, index: usize, text: String) {
+        let text = text.trim().to_string();
+        if !text.is_empty() {
+            if let Some(a) = self.annotations.get_mut(index) {
+                a.replies.push(Reply {
+                    author: "author".to_string(),
+                    text,
+                });
+                self.persist_annotations();
+                self.message = Some("Reply added.".into());
+            }
+        }
+        self.reopen_annotation_review(index);
+    }
+
+    /// Toggle the resolved/open state of the annotation at `index` (#889): a
+    /// resolved thread is dimmed in the list and hidden by the open filter.
+    pub(crate) fn toggle_annotation_resolved(&mut self, index: usize) {
+        if let Some(a) = self.annotations.get_mut(index) {
+            a.resolved = !a.resolved;
+            let now = a.resolved;
+            self.persist_annotations();
+            self.message = Some(if now {
+                "Annotation resolved.".into()
+            } else {
+                "Annotation reopened.".into()
+            });
+            // Resolving may hide the row under the open filter; keep the selection on
+            // a still-visible note.
+            self.annotation_snap();
+        }
+    }
+
+    /// Cycle the resolved/open filter (#889): all → open → resolved → all. Snaps the
+    /// selection onto a note the new filter keeps visible.
+    pub(crate) fn cycle_annotation_show(&mut self) {
+        if let Mode::Annotations { show, .. } = &mut self.mode {
+            *show = show.next();
+        }
+        self.annotation_snap();
+    }
+
     /// Key handling for the annotation review list: move (skipping filtered-out
-    /// notes), jump (Enter), delete (`d`), close (Esc). `/` starts a type-to-filter
-    /// query (#822) that narrows the list to notes whose text or anchored snippet
-    /// match; Esc clears the filter before it closes the list.
+    /// notes), jump (Enter), reply (`a`, #889), resolve/reopen (`r`, #889), cycle
+    /// the open/resolved filter (`f`, #889), delete (`d`), close (Esc). `/` starts a
+    /// type-to-filter query (#822) that narrows the list to notes whose text or
+    /// anchored snippet match; Esc clears the filter before it closes the list.
     pub(crate) fn on_key_annotations(&mut self, key: KeyEvent) {
         let Mode::Annotations {
             selected, typing, ..
@@ -288,6 +371,9 @@ impl App {
                     buf.cursor = buf.cursor_at_byte(at);
                 }
             }
+            KeyCode::Char('a') if acts_on_selected => self.start_annotation_reply(selected),
+            KeyCode::Char('r') if acts_on_selected => self.toggle_annotation_resolved(selected),
+            KeyCode::Char('f') => self.cycle_annotation_show(),
             KeyCode::Char('d') if acts_on_selected => {
                 self.annotations.remove(selected);
                 self.persist_annotations();
@@ -346,17 +432,32 @@ impl App {
         matches!(&self.mode, Mode::Annotations { filter, .. } if !filter.is_empty())
     }
 
-    /// Whether the annotation at `index` passes the active filter (#822): a
-    /// case-insensitive substring match on its note text or the snippet of prose it
-    /// anchors. Clamped to the buffer so a stale offset never indexes past the end.
-    pub(crate) fn annotation_matches(&self, index: usize, q: &str) -> bool {
-        if q.is_empty() {
-            return true;
+    /// The active resolved/open filter (#889): `All` off the list.
+    const fn annotation_show(&self) -> crate::mode::AnnoShow {
+        match &self.mode {
+            Mode::Annotations { show, .. } => *show,
+            _ => crate::mode::AnnoShow::All,
         }
+    }
+
+    /// Whether the annotation at `index` passes both the text filter (#822) and the
+    /// resolved/open filter (#889). The text query is a case-insensitive substring
+    /// match on the note, any reply text, or the snippet of prose it anchors;
+    /// clamped to the buffer so a stale offset never indexes past the end.
+    pub(crate) fn annotation_matches(&self, index: usize, q: &str) -> bool {
         let Some(a) = self.annotations.get(index) else {
             return false;
         };
-        if a.note.to_lowercase().contains(q) {
+        // The resolved/open filter applies whether or not a text query is set.
+        if !self.annotation_show().admits(a.resolved) {
+            return false;
+        }
+        if q.is_empty() {
+            return true;
+        }
+        if a.note.to_lowercase().contains(q)
+            || a.replies.iter().any(|r| r.text.to_lowercase().contains(q))
+        {
             return true;
         }
         let len = self.edit_buffer().len_bytes();
@@ -475,6 +576,8 @@ impl App {
                     start: a.start.saturating_sub(*base),
                     end: a.end.saturating_sub(*base),
                     note: a.note.clone(),
+                    replies: a.replies.clone(),
+                    resolved: a.resolved,
                 })
                 .collect();
             if let Err(e) = self.project.set_chapter_annotations(file, &local) {

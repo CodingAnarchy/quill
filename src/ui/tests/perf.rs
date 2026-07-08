@@ -48,6 +48,8 @@ fn render_stays_within_a_frame() {
             start: i * 53,
             end: i * 53 + 5,
             note: "note".into(),
+            replies: Vec::new(),
+            resolved: false,
         })
         .collect();
 

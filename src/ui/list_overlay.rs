@@ -757,6 +757,35 @@ pub(super) fn draw_review_import(frame: &mut Frame, area: Rect, preview: &Review
     );
 }
 
+/// One annotation-list row (#302/#889): the marker + note over the dimmed snippet
+/// it anchors, prefixed with a check for a resolved thread and suffixed with a
+/// reply count. A resolved row is drawn dimmed throughout so it reads as done at a
+/// glance, distinct from the still-open notes.
+fn annotation_row(selected: bool, a: &crate::annotation::Live, snippet: String) -> Line<'static> {
+    let check = if a.resolved { "✓ " } else { "" };
+    let replies = match a.replies.len() {
+        0 => String::new(),
+        1 => "  (1 reply)".to_string(),
+        n => format!("  ({n} replies)"),
+    };
+    let primary = format!("{check}{}{replies}", a.note);
+    if a.resolved {
+        // A resolved thread reads as done: dim the whole row (still reversed when
+        // selected so the cursor is legible).
+        let dim = Style::default().fg(theme::current().dim);
+        let style = if selected {
+            dim.add_modifier(Modifier::REVERSED)
+        } else {
+            dim
+        };
+        return Line::from(vec![
+            Span::styled(format!("{}{primary}", marker(selected)), style),
+            Span::styled(format!("  — {snippet}"), dim),
+        ]);
+    }
+    list_row(selected, &primary, Some(snippet))
+}
+
 /// Render the active chapter's inline annotations (#302) as a navigable list:
 /// each row is the note over the (dimmed) snippet of text it's anchored to.
 pub(super) fn draw_annotations(
@@ -771,9 +800,14 @@ pub(super) fn draw_annotations(
     let title = format!(" Annotations ({}) ", app.annotations.len());
     // The type-to-filter query (#822) narrows to notes whose text or anchored
     // snippet match; the row index is preserved so the marker/click map align.
-    let (filter, typing) = match &app.mode {
-        crate::mode::Mode::Annotations { filter, typing, .. } => (filter.clone(), *typing),
-        _ => (String::new(), false),
+    let (filter, typing, show) = match &app.mode {
+        crate::mode::Mode::Annotations {
+            filter,
+            typing,
+            show,
+            ..
+        } => (filter.clone(), *typing, *show),
+        _ => (String::new(), false, crate::mode::AnnoShow::All),
     };
     let query = filter.to_lowercase();
     let visible: Vec<usize> = (0..app.annotations.len())
@@ -790,16 +824,26 @@ pub(super) fn draw_annotations(
             } else {
                 "(text gone)".to_string()
             };
-            list_row(i == selected, &a.note, Some(snippet))
+            annotation_row(i == selected, a, snippet)
         })
         .collect();
+    // The resolved/open filter (#889) is part of the list identity — surface which
+    // slice is showing and how to cycle it alongside the text filter.
+    let show_tag = match show {
+        crate::mode::AnnoShow::All => String::new(),
+        other => format!("[{}] ", other.label()),
+    };
     let help = if typing {
         format!("Filter: {filter}_")
     } else if filter.is_empty() {
-        "Annotations — ↑↓ move · enter jump · d delete · / filter · esc close".to_string()
+        format!(
+            "{show_tag}Annotations — ↑↓ move · enter jump · a reply · r resolve · \
+             f {} · d delete · / filter · esc close",
+            show.next().label()
+        )
     } else {
         format!(
-            "Filter “{}” — {} match{} · esc clears",
+            "{show_tag}Filter “{}” — {} match{} · esc clears",
             filter,
             visible.len(),
             if visible.len() == 1 { "" } else { "es" }
