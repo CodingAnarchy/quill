@@ -42,7 +42,17 @@ impl App {
     /// run-action menu / help, and shown once on first launch via
     /// [`maybe_offer_onboarding`](Self::maybe_offer_onboarding).
     pub(crate) fn open_onboarding(&mut self) {
-        self.overlay = Some(Overlay::onboarding(crate::onboarding::card_lines()));
+        // When the project opened read-only because another live Quill instance
+        // already holds it (#871), lead the card with a read-only banner (#885)
+        // so a first-run author sees why saves are refused — otherwise the card
+        // overlays the momentary open-time warning and hides it. The status bar
+        // also keeps a persistent read-only tag after the card is dismissed.
+        let mut lines = Vec::new();
+        if let Some(holder) = self.project.busy_holder() {
+            lines.extend(crate::onboarding::read_only_banner_lines(holder));
+        }
+        lines.extend(crate::onboarding::card_lines());
+        self.overlay = Some(Overlay::onboarding(lines));
     }
 
     /// On first launch, show the quick-start card once (#837). No-op when the card

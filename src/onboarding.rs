@@ -37,6 +37,28 @@ pub fn mark_shown() {
     let _ = config::set_values(&changes);
 }
 
+/// The read-only banner lines prepended to the quick-start card when the project
+/// opened read-only because it's already open in another live Quill instance
+/// (#871/#885). Without this, the open-time read-only warning is momentary and
+/// the first-run card overlays it, so a brand-new author never learns why their
+/// saves are refused. Bold and leading, so it reads before the tour; the same
+/// state also persists in the status bar after the card is dismissed. `holder`
+/// names the instance that already holds the project.
+pub fn read_only_banner_lines(holder: &str) -> Vec<Line<'static>> {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    vec![
+        Line::from(Span::styled(
+            "Read-only: this project is already open in another Quill instance.".to_string(),
+            bold,
+        )),
+        Line::from(Span::styled(
+            format!("Saves are disabled while {holder} holds it."),
+            bold,
+        )),
+        Line::raw(""),
+    ]
+}
+
 /// The quick-start card's rendered lines (#837): a short, bold-titled tour of the
 /// three things a new author most needs — the command palette, the core
 /// keybindings, and turning on the (opt-in, off-by-default) AI assistance. Pure
