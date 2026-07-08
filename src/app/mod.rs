@@ -528,6 +528,12 @@ pub struct App {
     /// text; cleared on button-up. A plain press-and-release (no drag) never uses
     /// it, so a click still just positions the cursor.
     pub(crate) mouse_anchor: Option<usize>,
+    /// Remembered group-collapse state per palette (#943), keyed by the palette's
+    /// title (e.g. "Run action"). A palette re-reads its saved set on open and
+    /// writes the author's collapse/expand changes back, so the groups they
+    /// collapsed stay collapsed across opens (within the session). The run-action
+    /// palette seeds this all-collapsed the first time it opens.
+    pub(crate) palette_collapsed: HashMap<&'static str, std::collections::HashSet<&'static str>>,
 }
 
 impl App {
@@ -679,6 +685,7 @@ impl App {
             message: None,
             clipboard: Box::new(crate::clipboard::Osc52Clipboard::new()),
             mouse_anchor: None,
+            palette_collapsed: HashMap::new(),
         };
         // Baselines + per-part counters for the daily word tally (sized to the
         // active book's parts; edits move each chapter from here).
