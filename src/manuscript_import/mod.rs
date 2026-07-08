@@ -62,7 +62,7 @@ mod odt;
 mod scriv;
 mod text;
 
-pub use docx::parse_docx;
+pub use docx::{extract_comments, parse_docx};
 pub use folder::parse_markdown_folder;
 pub use markdown::{chapter_level, heading_count, parse_markdown, parse_markdown_at};
 pub use odt::parse_odt;

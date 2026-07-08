@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use crate::app::ListLayout;
 use crate::mode::{
     Corkboard, Dashboard, DashboardRow, DirBrowser, Findings, History, HistoryRow, ImportPreview,
-    Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage,
+    Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage, ReviewImport,
 };
 use crate::project::Project;
 
@@ -690,6 +690,68 @@ pub(super) fn draw_import_preview(frame: &mut Frame, area: Rect, preview: &Impor
         area,
         &title,
         &help,
+        header,
+        Some(header_len + preview.scroll),
+    );
+}
+
+/// Render the review-comment import preview (#886): the reviewer's Word comments
+/// recovered from a marked-up `.docx`, split into those that matched the active
+/// chapter's prose (which will become annotations on merge) and the unmatched ones
+/// (whose commented phrase no longer appears — the prose drifted), reported rather
+/// than silently dropped. Enter merges the matches, Esc cancels.
+pub(super) fn draw_review_import(frame: &mut Frame, area: Rect, preview: &ReviewImport) {
+    use crate::text::ellipsize;
+
+    let dim = Style::default().fg(theme::current().dim);
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let m = preview.matched.len();
+    let d = preview.dropped.len();
+    let title = " Import review comments ".to_string();
+
+    let mut header = vec![Line::from(Span::styled(
+        format!(
+            "{m} comment{} will be added as annotations{}:",
+            if m == 1 { "" } else { "s" },
+            if d == 0 {
+                String::new()
+            } else {
+                format!("  ·  {d} unmatched (the prose changed)")
+            }
+        ),
+        bold,
+    ))];
+    header.push(Line::raw(""));
+    let header_len = header.len();
+
+    // The matched comments first (each becomes an annotation), then the dropped
+    // ones, dimmed and flagged so the author sees what didn't carry.
+    let mut i = 0;
+    for (_, _, note) in &preview.matched {
+        header.push(list_row(
+            i == preview.scroll,
+            &format!("+ {}", ellipsize(note, 60)),
+            None,
+        ));
+        i += 1;
+    }
+    for (phrase, note) in &preview.dropped {
+        let text = format!(
+            "✗ {}  (no match for \"{}\")",
+            ellipsize(note, 40),
+            ellipsize(phrase, 20)
+        );
+        header.push(Line::from(Span::styled(text, dim)));
+        i += 1;
+    }
+    let _ = i;
+
+    let help = "Review import — ↑↓ scroll · enter merge · esc cancel";
+    draw_list_overlay(
+        frame,
+        area,
+        &title,
+        help,
         header,
         Some(header_len + preview.scroll),
     );

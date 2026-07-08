@@ -631,6 +631,31 @@ pub struct ImportPreview {
     pub(crate) scroll: usize,
 }
 
+/// State for the review-comment import preview (#886): the reviewer's Word
+/// comments recovered from a marked-up `.docx`, resolved against the active
+/// chapter's prose. The matched comments will become live annotations; the
+/// unmatched ones (whose commented phrase no longer appears — the prose drifted)
+/// are reported, not silently dropped. Enter merges the matches into the chapter's
+/// annotations; Esc cancels and writes nothing.
+///
+/// Everything needed to create the annotations is captured here when the preview
+/// opens (the resolved byte spans against the chapter buffer), so the merge never
+/// re-reads the source or re-searches the prose.
+pub struct ReviewImport {
+    /// The source `.docx` path (read-only; never moved or altered).
+    pub(crate) source: PathBuf,
+    /// The chapter file the comments will be anchored into — the active chapter.
+    pub(crate) chapter: String,
+    /// The matched comments: `(start, end, note)` buffer byte spans against the
+    /// active chapter, each becoming one annotation on merge.
+    pub(crate) matched: Vec<(usize, usize, String)>,
+    /// The unmatched comments: `(phrase, note)` whose commented phrase no longer
+    /// appears in the prose — reported so the author knows what didn't carry.
+    pub(crate) dropped: Vec<(String, String)>,
+    /// The first visible row, so a long list scrolls.
+    pub(crate) scroll: usize,
+}
+
 /// Which step of the find / replace interaction is active.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SearchStage {

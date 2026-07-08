@@ -6,10 +6,14 @@
 
 use std::fmt::Write as _;
 
+use crossterm::event::{KeyCode, KeyEvent};
+
 use super::assist::write_failure_message;
 use super::bible_review::{Staged, StagedTally};
 use super::*;
 use crate::ai::scaffold;
+use crate::annotation::Live;
+use crate::mode::ReviewImport;
 
 /// The source stashed between an import wizard's two prompts (#508): the folder
 /// of notes to seed a new project's bible from (#286), or the manuscript file to
@@ -84,6 +88,154 @@ impl App {
             // The new project is now active; import the notes into its bible.
             self.import_notes(&folder.to_string_lossy());
         }
+    }
+
+    // --- Import review comments from a marked-up .docx (#886) -------------
+
+    /// Prompt for a marked-up `.docx` to import the reviewer's Word comments from
+    /// (#886) — the return leg of the review-copy export (#834). Available with AI
+    /// off (it's a mechanical import). Only in the single-chapter view, since it
+    /// anchors into the active chapter's prose; the run-action guard blocks it in
+    /// the continuous view, but re-report here for the direct entry point.
+    pub(crate) fn start_import_review_comments(&mut self) {
+        if self.manuscript.is_some() {
+            self.message =
+                Some("Leave the continuous view (Ctrl-l) before importing review comments.".into());
+            return;
+        }
+        self.open_prompt(
+            Pending::ImportReviewComments,
+            "Import review comments — path to a marked-up .docx:",
+            "",
+            None,
+        );
+    }
+
+    /// Read the chosen `.docx`, recover its Word comments (#886), resolve each
+    /// against the active chapter's prose, and open the review-import preview: the
+    /// matches that will become annotations and the unmatched ones (whose phrase no
+    /// longer appears — the prose drifted) reported rather than silently dropped.
+    /// Nothing is written until the author confirms the merge. The source is read
+    /// only — never moved or altered.
+    pub(crate) fn begin_import_review_comments(&mut self, file: &str) {
+        let path = std::path::Path::new(file.trim());
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !(path.is_file() && ext.eq_ignore_ascii_case("docx")) {
+            self.message = Some(format!("Not a .docx file: {}", path.display()));
+            self.mode = self.editing_mode();
+            return;
+        }
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.message = Some(format!("Couldn't read {}: {e}", path.display()));
+                self.mode = self.editing_mode();
+                return;
+            }
+        };
+        let comments = match crate::manuscript_import::extract_comments(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                self.message = Some(format!("Couldn't read {}: {e}", path.display()));
+                self.mode = self.editing_mode();
+                return;
+            }
+        };
+        if comments.is_empty() {
+            self.message = Some(format!("No review comments found in {}", path.display()));
+            self.mode = self.editing_mode();
+            return;
+        }
+
+        // Anchor each comment's phrase in the active chapter's live prose. A phrase
+        // that no longer appears (the prose drifted) is reported, not lost.
+        let prose = self.edit_buffer().text();
+        let chapter = self.project.active_file().to_string();
+        let mut matched: Vec<(usize, usize, String)> = Vec::new();
+        let mut dropped: Vec<(String, String)> = Vec::new();
+        for c in comments {
+            match find_phrase(&prose, &c.phrase) {
+                // Skip a span overlapping one already taken so a clean, disjoint
+                // anchoring is what the merge writes (Word can nest, Quill won't).
+                Some((s, e)) if !matched.iter().any(|&(ms, me, _)| s < me && ms < e) => {
+                    matched.push((s, e, c.note));
+                }
+                _ => dropped.push((c.phrase, c.note)),
+            }
+        }
+        matched.sort_by_key(|&(s, e, _)| (s, e));
+
+        self.mode = Mode::ReviewImport(Box::new(ReviewImport {
+            source: path.to_path_buf(),
+            chapter,
+            matched,
+            dropped,
+            scroll: 0,
+        }));
+    }
+
+    /// Handle a key while the review-import preview (#886) is open: arrows / j-k /
+    /// paging scroll the list, Enter merges the matched comments into the active
+    /// chapter's annotations, and Esc (or any other key) cancels — merging nothing.
+    pub(crate) fn on_key_review_import(&mut self, key: KeyEvent) {
+        let Mode::ReviewImport(preview) = &mut self.mode else {
+            return;
+        };
+        let last = (preview.matched.len() + preview.dropped.len()).saturating_sub(1);
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => preview.scroll = (preview.scroll + 1).min(last),
+            KeyCode::Up | KeyCode::Char('k') => preview.scroll = preview.scroll.saturating_sub(1),
+            KeyCode::PageDown => preview.scroll = (preview.scroll + 10).min(last),
+            KeyCode::PageUp => preview.scroll = preview.scroll.saturating_sub(10),
+            KeyCode::Home => preview.scroll = 0,
+            KeyCode::End => preview.scroll = last,
+            KeyCode::Enter => self.confirm_review_import(),
+            _ => {
+                self.mode = self.editing_mode();
+                self.message = Some("Review import cancelled.".into());
+            }
+        }
+    }
+
+    /// Confirm the review-import preview (#886): create one annotation per matched
+    /// comment on the active chapter, persist, and report the merge (with any
+    /// dropped-with-reason count). Runs only on the author's confirm — Esc merges
+    /// nothing. The matched spans were resolved against the buffer when the preview
+    /// opened, so no prose is re-searched here.
+    pub(crate) fn confirm_review_import(&mut self) {
+        let editing = self.editing_mode();
+        let Mode::ReviewImport(preview) = std::mem::replace(&mut self.mode, editing) else {
+            return;
+        };
+        let ReviewImport {
+            source,
+            chapter,
+            matched,
+            dropped,
+            ..
+        } = *preview;
+        let added = matched.len();
+        for (start, end, note) in matched {
+            self.annotations.push(Live {
+                chapter: chapter.clone(),
+                start,
+                end,
+                note,
+            });
+        }
+        self.annotations.sort_by_key(|a| (a.start, a.end));
+        if added > 0 {
+            self.persist_annotations();
+        }
+        let mut msg = format!(
+            "Imported {added} comment{} as annotations from {}",
+            if added == 1 { "" } else { "s" },
+            source.display()
+        );
+        if !dropped.is_empty() {
+            let _ = write!(msg, " ({} unmatched — the prose changed)", dropped.len());
+        }
+        self.message = Some(msg);
     }
 
     // --- New project from an existing manuscript (#298) -------------------
@@ -465,6 +617,47 @@ impl App {
     }
 }
 
+/// Find the byte range of `phrase` within `prose` for a review-comment import
+/// (#886). The commented phrase recovered from the `.docx` is emphasis-flattened
+/// (it's the reader-visible run text), while the chapter body still carries its
+/// `*`/`**` markers, so an exact match is tried first and, failing that, the match
+/// is retried against the body with emphasis markers elided — mapping the hit back
+/// to real body offsets. `None` when the phrase no longer appears (the prose
+/// drifted), so the caller can report it rather than anchor it wrongly.
+fn find_phrase(prose: &str, phrase: &str) -> Option<(usize, usize)> {
+    let needle = phrase.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    // The common case: the phrase carried no emphasis, so it's present verbatim.
+    if let Some(start) = prose.find(needle) {
+        return Some((start, start + needle.len()));
+    }
+    // Otherwise match against the body with `*` markers skipped, keeping a map from
+    // each stripped byte back to its offset in the original prose so the range maps
+    // back exactly. Emphasis markers are ASCII `*`, one byte each.
+    let mut stripped = String::with_capacity(prose.len());
+    let mut offsets: Vec<usize> = Vec::with_capacity(prose.len());
+    for (i, c) in prose.char_indices() {
+        if c == '*' {
+            continue;
+        }
+        for _ in 0..c.len_utf8() {
+            offsets.push(i);
+        }
+        stripped.push(c);
+    }
+    let at = stripped.find(needle)?;
+    let start = *offsets.get(at)?;
+    // The end maps to the original offset just past the last matched byte: the
+    // offset of the byte after the match, or the prose length at the very end.
+    let end = offsets
+        .get(at + needle.len())
+        .copied()
+        .unwrap_or(prose.len());
+    Some((start, end))
+}
+
 /// Read a manuscript into the shared parsed form, dispatching on extension
 /// (#401/#402/#593/#836): a `.docx` or `.odt` from its bytes, a `.scriv` bundle
 /// from its directory, a plain folder as one chapter per `.md` file, a `.txt` as
@@ -584,8 +777,44 @@ fn import_summary_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::import_warning_suffix;
+    use super::{find_phrase, import_warning_suffix};
     use crate::manuscript_import::Dropped;
+
+    #[test]
+    fn find_phrase_matches_plain_prose_verbatim() {
+        let prose = "The sea was grey and it ended.\n";
+        assert_eq!(find_phrase(prose, "grey"), Some((12, 16)));
+        assert_eq!(find_phrase(prose, "it ended"), Some((21, 29)));
+    }
+
+    #[test]
+    fn find_phrase_matches_across_emphasis_markers() {
+        // The commented phrase is emphasis-flattened ("grey sea"), but the body
+        // still carries the `*` markers; the match spans them and reports the real
+        // body offsets.
+        let prose = "The *grey sea* rolled.";
+        let (s, e) = find_phrase(prose, "grey sea").expect("matches across markers");
+        assert_eq!(
+            &prose[s..e],
+            "grey sea",
+            "the span covers exactly the phrase"
+        );
+        // A phrase inside a bold run matches too.
+        let prose = "It **finally ended** there.";
+        let (s, e) = find_phrase(prose, "finally ended").expect("matches inside bold");
+        assert_eq!(&prose[s..e], "finally ended");
+    }
+
+    #[test]
+    fn find_phrase_returns_none_when_the_prose_drifted() {
+        // "grey" became "gray" — the phrase no longer appears anywhere.
+        assert_eq!(find_phrase("The sea was gray.", "grey"), None);
+        assert_eq!(
+            find_phrase("anything", "   "),
+            None,
+            "an empty phrase never matches"
+        );
+    }
 
     #[test]
     fn clean_import_has_no_warning_suffix() {
