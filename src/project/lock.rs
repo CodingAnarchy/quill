@@ -18,6 +18,13 @@
 //! The guard is RAII: dropping [`InstanceLock`] removes the file it created, so
 //! the lock lifecycle lives with the [`Project`](super::Project) that owns it and
 //! never needs a release call in the quit path.
+//!
+//! A lock can also go stale *after* open: the holder crashes while we're already
+//! running read-only, so the lock we deferred to is now a dead pid (#890).
+//! [`recheck`] re-runs the same classification on an idle tick so the project
+//! reclaims a now-stale lock and becomes writable without a restart — a
+//! genuinely-live holder (or a different-host / undecidable lock) still keeps us
+//! read-only, exactly as at open.
 
 use std::fs::{self, File};
 #[cfg(test)]
@@ -235,6 +242,41 @@ pub fn acquire(root: &Path) -> LockOutcome {
     }
 }
 
+/// The outcome of an idle re-check of a project we're currently running
+/// read-only on ([`recheck`]).
+pub enum RecheckOutcome {
+    /// The lock we deferred to at open is now stale (its same-host holder is gone,
+    /// or it was torn): we reclaimed it. The project can become writable; the
+    /// carried [`InstanceLock`] must be installed so its `Drop` later releases it.
+    Reclaimed(InstanceLock),
+    /// The lock is still held by a live instance (or a different-host / undecidable
+    /// lock, or it couldn't be probed): stay read-only. Nothing changed.
+    StillBusy,
+}
+
+/// Re-check a project we're currently running read-only on and reclaim the lock
+/// if it has *become* stale since open (#890): the same-host holder crashed while
+/// we were deferring to it, so its pid is no longer alive (or the file was torn).
+///
+/// This is the idle-tick counterpart to [`acquire`]: it runs the identical
+/// staleness classification, so a genuinely-live holder — or a different-host /
+/// undecidable lock — keeps us read-only (no regression to #871), while a
+/// provably-dead same-host lock is reclaimed and the caller can flip to writable.
+/// It only ever *takes* the lock when it can prove the old holder is gone, so it
+/// never steals a live instance's lock.
+///
+/// Kept small and additive: it delegates the whole decision to [`acquire`], which
+/// already reclaims a dead same-host / torn lock and honors a live or different-
+/// host one. A filesystem hiccup surfaces as [`RecheckOutcome::StillBusy`] — we
+/// simply stay read-only until the next tick rather than treat a transient read
+/// error as a reclaim.
+pub fn recheck(root: &Path) -> RecheckOutcome {
+    match acquire(root) {
+        LockOutcome::Held(lock) => RecheckOutcome::Reclaimed(lock),
+        LockOutcome::Busy { .. } => RecheckOutcome::StillBusy,
+    }
+}
+
 /// The distinct ways an exclusive-create attempt can fail: the file already
 /// exists (someone holds it) vs. a real filesystem error.
 enum TryError {
@@ -386,6 +428,73 @@ mod tests {
             }
             LockOutcome::Held(_) => panic!("a different-host lock must not be reclaimed"),
         }
+    }
+
+    // The idle re-check reclaims a lock that went stale *after* open: we were
+    // running read-only against a live holder, it crashed, and its pid is now
+    // dead. The re-check reclaims it so the caller can flip to writable.
+    #[test]
+    fn recheck_reclaims_a_now_stale_lock() {
+        let root = tmpdir("recheck-stale");
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        // The former holder, now crashed: our host, a pid that can't be alive.
+        let dead = Holder {
+            pid: 1 << 30,
+            host: hostname(),
+            token: 0,
+        };
+        fs::write(path(&root), dead.serialize()).unwrap();
+
+        match recheck(&root) {
+            RecheckOutcome::Reclaimed(_lock) => {
+                assert_eq!(
+                    recorded_pid(&root),
+                    Some(std::process::id() as i32),
+                    "the reclaimed lock now records our pid"
+                );
+            }
+            RecheckOutcome::StillBusy => panic!("a now-dead same-host lock must be reclaimed"),
+        }
+    }
+
+    // The idle re-check must NOT reclaim a lock still held by a live instance:
+    // no regression to the #871 protection while we run read-only.
+    #[cfg(unix)]
+    #[test]
+    fn recheck_respects_a_live_holder() {
+        let root = tmpdir("recheck-live");
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        let live_other = Holder {
+            pid: 1, // init/launchd — always alive, never our pid
+            host: hostname(),
+            token: 0,
+        };
+        fs::write(path(&root), live_other.serialize()).unwrap();
+
+        assert!(
+            matches!(recheck(&root), RecheckOutcome::StillBusy),
+            "a live holder must keep us read-only on re-check"
+        );
+        assert_eq!(recorded_pid(&root), Some(1), "the live lock is untouched");
+    }
+
+    // A different-host lock stays honored on re-check: we can't probe another
+    // machine's processes, so it's never assumed stale.
+    #[test]
+    fn recheck_honors_a_different_host_lock() {
+        let root = tmpdir("recheck-otherhost");
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        let other = Holder {
+            pid: std::process::id() as i32,
+            host: "some-other-machine".to_string(),
+            token: 0,
+        };
+        fs::write(path(&root), other.serialize()).unwrap();
+
+        assert!(
+            matches!(recheck(&root), RecheckOutcome::StillBusy),
+            "a different-host lock must stay honored on re-check"
+        );
     }
 
     #[test]
