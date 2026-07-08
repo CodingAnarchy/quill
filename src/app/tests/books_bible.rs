@@ -414,6 +414,7 @@ fn jumping_to_a_cross_book_finding_switches_books() {
         chapters: vec!["Dusk".into()],
         book: Some(1),
         action: None,
+        corroborators: Vec::new(),
     });
     app.open_triage();
     assert!(matches!(app.mode, Mode::Findings(_)));

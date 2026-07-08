@@ -609,6 +609,7 @@ impl Project {
                 note: a.note.clone(),
                 replies: a.replies.clone(),
                 resolved: a.resolved,
+                reviewer: a.reviewer.clone(),
             })
             .collect();
         live.sort_by_key(|a| (a.start, a.end));
@@ -632,6 +633,7 @@ impl Project {
                 note: a.note.clone(),
                 replies: a.replies.clone(),
                 resolved: a.resolved,
+                reviewer: a.reviewer.clone(),
             });
         }
         let path = self.root.join(ANNOTATIONS_NAME);

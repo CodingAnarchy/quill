@@ -147,9 +147,22 @@ impl App {
         message: &str,
         run: impl FnOnce(&dyn Backend, String, String) -> Outcome + Send + 'static,
     ) {
-        let model = self.ai.model.clone();
+        let model = self.pass_cloud_model();
         let manuscript = self.manuscript_text();
         self.spawn_outcome(message, move |backend| run(backend, manuscript, model));
+    }
+
+    /// The cloud model the next manuscript request should build with (#930): the
+    /// one-shot the per-action router armed in `route_request` (a light, small pass
+    /// stepped down to a cheaper tier), or the session `[ai] model` when nothing was
+    /// armed (heavy passes, and anything that skipped the picker). Consumed here so
+    /// a choice never leaks into a later request. The *local* backend ignores this
+    /// (it picks its own on-device model, `routed_model`); the model only shapes the
+    /// Claude request the build closure assembles.
+    fn pass_cloud_model(&self) -> String {
+        self.routed_cloud_model
+            .take()
+            .unwrap_or_else(|| self.ai.model.clone())
     }
 
     /// Spawn a manuscript analysis pass (#425): `build` makes the request from the

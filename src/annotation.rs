@@ -23,6 +23,12 @@ pub struct Reply {
     pub text: String,
 }
 
+/// The label the review list shows (and filters by) for an annotation whose
+/// `reviewer` is unset — a note the author left themselves, rather than one
+/// imported from a named reviewer's comment (#933). Also the bucket a
+/// per-reviewer filter groups every author-authored note under.
+pub const AUTHOR_LABEL: &str = "you";
+
 /// One annotation as stored on disk: a chapter-local byte range plus the note.
 /// `chapter` is the chapter's file name — the stable key that survives reordering
 /// and retitling.
@@ -31,6 +37,11 @@ pub struct Reply {
 /// single-note annotation loads with no replies and open, so the on-disk format
 /// stays backward-compatible (both fields `#[serde(default)]`, and omitted from
 /// output when at their default so a plain note round-trips unchanged).
+///
+/// `reviewer` (#933) is the named editor/beta-reader an imported comment came from
+/// (#886); `None` is a note the author left themselves. Like the thread fields
+/// it's `#[serde(default)]` and skipped when unset, so a pre-reviewer annotation
+/// loads (as author-authored) and a plain note still round-trips unchanged.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Annotation {
     pub chapter: String,
@@ -41,6 +52,8 @@ pub struct Annotation {
     pub replies: Vec<Reply>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub resolved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<String>,
 }
 
 /// The `annotations.toml` side file: a flat array of `[[annotation]]` tables.
@@ -67,6 +80,19 @@ pub struct Live {
     /// show and toggle them; persisted back to disk with the note.
     pub replies: Vec<Reply>,
     pub resolved: bool,
+    /// The named reviewer an imported comment came from (#886/#933), or `None` for
+    /// an author-authored note; carried live so the review list can group, filter,
+    /// and sort by it, and persisted back to disk with the note.
+    pub reviewer: Option<String>,
+}
+
+impl Live {
+    /// The reviewer label the review list shows and filters by (#933): the named
+    /// reviewer, or [`AUTHOR_LABEL`] for a note the author left themselves.
+    #[must_use]
+    pub fn reviewer_label(&self) -> &str {
+        self.reviewer.as_deref().unwrap_or(AUTHOR_LABEL)
+    }
 }
 
 /// Shift a byte range through one edit `(start, old_end, new_end)` — bytes

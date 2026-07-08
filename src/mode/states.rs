@@ -216,6 +216,56 @@ pub struct Finding {
     /// and history rows — and for findings restored from the durable store, which
     /// records content, not the pass (a fresh pass re-attributes them).
     pub(crate) action: Option<AiAction>,
+    /// Other passes that independently raised the *same span* (#921): cross-pass
+    /// consensus. `kind` is this finding's own pass; `corroborators` holds the
+    /// additional passes that flagged the same chapters + summary, so the health
+    /// view can weight a finding by agreement ("flagged by continuity + plot").
+    /// Empty for a lone finding. Not part of identity — merging corroborators
+    /// never changes which finding this *is* — so triage dedup and dismiss-matching
+    /// stay keyed on content alone.
+    pub(crate) corroborators: Vec<FindingKind>,
+}
+
+impl Finding {
+    /// Every pass that agrees on this finding (#921): its own `kind` first, then
+    /// the corroborating passes, de-duplicated and in first-seen order. One pass
+    /// means no consensus; two or more is cross-pass agreement.
+    pub(crate) fn agreement(&self) -> Vec<FindingKind> {
+        let mut passes = vec![self.kind];
+        for &k in &self.corroborators {
+            if !passes.contains(&k) {
+                passes.push(k);
+            }
+        }
+        passes
+    }
+
+    /// Fold `other`'s passes into this finding's corroborators (#921) when a second
+    /// pass raises the same span. Records `other`'s own kind and any consensus it
+    /// already carried, skipping this finding's own kind and duplicates, so the
+    /// agreement set stays a clean union.
+    pub(crate) fn corroborate(&mut self, other: &Self) {
+        for k in other.agreement() {
+            if k != self.kind && !self.corroborators.contains(&k) {
+                self.corroborators.push(k);
+            }
+        }
+    }
+
+    /// The cross-pass agreement signal (#921): `None` when a single pass raised
+    /// this finding, or `Some("flagged by continuity + plot")` when passes agree —
+    /// the consensus weight the findings list and health dashboard show. Passes are
+    /// listed in agreement order (the primary first), lower-cased to read as a
+    /// fragment. The single place the signal's wording lives, so the list, the
+    /// dashboard, and its export stay identical.
+    pub(crate) fn agreement_signal(&self) -> Option<String> {
+        let passes = self.agreement();
+        if passes.len() < 2 {
+            return None;
+        }
+        let labels: Vec<String> = passes.iter().map(|k| k.label().to_lowercase()).collect();
+        Some(format!("flagged by {}", labels.join(" + ")))
+    }
 }
 
 /// Identity is the finding's *content* — kind, summary, chapters, and book — not
@@ -225,6 +275,9 @@ pub struct Finding {
 /// persisted `kind`) still matches the one a fresh pass produces, so triage dedup
 /// and dismiss-matching stay intact. `kind` sharpens cross-pass dedup (#827): two
 /// passes flagging the same span with coincidentally identical text stay distinct.
+/// `corroborators` (#921) is *not* part of identity — folding in an agreeing pass
+/// weights a finding by consensus without changing which finding it is, so re-check
+/// and dismiss-matching keep working on the merged finding.
 impl PartialEq for Finding {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
@@ -651,9 +704,11 @@ pub struct ReviewImport {
     pub(crate) source: PathBuf,
     /// The chapter file the comments will be anchored into — the active chapter.
     pub(crate) chapter: String,
-    /// The matched comments: `(start, end, note)` buffer byte spans against the
-    /// active chapter, each becoming one annotation on merge.
-    pub(crate) matched: Vec<(usize, usize, String)>,
+    /// The matched comments: `(start, end, note, reviewer)` buffer byte spans
+    /// against the active chapter, each becoming one annotation on merge. The
+    /// reviewer (#933) is the named editor the comment came from, `None` when the
+    /// source didn't attribute it.
+    pub(crate) matched: Vec<(usize, usize, String, Option<String>)>,
     /// The unmatched comments: `(phrase, note)` whose commented phrase no longer
     /// appears in the prose — reported so the author knows what didn't carry.
     pub(crate) dropped: Vec<(String, String)>,

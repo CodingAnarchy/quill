@@ -163,7 +163,7 @@ fn review_import_lists_matches_and_dropped_comments() {
     app.mode = Mode::ReviewImport(Box::new(ReviewImport {
         source: std::path::PathBuf::from("/tmp/book-review.docx"),
         chapter: "one.md".into(),
-        matched: vec![(12, 16, "vivid word".into())],
+        matched: vec![(12, 16, "vivid word".into(), None)],
         dropped: vec![("gray waves".into(), "check this".into())],
         scroll: 0,
     }));
@@ -196,7 +196,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
     // The review list (#302/#889) renders a resolved note distinctly (a ✓ + a reply
     // count), and its help line advertises the reply / resolve / filter keys.
     use crate::annotation::{Live, Reply};
-    use crate::mode::{AnnoShow, Mode};
+    use crate::mode::{AnnoShow, AnnoSort, Mode};
 
     let mut app = app_with("The night was long.\n");
     app.annotations = vec![
@@ -207,6 +207,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
             note: "still thinking".into(),
             replies: Vec::new(),
             resolved: false,
+            reviewer: None,
         },
         Live {
             chapter: "one.md".into(),
@@ -218,6 +219,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
                 text: "done".into(),
             }],
             resolved: true,
+            reviewer: None,
         },
     ];
     app.mode = Mode::Annotations {
@@ -225,6 +227,8 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
         filter: String::new(),
         typing: false,
         show: AnnoShow::All,
+        sort: AnnoSort::default(),
+        reviewer: None,
     };
 
     let screen = render(&app, 90, 20);
@@ -240,9 +244,16 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
         screen.contains("(1 reply)"),
         "the reply count shows on the thread:\n{screen}"
     );
+    // The thread keys and the triage keys (#933) are advertised in the help line.
+    // The line wraps in this width, so check for tokens that don't straddle a wrap.
     assert!(
-        screen.contains("a reply") && screen.contains("r resolve") && screen.contains("f open"),
-        "the thread keys are advertised in the help line:\n{screen}"
+        screen.contains("reply")
+            && screen.contains("resolve")
+            && screen.contains("f open")
+            && screen.contains("sort")
+            && screen.contains("reviewer")
+            && screen.contains("next/prev open"),
+        "the thread + triage keys are advertised in the help line:\n{screen}"
     );
 }
 

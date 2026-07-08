@@ -15,6 +15,7 @@
 use crate::ai::cost::Estimate;
 use crate::ai::model_select::STANDARD_CONTEXT_TOKENS;
 use crate::ai::BackendKind;
+use crate::mode::ModelWeight;
 
 /// The author's routing preference, from `[ai] routing`. It's a config *value*, so
 /// the enum now lives in [`config::Policy`](crate::config::Policy) alongside the
@@ -214,6 +215,55 @@ fn cloudish_reason(over: bool, reason: &str) -> Route {
     }
 }
 
+/// The default heavy-tier Claude model (#930). Matches
+/// [`config::ai::default_ai_model`] — a pass that runs on the *unchanged* default
+/// `[ai] model` is a candidate for the light step-down; a pass on an author-chosen
+/// model is not (the author's choice is the override, and it wins). Kept in sync
+/// with the config default: if the default lineup changes, update both.
+pub const DEFAULT_CLOUD_MODEL: &str = "claude-opus-4-8";
+
+/// The cheaper/faster Claude model a light, small pass steps down to (#930) — the
+/// Haiku tier, the same model the naming pass already pins. Chosen for the
+/// high-frequency light passes (style flags, marketing copy) when the estimate is
+/// below [`LIGHT_STEPDOWN_TOKENS`], where the top model's depth isn't needed.
+pub const LIGHT_CLOUD_MODEL: &str = "claude-haiku-4-5";
+
+/// Below this many estimated input tokens a [`Light`](ModelWeight::Light) pass is
+/// small enough to run on the cheaper [`LIGHT_CLOUD_MODEL`] without a meaningful
+/// quality loss (#930). A larger light pass — a whole-manuscript style scan —
+/// keeps the top model, since the extra context is where a cheaper model would
+/// start to miss things. Deliberately generous: a single-chapter or scene-sized
+/// pass (≈ a few thousand tokens) drops to the cheap tier; a book-sized one does not.
+pub const LIGHT_STEPDOWN_TOKENS: u32 = 12_000;
+
+/// Pick *which* cloud (Claude) model runs an action once routing has chosen the
+/// cloud backend (#930) — pure, so it's table-tested alongside [`route`]. The
+/// choice is the author's configured `[ai] model` (`configured`) by default, and
+/// steps down to the cheaper [`LIGHT_CLOUD_MODEL`] only when **all** hold:
+///
+/// - the pass is [`Light`](ModelWeight::Light) (a naming/style-flag-class scan,
+///   not a heavy continuity/characterization reasoning pass), and
+/// - its estimate is under [`LIGHT_STEPDOWN_TOKENS`] (small enough that the top
+///   model's depth isn't needed), and
+/// - the author hasn't overridden `[ai] model` — `configured` is still the
+///   [`DEFAULT_CLOUD_MODEL`]. An explicit model choice is a deliberate override
+///   and wins for every pass; only the *default* is eligible to be stepped down.
+///
+/// Heavy passes always run on `configured`. The picker never changes *what* a pass
+/// produces — only which model runs it — and it's independent of the offline/local
+/// pins and the cost ceiling (those are [`route`]'s job; this is called only after
+/// [`route`] has already resolved the backend to Claude).
+pub fn pick_cloud_model(weight: ModelWeight, est_tokens: u32, configured: &str) -> &str {
+    let can_step_down = matches!(weight, ModelWeight::Light)
+        && est_tokens < LIGHT_STEPDOWN_TOKENS
+        && configured == DEFAULT_CLOUD_MODEL;
+    if can_step_down {
+        LIGHT_CLOUD_MODEL
+    } else {
+        configured
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,5 +402,112 @@ mod tests {
         let mut big = inputs(Policy::Ask, est(0.80, 100_000));
         big.local_fits = false;
         assert_eq!(route(&big).confirm, Some(Confirm { offer_local: false }));
+    }
+
+    // --- per-action cloud model picker (#930) --------------------------------
+
+    #[test]
+    fn heavy_passes_always_use_the_configured_model() {
+        // A heavy reasoning pass keeps the top model regardless of size — even a
+        // tiny one, where a light pass would step down.
+        for tokens in [
+            500,
+            LIGHT_STEPDOWN_TOKENS - 1,
+            LIGHT_STEPDOWN_TOKENS,
+            100_000,
+        ] {
+            assert_eq!(
+                pick_cloud_model(ModelWeight::Heavy, tokens, DEFAULT_CLOUD_MODEL),
+                DEFAULT_CLOUD_MODEL,
+                "heavy @ {tokens} tokens keeps the top model",
+            );
+        }
+    }
+
+    #[test]
+    fn light_small_passes_step_down_to_the_cheaper_tier() {
+        // A light, small pass on the default model drops to the cheaper/faster tier.
+        assert_eq!(
+            pick_cloud_model(ModelWeight::Light, 2_000, DEFAULT_CLOUD_MODEL),
+            LIGHT_CLOUD_MODEL,
+        );
+        // Just under the step-down ceiling still steps down…
+        assert_eq!(
+            pick_cloud_model(
+                ModelWeight::Light,
+                LIGHT_STEPDOWN_TOKENS - 1,
+                DEFAULT_CLOUD_MODEL
+            ),
+            LIGHT_CLOUD_MODEL,
+        );
+    }
+
+    #[test]
+    fn light_large_passes_keep_the_top_model() {
+        // A big light pass (a whole-manuscript style scan) is where a cheaper model
+        // would start to miss things, so it keeps the top model. At the ceiling and
+        // above it does not step down.
+        assert_eq!(
+            pick_cloud_model(
+                ModelWeight::Light,
+                LIGHT_STEPDOWN_TOKENS,
+                DEFAULT_CLOUD_MODEL
+            ),
+            DEFAULT_CLOUD_MODEL,
+        );
+        assert_eq!(
+            pick_cloud_model(ModelWeight::Light, 80_000, DEFAULT_CLOUD_MODEL),
+            DEFAULT_CLOUD_MODEL,
+        );
+    }
+
+    #[test]
+    fn an_author_model_override_wins_for_every_pass() {
+        // When the author has pinned a non-default `[ai] model`, that choice is the
+        // override and is used verbatim — a light, small pass does NOT step down
+        // away from it (the override is deliberate).
+        let pinned = "claude-sonnet-4-6";
+        assert_eq!(
+            pick_cloud_model(ModelWeight::Light, 1_000, pinned),
+            pinned,
+            "a small light pass respects the author's pinned model",
+        );
+        assert_eq!(pick_cloud_model(ModelWeight::Heavy, 1_000, pinned), pinned,);
+        // Even if the author pins the Haiku tier itself, it's returned as-is.
+        assert_eq!(
+            pick_cloud_model(ModelWeight::Heavy, 100_000, LIGHT_CLOUD_MODEL),
+            LIGHT_CLOUD_MODEL,
+        );
+    }
+
+    #[test]
+    fn the_picker_is_independent_of_the_offline_and_ceiling_route() {
+        // The picker only chooses *which* cloud model; it never decides local-vs-
+        // cloud. That stays `route`'s job — a smoke check that the two are separate
+        // functions with no shared branch: a light small pass steps down here even
+        // though `route` (given the same size, over threshold) would send it local.
+        let stepped = pick_cloud_model(ModelWeight::Light, 2_000, DEFAULT_CLOUD_MODEL);
+        assert_eq!(stepped, LIGHT_CLOUD_MODEL);
+        // And the cost estimate reflects the chosen model: the cheaper tier quotes
+        // strictly less than the top model for the identical request.
+        let chars = 2_000 * 4;
+        let light = crate::ai::cost::estimate(chars, 4096, LIGHT_CLOUD_MODEL, false);
+        let heavy = crate::ai::cost::estimate(chars, 4096, DEFAULT_CLOUD_MODEL, false);
+        assert!(
+            light.dollars < heavy.dollars,
+            "cost reflects the model: {} (light) < {} (heavy)",
+            light.dollars,
+            heavy.dollars,
+        );
+    }
+
+    #[test]
+    fn the_default_cloud_model_matches_the_config_default() {
+        // The step-down only applies to the *unchanged* default `[ai] model`, so
+        // this constant must equal the config default or the step-down never fires.
+        assert_eq!(
+            DEFAULT_CLOUD_MODEL,
+            crate::config::AiConfig::default().model
+        );
     }
 }

@@ -509,7 +509,32 @@ impl App {
         self.routed_backend.set(Some(backend));
         if backend == BackendKind::Local {
             self.routed_model.set(self.pick_local_model(action, force));
+            // A local pass never uses a per-action cloud model — clear any one-shot
+            // a prior (cancelled) cloud route may have armed, so it can't leak.
+            self.routed_cloud_model.set(None);
+        } else {
+            // Cloud: arm the per-action model the pass's weight + estimate resolved
+            // to (#930), so the request runs on the chosen tier rather than always
+            // the session `[ai] model`. Only for the costed manuscript passes — an
+            // interactive/local action has no `cost_profile`, so it keeps the
+            // session model (the one-shot stays `None`).
+            self.routed_cloud_model
+                .set(self.cloud_model_override(action, force));
         }
+    }
+
+    /// The per-action cloud model to arm for this request (#930), or `None` when
+    /// the pass keeps the session `[ai] model`: `Some` only for a costed manuscript
+    /// pass whose picker chose a model *different* from the session one (a light,
+    /// small pass stepped down to the cheaper tier). A heavy pass — or any pass the
+    /// picker leaves on the configured model — arms nothing, so the existing
+    /// `self.ai.model` path is untouched.
+    fn cloud_model_override(&self, action: AiAction, force: bool) -> Option<String> {
+        if action.cost() != AiCost::Manuscript {
+            return None;
+        }
+        let chosen = self.cloud_model_for(action, self.pass_context_len(action, force));
+        (chosen != self.ai.model).then(|| chosen.to_string())
     }
 
     /// The local model best suited to this action (#377): the router picks from the
@@ -558,7 +583,7 @@ impl App {
     /// ([`start_ai_action`]) and the workflow runner (#227) so a workflow's AI
     /// step follows the same cost policy.
     pub(crate) fn ai_action_start(&self, action: AiAction, force: bool) -> AiStart {
-        let Some((model, max_tokens)) = self.cost_profile(action) else {
+        let Some((model, max_tokens)) = self.cost_profile(action, force) else {
             // Interactive / image action — no costed pass to route; run on the
             // session backend (which an `offline` pin / the in-app switch resolve).
             return AiStart::Run(self.ai.backend());
@@ -616,12 +641,29 @@ impl App {
     /// live AI settings. `None` for the local / interactive / image actions
     /// (Ask, Triage, Brainstorm, the drafts, the portraits/scene, the thesaurus),
     /// which issue no costed whole-manuscript pass.
-    fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
+    fn cost_profile(&self, action: AiAction, force: bool) -> Option<(&str, u32)> {
         match action.cost() {
             AiCost::None => None,
             AiCost::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
-            AiCost::Manuscript => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
+            // Per-action model routing (#930): a heavy reasoning pass runs on the
+            // configured top model; a light, small one can drop to a cheaper tier.
+            // The estimate below then reflects whichever model is chosen, and the
+            // same model is armed as the one-shot cloud model the request uses.
+            AiCost::Manuscript => Some((
+                self.cloud_model_for(action, self.pass_context_len(action, force)),
+                ai::MAX_OUTPUT_TOKENS,
+            )),
         }
+    }
+
+    /// The cloud (Claude) model this action's manuscript pass will run on (#930):
+    /// the pure per-action picker applied to the pass's weight, its token estimate
+    /// (`context_chars / 4`, the same figure the cost estimate uses), and the
+    /// author's configured `[ai] model` — a heavy pass keeps the top model, a
+    /// light, small one drops to the cheaper tier, and an author-set model always
+    /// wins. Borrows from `self` (either `self.ai.model` or a `'static` tier id).
+    fn cloud_model_for(&self, action: AiAction, context_len: usize) -> &str {
+        router::pick_cloud_model(action.weight(), (context_len / 4) as u32, &self.ai.model)
     }
 
     /// Dispatch an AI action to its handler. Shared by the palette and the cost

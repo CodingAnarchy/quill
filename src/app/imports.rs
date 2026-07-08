@@ -151,19 +151,19 @@ impl App {
         // that no longer appears (the prose drifted) is reported, not lost.
         let prose = self.edit_buffer().text();
         let chapter = self.project.active_file().to_string();
-        let mut matched: Vec<(usize, usize, String)> = Vec::new();
+        let mut matched: Vec<(usize, usize, String, Option<String>)> = Vec::new();
         let mut dropped: Vec<(String, String)> = Vec::new();
         for c in comments {
             match find_phrase(&prose, &c.phrase) {
                 // Skip a span overlapping one already taken so a clean, disjoint
                 // anchoring is what the merge writes (Word can nest, Quill won't).
-                Some((s, e)) if !matched.iter().any(|&(ms, me, _)| s < me && ms < e) => {
-                    matched.push((s, e, c.note));
+                Some((s, e)) if !matched.iter().any(|&(ms, me, ..)| s < me && ms < e) => {
+                    matched.push((s, e, c.note, c.reviewer));
                 }
                 _ => dropped.push((c.phrase, c.note)),
             }
         }
-        matched.sort_by_key(|&(s, e, _)| (s, e));
+        matched.sort_by_key(|&(s, e, ..)| (s, e));
 
         self.mode = Mode::ReviewImport(Box::new(ReviewImport {
             source: path.to_path_buf(),
@@ -215,7 +215,7 @@ impl App {
             ..
         } = *preview;
         let added = matched.len();
-        for (start, end, note) in matched {
+        for (start, end, note, reviewer) in matched {
             self.annotations.push(Live {
                 chapter: chapter.clone(),
                 start,
@@ -223,6 +223,7 @@ impl App {
                 note,
                 replies: Vec::new(),
                 resolved: false,
+                reviewer,
             });
         }
         self.annotations.sort_by_key(|a| (a.start, a.end));
