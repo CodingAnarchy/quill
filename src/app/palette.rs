@@ -648,12 +648,14 @@ impl App {
             return AiStart::Run(self.ai.backend());
         };
         // Estimate the remote cost, then let the hybrid router (#372) pick a backend
-        // from the policy, the estimate, and each backend's readiness.
+        // from the policy, the estimate, and each backend's readiness. Interactive
+        // passes run synchronously at the standard rate — the Batch API (half price)
+        // is reserved for a future opt-in background update — so no batch discount.
         let est = cost::estimate(
             self.pass_context_len(action, force),
             max_tokens,
             model,
-            self.pass_batches(action, force),
+            false,
         );
         let route = router::route(&router::Inputs {
             policy: self.ai.routing,

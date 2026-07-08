@@ -110,6 +110,15 @@ pub fn schema() -> Value {
 
 /// The array-of-character-profiles schema on its own, so other passes (the notes
 /// import, #283) can compose it without the `{ "characters": … }` wrapper.
+///
+/// **Every field is `required`** (like the other bible trackers). Structured
+/// outputs compile the schema into a constrained-decoding grammar, and an
+/// `additionalProperties: false` object with many *optional* fields expands to an
+/// any-subset-in-any-order grammar the API rejects with "Schema is too complex".
+/// Leaving only `name` required is what broke the character rebuild — don't
+/// reintroduce optional fields here. The model emits empty strings/arrays for
+/// what it has nothing for; every field is `#[serde(default)]`, so that parses
+/// identically to an omitted one.
 pub fn items_schema() -> Value {
     let string_array = super::string_array();
     json!({
@@ -129,6 +138,7 @@ pub fn items_schema() -> Value {
                                 "tics": string_array,
                                 "rhythm": { "type": "string" }
                             },
+                            "required": ["patterns", "register", "tics", "rhythm"],
                             "additionalProperties": false
                         },
                         "personality": string_array,
@@ -170,7 +180,10 @@ pub fn items_schema() -> Value {
                             }
                         }
                     },
-                    "required": ["name"],
+                    "required": [
+                        "name", "aliases", "role", "physical", "voice",
+                        "personality", "relationships", "goals", "arc", "drift"
+                    ],
                     "additionalProperties": false
                 }
     })

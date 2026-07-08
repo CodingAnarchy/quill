@@ -247,50 +247,48 @@ fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
 }
 
 #[test]
-fn a_full_rebuild_estimates_the_batch_rate_but_an_incremental_pass_full() {
-    // A from-scratch full rebuild runs through the Batch API at half price on the
-    // Claude backend, so its estimate must halve; an incremental pass runs at the
-    // standard rate and estimates full (#691). `two_chapter_app` defaults to the
-    // Claude backend, so the batch path applies.
-    let (mut app, dir) = two_chapter_app("batch-estimate");
-    let action = AiAction::Characters;
+fn a_full_rebuild_estimates_the_standard_rate_not_the_batch_discount() {
+    // A from-scratch full rebuild once routed through the Batch API at half price;
+    // it now runs synchronously through the standard Messages API (the Batch API,
+    // async with no latency SLA, is reserved for a future opt-in background update),
+    // so the confirm estimate quotes the full standard rate with no discount.
+    // `two_chapter_app` defaults to the Claude backend.
+    const TRACKERS: [AiAction; 5] = [
+        AiAction::Characters,
+        AiAction::Continuity,
+        AiAction::Setting,
+        AiAction::Plot,
+        AiAction::Theme,
+    ];
+    let (app, _dir) = two_chapter_app("full-rebuild-standard-rate");
     assert_eq!(app.ai.backend(), ai::BackendKind::Claude);
 
-    // First run: no bible yet, so the pass rebuilds the whole book from scratch and
-    // runs batched. Its estimate is half the same pass priced at the standard rate.
+    // No bible yet → every queued tracker rebuilds the whole book from scratch.
+    // The combined confirm estimate must equal that total input priced at the
+    // standard rate, not the batch (half) figure.
+    let chars: usize = TRACKERS
+        .iter()
+        .map(|&a| app.pass_context_len(a, true))
+        .sum();
     assert!(
-        app.pass_batches(action, false),
-        "a from-scratch full rebuild runs batched"
-    );
-    let chars = app.pass_context_len(action, false);
-    let batched = crate::ai::cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
-    let standard = crate::ai::cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &app.ai.model, false);
-    assert!(
-        (batched.dollars - standard.dollars / 2.0).abs() < 1e-9,
-        "the full rebuild estimates the batch (half) figure: {} vs {}",
-        batched.dollars,
-        standard.dollars
+        chars > 0,
+        "a from-scratch rebuild costs the whole manuscript"
     );
 
-    // Now a bible exists and only one chapter changed → an incremental pass, which
-    // does not batch, so it estimates the full rate.
-    write_character_bible(&dir);
-    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
-        .unwrap();
-    app.on_key(ctrl('n')); // active → Two
-    type_str(&mut app, "NEWWORD");
-    app.on_key(ctrl('s'));
+    let est = app.bibles_refresh_estimate_for_test(true);
+    let standard = crate::ai::cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &app.ai.model, false);
+    let batched = crate::ai::cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &app.ai.model, true);
     assert!(
-        matches!(
-            app.plan_bible_pass_for_test(&super::worker::bible_tracker(action).unwrap(), 0)
-                .0,
-            ai::incremental::Scope::Incremental(_)
-        ),
-        "the edited chapter scopes an incremental pass"
+        (est.dollars - standard.dollars).abs() < 1e-9,
+        "the full rebuild estimates the standard (undiscounted) figure: {} vs {}",
+        est.dollars,
+        standard.dollars
     );
     assert!(
-        !app.pass_batches(action, false),
-        "an incremental pass runs at the standard rate, not batched"
+        est.dollars > batched.dollars,
+        "the estimate is not the batch (half) figure: {} vs {}",
+        est.dollars,
+        batched.dollars
     );
 }
 

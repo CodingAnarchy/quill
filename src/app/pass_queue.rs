@@ -177,25 +177,20 @@ impl App {
 
     /// The combined cost estimate for a planned queue (#923): the summed input size
     /// of every pass, each scoped exactly as it will run (incremental delta, full
-    /// rebuild, or up-to-date/zero). The batch discount (#691) applies only when
-    /// every pass that will actually run does so batched, so the one figure isn't
-    /// under-quoted. Mirrors the all-bibles estimate (#655).
+    /// rebuild, or up-to-date/zero). Every pass runs synchronously at the standard
+    /// rate (the Batch API's half price is reserved for a future opt-in background
+    /// update, #950), so the figure applies no discount. Mirrors the all-bibles
+    /// estimate (#655).
     fn pass_queue_estimate(&self, planned: &[QueuedPass], force: bool) -> Estimate {
         let resolved: Vec<(AiAction, usize)> = planned
             .iter()
             .filter_map(|p| AiAction::from_slug(&p.slug).map(|a| (a, p.book)))
             .collect();
-        let mut running = resolved
-            .iter()
-            .filter(|&&(action, book)| self.book_pass_context_len(action, book, force) > 0)
-            .peekable();
-        let batch = running.peek().is_some()
-            && running.all(|&(action, book)| self.book_pass_batches(action, book, force));
         let chars: usize = resolved
             .iter()
             .map(|&(action, book)| self.book_pass_context_len(action, book, force))
             .sum();
-        cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &self.ai.model, batch)
+        cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &self.ai.model, false)
     }
 
     /// Run queued passes until one spawns an async request (then suspend until

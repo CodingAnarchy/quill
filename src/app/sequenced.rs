@@ -23,9 +23,15 @@ use super::workflows::WorkflowDriver;
 use super::App;
 
 /// How long a single async step may run before the no-hang guardrail aborts it
-/// and stops the run (#227). Generous — a real AI pass can take many seconds;
-/// this only catches a wedged request, not a slow one.
-pub const STEP_TIMEOUT: Duration = Duration::from_secs(120);
+/// and stops the run (#227). Sized to clear the slowest a *healthy* step can
+/// take so it only trips on a genuinely wedged request: every sequenced AI step
+/// now runs synchronously through the standard Messages API, and the heaviest —
+/// a full-manuscript bible rebuild — finishes well inside this. (Bible rebuilds
+/// used to run through the async Batch API, whose ~10-minute poll blew past the
+/// old 120s guardrail and surfaced as a false "timed out"; they're synchronous
+/// now — see `run_bible_tracker` — so there's no multi-minute batch wait to
+/// accommodate.)
+pub const STEP_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The bookkeeping every sequenced run needs while it walks its queue and
 /// suspends on async steps. The feature-specific queue, names, and extra state
