@@ -273,9 +273,29 @@ impl App {
                     return false;
                 }
             }
+            // Only the pair / absence rows of the co-occurrence report are
+            // selectable; a click on a section header is ignored (#922).
+            Mode::CoOccurrence(c) => {
+                if c.chapter_at(index).is_some() {
+                    c.selected = index;
+                } else {
+                    return false;
+                }
+            }
             Mode::History(h) => h.selected = index,
             Mode::Corkboard(c) => c.selected = index,
-            Mode::Annotations { selected, .. } | Mode::Outline { selected, .. } => {
+            Mode::BackupBrowser(b) => b.selected = index,
+            // The annotation list can be sorted/filtered (#933), so a click's screen
+            // position is a display position — map it back to the annotation index
+            // the visible order holds there before selecting.
+            Mode::Annotations { .. } => {
+                let order = self.annotation_visible_order();
+                let Some(&idx) = order.get(index) else {
+                    return false;
+                };
+                self.set_annotations_selected(idx);
+            }
+            Mode::Outline { selected, .. } => {
                 *selected = index;
             }
             _ => return false,
@@ -367,10 +387,12 @@ impl App {
             Mode::Nav { .. }
                 | Mode::Findings(_)
                 | Mode::Dashboard(_)
+                | Mode::CoOccurrence(_)
                 | Mode::History(_)
                 | Mode::Annotations { .. }
                 | Mode::Outline { .. }
                 | Mode::Corkboard(_)
+                | Mode::BackupBrowser(_)
                 | Mode::ModelManager { .. }
                 | Mode::Palette(_)
                 | Mode::ProjectSearch(_)

@@ -196,6 +196,38 @@ fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
 }
 
 #[test]
+#[cfg(not(feature = "local"))]
+fn incremental_pass_degrades_to_changed_chapters_without_an_embedder() {
+    // Retrieval-backed context (#929) is a best-effort sharpening: without a usable
+    // embedding model on disk (the default build has no on-device embedder at all),
+    // the incremental pass sends the changed chapters alone — byte-identical to the
+    // classic path — so it degrades gracefully. Here the retrieved block is empty,
+    // and folding it in is a no-op over the changed-chapter render the pass builds.
+    let (mut app, dir) = two_chapter_app("incr-fallback");
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
+    app.on_key(ctrl('n')); // active → Two
+    type_str(&mut app, "NEWWORD");
+    app.on_key(ctrl('s'));
+
+    assert!(
+        app.ask_embed_model().is_none(),
+        "no embedding model on disk → retrieval is unavailable, so the pass falls back"
+    );
+    let changed = app.chapters_text(&["two.md".to_string()]);
+    // The fold with empty retrieval is exactly the changed-chapter context.
+    assert_eq!(
+        ai::incremental::with_prior_passages("", &changed),
+        changed,
+        "empty retrieval leaves the changed-chapter context untouched"
+    );
+    assert!(
+        changed.contains("NEWWORD") && !changed.contains("first chapter"),
+        "and the context is still only the changed chapter: {changed}"
+    );
+}
+
+#[test]
 fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
     let (app, dir) = two_chapter_app("incr-cost");
     let action = crate::mode::AiAction::Characters;
@@ -491,5 +523,95 @@ fn cost_ceiling_routes_local_when_the_model_is_downloaded() {
             AiStart::Run(ai::BackendKind::Local)
         ),
         "over the ceiling with a downloaded model → on-device",
+    );
+}
+
+// --- per-action cloud model routing (#930) ---------------------------------
+
+/// A light, small pass (a style-flag scan on a tiny manuscript) confirms against
+/// — and would run on — the cheaper Haiku tier, not the configured Opus default.
+/// The cost the author sees is the cheaper model's, and the request is armed with
+/// it so the pass actually runs there.
+#[test]
+fn a_light_small_pass_routes_to_the_cheaper_model() {
+    let (mut app, _dir) = two_chapter_app("route-light-cheap");
+    app.ai.enabled = true; // routing defaults to Configured (cloud)
+    app.ai.cost_threshold = 0.0; // force the confirm so we can read its label
+    match app.ai_action_start(AiAction::Style, false) {
+        AiStart::Confirm { label, .. } => assert!(
+            label.contains("claude-haiku-4-5"),
+            "a light small pass quotes the cheaper model: {label}",
+        ),
+        other => panic!("expected a cost confirm, got {other:?}"),
+    }
+
+    // And `route_request` arms that model as the one-shot the request builds with.
+    app.route_request(ai::BackendKind::Claude, AiAction::Style, false);
+    assert_eq!(
+        app.routed_cloud_model.take().as_deref(),
+        Some("claude-haiku-4-5"),
+        "the light small pass runs on the cheaper tier",
+    );
+}
+
+/// A heavy reasoning pass keeps the configured top model even on a tiny
+/// manuscript — its depth is never downgraded — and arms no per-action override
+/// (so the existing session-model path is untouched).
+#[test]
+fn a_heavy_pass_keeps_the_configured_model() {
+    let (mut app, _dir) = two_chapter_app("route-heavy-top");
+    app.ai.enabled = true;
+    app.ai.cost_threshold = 0.0;
+    match app.ai_action_start(AiAction::Continuity, false) {
+        AiStart::Confirm { label, .. } => assert!(
+            label.contains(&app.ai.model) && !label.contains("claude-haiku-4-5"),
+            "a heavy pass quotes the configured top model: {label}",
+        ),
+        other => panic!("expected a cost confirm, got {other:?}"),
+    }
+
+    app.route_request(ai::BackendKind::Claude, AiAction::Continuity, false);
+    assert!(
+        app.routed_cloud_model.take().is_none(),
+        "a heavy pass on the configured model arms no per-action override",
+    );
+}
+
+/// When the author has pinned a non-default `[ai] model`, that override wins for
+/// every pass — a light, small pass does NOT step down away from it.
+#[test]
+fn an_author_model_override_is_respected_for_light_passes() {
+    let (mut app, _dir) = two_chapter_app("route-override");
+    app.ai.enabled = true;
+    app.ai.model = "claude-sonnet-4-6".to_string();
+    app.ai.cost_threshold = 0.0;
+    match app.ai_action_start(AiAction::Style, false) {
+        AiStart::Confirm { label, .. } => assert!(
+            label.contains("claude-sonnet-4-6"),
+            "the author's pinned model is used, not the cheaper tier: {label}",
+        ),
+        other => panic!("expected a cost confirm, got {other:?}"),
+    }
+    app.route_request(ai::BackendKind::Claude, AiAction::Style, false);
+    assert!(
+        app.routed_cloud_model.take().is_none(),
+        "no step-down away from the author's pinned model",
+    );
+}
+
+/// Routing on-device clears any per-action cloud model, and the local backend
+/// picks its own on-device model — the cloud step-down never leaks into a local
+/// pass (the offline/local pins still win end to end).
+#[test]
+fn routing_local_clears_the_cloud_override() {
+    let (app, _dir) = two_chapter_app("route-local-clears");
+    // Pretend a prior cloud route armed a cheap model, then route the next request
+    // on-device: the one-shot must be cleared.
+    app.routed_cloud_model
+        .set(Some("claude-haiku-4-5".to_string()));
+    app.route_request(ai::BackendKind::Local, AiAction::Style, false);
+    assert!(
+        app.routed_cloud_model.take().is_none(),
+        "a local route clears the cloud override so it can't leak",
     );
 }

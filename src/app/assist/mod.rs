@@ -27,7 +27,8 @@ use crate::mode::AiAction;
 mod ask;
 mod recheck;
 mod reference;
-mod retrieve;
+pub(in crate::app) mod retrieve;
+mod similar;
 mod trackers;
 mod triage;
 mod workflow;
@@ -66,6 +67,7 @@ pub(super) fn findings_from<T>(
                 chapters,
                 book,
                 action: Some(action),
+                corroborators: Vec::new(),
             }
         })
         .collect()

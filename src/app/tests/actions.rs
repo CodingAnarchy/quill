@@ -6,7 +6,7 @@
 use super::*;
 use crate::ai;
 use crate::ai::keychain::Key;
-use crate::mode::{Action, AiAction, ExportFormat, PaletteRow, Pending};
+use crate::mode::{Action, AiAction, Command, ExportFormat, PaletteRow, Pending};
 
 /// Every registry action has a distinct stable name — workflows (#89) reference
 /// these, so a collision would make one unaddressable.
@@ -25,12 +25,31 @@ fn action_names_are_unique_and_stable() {
     assert!(names.contains(&"triage"));
 }
 
+/// The run-action palette lists exactly the *applicable* actions (#944): every
+/// item is one whose `action_status` is `None`, and inapplicable ones are absent.
 #[test]
-fn action_palette_lists_every_registry_action() {
+fn action_palette_lists_only_applicable_actions() {
     let (mut app, _dir) = two_chapter_app("action-palette");
     app.open_action_palette();
     match &app.mode {
-        Mode::Palette(p) => assert_eq!(p.items.len(), Action::ALL.len(), "all actions listed"),
+        Mode::Palette(p) => {
+            let applicable = Action::ALL
+                .iter()
+                .filter(|&&a| app.action_status(a).is_none())
+                .count();
+            assert_eq!(
+                p.items.len(),
+                applicable,
+                "only applicable actions are listed"
+            );
+            assert!(
+                p.items.iter().all(|i| match i.command {
+                    Command::Run(a) => app.action_status(a).is_none(),
+                    _ => false,
+                }),
+                "every listed action is runnable right now"
+            );
+        }
         _ => panic!("expected the run-action palette to open"),
     }
 }
@@ -92,8 +111,14 @@ fn the_action_palette_groups_actions_under_collapsible_headers() {
 fn collapsing_a_group_hides_its_items_but_keeps_the_header() {
     let (mut app, _dir) = two_chapter_app("palette-collapse");
     app.open_action_palette();
+    // Groups open collapsed by default now (#943); expand Project first (→), so
+    // there's something for ← to collapse back.
+    app.on_key(key(KeyCode::Right));
     let before = match &app.mode {
-        Mode::Palette(p) => p.rows().len(),
+        Mode::Palette(p) => {
+            assert!(!p.collapsed.contains("Project"), "→ expanded Project");
+            p.rows().len()
+        }
         _ => unreachable!(),
     };
     // The Project header is selected first; ← collapses it.
@@ -119,6 +144,7 @@ fn collapsing_a_group_hides_its_items_but_keeps_the_header() {
 fn enter_on_a_header_toggles_it_rather_than_running_an_action() {
     let (mut app, _dir) = two_chapter_app("palette-toggle");
     app.open_action_palette();
+    // Project opens collapsed (#943), so the first Enter expands it.
     app.on_key(key(KeyCode::Enter)); // on the Project header
     assert!(
         matches!(app.mode, Mode::Palette(_)),
@@ -127,12 +153,190 @@ fn enter_on_a_header_toggles_it_rather_than_running_an_action() {
     let Mode::Palette(p) = &app.mode else {
         panic!();
     };
-    assert!(p.collapsed.contains("Project"), "collapsed by Enter");
-    app.on_key(key(KeyCode::Enter)); // toggles back open
+    assert!(!p.collapsed.contains("Project"), "Enter expands it");
+    app.on_key(key(KeyCode::Enter)); // toggles back collapsed
     let Mode::Palette(p) = &app.mode else {
         panic!();
     };
-    assert!(!p.collapsed.contains("Project"), "Enter expands it again");
+    assert!(p.collapsed.contains("Project"), "Enter collapses it again");
+}
+
+/// The stable names of the actions the run-action palette currently offers — the
+/// searchable set, independent of which groups are collapsed. Names (not `Action`,
+/// which isn't `PartialEq`) so tests can assert membership.
+fn palette_action_names(app: &App) -> Vec<&'static str> {
+    let Mode::Palette(p) = &app.mode else {
+        panic!("expected the run-action palette");
+    };
+    p.items
+        .iter()
+        .filter_map(|i| match i.command {
+            Command::Run(a) => Some(a.name()),
+            _ => None,
+        })
+        .collect()
+}
+
+// --- #944: hide inapplicable actions ---------------------------------------
+
+/// Inapplicable actions are *absent* from the palette, not tagged "unavailable"
+/// (#944): with AI off, the AI passes and a series action drop out, while an
+/// applicable action (Enable AI) and the always-shown `SwitchBackend` remain.
+#[test]
+fn the_action_palette_hides_inapplicable_actions() {
+    let (mut app, _dir) = two_chapter_app("palette-hide-inapplicable");
+    app.ai = ai::Settings::default(); // AI off, deterministic
+    assert!(app.project.book_count() <= 1, "single-book fixture");
+    app.open_action_palette();
+    let actions = palette_action_names(&app);
+    let has = |a: Action| actions.contains(&a.name());
+
+    // Inapplicable with AI off / on a single book — hidden.
+    assert!(
+        !has(Action::Ai(AiAction::Characters)),
+        "an AI pass is hidden while AI is off"
+    );
+    assert!(
+        !has(Action::RefreshSeriesBible),
+        "a series action is hidden on a single book"
+    );
+    // Applicable — present.
+    assert!(has(Action::EnableAi), "Enable AI is shown while AI is off");
+    assert!(has(Action::Save), "an always-applicable action is shown");
+    // The backend switch has status None but is a special-case that must survive
+    // the filter (#944/#371).
+    assert!(has(Action::SwitchBackend), "SwitchBackend is still listed");
+    // No listed action carries the old "unavailable" tag.
+    let Mode::Palette(p) = &app.mode else {
+        unreachable!();
+    };
+    assert!(
+        p.items.iter().all(|i| !i.desc.contains("unavailable")),
+        "no dead 'unavailable' rows remain"
+    );
+}
+
+/// An action reappears once it becomes applicable: Enable AI is shown while AI is
+/// off and gone once AI is on, and an AI pass makes the opposite transition —
+/// filtering follows the live `action_status` (#944).
+#[test]
+fn hidden_actions_reappear_when_they_become_applicable() {
+    let (mut app, _dir) = two_chapter_app("palette-reappear");
+    app.ai = ai::Settings::default(); // off
+    app.open_action_palette();
+    let off = palette_action_names(&app);
+    assert!(
+        off.contains(&Action::EnableAi.name()),
+        "Enable AI shown while off"
+    );
+
+    // Turn AI on: Enable AI drops out, and the local AI actions stay/come in.
+    app.ai.enabled = true;
+    app.open_action_palette();
+    let on = palette_action_names(&app);
+    assert!(
+        !on.contains(&Action::EnableAi.name()),
+        "Enable AI is hidden once AI is enabled"
+    );
+    assert!(
+        on.contains(&Action::Ai(AiAction::Triage).name()),
+        "a local AI action is shown with AI on"
+    );
+}
+
+// --- #943: remember collapse state + open collapsed ------------------------
+
+/// A fresh run-action palette opens with every group collapsed (#943): the
+/// visible rows are all group headers, no items.
+#[test]
+fn the_action_palette_opens_with_every_group_collapsed() {
+    let (mut app, _dir) = two_chapter_app("palette-open-collapsed");
+    app.open_action_palette();
+    let Mode::Palette(p) = &app.mode else {
+        panic!("expected the run-action palette");
+    };
+    // Every group present in the items is in the collapsed set.
+    let groups: std::collections::HashSet<&str> = p.items.iter().filter_map(|i| i.group).collect();
+    assert!(!groups.is_empty(), "the palette has groups");
+    assert!(
+        groups.iter().all(|g| p.collapsed.contains(g)),
+        "every group opens collapsed"
+    );
+    // So the visible rows are headers only — a short, scannable menu.
+    assert!(
+        p.rows()
+            .iter()
+            .all(|r| matches!(r, PaletteRow::Header { .. })),
+        "the initial view is group headers, not the full action list"
+    );
+}
+
+/// Collapse state persists across opens (#943): a group the author expands stays
+/// expanded the next time the palette opens, rather than resetting to collapsed.
+#[test]
+fn collapse_state_persists_across_opens() {
+    let (mut app, _dir) = two_chapter_app("palette-persist");
+    app.open_action_palette();
+    // Expand the Project group (selected header, →), then close the palette.
+    app.on_key(key(KeyCode::Right));
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(!p.collapsed.contains("Project"), "expanded Project");
+    app.on_key(key(KeyCode::Esc));
+
+    // Re-open: Project is remembered expanded, not reset to collapsed.
+    app.open_action_palette();
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(
+        !p.collapsed.contains("Project"),
+        "the expanded group is remembered on the next open"
+    );
+
+    // Collapse it again and confirm the collapse is likewise remembered.
+    app.on_key(key(KeyCode::Left));
+    app.on_key(key(KeyCode::Esc));
+    app.open_action_palette();
+    let Mode::Palette(p) = &app.mode else {
+        panic!();
+    };
+    assert!(
+        p.collapsed.contains("Project"),
+        "re-collapsing is remembered too"
+    );
+}
+
+/// Collapsing a group never hides an action from a filter (#943): `items` — the
+/// set a typed filter searches — holds every applicable action regardless of the
+/// collapse state, so a match can still surface it.
+#[test]
+fn collapse_state_does_not_remove_items_from_the_searchable_set() {
+    let (mut app, _dir) = two_chapter_app("palette-filter");
+    app.ai = ai::Settings::default();
+    app.open_action_palette(); // all collapsed by default
+    let collapsed_items = palette_action_names(&app);
+    // Expand every group and re-read: the item set is identical.
+    let groups: Vec<&'static str> = {
+        let Mode::Palette(p) = &mut app.mode else {
+            panic!();
+        };
+        let gs: Vec<&'static str> = p.collapsed.iter().copied().collect();
+        for g in &gs {
+            p.set_collapsed(g, false);
+        }
+        gs
+    };
+    assert!(!groups.is_empty(), "there were collapsed groups");
+    let expanded_items = palette_action_names(&app);
+    assert_eq!(
+        collapsed_items, expanded_items,
+        "the searchable item set is the same whether groups are collapsed or not"
+    );
+    // And it holds the applicable actions a filter would match.
+    assert!(expanded_items.contains(&Action::Save.name()));
+    assert!(expanded_items.contains(&Action::EnableAi.name()));
 }
 
 #[test]

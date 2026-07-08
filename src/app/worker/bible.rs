@@ -194,10 +194,17 @@ impl App {
                     t.full_msg,
                 )
             }
-            ai::incremental::Scope::Incremental(changed) => (
-                (t.incr)(&prior, &self.book_render(book, Some(&changed)), &model),
-                t.incr_msg,
-            ),
+            ai::incremental::Scope::Incremental(changed) => {
+                // Retrieval-backed incremental pass (#929): when a usable embedding
+                // model is on disk, fold the prior passages the changed chapters bear
+                // on into the revise context (off the worker thread, since embedding
+                // is CPU-bound), so the pass sees the scenes that matter — where a
+                // character/place last appeared — instead of being blind to
+                // everything outside the diff. Falls back to the plain
+                // changed-chapters-only context when embeddings aren't available.
+                self.spawn_incremental_pass(&t, book, &prior, &model, changed, current, series);
+                return;
+            }
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
         // A series merges the book's digests into the state (carrying the other
@@ -217,6 +224,68 @@ impl App {
         // (`Backend::complete_batched`, the `cost::estimate` discount) is retained
         // for a future opt-in background "update" that can tolerate the latency (#950).
         self.spawn_request(base_msg, req, false, t.finish);
+    }
+
+    /// Spawn a retrieval-backed incremental bible pass (#929). Assembles everything
+    /// off-thread retrieval needs on the UI thread — the changed chapters' rendered
+    /// text (the revise material and the retrieval query), the whole-book index
+    /// input, the index dir, and the embedding model (`None` when none is on disk) —
+    /// then, off the worker thread, retrieves the prior passages the changed chapters
+    /// bear on and folds them into the revise context via
+    /// [`incremental::with_prior_passages`](ai::incremental::with_prior_passages)
+    /// before building + completing the request. When retrieval isn't available or
+    /// turns up nothing, the context is the changed chapters alone — the exact prior
+    /// incremental request — so the pass degrades gracefully. The request shape,
+    /// schema, and `t.finish` parse are identical either way; retrieval changes only
+    /// *what prior context* the revise sees.
+    #[allow(clippy::too_many_arguments)] // one call site; a struct would only obscure the flow
+    fn spawn_incremental_pass(
+        &mut self,
+        t: &BibleTracker,
+        book: usize,
+        prior: &str,
+        model: &str,
+        changed: Vec<String>,
+        current: ai::incremental::Digests,
+        series: bool,
+    ) {
+        // The changed chapters, rendered once: the material the pass revises from and
+        // the query retrieval ranks the prior passages against.
+        let changed_text = self.book_render(book, Some(&changed));
+        // Retrieval inputs, moved into the worker: the whole book to (re-)index, the
+        // index dir, and the embedding model — `None` keeps the pass on the plain
+        // incremental context (#929).
+        let embed_model = self.ask_embed_model();
+        let chapters = embed_model.is_some().then(|| self.ask_index_chapters());
+        let root = self.project.root.clone();
+        let prior = prior.to_string();
+        let model = model.to_string();
+        let incr = t.incr;
+        let finish = t.finish;
+
+        let merge = series.then(|| self.other_books_files(book));
+        self.pending_pass = Some((t.key.to_string(), current, merge));
+        let message = t.incr_msg.to_string();
+        self.spawn_outcome(&message, move |backend| {
+            // Retrieve the relevant prior passages (best effort); fall back to the
+            // changed chapters alone when embeddings aren't available or find nothing.
+            let retrieved = match (embed_model, chapters) {
+                (Some(m), Some(chapters)) => {
+                    super::super::assist::retrieve::retrieve_prior_context(
+                        &root,
+                        &chapters,
+                        m,
+                        &changed,
+                        &changed_text,
+                    )
+                    .unwrap_or_default()
+                }
+                _ => String::new(),
+            };
+            let context = ai::incremental::with_prior_passages(&retrieved, &changed_text);
+            let req = incr(&prior, &context, &model);
+            finish(backend.complete(&req))
+        });
     }
 
     /// Whether a full rebuild of `action` for `book` is pinned `offline` yet too
@@ -285,8 +354,14 @@ impl App {
         let merge = series.then(|| self.other_books_files(book));
         self.pending_pass = Some((t.key.to_string(), current, merge));
         let message = format!("{} (folding on-device — chapter by chapter)", t.full_msg);
+        // Report per-pass chapter progress (#923): the fold walks the chapters one
+        // chunk at a time, so it can publish "chapter n/total" into the shared cell
+        // the pass-queue run's status reads. Reset before the pass, cleared after.
+        let progress = self.pass_progress.clone();
+        let total = chapters.len();
+        self.set_pass_progress(Some((0, total)));
         self.spawn_outcome(&message, move |backend| {
-            fold_rebuild(
+            let out = fold_rebuild(
                 backend,
                 &chapters,
                 window,
@@ -295,8 +370,28 @@ impl App {
                 &model,
                 incr,
                 finish,
-            )
+                &progress,
+                total,
+            );
+            if let Ok(mut slot) = progress.lock() {
+                *slot = None; // the pass is done; drop the per-chapter counter
+            }
+            out
         });
+    }
+
+    /// Set (or clear) the in-flight pass's per-chapter progress counter (#923).
+    pub(in crate::app) fn set_pass_progress(&self, progress: Option<(usize, usize)>) {
+        if let Ok(mut slot) = self.pass_progress.lock() {
+            *slot = progress;
+        }
+    }
+
+    /// The in-flight pass's per-chapter progress `(done, total)` (#923), or `None`
+    /// between fold steps and for one-shot passes — the pass-queue run's status
+    /// reads it to show "continuity: chapter 5/12".
+    pub(in crate::app) fn pass_progress(&self) -> Option<(usize, usize)> {
+        self.pass_progress.lock().ok().and_then(|slot| *slot)
     }
 
     /// The chapter `file → content-digest` map for the active book (#90). Used by
@@ -483,6 +578,8 @@ fn fold_rebuild(
     model: &str,
     incr: fn(&str, &str, &str) -> ai::Request,
     finish: fn(Result<ai::Response, ai::AiError>) -> Outcome,
+    progress: &Arc<Mutex<Option<(usize, usize)>>>,
+    total: usize,
 ) -> Outcome {
     // Position-indexed sizes so the planner packs whole chapters on seams; the
     // "file" id is just the index, since we drain by count.
@@ -525,6 +622,11 @@ fn fold_rebuild(
         last = Some(resp);
         remaining.drain(0..count);
         next += count;
+        // Publish per-pass chapter progress (#923): `next` is now how many whole
+        // chapters this pass has folded in, out of `total`.
+        if let Ok(mut slot) = progress.lock() {
+            *slot = Some((next, total));
+        }
     }
     // The last step's response is the complete folded bible (or an empty
     // manuscript, which yields no chapters and so no fold — an empty result).

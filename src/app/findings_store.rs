@@ -25,10 +25,20 @@ fn key(f: &Finding) -> String {
     // Kind, then book index, then summary, then chapters — joined with
     // control-character separators that can't occur in the fields' own text, so
     // distinct findings never collide.
+    format!("{}\u{1f}{}", f.kind.slug(), span_key(f))
+}
+
+/// The *span* key — book, summary, and chapters, **without** the kind (#921). A
+/// dismissal is anchored to the span, so dismissing a finding one pass raised also
+/// suppresses the same span another pass (continuity + plot on one dangling
+/// thread) re-raises. It's still derived from what the finding *says* — the summary
+/// carries the flagged detail and the chapters the location — so it stays keyed to
+/// the underlying text: change the prose and the summary/chapters shift, the span
+/// key changes, and the finding legitimately re-surfaces.
+fn span_key(f: &Finding) -> String {
     let book = f.book.map(|b| b.to_string()).unwrap_or_default();
     format!(
-        "{}\u{1f}{book}\u{1f}{}\u{1f}{}",
-        f.kind.slug(),
+        "{book}\u{1f}{}\u{1f}{}",
         f.summary,
         f.chapters.join("\u{1e}")
     )
@@ -75,6 +85,9 @@ impl Record {
             // The store records content, not the originating pass, so a restored
             // finding can't be rechecked until a fresh pass re-attributes it (#608).
             action: None,
+            // Cross-pass consensus (#921) is recomputed by the health view from the
+            // live set each run, not persisted; a restored finding starts lone.
+            corroborators: Vec::new(),
         }
     }
 }
@@ -129,8 +142,16 @@ impl FindingsStore {
     }
 
     /// Whether a finding has been dismissed (so a re-run shouldn't re-surface it).
+    /// Matched by *span*, not the exact pass (#921): a dismissal the author made on
+    /// one pass's finding also suppresses the same span raised by a corroborating
+    /// pass, since the two describe one issue. The span key still tracks the
+    /// underlying text, so a prose edit that changes the summary/chapters lets the
+    /// finding re-surface.
     pub(super) fn is_dismissed(&self, f: &Finding) -> bool {
-        self.position(f).is_some_and(|i| self.findings[i].dismissed)
+        let span = span_key(f);
+        self.findings
+            .iter()
+            .any(|r| r.dismissed && span_key(&r.finding()) == span)
     }
 
     /// Record a finding as seen (open) if it's new, persisting. A finding already
@@ -171,12 +192,19 @@ mod tests {
     use crate::mode::{Finding, FindingKind};
 
     fn finding(summary: &str) -> Finding {
+        finding_of(FindingKind::Continuity, summary)
+    }
+
+    /// A finding of a specific pass on chapter "One" — for the cross-pass dismissal
+    /// tests, where the pass (kind) varies but the span stays the same.
+    fn finding_of(kind: FindingKind, summary: &str) -> Finding {
         Finding {
             summary: summary.into(),
-            kind: FindingKind::Continuity,
+            kind,
             chapters: vec!["One".into()],
             book: None,
             action: None,
+            corroborators: Vec::new(),
         }
     }
 
@@ -193,6 +221,51 @@ mod tests {
         let reloaded = FindingsStore::load(&dir);
         assert!(reloaded.is_dismissed(&finding("the locket changes color")));
         assert!(reloaded.open().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A dismissal is anchored to the *span* (#921): the author dismisses a dangling
+    // thread the continuity pass raised, and when the plot pass later flags the same
+    // span it's suppressed too — one triage decision covers the issue, whichever
+    // pass re-surfaces it.
+    #[test]
+    fn dismissal_suppresses_the_same_span_from_another_pass() {
+        let dir = crate::testutil::scratch_dir("findings-store", "cross-pass-dismiss");
+        let same = "a dangling thread";
+        let mut store = FindingsStore::load(&dir);
+        let continuity = finding_of(FindingKind::Continuity, same);
+        store.remember(&dir, &continuity);
+        store.dismiss(&dir, &continuity);
+
+        // A different pass raises the identical span: still recognized as dismissed.
+        let plot = finding_of(FindingKind::Plot, same);
+        let reloaded = FindingsStore::load(&dir);
+        assert!(
+            reloaded.is_dismissed(&plot),
+            "a dismissal on one pass suppresses the same span on another"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The span key tracks the underlying text, so an edit that changes the finding's
+    // summary (the flagged detail) re-surfaces it — a dismissal doesn't outlive the
+    // prose it was about (#921).
+    #[test]
+    fn a_changed_span_is_not_suppressed_by_an_old_dismissal() {
+        let dir = crate::testutil::scratch_dir("findings-store", "resurface-on-change");
+        let mut store = FindingsStore::load(&dir);
+        let before = finding("the locket is silver in ch.1");
+        store.remember(&dir, &before);
+        store.dismiss(&dir, &before);
+
+        // After a revision the pass flags a different detail: a new span, so the old
+        // dismissal doesn't reach it.
+        let after = finding("the locket is gold in ch.1");
+        let reloaded = FindingsStore::load(&dir);
+        assert!(
+            !reloaded.is_dismissed(&after),
+            "a dismissal keyed to the old text doesn't suppress the revised finding"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

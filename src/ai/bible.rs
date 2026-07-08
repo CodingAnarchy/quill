@@ -290,6 +290,79 @@ pub fn list_items(text: &str, heading: &str) -> Vec<String> {
     items
 }
 
+// --- The author's research notebook (#932) ----------------------------------
+
+/// The author-maintained research / worldbuilding notebook file (#932), relative
+/// to `bible/`: a bible-like journal of historical refs, magic-system sources,
+/// and worldbuilding rules that the AI's trackers can *cite* but never write. The
+/// author owns every word — the AI-write path (`stage_bible`) targets the tracker
+/// files, never this one; [`scaffold_research`] only seeds an empty template.
+pub const RESEARCH_FILE: &str = "research.md";
+
+/// The seed template for a fresh research notebook (#932): an author-facing header
+/// explaining the file and one `## ` heading to write under. It is deliberately
+/// prose-free — Quill seeds structure, never worldbuilding content — so the
+/// no-AI-write invariant holds even for the first write.
+const RESEARCH_TEMPLATE: &str =
+    "# Research notebook\n\n_Your research and worldbuilding journal — you write it, \
+Quill's trackers only cite it. Give each note a `## ` heading so a bible entry can \
+reference it by name._\n\n## Example note\n\n_Replace this with your own research._\n";
+
+/// The path to the author's research notebook (#932): `bible/research.md` under the
+/// project `root`.
+pub fn research_path(root: &Path) -> std::path::PathBuf {
+    root.join("bible").join(RESEARCH_FILE)
+}
+
+/// A readable citation to one of the author's research notes (#932), for a
+/// generated bible / tracker entry to ground a claim against — e.g. `per research
+/// note 'Feudal Timeline'`. The one source of the citation phrasing, so a tracker
+/// bullet and a reader recognize the same shape. The AI only *emits* this
+/// reference; it never writes the note it points at.
+pub fn cite_research(note: &str) -> String {
+    format!("per research note '{}'", note.trim())
+}
+
+/// The note titles the author has written in the research notebook (#932) — the
+/// `## ` headings in `bible/research.md`, in file order — so a tracker can cite a
+/// note that actually exists (and a reader can validate a citation). Empty when the
+/// notebook is absent or the author has only the seed template. The template's
+/// `## Example note` heading is skipped so a fresh, untouched notebook cites
+/// nothing.
+pub fn research_notes(root: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(research_path(root)) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| line.strip_prefix("## "))
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty() && h != "Example note")
+        .collect()
+}
+
+/// Whether `text` carries a readable research citation (#932) — the shape
+/// [`cite_research`] emits. The reader counterpart used to prove a tracker entry
+/// grounds against a note.
+pub fn has_research_citation(text: &str) -> bool {
+    text.contains("per research note '")
+}
+
+/// Create the author's research notebook (#932) with the seed template *only when
+/// it is absent*, so opening it never clobbers what the author has written.
+/// Returns the path either way. This is the only write Quill makes to the
+/// notebook, and it writes structure, not content — the author authors every
+/// note. An I/O failure surfaces to the caller.
+pub fn scaffold_research(root: &Path) -> std::io::Result<std::path::PathBuf> {
+    let path = research_path(root);
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, RESEARCH_TEMPLATE)?;
+    }
+    Ok(path)
+}
+
 // --- Reading the project's bible (the typed counterpart to the writers) -----
 
 /// The place/term gazetteer from `bible/setting.md` (empty when absent).
@@ -314,6 +387,94 @@ pub fn character_names(root: &Path) -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+/// One bible entry paired with the chapters it appears in — the shape the
+/// co-occurrence read (#922) works over, read back from the rendered bible files
+/// the trackers wrote. Character appearances come from the per-chapter Arc beats;
+/// motif appearances from the tracker's "Appears in" line.
+pub struct Appearances {
+    pub name: String,
+    pub chapters: Vec<String>,
+}
+
+/// Each character's per-chapter appearances read from `bible/characters/*.md`
+/// (#922): the name from front matter, the chapters from the `## Arc` beats — each
+/// a `- **<chapter>:** <state>` line the profile renderer wrote. Empty when the
+/// character bible is absent. Sorted by name for a deterministic read.
+pub fn character_appearances(root: &Path) -> Vec<Appearances> {
+    let dir = root.join("bible").join("characters");
+    let mut out: Vec<Appearances> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| {
+            let name = front_field(&text, "name")?;
+            Some(Appearances {
+                chapters: arc_chapters(&text),
+                name,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// The chapter titles named by the `## Arc` beats of a character bible file — the
+/// bold label of each `- **<chapter>:** <state>` bullet, up to the next `##`
+/// heading or block marker.
+fn arc_chapters(text: &str) -> Vec<String> {
+    let mut chapters = Vec::new();
+    let mut in_arc = false;
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            in_arc = h.trim() == "Arc";
+        } else if in_arc {
+            if line.starts_with("<!--") {
+                break; // end of the generated block
+            }
+            if let Some(rest) = line.strip_prefix("- **") {
+                if let Some(chapter) = rest.split_once(":**").map(|(c, _)| c.trim()) {
+                    chapters.push(chapter.to_string());
+                }
+            }
+        }
+    }
+    chapters
+}
+
+/// Each motif's appearances read from `bible/theme.md` (#922): the motif name from
+/// its `### <name> — <status>` heading, the chapters from the `- **Appears in:**
+/// <a, b, c>` line the theme renderer wrote. Empty when the theme bible is absent.
+pub fn motif_appearances(root: &Path) -> Vec<Appearances> {
+    let path = root.join("bible").join("theme.md");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut current: Option<Appearances> = None;
+    for line in text.lines() {
+        if let Some(head) = line.strip_prefix("### ") {
+            if let Some(entry) = current.take() {
+                out.push(entry);
+            }
+            // The heading is `<name> — <status>`; keep only the name.
+            let name = head.split(" — ").next().unwrap_or(head).trim().to_string();
+            current = Some(Appearances {
+                name,
+                chapters: Vec::new(),
+            });
+        } else if let Some(entry) = current.as_mut() {
+            if let Some(list) = line.strip_prefix("- **Appears in:** ") {
+                entry.chapters = list.split(", ").map(|c| c.trim().to_string()).collect();
+            }
+        }
+    }
+    if let Some(entry) = current.take() {
+        out.push(entry);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -370,6 +531,112 @@ mod tests {
         let root = std::path::Path::new("/nonexistent-quill-bible");
         assert!(gazetteer(root).is_empty());
         assert!(character_names(root).is_empty());
+        assert!(character_appearances(root).is_empty());
+        assert!(motif_appearances(root).is_empty());
+    }
+
+    #[test]
+    fn character_appearances_read_the_arc_chapter_titles() {
+        // A rendered character profile (the writer's own `## Arc` shape) reads back
+        // to the chapter titles of its arc beats, in order (#922).
+        let body = "## Arc\n- **One:** arrives\n- **Three:** confronts\n\n";
+        let file = render("name: Mara\n", body, "## Notes\n", "2026-06-19");
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-appear-char-{}", std::process::id()));
+        let chars = root.join("bible").join("characters");
+        std::fs::create_dir_all(&chars).unwrap();
+        std::fs::write(chars.join("mara.md"), file).unwrap();
+
+        let read = character_appearances(&root);
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].name, "Mara");
+        assert_eq!(read[0].chapters, vec!["One", "Three"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn motif_appearances_read_the_appears_in_line() {
+        // The theme tracker's rendered `### <name> — <status>` + `Appears in` line
+        // reads back to the motif name and its chapters (#922).
+        let body = "## Motifs\n### Mirrors — recurring\n\
+                    - **Appears in:** One, Three\n\n\
+                    ### Storm — faded\n- **Appears in:** Two\n\n";
+        let file = render("title: Themes\n", body, "## Notes\n", "2026-06-19");
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-appear-motif-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("bible")).unwrap();
+        std::fs::write(root.join("bible").join("theme.md"), file).unwrap();
+
+        let read = motif_appearances(&root);
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].name, "Mirrors");
+        assert_eq!(read[0].chapters, vec!["One", "Three"]);
+        assert_eq!(read[1].name, "Storm");
+        assert_eq!(read[1].chapters, vec!["Two"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cite_research_reads_as_a_readable_reference() {
+        // The citation a tracker entry carries to ground against a research note.
+        assert_eq!(
+            cite_research("Feudal Timeline"),
+            "per research note 'Feudal Timeline'"
+        );
+        // Whitespace is trimmed so an entry reads cleanly.
+        assert_eq!(
+            cite_research("  Magic sources  "),
+            "per research note 'Magic sources'"
+        );
+        // A tracker bullet carrying the citation is recognizable to a reader.
+        let bullet = format!(
+            "Lord Grey ruled 1432-1456 ({})",
+            cite_research("Feudal Timeline")
+        );
+        assert!(has_research_citation(&bullet));
+        assert!(!has_research_citation("Lord Grey ruled 1432-1456"));
+    }
+
+    #[test]
+    fn research_notebook_is_author_owned_and_persists() {
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-research-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("bible")).unwrap();
+
+        // Absent: no notes and no citations to draw from.
+        assert!(research_notes(&root).is_empty());
+
+        // Scaffolding seeds a template only — structure, not worldbuilding content —
+        // so a fresh notebook cites nothing (the example heading is skipped).
+        let path = scaffold_research(&root).unwrap();
+        assert!(path.exists());
+        assert_eq!(path, research_path(&root));
+        assert!(
+            research_notes(&root).is_empty(),
+            "seed template cites nothing"
+        );
+
+        // The author writes notes; the file persists and its headings become the
+        // notes a tracker can cite.
+        std::fs::write(
+            &path,
+            "# Research notebook\n\n## Feudal Timeline\n\nLord Grey ruled 1432-1456.\n\n## Magic sources\n\nThe focus stones.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            research_notes(&root),
+            vec!["Feudal Timeline".to_string(), "Magic sources".to_string()]
+        );
+
+        // Scaffolding again never clobbers the author's writing.
+        scaffold_research(&root).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("Lord Grey ruled 1432-1456"),
+            "author content preserved"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

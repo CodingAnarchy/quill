@@ -397,6 +397,7 @@ fn a_click_selects_a_findings_row() {
             chapters: Vec::new(),
             book: None,
             action: None,
+            corroborators: Vec::new(),
         })
         .collect();
     app.mode = Mode::Findings(Box::new(Findings {

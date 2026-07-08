@@ -551,6 +551,22 @@ impl Project {
         self.dictionary.contains(&word.to_lowercase())
     }
 
+    /// The path to the project's custom dictionary file (#935), whether or not it
+    /// exists yet — the seam the in-app view/edit path opens in a pane so the author
+    /// can read and hand-edit the accepted-word list directly.
+    pub fn dictionary_path(&self) -> PathBuf {
+        self.root.join(DICTIONARY_NAME)
+    }
+
+    /// Re-read the custom dictionary from disk into the in-memory set (#935), so an
+    /// edit made outside `accept_word` — the author hand-editing `dictionary.txt`, or
+    /// the in-app view/edit pane saving it — takes effect without reopening the
+    /// project. Kept off the idle/keystroke path: the caller runs it only when the
+    /// dictionary was actually touched (e.g. its edit pane closed), never per tick.
+    pub fn reload_dictionary(&mut self) {
+        self.dictionary = load_dictionary(&self.root);
+    }
+
     /// Accept `word` into the project's custom dictionary (#358): add it to the
     /// in-memory set and append it to `dictionary.txt` at the project root (one
     /// word per line, original case preserved for readability), so it's never
@@ -593,6 +609,7 @@ impl Project {
                 note: a.note.clone(),
                 replies: a.replies.clone(),
                 resolved: a.resolved,
+                reviewer: a.reviewer.clone(),
             })
             .collect();
         live.sort_by_key(|a| (a.start, a.end));
@@ -616,6 +633,7 @@ impl Project {
                 note: a.note.clone(),
                 replies: a.replies.clone(),
                 resolved: a.resolved,
+                reviewer: a.reviewer.clone(),
             });
         }
         let path = self.root.join(ANNOTATIONS_NAME);

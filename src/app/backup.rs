@@ -45,6 +45,23 @@ pub type LocalBackupOutcome = Result<PathBuf, String>;
 /// backups dir is left alone.
 const ZIP_SUFFIX: &str = ".zip";
 
+/// One local archive backup, as listed by the backup browser (#934): its file
+/// name, full path, byte size, and last-modified time. A returned list is ordered
+/// newest-first, so the most recent restore target leads. Built from the backups
+/// directory #888 writes into, never the project itself.
+#[derive(Clone, Debug)]
+pub struct BackupEntry {
+    /// The archive's file name (the timestamped [`archive::default_name`] form).
+    pub name: String,
+    /// The archive's full path — the restore source.
+    pub path: PathBuf,
+    /// The archive's size in bytes, for the human-readable "how big" column.
+    pub size: u64,
+    /// The archive's last-modified time — the honest "when it was written", the
+    /// same signal [`latest_archive_mtime`] judges staleness by.
+    pub modified: SystemTime,
+}
+
 impl App {
     /// Note that a save just reached disk, so an on-save backup is due (#887).
     /// Called from the shared post-save tail. Cheap and a no-op when backup is
@@ -242,6 +259,48 @@ impl App {
     pub(crate) fn last_local_backup_age(&self) -> Option<Duration> {
         self.last_local_backup.map(|at| at.elapsed())
     }
+
+    // --- Browse & restore local backups (#934) ----------------------------
+
+    /// The project's local archive backups, newest first (#934): each entry's file
+    /// name, path, size, and last-modified time, read from the backups dir #888
+    /// writes into. Empty when no data dir resolves (hermetically stubbed off in
+    /// tests) or the directory is absent — a clean no-op the browser reports as
+    /// "no backups yet". Reads only the backups dir (a `stat` per archive), never
+    /// the project, so it costs nothing proportional to the novel.
+    pub(crate) fn list_local_backups(&self) -> Vec<BackupEntry> {
+        let Some(dir) = config::backups_dir(&self.project.root) else {
+            return Vec::new();
+        };
+        list_backups_in(&dir)
+    }
+}
+
+/// The archive backups directly under `dir`, newest first (#934): only our own
+/// `.zip` output ([`archive_names`]), each stamped with its size and mtime. An
+/// archive whose metadata can't be read is skipped (best-effort, like the rest of
+/// the backup path) rather than failing the whole listing. Pure over a directory,
+/// so the browser's list is unit-testable against a seeded fixture.
+fn list_backups_in(dir: &Path) -> Vec<BackupEntry> {
+    let mut entries: Vec<BackupEntry> = archive_names(dir)
+        .into_iter()
+        .filter_map(|name| {
+            let path = dir.join(&name);
+            let meta = fs::metadata(&path).ok()?;
+            Some(BackupEntry {
+                name,
+                path,
+                size: meta.len(),
+                modified: meta.modified().ok()?,
+            })
+        })
+        .collect();
+    // Newest first: the most recent archive is the likeliest restore target and
+    // leads the list. `archive_names` sorts by timestamped name (oldest first), so
+    // sort by mtime and reverse to put the freshest write on top.
+    entries.sort_by_key(|e| e.modified);
+    entries.reverse();
+    entries
 }
 
 /// Archive the project at `root` into `dir` under a timestamped name, then prune
@@ -443,5 +502,44 @@ mod tests {
         assert_eq!(stale_age_label(Duration::from_secs(5 * 3600)), "5h");
         assert_eq!(stale_age_label(Duration::from_secs(23 * 3600)), "23h");
         assert_eq!(stale_age_label(Duration::from_secs(50 * 3600)), "2d");
+    }
+
+    #[test]
+    fn listing_orders_newest_first_and_skips_non_archives() {
+        // Three archives at distinct mtimes plus a non-`.zip` file: the listing is
+        // newest-first and includes only our own archives (#934).
+        let dir = crate::testutil::scratch_dir("backup", "list-order");
+        fs::create_dir_all(&dir).unwrap();
+        for (name, ago) in [
+            ("Book-2000-01-01-000000.zip", 3 * 3600),
+            ("Book-2000-01-02-000000.zip", 3600),
+            ("Book-2000-01-03-000000.zip", 60),
+        ] {
+            let path = dir.join(name);
+            fs::write(&path, b"zip").unwrap();
+            let when = SystemTime::now() - Duration::from_secs(ago);
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(when)
+                .unwrap();
+        }
+        fs::write(dir.join("notes.txt"), b"not an archive").unwrap();
+
+        let entries = list_backups_in(&dir);
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "Book-2000-01-03-000000.zip",
+                "Book-2000-01-02-000000.zip",
+                "Book-2000-01-01-000000.zip",
+            ],
+            "newest-first, .zip only"
+        );
+        assert!(entries.iter().all(|e| e.size > 0), "sizes read");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

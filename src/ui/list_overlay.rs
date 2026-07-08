@@ -21,8 +21,9 @@ use std::cell::RefCell;
 
 use crate::app::ListLayout;
 use crate::mode::{
-    Corkboard, Dashboard, DashboardRow, DirBrowser, Findings, History, HistoryRow, ImportPreview,
-    Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage, ReviewImport,
+    BackupBrowser, CoOccurrence, CoOccurrenceRow, Corkboard, Dashboard, DashboardRow, DirBrowser,
+    Findings, History, HistoryRow, ImportPreview, Palette, PaletteRow, ProjectBrowser,
+    ProjectSearch, ProjectSearchStage, ReviewImport,
 };
 use crate::project::Project;
 
@@ -489,9 +490,15 @@ pub(super) fn draw_findings(
                 (Some(t), true) => format!("  [{t}]"),
                 (Some(t), false) => format!("  [{t} · {chapters}]"),
             };
+            // The cross-pass agreement signal (#921) trails the location when more
+            // than one pass flagged this span ("flagged by continuity + plot").
+            let signal = item
+                .agreement_signal()
+                .map(|s| format!("  · {s}"))
+                .unwrap_or_default();
             list_row(
                 *i == findings.selected,
-                &format!("{}{loc}", item.summary),
+                &format!("{}{loc}{signal}", item.summary),
                 None,
             )
         })
@@ -546,7 +553,17 @@ pub(super) fn draw_dashboard(
                 Style::default().fg(theme::current().dim),
             )),
             DashboardRow::Finding(f) => {
-                list_row(i == dashboard.selected, &format!("    {}", f.summary), None)
+                // The cross-pass agreement signal (#921) trails the summary when
+                // more than one pass flagged the span ("flagged by continuity + plot").
+                let signal = f
+                    .agreement_signal()
+                    .map(|s| format!("  · {s}"))
+                    .unwrap_or_default();
+                list_row(
+                    i == dashboard.selected,
+                    &format!("    {}{signal}", f.summary),
+                    None,
+                )
             }
         })
         .collect();
@@ -561,6 +578,41 @@ pub(super) fn draw_dashboard(
         &help,
         rows,
         selected_pos,
+        Some(recorder),
+    );
+}
+
+/// Render the motif / character co-occurrence report (#922) as a navigable list:
+/// a bold section header, then each co-occurring pair / notable absence as a
+/// jumpable row. The selected jumpable row is the one Enter jumps to.
+pub(super) fn draw_cooccurrence(
+    frame: &mut Frame,
+    area: Rect,
+    report: &CoOccurrence,
+    recorder: &RefCell<ListLayout>,
+) {
+    let rows: Vec<Line<'static>> = report
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| match row {
+            CoOccurrenceRow::Header(label) => Line::from(Span::styled(
+                (*label).to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            CoOccurrenceRow::Pair { line, .. } | CoOccurrenceRow::Absence { line, .. } => {
+                list_row(i == report.selected, &format!("  {line}"), None)
+            }
+        })
+        .collect();
+    let help = "Co-occurrence — ↑↓ move · enter jump · s save · esc close".to_string();
+    draw_list_overlay_recording(
+        frame,
+        area,
+        " Motif & character co-occurrence ",
+        &help,
+        rows,
+        Some(report.selected),
         Some(recorder),
     );
 }
@@ -727,10 +779,16 @@ pub(super) fn draw_review_import(frame: &mut Frame, area: Rect, preview: &Review
     // The matched comments first (each becomes an annotation), then the dropped
     // ones, dimmed and flagged so the author sees what didn't carry.
     let mut i = 0;
-    for (_, _, note) in &preview.matched {
+    for (_, _, note, reviewer) in &preview.matched {
+        // Attribute an imported comment to its named reviewer (#933) so a
+        // multi-editor merge shows who left each note.
+        let who = reviewer
+            .as_deref()
+            .map(|r| format!("  ({r})"))
+            .unwrap_or_default();
         header.push(list_row(
             i == preview.scroll,
-            &format!("+ {}", ellipsize(note, 60)),
+            &format!("+ {}{who}", ellipsize(note, 60)),
             None,
         ));
         i += 1;
@@ -760,7 +818,9 @@ pub(super) fn draw_review_import(frame: &mut Frame, area: Rect, preview: &Review
 /// One annotation-list row (#302/#889): the marker + note over the dimmed snippet
 /// it anchors, prefixed with a check for a resolved thread and suffixed with a
 /// reply count. A resolved row is drawn dimmed throughout so it reads as done at a
-/// glance, distinct from the still-open notes.
+/// glance, distinct from the still-open notes. When the note carries a named
+/// reviewer (#886/#933), its name leads the note so a multi-editor list shows who
+/// left each one.
 fn annotation_row(selected: bool, a: &crate::annotation::Live, snippet: String) -> Line<'static> {
     let check = if a.resolved { "✓ " } else { "" };
     let replies = match a.replies.len() {
@@ -768,7 +828,14 @@ fn annotation_row(selected: bool, a: &crate::annotation::Live, snippet: String) 
         1 => "  (1 reply)".to_string(),
         n => format!("  ({n} replies)"),
     };
-    let primary = format!("{check}{}{replies}", a.note);
+    // A named reviewer is shown; an author-authored note carries no tag (it's the
+    // implicit "you"), keeping the historic single-author row unchanged.
+    let who = a
+        .reviewer
+        .as_deref()
+        .map(|r| format!("{r}: "))
+        .unwrap_or_default();
+    let primary = format!("{check}{who}{}{replies}", a.note);
     if a.resolved {
         // A resolved thread reads as done: dim the whole row (still reversed when
         // selected so the cursor is legible).
@@ -800,19 +867,26 @@ pub(super) fn draw_annotations(
     let title = format!(" Annotations ({}) ", app.annotations.len());
     // The type-to-filter query (#822) narrows to notes whose text or anchored
     // snippet match; the row index is preserved so the marker/click map align.
-    let (filter, typing, show) = match &app.mode {
+    let (filter, typing, show, sort, reviewer) = match &app.mode {
         crate::mode::Mode::Annotations {
             filter,
             typing,
             show,
+            sort,
+            reviewer,
             ..
-        } => (filter.clone(), *typing, *show),
-        _ => (String::new(), false, crate::mode::AnnoShow::All),
+        } => (filter.clone(), *typing, *show, *sort, reviewer.clone()),
+        _ => (
+            String::new(),
+            false,
+            crate::mode::AnnoShow::All,
+            crate::mode::AnnoSort::Position,
+            None,
+        ),
     };
-    let query = filter.to_lowercase();
-    let visible: Vec<usize> = (0..app.annotations.len())
-        .filter(|&i| app.annotation_matches(i, &query))
-        .collect();
+    // The visible notes in display order (#933): filtered, then ordered by the
+    // active sort. The single list the app, the marker, and the click map agree on.
+    let visible = app.annotation_visible_order();
     let selected_pos = visible.iter().position(|&i| i == selected);
     let rows = visible
         .iter()
@@ -827,26 +901,35 @@ pub(super) fn draw_annotations(
             annotation_row(i == selected, a, snippet)
         })
         .collect();
-    // The resolved/open filter (#889) is part of the list identity — surface which
-    // slice is showing and how to cycle it alongside the text filter.
+    // The resolved/open filter (#889), sort order (#933), and per-reviewer filter
+    // (#933) are part of the list identity — surface each slice/order and how to
+    // cycle it alongside the text filter.
     let show_tag = match show {
         crate::mode::AnnoShow::All => String::new(),
         other => format!("[{}] ", other.label()),
     };
+    let sort_tag = match sort {
+        crate::mode::AnnoSort::Position => String::new(),
+        other => format!("[by {}] ", other.label()),
+    };
+    let who_tag = reviewer
+        .as_deref()
+        .map(|r| format!("[@{r}] "))
+        .unwrap_or_default();
+    let tags = format!("{show_tag}{sort_tag}{who_tag}");
     let help = if typing {
         format!("Filter: {filter}_")
-    } else if filter.is_empty() {
+    } else if filter.is_empty() && reviewer.is_none() {
         format!(
-            "{show_tag}Annotations — ↑↓ move · enter jump · a reply · r resolve · \
-             f {} · d delete · / filter · esc close",
+            "{tags}Annotations — ↑↓ move · ]/[ next/prev open · enter jump · a reply · \
+             r resolve · f {} · s sort · R reviewer · d delete · / filter · esc close",
             show.next().label()
         )
     } else {
+        let n = visible.len();
         format!(
-            "{show_tag}Filter “{}” — {} match{} · esc clears",
-            filter,
-            visible.len(),
-            if visible.len() == 1 { "" } else { "es" }
+            "{tags}Filtered — {n} match{} · esc clears",
+            if n == 1 { "" } else { "es" }
         )
     };
     draw_list_overlay_recording(
@@ -991,9 +1074,104 @@ pub(super) fn draw_model_manager(
     draw_list_overlay(frame, area, &title, help, rows, Some(selected));
 }
 
+/// Render the local-backup browser (#934): the project's timestamped `.zip`
+/// archives, newest first, each a "how long ago" label + its date over its human
+/// size. Navigable; Enter restores the selected backup over the open project
+/// (behind a confirm), Esc closes. `recorder` captures the row geometry for
+/// click-to-select.
+pub(super) fn draw_backup_browser(
+    frame: &mut Frame,
+    area: Rect,
+    browser: &BackupBrowser,
+    recorder: &RefCell<ListLayout>,
+) {
+    let title = format!(" Backups ({}) ", browser.entries.len());
+    let now = std::time::SystemTime::now();
+    let rows = browser
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let when = backup_when(e.modified, now);
+            list_row(
+                i == browser.selected,
+                &when,
+                Some(format!("{}  ·  {}", human_size(e.size), e.name)),
+            )
+        })
+        .collect();
+    let help = "Backups — ↑↓ move · enter restore · esc close";
+    draw_list_overlay_recording(
+        frame,
+        area,
+        &title,
+        help,
+        rows,
+        Some(browser.selected),
+        Some(recorder),
+    );
+}
+
+/// A backup's "when" label for the browser (#934): its local date-time, with a
+/// coarse "how long ago" suffix so recency reads at a glance. Falls back to just
+/// the age (or "unknown time" for a clock skew that puts the archive in the future)
+/// when the timestamp can't be formatted.
+fn backup_when(modified: std::time::SystemTime, now: std::time::SystemTime) -> String {
+    let ago = now
+        .duration_since(modified)
+        .map(|d| format!(" ({} ago)", backup_age(d)))
+        .unwrap_or_default();
+    let offset = time::OffsetDateTime::now_local()
+        .map(time::OffsetDateTime::offset)
+        .unwrap_or(time::UtcOffset::UTC);
+    let local = time::OffsetDateTime::from(modified).to_offset(offset);
+    let fmt = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
+    match local.format(&fmt) {
+        Ok(s) => format!("{s}{ago}"),
+        Err(_) if ago.is_empty() => "unknown time".to_string(),
+        Err(_) => ago.trim().trim_matches(['(', ')']).to_string(),
+    }
+}
+
+/// A compact "how long ago" label for a backup's age (#934): minutes under an
+/// hour, hours under a day, then days. Coarse on purpose — the browser wants
+/// "recent vs. old" at a glance, with the exact date already alongside it.
+fn backup_age(age: std::time::Duration) -> String {
+    let mins = age.as_secs() / 60;
+    if mins < 60 {
+        format!("{mins}m")
+    } else if mins < 60 * 24 {
+        format!("{}h", mins / 60)
+    } else {
+        format!("{}d", mins / (60 * 24))
+    }
+}
+
+/// A backup's size as a compact human-readable string (#934): bytes, then KB / MB
+/// as the size grows, one decimal place past a kilobyte. A backup is text, so this
+/// tops out in the low megabytes for even a large novel.
+fn human_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::scroll_offset;
+    use super::{human_size, scroll_offset};
+
+    #[test]
+    fn human_size_reads_bytes_then_kb_then_mb() {
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1536), "1.5 KB");
+        assert_eq!(human_size(3 * 1024 * 1024), "3.0 MB");
+    }
 
     #[test]
     fn a_list_that_fits_does_not_scroll() {

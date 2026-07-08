@@ -16,6 +16,7 @@
 
 use std::time::{Duration, Instant};
 
+use super::pass_queue::PassQueueDriver;
 use super::series_bible::SeriesBibleDriver;
 use super::task::Task;
 use super::workflows::WorkflowDriver;
@@ -155,6 +156,8 @@ impl App {
             advance_sequenced::<WorkflowDriver>(self, step_error);
         } else if self.series_bible_run.is_some() {
             advance_sequenced::<SeriesBibleDriver>(self, step_error);
+        } else if self.pass_queue_running() {
+            advance_sequenced::<PassQueueDriver>(self, step_error);
         }
     }
 
@@ -164,6 +167,8 @@ impl App {
             tick_sequenced_timeout::<WorkflowDriver>(self);
         } else if self.series_bible_run.is_some() {
             tick_sequenced_timeout::<SeriesBibleDriver>(self);
+        } else if self.pass_queue_running() {
+            tick_sequenced_timeout::<PassQueueDriver>(self);
         }
     }
 
@@ -174,6 +179,8 @@ impl App {
             cancel_sequenced::<WorkflowDriver>(self);
         } else if self.series_bible_run.is_some() {
             cancel_sequenced::<SeriesBibleDriver>(self);
+        } else if self.pass_queue_running() {
+            cancel_sequenced::<PassQueueDriver>(self);
         }
     }
 

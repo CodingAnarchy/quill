@@ -4,6 +4,31 @@
 
 use super::super::*;
 
+use crate::ai::embed::Breadth;
+
+/// Parse an optional retrieval-breadth marker off the front of an Ask question
+/// (#931), returning the requested [`Breadth`] and the question with the marker
+/// stripped. A question may lead with `!broad ` / `!fine ` (or the aliases
+/// `!wide` / `!narrow`) to ground the answer in fewer-larger vs more-smaller
+/// passages; anything else — the overwhelming default — is [`Breadth::Normal`] and
+/// the question is returned untouched, so default Ask behavior is unchanged.
+///
+/// The marker is a plain in-question toggle so it needs no new prompt state and
+/// stays hermetically testable: the parse is pure. Matching is case-insensitive and
+/// only fires on the leading token, so a question that merely *mentions* "broad"
+/// isn't affected.
+fn parse_breadth(question: &str) -> (Breadth, String) {
+    let q = question.trim_start();
+    let (marker, rest) = q.split_once(char::is_whitespace).unwrap_or((q, ""));
+    let breadth = match marker.to_ascii_lowercase().as_str() {
+        "!broad" | "!wide" => Breadth::Broad,
+        "!fine" | "!narrow" => Breadth::Fine,
+        // No recognized marker → default breadth, question untouched.
+        _ => return (Breadth::Normal, question.to_string()),
+    };
+    (breadth, rest.trim_start().to_string())
+}
+
 /// One entry in the "Ask the manuscript" history (#609): the question and its
 /// grounded answer (prose + cited chapter titles). Persisted per project (#654)
 /// via [`qa_store`](super::super::qa_store) so a past lookup and its citations
@@ -38,6 +63,7 @@ fn qa_citation_findings(answer: &ai::Answer) -> Vec<Finding> {
             chapters: vec![title.to_string()],
             book: None,
             action: None, // a Q&A citation isn't a re-runnable analysis finding (#608)
+            corroborators: Vec::new(),
         });
     }
     out
@@ -58,6 +84,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
             chapters: Vec::new(),
             book: None,
             action: None,
+            corroborators: Vec::new(),
         })
         .collect();
     if !rows.is_empty() {
@@ -67,6 +94,7 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
             chapters: Vec::new(),
             book: None,
             action: None,
+            corroborators: Vec::new(),
         });
     }
     rows
@@ -98,6 +126,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                 chapters: Vec::new(),
                 book: None,
                 action: None,
+                corroborators: Vec::new(),
             });
         } else {
             for title in cited {
@@ -108,6 +137,7 @@ fn qa_history_findings(log: &[QaEntry]) -> Vec<Finding> {
                     chapters: vec![title.to_string()],
                     book: None,
                     action: None,
+                    corroborators: Vec::new(),
                 });
             }
         }
@@ -129,8 +159,15 @@ impl App {
     /// available or turns up nothing, it falls back to the whole-book context
     /// unchanged. Either way it's the one `build_qa_request` path, so the answer's
     /// citations stay jumpable exactly as today.
+    ///
+    /// A question may lead with a breadth marker (`!broad` / `!fine`, #931) to ground
+    /// the answer in fewer-larger vs more-smaller passages; the marker is parsed off
+    /// here so it never reaches the model or the Q&A log (the logged question is the
+    /// plain text), and it only affects the retrieval path — a whole-book fallback is
+    /// unchanged, as is the default (no marker) ask.
     pub(crate) fn ask_ai(&mut self, question: &str) {
-        let question = question.trim().to_string();
+        // Split off an optional breadth marker (#931); the rest is the real question.
+        let (breadth, question) = parse_breadth(question.trim());
         if question.is_empty() {
             return;
         }
@@ -147,10 +184,11 @@ impl App {
         self.spawn_ai(
             "⟳ Sending to Claude…",
             move |backend, manuscript, model| {
-                // Try semantic retrieval first; fall back to the whole book (#831).
+                // Try semantic retrieval first, at the requested breadth; fall back to
+                // the whole book (#831, #931).
                 let context = match (embed_model, chapters) {
                     (Some(m), Some(chapters)) => {
-                        super::retrieve::retrieve_context(&root, &chapters, m, &question)
+                        super::retrieve::retrieve_context(&root, &chapters, m, &question, breadth)
                             .unwrap_or(manuscript)
                     }
                     _ => manuscript,
@@ -229,5 +267,44 @@ impl App {
             items,
             ..Default::default()
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_breadth, Breadth};
+
+    #[test]
+    fn no_marker_is_normal_breadth_and_untouched_question() {
+        // The default (no marker) ask is unchanged (#931): Normal breadth, verbatim.
+        let (b, q) = parse_breadth("what is the arc of the locket?");
+        assert_eq!(b, Breadth::Normal);
+        assert_eq!(q, "what is the arc of the locket?");
+    }
+
+    #[test]
+    fn broad_and_fine_markers_are_parsed_and_stripped() {
+        let (b, q) = parse_breadth("!broad what is the arc of the locket?");
+        assert_eq!(b, Breadth::Broad);
+        assert_eq!(q, "what is the arc of the locket?", "marker stripped");
+
+        let (b, q) = parse_breadth("!fine what exact word did she use?");
+        assert_eq!(b, Breadth::Fine);
+        assert_eq!(q, "what exact word did she use?");
+
+        // Aliases and case-insensitivity.
+        assert_eq!(parse_breadth("!WIDE q").0, Breadth::Broad);
+        assert_eq!(parse_breadth("!Narrow q").0, Breadth::Fine);
+    }
+
+    #[test]
+    fn a_mentioned_word_is_not_a_marker() {
+        // Only a leading `!marker` toggles breadth; a question that merely mentions
+        // "broad" is a plain Normal ask, untouched.
+        let (b, q) = parse_breadth("is the broad daylight scene consistent?");
+        assert_eq!(b, Breadth::Normal);
+        assert_eq!(q, "is the broad daylight scene consistent?");
+        // A bare word without the `!` prefix isn't a marker either.
+        assert_eq!(parse_breadth("broad q").0, Breadth::Normal);
     }
 }

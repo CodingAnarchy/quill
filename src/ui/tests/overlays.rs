@@ -163,7 +163,7 @@ fn review_import_lists_matches_and_dropped_comments() {
     app.mode = Mode::ReviewImport(Box::new(ReviewImport {
         source: std::path::PathBuf::from("/tmp/book-review.docx"),
         chapter: "one.md".into(),
-        matched: vec![(12, 16, "vivid word".into())],
+        matched: vec![(12, 16, "vivid word".into(), None)],
         dropped: vec![("gray waves".into(), "check this".into())],
         scroll: 0,
     }));
@@ -196,7 +196,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
     // The review list (#302/#889) renders a resolved note distinctly (a ✓ + a reply
     // count), and its help line advertises the reply / resolve / filter keys.
     use crate::annotation::{Live, Reply};
-    use crate::mode::{AnnoShow, Mode};
+    use crate::mode::{AnnoShow, AnnoSort, Mode};
 
     let mut app = app_with("The night was long.\n");
     app.annotations = vec![
@@ -207,6 +207,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
             note: "still thinking".into(),
             replies: Vec::new(),
             resolved: false,
+            reviewer: None,
         },
         Live {
             chapter: "one.md".into(),
@@ -218,6 +219,7 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
                 text: "done".into(),
             }],
             resolved: true,
+            reviewer: None,
         },
     ];
     app.mode = Mode::Annotations {
@@ -225,6 +227,8 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
         filter: String::new(),
         typing: false,
         show: AnnoShow::All,
+        sort: AnnoSort::default(),
+        reviewer: None,
     };
 
     let screen = render(&app, 90, 20);
@@ -240,8 +244,57 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
         screen.contains("(1 reply)"),
         "the reply count shows on the thread:\n{screen}"
     );
+    // The thread keys and the triage keys (#933) are advertised in the help line.
+    // The line wraps in this width, so check for tokens that don't straddle a wrap.
     assert!(
-        screen.contains("a reply") && screen.contains("r resolve") && screen.contains("f open"),
-        "the thread keys are advertised in the help line:\n{screen}"
+        screen.contains("reply")
+            && screen.contains("resolve")
+            && screen.contains("f open")
+            && screen.contains("sort")
+            && screen.contains("reviewer")
+            && screen.contains("next/prev open"),
+        "the thread + triage keys are advertised in the help line:\n{screen}"
+    );
+}
+
+#[test]
+fn the_backup_browser_lists_dates_sizes_and_the_restore_key() {
+    // The backup browser (#934) lists each archive's date-ish label over its size
+    // and name, with the restore/close keys in the help line.
+    use crate::app::BackupEntry;
+    use crate::mode::BackupBrowser;
+    use std::time::{Duration, SystemTime};
+
+    let mut app = app_with("body\n");
+    let entry = |name: &str, size: u64, ago_secs: u64| BackupEntry {
+        name: name.into(),
+        path: std::path::PathBuf::from(name),
+        size,
+        modified: SystemTime::now() - Duration::from_secs(ago_secs),
+    };
+    app.mode = Mode::BackupBrowser(Box::new(BackupBrowser {
+        entries: vec![
+            entry("Book-2000-01-03-000000.zip", 3 * 1024 * 1024, 3600),
+            entry("Book-2000-01-01-000000.zip", 2048, 3 * 24 * 3600),
+        ],
+        selected: 0,
+    }));
+
+    let screen = render(&app, 90, 20);
+    assert!(
+        screen.contains("Backups (2)"),
+        "titled with the count:\n{screen}"
+    );
+    assert!(
+        screen.contains("3.0 MB") && screen.contains("2.0 KB"),
+        "human sizes shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Book-2000-01-03-000000.zip"),
+        "the archive name is listed:\n{screen}"
+    );
+    assert!(
+        screen.contains("enter restore") && screen.contains("esc close"),
+        "the restore/close keys are advertised:\n{screen}"
     );
 }

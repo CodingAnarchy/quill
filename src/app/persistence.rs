@@ -241,6 +241,66 @@ impl App {
         );
     }
 
+    /// On open, if the project looks damaged, offer to restore from the latest
+    /// local backup (#934). "Damaged" is a manifest that won't parse or a chapter
+    /// file that's missing or unreadable — the kind of data loss a backup exists to
+    /// undo. When the newest archive #888 wrote is available, this opens a y/N
+    /// restore confirm targeting it; otherwise it's a clean no-op (nothing to offer,
+    /// or the project is intact). Skipped when a prompt/overlay is already up (the
+    /// crash-recovery offer takes precedence), so the two never fight over the
+    /// screen. Reads only the chapter files' existence + the backups dir — never a
+    /// re-parse of the manuscript — so it costs an open next to nothing.
+    pub fn offer_backup_restore_on_damage(&mut self) {
+        // Don't pre-empt an already-open prompt/overlay (e.g. the crash-recovery
+        // offer, which is about *unsaved* work and comes first).
+        if !matches!(
+            self.mode,
+            crate::mode::Mode::Insert | crate::mode::Mode::Normal
+        ) {
+            return;
+        }
+        if self.project_looks_intact() {
+            return;
+        }
+        // The project looks damaged. Offer the newest backup, if there is one.
+        let Some(latest) = self.list_local_backups().into_iter().next() else {
+            self.message =
+                Some("This project looks damaged, and there's no local backup to restore.".into());
+            return;
+        };
+        self.pending_restore_backup = Some(latest.path);
+        self.open_prompt(
+            Pending::ConfirmRestoreBackup,
+            format!(
+                "This project looks damaged. Restore from the latest backup ({})? (y/N)",
+                latest.name
+            ),
+            "",
+            None,
+        );
+    }
+
+    /// Whether the open project's files look intact (#934): its manifest parses and
+    /// every chapter file the manifest references exists and reads. A missing or
+    /// unreadable chapter, or a manifest that no longer parses, reads as damaged —
+    /// the signal the on-open restore offer keys on. A missing chapter file counts:
+    /// [`try_chapter_body`](crate::project::Project::try_chapter_body) reads it as
+    /// the legitimate "empty chapter" (`Ok("")`), so existence is checked
+    /// separately. Checks file existence + a cheap read probe, never a full re-parse
+    /// of the prose, so it stays proportional to the chapter *count*, not the
+    /// novel's size.
+    fn project_looks_intact(&self) -> bool {
+        use crate::project::Project;
+        // The manifest must still parse — a corrupt `book.toml` is damage even when
+        // the in-memory project (opened earlier) is fine.
+        if Project::open(&self.project.root).is_err() {
+            return false;
+        }
+        (0..self.chapter_count()).all(|i| {
+            self.project.chapter_path(i).is_file() && self.project.try_chapter_body(i).is_ok()
+        })
+    }
+
     /// How the recovery prompt names what it found: one chapter by title, or a
     /// count when several chapters from the continuous view were captured (#566).
     fn recovery_descriptor(&self, rec: &recovery::Recovery) -> String {

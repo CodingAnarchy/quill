@@ -23,6 +23,7 @@ const KIND_ORDER: &[FindingKind] = &[
     FindingKind::Style,
     FindingKind::Editorial,
     FindingKind::Voice,
+    FindingKind::Echo,
     FindingKind::Other,
 ];
 
@@ -34,6 +35,33 @@ fn chapter_bucket(f: &Finding) -> String {
     f.chapters
         .first()
         .map_or_else(|| NO_CHAPTER.to_string(), Clone::clone)
+}
+
+/// The *span* two findings share when they're the same issue seen by different
+/// passes (#921): the summary + chapters + book, ignoring the kind. Findings that
+/// agree on this — one dangling thread flagged by both continuity and plot — are
+/// merged into a single row weighted by that agreement.
+fn span_of(f: &Finding) -> (String, Vec<String>, Option<usize>) {
+    (f.summary.clone(), f.chapters.clone(), f.book)
+}
+
+/// Collapse cross-pass agreement into consensus findings (#921): findings that
+/// several passes raise for the same span become one, keeping the first pass's
+/// `kind` as the primary lens and folding every other pass into `corroborators`,
+/// so the view can weight the finding by agreement. First-seen order is preserved
+/// (the primary is whichever pass surfaced the span first). A lone finding passes
+/// through unchanged. Pure over the input, so it's directly testable.
+pub(super) fn consensus(findings: &[Finding]) -> Vec<Finding> {
+    let mut merged: Vec<Finding> = Vec::new();
+    for f in findings {
+        let span = span_of(f);
+        if let Some(existing) = merged.iter_mut().find(|m| span_of(m) == span) {
+            existing.corroborate(f);
+        } else {
+            merged.push(f.clone());
+        }
+    }
+    merged
 }
 
 /// Build the dashboard's flat, ordered row list (#827) from a set of open
@@ -88,12 +116,17 @@ impl App {
             self.message = Some("No findings yet — run a continuity / setting / style pass".into());
             return;
         }
-        let rows = dashboard_rows(&self.triage);
+        // Collapse cross-pass agreement first (#921): a span several passes flag is
+        // one finding weighted by consensus, so the dashboard count and rows reflect
+        // distinct issues, not per-pass duplicates.
+        let findings = consensus(&self.triage);
+        let total = findings.len();
+        let rows = dashboard_rows(&findings);
         let selected = rows.iter().position(|r| r.finding().is_some()).unwrap_or(0);
         self.mode = Mode::Dashboard(Box::new(Dashboard {
             rows,
             selected,
-            total: self.triage.len(),
+            total,
         }));
     }
 
@@ -184,7 +217,11 @@ fn dashboard_plain_text(d: &Dashboard) -> String {
                 out.push(format!("- {title} ({count})"));
             }
             DashboardRow::Finding(f) => {
-                out.push(format!("    - {}", f.summary));
+                let signal = f
+                    .agreement_signal()
+                    .map(|s| format!(" ({s})"))
+                    .unwrap_or_default();
+                out.push(format!("    - {}{signal}", f.summary));
             }
         }
     }

@@ -45,31 +45,60 @@ impl App {
         }));
     }
 
-    /// Open the unified run-action menu (#225): every registry [`Action`], run by
-    /// name through the same dispatch its dedicated shortcut uses. Unavailable
-    /// actions stay listed, annotated with why they can't run right now.
+    /// Open the unified run-action menu (#225): every *applicable* registry
+    /// [`Action`], run by name through the same dispatch its dedicated shortcut
+    /// uses. Actions that can't run in the current context are hidden (#944) rather
+    /// than listed as "unavailable" — [`action_status`](App::action_status) returns
+    /// `None` exactly when an action is applicable, so filtering on `is_some()`
+    /// drops the inapplicable ones (Enable-AI when AI is on, the AI passes when it's
+    /// off, series actions on a single book, …) while `SwitchBackend` (status
+    /// `None`) stays. The groups open collapsed by default and remember the author's
+    /// collapse/expand changes across opens (#943).
     pub(crate) fn open_action_palette(&mut self) {
-        let items = Action::ALL
+        let items: Vec<PaletteItem> = Action::ALL
             .iter()
+            .filter(|&&a| self.action_status(a).is_none())
             .map(|&a| {
-                let desc = match self.action_status(a) {
-                    Some(reason) => format!("{} · unavailable: {reason}", a.name()),
-                    // The backend switch shows which backend is active right now,
-                    // so the author can see the state before flipping it (#371).
-                    None if matches!(a, Action::SwitchBackend) => {
-                        format!("{} · now: {}", a.name(), self.ai_backend_label())
-                    }
-                    None => a.name().to_string(),
+                // The backend switch shows which backend is active right now, so the
+                // author can see the state before flipping it (#371).
+                let desc = if matches!(a, Action::SwitchBackend) {
+                    format!("{} · now: {}", a.name(), self.ai_backend_label())
+                } else {
+                    a.name().to_string()
                 };
                 PaletteItem::new(a.label(), desc, Command::Run(a)).in_group(a.group())
             })
             .collect();
+        let collapsed = self.palette_collapsed_for("Run action", &items);
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Run action",
             items,
             selected: 0,
-            collapsed: std::collections::HashSet::default(),
+            collapsed,
         }));
+    }
+
+    /// The collapse state a grouped palette opens with (#943): the author's
+    /// remembered set for this `title`, or — the first time it's opened this session
+    /// — every group collapsed, so the palette opens as a short list of group
+    /// headers. Only groups that still exist in `items` are kept, so an action that
+    /// became inapplicable (and dropped its whole group) doesn't leave a stale entry.
+    fn palette_collapsed_for(
+        &mut self,
+        title: &'static str,
+        items: &[PaletteItem],
+    ) -> std::collections::HashSet<&'static str> {
+        let groups: std::collections::HashSet<&'static str> =
+            items.iter().filter_map(|i| i.group).collect();
+        let saved = self
+            .palette_collapsed
+            .entry(title)
+            // First open this session: default every group collapsed.
+            .or_insert_with(|| groups.clone());
+        // Prune groups that no longer exist so the stored set stays in step with the
+        // current (filtered) action set.
+        saved.retain(|g| groups.contains(g));
+        saved.clone()
     }
 
     /// Why `action` can't run right now, or `None` if it can — the one
@@ -86,7 +115,12 @@ impl App {
             // Triage, the health dashboard, and the Ask history are local — they
             // work with the AI backend off (browsing already-collected findings /
             // past answers, #609/#827).
-            Action::Ai(AiAction::Triage | AiAction::Dashboard | AiAction::AskHistory) => None,
+            Action::Ai(
+                AiAction::Triage
+                | AiAction::Dashboard
+                | AiAction::CoOccurrence
+                | AiAction::AskHistory,
+            ) => None,
             // Image generation has its own opt-in / key, separate from the text AI
             // (and its own "local not compiled" fail-fast).
             Action::Ai(AiAction::Portrait | AiAction::Scene) => {
@@ -136,6 +170,9 @@ impl App {
             // The all-bibles refresh (#655) spawns the four bible passes, so it
             // needs a ready AI backend, but works for a standalone novel too.
             Action::RefreshBibles => self.ai.check_ready().err().map(|e| e.to_string()),
+            // The durable pass queue (#923) spawns the bible passes, so it needs a
+            // ready AI backend; works for a standalone novel too.
+            Action::QueuePasses => self.ai.check_ready().err().map(|e| e.to_string()),
             // Describe-to-config needs the AI to propose the settings (#303).
             Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
             // The assistant pane is a single-chapter-view feature, like the splits.
@@ -235,6 +272,7 @@ impl App {
                     | AiAction::Editorial
             ) | Action::RefreshSeriesBible
                 | Action::RefreshBibles
+                | Action::QueuePasses
                 | Action::DescribeConfig
         )
     }
@@ -259,6 +297,7 @@ impl App {
             Action::ImportReviewComments => self.start_import_review_comments(),
             Action::ArchiveProject => self.start_archive_project(),
             Action::RestoreArchive => self.start_restore_archive(),
+            Action::BrowseBackups => self.open_backup_browser(),
             Action::StartSprint => self.start_sprint(),
             Action::StopSprint => self.stop_sprint(),
             Action::SwitchBook => self.open_book_switcher(),
@@ -269,9 +308,11 @@ impl App {
             Action::SetGoals => self.start_set_goals(),
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::RefreshBibles => self.start_refresh_bibles(force),
+            Action::QueuePasses => self.start_queue_passes(force),
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),
             Action::AcceptWord => self.accept_word_at_cursor(),
+            Action::ViewDictionary => self.view_dictionary(),
             Action::NextMisspelling => self.navigate_spell_flag(1),
             Action::PrevMisspelling => self.navigate_spell_flag(-1),
             Action::ToggleTypewriter => {
@@ -299,6 +340,7 @@ impl App {
             Action::SetImageKey => self.start_set_api_key(ai::keychain::Key::Fal),
             Action::Assistant => self.open_assistant(),
             Action::BrowseBible => self.open_bible_files(),
+            Action::ViewResearch => self.open_research_notebook(),
             Action::InsertSnippet => self.open_snippet_picker(),
             Action::BrowseFonts => self.open_font_browser(),
             Action::SetExportStyle => self.open_export_style_menu(),
@@ -385,6 +427,10 @@ impl App {
             return;
         }
         let current = rows.get(p.selected);
+        // Set when a group's collapse state changes, so it's persisted back to
+        // `App.palette_collapsed` (#943) once the `p` borrow ends — remembering the
+        // author's collapse/expand across opens.
+        let mut collapse_changed = false;
         match key.code {
             // On a group header: →/← (and Enter) expand or collapse it (#514).
             KeyCode::Right => {
@@ -394,6 +440,7 @@ impl App {
                 }) = current
                 {
                     p.set_collapsed(group, false);
+                    collapse_changed = true;
                 }
             }
             KeyCode::Left => {
@@ -401,11 +448,15 @@ impl App {
                     Some(PaletteRow::Header {
                         group,
                         collapsed: false,
-                    }) => p.set_collapsed(group, true),
+                    }) => {
+                        p.set_collapsed(group, true);
+                        collapse_changed = true;
+                    }
                     // From an item, ← collapses its group and lands on that header.
                     Some(PaletteRow::Item(i)) => {
                         if let Some(g) = p.items[*i].group {
                             p.set_collapsed(g, true);
+                            collapse_changed = true;
                             // Collapsing only removes the rows *after* the header, so its
                             // index in the rows we already computed still points at it.
                             p.selected = rows
@@ -423,6 +474,9 @@ impl App {
                 let command = match current {
                     Some(PaletteRow::Header { group, collapsed }) => {
                         p.set_collapsed(group, !*collapsed);
+                        let (title, collapsed) = (p.title, p.collapsed.clone());
+                        // The `p` borrow ends here; persist the toggle (#943).
+                        self.palette_collapsed.insert(title, collapsed);
                         return;
                     }
                     Some(PaletteRow::Item(i)) => Some(p.items[*i].command.clone()),
@@ -472,6 +526,13 @@ impl App {
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
         }
+        // A →/← collapse or expand landed on a header (the Enter path persists and
+        // returns on its own): remember it for the next open (#943).
+        if collapse_changed {
+            if let Mode::Palette(p) = &self.mode {
+                self.palette_collapsed.insert(p.title, p.collapsed.clone());
+            }
+        }
     }
 
     /// Begin an AI action chosen from the palette: for a network pass, show a
@@ -507,7 +568,32 @@ impl App {
         self.routed_backend.set(Some(backend));
         if backend == BackendKind::Local {
             self.routed_model.set(self.pick_local_model(action, force));
+            // A local pass never uses a per-action cloud model — clear any one-shot
+            // a prior (cancelled) cloud route may have armed, so it can't leak.
+            self.routed_cloud_model.set(None);
+        } else {
+            // Cloud: arm the per-action model the pass's weight + estimate resolved
+            // to (#930), so the request runs on the chosen tier rather than always
+            // the session `[ai] model`. Only for the costed manuscript passes — an
+            // interactive/local action has no `cost_profile`, so it keeps the
+            // session model (the one-shot stays `None`).
+            self.routed_cloud_model
+                .set(self.cloud_model_override(action, force));
         }
+    }
+
+    /// The per-action cloud model to arm for this request (#930), or `None` when
+    /// the pass keeps the session `[ai] model`: `Some` only for a costed manuscript
+    /// pass whose picker chose a model *different* from the session one (a light,
+    /// small pass stepped down to the cheaper tier). A heavy pass — or any pass the
+    /// picker leaves on the configured model — arms nothing, so the existing
+    /// `self.ai.model` path is untouched.
+    fn cloud_model_override(&self, action: AiAction, force: bool) -> Option<String> {
+        if action.cost() != AiCost::Manuscript {
+            return None;
+        }
+        let chosen = self.cloud_model_for(action, self.pass_context_len(action, force));
+        (chosen != self.ai.model).then(|| chosen.to_string())
     }
 
     /// The local model best suited to this action (#377): the router picks from the
@@ -556,7 +642,7 @@ impl App {
     /// ([`start_ai_action`]) and the workflow runner (#227) so a workflow's AI
     /// step follows the same cost policy.
     pub(crate) fn ai_action_start(&self, action: AiAction, force: bool) -> AiStart {
-        let Some((model, max_tokens)) = self.cost_profile(action) else {
+        let Some((model, max_tokens)) = self.cost_profile(action, force) else {
             // Interactive / image action — no costed pass to route; run on the
             // session backend (which an `offline` pin / the in-app switch resolve).
             return AiStart::Run(self.ai.backend());
@@ -616,12 +702,29 @@ impl App {
     /// live AI settings. `None` for the local / interactive / image actions
     /// (Ask, Triage, Brainstorm, the drafts, the portraits/scene, the thesaurus),
     /// which issue no costed whole-manuscript pass.
-    fn cost_profile(&self, action: AiAction) -> Option<(&str, u32)> {
+    fn cost_profile(&self, action: AiAction, force: bool) -> Option<(&str, u32)> {
         match action.cost() {
             AiCost::None => None,
             AiCost::Naming => Some((naming::MODEL, naming::MAX_TOKENS)),
-            AiCost::Manuscript => Some((&self.ai.model, ai::MAX_OUTPUT_TOKENS)),
+            // Per-action model routing (#930): a heavy reasoning pass runs on the
+            // configured top model; a light, small one can drop to a cheaper tier.
+            // The estimate below then reflects whichever model is chosen, and the
+            // same model is armed as the one-shot cloud model the request uses.
+            AiCost::Manuscript => Some((
+                self.cloud_model_for(action, self.pass_context_len(action, force)),
+                ai::MAX_OUTPUT_TOKENS,
+            )),
         }
+    }
+
+    /// The cloud (Claude) model this action's manuscript pass will run on (#930):
+    /// the pure per-action picker applied to the pass's weight, its token estimate
+    /// (`context_chars / 4`, the same figure the cost estimate uses), and the
+    /// author's configured `[ai] model` — a heavy pass keeps the top model, a
+    /// light, small one drops to the cheaper tier, and an author-set model always
+    /// wins. Borrows from `self` (either `self.ai.model` or a `'static` tier id).
+    fn cloud_model_for(&self, action: AiAction, context_len: usize) -> &str {
+        router::pick_cloud_model(action.weight(), (context_len / 4) as u32, &self.ai.model)
     }
 
     /// Dispatch an AI action to its handler. Shared by the palette and the cost
@@ -653,8 +756,11 @@ impl App {
             AiAction::AdCreative => self.analyze_ad_creative(),
             AiAction::Portrait => self.start_portrait(),
             AiAction::Scene => self.start_scene(),
+            AiAction::SemanticFind => self.start_semantic_find(),
+            AiAction::Echo => self.start_echo_detection(),
             AiAction::Triage => self.open_triage(),
             AiAction::Dashboard => self.open_health_dashboard(),
+            AiAction::CoOccurrence => self.open_cooccurrence(),
             AiAction::AskHistory => self.open_qa_history(),
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::NameGen => self.start_namegen(),
@@ -744,9 +850,21 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
             "Manuscript health",
             "Open findings by kind & chapter, with counts (local)",
         ),
+        AiAction::CoOccurrence => (
+            "Motif & character co-occurrence",
+            "Which entries cluster & which are conspicuously apart (local)",
+        ),
         AiAction::AskHistory => (
             "Ask history",
             "Re-open a past Ask — answer + jumpable citations (local)",
+        ),
+        AiAction::SemanticFind => (
+            "Find similar scenes",
+            "Ranked, jumpable passages like a selection or a query (local, reads only)",
+        ),
+        AiAction::Echo => (
+            "Echo & near-duplicate detection",
+            "Flag repeated / echoed passage pairs with scores (local, reads only)",
         ),
         AiAction::Thesaurus => (
             "Word search",

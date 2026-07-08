@@ -70,11 +70,12 @@ impl App {
             return;
         }
 
-        // While a sequenced run is in progress (a workflow #227, or a series-bible
-        // refresh #340) suspended on an async step, Esc cancels it — cleanly, after
-        // the current step finishes (#344). Only in an editing mode: a prompt or
-        // palette owns Esc itself (a cost-confirm cancels there).
-        if self.sequenced_run_active()
+        // While a sequenced run is in progress (a workflow #227, a series-bible
+        // refresh #340, or a durable pass queue #923) suspended on an async step,
+        // Esc cancels it — cleanly, after the current step finishes (#344). Only in
+        // an editing mode: a prompt or palette owns Esc itself (a cost-confirm
+        // cancels there).
+        if (self.sequenced_run_active() || self.pass_queue_running())
             && key.code == KeyCode::Esc
             && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
         {
@@ -132,6 +133,7 @@ impl App {
             Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Dashboard(_) => self.on_key_dashboard(key),
+            Mode::CoOccurrence(_) => self.on_key_cooccurrence(key),
             Mode::History(_) => self.on_key_history(key),
             Mode::Annotations { .. } => self.on_key_annotations(key),
             Mode::Corkboard(_) => self.on_key_corkboard(key),
@@ -146,6 +148,7 @@ impl App {
             Mode::DirBrowser(_) => self.on_key_dir_browser(key),
             Mode::ImportPreview(_) => self.on_key_import_preview(key),
             Mode::ReviewImport(_) => self.on_key_review_import(key),
+            Mode::BackupBrowser(_) => self.on_key_backup_browser(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
             Mode::Visual { .. } => self.on_key_visual(key),

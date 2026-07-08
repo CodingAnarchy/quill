@@ -127,6 +127,8 @@ pub enum FindingKind {
     Style,
     Editorial,
     Voice,
+    /// Echo / near-duplicate passage pairs (#920) — the semantic-repetition scan.
+    Echo,
     /// Not a re-runnable analysis pass (Q&A citations / answer rows), or an
     /// unrecognized persisted slug.
     Other,
@@ -146,6 +148,7 @@ impl FindingKind {
             Self::Style => "style",
             Self::Editorial => "editorial",
             Self::Voice => "voice",
+            Self::Echo => "echo",
             Self::Other => "other",
         }
     }
@@ -162,6 +165,7 @@ impl FindingKind {
             Self::Style => "Prose & style",
             Self::Editorial => "Editorial",
             Self::Voice => "Character voice",
+            Self::Echo => "Echoes & near-duplicates",
             Self::Other => "Other",
         }
     }
@@ -179,6 +183,7 @@ impl FindingKind {
             Self::Style,
             Self::Editorial,
             Self::Voice,
+            Self::Echo,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -211,6 +216,56 @@ pub struct Finding {
     /// and history rows — and for findings restored from the durable store, which
     /// records content, not the pass (a fresh pass re-attributes them).
     pub(crate) action: Option<AiAction>,
+    /// Other passes that independently raised the *same span* (#921): cross-pass
+    /// consensus. `kind` is this finding's own pass; `corroborators` holds the
+    /// additional passes that flagged the same chapters + summary, so the health
+    /// view can weight a finding by agreement ("flagged by continuity + plot").
+    /// Empty for a lone finding. Not part of identity — merging corroborators
+    /// never changes which finding this *is* — so triage dedup and dismiss-matching
+    /// stay keyed on content alone.
+    pub(crate) corroborators: Vec<FindingKind>,
+}
+
+impl Finding {
+    /// Every pass that agrees on this finding (#921): its own `kind` first, then
+    /// the corroborating passes, de-duplicated and in first-seen order. One pass
+    /// means no consensus; two or more is cross-pass agreement.
+    pub(crate) fn agreement(&self) -> Vec<FindingKind> {
+        let mut passes = vec![self.kind];
+        for &k in &self.corroborators {
+            if !passes.contains(&k) {
+                passes.push(k);
+            }
+        }
+        passes
+    }
+
+    /// Fold `other`'s passes into this finding's corroborators (#921) when a second
+    /// pass raises the same span. Records `other`'s own kind and any consensus it
+    /// already carried, skipping this finding's own kind and duplicates, so the
+    /// agreement set stays a clean union.
+    pub(crate) fn corroborate(&mut self, other: &Self) {
+        for k in other.agreement() {
+            if k != self.kind && !self.corroborators.contains(&k) {
+                self.corroborators.push(k);
+            }
+        }
+    }
+
+    /// The cross-pass agreement signal (#921): `None` when a single pass raised
+    /// this finding, or `Some("flagged by continuity + plot")` when passes agree —
+    /// the consensus weight the findings list and health dashboard show. Passes are
+    /// listed in agreement order (the primary first), lower-cased to read as a
+    /// fragment. The single place the signal's wording lives, so the list, the
+    /// dashboard, and its export stay identical.
+    pub(crate) fn agreement_signal(&self) -> Option<String> {
+        let passes = self.agreement();
+        if passes.len() < 2 {
+            return None;
+        }
+        let labels: Vec<String> = passes.iter().map(|k| k.label().to_lowercase()).collect();
+        Some(format!("flagged by {}", labels.join(" + ")))
+    }
 }
 
 /// Identity is the finding's *content* — kind, summary, chapters, and book — not
@@ -220,6 +275,9 @@ pub struct Finding {
 /// persisted `kind`) still matches the one a fresh pass produces, so triage dedup
 /// and dismiss-matching stay intact. `kind` sharpens cross-pass dedup (#827): two
 /// passes flagging the same span with coincidentally identical text stay distinct.
+/// `corroborators` (#921) is *not* part of identity — folding in an agreeing pass
+/// weights a finding by consensus without changing which finding it is, so re-check
+/// and dismiss-matching keep working on the merged finding.
 impl PartialEq for Finding {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
@@ -282,6 +340,59 @@ impl Dashboard {
     /// The finding at the given row index, if that row is a jumpable finding.
     pub(crate) fn finding_at(&self, row: usize) -> Option<&Finding> {
         self.rows.get(row).and_then(DashboardRow::finding)
+    }
+}
+
+/// One row of the motif / character co-occurrence report (#922): a section header,
+/// a co-occurring pair (with its shared chapters, the jump target), or a notable
+/// absence (with the gap chapters). Only the pair and absence rows are jumpable;
+/// `chapter` is the row's jump target (its first shared / missing chapter), which
+/// the report's Enter activates.
+pub enum CoOccurrenceRow {
+    /// A section header (e.g. "Co-occurring" / "Notable absences").
+    Header(&'static str),
+    /// A co-occurring pair: the display line and the chapter it jumps to.
+    Pair { line: String, chapter: String },
+    /// A notable absence: the display line and the first missing chapter it jumps to.
+    Absence { line: String, chapter: String },
+}
+
+impl CoOccurrenceRow {
+    /// The chapter this row jumps to, or `None` for a header (headers aren't
+    /// selectable).
+    pub(crate) fn chapter(&self) -> Option<&str> {
+        match self {
+            Self::Pair { chapter, .. } | Self::Absence { chapter, .. } => Some(chapter),
+            Self::Header(_) => None,
+        }
+    }
+}
+
+/// State for an open [`Mode::CoOccurrence`] — the motif / character co-occurrence
+/// report (#922): co-occurring pairs and notable absences drawn from the bibles'
+/// chapter-appearance data, each jumpable to its relevant chapter. `rows` is the
+/// flat, ordered render/selection list; `selected` is the current jumpable row
+/// (headers are skipped). A read of the standing bible data — no request.
+pub struct CoOccurrence {
+    pub(crate) rows: Vec<CoOccurrenceRow>,
+    pub(crate) selected: usize,
+}
+
+impl CoOccurrence {
+    /// The indices of the selectable (jumpable) rows, in order — the stops the
+    /// arrow keys move between.
+    pub(crate) fn jump_rows(&self) -> Vec<usize> {
+        self.rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.chapter().is_some())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// The jump-target chapter at the given row index, if that row is jumpable.
+    pub(crate) fn chapter_at(&self, row: usize) -> Option<&str> {
+        self.rows.get(row).and_then(CoOccurrenceRow::chapter)
     }
 }
 
@@ -646,14 +757,27 @@ pub struct ReviewImport {
     pub(crate) source: PathBuf,
     /// The chapter file the comments will be anchored into — the active chapter.
     pub(crate) chapter: String,
-    /// The matched comments: `(start, end, note)` buffer byte spans against the
-    /// active chapter, each becoming one annotation on merge.
-    pub(crate) matched: Vec<(usize, usize, String)>,
+    /// The matched comments: `(start, end, note, reviewer)` buffer byte spans
+    /// against the active chapter, each becoming one annotation on merge. The
+    /// reviewer (#933) is the named editor the comment came from, `None` when the
+    /// source didn't attribute it.
+    pub(crate) matched: Vec<(usize, usize, String, Option<String>)>,
     /// The unmatched comments: `(phrase, note)` whose commented phrase no longer
     /// appears in the prose — reported so the author knows what didn't carry.
     pub(crate) dropped: Vec<(String, String)>,
     /// The first visible row, so a long list scrolls.
     pub(crate) scroll: usize,
+}
+
+/// State for an open [`Mode::BackupBrowser`] — the local-backup browser (#934):
+/// the project's timestamped `.zip` archives (newest first, each with its size and
+/// date), and the selected row. Enter restores the selected backup over the open
+/// project (behind a confirm); Esc closes. The list is captured when the browser
+/// opens, so it's a stable target for the arrow keys. Read-only over the working
+/// project until a restore is confirmed.
+pub struct BackupBrowser {
+    pub(crate) entries: Vec<crate::app::BackupEntry>,
+    pub(crate) selected: usize,
 }
 
 /// Which step of the find / replace interaction is active.

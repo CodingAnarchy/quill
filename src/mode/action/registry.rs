@@ -52,6 +52,10 @@ pub enum Action {
     ArchiveProject,
     /// Restore a project from a `.zip` archive into a new folder (#594).
     RestoreArchive,
+    /// Browse the project's scheduled local backups (#934): the timestamped `.zip`
+    /// archives #888 wrote, newest first with sizes and dates, in an overlay from
+    /// which the author restores one over the open project (behind a confirm).
+    BrowseBackups,
     /// Start a timed writing sprint (#299).
     StartSprint,
     /// Stop the active writing sprint (#299).
@@ -77,12 +81,19 @@ pub enum Action {
     /// batch — one combined cost estimate/confirm and combined progress, over every
     /// book of a series (#655).
     RefreshBibles,
+    /// Queue the whole bible suite as a durable, resumable run (#923): the five
+    /// trackers over every book, one aggregate cost confirm, per-pass progress, and
+    /// a crash-safe queue (`bible/.queue.toml`) that resumes rather than losing the
+    /// passes already done. `force` rebuilds each bible from the whole manuscript.
+    QueuePasses,
     /// Find & replace across every chapter in the project (#295).
     ProjectFind,
     /// Describe a configuration change in words; the AI proposes settings (#303).
     DescribeConfig,
     /// Accept the flagged word at the cursor into the project dictionary (#358).
     AcceptWord,
+    /// Open the project's custom dictionary in a pane to view and edit it (#935).
+    ViewDictionary,
     /// Jump the cursor to the next misspelled word (#359).
     NextMisspelling,
     /// Jump the cursor to the previous misspelled word (#359).
@@ -124,6 +135,12 @@ pub enum Action {
     /// that saves back to disk. Navigation/editing of the AI's tracking artifacts,
     /// within the AI boundary (the AI authors nothing).
     BrowseBible,
+    /// Open the author's research / worldbuilding notebook (#932): `bible/research.md`,
+    /// an author-maintained journal of historical refs, magic-system sources, and
+    /// worldbuilding rules that the AI's trackers can *cite* but never write. Opens
+    /// it in an editable pane, seeding an empty template on first use. Squarely
+    /// within the AI boundary — the author authors every note; Quill only cites it.
+    ViewResearch,
     /// Open the snippet picker to insert an author-defined snippet (#411).
     InsertSnippet,
     /// Browse the curated open-licensed font library, download a font into the
@@ -196,6 +213,7 @@ impl Action {
         Self::ImportReviewComments,
         Self::ArchiveProject,
         Self::RestoreArchive,
+        Self::BrowseBackups,
         // Export
         Self::Export(ExportFormat::Markdown),
         Self::Export(ExportFormat::Docx),
@@ -237,13 +255,17 @@ impl Action {
         Self::Ai(AiAction::AdCreative),
         Self::Ai(AiAction::Portrait),
         Self::Ai(AiAction::Scene),
+        Self::Ai(AiAction::SemanticFind),
+        Self::Ai(AiAction::Echo),
         Self::Ai(AiAction::Triage),
         Self::Ai(AiAction::Dashboard),
+        Self::Ai(AiAction::CoOccurrence),
         Self::Ai(AiAction::AskHistory),
         Self::Ai(AiAction::Thesaurus),
         Self::Ai(AiAction::NameGen),
         Self::Ai(AiAction::Editorial),
         Self::RefreshBibles,
+        Self::QueuePasses,
         Self::RefreshSeriesBible,
         Self::DescribeConfig,
         Self::SwitchBackend,
@@ -252,8 +274,10 @@ impl Action {
         Self::SetImageKey,
         Self::Assistant,
         Self::BrowseBible,
+        Self::ViewResearch,
         // Editing
         Self::AcceptWord,
+        Self::ViewDictionary,
         Self::NextMisspelling,
         Self::PrevMisspelling,
         Self::AddAnnotation,
@@ -300,6 +324,7 @@ impl Action {
             Self::ImportReviewComments => "import:review-comments",
             Self::ArchiveProject => "archive",
             Self::RestoreArchive => "archive:restore",
+            Self::BrowseBackups => "backups:browse",
             Self::StartSprint => "sprint:start",
             Self::StopSprint => "sprint:stop",
             Self::SwitchBook => "book:switch",
@@ -310,9 +335,11 @@ impl Action {
             Self::SetGoals => "goals:set",
             Self::RefreshSeriesBible => "bible:series",
             Self::RefreshBibles => "bible:refresh-all",
+            Self::QueuePasses => "bible:queue",
             Self::ProjectFind => "find:project",
             Self::DescribeConfig => "config:describe",
             Self::AcceptWord => "dict:accept",
+            Self::ViewDictionary => "dict:view",
             Self::NextMisspelling => "spell:next",
             Self::PrevMisspelling => "spell:prev",
             Self::ToggleTypewriter => "view:typewriter",
@@ -328,6 +355,7 @@ impl Action {
             Self::SetImageKey => "image:set-key",
             Self::Assistant => "assistant",
             Self::BrowseBible => "bible:browse",
+            Self::ViewResearch => "research:view",
             Self::InsertSnippet => "snippet",
             Self::BrowseFonts => "fonts:browse",
             Self::SetExportStyle => "style:set",
@@ -359,7 +387,8 @@ impl Action {
             | Self::ImportManuscript
             | Self::ImportReviewComments
             | Self::ArchiveProject
-            | Self::RestoreArchive => "Project",
+            | Self::RestoreArchive
+            | Self::BrowseBackups => "Project",
             Self::Export(_)
             | Self::PdfWrapCover
             | Self::ReviewCopy
@@ -373,6 +402,7 @@ impl Action {
             Self::Ai(_)
             | Self::EnableAi
             | Self::RefreshBibles
+            | Self::QueuePasses
             | Self::RefreshSeriesBible
             | Self::DescribeConfig
             | Self::SwitchBackend
@@ -380,8 +410,10 @@ impl Action {
             | Self::SetClaudeKey
             | Self::SetImageKey
             | Self::Assistant
-            | Self::BrowseBible => "AI",
+            | Self::BrowseBible
+            | Self::ViewResearch => "AI",
             Self::AcceptWord
+            | Self::ViewDictionary
             | Self::NextMisspelling
             | Self::PrevMisspelling
             | Self::AddAnnotation
@@ -433,8 +465,11 @@ impl Action {
             Self::Ai(AiAction::AdCreative) => "AI · Ad creative",
             Self::Ai(AiAction::Portrait) => "AI · Character portraits",
             Self::Ai(AiAction::Scene) => "AI · Scene illustration",
+            Self::Ai(AiAction::SemanticFind) => "AI · Find similar scenes",
+            Self::Ai(AiAction::Echo) => "AI · Echo & near-duplicate detection",
             Self::Ai(AiAction::Triage) => "Revision triage",
             Self::Ai(AiAction::Dashboard) => "Manuscript health dashboard",
+            Self::Ai(AiAction::CoOccurrence) => "Motif & character co-occurrence",
             Self::Ai(AiAction::AskHistory) => "AI · Ask history",
             Self::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
             Self::Ai(AiAction::NameGen) => "AI · Name generator",
@@ -448,6 +483,7 @@ impl Action {
             Self::ImportReviewComments => "Import review comments (.docx) → annotations",
             Self::ArchiveProject => "Archive project… (.zip backup)",
             Self::RestoreArchive => "Restore project from archive…",
+            Self::BrowseBackups => "Browse backups…",
             Self::StartSprint => "Start a writing sprint",
             Self::StopSprint => "Stop the writing sprint",
             Self::SwitchBook => "Switch book",
@@ -458,9 +494,11 @@ impl Action {
             Self::SetGoals => "Set writing goals",
             Self::RefreshSeriesBible => "Refresh series bible",
             Self::RefreshBibles => "Refresh all bibles",
+            Self::QueuePasses => "Queue bible passes (resumable)",
             Self::ProjectFind => "Find across manuscript",
             Self::DescribeConfig => "Configure by description",
             Self::AcceptWord => "Add word to dictionary",
+            Self::ViewDictionary => "View project dictionary",
             Self::NextMisspelling => "Next misspelling",
             Self::PrevMisspelling => "Previous misspelling",
             Self::ToggleTypewriter => "Typewriter scrolling (toggle)",
@@ -476,6 +514,7 @@ impl Action {
             Self::SetImageKey => "Set image API key (keychain)",
             Self::Assistant => "Authorial assistant",
             Self::BrowseBible => "Browse story bible",
+            Self::ViewResearch => "View research notebook",
             Self::InsertSnippet => "Insert snippet…",
             Self::BrowseFonts => "Browse & download fonts…",
             Self::SetExportStyle => "Set export style…",
@@ -501,7 +540,12 @@ impl Action {
     pub(crate) const fn is_sync(self) -> bool {
         match self {
             // Local, no network request — like Triage, these run synchronously.
-            Self::Ai(AiAction::Triage | AiAction::Dashboard | AiAction::AskHistory) => true,
+            Self::Ai(
+                AiAction::Triage
+                | AiAction::Dashboard
+                | AiAction::CoOccurrence
+                | AiAction::AskHistory,
+            ) => true,
             Self::Ai(_) => false,
             _ => true,
         }

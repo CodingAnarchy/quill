@@ -354,6 +354,7 @@ fn continuity_ui_finding(chapter: &str, detail: &str) -> crate::mode::Finding {
         chapters: vec![chapter.into()],
         book: None,
         action: Some(crate::mode::AiAction::Continuity),
+        corroborators: Vec::new(),
     }
 }
 
@@ -485,6 +486,7 @@ fn recheck_is_a_noop_for_a_finding_without_a_pass() {
             chapters: vec!["One".into()],
             book: None,
             action: None,
+            corroborators: Vec::new(),
         }],
         selected: 0,
         filter: String::new(),
@@ -517,6 +519,7 @@ fn findings_over(name: &str, summaries: &[(&str, &str)]) -> (App, TempProject) {
             chapters: vec![(*chapter).into()],
             book: None,
             action: None,
+            corroborators: Vec::new(),
         })
         .collect();
     app.mode = Mode::Findings(Box::new(crate::mode::Findings {
@@ -763,6 +766,7 @@ fn recheck_all_skips_a_finding_without_a_pass() {
         chapters: vec!["One".into()],
         book: None,
         action: None, // as if restored from the durable store
+        corroborators: Vec::new(),
     };
     app.accumulate_triage(std::slice::from_ref(&restored));
     app.mode = Mode::Findings(Box::new(Findings {

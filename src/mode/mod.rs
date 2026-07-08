@@ -60,6 +60,46 @@ impl AnnoShow {
     }
 }
 
+/// How the annotation review list is ordered (#933), cycled with `s`. Position is
+/// the historic default — notes in document order, the order they anchor in the
+/// prose. Status groups the still-open threads ahead of the resolved ones (each
+/// group kept in position order) so triage works top-down; reviewer groups a
+/// multi-editor merge by who left each note (alphabetical, then position within a
+/// reviewer). The sort is applied after the text/status/reviewer filters, over the
+/// notes that pass, so it never changes which rows show — only their order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum AnnoSort {
+    /// Document order — by anchored byte offset. The historic default.
+    #[default]
+    Position,
+    /// Open threads first, then resolved; position order within each group.
+    Status,
+    /// Grouped by reviewer (alphabetical); position order within a reviewer.
+    Reviewer,
+}
+
+impl AnnoSort {
+    /// The next state in the cycle (Position → Status → Reviewer → Position).
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Position => Self::Status,
+            Self::Status => Self::Reviewer,
+            Self::Reviewer => Self::Position,
+        }
+    }
+
+    /// The short label shown in the list help line.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Position => "position",
+            Self::Status => "status",
+            Self::Reviewer => "reviewer",
+        }
+    }
+}
+
 /// A full-screen, read-only overlay drawn above any mode: the progress report,
 /// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
 /// render itself, and the current scroll offset. `App` keeps a single
@@ -229,6 +269,12 @@ pub enum Mode {
     /// jumpable (Enter opens the chapter). A read of the standing triage state,
     /// read-only over the prose. Boxed (carries the grouped rows).
     Dashboard(Box<Dashboard>),
+    /// The motif / character co-occurrence report (#922): co-occurring pairs and
+    /// notable absences drawn from the character and theme bibles' chapter-
+    /// appearance data, each jumpable to its relevant chapter. A combinatorial read
+    /// of the standing bible data, read-only over the prose. Boxed (carries the
+    /// row list).
+    CoOccurrence(Box<CoOccurrence>),
     /// Browsing the commit history (#587): a navigable list of past commits where
     /// the selected one can be diffed against the current chapter, or the chapter
     /// restored to it (into the editable buffer for review-and-save). Boxed (carries
@@ -242,11 +288,20 @@ pub enum Mode {
     /// whose text or anchored snippet match, Esc leaves input (keeping the filter)
     /// and a second Esc clears it. `show` (#889) is the resolved/open state filter,
     /// cycled with `f`, applied on top of the text filter.
+    ///
+    /// `sort` and `reviewer` are the multi-reviewer triage state (#933): `sort`
+    /// (cycled with `s`) orders the visible notes by position / status / reviewer;
+    /// `reviewer` (cycled with `R`) is the per-reviewer filter (`None` shows every
+    /// reviewer), applied alongside the text and status filters. `[`/`]` jump to the
+    /// previous / next open thread. These are additive over the existing state — the
+    /// filter/resolve behavior is unchanged when they're at their defaults.
     Annotations {
         selected: usize,
         filter: String,
         typing: bool,
         show: AnnoShow,
+        sort: AnnoSort,
+        reviewer: Option<String>,
     },
     /// The focused heading outline (#657): the Ctrl-O outline made navigable.
     /// The outline pane normally just lists the active chapter's headings and
@@ -321,6 +376,12 @@ pub enum Mode {
     /// merges the matches into the chapter's annotations, Esc cancels. Boxed
     /// (carries the resolved comments and dropped list).
     ReviewImport(Box<ReviewImport>),
+    /// Browsing the project's local backups (#934): the timestamped `.zip` archives
+    /// #888 wrote, newest first, each with its size and date. Navigable; Enter
+    /// restores the selected backup over the open project (behind a confirm), Esc
+    /// closes. Read-only over the working project until a restore is confirmed. Boxed
+    /// (carries the backup list).
+    BackupBrowser(Box<BackupBrowser>),
 }
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
@@ -619,6 +680,11 @@ pub enum Pending {
     Rename { at: usize },
     /// Text input: a question to ask the AI about the manuscript.
     AskAi,
+    /// Text input: a query for semantic "find similar scenes" (#924) — the passages
+    /// most similar to this text, ranked with scores + jumpable citations. Prefilled
+    /// with the visual selection when one is active, so the author can find scenes
+    /// like the one they highlighted.
+    SemanticFind,
     /// Text input: a word/phrase (and optional filters) for the thesaurus (#290).
     Thesaurus,
     /// Text input: constraints (origin, syllables, tone, era) for the name
@@ -643,6 +709,14 @@ pub enum Pending {
     /// the four bible passes over every book. `force` rebuilds each bible from the
     /// whole manuscript (#176). `y` runs the batch, anything else cancels.
     ConfirmRefreshBibles { force: bool },
+    /// Confirm a durable pass queue (#923) — one aggregate cost confirm gating the
+    /// whole bible-suite run. `force` rebuilds each bible from the whole manuscript
+    /// (#176). `y` runs the queue, anything else cancels.
+    ConfirmQueuePasses { force: bool },
+    /// y/Esc: resume an interrupted pass queue found at launch (#923) — a crashed
+    /// run picks up its remaining passes rather than losing the completed ones. `y`
+    /// resumes; anything else discards the persisted queue.
+    ResumePassQueue,
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,
@@ -656,6 +730,13 @@ pub enum Pending {
     /// target revision waits in `App::pending_restore_rev` (kept off the `Copy`
     /// `Pending` enum), taken when the restore runs.
     ConfirmRestoreProject,
+    /// y/N: restore a local backup archive over the open project (#934) — chosen in
+    /// the backup browser, or the latest offered when the project looks damaged on
+    /// open. Destructive to the current working state, so it always asks first; the
+    /// working project is itself archived before the swap. The target archive waits
+    /// in `App::pending_restore_backup` (kept off the `Copy` `Pending` enum), taken
+    /// when the restore runs.
+    ConfirmRestoreBackup,
     /// Crash recovery (#263): unsaved work from a previous session was found.
     /// `y`/`r` restores it, `d` discards the sidecar, Esc keeps it for later.
     ConfirmRecovery,

@@ -42,6 +42,7 @@ mod archive;
 mod assist;
 mod assistant;
 mod backup;
+mod backup_browser;
 mod bible_review;
 mod corkboard;
 mod dispatch;
@@ -61,6 +62,7 @@ mod nav;
 mod outline;
 mod palette;
 mod panes;
+mod pass_queue;
 mod qa_store;
 mod reports;
 mod search;
@@ -72,6 +74,7 @@ mod workflows;
 
 mod chapters;
 mod configure;
+mod cooccurrence;
 mod counts;
 mod persistence;
 mod project_ops;
@@ -85,6 +88,7 @@ mod vim;
 mod wizard;
 
 pub use assistant::{Assistant, Entry, Speaker};
+pub use backup::BackupEntry;
 // The key-dispatch helpers moved to `dispatch` (#759); re-imported here so the
 // `app`-module call sites keep spelling them unqualified / via `super::`.
 use dispatch::{build_keymap, scroll_target};
@@ -148,6 +152,13 @@ pub struct App {
     /// beside `routed_backend` when routing on-device and consumed by
     /// `backend_spec`. `None` ⇒ the single hardware-recommended model.
     routed_model: std::cell::Cell<Option<&'static ai::model_select::Model>>,
+    /// One-shot *cloud* model the per-action router picked for the next request
+    /// (#930): the Claude model this pass's weight + estimate resolved to, set in
+    /// `route_request` and consumed by `spawn_ai` so the actual request runs on the
+    /// chosen tier (a heavy pass on the top model, a light small one on a cheaper
+    /// one). `None` ⇒ the session `[ai] model`, as before — so a pass that never
+    /// went through the per-action picker (interactive, local) is unchanged.
+    routed_cloud_model: std::cell::Cell<Option<String>>,
     /// A one-line notice the worker sets when a routed-local request couldn't
     /// obtain its model (download/init failed) and fell back to Claude (#725), so
     /// the fallback is never silent. Shared with the worker thread; read and
@@ -446,6 +457,17 @@ pub struct App {
     /// per-book bible passes and where it is. `Some` while the book-by-book
     /// refresh is running (including suspended on an in-flight pass).
     series_bible_run: Option<series_bible::SeriesBibleRun>,
+    /// A durable multi-pass queue run in progress (#923), if any: the ordered
+    /// passes (persisted to `bible/.queue.toml`), the cursor, and the shared
+    /// sequenced-run bookkeeping. `Some` while the queue runs (including suspended
+    /// on an in-flight pass); a crash mid-run leaves the file to resume from.
+    pass_queue_run: Option<pass_queue::PassQueueRun>,
+    /// Per-pass sub-progress (#923): the `(done, total)` chapter counter the
+    /// in-flight fold pass updates on the worker thread as it walks chapters, so
+    /// the run's status can read "continuity: chapter 5/12". `None` between the
+    /// chapter-granular fold steps and for one-shot passes (which show pass-level
+    /// progress only). Shared so the worker can write while the UI thread reads.
+    pass_progress: Arc<Mutex<Option<(usize, usize)>>>,
     /// Crash recovery (#263): unsaved work found at launch, awaiting the author's
     /// restore/discard choice. `Some` only while the recovery prompt is open;
     /// taken when they restore, cleared when they discard or defer.
@@ -482,6 +504,11 @@ pub struct App {
     /// the source prompt and the new-folder-path prompt; taken when the folder is
     /// entered and the archive is unpacked.
     pending_archive_source: Option<PathBuf>,
+    /// The local backup archive a restore confirm (#934) targets, held while the
+    /// y/N prompt is open (from the backup browser, or the on-open damage offer);
+    /// taken when the restore runs. Kept off the `Copy` `Pending` enum so the path
+    /// lives here.
+    pending_restore_backup: Option<PathBuf>,
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
@@ -514,6 +541,12 @@ pub struct App {
     /// text; cleared on button-up. A plain press-and-release (no drag) never uses
     /// it, so a click still just positions the cursor.
     pub(crate) mouse_anchor: Option<usize>,
+    /// Remembered group-collapse state per palette (#943), keyed by the palette's
+    /// title (e.g. "Run action"). A palette re-reads its saved set on open and
+    /// writes the author's collapse/expand changes back, so the groups they
+    /// collapsed stay collapsed across opens (within the session). The run-action
+    /// palette seeds this all-collapsed the first time it opens.
+    pub(crate) palette_collapsed: HashMap<&'static str, std::collections::HashSet<&'static str>>,
 }
 
 impl App {
@@ -574,6 +607,7 @@ impl App {
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
+            routed_cloud_model: std::cell::Cell::new(None),
             ai_routing_notice: std::sync::Arc::new(std::sync::Mutex::new(None)),
             #[cfg(test)]
             test_local_present: None,
@@ -647,6 +681,8 @@ impl App {
             pending_config: None,
             workflow_run: None,
             series_bible_run: None,
+            pass_queue_run: None,
+            pass_progress: Arc::new(Mutex::new(None)),
             pending_recovery: None,
             recovery_written: false,
             pending_switch: None,
@@ -656,6 +692,7 @@ impl App {
             import_source: None,
             pending_import_source: None,
             pending_archive_source: None,
+            pending_restore_backup: None,
             sprint: None,
             qa_log,
             qa_store,
@@ -663,6 +700,7 @@ impl App {
             message: None,
             clipboard: Box::new(crate::clipboard::Osc52Clipboard::new()),
             mouse_anchor: None,
+            palette_collapsed: HashMap::new(),
         };
         // Baselines + per-part counters for the daily word tally (sized to the
         // active book's parts; edits move each chapter from here).
@@ -866,6 +904,27 @@ impl App {
             }
             Ok(false) => self.message = Some(format!("'{word}' is already in the dictionary.")),
             Err(err) => self.message = Some(format!("Couldn't write the dictionary: {err}")),
+        }
+    }
+
+    /// Open the project's custom dictionary in a reference pane to view and edit it
+    /// (#935): the accepted-word list (`dictionary.txt`, one word per line) as a
+    /// plain editable buffer beside the manuscript. Editing and saving it there is
+    /// how the author removes a word or fixes a typo'd entry; closing the pane
+    /// reloads the checker's in-memory set (`close_split_if_any`), so the change
+    /// takes effect without reopening the project. The reload stays off the idle
+    /// spell pass — it fires only when this pane closes, never per tick.
+    pub(crate) fn view_dictionary(&mut self) {
+        let path = self.project.dictionary_path();
+        self.open_file_in_pane(path);
+        // `open_file_in_pane` set its own message; only override it when the pane
+        // actually opened, so an error (e.g. a continuous view in the way) shows.
+        if self.split.is_some() {
+            self.message = Some(
+                "Editing the project dictionary — one word per line; \
+                 Ctrl-w c closes and reloads it."
+                    .into(),
+            );
         }
     }
 

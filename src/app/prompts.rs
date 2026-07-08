@@ -267,6 +267,24 @@ impl App {
                     self.message = Some("Bible refresh cancelled.".into());
                 }
             }
+            Pending::ConfirmQueuePasses { force } => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.mode = closed;
+                    self.queue_passes_confirmed(force);
+                } else {
+                    self.mode = closed;
+                    self.message = Some("Pass queue cancelled.".into());
+                }
+            }
+            Pending::ResumePassQueue => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.mode = closed;
+                    self.resume_pass_queue();
+                } else {
+                    self.mode = closed;
+                    self.discard_pass_queue();
+                }
+            }
             Pending::ConfirmRemoveModel(id) => match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;
@@ -309,6 +327,17 @@ impl App {
                 } else {
                     self.pending_restore_rev = None; // cancelled — drop the target
                     self.mode = closed;
+                }
+            }
+            Pending::ConfirmRestoreBackup => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    // restore_pending_backup reopens the project (resetting the
+                    // mode) on success, or restores a resting mode itself on failure.
+                    self.restore_pending_backup();
+                } else {
+                    self.pending_restore_backup = None; // cancelled — drop the target
+                    self.mode = closed;
+                    self.message = Some("Restore cancelled.".into());
                 }
             }
             Pending::ConfirmRecovery => match key.code {
@@ -406,6 +435,7 @@ impl App {
             | Pending::SetStyleText(_)
             | Pending::SetSettingText(_)
             | Pending::AskAi
+            | Pending::SemanticFind
             | Pending::Thesaurus
             | Pending::NameGen(_)
             | Pending::Commit
@@ -567,6 +597,12 @@ impl App {
                                 // asynchronously in the overlay.
                                 self.mode = closed;
                                 self.ask_ai(text);
+                            }
+                            Pending::SemanticFind => {
+                                // Back to editing; the ranked similar passages arrive
+                                // in the findings overlay (#924).
+                                self.mode = closed;
+                                self.semantic_find(text);
                             }
                             Pending::Thesaurus => {
                                 // Back to editing; the candidates arrive in the overlay.
