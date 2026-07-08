@@ -557,7 +557,9 @@ does the same thing conversationally.
 PER-PROJECT SETTINGS
 
 Your ~/.config/quill/config.toml holds the global settings shared across every
-project. A single book can override any of them for itself in its book.toml
+project. Every setting it can hold — each key's default, valid values, and an
+example — is documented in the configuration reference (docs/configuration.md).
+A single book can override any of them for itself in its book.toml
 manifest, under a [quill] table — a screenplay can pin a wider column, a light
 theme, or its own workflow set without disturbing your defaults. The override
 sections mirror the global file's, nested under [quill]:
