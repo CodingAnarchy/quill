@@ -90,17 +90,20 @@ pub fn build_request(manuscript: String, model: &str) -> Request {
 /// Parse a structured continuity reply.
 const REVISE_SYSTEM: &str = "You are a continuity editor maintaining an existing \
 timeline. You are given the current timeline and only the chapters that have \
-changed since it was built; the timeline also records events from the rest of the \
-work — earlier chapters, and in a multi-book series the earlier books — that are \
-NOT shown to you. Revise the timeline: update or re-rank the events the given \
+changed since it was built; you may also be given a few RELEVANT PRIOR PASSAGES \
+retrieved from earlier chapters that bear on the changes (where a character or \
+place last appeared) — treat these as read-only reference, not as changed \
+material to re-rank. The timeline also records events from the rest of the work — \
+earlier chapters, and in a multi-book series the earlier books — that are NOT \
+shown to you. Revise the timeline: update or re-rank the events the given changed \
 chapters affect, add events they introduce, and remove events they delete — \
 keeping the `story_order` consistent across the whole timeline, including the \
 events you can't see. Then check the given chapters against the entire timeline \
-for genuine continuity contradictions, INCLUDING contradictions with events the \
-timeline records from material not shown (for example, a character who died in an \
-earlier book reappearing). Be faithful to the text; report only real \
-contradictions, each with the chapters involved. Reference chapters by title. \
-Return the complete revised timeline and findings.";
+AND the prior passages shown for genuine continuity contradictions, INCLUDING \
+contradictions with events the timeline records from material not shown (for \
+example, a character who died in an earlier book reappearing). Be faithful to the \
+text; report only real contradictions, each with the chapters involved. Reference \
+chapters by title. Return the complete revised timeline and findings.";
 
 /// Build an incremental revision request (#90): revise the existing timeline from
 /// only the changed chapters.

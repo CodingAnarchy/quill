@@ -196,6 +196,38 @@ fn an_edited_chapter_scopes_the_pass_to_just_that_chapter() {
 }
 
 #[test]
+#[cfg(not(feature = "local"))]
+fn incremental_pass_degrades_to_changed_chapters_without_an_embedder() {
+    // Retrieval-backed context (#929) is a best-effort sharpening: without a usable
+    // embedding model on disk (the default build has no on-device embedder at all),
+    // the incremental pass sends the changed chapters alone — byte-identical to the
+    // classic path — so it degrades gracefully. Here the retrieved block is empty,
+    // and folding it in is a no-op over the changed-chapter render the pass builds.
+    let (mut app, dir) = two_chapter_app("incr-fallback");
+    ai::incremental::State::record(&dir, "characters", "2026-06-21", app.chapter_digests())
+        .unwrap();
+    app.on_key(ctrl('n')); // active → Two
+    type_str(&mut app, "NEWWORD");
+    app.on_key(ctrl('s'));
+
+    assert!(
+        app.ask_embed_model().is_none(),
+        "no embedding model on disk → retrieval is unavailable, so the pass falls back"
+    );
+    let changed = app.chapters_text(&["two.md".to_string()]);
+    // The fold with empty retrieval is exactly the changed-chapter context.
+    assert_eq!(
+        ai::incremental::with_prior_passages("", &changed),
+        changed,
+        "empty retrieval leaves the changed-chapter context untouched"
+    );
+    assert!(
+        changed.contains("NEWWORD") && !changed.contains("first chapter"),
+        "and the context is still only the changed chapter: {changed}"
+    );
+}
+
+#[test]
 fn cost_context_is_the_whole_manuscript_first_then_zero_when_current() {
     let (app, dir) = two_chapter_app("incr-cost");
     let action = crate::mode::AiAction::Characters;

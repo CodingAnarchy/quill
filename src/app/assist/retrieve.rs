@@ -65,6 +65,14 @@ impl App {
     }
 }
 
+/// How many prior passages a retrieval-backed incremental pass folds into its
+/// context (#929). A handful — enough to carry the scenes a changed chapter bears
+/// on (where a character/place last appeared, a rule was set) without re-sending a
+/// meaningful fraction of the book, which would defeat retrieval's point of
+/// focusing the pass. Only the `local` retrieval path reads it.
+#[cfg_attr(not(feature = "local"), allow(dead_code))]
+pub(in crate::app) const CONTEXT_TOP_K: usize = 8;
+
 /// Refresh the project's embedding index against `chapters` and retrieve the top
 /// passages for `question`, returned as the manuscript-shaped context
 /// [`ai::build_qa_request`] feeds (#831). Runs on the worker thread (embedding is
@@ -96,6 +104,41 @@ pub(super) fn retrieve_context(
     Some(ai::retrieved_context(&hits))
 }
 
+/// Retrieve the prior passages a changed chapter bears on, as the reference block a
+/// retrieval-backed incremental bible pass folds into its context (#929). Refreshes
+/// the semantic index against the whole book (so it's current, #90), then ranks the
+/// prior passages against `query` (the changed chapters' prose) while excluding the
+/// `changed` chapters themselves — they're already sent to the pass in full — and
+/// renders the top hits under their chapter titles ([`ai::retrieved_context`]), so
+/// each stays a jumpable citation. Runs on the worker thread (embedding is
+/// CPU/GPU-bound).
+///
+/// `None` — so the pass degrades to the plain incremental path, sending only the
+/// changed chapters — when no usable embedding model is on disk, the index turns up
+/// no prior hits, or any embedding/model error occurs. Retrieval is a best-effort
+/// sharpening of the pass, never a hard failure of it. Reads prose to retrieve +
+/// cite it; never writes it — inside the AI boundary.
+#[cfg(feature = "local")]
+pub(in crate::app) fn retrieve_prior_context(
+    root: &std::path::Path,
+    chapters: &[Chapter],
+    model: &'static EmbedModel,
+    changed: &[String],
+    query: &str,
+) -> Option<String> {
+    let embedder = LocalEmbedder::for_model(model).ok()?;
+    let mut index = Index::load(root);
+    index.refresh(chapters, &embedder).ok()?;
+    let _ = index.save(root);
+    let hits = index
+        .relevant_prior(query, changed, CONTEXT_TOP_K, &embedder)
+        .ok()?;
+    if hits.is_empty() {
+        return None;
+    }
+    Some(ai::retrieved_context(&hits))
+}
+
 /// Without the `local` feature there's no on-device embedder — retrieval is
 /// unavailable and Ask always uses the whole-book path (#831).
 #[cfg(not(feature = "local"))]
@@ -104,6 +147,19 @@ pub(super) const fn retrieve_context(
     _chapters: &[Chapter],
     _model: &'static EmbedModel,
     _question: &str,
+) -> Option<String> {
+    None
+}
+
+/// Without the `local` feature there's no on-device embedder — a bible pass always
+/// uses the plain incremental (changed-chapters-only) context (#929).
+#[cfg(not(feature = "local"))]
+pub(in crate::app) const fn retrieve_prior_context(
+    _root: &std::path::Path,
+    _chapters: &[Chapter],
+    _model: &'static EmbedModel,
+    _changed: &[String],
+    _query: &str,
 ) -> Option<String> {
     None
 }

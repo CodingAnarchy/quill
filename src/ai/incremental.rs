@@ -70,9 +70,41 @@ pub fn decide(prior: Option<&Digests>, current: &Digests, threshold: usize) -> S
     }
 }
 
+/// The heading the retrieval-backed context (#929) is filed under in a revise
+/// request, so a test can assert the relevant prior passages made it into the
+/// context and the model knows they're reference, not the changed material.
+pub const PRIOR_PASSAGES_HEADING: &str = "## Relevant prior passages (for reference)";
+
+/// Fold the retrieved relevant prior passages (#929) into a changed-chapters block
+/// for a revise request. `retrieved` is [`crate::ai::retrieved_context`]'s output —
+/// the top prior passages the changed chapters bear on, each already under its
+/// `# Title` heading so its chapter stays a jumpable citation. It's prepended as a
+/// clearly-labeled reference section *before* the changed chapters, so the model can
+/// check the change against the scenes that matter (where a character last appeared,
+/// a rule was set) instead of being blind to everything outside the diff — while
+/// still knowing which text is the changed material to revise from. An empty
+/// `retrieved` (no index / no hits) returns the changed chapters unchanged, so the
+/// caller degrades to the plain incremental path exactly as before.
+pub fn with_prior_passages(retrieved: &str, changed_chapters: &str) -> String {
+    if retrieved.trim().is_empty() {
+        return changed_chapters.to_string();
+    }
+    format!(
+        "{PRIOR_PASSAGES_HEADING}\n\n{}\n\n\
+         ## Chapters that changed\n\n{changed_chapters}",
+        retrieved.trim_end()
+    )
+}
+
 /// Build a "revise this bible" request (#90): the existing bible plus only the
 /// changed chapters as cached context, with the same schema as the full pass so
 /// the model returns a complete, replacement bible.
+///
+/// `changed_chapters` is the changed material to revise from — either the changed
+/// chapters alone (the classic path) or, when a semantic index is available, those
+/// chapters preceded by a labeled block of the relevant prior passages retrieval
+/// pulled up ([`with_prior_passages`], #929). Either way the request shape and the
+/// schema are identical, so retrieval changes only *what context* the revise sees.
 pub fn revise_request(
     system: &str,
     schema: Value,
@@ -262,6 +294,8 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     fn digests(pairs: &[(&str, &str)]) -> Digests {
@@ -426,6 +460,92 @@ mod tests {
             folded,
             vec!["one", "two", "three", "four", "five"],
             "every chapter folded once, in manuscript order"
+        );
+    }
+
+    #[test]
+    fn with_prior_passages_prepends_a_labeled_reference_section() {
+        // Retrieval-backed context (#929): the retrieved prior passages are folded in
+        // ahead of the changed chapters, under a clearly-labeled reference heading, so
+        // the model can check the change against them without mistaking them for the
+        // material to revise from. The changed chapters still follow, intact.
+        let retrieved = "# The Locket\n\nShe clutched the silver locket.\n";
+        let changed = "# The Duel\n\nHe drew the gold locket.\n";
+        let context = with_prior_passages(retrieved, changed);
+        assert!(
+            context.contains(PRIOR_PASSAGES_HEADING),
+            "the prior passages are under their labeled heading: {context}"
+        );
+        assert!(
+            context.contains("silver locket"),
+            "the retrieved prior passage is present as context"
+        );
+        assert!(
+            context.contains("gold locket"),
+            "the changed chapter is still present"
+        );
+        // The prior passages come before the changed chapters (reference, then the
+        // material to revise from).
+        let prior_at = context.find("silver locket").unwrap();
+        let changed_at = context.find("gold locket").unwrap();
+        assert!(prior_at < changed_at, "prior passages lead: {context}");
+    }
+
+    #[test]
+    fn with_prior_passages_empty_retrieval_is_the_plain_incremental_context() {
+        // No index / no hits → the changed chapters alone, byte-identical to the
+        // classic incremental path, so retrieval degrades gracefully (#929).
+        let changed = "# The Duel\n\nHe drew the gold locket.\n";
+        assert_eq!(with_prior_passages("", changed), changed);
+        assert_eq!(with_prior_passages("   \n  ", changed), changed);
+    }
+
+    #[test]
+    fn revise_request_carries_the_retrieved_prior_context() {
+        // End to end at the request level: a contradiction only detectable against a
+        // prior scene (a locket silver in ch.1, gold in the changed ch.2) — the plain
+        // incremental request can't see ch.1, but the retrieval-backed one folds it in
+        // as context, so the revise pass has the passage the contradiction needs.
+        let prior_bible = "## Timeline\n- The locket is silver.\n";
+        let changed = "# The Duel\n\nHe drew the gold locket.\n";
+        let retrieved = "# The Locket\n\nShe clutched the silver locket.\n";
+
+        // Plain incremental: the changed chapter only — no prior scene in context.
+        let plain = revise_request(
+            "sys",
+            json!({}),
+            256,
+            prior_bible,
+            changed,
+            "claude-opus-4-8",
+        );
+        assert!(
+            !plain.cached_context.contains("silver locket"),
+            "the plain path is blind to the prior locket scene"
+        );
+
+        // Retrieval-backed: the same request shape, but the prior scene is now in the
+        // context, labeled as reference — at least as much to check against as before.
+        let context = with_prior_passages(retrieved, changed);
+        let backed = revise_request(
+            "sys",
+            json!({}),
+            256,
+            prior_bible,
+            &context,
+            "claude-opus-4-8",
+        );
+        assert!(
+            backed.cached_context.contains("silver locket"),
+            "the retrieval-backed path carries the prior scene the contradiction needs"
+        );
+        assert!(
+            backed.cached_context.contains("gold locket"),
+            "and still carries the changed chapter"
+        );
+        assert!(
+            backed.cached_context.contains(PRIOR_PASSAGES_HEADING),
+            "the prior scene is labeled as reference, not changed material"
         );
     }
 

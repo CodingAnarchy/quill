@@ -375,6 +375,55 @@ impl Index {
         Ok(hits)
     }
 
+    /// Retrieve the prior passages most relevant to a changed chapter, for a
+    /// retrieval-backed incremental pass (#929): rank the index against `query` (the
+    /// changed chapter's prose) and return the top `top_k`, but **exclude every
+    /// passage whose chapter is in `changed`**. Those changed chapters are already
+    /// sent to the pass in full, so retrieval's job is to surface the *prior* scenes
+    /// that bear on the change — where a character last appeared, the place a rule
+    /// was established — that the incremental request would otherwise never see
+    /// (today it sends only the changed chapters and a summarized bible). The hits
+    /// keep their chapter titles, so each stays a jumpable citation exactly like the
+    /// full-context path.
+    ///
+    /// `changed` is matched by `Passage::file` (the index's per-chapter key), so a
+    /// changed chapter contributes nothing to its own retrieved context. An empty
+    /// index or `top_k == 0` returns nothing (the caller then falls back to the
+    /// whole-book context). Reads prose to retrieve + cite it, never writes it —
+    /// inside the AI boundary like every retrieval path here.
+    pub fn relevant_prior(
+        &self,
+        query: &str,
+        changed: &[String],
+        top_k: usize,
+        embedder: &dyn Embedder,
+    ) -> Result<Vec<Hit>, AiError> {
+        if self.passages.is_empty() || top_k == 0 {
+            return Ok(Vec::new());
+        }
+        let mut q = embedder
+            .embed(std::slice::from_ref(&query.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| AiError::Internal("embedder returned no query vector".into()))?;
+        normalize(&mut q);
+        Ok(self.rank_prior(&q, changed, top_k))
+    }
+
+    /// Rank the prior passages against an already-embedded, normalized query vector,
+    /// dropping any passage from a `changed` chapter — the pure core of
+    /// [`relevant_prior`](Self::relevant_prior), split out so tests can drive the
+    /// selection with an injected query vector and no embedder round-trip (#531).
+    /// Ranks over the full index, filters the changed chapters, then truncates, so
+    /// excluding the changed chapters still leaves `top_k` prior hits when the index
+    /// holds them.
+    pub fn rank_prior(&self, query: &[f32], changed: &[String], top_k: usize) -> Vec<Hit> {
+        let mut hits = self.rank(query, self.passages.len());
+        hits.retain(|h| !changed.iter().any(|f| f == &h.passage.file));
+        hits.truncate(top_k);
+        hits
+    }
+
     /// Echo / near-duplicate detection (#920): scan every pair of indexed passages
     /// and return those whose cosine similarity is at least `threshold`, as
     /// [`EchoPair`]s carrying both passages and the score. Highest-similarity pairs
@@ -774,6 +823,87 @@ mod tests {
             .unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].passage.file, "one.md");
+    }
+
+    #[test]
+    fn relevant_prior_retrieves_the_bearing_chapter_and_excludes_the_changed_one() {
+        // The retrieval-backed incremental pass (#929): a changed chapter re-raises
+        // the locket; retrieval must surface the *prior* locket scene as context and
+        // never re-send the changed chapter itself (it's already in the request).
+        let embedder = FakeEmbedder {
+            keywords: vec!["locket", "harbor", "sword"],
+        };
+        let chapters = vec![
+            chapter(
+                "The Locket",
+                "one.md",
+                "She clutched the silver locket tightly.",
+            ),
+            chapter(
+                "The Harbor",
+                "two.md",
+                "Ships crowded the busy harbor at dawn.",
+            ),
+            chapter(
+                "The Duel",
+                "three.md",
+                // The changed chapter: a sword scene that also mentions the locket.
+                "He drew his sword, the locket at his throat.",
+            ),
+        ];
+        let mut index = Index::default();
+        index.refresh(&chapters, &embedder).unwrap();
+
+        // Chapter three changed; its own prose is the query. The prior locket scene
+        // (one.md) is the passage that bears on the change and must rank first; the
+        // changed chapter (three.md) is excluded even though it's maximally similar
+        // to itself; the unrelated harbor (two.md) scores 0.
+        let query = "He drew his sword, the locket at his throat.";
+        let changed = vec!["three.md".to_string()];
+        let hits = index.relevant_prior(query, &changed, 5, &embedder).unwrap();
+        assert!(
+            hits.iter().all(|h| h.passage.file != "three.md"),
+            "the changed chapter is never in its own retrieved context: {hits:?}"
+        );
+        assert_eq!(
+            hits[0].passage.file, "one.md",
+            "the prior locket scene ranks first: {hits:?}"
+        );
+        assert_eq!(hits[0].passage.title, "The Locket", "citation preserved");
+    }
+
+    #[test]
+    fn relevant_prior_respects_top_k_after_excluding_changed() {
+        // Excluding the changed chapters happens before truncation, so `top_k`
+        // still yields that many *prior* hits when the index holds them.
+        let embedder = FakeEmbedder {
+            keywords: vec!["a"],
+        };
+        let chapters = vec![
+            chapter("Ch1", "one.md", "aaa aaa"),
+            chapter("Ch2", "two.md", "aaa"),
+            chapter("Ch3", "three.md", "aaa aaa aaa"), // the changed chapter
+        ];
+        let mut index = Index::default();
+        index.refresh(&chapters, &embedder).unwrap();
+        let changed = vec!["three.md".to_string()];
+        let hits = index.relevant_prior("aaa", &changed, 2, &embedder).unwrap();
+        assert_eq!(hits.len(), 2, "two prior hits despite the excluded chapter");
+        assert!(hits.iter().all(|h| h.passage.file != "three.md"));
+    }
+
+    #[test]
+    fn relevant_prior_on_an_empty_index_returns_nothing() {
+        // No index (embeddings unavailable / never built) → no retrieved context,
+        // and the caller falls back to the whole-book incremental path (#929).
+        let embedder = FakeEmbedder {
+            keywords: vec!["x"],
+        };
+        let index = Index::default();
+        assert!(index
+            .relevant_prior("anything", &["a.md".into()], 5, &embedder)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

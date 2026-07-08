@@ -125,17 +125,19 @@ pub fn build_concept_request(concept: &str, model: &str) -> Request {
 
 const REVISE_SYSTEM: &str = "You are a worldbuilding editor maintaining an \
 existing setting bible. You are given the current bible and only the chapters \
-that have changed since it was built; the bible also records the world \
-established by the rest of the work — earlier chapters, and in a multi-book \
-series the earlier books — that is NOT shown to you. Revise it: update the \
-categories, entries, and gazetteer the given chapters affect, add anything newly \
-established, and drop what they contradict. Preserve everything the given \
-chapters don't touch exactly as the bible records it. Then check the given \
-chapters against the whole recorded world for genuine rule violations, INCLUDING \
-violations of rules the bible records from material not shown. Be faithful to the \
-text; report only genuine violations, each with the chapters involved. Reference \
-chapters by title. Return the complete revised setting bible, gazetteer, and \
-findings.";
+that have changed since it was built; you may also be given a few RELEVANT PRIOR \
+PASSAGES retrieved from earlier chapters that bear on the changes (where a place \
+or rule was established) — treat these as read-only reference, not as changed \
+material to revise from. The bible also records the world established by the rest \
+of the work — earlier chapters, and in a multi-book series the earlier books — \
+that is NOT shown to you. Revise it: update the categories, entries, and gazetteer \
+the given changed chapters affect, add anything newly established, and drop what \
+they contradict. Preserve everything the given chapters don't touch exactly as the \
+bible records it. Then check the given chapters against the whole recorded world \
+AND the prior passages shown for genuine rule violations, INCLUDING violations of \
+rules the bible records from material not shown. Be faithful to the text; report \
+only genuine violations, each with the chapters involved. Reference chapters by \
+title. Return the complete revised setting bible, gazetteer, and findings.";
 
 /// Build an incremental revision request (#90): revise the existing setting bible
 /// from only the changed chapters.
