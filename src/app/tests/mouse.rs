@@ -4,6 +4,7 @@
 //! synthetic mouse event, asserting where the cursor lands.
 
 use super::*;
+use crate::buffer::Cursor;
 use crate::mode::{Mode, Overlay};
 use crate::ui::render_to_string;
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
@@ -434,15 +435,60 @@ fn wheel_scrolls_the_editor_without_moving_the_cursor() {
 }
 
 #[test]
-fn wheel_up_clamps_at_the_top() {
+fn wheel_up_clamps_at_the_start_of_the_chapter() {
+    // With the cursor at the top of the chapter there is nothing above to reveal, so
+    // wheel-up stays clamped at the first row (a burst can't page above line0).
     let body = (0..60).fold(String::new(), |mut s, i| {
         writeln!(s, "line{i}").unwrap();
         s
     });
     let (mut app, _dir) = rendered_app("wheel-top", &body, 20);
-    // Already at the top; scrolling up can't go negative.
-    wheel(&mut app, true);
-    assert_eq!(app.scroll_offset.get(), 0, "clamped at the top");
+    for _ in 0..10 {
+        wheel(&mut app, true);
+    }
+    render_to_string(&app, W, H); // clamps and stores the applied offset
+    assert_eq!(
+        app.scroll_offset.get(),
+        0,
+        "clamped at the start of the chapter"
+    );
+    let screen = render_to_string(&app, W, H);
+    assert!(
+        first_prose_row(&screen).contains("line0"),
+        "the first line still tops the view, no blank space above"
+    );
+}
+
+#[test]
+fn wheel_up_pages_back_with_the_cursor_at_the_bottom() {
+    // The #936 bug: put the cursor on the last line of a tall chapter (bottom of the
+    // page, no read-ahead room below), then wheel up — earlier lines must still
+    // scroll into view, and the cursor doesn't move.
+    let body = (0..60).fold(String::new(), |mut s, i| {
+        writeln!(s, "line{i}").unwrap();
+        s
+    });
+    let (mut app, _dir) = rendered_app("wheel-bottom", &body, 20);
+    let last = app.edit_buffer().line_count() - 1;
+    app.edit_buffer_mut().cursor = Cursor { line: last, col: 0 };
+    render_to_string(&app, W, H); // re-anchor the view on the moved cursor
+    let cursor_before = app.edit_buffer().cursor;
+    let top_before = top_row_text(&app);
+
+    for _ in 0..3 {
+        wheel(&mut app, true); // page back up
+    }
+    let top_after = top_row_text(&app);
+    assert!(
+        app.scroll_offset.get() < 0,
+        "the view scrolled up above the cursor"
+    );
+    assert_ne!(top_before, top_after, "an earlier line now tops the view");
+    assert_eq!(
+        app.edit_buffer().cursor,
+        cursor_before,
+        "scrolling up leaves the cursor put"
+    );
 }
 
 #[test]

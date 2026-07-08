@@ -312,26 +312,23 @@ impl App {
         if self.scroll_modal_list(notches) {
             return;
         }
-        // Otherwise the editor viewport: a read-ahead offset decoupled from the
-        // cursor, clamped by the renderer so it can't run past the top or leave
-        // blank space past the end. A subsequent cursor move/edit snaps it back.
+        // Otherwise the editor viewport: a signed offset decoupled from the cursor,
+        // clamped by the renderer so it can't run past the top of the chapter or
+        // leave blank space past the end. A subsequent cursor move/edit snaps it back.
         self.scroll_editor(notches);
     }
 
-    /// Shift the editor's decoupled read-ahead viewport offset (#764) by `notches`
-    /// (positive scrolls down). Clamped to zero at the top; the renderer clamps the
-    /// bottom against the real content so no blank space shows past the end.
+    /// Shift the editor's decoupled viewport offset (#764/#936) by `notches`
+    /// (positive scrolls down toward later content, negative scrolls up toward the
+    /// start of the chapter). The renderer clamps the stored offset against the real
+    /// content each frame — the top of the chapter one way, no blank tail the other —
+    /// so this can add unconditionally; over-scroll is corrected on the next render.
     fn scroll_editor(&self, notches: i32) {
-        let step = notches * SCROLL_STEP as i32;
-        let cur = self.scroll_offset.get();
+        let step = (notches * SCROLL_STEP as i32) as isize;
         // The renderer stores the offset clamped to the content each frame, so `cur`
-        // is never larger than the last-drawn maximum — a wheel-up here responds at
+        // never sits past the last-drawn maximum — a reversing wheel here responds at
         // once rather than draining a runaway accumulation.
-        let next = if step >= 0 {
-            cur.saturating_add(step as usize)
-        } else {
-            cur.saturating_sub((-step) as usize)
-        };
+        let next = self.scroll_offset.get().saturating_add(step);
         self.scroll_offset.set(next);
     }
 
