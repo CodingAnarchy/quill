@@ -267,6 +267,24 @@ impl App {
                     self.message = Some("Bible refresh cancelled.".into());
                 }
             }
+            Pending::ConfirmQueuePasses { force } => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.mode = closed;
+                    self.queue_passes_confirmed(force);
+                } else {
+                    self.mode = closed;
+                    self.message = Some("Pass queue cancelled.".into());
+                }
+            }
+            Pending::ResumePassQueue => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.mode = closed;
+                    self.resume_pass_queue();
+                } else {
+                    self.mode = closed;
+                    self.discard_pass_queue();
+                }
+            }
             Pending::ConfirmRemoveModel(id) => match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;

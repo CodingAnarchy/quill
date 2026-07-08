@@ -81,6 +81,11 @@ pub enum Action {
     /// batch — one combined cost estimate/confirm and combined progress, over every
     /// book of a series (#655).
     RefreshBibles,
+    /// Queue the whole bible suite as a durable, resumable run (#923): the five
+    /// trackers over every book, one aggregate cost confirm, per-pass progress, and
+    /// a crash-safe queue (`bible/.queue.toml`) that resumes rather than losing the
+    /// passes already done. `force` rebuilds each bible from the whole manuscript.
+    QueuePasses,
     /// Find & replace across every chapter in the project (#295).
     ProjectFind,
     /// Describe a configuration change in words; the AI proposes settings (#303).
@@ -260,6 +265,7 @@ impl Action {
         Self::Ai(AiAction::NameGen),
         Self::Ai(AiAction::Editorial),
         Self::RefreshBibles,
+        Self::QueuePasses,
         Self::RefreshSeriesBible,
         Self::DescribeConfig,
         Self::SwitchBackend,
@@ -329,6 +335,7 @@ impl Action {
             Self::SetGoals => "goals:set",
             Self::RefreshSeriesBible => "bible:series",
             Self::RefreshBibles => "bible:refresh-all",
+            Self::QueuePasses => "bible:queue",
             Self::ProjectFind => "find:project",
             Self::DescribeConfig => "config:describe",
             Self::AcceptWord => "dict:accept",
@@ -395,6 +402,7 @@ impl Action {
             Self::Ai(_)
             | Self::EnableAi
             | Self::RefreshBibles
+            | Self::QueuePasses
             | Self::RefreshSeriesBible
             | Self::DescribeConfig
             | Self::SwitchBackend
@@ -486,6 +494,7 @@ impl Action {
             Self::SetGoals => "Set writing goals",
             Self::RefreshSeriesBible => "Refresh series bible",
             Self::RefreshBibles => "Refresh all bibles",
+            Self::QueuePasses => "Queue bible passes (resumable)",
             Self::ProjectFind => "Find across manuscript",
             Self::DescribeConfig => "Configure by description",
             Self::AcceptWord => "Add word to dictionary",

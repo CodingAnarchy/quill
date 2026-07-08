@@ -220,7 +220,7 @@ impl App {
         let Some(cont) = self.ok_or_report(result) else {
             return;
         };
-        let book = self.current_series_bible_book();
+        let book = self.current_pass_book();
         let findings = findings_from(
             &cont.findings,
             book,
@@ -243,7 +243,7 @@ impl App {
         let Some(setting) = self.ok_or_report(result) else {
             return;
         };
-        let book = self.current_series_bible_book();
+        let book = self.current_pass_book();
         let findings = findings_from(&setting.findings, book, AiAction::Setting, describe_setting);
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("setting.md");
@@ -262,7 +262,7 @@ impl App {
         let Some(plot) = self.ok_or_report(result) else {
             return;
         };
-        let book = self.current_series_bible_book();
+        let book = self.current_pass_book();
         let findings = findings_from(&plot.findings, book, AiAction::Plot, describe_plot);
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("plot.md");
@@ -281,7 +281,7 @@ impl App {
         let Some(theme) = self.ok_or_report(result) else {
             return;
         };
-        let book = self.current_series_bible_book();
+        let book = self.current_pass_book();
         let findings = findings_from(&theme.findings, book, AiAction::Theme, describe_theme);
         let today = date::iso(date::today());
         let path = self.project.root.join("bible").join("theme.md");

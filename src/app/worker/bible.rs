@@ -357,8 +357,14 @@ impl App {
         let merge = series.then(|| self.other_books_files(book));
         self.pending_pass = Some((t.key.to_string(), current, merge));
         let message = format!("{} (folding on-device — chapter by chapter)", t.full_msg);
+        // Report per-pass chapter progress (#923): the fold walks the chapters one
+        // chunk at a time, so it can publish "chapter n/total" into the shared cell
+        // the pass-queue run's status reads. Reset before the pass, cleared after.
+        let progress = self.pass_progress.clone();
+        let total = chapters.len();
+        self.set_pass_progress(Some((0, total)));
         self.spawn_outcome(&message, move |backend| {
-            fold_rebuild(
+            let out = fold_rebuild(
                 backend,
                 &chapters,
                 window,
@@ -367,8 +373,28 @@ impl App {
                 &model,
                 incr,
                 finish,
-            )
+                &progress,
+                total,
+            );
+            if let Ok(mut slot) = progress.lock() {
+                *slot = None; // the pass is done; drop the per-chapter counter
+            }
+            out
         });
+    }
+
+    /// Set (or clear) the in-flight pass's per-chapter progress counter (#923).
+    pub(in crate::app) fn set_pass_progress(&self, progress: Option<(usize, usize)>) {
+        if let Ok(mut slot) = self.pass_progress.lock() {
+            *slot = progress;
+        }
+    }
+
+    /// The in-flight pass's per-chapter progress `(done, total)` (#923), or `None`
+    /// between fold steps and for one-shot passes — the pass-queue run's status
+    /// reads it to show "continuity: chapter 5/12".
+    pub(in crate::app) fn pass_progress(&self) -> Option<(usize, usize)> {
+        self.pass_progress.lock().ok().and_then(|slot| *slot)
     }
 
     /// The chapter `file → content-digest` map for the active book (#90). Used by
@@ -585,6 +611,8 @@ fn fold_rebuild(
     model: &str,
     incr: fn(&str, &str, &str) -> ai::Request,
     finish: fn(Result<ai::Response, ai::AiError>) -> Outcome,
+    progress: &Arc<Mutex<Option<(usize, usize)>>>,
+    total: usize,
 ) -> Outcome {
     // Position-indexed sizes so the planner packs whole chapters on seams; the
     // "file" id is just the index, since we drain by count.
@@ -627,6 +655,11 @@ fn fold_rebuild(
         last = Some(resp);
         remaining.drain(0..count);
         next += count;
+        // Publish per-pass chapter progress (#923): `next` is now how many whole
+        // chapters this pass has folded in, out of `total`.
+        if let Ok(mut slot) = progress.lock() {
+            *slot = Some((next, total));
+        }
     }
     // The last step's response is the complete folded bible (or an empty
     // manuscript, which yields no chapters and so no fold — an empty result).

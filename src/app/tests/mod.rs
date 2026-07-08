@@ -84,6 +84,7 @@ mod mouse;
 mod onboarding;
 mod outline;
 mod panes;
+mod pass_queue;
 mod project_search;
 mod projects;
 mod prompt_editing;

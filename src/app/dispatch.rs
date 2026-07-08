@@ -70,11 +70,12 @@ impl App {
             return;
         }
 
-        // While a sequenced run is in progress (a workflow #227, or a series-bible
-        // refresh #340) suspended on an async step, Esc cancels it — cleanly, after
-        // the current step finishes (#344). Only in an editing mode: a prompt or
-        // palette owns Esc itself (a cost-confirm cancels there).
-        if self.sequenced_run_active()
+        // While a sequenced run is in progress (a workflow #227, a series-bible
+        // refresh #340, or a durable pass queue #923) suspended on an async step,
+        // Esc cancels it — cleanly, after the current step finishes (#344). Only in
+        // an editing mode: a prompt or palette owns Esc itself (a cost-confirm
+        // cancels there).
+        if (self.sequenced_run_active() || self.pass_queue_running())
             && key.code == KeyCode::Esc
             && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
         {
