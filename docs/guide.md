@@ -48,7 +48,9 @@ A project is a folder of chapters (one Markdown file each) plus a book.toml
 manifest. Ctrl-N and Ctrl-P step to the next and previous chapter. Ctrl-G opens
 the chapter browser: arrow keys move, Enter opens the selected chapter, "o"
 opens it in a side pane, and "f" lists the project's reference files (the story
-bible and loose notes). Press "/" to filter the list as you type (by title,
+bible and loose notes, grouped so a large set is easy to scan). A reference pane
+is a normal editor — focus it with Ctrl-W w or a mouse click, drag its divider to
+resize, and close it with Ctrl-W c or Vim ":q". Press "/" to filter the list as you type (by title,
 status, or POV) and quick-jump to a chapter; Enter opens the highlighted match,
 Esc keeps the filter for the browser's commands to act on, and a second Esc
 clears it. Press "#" to go straight to a chapter by number (1-based) or title
@@ -276,6 +278,12 @@ local archive is older than stale_warn_hours (24 by default; 0 turns the warning
 off) and Quill warns you up front that the copy is stale. Local backups are off by
 default and independent of the remote push — you can have either, both, or neither.
 
+You can browse and restore those local archives without leaving Quill. "Browse
+backups…" (Ctrl-K, or backup:browse) lists the archives kept for the project so
+you can inspect and restore one in place, and opening a project whose newest local
+backup is more recent than the working copy prompts to restore it — recovery is a
+confirmation, not a manual unzip.
+
 
 REPORTS
 
@@ -330,7 +338,10 @@ When the review copy comes back marked up, "Import review copy" (also in the
 Ctrl-K menu) reads the returned .docx and turns your editor's Word comments into
 inline annotations, anchored to the exact phrase each one sits on — the round
 trip from export to editorial feedback, with the notes landing where you can act
-on them.
+on them. "Review annotations" (Ctrl-K) opens the notes as a list you can work
+through: reply to a note and resolve it when it's handled, and — when a
+manuscript comes back marked up by several reviewers — sort the list, filter by
+reviewer or status, and jump to the next open one.
 
 The export menu also leads with "Set export style…" and "Preview style…". The
 designed exports (EPUB and print PDF) can be lightly styled, and you no longer
@@ -427,14 +438,29 @@ social posts). Revision triage collects every finding into one list to work
 through, and the "Manuscript health" dashboard gives a one-screen overview of
 the open findings grouped by kind (continuity, consistency, style, and the
 rest); you can export the findings list to a file and re-check every open
-finding in one pass.
+finding in one pass. A finding corroborated across passes is marked as
+consensus, and dismissing one persists against its anchored span, so it stays
+dismissed when you re-run.
 
 "Ask the manuscript" retrieves the most relevant chapters for your question
 through an on-device semantic index, so its grounded, citable answer points at
-the right passages without a cloud round-trip.
+the right passages without a cloud round-trip. The same index powers more than
+Ask: "find similar scenes" locates the scenes closest in meaning to a passage
+or query, echo detection flags passages that read too much like each other (as
+findings you can revise), a motif & character co-occurrence report shows which
+motifs and characters recur together, and the incremental continuity and setting
+passes pull their context from the index rather than a fixed window. An
+author-written research notebook kept in the project can be cited by the bibles,
+so a tracked fact traces back to a source you control.
 
 Each pass runs off the editor thread, so the editor never freezes, and a pass
-that would cost more than your threshold asks before spending.
+that would cost more than your threshold asks before spending. Passes route to
+the right-sized cloud model per action, you can run several as a durable queue
+that resumes where it left off after a restart, and — opt-in — a background
+bible update rebuilds the bibles from the full manuscript through Claude's
+asynchronous Batch API (about 50% cheaper), returning immediately and
+reconciling the result on a later launch (set [ai] background-batch-update; off
+by default).
 
 Your API key is kept in the OS keychain, not in plaintext in your config file, so
 a synced dotfile or a backup of the config never carries it. Run "Set Claude API

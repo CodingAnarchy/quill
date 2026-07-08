@@ -5,6 +5,91 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-08
+
+A semantic-manuscript release, built on an on-device embedding index of the
+book. Quill can now find scenes by meaning, catch passages that echo each other,
+and feed the right nearby prose into its continuity and setting passes instead of
+guessing. The AI-assist surface hardens inside the assistant boundary: findings
+gain cross-pass consensus and durable, span-anchored dismissals; the story bible
+can cite an author-written research notebook; multi-pass runs queue and resume;
+each pass routes to the right-sized cloud model; and an opt-in background bible
+update runs through Claude's asynchronous Batch API (half price, reconciled
+across sessions). The editor gains multi-reviewer annotation triage, a
+decluttered run-action palette, a richer reference-file pane, and a per-project
+spell dictionary — and, on the safety side, you can browse and restore local
+backups in-app.
+
+### Added
+
+- **Semantic "find similar scenes"** — search the manuscript by meaning over the
+  on-device embedding index and jump to the scenes closest to a passage or query,
+  not just ones that share the same words.
+- **Echo / near-duplicate detection** — surface passages that read too much like
+  each other (unintended repetition, a description reused across chapters) as
+  findings the author can review and revise.
+- **Motif & character co-occurrence report** — a report over the index that shows
+  which motifs and characters recur and where they appear together, as an
+  analysis surface — never a rewrite.
+- **Author-maintained research notebook** — keep an author-written research
+  notebook in the project that the bibles cite, so tracked facts trace back to a
+  source the author controls.
+- **Queued, resumable multi-pass AI runs** — run several AI passes as a durable
+  queue with per-pass progress that survives a restart, so a long batch of passes
+  resumes where it left off instead of starting over.
+- **Opt-in background bible update via the Batch API** — an explicit, opt-in
+  action rebuilds the bibles from the full manuscript through Claude's
+  asynchronous Message Batches API (about 50% cheaper), returning immediately and
+  reconciling the finished result out-of-band on a later launch or idle tick.
+  Off by default; gated on the `[ai] background-batch-update` flag and a ready
+  cloud backend.
+- **Cross-pass consensus and span-anchored dismissals for findings** — findings
+  corroborated across passes are marked as consensus, and dismissing a finding
+  persists against the anchored span so it stays dismissed across re-runs.
+- **Multi-reviewer annotation triage** — sort annotations, filter by reviewer or
+  by status, and jump to the next open one, so a manuscript marked up by several
+  reviewers is workable at a glance.
+- **Per-project spell dictionary** — the project's custom spell dictionary is now
+  viewable and editable in-app, so book-specific names and terms are managed in
+  one place.
+- **Browse and restore local backups in-app** — list the local backup archives,
+  inspect them, and restore one without leaving Quill; opening a project with a
+  newer backup on disk offers to restore it.
+
+### Changed
+
+- **Retrieval-backed continuity and setting passes** — the incremental continuity
+  and setting passes pull the most relevant nearby prose from the embedding index
+  as context instead of a fixed window, so their observations are grounded in the
+  passages that actually bear on the check.
+- **Per-question retrieval breadth for grounded Ask** — a grounded-Ask question
+  can choose how widely to retrieve, trading focus for coverage per question.
+- **Per-pass model routing** — each AI pass routes to the right-sized cloud model
+  (a heavier model where it earns its keep, a lighter one elsewhere), rather than
+  one model for everything.
+- **Reference-file pane improvements** — the reference-file pane gains grouping,
+  mouse focus, a resizable divider, and Vim-style close, making a large set of
+  reference files easier to navigate.
+- **Wheel scroll re-reads earlier prose** — scrolling the wheel up now pages back
+  through earlier prose in a chapter rather than stopping at the viewport top.
+- **Run-action palette declutter** — the Ctrl-K run-action palette hides actions
+  that don't apply in the current context, and remembers group collapse state
+  (staying collapsed, and reopening collapsed) between sessions.
+- **Internal quality pass** — four oversized modules were split into cohesive
+  submodules (`app/vcs_actions`, `export/exporting/manuscript`, `export/pdf/mod`,
+  `export/epub/tests`).
+
+### Fixed
+
+- **"Refresh all bibles" runs synchronously** — the interactive "refresh all
+  bibles" action now runs synchronously and no longer reports a false batch
+  "timed out"; a too-complex character schema that could break the refresh was
+  also fixed.
+- **Pass-queue resume under `--features local`** — resuming the multi-pass queue
+  no longer fails when built with the `local` feature.
+
+[0.6.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.6.0
+
 ## [0.5.0] - 2026-07-07
 
 A collaboration- and safety-focused release. It closes the editorial loop —
