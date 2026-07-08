@@ -92,6 +92,7 @@ impl App {
                     note: a.note,
                     replies: a.replies,
                     resolved: a.resolved,
+                    reviewer: a.reviewer,
                 });
             }
         }
@@ -237,6 +238,7 @@ impl App {
             note,
             replies: Vec::new(),
             resolved: false,
+            reviewer: None,
         });
         self.annotations.sort_by_key(|a| (a.start, a.end));
         self.persist_annotations();
@@ -255,6 +257,8 @@ impl App {
             filter: String::new(),
             typing: false,
             show: crate::mode::AnnoShow::default(),
+            sort: crate::mode::AnnoSort::default(),
+            reviewer: None,
         };
     }
 
@@ -272,6 +276,8 @@ impl App {
             filter: String::new(),
             typing: false,
             show: crate::mode::AnnoShow::default(),
+            sort: crate::mode::AnnoSort::default(),
+            reviewer: None,
         };
     }
 
@@ -331,11 +337,49 @@ impl App {
         self.annotation_snap();
     }
 
+    /// Cycle the sort order (#933): position → status → reviewer → position. Snaps
+    /// the selection onto a still-visible note (the same notes, reordered).
+    pub(crate) fn cycle_annotation_sort(&mut self) {
+        if let Mode::Annotations { sort, .. } = &mut self.mode {
+            *sort = sort.next();
+        }
+        self.annotation_snap();
+    }
+
+    /// Cycle the per-reviewer filter (#933): all reviewers → each present reviewer
+    /// in turn → back to all. The reviewers are the author's own bucket then the
+    /// named editors alphabetically; with only one (or none) present, cycling is a
+    /// no-op. Snaps the selection onto a note the new filter keeps visible.
+    pub(crate) fn cycle_annotation_reviewer(&mut self) {
+        let reviewers = self.annotation_reviewers();
+        // Nothing to narrow by when every note shares one reviewer bucket.
+        if reviewers.len() < 2 {
+            return;
+        }
+        let current = self.annotation_reviewer_filter();
+        // all → first → … → last → all.
+        let next = match current
+            .as_deref()
+            .and_then(|c| reviewers.iter().position(|r| r == c))
+        {
+            None => Some(reviewers[0].clone()),
+            Some(i) if i + 1 < reviewers.len() => Some(reviewers[i + 1].clone()),
+            Some(_) => None,
+        };
+        if let Mode::Annotations { reviewer, .. } = &mut self.mode {
+            *reviewer = next;
+        }
+        self.annotation_snap();
+    }
+
     /// Key handling for the annotation review list: move (skipping filtered-out
     /// notes), jump (Enter), reply (`a`, #889), resolve/reopen (`r`, #889), cycle
     /// the open/resolved filter (`f`, #889), delete (`d`), close (Esc). `/` starts a
     /// type-to-filter query (#822) that narrows the list to notes whose text or
     /// anchored snippet match; Esc clears the filter before it closes the list.
+    /// Multi-reviewer triage (#933): `s` cycles the sort (position/status/reviewer),
+    /// `R` cycles the per-reviewer filter, and `]`/`[` jump to the next/previous
+    /// open thread.
     pub(crate) fn on_key_annotations(&mut self, key: KeyEvent) {
         let Mode::Annotations {
             selected, typing, ..
@@ -374,6 +418,12 @@ impl App {
             KeyCode::Char('a') if acts_on_selected => self.start_annotation_reply(selected),
             KeyCode::Char('r') if acts_on_selected => self.toggle_annotation_resolved(selected),
             KeyCode::Char('f') => self.cycle_annotation_show(),
+            KeyCode::Char('s') => self.cycle_annotation_sort(),
+            KeyCode::Char('R') => self.cycle_annotation_reviewer(),
+            // `]`/`[` jump to the next/previous open thread (#933), the spell nav's
+            // `]s`/`[s` for triage.
+            KeyCode::Char(']') => self.jump_annotation_open(true),
+            KeyCode::Char('[') => self.jump_annotation_open(false),
             KeyCode::Char('d') if acts_on_selected => {
                 self.annotations.remove(selected);
                 self.persist_annotations();
@@ -428,8 +478,14 @@ impl App {
         }
     }
 
+    /// Whether any narrowing filter is active — the `/` text query (#822) or the
+    /// per-reviewer filter (#933). The first Esc clears these before a second closes
+    /// the list.
     const fn annotation_has_filter(&self) -> bool {
-        matches!(&self.mode, Mode::Annotations { filter, .. } if !filter.is_empty())
+        matches!(
+            &self.mode,
+            Mode::Annotations { filter, reviewer, .. } if !filter.is_empty() || reviewer.is_some()
+        )
     }
 
     /// The active resolved/open filter (#889): `All` off the list.
@@ -440,10 +496,50 @@ impl App {
         }
     }
 
-    /// Whether the annotation at `index` passes both the text filter (#822) and the
-    /// resolved/open filter (#889). The text query is a case-insensitive substring
-    /// match on the note, any reply text, or the snippet of prose it anchors;
-    /// clamped to the buffer so a stale offset never indexes past the end.
+    /// The active sort order (#933): `Position` off the list.
+    const fn annotation_sort(&self) -> crate::mode::AnnoSort {
+        match &self.mode {
+            Mode::Annotations { sort, .. } => *sort,
+            _ => crate::mode::AnnoSort::Position,
+        }
+    }
+
+    /// The active per-reviewer filter (#933): `Some(name)` narrows to that
+    /// reviewer's notes ([`AUTHOR_LABEL`](crate::annotation::AUTHOR_LABEL) for the
+    /// author's own); `None` (off the list, or when cleared) shows every reviewer.
+    fn annotation_reviewer_filter(&self) -> Option<String> {
+        match &self.mode {
+            Mode::Annotations { reviewer, .. } => reviewer.clone(),
+            _ => None,
+        }
+    }
+
+    /// The distinct reviewer labels present across the loaded annotations (#933),
+    /// in a stable order — the author's own bucket
+    /// ([`AUTHOR_LABEL`](crate::annotation::AUTHOR_LABEL)) first when any note is
+    /// author-authored, then the named reviewers alphabetically. The cycle order
+    /// the `R` per-reviewer filter steps through.
+    fn annotation_reviewers(&self) -> Vec<String> {
+        let mut named: Vec<String> = self
+            .annotations
+            .iter()
+            .filter_map(|a| a.reviewer.clone())
+            .collect();
+        named.sort();
+        named.dedup();
+        let mut out = Vec::new();
+        if self.annotations.iter().any(|a| a.reviewer.is_none()) {
+            out.push(crate::annotation::AUTHOR_LABEL.to_string());
+        }
+        out.extend(named);
+        out
+    }
+
+    /// Whether the annotation at `index` passes the text filter (#822), the
+    /// resolved/open filter (#889), and the per-reviewer filter (#933). The text
+    /// query is a case-insensitive substring match on the note, any reply text, or
+    /// the snippet of prose it anchors; clamped to the buffer so a stale offset
+    /// never indexes past the end.
     pub(crate) fn annotation_matches(&self, index: usize, q: &str) -> bool {
         let Some(a) = self.annotations.get(index) else {
             return false;
@@ -451,6 +547,12 @@ impl App {
         // The resolved/open filter applies whether or not a text query is set.
         if !self.annotation_show().admits(a.resolved) {
             return false;
+        }
+        // The per-reviewer filter (#933), likewise independent of the text query.
+        if let Some(who) = self.annotation_reviewer_filter() {
+            if a.reviewer_label() != who {
+                return false;
+            }
         }
         if q.is_empty() {
             return true;
@@ -481,17 +583,28 @@ impl App {
         }
     }
 
-    const fn set_annotations_selected(&mut self, selected: usize) {
+    pub(crate) const fn set_annotations_selected(&mut self, selected: usize) {
         if let Mode::Annotations { selected: s, .. } = &mut self.mode {
             *s = selected;
         }
     }
 
+    /// Clear the active narrowing filters (#822/#933): the `/` text query and the
+    /// per-reviewer filter, restoring the full (still status-filtered / sorted)
+    /// list. The first Esc runs this; a second then closes the list.
     fn clear_annotation_filter(&mut self) {
-        if let Mode::Annotations { filter, typing, .. } = &mut self.mode {
+        if let Mode::Annotations {
+            filter,
+            typing,
+            reviewer,
+            ..
+        } = &mut self.mode
+        {
             filter.clear();
             *typing = false;
+            *reviewer = None;
         }
+        self.annotation_snap();
     }
 
     fn annotation_filter_push(&mut self, c: char) {
@@ -508,49 +621,116 @@ impl App {
         self.annotation_snap();
     }
 
-    /// After the filter changes, keep the selection on a visible note: if the
-    /// current one no longer matches, jump to the first that does (#822).
-    fn annotation_snap(&mut self) {
+    /// The visible annotation indices in display order (#933): the notes that pass
+    /// the text/status/reviewer filters, ordered by the active sort. This is the
+    /// single source of truth the renderer, the arrow keys, and the snap all read,
+    /// so the list, the selection, and the navigation always agree on order.
+    ///
+    /// The indices are into [`App::annotations`] (kept in position order), so
+    /// `Position` is just the filtered indices unchanged; `Status` and `Reviewer`
+    /// stable-sort them by a group key, keeping position order within each group.
+    pub(crate) fn annotation_visible_order(&self) -> Vec<usize> {
         let q = self.annotation_query();
+        let mut order: Vec<usize> = (0..self.annotations.len())
+            .filter(|&i| self.annotation_matches(i, &q))
+            .collect();
+        // A stable sort preserves the position order the filtered indices already
+        // carry, so it's the tie-break within every group.
+        match self.annotation_sort() {
+            crate::mode::AnnoSort::Position => {}
+            crate::mode::AnnoSort::Status => {
+                // Open (false) before resolved (true).
+                order.sort_by_key(|&i| self.annotations[i].resolved);
+            }
+            crate::mode::AnnoSort::Reviewer => {
+                order.sort_by_key(|&i| self.annotations[i].reviewer_label().to_string());
+            }
+        }
+        order
+    }
+
+    /// After a filter/sort change, keep the selection on a visible note: if the
+    /// current one no longer matches, jump to the first in display order (#822/#933).
+    fn annotation_snap(&mut self) {
         let sel = match &self.mode {
             Mode::Annotations { selected, .. } => *selected,
             _ => return,
         };
-        if !self.annotation_matches(sel, &q) {
-            if let Some(first) =
-                (0..self.annotations.len()).find(|&i| self.annotation_matches(i, &q))
-            {
+        let order = self.annotation_visible_order();
+        if !order.contains(&sel) {
+            if let Some(&first) = order.first() {
                 self.set_annotations_selected(first);
             }
         }
     }
 
-    /// The next (or previous, by `forward`) note that passes the filter, or the
-    /// current selection unchanged when there's no further match that way (#822).
+    /// The next (or previous, by `forward`) visible note in display order, or the
+    /// current selection unchanged at the end that way (#822/#933). Moves within
+    /// [`annotation_visible_order`](Self::annotation_visible_order) so the arrow
+    /// keys follow the sorted, filtered list the renderer shows.
     fn annotation_step(&self, forward: bool) -> usize {
-        let q = self.annotation_query();
         let from = match &self.mode {
             Mode::Annotations { selected, .. } => *selected,
             _ => return 0,
         };
-        let n = self.annotations.len();
-        let mut i = from;
-        loop {
-            if forward {
-                if i + 1 >= n {
-                    return from;
-                }
-                i += 1;
-            } else {
-                if i == 0 {
-                    return from;
-                }
-                i -= 1;
-            }
-            if self.annotation_matches(i, &q) {
-                return i;
-            }
+        let order = self.annotation_visible_order();
+        let Some(pos) = order.iter().position(|&i| i == from) else {
+            // The selection isn't visible; land on the first visible note either way.
+            return order.first().copied().unwrap_or(from);
+        };
+        let next = if forward {
+            pos + 1
+        } else {
+            pos.wrapping_sub(1)
+        };
+        order.get(next).copied().unwrap_or(from)
+    }
+
+    /// Jump to the next (or previous, by `forward`) OPEN thread in display order
+    /// (#933), like the spell nav's `]s`/`[s`. Wraps the whole visible list so a
+    /// jump from the last open note lands back on the first, giving a round-robin
+    /// walk through the still-open triage. A no-op when nothing visible is open.
+    pub(crate) fn jump_annotation_open(&mut self, forward: bool) {
+        let from = match &self.mode {
+            Mode::Annotations { selected, .. } => *selected,
+            _ => return,
+        };
+        let order = self.annotation_visible_order();
+        // The open threads among the visible notes, in display order.
+        let open: Vec<usize> = order
+            .iter()
+            .copied()
+            .filter(|&i| !self.annotations[i].resolved)
+            .collect();
+        let n = open.len();
+        if n == 0 {
+            self.message = Some("No open threads.".into());
+            return;
         }
+        // The current selection's position in the display order — the reference
+        // point the jump steps from, whether or not the selection itself is open.
+        let cur_pos = order.iter().position(|&i| i == from).unwrap_or(0);
+        // The open-list position the jump starts from. When the selection is itself
+        // open, that's its own index. Otherwise it's the count of open notes at or
+        // before the cursor — the index of the first open note *after* it — so a `]`
+        // lands there and a `[` steps back one; both wrap the open list.
+        let base = open.iter().position(|&i| i == from).map_or_else(
+            || {
+                open.iter()
+                    .filter(|&&i| order.iter().position(|&o| o == i) <= Some(cur_pos))
+                    .count()
+            },
+            // A `]` from an open note advances past it; the shared `+1`/`-1` below
+            // handles the step, so an on-open start is offset back by one here to
+            // cancel it and land the neighbor, matching the off-open case's "next".
+            |p| if forward { p + 1 } else { p + n },
+        );
+        let target = if forward {
+            base % n
+        } else {
+            (base + n - 1) % n
+        };
+        self.set_annotations_selected(open[target]);
     }
 
     /// Write the loaded chapters' live annotations to their side files (#302/#370):
@@ -578,6 +758,7 @@ impl App {
                     note: a.note.clone(),
                     replies: a.replies.clone(),
                     resolved: a.resolved,
+                    reviewer: a.reviewer.clone(),
                 })
                 .collect();
             if let Err(e) = self.project.set_chapter_annotations(file, &local) {

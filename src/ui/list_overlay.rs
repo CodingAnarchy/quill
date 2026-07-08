@@ -727,10 +727,16 @@ pub(super) fn draw_review_import(frame: &mut Frame, area: Rect, preview: &Review
     // The matched comments first (each becomes an annotation), then the dropped
     // ones, dimmed and flagged so the author sees what didn't carry.
     let mut i = 0;
-    for (_, _, note) in &preview.matched {
+    for (_, _, note, reviewer) in &preview.matched {
+        // Attribute an imported comment to its named reviewer (#933) so a
+        // multi-editor merge shows who left each note.
+        let who = reviewer
+            .as_deref()
+            .map(|r| format!("  ({r})"))
+            .unwrap_or_default();
         header.push(list_row(
             i == preview.scroll,
-            &format!("+ {}", ellipsize(note, 60)),
+            &format!("+ {}{who}", ellipsize(note, 60)),
             None,
         ));
         i += 1;
@@ -760,7 +766,9 @@ pub(super) fn draw_review_import(frame: &mut Frame, area: Rect, preview: &Review
 /// One annotation-list row (#302/#889): the marker + note over the dimmed snippet
 /// it anchors, prefixed with a check for a resolved thread and suffixed with a
 /// reply count. A resolved row is drawn dimmed throughout so it reads as done at a
-/// glance, distinct from the still-open notes.
+/// glance, distinct from the still-open notes. When the note carries a named
+/// reviewer (#886/#933), its name leads the note so a multi-editor list shows who
+/// left each one.
 fn annotation_row(selected: bool, a: &crate::annotation::Live, snippet: String) -> Line<'static> {
     let check = if a.resolved { "✓ " } else { "" };
     let replies = match a.replies.len() {
@@ -768,7 +776,14 @@ fn annotation_row(selected: bool, a: &crate::annotation::Live, snippet: String) 
         1 => "  (1 reply)".to_string(),
         n => format!("  ({n} replies)"),
     };
-    let primary = format!("{check}{}{replies}", a.note);
+    // A named reviewer is shown; an author-authored note carries no tag (it's the
+    // implicit "you"), keeping the historic single-author row unchanged.
+    let who = a
+        .reviewer
+        .as_deref()
+        .map(|r| format!("{r}: "))
+        .unwrap_or_default();
+    let primary = format!("{check}{who}{}{replies}", a.note);
     if a.resolved {
         // A resolved thread reads as done: dim the whole row (still reversed when
         // selected so the cursor is legible).
@@ -800,19 +815,26 @@ pub(super) fn draw_annotations(
     let title = format!(" Annotations ({}) ", app.annotations.len());
     // The type-to-filter query (#822) narrows to notes whose text or anchored
     // snippet match; the row index is preserved so the marker/click map align.
-    let (filter, typing, show) = match &app.mode {
+    let (filter, typing, show, sort, reviewer) = match &app.mode {
         crate::mode::Mode::Annotations {
             filter,
             typing,
             show,
+            sort,
+            reviewer,
             ..
-        } => (filter.clone(), *typing, *show),
-        _ => (String::new(), false, crate::mode::AnnoShow::All),
+        } => (filter.clone(), *typing, *show, *sort, reviewer.clone()),
+        _ => (
+            String::new(),
+            false,
+            crate::mode::AnnoShow::All,
+            crate::mode::AnnoSort::Position,
+            None,
+        ),
     };
-    let query = filter.to_lowercase();
-    let visible: Vec<usize> = (0..app.annotations.len())
-        .filter(|&i| app.annotation_matches(i, &query))
-        .collect();
+    // The visible notes in display order (#933): filtered, then ordered by the
+    // active sort. The single list the app, the marker, and the click map agree on.
+    let visible = app.annotation_visible_order();
     let selected_pos = visible.iter().position(|&i| i == selected);
     let rows = visible
         .iter()
@@ -827,26 +849,35 @@ pub(super) fn draw_annotations(
             annotation_row(i == selected, a, snippet)
         })
         .collect();
-    // The resolved/open filter (#889) is part of the list identity — surface which
-    // slice is showing and how to cycle it alongside the text filter.
+    // The resolved/open filter (#889), sort order (#933), and per-reviewer filter
+    // (#933) are part of the list identity — surface each slice/order and how to
+    // cycle it alongside the text filter.
     let show_tag = match show {
         crate::mode::AnnoShow::All => String::new(),
         other => format!("[{}] ", other.label()),
     };
+    let sort_tag = match sort {
+        crate::mode::AnnoSort::Position => String::new(),
+        other => format!("[by {}] ", other.label()),
+    };
+    let who_tag = reviewer
+        .as_deref()
+        .map(|r| format!("[@{r}] "))
+        .unwrap_or_default();
+    let tags = format!("{show_tag}{sort_tag}{who_tag}");
     let help = if typing {
         format!("Filter: {filter}_")
-    } else if filter.is_empty() {
+    } else if filter.is_empty() && reviewer.is_none() {
         format!(
-            "{show_tag}Annotations — ↑↓ move · enter jump · a reply · r resolve · \
-             f {} · d delete · / filter · esc close",
+            "{tags}Annotations — ↑↓ move · ]/[ next/prev open · enter jump · a reply · \
+             r resolve · f {} · s sort · R reviewer · d delete · / filter · esc close",
             show.next().label()
         )
     } else {
+        let n = visible.len();
         format!(
-            "{show_tag}Filter “{}” — {} match{} · esc clears",
-            filter,
-            visible.len(),
-            if visible.len() == 1 { "" } else { "es" }
+            "{tags}Filtered — {n} match{} · esc clears",
+            if n == 1 { "" } else { "es" }
         )
     };
     draw_list_overlay_recording(

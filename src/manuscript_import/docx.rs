@@ -38,6 +38,11 @@ pub struct ImportedComment {
     pub phrase: String,
     /// The reviewer's comment text (the body of `word/comments.xml`).
     pub note: String,
+    /// The named reviewer the comment came from (#933) — the `w:author` attribute
+    /// Word records on each comment. `None` when the `.docx` carries no author on
+    /// it (or the generic self-attribution Quill's own review-copy export writes),
+    /// so an imported note is grouped, filtered, and sorted by its editor.
+    pub reviewer: Option<String>,
 }
 
 /// Extract the Word comments from a marked-up `.docx` (#886): read
@@ -85,7 +90,8 @@ fn extract_comments_from_xml(document: &str, comments: Option<&str>) -> Vec<Impo
                     if !phrase.is_empty() {
                         out.push(ImportedComment {
                             phrase: phrase.to_string(),
-                            note: note.clone(),
+                            note: note.note.clone(),
+                            reviewer: note.reviewer.clone(),
                         });
                     }
                 }
@@ -135,14 +141,38 @@ fn find_marker(xml: &str, from: usize, name: &str) -> Option<(usize, String)> {
     }
 }
 
-/// Map each `<w:comment w:id="…">` to its note text, from `word/comments.xml`.
-/// The note is the concatenated `<w:t>` run text of the comment body (empty
-/// comments map to an empty string). An id-less comment is skipped.
-fn comment_notes(comments: &str) -> std::collections::HashMap<String, String> {
+/// One recovered comment body: its note text and the reviewer it's attributed to
+/// (#933), paired to the in-body anchor by id.
+struct CommentBody {
+    note: String,
+    reviewer: Option<String>,
+}
+
+/// The generic self-attribution Quill's own review-copy export (#834) stamps on
+/// every comment. It names no real reviewer, so importing Quill's own copy back
+/// leaves the note author-authored (`reviewer = None`) rather than tagging it to
+/// this placeholder.
+const SELF_ATTRIBUTION: &str = "Author annotation";
+
+/// Map each `<w:comment w:id="…">` to its note text and reviewer, from
+/// `word/comments.xml`. The note is the concatenated `<w:t>` run text of the
+/// comment body (empty comments map to an empty string); the reviewer is the
+/// `w:author` attribute (#933), dropped when absent, blank, or Quill's own
+/// self-attribution. An id-less comment is skipped.
+fn comment_notes(comments: &str) -> std::collections::HashMap<String, CommentBody> {
     let mut out = std::collections::HashMap::new();
     for_each_child(comments, "w:comment", |attrs, inner| {
         if let (Some(id), Some(inner)) = (attr_value(attrs, "w:id"), inner) {
-            out.insert(id, run_text(inner).trim().to_string());
+            let reviewer = attr_value(attrs, "w:author")
+                .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty() && a != SELF_ATTRIBUTION);
+            out.insert(
+                id,
+                CommentBody {
+                    note: run_text(inner).trim().to_string(),
+                    reviewer,
+                },
+            );
         }
     });
     out
@@ -588,13 +618,54 @@ mod tests {
                 ImportedComment {
                     phrase: "grey sea".into(),
                     note: "vivid".into(),
+                    reviewer: None,
                 },
                 ImportedComment {
                     phrase: "very cold".into(),
                     note: "redundant?".into(),
+                    reviewer: None,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn extract_comments_carries_the_reviewers_name() {
+        // A comment authored by a named reviewer (`w:author`) carries that name;
+        // an author-less comment stays unattributed (#933).
+        let document = document(
+            "<w:p>\
+             <w:commentRangeStart w:id=\"0\"/><w:r><w:t>grey sea</w:t></w:r>\
+             <w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r>\
+             <w:r><w:t xml:space=\"preserve\"> and </w:t></w:r>\
+             <w:commentRangeStart w:id=\"1\"/><w:r><w:t>cold</w:t></w:r>\
+             <w:commentRangeEnd w:id=\"1\"/><w:r><w:commentReference w:id=\"1\"/></w:r></w:p>",
+        );
+        let comments = "<w:comments>\
+             <w:comment w:id=\"0\" w:author=\"Jane Editor\"><w:p><w:r><w:t>vivid</w:t></w:r></w:p></w:comment>\
+             <w:comment w:id=\"1\"><w:p><w:r><w:t>redundant?</w:t></w:r></w:p></w:comment>\
+             </w:comments>";
+        let out = extract_comments_from_xml(&document, Some(comments));
+        assert_eq!(out[0].reviewer.as_deref(), Some("Jane Editor"));
+        assert_eq!(
+            out[1].reviewer, None,
+            "an author-less comment is unattributed"
+        );
+    }
+
+    #[test]
+    fn extract_comments_ignores_quills_own_self_attribution() {
+        // Quill's review-copy export stamps "Author annotation" on every comment;
+        // importing its own copy back leaves the note author-authored (#933).
+        let document = document(
+            "<w:p><w:commentRangeStart w:id=\"0\"/><w:r><w:t>grey sea</w:t></w:r>\
+             <w:commentRangeEnd w:id=\"0\"/><w:r><w:commentReference w:id=\"0\"/></w:r></w:p>",
+        );
+        let comments = "<w:comments>\
+             <w:comment w:id=\"0\" w:author=\"Author annotation\"><w:p><w:r><w:t>note</w:t></w:r></w:p></w:comment>\
+             </w:comments>";
+        let out = extract_comments_from_xml(&document, Some(comments));
+        assert_eq!(out[0].reviewer, None);
     }
 
     #[test]
@@ -659,13 +730,16 @@ mod tests {
                 ImportedComment {
                     phrase: "grey".into(),
                     note: "vivid".into(),
+                    reviewer: None,
                 },
                 ImportedComment {
                     phrase: "it ended".into(),
                     note: "abrupt".into(),
+                    reviewer: None,
                 },
             ],
-            "each annotation round-trips to a comment on its phrase"
+            "each annotation round-trips to a comment on its phrase (Quill's own \
+             self-attribution is not treated as a named reviewer)"
         );
     }
 
