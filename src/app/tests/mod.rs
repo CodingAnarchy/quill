@@ -86,6 +86,7 @@ mod projects;
 mod prompt_editing;
 mod recovery;
 mod resume;
+mod review_import;
 mod snippets;
 mod spell;
 mod sprint;

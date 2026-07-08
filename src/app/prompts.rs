@@ -430,6 +430,7 @@ impl App {
             | Pending::NewFromNotesDest
             | Pending::ImportManuscriptSource
             | Pending::ImportManuscriptDest
+            | Pending::ImportReviewComments
             | Pending::ArchiveProjectDest
             | Pending::RestoreArchiveSource
             | Pending::RestoreArchiveDest
@@ -718,6 +719,16 @@ impl App {
                                     );
                                 } else {
                                     self.finish_import_manuscript(text);
+                                }
+                            }
+                            Pending::ImportReviewComments => {
+                                if text.is_empty() {
+                                    self.mode = closed;
+                                    self.message = Some("Cancelled — no .docx file.".into());
+                                } else {
+                                    // Recover the comments, resolve them, and open
+                                    // the review-import preview (or report + stop).
+                                    self.begin_import_review_comments(text);
                                 }
                             }
                             Pending::ArchiveProjectDest => {

@@ -151,3 +151,42 @@ fn import_preview_lists_the_chapters_count_and_level() {
         "the confirm/cancel affordance is shown:\n{screen}"
     );
 }
+
+#[test]
+fn review_import_lists_matches_and_dropped_comments() {
+    // The review-import preview (#886) shows what the reviewer's comments resolved
+    // to: the matches that will become annotations and the unmatched ones (the
+    // prose drifted), reported rather than silently dropped.
+    use crate::mode::ReviewImport;
+
+    let mut app = app_with("The sea was grey.\n");
+    app.mode = Mode::ReviewImport(Box::new(ReviewImport {
+        source: std::path::PathBuf::from("/tmp/book-review.docx"),
+        chapter: "one.md".into(),
+        matched: vec![(12, 16, "vivid word".into())],
+        dropped: vec![("gray waves".into(), "check this".into())],
+        scroll: 0,
+    }));
+
+    let screen = render(&app, 80, 24);
+    assert!(
+        screen.contains("1 comment will be added as annotations"),
+        "the match count is shown before merging:\n{screen}"
+    );
+    assert!(
+        screen.contains("1 unmatched"),
+        "the dropped-with-reason count is surfaced:\n{screen}"
+    );
+    assert!(
+        screen.contains("vivid word"),
+        "the matched note is listed:\n{screen}"
+    );
+    assert!(
+        screen.contains("check this") && screen.contains("gray waves"),
+        "the dropped comment and its phrase are reported:\n{screen}"
+    );
+    assert!(
+        screen.contains("enter merge") && screen.contains("esc cancel"),
+        "the merge/cancel affordance is shown:\n{screen}"
+    );
+}

@@ -265,6 +265,13 @@ pub enum Mode {
     /// the split level can be toggled and the preview re-parsed. Boxed (carries the
     /// parsed chapters and the source text).
     ImportPreview(Box<ImportPreview>),
+    /// Previewing a review-comment import before merging it (#886): the reviewer's
+    /// Word comments recovered from a marked-up `.docx`, resolved against the active
+    /// chapter — which matched the prose (and will become annotations) and which
+    /// didn't (the prose drifted, so they're reported rather than lost). Enter
+    /// merges the matches into the chapter's annotations, Esc cancels. Boxed
+    /// (carries the resolved comments and dropped list).
+    ReviewImport(Box<ReviewImport>),
 }
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
@@ -652,6 +659,10 @@ pub enum Pending {
     ImportManuscriptSource,
     /// Text input: the path for the new project created from a manuscript (#298).
     ImportManuscriptDest,
+    /// Text input: a marked-up `.docx` to import review comments from (#886). On
+    /// Enter the Word comments are recovered, resolved against the active chapter,
+    /// and the review-import preview opens.
+    ImportReviewComments,
     /// Text input: the destination path for a project archive (#594). On Enter a
     /// timestamped `.zip` of the whole project is written there.
     ArchiveProjectDest,

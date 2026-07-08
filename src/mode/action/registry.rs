@@ -163,6 +163,11 @@ pub enum Action {
     /// every other export strips — as Word comments anchored to their ranges. The
     /// collaboration/handoff artifact for a beta reader or editor. Pure export.
     ReviewCopy,
+    /// Import review comments (#886): the return leg of the review copy (#834) —
+    /// read a marked-up `.docx` and turn the reviewer's Word comments into live
+    /// annotations anchored to the phrases they marked in the active chapter.
+    /// Unmatched comments (the prose drifted) are reported, not silently lost.
+    ImportReviewComments,
     /// Export the print **wrap cover** (#819): a single full-bleed PDF at
     /// `2×trim + spine + 2×bleed` with the front-cover art on the front panel, a
     /// reserved barcode/ISBN zone on the back, and a spine sized from the interior
@@ -188,6 +193,7 @@ impl Action {
         Self::ImportNotes,
         Self::NewProjectFromNotes,
         Self::ImportManuscript,
+        Self::ImportReviewComments,
         Self::ArchiveProject,
         Self::RestoreArchive,
         // Export
@@ -291,6 +297,7 @@ impl Action {
             Self::ImportNotes => "import",
             Self::NewProjectFromNotes => "new-from-notes",
             Self::ImportManuscript => "import:manuscript",
+            Self::ImportReviewComments => "import:review-comments",
             Self::ArchiveProject => "archive",
             Self::RestoreArchive => "archive:restore",
             Self::StartSprint => "sprint:start",
@@ -350,6 +357,7 @@ impl Action {
             | Self::ImportNotes
             | Self::NewProjectFromNotes
             | Self::ImportManuscript
+            | Self::ImportReviewComments
             | Self::ArchiveProject
             | Self::RestoreArchive => "Project",
             Self::Export(_)
@@ -437,6 +445,7 @@ impl Action {
             Self::ImportNotes => "Import notes → story bible",
             Self::NewProjectFromNotes => "New project from a folder of notes",
             Self::ImportManuscript => "Import a manuscript → new project",
+            Self::ImportReviewComments => "Import review comments (.docx) → annotations",
             Self::ArchiveProject => "Archive project… (.zip backup)",
             Self::RestoreArchive => "Restore project from archive…",
             Self::StartSprint => "Start a writing sprint",

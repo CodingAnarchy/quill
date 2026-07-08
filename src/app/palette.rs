@@ -102,6 +102,11 @@ impl App {
             {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
+            // Review comments anchor into the active chapter's prose; the continuous
+            // view holds a multi-chapter window, so leave it first.
+            Action::ImportReviewComments if self.manuscript.is_some() => {
+                Some("leave the continuous view (Ctrl-l) first".into())
+            }
             // The publish bundles set [print]/language defaults on book.toml, which a
             // multi-book series has no single top-level table for; guide per-book. The
             // wrap cover's spine comes from one book's interior page count, so it's a
@@ -244,6 +249,7 @@ impl App {
             Action::ImportNotes => self.start_import(),
             Action::NewProjectFromNotes => self.start_new_from_notes(),
             Action::ImportManuscript => self.start_import_manuscript(),
+            Action::ImportReviewComments => self.start_import_review_comments(),
             Action::ArchiveProject => self.start_archive_project(),
             Action::RestoreArchive => self.start_restore_archive(),
             Action::StartSprint => self.start_sprint(),
