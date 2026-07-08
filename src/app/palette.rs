@@ -651,6 +651,8 @@ impl App {
             AiAction::AdCreative => self.analyze_ad_creative(),
             AiAction::Portrait => self.start_portrait(),
             AiAction::Scene => self.start_scene(),
+            AiAction::SemanticFind => self.start_semantic_find(),
+            AiAction::Echo => self.start_echo_detection(),
             AiAction::Triage => self.open_triage(),
             AiAction::Dashboard => self.open_health_dashboard(),
             AiAction::AskHistory => self.open_qa_history(),
@@ -745,6 +747,14 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::AskHistory => (
             "Ask history",
             "Re-open a past Ask — answer + jumpable citations (local)",
+        ),
+        AiAction::SemanticFind => (
+            "Find similar scenes",
+            "Ranked, jumpable passages like a selection or a query (local, reads only)",
+        ),
+        AiAction::Echo => (
+            "Echo & near-duplicate detection",
+            "Flag repeated / echoed passage pairs with scores (local, reads only)",
         ),
         AiAction::Thesaurus => (
             "Word search",

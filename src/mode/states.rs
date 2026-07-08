@@ -127,6 +127,8 @@ pub enum FindingKind {
     Style,
     Editorial,
     Voice,
+    /// Echo / near-duplicate passage pairs (#920) — the semantic-repetition scan.
+    Echo,
     /// Not a re-runnable analysis pass (Q&A citations / answer rows), or an
     /// unrecognized persisted slug.
     Other,
@@ -146,6 +148,7 @@ impl FindingKind {
             Self::Style => "style",
             Self::Editorial => "editorial",
             Self::Voice => "voice",
+            Self::Echo => "echo",
             Self::Other => "other",
         }
     }
@@ -162,6 +165,7 @@ impl FindingKind {
             Self::Style => "Prose & style",
             Self::Editorial => "Editorial",
             Self::Voice => "Character voice",
+            Self::Echo => "Echoes & near-duplicates",
             Self::Other => "Other",
         }
     }
@@ -179,6 +183,7 @@ impl FindingKind {
             Self::Style,
             Self::Editorial,
             Self::Voice,
+            Self::Echo,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)

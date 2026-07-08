@@ -84,6 +84,19 @@ pub struct Hit {
     pub score: f32,
 }
 
+/// A near-duplicate / echo pair (#920): two distinct passages whose vectors are
+/// close, with their cosine similarity. The echo-detection pass surfaces these as
+/// findings — each pair carries *both* jumpable citations and the score, so the
+/// author can compare the two spans and decide whether the repetition is a
+/// mistake or a deliberate reprise. Observation only: it flags the pair, never
+/// edits either passage.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EchoPair {
+    pub a: Passage,
+    pub b: Passage,
+    pub score: f32,
+}
+
 /// The seam between the index and a model: turn texts into fixed-width embedding
 /// vectors. `LocalEmbedder` is the candle implementation; tests inject a fake so
 /// the whole retrieval path runs with no model download (#531).
@@ -326,6 +339,85 @@ impl Index {
         hits.truncate(top_k);
         hits
     }
+
+    /// Semantic "find similar scenes" (#924): rank the indexed passages by cosine
+    /// similarity to `query` and return the top `top_k`, but drop any passage whose
+    /// prose is byte-identical to `query`. That exclusion is what turns the shared
+    /// [`search`](Self::search) primitive into a *find-similar-elsewhere*: when the
+    /// query is a passage the author selected, its own vector would otherwise
+    /// dominate the ranking (a passage is maximally similar to itself), so a
+    /// self-match is filtered out and the author sees the *other* passages that echo
+    /// it. A typed query rarely matches a passage verbatim, so the filter is a no-op
+    /// there and this behaves like plain search.
+    ///
+    /// Reads prose to rank + cite it, never writes it — squarely inside the AI
+    /// boundary, like every other retrieval path here.
+    pub fn similar(
+        &self,
+        query: &str,
+        top_k: usize,
+        embedder: &dyn Embedder,
+    ) -> Result<Vec<Hit>, AiError> {
+        if self.passages.is_empty() || top_k == 0 {
+            return Ok(Vec::new());
+        }
+        let mut q = embedder
+            .embed(std::slice::from_ref(&query.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| AiError::Internal("embedder returned no query vector".into()))?;
+        normalize(&mut q);
+        // Rank over one extra slot, then drop the self-match, so excluding the
+        // query's own passage still leaves `top_k` results when the index has them.
+        let mut hits = self.rank(&q, top_k + 1);
+        hits.retain(|h| h.passage.text != query);
+        hits.truncate(top_k);
+        Ok(hits)
+    }
+
+    /// Echo / near-duplicate detection (#920): scan every pair of indexed passages
+    /// and return those whose cosine similarity is at least `threshold`, as
+    /// [`EchoPair`]s carrying both passages and the score. Highest-similarity pairs
+    /// first (a stable file/text tie-break keeps runs reproducible). A pair of
+    /// passages *within the same chapter* is skipped — a repeated refrain in one
+    /// scene is usually deliberate, and the interesting echoes are cross-chapter;
+    /// this also keeps a long chapter's adjacent passages from flooding the results.
+    ///
+    /// Pure over the stored (already-normalized) vectors — no embedder round-trip,
+    /// so tests drive it with injected vectors. O(n²) in the passage count, run on
+    /// the worker thread; the manuscript's passage count is small enough (a passage
+    /// is ~1,200 chars) that this stays well under a frame for a whole book.
+    ///
+    /// Reads prose to compare + cite it, never writes it (within the AI boundary).
+    pub fn echo_pairs(&self, threshold: f32) -> Vec<EchoPair> {
+        let mut pairs = Vec::new();
+        for (i, p) in self.passages.iter().enumerate() {
+            for q in &self.passages[i + 1..] {
+                // Cross-chapter only: a within-chapter repeat is usually intended,
+                // and the echoes an author misses span scenes.
+                if p.passage.file == q.passage.file {
+                    continue;
+                }
+                let score = cosine(&p.vector, &q.vector);
+                if score >= threshold {
+                    pairs.push(EchoPair {
+                        a: p.passage.clone(),
+                        b: q.passage.clone(),
+                        score,
+                    });
+                }
+            }
+        }
+        pairs.sort_by(|x, y| {
+            y.score
+                .total_cmp(&x.score)
+                .then_with(|| x.a.file.cmp(&y.a.file))
+                .then_with(|| x.b.file.cmp(&y.b.file))
+                .then_with(|| x.a.text.cmp(&y.a.text))
+                .then_with(|| x.b.text.cmp(&y.b.text))
+        });
+        pairs
+    }
 }
 
 // --- Persistence: the index lives next to the bible state -------------------
@@ -363,147 +455,8 @@ impl Index {
 #[cfg(feature = "local")]
 pub use local::LocalEmbedder;
 
-/// The candle text-embedding backend (#831), behind `#[cfg(feature = "local")]` so
-/// its heavy deps stay out of a default build — the same gating the generative
-/// [`crate::ai::local`] backend uses. A small BERT-family sentence-transformers
-/// encoder (`all-MiniLM-L6-v2`) loaded from safetensors, mean-pooled and
-/// L2-normalized to one vector per passage. It only ever reads text to vectorize
-/// it, so it's inside the AI boundary by construction.
 #[cfg(feature = "local")]
-mod local {
-    use candle_core::{Device, Tensor};
-    use candle_nn::VarBuilder;
-    use candle_transformers::models::bert::{BertModel, Config, DTYPE};
-    use tokenizers::Tokenizer;
-
-    use super::Embedder;
-    use crate::ai::model_select::{self, EmbedModel};
-    use crate::ai::AiError;
-
-    /// A loaded local embedding model — the encoder, its tokenizer, and the device.
-    pub struct LocalEmbedder {
-        model: BertModel,
-        tokenizer: Tokenizer,
-        device: Device,
-        tag: String,
-    }
-
-    impl LocalEmbedder {
-        /// Load an [`EmbedModel`] from the `hf-hub` cache (downloading if absent,
-        /// resumable), matching the generative backend's `for_model` path. The
-        /// repo carries `model.safetensors`, `config.json`, and `tokenizer.json` —
-        /// the sentence-transformers layout candle's `bert` reads.
-        pub fn for_model(model: &EmbedModel) -> Result<Self, AiError> {
-            let hub = hf_hub::api::sync::ApiBuilder::new()
-                .with_progress(false)
-                .build()
-                .map_err(|e| download_error(model, e))?;
-            let repo = hub.model(model.repo.to_string());
-            let weights = repo
-                .get(model.weights_file)
-                .map_err(|e| download_error(model, e))?;
-            let config = repo
-                .get("config.json")
-                .map_err(|e| download_error(model, e))?;
-            let tokenizer_path = repo
-                .get("tokenizer.json")
-                .map_err(|e| download_error(model, e))?;
-            Self::load(
-                weights.to_str().unwrap_or_default(),
-                config.to_str().unwrap_or_default(),
-                tokenizer_path.to_str().unwrap_or_default(),
-                model.id,
-            )
-        }
-
-        /// Load a BERT embedding model from a safetensors weights file, its
-        /// `config.json`, and its `tokenizer.json`. Uses the best device candle
-        /// offers (Metal on Apple Silicon, else CPU).
-        pub fn load(
-            weights_path: &str,
-            config_path: &str,
-            tokenizer_path: &str,
-            tag: &str,
-        ) -> Result<Self, AiError> {
-            let device = model_select::best_device();
-            let config: Config = serde_json::from_str(
-                &std::fs::read_to_string(config_path)
-                    .map_err(|e| internal(format!("read config: {e}")))?,
-            )
-            .map_err(|e| internal(format!("parse config: {e}")))?;
-            let tokenizer = Tokenizer::from_file(tokenizer_path)
-                .map_err(|e| internal(format!("tokenizer: {e}")))?;
-            // SAFETY: mmap of a read-only weights file we just fetched; candle's
-            // documented load path (the same one the bert example uses).
-            let vb = unsafe {
-                VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, &device)
-                    .map_err(|e| internal(format!("load weights: {e}")))?
-            };
-            let model =
-                BertModel::load(vb, &config).map_err(|e| internal(format!("build model: {e}")))?;
-            Ok(Self {
-                model,
-                tokenizer,
-                device,
-                tag: tag.to_string(),
-            })
-        }
-
-        /// Embed one text into a mean-pooled sentence vector.
-        fn embed_one(&self, text: &str) -> Result<Vec<f32>, AiError> {
-            let encoding = self
-                .tokenizer
-                .encode(text, true)
-                .map_err(|e| internal(format!("encode: {e}")))?;
-            let ids = encoding.get_ids().to_vec();
-            let n = ids.len();
-            let token_ids = Tensor::new(ids.as_slice(), &self.device)
-                .and_then(|t| t.unsqueeze(0))
-                .map_err(|e| internal(format!("input tensor: {e}")))?;
-            let token_type_ids = token_ids
-                .zeros_like()
-                .map_err(|e| internal(format!("type ids: {e}")))?;
-            let out = self
-                .model
-                .forward(&token_ids, &token_type_ids, None)
-                .map_err(|e| internal(format!("forward: {e}")))?;
-            // Mean-pool over the token axis → one sentence vector. `out` is
-            // (1, n_tokens, hidden); sum over tokens and divide by the count.
-            let pooled = out
-                .sum(1)
-                .and_then(|t| t / n.max(1) as f64)
-                .and_then(|t| t.squeeze(0))
-                .and_then(|t| t.to_dtype(candle_core::DType::F32))
-                .and_then(|t| t.to_vec1::<f32>())
-                .map_err(|e| internal(format!("pool: {e}")))?;
-            Ok(pooled)
-        }
-    }
-
-    impl Embedder for LocalEmbedder {
-        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, AiError> {
-            texts.iter().map(|t| self.embed_one(t)).collect()
-        }
-
-        fn model_tag(&self) -> String {
-            self.tag.clone()
-        }
-    }
-
-    const fn internal(msg: String) -> AiError {
-        AiError::Internal(msg)
-    }
-
-    /// An actionable error when an embedding model can't be fetched (#726), naming
-    /// the model + repo + file so a genuine failure points at the concrete resource.
-    fn download_error(model: &EmbedModel, cause: impl std::fmt::Display) -> AiError {
-        AiError::NotConfigured(format!(
-            "couldn't obtain the embedding model {} (~{} MB, {}/{}) — download it while \
-             online, or Ask falls back to sending the whole book. ({cause})",
-            model.id, model.size_mb, model.repo, model.weights_file,
-        ))
-    }
-}
+mod local;
 
 #[cfg(test)]
 mod tests {
@@ -762,6 +715,163 @@ mod tests {
         let hits = loaded.search("gold", 1, &embedder).unwrap();
         assert_eq!(hits[0].passage.title, "Gold");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn similar_excludes_the_query_passage_and_ranks_the_echo_first() {
+        // The find-similar primitive (#924): querying with a passage's own prose
+        // drops that passage (a self-match) and surfaces the ones that echo it.
+        let embedder = FakeEmbedder {
+            keywords: vec!["storm", "calm"],
+        };
+        let chapters = vec![
+            chapter(
+                "Storm A",
+                "one.md",
+                "A sudden storm broke over the storm-lit bay.",
+            ),
+            chapter(
+                "Storm B",
+                "two.md",
+                "Another storm rolled in, a storm of wind.",
+            ),
+            chapter("Calm", "three.md", "The calm, calm morning was still."),
+        ];
+        let mut index = Index::default();
+        index.refresh(&chapters, &embedder).unwrap();
+
+        // Query with chapter one's exact prose: it must not return itself, and the
+        // other storm-heavy passage ranks above the calm one.
+        let query = "A sudden storm broke over the storm-lit bay.";
+        let hits = index.similar(query, 5, &embedder).unwrap();
+        assert!(
+            hits.iter().all(|h| h.passage.text != query),
+            "the query's own passage is excluded: {hits:?}"
+        );
+        assert_eq!(
+            hits[0].passage.file, "two.md",
+            "the echoing storm passage ranks first"
+        );
+        // The calm passage (no shared keyword) scores 0 and ranks last.
+        assert_eq!(hits.last().unwrap().passage.file, "three.md");
+    }
+
+    #[test]
+    fn similar_from_a_typed_query_behaves_like_search() {
+        // A typed query rarely matches a passage verbatim, so nothing is excluded
+        // and the most relevant passage still ranks first.
+        let embedder = FakeEmbedder {
+            keywords: vec!["locket", "harbor"],
+        };
+        let chapters = vec![
+            chapter("Locket", "one.md", "She held the locket."),
+            chapter("Harbor", "two.md", "Ships filled the harbor."),
+        ];
+        let mut index = Index::default();
+        index.refresh(&chapters, &embedder).unwrap();
+        let hits = index
+            .similar("something about a locket", 2, &embedder)
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].passage.file, "one.md");
+    }
+
+    #[test]
+    fn echo_pairs_flags_near_duplicates_above_threshold() {
+        // Echo detection (#920): three chapters, two of which are near-identical.
+        // A high threshold flags only the near-duplicate; a lower one also catches
+        // the softer echo, and an unrelated passage is never paired.
+        // Vectors chosen directly so similarity is exact and threshold behavior is
+        // unambiguous.
+        let passages = [
+            ("dup1.md", vec![1.0, 0.0, 0.0]),   // near-duplicate of dup2
+            ("dup2.md", vec![0.99, 0.14, 0.0]), // ~0.99 cosine with dup1
+            ("echo.md", vec![0.7, 0.7, 0.0]),   // a softer echo of dup1 (~0.7)
+            ("far.md", vec![0.0, 0.0, 1.0]),    // orthogonal to all — never paired
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (file, mut vector))| {
+            normalize(&mut vector);
+            IndexedPassage {
+                passage: Passage {
+                    title: format!("Ch {i}"),
+                    file: file.into(),
+                    text: format!("passage {i}"),
+                },
+                digest: "d".into(),
+                vector,
+            }
+        })
+        .collect();
+        let index = Index {
+            model_tag: "fake".into(),
+            passages,
+        };
+
+        // High threshold: only the near-duplicate pair (dup1 ↔ dup2).
+        let near = index.echo_pairs(0.95);
+        assert_eq!(
+            near.len(),
+            1,
+            "only the near-duplicate clears 0.95: {near:?}"
+        );
+        let files = [near[0].a.file.as_str(), near[0].b.file.as_str()];
+        assert!(files.contains(&"dup1.md") && files.contains(&"dup2.md"));
+        assert!(near[0].score >= 0.95);
+
+        // Lower threshold: the soft echo (echo.md) also pairs, and the highest-
+        // similarity pair sorts first.
+        let soft = index.echo_pairs(0.6);
+        assert!(soft.len() >= 3, "soft echoes surface at 0.6: {soft:?}");
+        assert!(
+            soft[0].score >= soft[1].score,
+            "pairs are ordered by descending similarity"
+        );
+        // The orthogonal passage is never in any pair.
+        assert!(
+            soft.iter()
+                .all(|p| p.a.file != "far.md" && p.b.file != "far.md"),
+            "an unrelated passage is never flagged: {soft:?}"
+        );
+    }
+
+    #[test]
+    fn echo_pairs_skips_within_chapter_repeats() {
+        // Two identical passages in the *same* chapter (a deliberate in-scene
+        // refrain) are not flagged; the same text across chapters is.
+        let make = |file: &str, text: &str, v: Vec<f32>| {
+            let mut vector = v;
+            normalize(&mut vector);
+            IndexedPassage {
+                passage: Passage {
+                    title: file.into(),
+                    file: file.into(),
+                    text: text.into(),
+                },
+                digest: "d".into(),
+                vector,
+            }
+        };
+        let index = Index {
+            model_tag: "fake".into(),
+            passages: vec![
+                make("a.md", "the refrain", vec![1.0, 0.0]),
+                make("a.md", "the refrain again", vec![1.0, 0.0]), // same chapter → skipped
+                make("b.md", "the refrain elsewhere", vec![1.0, 0.0]), // cross-chapter → flagged
+            ],
+        };
+        let pairs = index.echo_pairs(0.9);
+        // Only the cross-chapter pairs (a↔b, twice) are flagged; the a↔a pair isn't.
+        assert!(
+            pairs.iter().all(|p| p.a.file != p.b.file),
+            "no within-chapter pair is flagged: {pairs:?}"
+        );
+        assert_eq!(
+            pairs.len(),
+            2,
+            "both a.md passages pair with b.md: {pairs:?}"
+        );
     }
 
     /// End-to-end retrieval with the *real* candle embedding model (#831): download

@@ -47,6 +47,16 @@ pub enum AiAction {
     /// Browse the session's "Ask the manuscript" history — past asks, answers, and
     /// their jumpable citations (local; no request) (#609).
     AskHistory,
+    /// Semantic "find similar scenes" (#924): from a selected passage or a typed
+    /// query, retrieve the top-N most similar passages elsewhere in the manuscript,
+    /// ranked with a similarity score and a jumpable citation. Reads + cites; local
+    /// (the on-device embedding index), no network request.
+    SemanticFind,
+    /// Echo / near-duplicate detection (#920): scan the embedding index for
+    /// near-duplicate and high-similarity passage pairs and surface them as
+    /// findings, each with both citations + a score. Reads + flags; local, no
+    /// network request.
+    Echo,
     /// In-context thesaurus / word search for a word or phrase (#290).
     Thesaurus,
     /// Name generator — candidate character / place / term names by constraints,
@@ -226,6 +236,18 @@ impl AiAction {
             bible_key: None,
         },
         AiActionSpec {
+            action: Self::SemanticFind,
+            slug: "ai:find-similar",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: Self::Echo,
+            slug: "ai:echo",
+            cost: AiCost::None,
+            bible_key: None,
+        },
+        AiActionSpec {
             action: Self::Thesaurus,
             slug: "ai:thesaurus",
             cost: AiCost::None,
@@ -294,6 +316,7 @@ impl AiAction {
             Self::Style => FindingKind::Style,
             Self::Editorial => FindingKind::Editorial,
             Self::Voice => FindingKind::Voice,
+            Self::Echo => FindingKind::Echo,
             _ => FindingKind::Other,
         }
     }

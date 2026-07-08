@@ -406,6 +406,7 @@ impl App {
             | Pending::SetStyleText(_)
             | Pending::SetSettingText(_)
             | Pending::AskAi
+            | Pending::SemanticFind
             | Pending::Thesaurus
             | Pending::NameGen(_)
             | Pending::Commit
@@ -567,6 +568,12 @@ impl App {
                                 // asynchronously in the overlay.
                                 self.mode = closed;
                                 self.ask_ai(text);
+                            }
+                            Pending::SemanticFind => {
+                                // Back to editing; the ranked similar passages arrive
+                                // in the findings overlay (#924).
+                                self.mode = closed;
+                                self.semantic_find(text);
                             }
                             Pending::Thesaurus => {
                                 // Back to editing; the candidates arrive in the overlay.

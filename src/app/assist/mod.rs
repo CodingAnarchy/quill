@@ -28,6 +28,7 @@ mod ask;
 mod recheck;
 mod reference;
 mod retrieve;
+mod similar;
 mod trackers;
 mod triage;
 mod workflow;

@@ -619,6 +619,11 @@ pub enum Pending {
     Rename { at: usize },
     /// Text input: a question to ask the AI about the manuscript.
     AskAi,
+    /// Text input: a query for semantic "find similar scenes" (#924) — the passages
+    /// most similar to this text, ranked with scores + jumpable citations. Prefilled
+    /// with the visual selection when one is active, so the author can find scenes
+    /// like the one they highlighted.
+    SemanticFind,
     /// Text input: a word/phrase (and optional filters) for the thesaurus (#290).
     Thesaurus,
     /// Text input: constraints (origin, syllables, tone, era) for the name
