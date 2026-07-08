@@ -226,6 +226,56 @@ impl App {
         self.spawn_request(base_msg, req, false, t.finish);
     }
 
+    /// Build the full-manuscript rebuild request for a background batch update
+    /// (#950), plus the manuscript digests it's built against (the staleness
+    /// baseline) and whether this is a series book (so the reconcile merges rather
+    /// than replaces the recorded state). Returns `None` when there's no tracker for
+    /// the action or the book has nothing to send (an empty manuscript). Always a
+    /// full rebuild: the batch path is the "full-from-scratch rebuild on the Claude
+    /// backend" the removed `book_pass_batches` eligibility covered — the interactive
+    /// incremental path (#655/#955) stays synchronous and unbatched.
+    ///
+    /// In a series with an existing shared bible, a book's "full" pass *revises* the
+    /// shared bible with that book's chapters (never discarding the other books),
+    /// exactly as `run_bible_tracker`'s `Scope::Full` arm does; a first build or a
+    /// standalone novel rebuilds from the whole book.
+    pub(in crate::app) fn batch_full_request(
+        &self,
+        action: AiAction,
+        book: usize,
+    ) -> Option<(ai::Request, ai::incremental::Digests, bool)> {
+        let t = bible_tracker(action)?;
+        let manuscript = self.book_render(book, None);
+        if manuscript.trim().is_empty() {
+            return None; // an empty book has nothing to rebuild
+        }
+        let current = self.book_digests(book);
+        let series = self.project.book_count() > 1;
+        let model = self.ai.model.clone();
+        let prior = match t.source {
+            BibleSource::Dir(dir) => bible::raw_dir(&self.project.root, dir),
+            BibleSource::File(file) => bible::raw_file(&self.project.root, file),
+        };
+        // Series with an existing bible → revise it with the whole book; else a
+        // from-scratch rebuild of the whole book (mirrors the `Scope::Full` arms).
+        let req = if series && !prior.trim().is_empty() {
+            (t.incr)(&prior, &manuscript, &model)
+        } else {
+            (t.full)(manuscript, &model)
+        };
+        Some((req, current, series))
+    }
+
+    /// The tracker `finish` that turns a completed batch response into the matching
+    /// [`Outcome`] (#950), so the reconcile applies a batch rebuild through the same
+    /// per-feature apply path the interactive pass uses. `None` for a non-bible
+    /// action (which never reaches the batch update).
+    pub(in crate::app) fn bible_finish(
+        action: AiAction,
+    ) -> Option<fn(Result<ai::Response, ai::AiError>) -> Outcome> {
+        bible_tracker(action).map(|t| t.finish)
+    }
+
     /// Spawn a retrieval-backed incremental bible pass (#929). Assembles everything
     /// off-thread retrieval needs on the UI thread — the changed chapters' rendered
     /// text (the revise material and the retrieval query), the whole-book index

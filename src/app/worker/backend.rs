@@ -404,35 +404,7 @@ impl App {
                 // If the assistant pane (#392) is waiting on this pass, capture its
                 // result before the outcome is consumed, then resume after applying.
                 let assistant_summary = self.assistant_pass_summary(&outcome);
-                match outcome {
-                    Outcome::Answer(r) => self.apply_qa_result(r),
-                    Outcome::Characters(r) => self.apply_characters(r),
-                    Outcome::Continuity(r) => self.apply_continuity(r),
-                    Outcome::Setting(r) => self.apply_setting(r),
-                    Outcome::Plot(r) => self.apply_plot(r),
-                    Outcome::Theme(r) => self.apply_theme(r),
-                    Outcome::Scaffold(r) => self.apply_scaffold(r),
-                    Outcome::Naming(r) => self.apply_naming(r),
-                    Outcome::Style(r) => self.apply_style(r),
-                    Outcome::Submission(r) => self.apply_submission(r),
-                    Outcome::Brainstorm(r) => self.apply_brainstorm(r),
-                    Outcome::AdCreative(r) => self.apply_ad_creative(r),
-                    Outcome::Marketing(r) => self.apply_marketing(r),
-                    Outcome::Social(r) => self.apply_social(r),
-                    Outcome::Voice(r) => self.apply_voice(r),
-                    Outcome::Image(r) => self.apply_images(r),
-                    Outcome::Workflow(r) => self.apply_generated_workflow(r),
-                    Outcome::Config(r) => self.apply_generated_config(r),
-                    Outcome::Import(r) => self.apply_import(r),
-                    Outcome::Thesaurus(r) => self.apply_thesaurus(r),
-                    Outcome::NameGen(r) => self.apply_namegen(r),
-                    Outcome::Editorial(r) => self.apply_editorial(r),
-                    Outcome::SemanticFind(r) => self.apply_semantic_find(r),
-                    Outcome::Echo(r) => self.apply_echo(r),
-                    Outcome::Recheck(r) => self.apply_recheck(r),
-                    Outcome::RecheckAll(r) => self.apply_recheck_all(r),
-                    Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
-                }
+                self.apply_outcome(outcome);
                 // If a routed-local pass fell back to Claude (#725), surface why —
                 // the pass ran, but the author should know their local model wasn't
                 // used (and how to enable it). Overrides the per-feature success
@@ -472,6 +444,43 @@ impl App {
         }
         // Fire a setup wizard's deferred setting draft once the worker is free (#282).
         self.pump_wizard_drafts();
+    }
+
+    /// Dispatch a completed [`Outcome`] to its feature's `apply_*` handler — the one
+    /// place the per-feature routing lives. Called by [`poll_ai`](App::poll_ai) for
+    /// the interactive worker's result, and reused by the background batch update
+    /// (#950) when a reconciled batch's rebuild is applied through the same path
+    /// (the tracker's `finish` turns the batch response into the matching variant).
+    pub(in crate::app) fn apply_outcome(&mut self, outcome: Outcome) {
+        match outcome {
+            Outcome::Answer(r) => self.apply_qa_result(r),
+            Outcome::Characters(r) => self.apply_characters(r),
+            Outcome::Continuity(r) => self.apply_continuity(r),
+            Outcome::Setting(r) => self.apply_setting(r),
+            Outcome::Plot(r) => self.apply_plot(r),
+            Outcome::Theme(r) => self.apply_theme(r),
+            Outcome::Scaffold(r) => self.apply_scaffold(r),
+            Outcome::Naming(r) => self.apply_naming(r),
+            Outcome::Style(r) => self.apply_style(r),
+            Outcome::Submission(r) => self.apply_submission(r),
+            Outcome::Brainstorm(r) => self.apply_brainstorm(r),
+            Outcome::AdCreative(r) => self.apply_ad_creative(r),
+            Outcome::Marketing(r) => self.apply_marketing(r),
+            Outcome::Social(r) => self.apply_social(r),
+            Outcome::Voice(r) => self.apply_voice(r),
+            Outcome::Image(r) => self.apply_images(r),
+            Outcome::Workflow(r) => self.apply_generated_workflow(r),
+            Outcome::Config(r) => self.apply_generated_config(r),
+            Outcome::Import(r) => self.apply_import(r),
+            Outcome::Thesaurus(r) => self.apply_thesaurus(r),
+            Outcome::NameGen(r) => self.apply_namegen(r),
+            Outcome::Editorial(r) => self.apply_editorial(r),
+            Outcome::SemanticFind(r) => self.apply_semantic_find(r),
+            Outcome::Echo(r) => self.apply_echo(r),
+            Outcome::Recheck(r) => self.apply_recheck(r),
+            Outcome::RecheckAll(r) => self.apply_recheck_all(r),
+            Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
+        }
     }
 }
 

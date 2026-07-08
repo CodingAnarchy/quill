@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use super::http::{self, Header};
 use super::tool_loop::{Converse, ToolCall, Turn};
-use super::{is_ok, AiError, Backend, Request, Response, Usage};
+use super::{is_ok, AiError, Backend, BatchStatus, Request, Response, Usage};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const BATCH_URL: &str = "https://api.anthropic.com/v1/messages/batches";
@@ -52,31 +52,18 @@ impl Backend for ClaudeBackend {
     /// one, poll until it ends, then fetch and parse the single result. Half the
     /// per-token price at the cost of latency — used for full-manuscript rebuilds.
     fn complete_batched(&self, req: &Request) -> Result<Response, AiError> {
-        let (status, value) = self.post(BATCH_URL, &batch_submit_body(req))?;
-        if !is_ok(status) {
-            return Err(api_error(status, &value));
-        }
-        let id = value
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AiError::ApiMalformed("batch response had no id".into()))?;
-        let status_url = format!("{BATCH_URL}/{id}");
-
+        let id = self.submit_batch(req)?;
         for _ in 0..BATCH_MAX_POLLS {
-            let (code, batch) = self.get_json(&status_url)?;
-            if !is_ok(code) {
-                return Err(api_error(code, &batch));
+            match self.reconcile_batch(&id)? {
+                BatchStatus::Ready(resp) => return Ok(resp),
+                BatchStatus::Failed(reason) => {
+                    return Err(AiError::Network {
+                        status: None,
+                        message: format!("batch request {reason}"),
+                    })
+                }
+                BatchStatus::Processing => thread::sleep(BATCH_POLL),
             }
-            if batch.get("processing_status").and_then(Value::as_str) == Some("ended") {
-                let results_url = batch
-                    .get("results_url")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        AiError::ApiMalformed("batch ended without a results url".into())
-                    })?;
-                return parse_batch_result(&self.get_text(results_url)?, BATCH_ID);
-            }
-            thread::sleep(BATCH_POLL);
         }
         // Don't invite a blind retry: the submitted batch keeps running (and
         // billing) server-side, so re-running would pay for a second one.
@@ -84,6 +71,44 @@ impl Backend for ClaudeBackend {
             status: None,
             message: "batch still processing after the time limit — it should finish on its own shortly (re-running starts a new, separately-billed batch)".into(),
         })
+    }
+
+    /// Submit a one-request batch (#950) and return its id without waiting — the
+    /// non-blocking half of the batch path. The submit itself is not retried (an
+    /// accidental double-submit would bill twice); a transient blip surfaces and the
+    /// caller can re-queue.
+    fn submit_batch(&self, req: &Request) -> Result<String, AiError> {
+        let (status, value) = self.post(BATCH_URL, &batch_submit_body(req))?;
+        if !is_ok(status) {
+            return Err(api_error(status, &value));
+        }
+        value
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| AiError::ApiMalformed("batch response had no id".into()))
+    }
+
+    /// Poll a submitted batch once (#950): fetch its status and, if it has ended,
+    /// fetch + parse the single result. Returns [`BatchStatus::Processing`] while
+    /// it's still running (so the caller checks again later rather than blocking),
+    /// [`BatchStatus::Ready`] with the parsed rebuild when it succeeded, or
+    /// [`BatchStatus::Failed`] when the batch ran its course but the request inside
+    /// it errored/expired. A status fetch that itself fails is an `AiError`.
+    fn reconcile_batch(&self, batch_id: &str) -> Result<BatchStatus, AiError> {
+        let status_url = format!("{BATCH_URL}/{batch_id}");
+        let (code, batch) = self.get_json(&status_url)?;
+        if !is_ok(code) {
+            return Err(api_error(code, &batch));
+        }
+        if batch.get("processing_status").and_then(Value::as_str) != Some("ended") {
+            return Ok(BatchStatus::Processing);
+        }
+        let results_url = batch
+            .get("results_url")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AiError::ApiMalformed("batch ended without a results url".into()))?;
+        parse_batch_status(&self.get_text(results_url)?, BATCH_ID)
     }
 
     fn as_converse(&self) -> Option<&dyn Converse> {
@@ -194,9 +219,14 @@ fn batch_submit_body(req: &Request) -> Value {
     json!({ "requests": [ { "custom_id": BATCH_ID, "params": build_body(req) } ] })
 }
 
-/// Parse the batch results JSONL: find the line for `custom_id`, require it
-/// succeeded, and pull the answer out of its message.
-fn parse_batch_result(jsonl: &str, custom_id: &str) -> Result<Response, AiError> {
+/// Parse the batch results JSONL into a [`BatchStatus`] (#950): find the line for
+/// `custom_id` and classify its outcome. A `succeeded` request becomes
+/// [`BatchStatus::Ready`]; an ended-but-not-succeeded request (`errored`,
+/// `canceled`, `expired`) becomes [`BatchStatus::Failed`] with the reason — a real,
+/// surfaced result, not a transport error — so the background update reports it
+/// rather than swallowing it. An unreadable / shapeless line, or no line for the
+/// id, is a genuine `AiError` (the parse itself failed).
+fn parse_batch_status(jsonl: &str, custom_id: &str) -> Result<BatchStatus, AiError> {
     for line in jsonl.lines().filter(|l| !l.trim().is_empty()) {
         let value: Value = serde_json::from_str(line)
             .map_err(|e| AiError::ApiMalformed(format!("bad batch result: {e}")))?;
@@ -209,12 +239,9 @@ fn parse_batch_result(jsonl: &str, custom_id: &str) -> Result<Response, AiError>
                 let message = result.and_then(|r| r.get("message")).ok_or_else(|| {
                     AiError::ApiMalformed("batch result missing its message".into())
                 })?;
-                parse_response(message)
+                parse_response(message).map(BatchStatus::Ready)
             }
-            Some(other) => Err(AiError::Network {
-                status: None,
-                message: format!("batch request {other}"),
-            }),
+            Some(other) => Ok(BatchStatus::Failed(other.to_string())),
             None => Err(AiError::ApiMalformed("batch result had no outcome".into())),
         };
     }
@@ -432,31 +459,54 @@ mod tests {
     }
 
     #[test]
-    fn parse_batch_result_extracts_a_succeeded_message() {
+    fn parse_batch_status_reads_a_succeeded_message() {
+        // The reconcile classifier (#950): a succeeded request becomes a Ready with
+        // the parsed rebuild response, ready to apply to the bible.
         let jsonl = r#"{"custom_id":"rebuild","result":{"type":"succeeded","message":{"content":[{"type":"text","text":"ok"}],"usage":{"output_tokens":2}}}}"#;
-        let resp = parse_batch_result(jsonl, "rebuild").unwrap();
-        assert_eq!(resp.text, "ok");
-        assert_eq!(resp.usage.output_tokens, 2);
+        match parse_batch_status(jsonl, "rebuild").unwrap() {
+            BatchStatus::Ready(resp) => {
+                assert_eq!(resp.text, "ok");
+                assert_eq!(resp.usage.output_tokens, 2);
+            }
+            _ => panic!("a succeeded request should be Ready"),
+        }
     }
 
     #[test]
-    fn parse_batch_result_reports_a_failed_request() {
-        let jsonl = r#"{"custom_id":"rebuild","result":{"type":"errored","error":{}}}"#;
-        assert!(matches!(
-            parse_batch_result(jsonl, "rebuild"),
-            Err(AiError::Network { .. })
-        ));
+    fn parse_batch_status_surfaces_a_failed_request_rather_than_erroring() {
+        // An ended-but-failed request (errored / canceled / expired) is a real,
+        // surfaced outcome — Failed with the reason, NOT a swallowed transport error
+        // (#950). The background update reports it so the author can re-queue.
+        for kind in ["errored", "canceled", "expired"] {
+            let jsonl =
+                format!(r#"{{"custom_id":"rebuild","result":{{"type":"{kind}","error":{{}}}}}}"#);
+            match parse_batch_status(&jsonl, "rebuild").unwrap() {
+                BatchStatus::Failed(reason) => assert_eq!(reason, kind),
+                _ => panic!("a {kind} request should be Failed, not an error"),
+            }
+        }
     }
 
     #[test]
-    fn parse_batch_result_errors_when_its_id_is_absent() {
-        let jsonl = r#"{"custom_id":"other","result":{"type":"succeeded"}}"#;
+    fn parse_batch_status_errors_on_an_unreadable_result() {
+        // A shapeless / missing line is a genuine parse fault, distinct from a
+        // batch that ended in failure.
         assert!(matches!(
-            parse_batch_result(jsonl, "rebuild"),
+            parse_batch_status(r#"{"custom_id":"rebuild"}"#, "rebuild"),
             Err(AiError::ApiMalformed(_))
         ));
         assert!(matches!(
-            parse_batch_result("", "rebuild"),
+            parse_batch_status("", "rebuild"),
+            Err(AiError::ApiMalformed(_))
+        ));
+    }
+
+    #[test]
+    fn parse_batch_status_errors_when_its_id_is_absent() {
+        // No results line for our custom_id is a parse fault, not a batch outcome.
+        let jsonl = r#"{"custom_id":"other","result":{"type":"succeeded"}}"#;
+        assert!(matches!(
+            parse_batch_status(jsonl, "rebuild"),
             Err(AiError::ApiMalformed(_))
         ));
     }

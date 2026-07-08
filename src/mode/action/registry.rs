@@ -86,6 +86,14 @@ pub enum Action {
     /// a crash-safe queue (`bible/.queue.toml`) that resumes rather than losing the
     /// passes already done. `force` rebuilds each bible from the whole manuscript.
     QueuePasses,
+    /// Queue a background bible update (#950): opt-in, explicit-action trigger for a
+    /// full-manuscript rebuild of every bible through the asynchronous Message
+    /// Batches API (half price, a window of up to ~24h). Submits and returns
+    /// immediately, persisting the batch ids to `bible/.batch.toml`; the results are
+    /// reconciled on a later launch / idle tick, so it survives app restarts and
+    /// never blocks writing. Gated on `[ai] background-batch-update` + a cloud
+    /// backend; distinct from the synchronous interactive refreshes (#655/#955).
+    BackgroundBibleUpdate,
     /// Find & replace across every chapter in the project (#295).
     ProjectFind,
     /// Describe a configuration change in words; the AI proposes settings (#303).
@@ -266,6 +274,7 @@ impl Action {
         Self::Ai(AiAction::Editorial),
         Self::RefreshBibles,
         Self::QueuePasses,
+        Self::BackgroundBibleUpdate,
         Self::RefreshSeriesBible,
         Self::DescribeConfig,
         Self::SwitchBackend,
@@ -336,6 +345,7 @@ impl Action {
             Self::RefreshSeriesBible => "bible:series",
             Self::RefreshBibles => "bible:refresh-all",
             Self::QueuePasses => "bible:queue",
+            Self::BackgroundBibleUpdate => "bible:background-update",
             Self::ProjectFind => "find:project",
             Self::DescribeConfig => "config:describe",
             Self::AcceptWord => "dict:accept",
@@ -403,6 +413,7 @@ impl Action {
             | Self::EnableAi
             | Self::RefreshBibles
             | Self::QueuePasses
+            | Self::BackgroundBibleUpdate
             | Self::RefreshSeriesBible
             | Self::DescribeConfig
             | Self::SwitchBackend
@@ -495,6 +506,7 @@ impl Action {
             Self::RefreshSeriesBible => "Refresh series bible",
             Self::RefreshBibles => "Refresh all bibles",
             Self::QueuePasses => "Queue bible passes (resumable)",
+            Self::BackgroundBibleUpdate => "Queue a background bible update (batch, ~24h)",
             Self::ProjectFind => "Find across manuscript",
             Self::DescribeConfig => "Configure by description",
             Self::AcceptWord => "Add word to dictionary",

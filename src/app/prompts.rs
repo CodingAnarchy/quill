@@ -285,6 +285,15 @@ impl App {
                     self.discard_pass_queue();
                 }
             }
+            Pending::ConfirmBatchUpdate => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    self.mode = closed;
+                    self.submit_batch_update();
+                } else {
+                    self.mode = closed;
+                    self.message = Some("Background bible update cancelled.".into());
+                }
+            }
             Pending::ConfirmRemoveModel(id) => match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     self.mode = closed;

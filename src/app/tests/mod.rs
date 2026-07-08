@@ -60,6 +60,7 @@ mod assistant;
 mod autosave;
 mod backup;
 mod backup_browser;
+mod batch_update;
 mod book_details;
 mod books;
 mod books_bible;

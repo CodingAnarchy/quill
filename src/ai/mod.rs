@@ -9,6 +9,7 @@
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
 pub mod ad_creative;
+pub mod batch;
 pub mod bible;
 pub mod brainstorm;
 pub mod character;
@@ -85,6 +86,37 @@ pub trait Backend: Send + Sync {
         self.complete(req)
     }
 
+    /// Submit `req` to the provider's Message Batches API and return the batch id,
+    /// *without waiting* for it to finish (#950). This is the non-blocking half of
+    /// the old polling `complete_batched`: the background bible update submits here,
+    /// persists the returned id, and reconciles later ([`reconcile_batch`]) across
+    /// idle ticks and sessions rather than blocking a worker thread for hours.
+    /// The default errors — only a backend with an async batch endpoint (Claude)
+    /// implements it, so the local model and any non-batch backend refuse cleanly.
+    ///
+    /// [`reconcile_batch`]: Backend::reconcile_batch
+    fn submit_batch(&self, _req: &Request) -> Result<String, AiError> {
+        Err(AiError::NotConfigured(
+            "this backend has no batch API — the background bible update needs the \
+             Claude (cloud) backend"
+                .into(),
+        ))
+    }
+
+    /// Poll a previously-[`submit_batch`](Backend::submit_batch)ted batch *once*
+    /// (no internal loop, #950) and report where it is: still processing, ended with
+    /// a parsed result, or ended in a failure/expiry. This is the reconcile half of
+    /// the split — driven from the UI's idle/launch cadence, so a batch that takes
+    /// hours is checked without ever blocking a worker thread on a poll loop. An
+    /// `AiError` here is a genuine transport/API fault fetching the status, distinct
+    /// from a batch that *ended* in failure ([`BatchStatus::Failed`]). The default
+    /// errors — only the batch backend implements it.
+    fn reconcile_batch(&self, _batch_id: &str) -> Result<BatchStatus, AiError> {
+        Err(AiError::NotConfigured(
+            "this backend has no batch API".into(),
+        ))
+    }
+
     /// This backend as the assistant's tool-use transport (#310), when it supports
     /// one. Lets the assistant get a [`Converse`](tool_loop::Converse) from a
     /// backend built through the shared [`Backend`] machinery, no downcast. `None`
@@ -112,6 +144,24 @@ pub struct Request {
 pub struct Response {
     pub text: String,
     pub usage: Usage,
+}
+
+/// Where a submitted batch stands when [`reconcile_batch`](Backend::reconcile_batch)
+/// polls it (#950) — the three graceful outcomes the background bible update must
+/// handle. Distinct from an [`AiError`], which is a fault *fetching* the status; a
+/// batch that runs its course but the request inside it errored/expired is a
+/// [`Failed`](BatchStatus::Failed), surfaced (never silently swallowed) so the
+/// author knows and can re-queue.
+pub enum BatchStatus {
+    /// The batch hasn't finished — check again on a later tick / launch. Never a
+    /// "timed out" (the #955 bug); the update stays queued until it truly ends.
+    Processing,
+    /// The batch ended and its single request succeeded — the parsed rebuild
+    /// response, ready to apply to the bible.
+    Ready(Response),
+    /// The batch ended, but its request didn't succeed (errored, was canceled, or
+    /// expired past the provider's window) — carries a human reason to surface.
+    Failed(String),
 }
 
 /// The result of a backend task, delivered from the worker thread to the UI. One

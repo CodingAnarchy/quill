@@ -717,6 +717,11 @@ pub enum Pending {
     /// run picks up its remaining passes rather than losing the completed ones. `y`
     /// resumes; anything else discards the persisted queue.
     ResumePassQueue,
+    /// Confirm a background bible update (#950) — one aggregate, batch-discounted
+    /// cost confirm before submitting the full-manuscript rebuilds to the async
+    /// Message Batches API. `y` submits (and returns immediately); anything else
+    /// cancels.
+    ConfirmBatchUpdate,
     /// y/N: generate character portraits (#238) — each image is billed, so the
     /// action confirms before spending.
     ConfirmPortraits,

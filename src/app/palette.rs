@@ -173,6 +173,9 @@ impl App {
             // The durable pass queue (#923) spawns the bible passes, so it needs a
             // ready AI backend; works for a standalone novel too.
             Action::QueuePasses => self.ai.check_ready().err().map(|e| e.to_string()),
+            // The background batch update (#950) is opt-in and Claude-batch-only —
+            // its own gate covers the setting, the cloud backend, and the key.
+            Action::BackgroundBibleUpdate => self.batch_update_status().err(),
             // Describe-to-config needs the AI to propose the settings (#303).
             Action::DescribeConfig => self.ai.check_ready().err().map(|e| e.to_string()),
             // The assistant pane is a single-chapter-view feature, like the splits.
@@ -309,6 +312,7 @@ impl App {
             Action::RefreshSeriesBible => self.start_refresh_series_bible(),
             Action::RefreshBibles => self.start_refresh_bibles(force),
             Action::QueuePasses => self.start_queue_passes(force),
+            Action::BackgroundBibleUpdate => self.start_batch_update(),
             Action::ProjectFind => self.open_project_find(),
             Action::DescribeConfig => self.start_describe_config(),
             Action::AcceptWord => self.accept_word_at_cursor(),
