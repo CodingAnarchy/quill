@@ -58,6 +58,7 @@ mod annotations;
 mod archive;
 mod assistant;
 mod autosave;
+mod backup;
 mod book_details;
 mod books;
 mod books_bible;
