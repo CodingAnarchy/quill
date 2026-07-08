@@ -732,6 +732,17 @@ fn backup_age_label(age: std::time::Duration) -> String {
     }
 }
 
+/// Scheduled local-backup indicator (#888): once a local archive has landed this
+/// session, a "saved N ago" note tells the author how current the on-disk copy is.
+/// Independent of the git/remote `vc_tag` — a local archive needs no repo, so it's
+/// shown on its own. Empty until the first local backup succeeds (or when local
+/// backups are off).
+fn local_backup_tag(app: &App) -> String {
+    app.last_local_backup_age().map_or_else(String::new, |age| {
+        format!(" · saved {}", backup_age_label(age))
+    })
+}
+
 /// A running writing sprint (#299): live countdown + net words written, always
 /// visible (independent of the transient message on the right).
 fn sprint_tag(app: &App) -> String {
@@ -829,8 +840,9 @@ fn editor_status_bar(app: &App) -> (String, String) {
         |m| format!("{m}  "),
     );
     let left = format!(
-        " {name}{dirty}{}{}{}",
+        " {name}{dirty}{}{}{}{}",
         vc_tag(app),
+        local_backup_tag(app),
         ai_tag(app),
         sprint_tag(app)
     );
