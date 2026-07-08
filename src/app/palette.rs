@@ -45,31 +45,60 @@ impl App {
         }));
     }
 
-    /// Open the unified run-action menu (#225): every registry [`Action`], run by
-    /// name through the same dispatch its dedicated shortcut uses. Unavailable
-    /// actions stay listed, annotated with why they can't run right now.
+    /// Open the unified run-action menu (#225): every *applicable* registry
+    /// [`Action`], run by name through the same dispatch its dedicated shortcut
+    /// uses. Actions that can't run in the current context are hidden (#944) rather
+    /// than listed as "unavailable" — [`action_status`](App::action_status) returns
+    /// `None` exactly when an action is applicable, so filtering on `is_some()`
+    /// drops the inapplicable ones (Enable-AI when AI is on, the AI passes when it's
+    /// off, series actions on a single book, …) while `SwitchBackend` (status
+    /// `None`) stays. The groups open collapsed by default and remember the author's
+    /// collapse/expand changes across opens (#943).
     pub(crate) fn open_action_palette(&mut self) {
-        let items = Action::ALL
+        let items: Vec<PaletteItem> = Action::ALL
             .iter()
+            .filter(|&&a| self.action_status(a).is_none())
             .map(|&a| {
-                let desc = match self.action_status(a) {
-                    Some(reason) => format!("{} · unavailable: {reason}", a.name()),
-                    // The backend switch shows which backend is active right now,
-                    // so the author can see the state before flipping it (#371).
-                    None if matches!(a, Action::SwitchBackend) => {
-                        format!("{} · now: {}", a.name(), self.ai_backend_label())
-                    }
-                    None => a.name().to_string(),
+                // The backend switch shows which backend is active right now, so the
+                // author can see the state before flipping it (#371).
+                let desc = if matches!(a, Action::SwitchBackend) {
+                    format!("{} · now: {}", a.name(), self.ai_backend_label())
+                } else {
+                    a.name().to_string()
                 };
                 PaletteItem::new(a.label(), desc, Command::Run(a)).in_group(a.group())
             })
             .collect();
+        let collapsed = self.palette_collapsed_for("Run action", &items);
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Run action",
             items,
             selected: 0,
-            collapsed: std::collections::HashSet::default(),
+            collapsed,
         }));
+    }
+
+    /// The collapse state a grouped palette opens with (#943): the author's
+    /// remembered set for this `title`, or — the first time it's opened this session
+    /// — every group collapsed, so the palette opens as a short list of group
+    /// headers. Only groups that still exist in `items` are kept, so an action that
+    /// became inapplicable (and dropped its whole group) doesn't leave a stale entry.
+    fn palette_collapsed_for(
+        &mut self,
+        title: &'static str,
+        items: &[PaletteItem],
+    ) -> std::collections::HashSet<&'static str> {
+        let groups: std::collections::HashSet<&'static str> =
+            items.iter().filter_map(|i| i.group).collect();
+        let saved = self
+            .palette_collapsed
+            .entry(title)
+            // First open this session: default every group collapsed.
+            .or_insert_with(|| groups.clone());
+        // Prune groups that no longer exist so the stored set stays in step with the
+        // current (filtered) action set.
+        saved.retain(|g| groups.contains(g));
+        saved.clone()
     }
 
     /// Why `action` can't run right now, or `None` if it can — the one
@@ -387,6 +416,10 @@ impl App {
             return;
         }
         let current = rows.get(p.selected);
+        // Set when a group's collapse state changes, so it's persisted back to
+        // `App.palette_collapsed` (#943) once the `p` borrow ends — remembering the
+        // author's collapse/expand across opens.
+        let mut collapse_changed = false;
         match key.code {
             // On a group header: →/← (and Enter) expand or collapse it (#514).
             KeyCode::Right => {
@@ -396,6 +429,7 @@ impl App {
                 }) = current
                 {
                     p.set_collapsed(group, false);
+                    collapse_changed = true;
                 }
             }
             KeyCode::Left => {
@@ -403,11 +437,15 @@ impl App {
                     Some(PaletteRow::Header {
                         group,
                         collapsed: false,
-                    }) => p.set_collapsed(group, true),
+                    }) => {
+                        p.set_collapsed(group, true);
+                        collapse_changed = true;
+                    }
                     // From an item, ← collapses its group and lands on that header.
                     Some(PaletteRow::Item(i)) => {
                         if let Some(g) = p.items[*i].group {
                             p.set_collapsed(g, true);
+                            collapse_changed = true;
                             // Collapsing only removes the rows *after* the header, so its
                             // index in the rows we already computed still points at it.
                             p.selected = rows
@@ -425,6 +463,9 @@ impl App {
                 let command = match current {
                     Some(PaletteRow::Header { group, collapsed }) => {
                         p.set_collapsed(group, !*collapsed);
+                        let (title, collapsed) = (p.title, p.collapsed.clone());
+                        // The `p` borrow ends here; persist the toggle (#943).
+                        self.palette_collapsed.insert(title, collapsed);
                         return;
                     }
                     Some(PaletteRow::Item(i)) => Some(p.items[*i].command.clone()),
@@ -473,6 +514,13 @@ impl App {
             }
             KeyCode::Esc => self.mode = Mode::Insert,
             _ => {}
+        }
+        // A →/← collapse or expand landed on a header (the Enter path persists and
+        // returns on its own): remember it for the next open (#943).
+        if collapse_changed {
+            if let Mode::Palette(p) = &self.mode {
+                self.palette_collapsed.insert(p.title, p.collapsed.clone());
+            }
         }
     }
 
