@@ -232,9 +232,9 @@ fn divider_line(title: &str, width: u16) -> Line<'static> {
 }
 
 /// A `label` padded to sit centered in `width` cells and styled — the shared
-/// shape of the chapter divider and the part/section header (#412), both of
-/// which are render-only.
-fn centered_line(label: &str, width: u16, style: Style) -> Line<'static> {
+/// shape of the chapter divider, the part/section header (#412), and the scene-
+/// break divider (#908), all of which are render-only.
+pub(super) fn centered_line(label: &str, width: u16, style: Style) -> Line<'static> {
     let pad = (width as usize).saturating_sub(label.chars().count()) / 2;
     Line::from(Span::styled(format!("{}{label}", " ".repeat(pad)), style))
 }

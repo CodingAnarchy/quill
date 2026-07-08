@@ -342,6 +342,115 @@ fn paragraph_indent_skips_fenced_code_blocks() {
 }
 
 #[test]
+fn a_scene_break_renders_as_a_centered_spaced_divider() {
+    // A thematic break between two paragraphs renders as a centered `* * *` divider
+    // (not the raw `---`), with blank breathing room above and below it (#908).
+    let app = app_with("Scene one ends.\n\n---\n\nScene two opens.\n");
+    let screen = render(&app, 60, 16);
+    let rows: Vec<&str> = screen.lines().collect();
+
+    // The raw markers are gone; the centered glyph is shown instead.
+    assert!(
+        !screen.contains("---"),
+        "the raw scene break is hidden:\n{screen}"
+    );
+    let glyph = rows
+        .iter()
+        .position(|l| l.contains("* * *"))
+        .expect("the divider glyph renders");
+    // Centered: the glyph sits well right of the left margin (indented by padding).
+    let indent = rows[glyph].len() - rows[glyph].trim_start().len();
+    assert!(indent > 10, "the divider is centered: {:?}", rows[glyph]);
+
+    // Breathing room: the rows just above and below the divider are blank, and the
+    // paragraphs themselves are further out — more than a plain paragraph gap.
+    assert!(
+        rows[glyph - 1].trim().is_empty() && rows[glyph + 1].trim().is_empty(),
+        "the divider has blank rows immediately around it:\n{screen}"
+    );
+    let one = rows.iter().position(|l| l.contains("Scene one")).unwrap();
+    let two = rows.iter().position(|l| l.contains("Scene two")).unwrap();
+    assert!(
+        glyph - one >= 3 && two - glyph >= 3,
+        "extra spacing separates the divider from the prose:\n{screen}"
+    );
+}
+
+#[test]
+fn a_scene_break_is_display_only_and_reveals_on_cursor() {
+    // Rendering the divider never mutates the buffer bytes, and placing the cursor
+    // on the break line reveals the raw markers for editing (#908).
+    let text = "Scene one ends.\n\n---\n\nScene two opens.\n";
+    let mut app = app_with(text);
+    let before = app.edit_buffer().text();
+
+    // Cursor away from the break: the divider shows, bytes untouched.
+    let away = render(&app, 60, 16);
+    assert!(away.contains("* * *"), "the divider renders:\n{away}");
+    assert!(!away.contains("---"), "the raw markers are hidden:\n{away}");
+    assert_eq!(
+        app.edit_buffer().text(),
+        before,
+        "the preview left the buffer byte-for-byte unchanged"
+    );
+
+    // Cursor on the break line (index 2): the raw `---` reveals, divider gone.
+    app.edit_buffer_mut().cursor = Cursor { line: 2, col: 0 };
+    let revealed = render(&app, 60, 16);
+    assert!(
+        revealed.contains("---"),
+        "the raw markers reveal under the cursor:\n{revealed}"
+    );
+    assert!(
+        !revealed.contains("* * *"),
+        "the divider is replaced by the raw text:\n{revealed}"
+    );
+    assert_eq!(
+        app.edit_buffer().text(),
+        before,
+        "revealing the raw markers left the bytes unchanged"
+    );
+}
+
+#[test]
+fn paragraph_indent_skips_the_paragraph_after_a_scene_break() {
+    // The first paragraph resuming after a scene break is flush-left (#908), like the
+    // first paragraph after a heading — while a later paragraph still indents.
+    let mut app = app_with("First para.\n\n---\n\nResuming para.\n\nLater para.\n");
+    let w = 60;
+    let h = 18;
+    let base_resuming = indent_of_row(&app, "Resuming para.", w, h).expect("resuming on screen");
+    let base_later = indent_of_row(&app, "Later para.", w, h).expect("later on screen");
+
+    app.paragraph_indent = true;
+    assert_eq!(
+        indent_of_row(&app, "Resuming para.", w, h),
+        Some(base_resuming),
+        "the paragraph after a scene break is not indented"
+    );
+    assert_eq!(
+        indent_of_row(&app, "Later para.", w, h),
+        Some(base_later + 4),
+        "a later paragraph still indents"
+    );
+}
+
+#[test]
+fn paragraph_indent_skips_the_paragraph_after_a_code_block() {
+    // The paragraph resuming after a fenced code block is flush-left (#908).
+    let mut app = app_with("Intro.\n\n```\ncode\n```\n\nAfter code.\n");
+    let w = 60;
+    let h = 18;
+    let base_after = indent_of_row(&app, "After code.", w, h).expect("after-code on screen");
+    app.paragraph_indent = true;
+    assert_eq!(
+        indent_of_row(&app, "After code.", w, h),
+        Some(base_after),
+        "the paragraph after a code block is not indented"
+    );
+}
+
+#[test]
 fn paragraph_indent_keeps_the_cursor_on_the_indented_line() {
     use ratatui::{backend::TestBackend, Terminal};
     // Cursor at the very start of an indented paragraph's first line.

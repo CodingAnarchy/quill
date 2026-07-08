@@ -14,7 +14,12 @@ use crate::buffer::Buffer;
 use crate::syntax::{Highlight, HighlightKind, Syntax};
 use crate::theme::{self, Theme};
 
+use super::header::centered_line;
 use super::{ByteRange, PARAGRAPH_INDENT};
+
+/// The typeset scene-break divider (#908) a concealed thematic break renders as —
+/// the printed-book convention of three spaced asterisks, centered in the column.
+const SCENE_BREAK_GLYPH: &str = "* * *";
 
 /// The "what to highlight in this span" overlays threaded through the body
 /// renderer (#431): one cohesive bundle, built once per pane and passed by
@@ -53,6 +58,12 @@ pub(super) enum RowKind {
     /// soft-wrapped/reflowed. When the cursor is inside, the fences are revealed
     /// and the content edits like prose, so it soft-wraps (`verbatim == false`).
     Code { verbatim: bool },
+    /// A thematic-break line — the author's scene divider (#908). In preview
+    /// (cursor outside) it renders as a single centered `* * *` row instead of the
+    /// raw markers; `revealed` (cursor on the line) shows the raw text as prose so
+    /// it can be edited or deleted. The `---` stays a real, editable buffer line —
+    /// this is the heading/emphasis "transform an editable line" model.
+    SceneBreak { revealed: bool },
 }
 
 /// Classify a logical line for fenced-code rendering (#723). A line is a
@@ -68,6 +79,24 @@ pub(super) fn row_kind(
     conceal: &[(usize, usize)],
 ) -> RowKind {
     let line_end = line_start + text.len();
+    // A scene break (#908): a `SceneBreak` span covers the line's start. It renders
+    // as a centered `* * *` divider while concealed (cursor outside), and as its raw
+    // markers while revealed (cursor on the line) so it can be edited. Checked before
+    // the hidden-fence rule because the break's own conceal marker would otherwise
+    // read as a hidden fence and drop the line to zero rows. A blank line is never a
+    // break (the grammar needs marker characters), so an empty line falls through.
+    let probe = line_start.min(line_end.saturating_sub(1));
+    if !text.is_empty() {
+        if let Some(brk) = syntax
+            .highlights_in(line_start, line_end.max(line_start + 1))
+            .find(|h| h.kind == HighlightKind::SceneBreak && h.start <= probe && probe < h.end)
+        {
+            // Revealed exactly when this break's own line is not concealed — the same
+            // all-or-nothing reveal the conceal list carries for a fenced block.
+            let revealed = !conceal.iter().any(|&(s, e)| s < brk.end && e > brk.start);
+            return RowKind::SceneBreak { revealed };
+        }
+    }
     // A fence row is fully hidden: its content range lies within one conceal range.
     // (Fence lines are never blank, so an empty line is only ordinary blank prose.)
     if !text.is_empty()
@@ -79,7 +108,6 @@ pub(super) fn row_kind(
     }
     // Code content: a `Code` span covers the line's start. Its block is in preview
     // (verbatim) when any fence line of that span is still concealed.
-    let probe = line_start.min(line_end.saturating_sub(1));
     if let Some(code) = syntax
         .highlights_in(line_start, line_end.max(line_start + 1))
         .find(|h| h.kind == HighlightKind::Code && h.start <= probe && probe < h.end)
@@ -97,7 +125,10 @@ pub(super) fn row_kind(
 pub(super) fn row_count(kind: RowKind, text: &str, width: usize, first_indent: usize) -> usize {
     match kind {
         RowKind::HiddenFence => 0,
-        RowKind::Code { verbatim: true } => 1,
+        // Verbatim preview code is one row (no reflow); a concealed scene break is
+        // one centered `* * *` divider row (#908). A revealed break shows the raw
+        // markers, which soft-wrap like any short line.
+        RowKind::Code { verbatim: true } | RowKind::SceneBreak { revealed: false } => 1,
         _ => crate::wrap::row_starts_first_indent(text, width, first_indent).len(),
     }
 }
@@ -115,7 +146,10 @@ pub(super) fn row_starts_for(
 ) -> Vec<usize> {
     match kind {
         RowKind::HiddenFence => Vec::new(),
-        RowKind::Code { verbatim: true } => vec![0],
+        // Verbatim preview code and the concealed `* * *` divider (#908) are each a
+        // single row spanning the whole line, so a click maps to the line's start;
+        // a revealed break maps per raw character like prose.
+        RowKind::Code { verbatim: true } | RowKind::SceneBreak { revealed: false } => vec![0],
         _ => crate::wrap::row_starts_first_indent(text, width, first_indent),
     }
 }
@@ -164,6 +198,14 @@ pub(super) fn styled_line(
         // Concealed fence line: contributes no visual row, so the block's fences
         // vanish and it reads as a set-apart preview.
         RowKind::HiddenFence => return Vec::new(),
+        // Concealed scene break (#908): one centered `* * *` divider row in place of
+        // the raw markers, dimmed so it reads as a quiet typeset division. Revealed
+        // (cursor on the line) it falls through to render the raw text as prose.
+        RowKind::SceneBreak { revealed: false } => {
+            let style = Style::default().fg(theme::current().dim);
+            let col = u16::try_from(width).unwrap_or(u16::MAX);
+            return vec![centered_line(SCENE_BREAK_GLYPH, col, style)];
+        }
         // Preview code: one verbatim row, whitespace preserved (no soft-wrap), set
         // apart with a full-width tint. An empty content line still gets a tinted
         // row so the block reads as one continuous box.
@@ -359,6 +401,10 @@ fn style_at(hls: &[Highlight], byte: usize, theme: Theme) -> Style {
             HighlightKind::Emphasis => style.add_modifier(Modifier::ITALIC),
             // Verbatim, set apart by color; the fence markers show literally (#522).
             HighlightKind::Code => style.fg(theme.code),
+            // Only reached when the break is revealed (cursor on the line): the raw
+            // `---` markers show dimmed so they read as the divider they'll become
+            // once the cursor leaves (#908). Concealed breaks never enter this path.
+            HighlightKind::SceneBreak => style.fg(theme.dim),
         };
     }
     style
