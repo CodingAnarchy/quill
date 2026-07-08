@@ -14,6 +14,52 @@ pub use action::*;
 mod states;
 pub use states::*;
 
+/// Which annotations the review list shows (#889), cycled with `f`: every note,
+/// only the open ones, or only the resolved ones. Applied on top of the `/` text
+/// filter so an author can, e.g., work through only the still-open threads.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum AnnoShow {
+    /// Open and resolved alike.
+    #[default]
+    All,
+    /// Only threads still open.
+    Open,
+    /// Only threads marked resolved.
+    Resolved,
+}
+
+impl AnnoShow {
+    /// The next state in the cycle (All → Open → Resolved → All).
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::All => Self::Open,
+            Self::Open => Self::Resolved,
+            Self::Resolved => Self::All,
+        }
+    }
+
+    /// Whether an annotation with `resolved` state passes this filter.
+    #[must_use]
+    pub const fn admits(self, resolved: bool) -> bool {
+        match self {
+            Self::All => true,
+            Self::Open => !resolved,
+            Self::Resolved => resolved,
+        }
+    }
+
+    /// The short label shown in the list help line.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Open => "open",
+            Self::Resolved => "resolved",
+        }
+    }
+}
+
 /// A full-screen, read-only overlay drawn above any mode: the progress report,
 /// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
 /// render itself, and the current scroll offset. `App` keeps a single
@@ -189,15 +235,18 @@ pub enum Mode {
     /// the commit list).
     History(Box<History>),
     /// Reviewing the active chapter's inline annotations (#302): a navigable list
-    /// where each can be jumped to or deleted. The items are read live from
-    /// `App::annotations`; this carries only the selected row. `filter`/`typing`
-    /// are the type-to-filter query and its input sub-mode (#822): `/` starts
-    /// typing, keystrokes narrow the list to notes whose text or anchored snippet
-    /// match, Esc leaves input (keeping the filter) and a second Esc clears it.
+    /// where each can be jumped to, replied to (#889), resolved/reopened (#889), or
+    /// deleted. The items are read live from `App::annotations`; this carries only
+    /// the selected row. `filter`/`typing` are the type-to-filter query and its
+    /// input sub-mode (#822): `/` starts typing, keystrokes narrow the list to notes
+    /// whose text or anchored snippet match, Esc leaves input (keeping the filter)
+    /// and a second Esc clears it. `show` (#889) is the resolved/open state filter,
+    /// cycled with `f`, applied on top of the text filter.
     Annotations {
         selected: usize,
         filter: String,
         typing: bool,
+        show: AnnoShow,
     },
     /// The focused heading outline (#657): the Ctrl-O outline made navigable.
     /// The outline pane normally just lists the active chapter's headings and
@@ -697,6 +746,10 @@ pub enum Pending {
     /// Text input: the note for an inline annotation (#302) anchored to the byte
     /// range `[start, end)` of the active chapter. Enter saves it, Esc cancels.
     Annotate { start: usize, end: usize },
+    /// Text input: a reply to add to the annotation at `index` in `App::annotations`
+    /// (#889). Enter appends it to the thread and re-opens the review list; an empty
+    /// reply (or Esc) cancels, re-opening the list unchanged.
+    AnnotateReply { index: usize },
     /// Text input: the one-line synopsis for a scene on the corkboard (#636 / #701).
     /// The target is resolved when the prompt opens — `chapter` is the card's
     /// chapter on the manuscript-wide board (`None` on the per-chapter board), and

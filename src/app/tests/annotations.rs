@@ -3,8 +3,9 @@
 //! and kept out of the chapter `.md` (so exports stay clean).
 
 use super::*;
+use crate::annotation::Remapper;
 use crate::buffer::Cursor;
-use crate::mode::Mode;
+use crate::mode::{AnnoShow, Mode};
 use crate::project::Project;
 
 fn ctrl(c: char) -> KeyEvent {
@@ -240,6 +241,7 @@ fn anno_state(app: &App) -> (usize, String, bool) {
             selected,
             filter,
             typing,
+            ..
         } => (*selected, filter.clone(), *typing),
         _ => panic!("expected the annotation list"),
     }
@@ -313,4 +315,310 @@ fn annotation_esc_clears_the_filter_then_closes() {
 
     app.on_key(key(KeyCode::Esc)); // close
     assert!(matches!(app.mode, Mode::Insert));
+}
+
+// --- Annotation threads: reply + resolve (#889) -------------------------------
+
+/// The review list's resolved/open filter state.
+fn anno_show(app: &App) -> AnnoShow {
+    match &app.mode {
+        Mode::Annotations { show, .. } => *show,
+        _ => panic!("expected the annotation list"),
+    }
+}
+
+#[test]
+fn a_reply_is_added_to_the_thread_and_persists() {
+    let (mut app, dir) = two_chapter_app("anno-reply");
+    app.create_annotation(0, 5, "opening note".into());
+    app.open_annotation_review();
+
+    // `a` opens the reply prompt; typing + Enter appends to the thread.
+    app.on_key(key(KeyCode::Char('a')));
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the reply prompt opened"
+    );
+    type_str(&mut app, "addressed in the next draft");
+    app.on_key(key(KeyCode::Enter));
+
+    // Back on the review list, on the same annotation, with the reply recorded.
+    assert!(matches!(app.mode, Mode::Annotations { selected: 0, .. }));
+    assert_eq!(app.annotations[0].replies.len(), 1);
+    assert_eq!(
+        app.annotations[0].replies[0].text,
+        "addressed in the next draft"
+    );
+
+    // It round-trips through the side file.
+    app.on_key(ctrl('s'));
+    let reopened = Project::open(&dir).unwrap();
+    let live = reopened.annotations_for("one.md");
+    assert_eq!(live[0].replies.len(), 1);
+    assert_eq!(live[0].replies[0].text, "addressed in the next draft");
+}
+
+#[test]
+fn an_empty_reply_adds_nothing_and_returns_to_the_list() {
+    let (mut app, _dir) = two_chapter_app("anno-reply-empty");
+    app.create_annotation(0, 5, "note".into());
+    app.open_annotation_review();
+
+    app.on_key(key(KeyCode::Char('a')));
+    app.on_key(key(KeyCode::Enter)); // confirm with no text
+    assert!(
+        app.annotations[0].replies.is_empty(),
+        "a blank reply is discarded"
+    );
+    assert!(
+        matches!(app.mode, Mode::Annotations { .. }),
+        "back on the list"
+    );
+}
+
+#[test]
+fn cancelling_a_reply_returns_to_the_review_list() {
+    let (mut app, _dir) = two_chapter_app("anno-reply-cancel");
+    app.create_annotation(0, 5, "note".into());
+    app.open_annotation_review();
+
+    app.on_key(key(KeyCode::Char('a')));
+    app.on_key(key(KeyCode::Esc)); // cancel — stay with the thread, not the editor
+    assert!(matches!(app.mode, Mode::Annotations { selected: 0, .. }));
+    assert!(app.annotations[0].replies.is_empty());
+}
+
+#[test]
+fn resolve_and_reopen_toggle_the_state_and_persist() {
+    let (mut app, dir) = two_chapter_app("anno-resolve");
+    app.create_annotation(0, 5, "check this".into());
+    app.open_annotation_review();
+    assert!(!app.annotations[0].resolved, "starts open");
+
+    // `r` resolves; it round-trips.
+    app.on_key(key(KeyCode::Char('r')));
+    assert!(app.annotations[0].resolved, "resolved");
+    app.on_key(ctrl('s'));
+    let reopened = Project::open(&dir).unwrap();
+    assert!(reopened.annotations_for("one.md")[0].resolved);
+
+    // `r` again reopens it.
+    app.on_key(key(KeyCode::Char('r')));
+    assert!(!app.annotations[0].resolved, "reopened");
+}
+
+#[test]
+fn the_show_filter_cycles_and_hides_the_other_state() {
+    let (mut app, _dir) = two_chapter_app("anno-show-filter");
+    app.create_annotation(0, 5, "first".into());
+    app.create_annotation(6, 13, "second".into());
+    app.open_annotation_review();
+
+    // Resolve the first note, then cycle the filter to "open": only the second
+    // note passes, so the selection snaps off the now-hidden first.
+    app.on_key(key(KeyCode::Char('r'))); // resolve #0
+    assert_eq!(anno_show(&app), AnnoShow::All);
+    app.on_key(key(KeyCode::Char('f'))); // All -> Open
+    assert_eq!(anno_show(&app), AnnoShow::Open);
+    assert!(
+        !app.annotation_matches(0, ""),
+        "resolved note hidden by the open filter"
+    );
+    assert!(app.annotation_matches(1, ""), "open note still shows");
+
+    // Cycle to "resolved": now only the first passes.
+    app.on_key(key(KeyCode::Char('f'))); // Open -> Resolved
+    assert_eq!(anno_show(&app), AnnoShow::Resolved);
+    assert!(app.annotation_matches(0, ""));
+    assert!(!app.annotation_matches(1, ""));
+
+    // And back to "all".
+    app.on_key(key(KeyCode::Char('f'))); // Resolved -> All
+    assert_eq!(anno_show(&app), AnnoShow::All);
+    assert!(app.annotation_matches(0, "") && app.annotation_matches(1, ""));
+}
+
+#[test]
+fn an_old_format_annotation_loads_open_with_no_replies() {
+    // A side file written before threads existed (#889): just chapter/start/end/note,
+    // no `replies` or `resolved` keys. It must load cleanly, open, with no replies —
+    // the backward-compat guarantee.
+    let (_app, dir) = two_chapter_app("anno-backcompat");
+    let old_format = "[[annotation]]\n\
+         chapter = \"one.md\"\n\
+         start = 0\n\
+         end = 5\n\
+         note = \"a legacy note\"\n";
+    fs::write(dir.join("annotations.toml"), old_format).unwrap();
+
+    let reopened = Project::open(&dir).unwrap();
+    let live = reopened.annotations_for("one.md");
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].note, "a legacy note");
+    assert!(live[0].replies.is_empty(), "no replies on a legacy note");
+    assert!(!live[0].resolved, "a legacy note loads open");
+}
+
+#[test]
+fn a_thread_survives_a_full_persistence_round_trip() {
+    let (mut app, dir) = two_chapter_app("anno-thread-roundtrip");
+    app.create_annotation(0, 5, "opening".into());
+    app.open_annotation_review();
+    app.on_key(key(KeyCode::Char('a')));
+    type_str(&mut app, "first reply");
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Char('a')));
+    type_str(&mut app, "second reply");
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Char('r'))); // resolve
+    app.on_key(ctrl('s'));
+
+    let reopened = Project::open(&dir).unwrap();
+    let live = reopened.annotations_for("one.md");
+    assert_eq!(live.len(), 1);
+    let a = &live[0];
+    assert_eq!(a.note, "opening");
+    assert!(a.resolved);
+    assert_eq!(
+        a.replies
+            .iter()
+            .map(|r| r.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["first reply", "second reply"],
+    );
+}
+
+// --- Batched remap keeps positions identical + is not quadratic (#893) --------
+
+#[test]
+fn a_reply_thread_and_resolved_flag_survive_an_edit_burst() {
+    // Threads ride along with the anchor through the idle remap: the replies and the
+    // resolved flag aren't disturbed when the note re-anchors (#889 + #893).
+    let (mut app, _dir) = two_chapter_app("anno-thread-remap");
+    app.create_annotation(6, 13, "note on chapter".into()); // "chapter"
+    app.open_annotation_review();
+    app.on_key(key(KeyCode::Char('a')));
+    type_str(&mut app, "keep me");
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Char('r'))); // resolve
+    app.on_key(key(KeyCode::Esc)); // back to editing
+
+    app.buffer.cursor = Cursor { line: 0, col: 0 };
+    type_str(&mut app, "XYZ");
+    app.on_idle();
+
+    let a = &app.annotations[0];
+    assert_eq!((a.start, a.end), (9, 16), "re-anchored past the insert");
+    assert_eq!(a.replies.len(), 1, "reply preserved through the remap");
+    assert_eq!(a.replies[0].text, "keep me");
+    assert!(a.resolved, "resolved flag preserved through the remap");
+}
+
+/// The old per-edit remap: walk every annotation once per edit, dropping any whose
+/// text is consumed. The batched [`Remapper`] must produce identical positions.
+fn remap_naive(anns: &mut Vec<(usize, usize)>, edits: &[(usize, usize, usize)]) {
+    for &e in edits {
+        anns.retain_mut(|r| match crate::annotation::remap(*r, e) {
+            Some((s, en)) => {
+                *r = (s, en);
+                true
+            }
+            None => false,
+        });
+    }
+}
+
+#[test]
+fn batched_remap_matches_the_per_edit_walk_on_many_annotations_and_edits() {
+    // Many annotations spread across a buffer, many edits: the one-pass Remapper
+    // must land every note exactly where the old walk-per-edit did (#893).
+    let mut seed = 0x2545_F491_4F6C_DD1Du64;
+    let mut rng = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for _ in 0..40 {
+        let mut anns: Vec<(usize, usize)> = (0..200)
+            .map(|i| {
+                let s = i * 3;
+                (s, s + 2)
+            })
+            .collect();
+        let edits: Vec<(usize, usize, usize)> = (0..150)
+            .map(|_| {
+                let start = (rng() % 600) as usize;
+                let old_len = (rng() % 4) as usize;
+                let new_len = (rng() % 4) as usize;
+                (start, start + old_len, start + new_len)
+            })
+            .collect();
+
+        let mut expected = anns.clone();
+        remap_naive(&mut expected, &edits);
+
+        let mapper = Remapper::new(&edits);
+        anns.retain_mut(|r| match mapper.remap_range(r.0, r.1) {
+            Some((s, e)) => {
+                *r = (s, e);
+                true
+            }
+            None => false,
+        });
+
+        assert_eq!(anns, expected, "batched remap diverged for edits {edits:?}");
+    }
+}
+
+#[test]
+#[ignore = "release-only perf guard; run via cargo perf"]
+fn batched_remap_is_not_quadratic_in_annotations_times_edits() {
+    use std::time::Instant;
+
+    // The defect (#893) was the per-annotation cost: the old code walked *every*
+    // annotation once per edit, so re-anchoring N notes through E edits cost N·E.
+    // The Remapper builds the composed edit map once, then answers each annotation
+    // with a binary search — so the annotation pass is linear in N, independent of
+    // the edit count. Measure a fixed edit burst against a growing annotation set
+    // and confirm the remap pass scales with N, not N·E.
+    let remap_pass = |n_anns: usize, edits: &[(usize, usize, usize)]| -> std::time::Duration {
+        let span = n_anns * 6 + 1;
+        let mut anns: Vec<(usize, usize)> = (0..n_anns).map(|i| (i * 6, i * 6 + 3)).collect();
+        let mapper = Remapper::new(edits);
+        // Time only the per-annotation remap — the part that used to be O(edits ×
+        // annotations). Building the map is done once, up front.
+        let t = Instant::now();
+        anns.retain_mut(|r| match mapper.remap_range(r.0.min(span), r.1.min(span)) {
+            Some((s, e)) => {
+                *r = (s, e);
+                true
+            }
+            None => false,
+        });
+        t.elapsed()
+    };
+
+    // A fixed 2,000-edit burst spread across the buffer.
+    let edits: Vec<(usize, usize, usize)> = (0..2000)
+        .map(|i| {
+            let start = (i * 13) % 60_001;
+            (start, start + 1, start + 2)
+        })
+        .collect();
+
+    let _ = remap_pass(1000, &edits); // warm
+    let small = remap_pass(5_000, &edits);
+    let big = remap_pass(20_000, &edits);
+    println!("remap pass: 5k anns = {small:?}, 20k anns = {big:?} (edits fixed at 2000)");
+
+    // 4× the annotations must not cost anywhere near 4× · (edit growth) — with the
+    // old N·E walk, holding E fixed, 4× N is 4× work; the guard is that 20k stays a
+    // small multiple of 5k (linear), and both are well within a frame. A quadratic
+    // regression (re-introducing the per-edit walk) would make `big` blow past this.
+    assert!(big.as_millis() < 16, "remap pass took {big:?}");
+    assert!(
+        big < small * 8,
+        "remap should scale ~linearly with annotations: 5k={small:?}, 20k={big:?}"
+    );
 }

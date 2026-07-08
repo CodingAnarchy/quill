@@ -190,3 +190,58 @@ fn review_import_lists_matches_and_dropped_comments() {
         "the merge/cancel affordance is shown:\n{screen}"
     );
 }
+
+#[test]
+fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
+    // The review list (#302/#889) renders a resolved note distinctly (a ✓ + a reply
+    // count), and its help line advertises the reply / resolve / filter keys.
+    use crate::annotation::{Live, Reply};
+    use crate::mode::{AnnoShow, Mode};
+
+    let mut app = app_with("The night was long.\n");
+    app.annotations = vec![
+        Live {
+            chapter: "one.md".into(),
+            start: 0,
+            end: 3,
+            note: "still thinking".into(),
+            replies: Vec::new(),
+            resolved: false,
+        },
+        Live {
+            chapter: "one.md".into(),
+            start: 4,
+            end: 9,
+            note: "fixed the tense".into(),
+            replies: vec![Reply {
+                author: "author".into(),
+                text: "done".into(),
+            }],
+            resolved: true,
+        },
+    ];
+    app.mode = Mode::Annotations {
+        selected: 0,
+        filter: String::new(),
+        typing: false,
+        show: AnnoShow::All,
+    };
+
+    let screen = render(&app, 90, 20);
+    assert!(
+        screen.contains("still thinking") && screen.contains("fixed the tense"),
+        "both notes are listed:\n{screen}"
+    );
+    assert!(
+        screen.contains("✓ fixed the tense"),
+        "the resolved thread carries a check:\n{screen}"
+    );
+    assert!(
+        screen.contains("(1 reply)"),
+        "the reply count shows on the thread:\n{screen}"
+    );
+    assert!(
+        screen.contains("a reply") && screen.contains("r resolve") && screen.contains("f open"),
+        "the thread keys are advertised in the help line:\n{screen}"
+    );
+}

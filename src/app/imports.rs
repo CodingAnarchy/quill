@@ -221,6 +221,8 @@ impl App {
                 start,
                 end,
                 note,
+                replies: Vec::new(),
+                resolved: false,
             });
         }
         self.annotations.sort_by_key(|a| (a.start, a.end));
