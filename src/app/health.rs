@@ -23,6 +23,7 @@ const KIND_ORDER: &[FindingKind] = &[
     FindingKind::Style,
     FindingKind::Editorial,
     FindingKind::Voice,
+    FindingKind::Echo,
     FindingKind::Other,
 ];
 

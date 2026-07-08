@@ -25,6 +25,14 @@ fn default_ai_model() -> String {
     "claude-opus-4-8".to_string()
 }
 
+/// Echo / near-duplicate detection (#920) is available by default; an author who
+/// leans on deliberate repetition can turn it off with `[ai] echo-detection =
+/// false`. A field default (not a plain `bool`) so an existing config that never
+/// mentions the key still gets the pass, not a silent off.
+const fn default_echo_detection() -> bool {
+    true
+}
+
 /// The fal.ai FLUX model used when no `[image] model` is configured — fast and
 /// inexpensive. It seeds [`ImageConfig::model`] (#809).
 fn default_image_model() -> String {
@@ -121,6 +129,14 @@ pub struct AiConfig {
     /// revise) once this many chapters have changed since its last pass (#90).
     /// 0 disables incremental updates — every pass is a full rebuild.
     pub refresh_after_changes: usize,
+    /// The off-switch for echo / near-duplicate detection (#920). When false the
+    /// echo pass refuses to run and surfaces no findings, so an author who leans on
+    /// deliberate repetition (a recurring refrain) isn't nagged. Default true — the
+    /// pass is available; individual pairs the author decides are intentional are
+    /// dismissed one-by-one through triage ("mark intentional reprise"), which the
+    /// durable store already keeps from re-surfacing.
+    #[serde(default = "default_echo_detection")]
+    pub echo_detection: bool,
     /// Memoized OS-keychain read for the Claude key, so the store is consulted at
     /// most once per session rather than on every palette-gating check (and, on a
     /// changed dev binary, prompts at most once). Not config — skipped on load and
@@ -145,6 +161,7 @@ impl Default for AiConfig {
             api_key: None,
             cost_threshold: 0.20,
             refresh_after_changes: 5,
+            echo_detection: true,
             keychain_cache: OnceCell::new(),
         }
     }

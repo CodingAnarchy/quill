@@ -160,6 +160,14 @@ pub enum Outcome {
     NameGen(Result<Vec<namegen::Name>, AiError>),
     /// Editorial read — fix-free flags (structural / continuity / line) (#293).
     Editorial(Result<Vec<editorial::Note>, AiError>),
+    /// Semantic "find similar scenes" (#924): the passages most similar to a
+    /// selection / query, ranked with scores + jumpable citations. `None` when no
+    /// embedding model is available (graceful degradation, not an error).
+    SemanticFind(Result<Option<Vec<embed::Hit>>, AiError>),
+    /// Echo / near-duplicate detection (#920): near-duplicate + echoed passage
+    /// pairs, each with both citations + a score. `None` when no embedding model is
+    /// available (graceful degradation, not an error).
+    Echo(Result<Option<Vec<embed::EchoPair>>, AiError>),
     /// Re-check of a single triage finding (#608): its originating pass re-run
     /// scoped to the finding's chapters, parsed to the fresh UI findings that
     /// pass now produces (so the one being rechecked is cleared if it's gone, or
@@ -205,6 +213,8 @@ impl Outcome {
             Self::Thesaurus(r) => r.as_ref().err(),
             Self::NameGen(r) => r.as_ref().err(),
             Self::Editorial(r) => r.as_ref().err(),
+            Self::SemanticFind(r) => r.as_ref().err(),
+            Self::Echo(r) => r.as_ref().err(),
             Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),
             Self::Error(e) => Some(e),
         }
