@@ -87,6 +87,7 @@ mod project_search;
 mod projects;
 mod prompt_editing;
 mod recovery;
+mod research_notebook;
 mod resume;
 mod review_import;
 mod similar;

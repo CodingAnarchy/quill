@@ -290,6 +290,79 @@ pub fn list_items(text: &str, heading: &str) -> Vec<String> {
     items
 }
 
+// --- The author's research notebook (#932) ----------------------------------
+
+/// The author-maintained research / worldbuilding notebook file (#932), relative
+/// to `bible/`: a bible-like journal of historical refs, magic-system sources,
+/// and worldbuilding rules that the AI's trackers can *cite* but never write. The
+/// author owns every word — the AI-write path (`stage_bible`) targets the tracker
+/// files, never this one; [`scaffold_research`] only seeds an empty template.
+pub const RESEARCH_FILE: &str = "research.md";
+
+/// The seed template for a fresh research notebook (#932): an author-facing header
+/// explaining the file and one `## ` heading to write under. It is deliberately
+/// prose-free — Quill seeds structure, never worldbuilding content — so the
+/// no-AI-write invariant holds even for the first write.
+const RESEARCH_TEMPLATE: &str =
+    "# Research notebook\n\n_Your research and worldbuilding journal — you write it, \
+Quill's trackers only cite it. Give each note a `## ` heading so a bible entry can \
+reference it by name._\n\n## Example note\n\n_Replace this with your own research._\n";
+
+/// The path to the author's research notebook (#932): `bible/research.md` under the
+/// project `root`.
+pub fn research_path(root: &Path) -> std::path::PathBuf {
+    root.join("bible").join(RESEARCH_FILE)
+}
+
+/// A readable citation to one of the author's research notes (#932), for a
+/// generated bible / tracker entry to ground a claim against — e.g. `per research
+/// note 'Feudal Timeline'`. The one source of the citation phrasing, so a tracker
+/// bullet and a reader recognize the same shape. The AI only *emits* this
+/// reference; it never writes the note it points at.
+pub fn cite_research(note: &str) -> String {
+    format!("per research note '{}'", note.trim())
+}
+
+/// The note titles the author has written in the research notebook (#932) — the
+/// `## ` headings in `bible/research.md`, in file order — so a tracker can cite a
+/// note that actually exists (and a reader can validate a citation). Empty when the
+/// notebook is absent or the author has only the seed template. The template's
+/// `## Example note` heading is skipped so a fresh, untouched notebook cites
+/// nothing.
+pub fn research_notes(root: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(research_path(root)) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| line.strip_prefix("## "))
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty() && h != "Example note")
+        .collect()
+}
+
+/// Whether `text` carries a readable research citation (#932) — the shape
+/// [`cite_research`] emits. The reader counterpart used to prove a tracker entry
+/// grounds against a note.
+pub fn has_research_citation(text: &str) -> bool {
+    text.contains("per research note '")
+}
+
+/// Create the author's research notebook (#932) with the seed template *only when
+/// it is absent*, so opening it never clobbers what the author has written.
+/// Returns the path either way. This is the only write Quill makes to the
+/// notebook, and it writes structure, not content — the author authors every
+/// note. An I/O failure surfaces to the caller.
+pub fn scaffold_research(root: &Path) -> std::io::Result<std::path::PathBuf> {
+    let path = research_path(root);
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, RESEARCH_TEMPLATE)?;
+    }
+    Ok(path)
+}
+
 // --- Reading the project's bible (the typed counterpart to the writers) -----
 
 /// The place/term gazetteer from `bible/setting.md` (empty when absent).
@@ -370,6 +443,69 @@ mod tests {
         let root = std::path::Path::new("/nonexistent-quill-bible");
         assert!(gazetteer(root).is_empty());
         assert!(character_names(root).is_empty());
+    }
+
+    #[test]
+    fn cite_research_reads_as_a_readable_reference() {
+        // The citation a tracker entry carries to ground against a research note.
+        assert_eq!(
+            cite_research("Feudal Timeline"),
+            "per research note 'Feudal Timeline'"
+        );
+        // Whitespace is trimmed so an entry reads cleanly.
+        assert_eq!(
+            cite_research("  Magic sources  "),
+            "per research note 'Magic sources'"
+        );
+        // A tracker bullet carrying the citation is recognizable to a reader.
+        let bullet = format!(
+            "Lord Grey ruled 1432-1456 ({})",
+            cite_research("Feudal Timeline")
+        );
+        assert!(has_research_citation(&bullet));
+        assert!(!has_research_citation("Lord Grey ruled 1432-1456"));
+    }
+
+    #[test]
+    fn research_notebook_is_author_owned_and_persists() {
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-research-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("bible")).unwrap();
+
+        // Absent: no notes and no citations to draw from.
+        assert!(research_notes(&root).is_empty());
+
+        // Scaffolding seeds a template only — structure, not worldbuilding content —
+        // so a fresh notebook cites nothing (the example heading is skipped).
+        let path = scaffold_research(&root).unwrap();
+        assert!(path.exists());
+        assert_eq!(path, research_path(&root));
+        assert!(
+            research_notes(&root).is_empty(),
+            "seed template cites nothing"
+        );
+
+        // The author writes notes; the file persists and its headings become the
+        // notes a tracker can cite.
+        std::fs::write(
+            &path,
+            "# Research notebook\n\n## Feudal Timeline\n\nLord Grey ruled 1432-1456.\n\n## Magic sources\n\nThe focus stones.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            research_notes(&root),
+            vec!["Feudal Timeline".to_string(), "Magic sources".to_string()]
+        );
+
+        // Scaffolding again never clobbers the author's writing.
+        scaffold_research(&root).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("Lord Grey ruled 1432-1456"),
+            "author content preserved"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

@@ -130,6 +130,12 @@ pub enum Action {
     /// that saves back to disk. Navigation/editing of the AI's tracking artifacts,
     /// within the AI boundary (the AI authors nothing).
     BrowseBible,
+    /// Open the author's research / worldbuilding notebook (#932): `bible/research.md`,
+    /// an author-maintained journal of historical refs, magic-system sources, and
+    /// worldbuilding rules that the AI's trackers can *cite* but never write. Opens
+    /// it in an editable pane, seeding an empty template on first use. Squarely
+    /// within the AI boundary — the author authors every note; Quill only cites it.
+    ViewResearch,
     /// Open the snippet picker to insert an author-defined snippet (#411).
     InsertSnippet,
     /// Browse the curated open-licensed font library, download a font into the
@@ -261,6 +267,7 @@ impl Action {
         Self::SetImageKey,
         Self::Assistant,
         Self::BrowseBible,
+        Self::ViewResearch,
         // Editing
         Self::AcceptWord,
         Self::ViewDictionary,
@@ -340,6 +347,7 @@ impl Action {
             Self::SetImageKey => "image:set-key",
             Self::Assistant => "assistant",
             Self::BrowseBible => "bible:browse",
+            Self::ViewResearch => "research:view",
             Self::InsertSnippet => "snippet",
             Self::BrowseFonts => "fonts:browse",
             Self::SetExportStyle => "style:set",
@@ -393,7 +401,8 @@ impl Action {
             | Self::SetClaudeKey
             | Self::SetImageKey
             | Self::Assistant
-            | Self::BrowseBible => "AI",
+            | Self::BrowseBible
+            | Self::ViewResearch => "AI",
             Self::AcceptWord
             | Self::ViewDictionary
             | Self::NextMisspelling
@@ -494,6 +503,7 @@ impl Action {
             Self::SetImageKey => "Set image API key (keychain)",
             Self::Assistant => "Authorial assistant",
             Self::BrowseBible => "Browse story bible",
+            Self::ViewResearch => "View research notebook",
             Self::InsertSnippet => "Insert snippet…",
             Self::BrowseFonts => "Browse & download fonts…",
             Self::SetExportStyle => "Set export style…",
