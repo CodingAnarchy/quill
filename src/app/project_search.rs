@@ -14,7 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::App;
 use crate::mode::{Mode, ProjectMatch, ProjectSearch, ProjectSearchStage};
-use crate::text::match_ranges_opts;
+use crate::text::try_match_ranges;
 
 impl App {
     /// Open manuscript-wide find (#295). Drops to the single-chapter view so a
@@ -50,6 +50,16 @@ impl App {
                 if ctrl =>
             {
                 self.project_search_mut().opts.whole_word ^= true;
+                self.rerun_project_search_if_listed();
+            }
+            // Ctrl-R flips regex mode (#891): the query is read as a regular
+            // expression rather than a literal, at parity with the chapter find.
+            // Guarded on `ctrl`, so a plain `r` at Results still promotes to
+            // replace (below).
+            (ProjectSearchStage::Query | ProjectSearchStage::Results, KeyCode::Char('r'))
+                if ctrl =>
+            {
+                self.project_search_mut().opts.regex ^= true;
                 self.rerun_project_search_if_listed();
             }
 
@@ -125,7 +135,15 @@ impl App {
             self.close_project_search();
             return;
         }
-        let matches = self.collect_project_matches(&query);
+        let matches = match self.collect_project_matches(&query) {
+            Ok(matches) => matches,
+            // A bad regex keeps the overlay open on the query so the author can
+            // fix it, rather than a search that silently finds nothing (#891).
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
         if matches.is_empty() {
             self.close_project_search();
             self.message = Some(format!("No matches for '{query}' across the manuscript."));
@@ -146,7 +164,16 @@ impl App {
             return;
         }
         let query = self.project_search().query.clone();
-        let matches = self.collect_project_matches(&query);
+        // A toggle that leaves the regex invalid (e.g. flipping regex on with a
+        // literal `(` in the query) reports the error and holds the current list,
+        // rather than blanking it out from under the author (#891).
+        let matches = match self.collect_project_matches(&query) {
+            Ok(matches) => matches,
+            Err(e) => {
+                self.message = Some(e);
+                return;
+            }
+        };
         let s = self.project_search_mut();
         s.matches = matches;
         s.selected = 0;
@@ -157,14 +184,16 @@ impl App {
     /// time; the active chapter's pending edits are flushed first so its matches
     /// are accurate. The shared core of [`run_project_search`] and the live
     /// re-run after a mode toggle.
-    fn collect_project_matches(&mut self, query: &str) -> Vec<ProjectMatch> {
+    fn collect_project_matches(&mut self, query: &str) -> Result<Vec<ProjectMatch>, String> {
         let opts = self.project_search().opts;
         let _ = self.flush_active();
         let mut matches = Vec::new();
         for i in 0..self.chapter_count() {
             let body = self.project.chapter_body(i);
             let title = self.project.chapter_title(i).unwrap_or("").to_string();
-            for (start, end) in match_ranges_opts(&body, query, opts) {
+            // Fallible so an invalid regex is reported once (#891), not silently
+            // treated as "no matches"; a literal query never errors.
+            for (start, end) in try_match_ranges(&body, query, opts)? {
                 matches.push(ProjectMatch {
                     chapter: i,
                     start,
@@ -174,7 +203,7 @@ impl App {
                 });
             }
         }
-        matches
+        Ok(matches)
     }
 
     /// Move the selected result by `dir` (+1 next, -1 previous), wrapping.

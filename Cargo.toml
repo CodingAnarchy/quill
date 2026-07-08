@@ -70,6 +70,10 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 # (a stale lock), so a second instance opens read-only rather than racing writes.
 # Already in the tree transitively (keyring/git2), so this adds no new download.
 libc = "0.2"
+# Regex mode for find & replace (#891): the project-wide and chapter finds treat
+# the query as a regular expression when the `re` toggle is on. Already in the
+# tree transitively (via a few build-time deps), so this adds no new download.
+regex = "1"
 
 [dev-dependencies]
 # Property / round-trip and adversarial-input testing for the data path (#265).

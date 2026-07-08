@@ -2908,6 +2908,7 @@ dependencies = [
  "libc",
  "proptest",
  "ratatui",
+ "regex",
  "ropey",
  "serde",
  "serde_json",

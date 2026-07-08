@@ -653,10 +653,15 @@ fn search_status(s: &Search) -> String {
         SearchStage::Query if s.from_vim => {
             format!(" {}{}{count}", if s.backward { '?' } else { '/' }, s.query)
         }
-        SearchStage::Query => format!(" Find: {}{modes}{count}  · ^C case · ^W word", s.query),
+        SearchStage::Query => {
+            format!(
+                " Find: {}{modes}{count}  · ^C case · ^W word · ^R regex",
+                s.query
+            )
+        }
         SearchStage::Navigate => {
             format!(
-                " Find: {}{modes}{count}  · n next · N prev · r replace · ^C case · ^W word · Esc done",
+                " Find: {}{modes}{count}  · n next · N prev · r replace · ^C case · ^W word · ^R regex · Esc done",
                 s.query
             )
         }

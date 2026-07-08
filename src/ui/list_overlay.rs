@@ -391,12 +391,12 @@ pub(super) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &ProjectSea
     let help = match ps.stage {
         ProjectSearchStage::Query => {
             format!(
-                "Find across manuscript: {}{modes}_ · enter search · ^C case · ^W word · esc cancel",
+                "Find across manuscript: {}{modes}_ · enter search · ^C case · ^W word · ^R regex · esc cancel",
                 ps.query
             )
         }
         ProjectSearchStage::Results => format!(
-            "'{}'{modes} — {n} {} in {span} {} · ↑↓ move · enter jump · r replace · ^C case · ^W word · esc close",
+            "'{}'{modes} — {n} {} in {span} {} · ↑↓ move · enter jump · r replace · ^C case · ^W word · ^R regex · esc close",
             ps.query,
             matches(n),
             chapters(span),

@@ -286,3 +286,104 @@ fn project_replace_honors_whole_word_and_case() {
     assert_eq!(one, "Bill was willing.\n", "only the name renamed: {one}");
     assert_eq!(two, "will he, Bill?\n", "only the name renamed: {two}");
 }
+
+// --- #891: regex mode, manuscript-wide -------------------------------------
+
+/// A two-chapter fixture seeded with numbered chapter references, for the regex
+/// tests: each chapter carries a `Chap. N` string a literal search can't target
+/// as a class. Built from scratch so the active chapter's buffer matches on open.
+fn chap_ref_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "See Chap. 3 for more.\n").unwrap();
+    fs::write(dir.join("two.md"), "Back in Chap. 12 again.\n").unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn project_regex_matches_across_chapters() {
+    let (mut app, _dir) = chap_ref_app("psearch-regex-find");
+    app.open_project_find();
+    type_str(&mut app, r"Chap\. \d+");
+    app.on_key(ctrl('r')); // regex mode
+    app.on_key(key(KeyCode::Enter));
+
+    let ps = app.project_search();
+    assert_eq!(ps.matches.len(), 2, "one Chap. N per chapter");
+    assert_eq!(ps.matches[0].chapter, 0);
+    assert_eq!(ps.matches[1].chapter, 1);
+    assert_eq!(ps.chapter_span(), 2);
+}
+
+#[test]
+fn project_invalid_regex_is_reported_not_a_panic() {
+    let (mut app, _dir) = chap_ref_app("psearch-regex-invalid");
+    app.open_project_find();
+    type_str(&mut app, "Chap. ("); // unbalanced group
+    app.on_key(ctrl('r'));
+    app.on_key(key(KeyCode::Enter));
+
+    // The overlay stays open on the query (not a panic, not a silent close), and
+    // the error is surfaced.
+    assert!(
+        matches!(app.mode, Mode::ProjectSearch(_)),
+        "overlay stays open to fix the pattern"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Invalid regex"),
+        "{:?}",
+        app.message
+    );
+}
+
+#[test]
+fn project_regex_replace_across_the_manuscript() {
+    // Normalize the numbered references: `Chap. N` → `Chapter N`, capturing the
+    // number with a backreference in the replacement.
+    let (mut app, dir) = chap_ref_app("psearch-regex-replace");
+    app.open_project_find();
+    type_str(&mut app, r"Chap\. (\d+)");
+    app.on_key(ctrl('r')); // regex mode
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('r'))); // → Replacement
+    type_str(&mut app, "Chapter N"); // literal replacement (no capture expansion)
+    app.on_key(key(KeyCode::Enter)); // → Step
+    app.on_key(key(KeyCode::Char('a'))); // → Confirm
+    app.on_key(key(KeyCode::Char('y'))); // replace all
+
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("2 chapters"),
+        "{:?}",
+        app.message
+    );
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert_eq!(one, "See Chapter N for more.\n");
+    assert_eq!(two, "Back in Chapter N again.\n");
+}
+
+#[test]
+fn project_regex_composes_with_case_sensitivity() {
+    let (mut app, _dir) = will_app("psearch-regex-case");
+    app.open_project_find();
+    type_str(&mut app, "will."); // regex `.` matches any char after "will"
+    app.on_key(ctrl('r')); // regex
+    app.on_key(ctrl('c')); // case-sensitive
+    app.on_key(key(KeyCode::Enter));
+    // Case-sensitive `will.`: "will " (one.md willing→"will" + "i"), "will " and
+    // "will," in two.md — lowercase "will" followed by any char. The capital
+    // "Will" is excluded by case. Chapter one: "willing" → "willi" matches once.
+    // Chapter two: "will he" and nothing else lowercase-will. So 2 total.
+    let n = app.project_search().matches.len();
+    assert_eq!(n, 2, "lowercase will+any-char in each chapter");
+}
