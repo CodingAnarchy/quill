@@ -704,9 +704,11 @@ pub struct ReviewImport {
     pub(crate) source: PathBuf,
     /// The chapter file the comments will be anchored into — the active chapter.
     pub(crate) chapter: String,
-    /// The matched comments: `(start, end, note)` buffer byte spans against the
-    /// active chapter, each becoming one annotation on merge.
-    pub(crate) matched: Vec<(usize, usize, String)>,
+    /// The matched comments: `(start, end, note, reviewer)` buffer byte spans
+    /// against the active chapter, each becoming one annotation on merge. The
+    /// reviewer (#933) is the named editor the comment came from, `None` when the
+    /// source didn't attribute it.
+    pub(crate) matched: Vec<(usize, usize, String, Option<String>)>,
     /// The unmatched comments: `(phrase, note)` whose commented phrase no longer
     /// appears in the prose — reported so the author knows what didn't carry.
     pub(crate) dropped: Vec<(String, String)>,

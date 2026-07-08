@@ -50,6 +50,7 @@ fn render_stays_within_a_frame() {
             note: "note".into(),
             replies: Vec::new(),
             resolved: false,
+            reviewer: None,
         })
         .collect();
 

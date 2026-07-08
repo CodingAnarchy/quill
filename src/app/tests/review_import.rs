@@ -111,7 +111,7 @@ fn importing_review_comments_anchors_them_as_annotations() {
     // The matches carried the resolved spans through to the merge unchanged.
     assert!(matched
         .iter()
-        .any(|&(s, e, ref n)| (s, e) == span("grey") && n == "vivid"));
+        .any(|(s, e, n, _)| (*s, *e) == span("grey") && n == "vivid"));
 
     // The imported annotations persist to the side file, keyed by chapter.
     app.persist_annotations();
@@ -173,6 +173,46 @@ fn a_comment_that_no_longer_matches_the_prose_is_reported() {
         "the drop is surfaced in the report: {msg}"
     );
     let _ = fs::remove_file(&source);
+}
+
+#[test]
+fn an_imported_comment_carries_its_reviewer_onto_the_annotation() {
+    // The reviewer identity a named `.docx` comment carries (#933) rides the merge
+    // through to the created annotation and persists. Driven from the review-import
+    // preview with a reviewer on the matched span (what `extract_comments` fills in
+    // from `w:author`, covered end-to-end in the docx unit tests).
+    use crate::mode::ReviewImport;
+
+    isolate("review-import-reviewer");
+    let dir = make_project(
+        "review-import-reviewer-p",
+        "Salt and Iron",
+        "The sea was grey and it ended.\n",
+    );
+    let mut app = open_app(&dir);
+
+    // "grey" is at bytes 12..16; attribute the comment to a named editor.
+    app.mode = Mode::ReviewImport(Box::new(ReviewImport {
+        source: std::path::PathBuf::from("/tmp/review.docx"),
+        chapter: "one.md".into(),
+        matched: vec![(12, 16, "vivid".into(), Some("Jane Editor".into()))],
+        dropped: Vec::new(),
+        scroll: 0,
+    }));
+
+    app.confirm_review_import();
+    assert_eq!(app.annotations.len(), 1);
+    assert_eq!(
+        app.annotations[0].reviewer.as_deref(),
+        Some("Jane Editor"),
+        "the reviewer identity carries onto the annotation"
+    );
+
+    // It persists and reloads with the reviewer intact.
+    app.persist_annotations();
+    let reopened = Project::open(&dir).unwrap();
+    let live = reopened.annotations_for("one.md");
+    assert_eq!(live[0].reviewer.as_deref(), Some("Jane Editor"));
 }
 
 #[test]

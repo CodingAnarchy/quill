@@ -275,7 +275,17 @@ impl App {
             }
             Mode::History(h) => h.selected = index,
             Mode::Corkboard(c) => c.selected = index,
-            Mode::Annotations { selected, .. } | Mode::Outline { selected, .. } => {
+            // The annotation list can be sorted/filtered (#933), so a click's screen
+            // position is a display position — map it back to the annotation index
+            // the visible order holds there before selecting.
+            Mode::Annotations { .. } => {
+                let order = self.annotation_visible_order();
+                let Some(&idx) = order.get(index) else {
+                    return false;
+                };
+                self.set_annotations_selected(idx);
+            }
+            Mode::Outline { selected, .. } => {
                 *selected = index;
             }
             _ => return false,

@@ -60,6 +60,46 @@ impl AnnoShow {
     }
 }
 
+/// How the annotation review list is ordered (#933), cycled with `s`. Position is
+/// the historic default — notes in document order, the order they anchor in the
+/// prose. Status groups the still-open threads ahead of the resolved ones (each
+/// group kept in position order) so triage works top-down; reviewer groups a
+/// multi-editor merge by who left each note (alphabetical, then position within a
+/// reviewer). The sort is applied after the text/status/reviewer filters, over the
+/// notes that pass, so it never changes which rows show — only their order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum AnnoSort {
+    /// Document order — by anchored byte offset. The historic default.
+    #[default]
+    Position,
+    /// Open threads first, then resolved; position order within each group.
+    Status,
+    /// Grouped by reviewer (alphabetical); position order within a reviewer.
+    Reviewer,
+}
+
+impl AnnoSort {
+    /// The next state in the cycle (Position → Status → Reviewer → Position).
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Position => Self::Status,
+            Self::Status => Self::Reviewer,
+            Self::Reviewer => Self::Position,
+        }
+    }
+
+    /// The short label shown in the list help line.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Position => "position",
+            Self::Status => "status",
+            Self::Reviewer => "reviewer",
+        }
+    }
+}
+
 /// A full-screen, read-only overlay drawn above any mode: the progress report,
 /// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
 /// render itself, and the current scroll offset. `App` keeps a single
@@ -242,11 +282,20 @@ pub enum Mode {
     /// whose text or anchored snippet match, Esc leaves input (keeping the filter)
     /// and a second Esc clears it. `show` (#889) is the resolved/open state filter,
     /// cycled with `f`, applied on top of the text filter.
+    ///
+    /// `sort` and `reviewer` are the multi-reviewer triage state (#933): `sort`
+    /// (cycled with `s`) orders the visible notes by position / status / reviewer;
+    /// `reviewer` (cycled with `R`) is the per-reviewer filter (`None` shows every
+    /// reviewer), applied alongside the text and status filters. `[`/`]` jump to the
+    /// previous / next open thread. These are additive over the existing state — the
+    /// filter/resolve behavior is unchanged when they're at their defaults.
     Annotations {
         selected: usize,
         filter: String,
         typing: bool,
         show: AnnoShow,
+        sort: AnnoSort,
+        reviewer: Option<String>,
     },
     /// The focused heading outline (#657): the Ctrl-O outline made navigable.
     /// The outline pane normally just lists the active chapter's headings and
