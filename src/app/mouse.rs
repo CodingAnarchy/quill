@@ -129,6 +129,12 @@ impl App {
         if self.click_list_row(col, row) {
             return;
         }
+        // A click in a split's other pane switches focus to it (#163 follow-up),
+        // before the editor click path — otherwise the focused-editor gate below
+        // would swallow a click meant to focus a docked surface / assistant.
+        if self.focus_pane_from_click(col, row) {
+            return;
+        }
         // Only the plain editing surface takes clicks: an open overlay, a focused
         // docked surface / assistant pane, or a modal mode owns the screen instead.
         if !self.editor_takes_click() {
@@ -178,6 +184,38 @@ impl App {
         buffer.cursor = buffer.cursor_at_byte(byte);
         self.scroll_offset.set(0);
         self.message = None;
+    }
+
+    /// Switch pane focus from a left-click when the window is split (#163 follow-up):
+    /// a click in the other pane focuses it (swap editors, or hand scroll/key focus to
+    /// a docked surface / assistant), and a click back in the focused editor's pane
+    /// while a surface/assistant holds focus returns focus to the editor. Returns
+    /// whether the click was consumed. Uses the pane rects the renderer records each
+    /// frame (`pane_rects`), so the divider column between panes is never a hit.
+    fn focus_pane_from_click(&mut self, col: u16, row: u16) -> bool {
+        let Some((focused_rect, other_rect)) = self.pane_rects.get() else {
+            return false;
+        };
+        let hit = |r: ratatui::layout::Rect| {
+            col >= r.x
+                && col < r.x.saturating_add(r.width)
+                && row >= r.y
+                && row < r.y.saturating_add(r.height)
+        };
+        let other_focused = self.surface_pane_focused() || self.assistant_pane_focused();
+        if hit(other_rect) {
+            // An editor pane is never focused in place, so a click always swaps it in;
+            // a surface/assistant only needs focusing when it doesn't already have it.
+            if self.other_pane_is_editor() || !other_focused {
+                self.focus_other_pane();
+            }
+            return true;
+        }
+        if hit(focused_rect) && other_focused {
+            self.focus_other_pane(); // hand focus back to the editor
+            return true;
+        }
+        false
     }
 
     /// Whether the plain editing surface should take a click / drag — not an open

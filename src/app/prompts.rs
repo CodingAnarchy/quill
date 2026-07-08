@@ -87,18 +87,34 @@ impl App {
         match cmd {
             "" => {} // bare `:` — nothing to do
             "w" => self.save_edit(),
-            // `:q` prompts on unsaved changes, exactly as Ctrl-Q does.
-            "q" => self.request_quit(),
-            // Write then quit; don't quit if the write failed (buffer still dirty).
+            // In a split, `:q` closes the focused pane (Vim's window `:q`); only with
+            // no split does it quit — prompting on unsaved changes, like Ctrl-Q.
+            "q" => {
+                if self.split.is_some() {
+                    self.close_focused_pane(false);
+                } else {
+                    self.request_quit();
+                }
+            }
+            // Write then close the focused pane (in a split) or quit; don't proceed if
+            // the write failed (buffer still dirty).
             "wq" | "x" => {
                 self.save_edit();
                 if !self.edit_dirty() {
-                    self.should_quit = true;
+                    if self.split.is_some() {
+                        self.close_focused_pane(false);
+                    } else {
+                        self.should_quit = true;
+                    }
                 }
             }
             "q!" => {
-                self.clear_recovery(); // explicit discard — don't re-offer next launch (#263)
-                self.should_quit = true;
+                if self.split.is_some() {
+                    self.close_focused_pane(true); // discard the focused pane's edits
+                } else {
+                    self.clear_recovery(); // explicit discard — don't re-offer next launch (#263)
+                    self.should_quit = true;
+                }
             }
             // `:{N}` — jump to line N (1-based, clamped to the buffer), like Vim.
             _ if !cmd.is_empty() && cmd.bytes().all(|b| b.is_ascii_digit()) => {

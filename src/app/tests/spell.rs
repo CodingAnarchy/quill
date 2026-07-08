@@ -114,11 +114,10 @@ fn editing_the_dictionary_pane_reloads_the_checker_on_close() {
     app.on_key(key(KeyCode::Char('w')));
     type_str(&mut app, "Aerendil\n");
     app.on_key(ctrl('s')); // write dictionary.txt
-                           // Switch focus back to the manuscript, then close the dictionary pane so the
-                           // close reloads the checker (the real path: edit the list, return to writing).
-    app.on_key(ctrl('w'));
-    app.on_key(key(KeyCode::Char('w')));
-    app.on_key(ctrl('w')); // Ctrl-w c closes the pane → reload + refresh
+                           // Close the dictionary pane while it's focused: Vim's Ctrl-w c closes the
+                           // focused pane, which returns to the manuscript and reloads the checker (the
+                           // real path: edit the list, then close it to get back to writing).
+    app.on_key(ctrl('w')); // Ctrl-w c closes the focused pane → reload + refresh
     app.on_key(key(KeyCode::Char('c')));
     assert!(app.split_view().is_none(), "the pane closed");
 

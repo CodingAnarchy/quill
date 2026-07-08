@@ -374,6 +374,139 @@ fn esc_leaves_the_bible_browser_for_the_editor() {
     );
 }
 
+// --- Closing the focused pane (Vim :q / Ctrl-w c) --------------------------
+
+/// Run a `:` ex command as if typed at the prompt: open it, type, submit.
+fn ex(app: &mut App, cmd: &str) {
+    app.open_ex_command();
+    for c in cmd.chars() {
+        app.on_key(key(KeyCode::Char(c)));
+    }
+    app.on_key(key(KeyCode::Enter));
+}
+
+/// Feed a left-click at screen `(col, row)`.
+fn click(app: &mut App, col: u16, row: u16) {
+    app.on_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    });
+}
+
+#[test]
+fn colon_q_closes_the_focused_pane_not_the_app_when_split() {
+    let (mut app, dir) = two_chapter_app("q-closes-pane"); // active = "One"
+    write_bible(&dir);
+    browse_bible(&mut app);
+    app.on_key(key(KeyCode::Enter)); // mara.md into the reference pane (focus stays on One)
+    window_cmd(&mut app, 'w'); // focus the bible pane (Vim :q closes the focused one)
+    assert!(app.split_view().is_some());
+    ex(&mut app, "q");
+    assert!(app.split_view().is_none(), ":q closed the focused pane");
+    assert!(!app.should_quit, ":q did not quit the app");
+    assert_eq!(
+        app.buffer.path.as_deref(),
+        Some(dir.join("one.md").as_path()),
+        "the kept pane is the chapter, not the closed bible file"
+    );
+}
+
+#[test]
+fn colon_q_quits_when_there_is_no_split() {
+    let (mut app, _dir) = two_chapter_app("q-quits"); // clean buffer, no split
+    ex(&mut app, "q");
+    assert!(
+        app.should_quit,
+        ":q with no split quits the app (buffer is clean)"
+    );
+}
+
+#[test]
+fn ctrl_w_c_closes_the_focused_reference_pane_and_returns_to_the_chapter() {
+    let (mut app, dir) = two_chapter_app("close-returns-chapter");
+    write_bible(&dir);
+    browse_bible(&mut app);
+    app.on_key(key(KeyCode::Enter)); // mara.md into the pane
+    window_cmd(&mut app, 'w'); // focus the bible pane
+    assert_eq!(
+        app.buffer.path.as_deref(),
+        Some(
+            dir.join("bible")
+                .join("characters")
+                .join("mara.md")
+                .as_path()
+        ),
+        "focus is on the bible file"
+    );
+    window_cmd(&mut app, 'c'); // close the focused pane
+    assert!(app.split_view().is_none(), "the pane closed");
+    assert_eq!(
+        app.buffer.path.as_deref(),
+        Some(dir.join("one.md").as_path()),
+        "closing the focused bible pane returns to the chapter"
+    );
+}
+
+#[test]
+fn clicking_the_other_pane_switches_focus_to_it() {
+    let (mut app, dir) = two_chapter_app("click-focus"); // active = "One"
+    write_bible(&dir);
+    browse_bible(&mut app);
+    app.on_key(key(KeyCode::Enter)); // mara.md into the reference pane; focus stays on One
+    screen(&app, 100, 20); // wide render populates the pane rects
+    let (_focused, other) = app.pane_rects.get().expect("split pane rects recorded");
+    click(
+        &mut app,
+        other.x + other.width / 2,
+        other.y + other.height / 2,
+    );
+    assert_eq!(
+        app.buffer.path.as_deref(),
+        Some(
+            dir.join("bible")
+                .join("characters")
+                .join("mara.md")
+                .as_path()
+        ),
+        "clicking the reference pane made it the focused editor"
+    );
+}
+
+#[test]
+fn clicking_the_editor_returns_focus_from_a_docked_surface() {
+    let (mut app, _dir) = two_chapter_app("click-return-focus");
+    app.on_key(ctrl('t')); // analysis report
+    window_cmd(&mut app, 'v'); // dock it as a surface
+    window_cmd(&mut app, 'w'); // focus the surface
+    assert!(app.surface_pane_focused());
+    screen(&app, 100, 20); // populate pane rects
+    let (focused, _other) = app.pane_rects.get().expect("split pane rects recorded");
+    click(
+        &mut app,
+        focused.x + focused.width / 2,
+        focused.y + focused.height / 2,
+    );
+    assert!(
+        !app.surface_pane_focused(),
+        "clicking the editor pane returned focus to it"
+    );
+}
+
+#[test]
+fn a_side_by_side_split_draws_a_divider_between_the_panes() {
+    let (mut app, _dir) = two_chapter_app("divider");
+    let plain = screen(&app, 100, 20);
+    window_cmd(&mut app, 'v'); // side-by-side split
+    let split = screen(&app, 100, 20);
+    let bars = |s: &str| s.chars().filter(|&c| c == '│').count();
+    assert!(
+        bars(&split) > bars(&plain),
+        "the split adds a vertical divider between the panes:\nplain:\n{plain}\nsplit:\n{split}"
+    );
+}
+
 // --- Resize & narrow-terminal collapse (#166) ------------------------------
 
 fn split_ratio(app: &App) -> u16 {
