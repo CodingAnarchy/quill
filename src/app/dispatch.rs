@@ -146,6 +146,7 @@ impl App {
             Mode::DirBrowser(_) => self.on_key_dir_browser(key),
             Mode::ImportPreview(_) => self.on_key_import_preview(key),
             Mode::ReviewImport(_) => self.on_key_review_import(key),
+            Mode::BackupBrowser(_) => self.on_key_backup_browser(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
             Mode::Visual { .. } => self.on_key_visual(key),

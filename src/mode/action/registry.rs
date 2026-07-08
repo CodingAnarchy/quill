@@ -52,6 +52,10 @@ pub enum Action {
     ArchiveProject,
     /// Restore a project from a `.zip` archive into a new folder (#594).
     RestoreArchive,
+    /// Browse the project's scheduled local backups (#934): the timestamped `.zip`
+    /// archives #888 wrote, newest first with sizes and dates, in an overlay from
+    /// which the author restores one over the open project (behind a confirm).
+    BrowseBackups,
     /// Start a timed writing sprint (#299).
     StartSprint,
     /// Stop the active writing sprint (#299).
@@ -198,6 +202,7 @@ impl Action {
         Self::ImportReviewComments,
         Self::ArchiveProject,
         Self::RestoreArchive,
+        Self::BrowseBackups,
         // Export
         Self::Export(ExportFormat::Markdown),
         Self::Export(ExportFormat::Docx),
@@ -305,6 +310,7 @@ impl Action {
             Self::ImportReviewComments => "import:review-comments",
             Self::ArchiveProject => "archive",
             Self::RestoreArchive => "archive:restore",
+            Self::BrowseBackups => "backups:browse",
             Self::StartSprint => "sprint:start",
             Self::StopSprint => "sprint:stop",
             Self::SwitchBook => "book:switch",
@@ -365,7 +371,8 @@ impl Action {
             | Self::ImportManuscript
             | Self::ImportReviewComments
             | Self::ArchiveProject
-            | Self::RestoreArchive => "Project",
+            | Self::RestoreArchive
+            | Self::BrowseBackups => "Project",
             Self::Export(_)
             | Self::PdfWrapCover
             | Self::ReviewCopy
@@ -457,6 +464,7 @@ impl Action {
             Self::ImportReviewComments => "Import review comments (.docx) → annotations",
             Self::ArchiveProject => "Archive project… (.zip backup)",
             Self::RestoreArchive => "Restore project from archive…",
+            Self::BrowseBackups => "Browse backups…",
             Self::StartSprint => "Start a writing sprint",
             Self::StopSprint => "Stop the writing sprint",
             Self::SwitchBook => "Switch book",

@@ -275,6 +275,7 @@ impl App {
             }
             Mode::History(h) => h.selected = index,
             Mode::Corkboard(c) => c.selected = index,
+            Mode::BackupBrowser(b) => b.selected = index,
             Mode::Annotations { selected, .. } | Mode::Outline { selected, .. } => {
                 *selected = index;
             }
@@ -371,6 +372,7 @@ impl App {
                 | Mode::Annotations { .. }
                 | Mode::Outline { .. }
                 | Mode::Corkboard(_)
+                | Mode::BackupBrowser(_)
                 | Mode::ModelManager { .. }
                 | Mode::Palette(_)
                 | Mode::ProjectSearch(_)

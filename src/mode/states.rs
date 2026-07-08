@@ -661,6 +661,17 @@ pub struct ReviewImport {
     pub(crate) scroll: usize,
 }
 
+/// State for an open [`Mode::BackupBrowser`] — the local-backup browser (#934):
+/// the project's timestamped `.zip` archives (newest first, each with its size and
+/// date), and the selected row. Enter restores the selected backup over the open
+/// project (behind a confirm); Esc closes. The list is captured when the browser
+/// opens, so it's a stable target for the arrow keys. Read-only over the working
+/// project until a restore is confirmed.
+pub struct BackupBrowser {
+    pub(crate) entries: Vec<crate::app::BackupEntry>,
+    pub(crate) selected: usize,
+}
+
 /// Which step of the find / replace interaction is active.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SearchStage {

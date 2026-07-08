@@ -181,6 +181,10 @@ fn main() -> io::Result<()> {
     app.restore_position();
     // If a previous session left unsaved work behind (a crash), offer it back.
     app.offer_recovery();
+    // If the project itself looks damaged (an unreadable manifest / missing chapter
+    // files), offer to restore from the latest local backup (#934). After recovery,
+    // which takes precedence — it's a no-op while that prompt is up.
+    app.offer_backup_restore_on_damage();
     // On the very first launch, show the dismissible quick-start card (#837).
     // After recovery, so a crash prompt takes precedence and the card waits for a
     // clean slate (it's a no-op when a prompt/overlay is already up).
