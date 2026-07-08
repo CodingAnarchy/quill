@@ -451,7 +451,7 @@ fn classify_block(block: &str) -> Option<Prose> {
 /// `_`, or `*`, with optional spaces between and nothing else — Quill's
 /// scene-break marker. A line with any other character (an em-dash, "5 * 3") is
 /// not one, so prose isn't mistaken for a break.
-fn is_thematic_break(block: &str) -> bool {
+pub fn is_thematic_break(block: &str) -> bool {
     if block.contains('\n') {
         return false;
     }
