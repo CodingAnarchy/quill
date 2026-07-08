@@ -172,24 +172,15 @@ impl App {
     /// input size of every queued `(tracker, book)` pass — each scoped exactly as it
     /// will run (incremental delta, full rebuild, or up-to-date/zero) — resolved to
     /// one token/dollar figure. A forced run bills each pass over the whole book;
-    /// an all-current batch estimates zero, so nothing is spent. The batch discount
-    /// (#691) applies only when every pass that will actually run does so batched
-    /// (a from-scratch full rebuild on Claude), so the one combined figure isn't
-    /// under-quoted by half-pricing a pass that will bill full rate.
+    /// an all-current batch estimates zero, so nothing is spent. Every pass runs
+    /// synchronously at the standard rate (the Batch API's half price is reserved
+    /// for a future opt-in background update), so the figure applies no discount.
     fn bibles_refresh_estimate(&self, queue: &[(AiAction, usize)], force: bool) -> Estimate {
-        // The passes that will actually send something (an up-to-date pass sends
-        // nothing, so it neither adds size nor affects the batch rate).
-        let mut running = queue
-            .iter()
-            .filter(|&&(action, book)| self.book_pass_context_len(action, book, force) > 0)
-            .peekable();
-        let batch = running.peek().is_some()
-            && running.all(|&(action, book)| self.book_pass_batches(action, book, force));
         let chars: usize = queue
             .iter()
             .map(|&(action, book)| self.book_pass_context_len(action, book, force))
             .sum();
-        cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &self.ai.model, batch)
+        cost::estimate(chars, ai::MAX_OUTPUT_TOKENS, &self.ai.model, false)
     }
 
     /// Run queued passes until one spawns an async request (then suspend until

@@ -160,9 +160,6 @@ impl App {
         // its digests into the state rather than replacing it. A standalone novel
         // has one book, so this is exactly the prior single-book behavior.
         let series = self.project.book_count() > 1;
-        // Full rebuilds run through the Batch API (half price, higher latency) on
-        // the Claude backend; the local backend has no batch path.
-        let claude = self.ai.backend() == ai::BackendKind::Claude;
         let model = self.ai.model.clone();
         // Offline-oversized full rebuild (#849): if this pass is pinned `offline`,
         // is a from-scratch full rebuild, and doesn't fit the on-device window,
@@ -176,7 +173,7 @@ impl App {
             self.run_folded_rebuild(&t, book, &model, current, series);
             return;
         }
-        let (req, base_msg, batch) = match scope {
+        let (req, base_msg) = match scope {
             ai::incremental::Scope::UpToDate => {
                 self.message = Some(format!(
                     "{}: bible is current — no chapters changed since the last pass.",
@@ -188,24 +185,18 @@ impl App {
                 // First build (no bible yet), or a standalone novel: rebuild from
                 // the whole book. `book_render(book, None)` is the active book's
                 // whole manuscript for a single-book project.
-                (
-                    (t.full)(self.book_render(book, None), &model),
-                    t.full_msg,
-                    claude,
-                )
+                ((t.full)(self.book_render(book, None), &model), t.full_msg)
             }
             ai::incremental::Scope::Full => {
                 // Series, bible exists: revise it with all of this book's chapters.
                 (
                     (t.incr)(&prior, &self.book_render(book, None), &model),
                     t.full_msg,
-                    false,
                 )
             }
             ai::incremental::Scope::Incremental(changed) => (
                 (t.incr)(&prior, &self.book_render(book, Some(&changed)), &model),
                 t.incr_msg,
-                false,
             ),
         };
         // Snapshot the manuscript state now; recorded once the pass applies cleanly.
@@ -215,12 +206,17 @@ impl App {
         // manifest can change before the async pass lands.
         let merge = series.then(|| self.other_books_files(book));
         self.pending_pass = Some((t.key.to_string(), current, merge));
-        let message = if batch {
-            format!("{base_msg} (batch — may take a few minutes)")
-        } else {
-            base_msg.to_string()
-        };
-        self.spawn_request(&message, req, batch, t.finish);
+        // A bible refresh is a request the author kicks off and watches, so every
+        // pass — full rebuild included — runs synchronously through the standard
+        // Messages API: bounded latency, seconds-to-minutes even over a whole
+        // manuscript. Full rebuilds used to run through the Message Batches API for
+        // its 50% saving (#176), but that endpoint is asynchronous with no latency
+        // SLA (a processing window of up to 24 hours), so an interactive pass would
+        // either false-time-out under the no-hang guardrail or block for minutes on
+        // a batch still legitimately processing. The batch machinery
+        // (`Backend::complete_batched`, the `cost::estimate` discount) is retained
+        // for a future opt-in background "update" that can tolerate the latency (#950).
+        self.spawn_request(base_msg, req, false, t.finish);
     }
 
     /// Whether a full rebuild of `action` for `book` is pinned `offline` yet too
@@ -437,36 +433,6 @@ impl App {
                 prior.len() + self.book_render(book, Some(&changed)).len()
             }
         }
-    }
-
-    /// Whether a costed pass for `book` will actually run via the Batch API (half
-    /// price) — so its cost estimate can quote the discounted figure the confirm
-    /// gates (#691). This must track the run-time decision in [`run_bible_tracker`]
-    /// exactly: a full rebuild batches, but only on the Claude backend and only
-    /// when it rebuilds the whole book from scratch (a first build, or a standalone
-    /// / single-book project). A series that revises its shared bible, an
-    /// incremental pass, an up-to-date pass, and every non-bible pass all run at the
-    /// standard rate.
-    pub(crate) fn book_pass_batches(&self, action: AiAction, book: usize, force: bool) -> bool {
-        let Some(t) = bible_tracker(action) else {
-            return false; // non-bible passes never batch
-        };
-        if self.ai.backend() != ai::BackendKind::Claude {
-            return false; // only the Claude backend has a batch path
-        }
-        let (scope, prior, _) = self.plan_bible_pass(&t, book);
-        // `force` (the palette's `R`) rebuilds in full regardless of the delta.
-        let full = force || matches!(scope, ai::incremental::Scope::Full);
-        // A series with an existing bible *revises* rather than rebuilds, so its
-        // "full" pass runs at standard rate; only a from-scratch rebuild batches.
-        let from_scratch = prior.trim().is_empty() || self.project.book_count() <= 1;
-        full && from_scratch
-    }
-
-    /// Whether the active book's costed pass will run batched — the active-book
-    /// form of [`book_pass_batches`], mirroring [`pass_context_len`].
-    pub(crate) fn pass_batches(&self, action: AiAction, force: bool) -> bool {
-        self.book_pass_batches(action, self.project.active_book(), force)
     }
 
     /// The whole manuscript as plain text for an AI request — the active book's
