@@ -3,10 +3,28 @@
 //! the resolved [`EmbeddedFont`]/[`EmbeddedImage`], the preset library, and the
 //! media-type/family helpers — form a self-contained subsystem the format writers
 //! consume. Re-exported from [`super`] so callers see it on `crate::export`.
+//!
+//! Split by concern (#897): the preset library lives in [`presets`], the embedded
+//! font/image types and their path helpers in [`font`]/[`image`], and the shared
+//! asset-loading machinery in [`asset`]; this module holds the [`ExportStyle`]
+//! config struct with its resolve/merge logic and re-exports the public surface.
+
+mod asset;
+mod font;
+mod image;
+mod presets;
 
 use serde::{Deserialize, Serialize};
 
+use self::asset::{load_asset, resolve_assets, AssetError};
+use self::font::{font_family, font_media_type, italic_sibling};
+use self::image::image_media_type;
+use self::presets::preset_base;
 use super::SCENE_BREAK;
+
+pub use self::font::{EmbeddedFont, FontRole, FontStyle};
+pub use self::image::{EmbeddedImage, ImageRole};
+pub use self::presets::{preset_blurb, HEADING_ALIGNS, PRESET_NAMES};
 
 /// Opt-in styling for the *designed* exports — EPUB now, PDF when it lands
 /// (#465). Loaded from the project manifest's `[style]` table; the default
@@ -100,251 +118,6 @@ pub struct ExportStyle {
     /// disk by the app, not persisted in the manifest.
     #[serde(skip)]
     pub images: Vec<EmbeddedImage>,
-}
-
-/// The CSS `text-align` values a heading may use (#470) — an allowlist, since the
-/// value is interpolated into the stylesheet. Public so the in-app style setter
-/// (#569) offers exactly the values the writers honor.
-pub const HEADING_ALIGNS: [&str; 4] = ["left", "center", "right", "justify"];
-
-/// The built-in preset names (#473, #482), in the order shown to authors. The
-/// single source of truth: [`preset_base`] resolves each one and the unknown-preset
-/// warning lists them, so the library can't drift between code and the message (a
-/// test asserts every name here resolves).
-pub const PRESET_NAMES: [&str; 7] = [
-    "classic",
-    "modern",
-    "literary",
-    "romance",
-    "thriller",
-    "fantasy",
-    "minimalist",
-];
-
-/// The base [`ExportStyle`] for a built-in preset (#473, #482), or `None` for an
-/// unknown name. Presets set only the asset-free knobs (scene break, ornaments,
-/// heading alignment, drop cap) so any author can use one without bundling licensed
-/// fonts or artwork — those are layered on top via explicit `[style]` keys. Each is
-/// a distinct, coherent look; keep the arms in sync with [`PRESET_NAMES`].
-fn preset_base(name: &str) -> Option<ExportStyle> {
-    Some(match name {
-        // Traditional: centered headings, drop caps, floral scene break + dividers.
-        "classic" => ExportStyle {
-            scene_break: Some("* * *".into()),
-            drop_cap: Some(true),
-            title_ornament: Some("❦".into()),
-            part_ornament: Some("❦".into()),
-            ..Default::default()
-        },
-        // Spare and contemporary: left-aligned headings, a minimal scene mark.
-        "modern" => ExportStyle {
-            heading_align: Some("left".into()),
-            scene_break: Some("•".into()),
-            ..Default::default()
-        },
-        // Literary fiction: understated — an asterism between scenes and a drop cap,
-        // no divider ornaments.
-        "literary" => ExportStyle {
-            scene_break: Some("⁂".into()),
-            drop_cap: Some(true),
-            ..Default::default()
-        },
-        // Romance: warm and decorative — a flower scene break with floral dividers.
-        "romance" => ExportStyle {
-            scene_break: Some("❀".into()),
-            drop_cap: Some(true),
-            title_ornament: Some("❦".into()),
-            part_ornament: Some("❦".into()),
-            ..Default::default()
-        },
-        // Thriller: stark and punchy — left-aligned headings, an em-dash scene
-        // break, no drop cap or ornaments.
-        "thriller" => ExportStyle {
-            heading_align: Some("left".into()),
-            scene_break: Some("—".into()),
-            ..Default::default()
-        },
-        // Fantasy: ornate — a diamond scene break with fleur-de-lis dividers and a
-        // drop cap.
-        "fantasy" => ExportStyle {
-            scene_break: Some("❖".into()),
-            drop_cap: Some(true),
-            title_ornament: Some("⚜".into()),
-            part_ornament: Some("⚜".into()),
-            ..Default::default()
-        },
-        // Minimalist: the barest mark — left-aligned headings, a single centered
-        // mid-dot, nothing else.
-        "minimalist" => ExportStyle {
-            heading_align: Some("left".into()),
-            scene_break: Some("·".into()),
-            ..Default::default()
-        },
-        _ => return None,
-    })
-}
-
-/// A one-line description of a built-in preset's look (#569), for the in-app
-/// preset picker — the same library [`PRESET_NAMES`] enumerates. Returns an empty
-/// string for an unknown name (which the picker never passes).
-pub fn preset_blurb(name: &str) -> &'static str {
-    match name {
-        "classic" => "* * * scene breaks, drop caps, ❦ title/part ornaments",
-        "modern" => "left-aligned headings, • scene breaks",
-        "literary" => "⁂ asterism scene breaks and drop caps, no ornaments",
-        "romance" => "❀ scene breaks, drop caps, ❦ ornaments",
-        "thriller" => "left-aligned headings, em-dash (—) scene breaks, spare",
-        "fantasy" => "❖ scene breaks, drop caps, ⚜ fleur-de-lis ornaments",
-        "minimalist" => "left-aligned headings, a single centered mid-dot (·)",
-        _ => "",
-    }
-}
-
-/// Which family an [`EmbeddedFont`] belongs to (#638): the body text or the
-/// headings. Each family resolves to up to two physical files — an upright and a
-/// true-italic face — and each file covers both a regular and a bold weight (via
-/// the `[wght]` axis for a variable font, pinned at embed time).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FontRole {
-    Body,
-    Heading,
-}
-
-impl FontRole {
-    /// The in-package file-name stem for this role (`fonts/<slug>.<ext>`); the
-    /// italic face appends `-italic` (see [`ExportStyle::resolve_fonts`]).
-    const fn slug(self) -> &'static str {
-        match self {
-            Self::Body => "body",
-            Self::Heading => "heading",
-        }
-    }
-}
-
-/// A designed export's four synthesizable text styles (#638): the combinations of
-/// weight (regular/bold) and slope (upright/italic) prose can take. Emphasis is
-/// pervasive in fiction, so all four must render in the chosen family — not just
-/// regular and a heading-derived bold.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FontStyle {
-    pub bold: bool,
-    pub italic: bool,
-}
-
-impl FontStyle {
-    pub const REGULAR: Self = Self {
-        bold: false,
-        italic: false,
-    };
-    pub const BOLD: Self = Self {
-        bold: true,
-        italic: false,
-    };
-    pub const ITALIC: Self = Self {
-        bold: false,
-        italic: true,
-    };
-    pub const BOLD_ITALIC: Self = Self {
-        bold: true,
-        italic: true,
-    };
-}
-
-/// A font file embedded into a designed export (#469, #638): its CSS family name,
-/// the family [`FontRole`] it fills, whether it is the true-italic face, the
-/// in-package href, the OPF manifest media type, and the bytes. Resolved by the
-/// app from the `[style]` font paths; not part of the persisted config.
-///
-/// One configured path resolves to up to two `EmbeddedFont`s per role: the upright
-/// file and — when a sibling `<stem>-italic.<ext>` exists — the true-italic file.
-/// Each file covers both a regular and a bold weight: for a variable `[wght]` font
-/// the PDF writer pins the weight at embed time and the EPUB `@font-face` rules
-/// carry the matching `font-weight`, so bold body text is a real heavier weight,
-/// never the heading font leaking into the bold slot (#638).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EmbeddedFont {
-    pub role: FontRole,
-    pub family: String,
-    /// The true-italic face for its family (a `<stem>-italic` sibling file); the
-    /// upright file when `false`. Body text resolves italic/bold-italic to the
-    /// italic file and regular/bold to the upright file.
-    pub italic: bool,
-    pub href: String,
-    pub media_type: &'static str,
-    pub bytes: Vec<u8>,
-}
-
-impl EmbeddedFont {
-    /// The CSS `@font-face` `format(...)` token for this file's media type (#709),
-    /// so a reader that can't handle the format has a fallback signal instead of
-    /// downloading an unusable face. `None` for a type with no standard token.
-    pub(crate) fn css_format(&self) -> Option<&'static str> {
-        Some(match self.media_type {
-            "font/ttf" => "truetype",
-            "font/otf" => "opentype",
-            "font/woff" => "woff",
-            "font/woff2" => "woff2",
-            _ => return None,
-        })
-    }
-}
-
-/// Where an [`EmbeddedImage`] is placed in a designed export (#472).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImageRole {
-    SceneBreak,
-    ChapterHeading,
-    Title,
-    /// The book cover (#582) — the first spine page in the EPUB, a full page 0 in
-    /// the PDF.
-    Cover,
-}
-
-impl ImageRole {
-    /// The in-package file slug for this role (`images/<slug>.<ext>`).
-    const fn slug(self) -> &'static str {
-        match self {
-            Self::SceneBreak => "scene-break",
-            Self::ChapterHeading => "chapter-heading",
-            Self::Title => "title",
-            Self::Cover => "cover",
-        }
-    }
-}
-
-/// An image file embedded into a designed export (#472): its in-package href, the
-/// OPF manifest media type, and the bytes (embedded verbatim — no decode/re-encode,
-/// so no image-codec dependency). Resolved by the app from the `[style]` paths.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EmbeddedImage {
-    pub role: ImageRole,
-    pub href: String,
-    pub media_type: &'static str,
-    pub bytes: Vec<u8>,
-    /// Author-supplied alt text (#818): `Some(text)` is a content image described
-    /// for assistive tech; `None` declares the image *decorative*, so the writer
-    /// emits the empty-alt + `role="presentation"` convention rather than a bare
-    /// empty `alt` on a content image.
-    pub alt: Option<String>,
-}
-
-/// Why a styling asset (font or image) couldn't be loaded.
-enum AssetError {
-    Unsupported,
-    Read(std::io::Error),
-}
-
-/// Load one styling-asset file: look up its (media type, extension) via `media`,
-/// then read its bytes via `load`. Shared by font (#469) and image (#472)
-/// resolution; the caller maps the error to a domain-specific warning.
-fn load_asset(
-    path: &str,
-    media: impl Fn(&str) -> Option<(&'static str, &'static str)>,
-    load: &mut impl FnMut(&str) -> std::io::Result<Vec<u8>>,
-) -> Result<(&'static str, &'static str, Vec<u8>), AssetError> {
-    let (media_type, ext) = media(path).ok_or(AssetError::Unsupported)?;
-    let bytes = load(path).map_err(AssetError::Read)?;
-    Ok((media_type, ext, bytes))
 }
 
 impl ExportStyle {
@@ -602,121 +375,9 @@ impl ExportStyle {
     }
 }
 
-/// Resolve a set of configured `(role, Option<path>)` asset targets into embedded
-/// structs, returning them alongside one warning per asset that couldn't be read
-/// or had an unsupported type. The shared body of [`ExportStyle::resolve_fonts`]
-/// and [`ExportStyle::resolve_images`] (#504): `media` looks up the (media type,
-/// extension); `kind`/`exts` shape the warning text (`unsupported {kind}` lists
-/// `{exts}`); `load` reads the bytes; `embed` builds the role-specific struct.
-fn resolve_assets<Role, Asset, const N: usize>(
-    targets: [(Role, Option<String>); N],
-    media: impl Fn(&str) -> Option<(&'static str, &'static str)>,
-    kind: &str,
-    exts: &str,
-    mut load: impl FnMut(&str) -> std::io::Result<Vec<u8>>,
-    mut embed: impl FnMut(Role, &str, &'static str, &'static str, Vec<u8>) -> Asset,
-) -> (Vec<Asset>, Vec<String>) {
-    let mut assets = Vec::new();
-    let mut warnings = Vec::new();
-    for (role, path) in targets {
-        let Some(path) = path else { continue };
-        match load_asset(&path, &media, &mut load) {
-            Ok((media_type, ext, bytes)) => assets.push(embed(role, &path, media_type, ext, bytes)),
-            Err(AssetError::Unsupported) => {
-                warnings.push(format!("style: unsupported {kind} '{path}' (use {exts})"));
-            }
-            Err(AssetError::Read(e)) => {
-                warnings.push(format!("style: couldn't read {kind} '{path}': {e}"));
-            }
-        }
-    }
-    (assets, warnings)
-}
-
-/// The OPF media type and canonical extension for a font path, or `None` for an
-/// unsupported type.
-fn font_media_type(path: &str) -> Option<(&'static str, &'static str)> {
-    let ext = std::path::Path::new(path)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "ttf" => ("font/ttf", "ttf"),
-        "otf" => ("font/otf", "otf"),
-        "woff" => ("font/woff", "woff"),
-        "woff2" => ("font/woff2", "woff2"),
-        _ => return None,
-    })
-}
-
-/// The OPF media type and extension for an image path, or `None` for an
-/// unsupported type. The EPUB-core raster/vector image formats.
-fn image_media_type(path: &str) -> Option<(&'static str, &'static str)> {
-    let ext = std::path::Path::new(path)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "png" => ("image/png", "png"),
-        "jpg" => ("image/jpeg", "jpg"),
-        "jpeg" => ("image/jpeg", "jpeg"),
-        "gif" => ("image/gif", "gif"),
-        "svg" => ("image/svg+xml", "svg"),
-        "webp" => ("image/webp", "webp"),
-        _ => return None,
-    })
-}
-
-/// The conventional true-italic sibling of a configured upright font path (#638):
-/// `fonts/eb-garamond.ttf` → `fonts/eb-garamond-italic.ttf`. The curated
-/// downloader writes the italic face at exactly this name, and a hand-specified
-/// font can drop one beside it to gain real italics. `None` when the path has no
-/// recognizable extension. A path that already ends in `-italic` isn't doubled.
-fn italic_sibling(path: &str) -> Option<String> {
-    let p = std::path::Path::new(path);
-    let stem = p.file_stem()?.to_str()?;
-    if stem.to_ascii_lowercase().ends_with("-italic") {
-        return None;
-    }
-    let ext = p.extension()?.to_str()?;
-    let parent = p.parent().and_then(|d| d.to_str()).unwrap_or("");
-    let file = format!("{stem}-italic.{ext}");
-    Some(if parent.is_empty() {
-        file
-    } else {
-        format!("{parent}/{file}")
-    })
-}
-
-/// A CSS-safe family name derived from a font file's stem (`Fonts/Georgia.ttf` →
-/// `Georgia`). Restricted to letters, digits, spaces, hyphens, and underscores so
-/// it can't break out of the quoted `font-family` / `@font-face` string it's
-/// interpolated into (#470); falls back to a generic name.
-fn font_family(path: &str) -> String {
-    let stem = std::path::Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    let safe: String = stem
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
-                c
-            } else {
-                ' '
-            }
-        })
-        .collect();
-    let safe = safe.split_whitespace().collect::<Vec<_>>().join(" ");
-    if safe.is_empty() {
-        "Embedded".to_string()
-    } else {
-        safe
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::font::italic_sibling;
     use super::*;
 
     #[test]
