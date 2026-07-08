@@ -120,6 +120,135 @@ fn a_same_process_reopen_is_not_blocked_by_our_own_lock() {
     fs::remove_dir_all(&dir).ok();
 }
 
+// --- #890: idle re-check reclaims a lock that goes stale after open ----------
+
+// A project opened read-only against a live holder that later crashes must
+// reclaim the now-stale lock on the idle re-check and become writable — the
+// transparent recovery the ticket asks for. We open against a live-looking lock
+// (pid 1), overwrite it with a dead pid to model the holder crashing, then
+// re-check: the project flips to writable and can save.
+#[cfg(unix)]
+#[test]
+fn a_stale_lock_is_reclaimed_on_idle_recheck() {
+    let dir = temp_dir("recheck-reclaim");
+    seed_project(&dir);
+    fs::create_dir_all(dir.join(".quill")).unwrap();
+    // A live holder at open (pid 1, always alive on Unix): opens read-only.
+    fs::write(
+        dir.join(".quill").join("lock"),
+        format!("1\n{}\n0\n", host()),
+    )
+    .unwrap();
+
+    let mut project = Project::open(&dir).unwrap();
+    assert!(
+        project.is_read_only(),
+        "opens read-only against a live holder"
+    );
+    // The holder crashes: its lock is now a dead same-host pid (2^30 is far above
+    // any live pid). The re-check must reclaim it.
+    fs::write(
+        dir.join(".quill").join("lock"),
+        format!("{}\n{}\n0\n", 1 << 30, host()),
+    )
+    .unwrap();
+
+    assert!(
+        project.recheck_lock(),
+        "a now-dead same-host lock is reclaimed on re-check"
+    );
+    assert!(
+        !project.is_read_only(),
+        "the reclaimed project is writable again"
+    );
+    assert!(
+        project.busy_holder().is_none(),
+        "the busy-holder note is cleared once reclaimed"
+    );
+    project.save_manifest().unwrap(); // writable now
+                                      // And the lock now records our pid, not the crashed holder's.
+    assert_eq!(
+        lock::recorded_pid(&dir),
+        Some(std::process::id() as i32),
+        "the reclaimed lock records our pid"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+// The idle re-check must NOT steal a lock still held by a live instance: no
+// regression to the #871 read-only protection.
+#[cfg(unix)]
+#[test]
+fn a_live_holder_is_respected_on_idle_recheck() {
+    let dir = temp_dir("recheck-live");
+    seed_project(&dir);
+    fs::create_dir_all(dir.join(".quill")).unwrap();
+    fs::write(
+        dir.join(".quill").join("lock"),
+        format!("1\n{}\n0\n", host()),
+    )
+    .unwrap();
+
+    let mut project = Project::open(&dir).unwrap();
+    assert!(project.is_read_only());
+    assert!(
+        !project.recheck_lock(),
+        "a live holder must keep the project read-only on re-check"
+    );
+    assert!(project.is_read_only(), "still read-only after the re-check");
+    assert_eq!(
+        lock::recorded_pid(&dir),
+        Some(1),
+        "the live holder's lock is untouched"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+// A different-host lock stays honored on re-check: we can't probe another
+// machine's processes, so it's never assumed stale.
+#[test]
+fn a_different_host_lock_stays_read_only_on_idle_recheck() {
+    let dir = temp_dir("recheck-otherhost");
+    seed_project(&dir);
+    fs::create_dir_all(dir.join(".quill")).unwrap();
+    // Even a "live-looking" pid is honored when the host isn't ours.
+    fs::write(
+        dir.join(".quill").join("lock"),
+        format!("{}\nsome-other-machine\n0\n", std::process::id()),
+    )
+    .unwrap();
+
+    let mut project = Project::open(&dir).unwrap();
+    assert!(project.is_read_only());
+    assert!(
+        !project.recheck_lock(),
+        "a different-host lock must stay honored on re-check"
+    );
+    assert!(project.is_read_only(), "still read-only after the re-check");
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+// The re-check is a no-op on a project we already own writably: nothing to
+// reclaim, and it never touches the lock we hold.
+#[test]
+fn recheck_is_a_no_op_on_a_writable_project() {
+    let dir = temp_dir("recheck-noop");
+    seed_project(&dir);
+
+    let mut project = Project::open(&dir).unwrap();
+    assert!(!project.is_read_only(), "opens writable");
+    assert!(
+        !project.recheck_lock(),
+        "a writable project has nothing to reclaim"
+    );
+    assert!(!project.is_read_only(), "still writable");
+
+    fs::remove_dir_all(&dir).ok();
+}
+
 // --- Gap 3: hard read error vs. empty/NotFound ------------------------------
 
 // A hard chapter-read failure must not zero-word-cache the chapter or drop its

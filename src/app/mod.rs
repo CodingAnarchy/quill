@@ -756,10 +756,28 @@ impl App {
         self.sync_annotations();
         self.tally_words();
         self.refresh_vc_status_on_idle();
+        self.recheck_instance_lock();
         self.capture_recovery();
         // Mark this input burst's end, so autosave fires only after the
         // configured seconds of genuine idle (#409).
         self.last_activity = std::time::Instant::now();
+    }
+
+    /// On idle, re-check a read-only project's instance lock and reclaim it if the
+    /// holder we deferred to at open has since crashed (#890). A no-op unless we're
+    /// running read-only; when the reclaim succeeds the project becomes writable
+    /// and we tell the author a stale lock was cleared, so a confusing dead-end
+    /// (saves silently refused) recovers transparently without a restart.
+    ///
+    /// Kept as its own additive path off the shared idle loop (#888 also edits the
+    /// tick): it only touches the lock, never the parse/tally/backup work.
+    fn recheck_instance_lock(&mut self) {
+        if self.project.recheck_lock() {
+            self.message = Some(
+                "Stale lock cleared: another instance had exited; the project is writable again."
+                    .into(),
+            );
+        }
     }
 
     /// Recompute the misspelled-word flags for the active buffer (#357), off the

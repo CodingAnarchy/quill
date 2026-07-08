@@ -35,7 +35,7 @@ mod template;
 pub use goals::{GoalField, Goals, DEFAULT_WORDS_PER_PAGE};
 use io::cache_chapter;
 pub use io::read_existing;
-use lock::{InstanceLock, LockOutcome};
+use lock::{InstanceLock, LockOutcome, RecheckOutcome};
 use series::Book;
 pub use structure::unique_dest;
 pub use template::{ProjectTemplate, TEMPLATES};
@@ -498,6 +498,32 @@ impl Project {
     /// for the open-time warning — `None` when this instance owns it (#871).
     pub fn busy_holder(&self) -> Option<&str> {
         self.busy_holder.as_deref()
+    }
+
+    /// Re-check a read-only project's instance lock and reclaim it if it has gone
+    /// stale since open (#890): the holder we deferred to at open crashed while we
+    /// were running read-only, so its lock is now a dead same-host pid (or a torn
+    /// file). If so, install the reclaimed lock, clear the read-only state, and
+    /// return `true` so the caller can note that a stale lock was cleared.
+    ///
+    /// A no-op unless we're currently read-only — a project we already own has
+    /// nothing to reclaim. A genuinely-live holder (or a different-host /
+    /// undecidable lock) leaves us read-only exactly as at open, so this never
+    /// steals a lock from a live instance. Called off the keystroke path (the idle
+    /// tick), never per-write.
+    pub fn recheck_lock(&mut self) -> bool {
+        if !self.read_only {
+            return false;
+        }
+        match lock::recheck(&self.root) {
+            RecheckOutcome::Reclaimed(lock) => {
+                self.lock = Some(lock);
+                self.read_only = false;
+                self.busy_holder = None;
+                true
+            }
+            RecheckOutcome::StillBusy => false,
+        }
     }
 
     /// The error a write returns when the project is read-only (another instance
