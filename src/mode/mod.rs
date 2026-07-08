@@ -370,6 +370,12 @@ pub enum Mode {
     /// merges the matches into the chapter's annotations, Esc cancels. Boxed
     /// (carries the resolved comments and dropped list).
     ReviewImport(Box<ReviewImport>),
+    /// Browsing the project's local backups (#934): the timestamped `.zip` archives
+    /// #888 wrote, newest first, each with its size and date. Navigable; Enter
+    /// restores the selected backup over the open project (behind a confirm), Esc
+    /// closes. Read-only over the working project until a restore is confirmed. Boxed
+    /// (carries the backup list).
+    BackupBrowser(Box<BackupBrowser>),
 }
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
@@ -710,6 +716,13 @@ pub enum Pending {
     /// target revision waits in `App::pending_restore_rev` (kept off the `Copy`
     /// `Pending` enum), taken when the restore runs.
     ConfirmRestoreProject,
+    /// y/N: restore a local backup archive over the open project (#934) — chosen in
+    /// the backup browser, or the latest offered when the project looks damaged on
+    /// open. Destructive to the current working state, so it always asks first; the
+    /// working project is itself archived before the swap. The target archive waits
+    /// in `App::pending_restore_backup` (kept off the `Copy` `Pending` enum), taken
+    /// when the restore runs.
+    ConfirmRestoreBackup,
     /// Crash recovery (#263): unsaved work from a previous session was found.
     /// `y`/`r` restores it, `d` discards the sidecar, Esc keeps it for later.
     ConfirmRecovery,

@@ -42,6 +42,7 @@ mod archive;
 mod assist;
 mod assistant;
 mod backup;
+mod backup_browser;
 mod bible_review;
 mod corkboard;
 mod dispatch;
@@ -85,6 +86,7 @@ mod vim;
 mod wizard;
 
 pub use assistant::{Assistant, Entry, Speaker};
+pub use backup::BackupEntry;
 // The key-dispatch helpers moved to `dispatch` (#759); re-imported here so the
 // `app`-module call sites keep spelling them unqualified / via `super::`.
 use dispatch::{build_keymap, scroll_target};
@@ -489,6 +491,11 @@ pub struct App {
     /// the source prompt and the new-folder-path prompt; taken when the folder is
     /// entered and the archive is unpacked.
     pending_archive_source: Option<PathBuf>,
+    /// The local backup archive a restore confirm (#934) targets, held while the
+    /// y/N prompt is open (from the backup browser, or the on-open damage offer);
+    /// taken when the restore runs. Kept off the `Copy` `Pending` enum so the path
+    /// lives here.
+    pending_restore_backup: Option<PathBuf>,
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
@@ -664,6 +671,7 @@ impl App {
             import_source: None,
             pending_import_source: None,
             pending_archive_source: None,
+            pending_restore_backup: None,
             sprint: None,
             qa_log,
             qa_store,

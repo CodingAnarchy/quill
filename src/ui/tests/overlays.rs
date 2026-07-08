@@ -256,3 +256,45 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
         "the thread + triage keys are advertised in the help line:\n{screen}"
     );
 }
+
+#[test]
+fn the_backup_browser_lists_dates_sizes_and_the_restore_key() {
+    // The backup browser (#934) lists each archive's date-ish label over its size
+    // and name, with the restore/close keys in the help line.
+    use crate::app::BackupEntry;
+    use crate::mode::BackupBrowser;
+    use std::time::{Duration, SystemTime};
+
+    let mut app = app_with("body\n");
+    let entry = |name: &str, size: u64, ago_secs: u64| BackupEntry {
+        name: name.into(),
+        path: std::path::PathBuf::from(name),
+        size,
+        modified: SystemTime::now() - Duration::from_secs(ago_secs),
+    };
+    app.mode = Mode::BackupBrowser(Box::new(BackupBrowser {
+        entries: vec![
+            entry("Book-2000-01-03-000000.zip", 3 * 1024 * 1024, 3600),
+            entry("Book-2000-01-01-000000.zip", 2048, 3 * 24 * 3600),
+        ],
+        selected: 0,
+    }));
+
+    let screen = render(&app, 90, 20);
+    assert!(
+        screen.contains("Backups (2)"),
+        "titled with the count:\n{screen}"
+    );
+    assert!(
+        screen.contains("3.0 MB") && screen.contains("2.0 KB"),
+        "human sizes shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Book-2000-01-03-000000.zip"),
+        "the archive name is listed:\n{screen}"
+    );
+    assert!(
+        screen.contains("enter restore") && screen.contains("esc close"),
+        "the restore/close keys are advertised:\n{screen}"
+    );
+}

@@ -311,6 +311,17 @@ impl App {
                     self.mode = closed;
                 }
             }
+            Pending::ConfirmRestoreBackup => {
+                if let KeyCode::Char('y' | 'Y') = key.code {
+                    // restore_pending_backup reopens the project (resetting the
+                    // mode) on success, or restores a resting mode itself on failure.
+                    self.restore_pending_backup();
+                } else {
+                    self.pending_restore_backup = None; // cancelled — drop the target
+                    self.mode = closed;
+                    self.message = Some("Restore cancelled.".into());
+                }
+            }
             Pending::ConfirmRecovery => match key.code {
                 KeyCode::Char('y' | 'Y' | 'r' | 'R') => {
                     self.mode = closed;

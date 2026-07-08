@@ -259,6 +259,7 @@ impl App {
             Action::ImportReviewComments => self.start_import_review_comments(),
             Action::ArchiveProject => self.start_archive_project(),
             Action::RestoreArchive => self.start_restore_archive(),
+            Action::BrowseBackups => self.open_backup_browser(),
             Action::StartSprint => self.start_sprint(),
             Action::StopSprint => self.stop_sprint(),
             Action::SwitchBook => self.open_book_switcher(),
