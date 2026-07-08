@@ -258,6 +258,23 @@ keystrokes that stay out of the way.
   copy). Findings surface in a **manuscript-health dashboard** — a one-screen
   overview grouped by kind (continuity, consistency, style, …); you can **export
   the findings list** to a file and **re-check every open finding** in one pass.
+  A finding corroborated across several passes is marked as **consensus**, and
+  **dismissing** one persists against its anchored span, so it stays dismissed
+  when you re-run. The same on-device semantic index powers analysis beyond Ask:
+  **find similar scenes** by meaning (jump to the scenes closest to a passage or
+  query), **echo / near-duplicate detection** (passages that read too much like
+  each other, surfaced as findings), and a **motif & character co-occurrence
+  report** (which motifs and characters recur, and where they appear together).
+  The incremental continuity and setting passes also pull their context from that
+  index — the passages that actually bear on the check — rather than a fixed
+  window. An author-written **research notebook** in the project can be cited by
+  the bibles, so a tracked fact traces back to a source you control. Run several
+  passes as a **durable, resumable queue** with per-pass progress that survives a
+  restart, and — opt-in — kick off a **background bible update** that rebuilds
+  the bibles from the full manuscript through Claude's asynchronous Message
+  Batches API (about 50% cheaper), returning immediately and reconciling the
+  finished result on a later launch or idle tick (`[ai] background-batch-update`,
+  off by default).
   Your hand-edits to
   the bible are ground truth on the next pass — **Browse story bible**
   (`bible:browse`, from the `Ctrl-K` menu) lists the files under `bible/`
@@ -298,10 +315,11 @@ keystrokes that stay out of the way.
 
 - **Run action** — **Ctrl-K** opens one menu listing every invokable action —
   save, each export, the progress and analysis reports, and the AI passes — and
-  runs the one you pick through the same path its own shortcut uses. An action
-  that can't run right now (an AI pass with AI off, an export from the continuous
-  view) stays listed with the reason. It's the single seam author workflows build
-  on to chain actions by name.
+  runs the one you pick through the same path its own shortcut uses. The menu is
+  decluttered: actions that simply don't apply in the current context are hidden
+  rather than listed as unavailable, and it **remembers group collapse state**
+  between sessions (a group you collapse stays collapsed, and reopens collapsed).
+  It's the single seam author workflows build on to chain actions by name.
 
 - **Workflows** — chain the actions you run together into one named routine.
   Define them in `config.toml` and run one with **Ctrl-X**:
@@ -598,6 +616,12 @@ by default; the keys (`enabled`, `interval_mins`, `local_enabled`,
 `local_interval_hours`, `local_keep`, `stale_warn_hours`) are in
 [`docs/configuration.md`](docs/configuration.md).
 
+Those local archives are browsable and restorable **in-app**: **Browse backups…**
+(in the Ctrl-K menu, or `backup:browse`) lists the archives Quill has kept for the
+project, and restoring one is a keystroke away. When you open a project and a
+newer local backup exists on disk, Quill offers to restore it, so a recovered copy
+is never more than a confirmation away.
+
 ### Smart typography
 
 A finished manuscript wants typographic punctuation, so Quill produces it as you
@@ -843,9 +867,10 @@ grouping and separate front/back word counts build on this in later work.)
 To write with your notes open, the browser opens files in a side pane: **o**
 opens the selected chapter beside the editor (compare two chapters), and **f**
 switches to the reference-file browser — the project's story bible (`bible/`) and
-loose notes — where **Enter** opens the chosen file in a side pane. A reference
-pane is a normal editor: **Ctrl-W w** focuses it to scroll or edit, **Ctrl-S**
-saves it to its own file, **Ctrl-W c** closes it.
+loose notes, **grouped** so a large set is easy to scan — where **Enter** opens
+the chosen file in a side pane. A reference pane is a normal editor: **Ctrl-W w**
+focuses it (or click it) to scroll or edit, drag the **divider** to resize it,
+**Ctrl-S** saves it to its own file, and **Ctrl-W c** (or Vim `:q`) closes it.
 
 In find (Ctrl-F): type to search the current chapter (case-insensitive,
 matches highlighted), **n / N** jump to the next / previous match, **r** start
@@ -924,6 +949,9 @@ delete the text it's pinned to and the note goes with it.
 An annotation is a thread, not a one-off: **reply** to one to add to the
 conversation, and **resolve** it when it's handled — the note stays on record but
 drops out of the way, so editorial back-and-forth lives on the annotation itself.
+When a manuscript comes back marked up by several reviewers, the list is built
+for triage: **sort** the notes, **filter** by reviewer or by status, and **jump
+to the next open one**, so a stack of comments is workable at a glance.
 
 Annotations also make the round trip through an editor. Export a **review copy**
 (the marked-up `.docx` from the `Ctrl-K` palette) and each annotation becomes a
