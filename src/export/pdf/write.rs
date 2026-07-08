@@ -8,8 +8,8 @@ use std::io::Write;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
+use super::draw::num;
 use super::font::{pdf_text_string, GidMap, ObjMap};
-use super::num;
 
 /// Build a FlateDecode-compressed stream object body: `<< /Filter /FlateDecode
 /// /Length N{extra} >>\nstream\n<zlib bytes>\nendstream`. `data` is the raw
