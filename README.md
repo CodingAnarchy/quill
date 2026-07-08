@@ -22,7 +22,9 @@ keystrokes that stay out of the way.
 - **Live stats** — word count and line position in the status bar.
 - **Markdown-aware editing** — incremental `tree-sitter` parse drives live
   syntax highlighting, soft-rendered emphasis (markers hidden until you edit a
-  span), and an in-chapter outline (Ctrl-O).
+  span), and an in-chapter outline (Ctrl-O). A scene break shows as a centered
+  typeset divider (revealed to its raw marks only with the cursor on the line),
+  with the paragraph after a break or a code block set flush-left.
 - **Preformatted blocks** — fence a block in ` ``` ` to set it apart verbatim:
   a log readout, transmission, letter, or any text whose line breaks and spacing
   should be preserved. It renders monospaced and unstyled in the editor and
@@ -56,7 +58,10 @@ keystrokes that stay out of the way.
   chapter pane.
 - **Inline annotations** — pin a margin-style note to a span of text ("check
   this date"); it's marked while editing, stays on its phrase as you revise, and
-  never appears in any export. Stored in a side file, listed and navigable.
+  never appears in a final export. Each note is a thread you can reply to and
+  resolve, and a marked-up review-copy `.docx` round-trips: export it, and an
+  editor's returned Word comments import back as annotations on the right spans.
+  Stored in a side file, listed and navigable.
 - **Chapter metadata** — set each chapter's status (draft / revised / final),
   a one-line summary, and POV character; stored as YAML front matter in the file
   (portable, and your other keys are preserved), with status shown in the pane.
@@ -581,6 +586,18 @@ git ignores. To bring one back, **Restore project from archive…** (or
 `archive:restore`) unpacks a `.zip` into a new folder and opens it — it refuses
 to overwrite an existing project, so a stray path can't clobber your work.
 
+For backups you don't have to remember, an opt-in `[backup]` table automates two
+kinds. A project under version control that points at a remote (Ctrl-V → **Set
+remote**) can push to it on a cadence in the background — an always-current
+off-site copy without a manual push, with the status bar reporting the last
+success or a failure to retry. Independently, Quill can keep **scheduled local
+archives** — the same `.zip`, written on a cadence to
+`~/.local/share/quill/backups/<project>/`, keeping the N most recent and pruning
+the rest, and warning you at open if the newest copy has gone stale. Both are off
+by default; the keys (`enabled`, `interval_mins`, `local_enabled`,
+`local_interval_hours`, `local_keep`, `stale_warn_hours`) are in
+[`docs/configuration.md`](docs/configuration.md).
+
 ### Smart typography
 
 A finished manuscript wants typographic punctuation, so Quill produces it as you
@@ -846,6 +863,8 @@ manuscript-wide replace rewrites each affected chapter file on disk, leaving
 front matter untouched, and reports how many occurrences changed and in how many
 chapters. Chapters are read one at a time, so a long series stays responsive.
 The single most common rename — a character or place, everywhere — is one pass.
+Project-wide find takes a regular expression, at parity with chapter find, so a
+pattern (not just a literal) can sweep the whole manuscript.
 
 ### Terminal keyboard support
 
@@ -901,14 +920,24 @@ their phrase as you edit around them — type before a note and it slides along;
 delete the text it's pinned to and the note goes with it.
 
 **Review annotations** (also in the palette) opens the chapter's notes as a list:
-**↑↓** to move, **Enter** to jump to one, **`d`** to delete (resolve) it, **Esc**
-to close.
+**↑↓** to move, **Enter** to jump to one, **`d`** to delete it, **Esc** to close.
+An annotation is a thread, not a one-off: **reply** to one to add to the
+conversation, and **resolve** it when it's handled — the note stays on record but
+drops out of the way, so editorial back-and-forth lives on the annotation itself.
+
+Annotations also make the round trip through an editor. Export a **review copy**
+(the marked-up `.docx` from the `Ctrl-K` palette) and each annotation becomes a
+Word comment anchored to its phrase; when the editor sends it back, **Import
+review copy** reads their comments straight back in as inline annotations on the
+exact spans they marked — so an editor's markup arrives as live notes, not a
+document to reconcile by hand.
 
 Annotations live in an `annotations.toml` side file at the project root, keyed by
-chapter — the chapter `.md` files stay clean, so **no export** (Markdown, Word,
-Scrivener, Vellum, EPUB) ever carries them. They work in both the single-chapter
-and continuous (`Ctrl-L`) views — in the continuous view a note is marked and
-anchored across the chapter window and saved back to the chapter that owns it.
+chapter — the chapter `.md` files stay clean, so **no final export** (Markdown,
+Word, Scrivener, Vellum, EPUB) ever carries them. They work in both the
+single-chapter and continuous (`Ctrl-L`) views — in the continuous view a note is
+marked and anchored across the chapter window and saved back to the chapter that
+owns it.
 
 ## Layout
 

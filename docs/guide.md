@@ -26,7 +26,10 @@ the cursor as one undoable edit. (Vim mode, if enabled, keeps its own bindings.)
 
 Markdown is understood as you write: emphasis (*italic*, **bold**) renders
 softly, with the markers hidden until you edit the span, and Ctrl-O toggles an
-in-chapter outline pane.
+in-chapter outline pane. A scene break renders as a centered typeset divider
+rather than its raw marks, revealed back to the marks only when the cursor is on
+that line; the paragraph after a break (or a code block) is set flush-left, the
+way the exports typeset a new scene.
 
 Fence a block in ``` to set it apart verbatim — a log readout, a transmission,
 a letter, anything whose line breaks and spacing should be preserved exactly. In
@@ -222,9 +225,11 @@ or diff the current manuscript against one to see everything that's changed sinc
 Quill guards your files against the ways they can go wrong quietly: an atomic save
 through a symlinked chapter replaces the real target rather than orphaning it; a
 project you open while another Quill already has it opens read-only (an advisory
-lock keeps two processes from racing writes and clobbering the shared sidecars);
-and a transient read error is told apart from an empty file, so a hiccup never
-zero-word-caches a chapter or wrongly offers recovery.
+lock keeps two processes from racing writes and clobbering the shared sidecars),
+while a lock left behind by a crashed or force-killed session is detected as
+stale and reclaimed automatically, so you're never locked out of your own
+project; and a transient read error is told apart from an empty file, so a hiccup
+never zero-word-caches a chapter or wrongly offers recovery.
 
 
 ARCHIVE & BACKUP
@@ -320,6 +325,12 @@ inline annotations (Ctrl-K "Annotate selection") — every other export strips t
 but the review copy turns each note into a Word comment anchored to the exact
 phrase you left it on, so your reader sees your questions in context. (Like the
 other exports, run it from the single-chapter view, not the continuous view.)
+
+When the review copy comes back marked up, "Import review copy" (also in the
+Ctrl-K menu) reads the returned .docx and turns your editor's Word comments into
+inline annotations, anchored to the exact phrase each one sits on — the round
+trip from export to editorial feedback, with the notes landing where you can act
+on them.
 
 The export menu also leads with "Set export style…" and "Preview style…". The
 designed exports (EPUB and print PDF) can be lightly styled, and you no longer

@@ -5,6 +5,71 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-07
+
+A collaboration- and safety-focused release. It closes the editorial loop —
+import a marked-up review copy so an editor's Word comments arrive as live
+annotations, then reply to and resolve those annotation threads without leaving
+Quill — and it takes the fear out of losing work: opt-in automatic backup to a
+Git remote on a cadence, opt-in scheduled local archives with retention, and
+automatic recovery of a stale project lock. Around that, the editor gains
+typeset scene-break dividers and regex in project-wide find, the offline AI
+gives a real answer on oversized full-book scans, and a documentation and
+tech-debt pass lands an authoritative configuration reference and splits the
+largest modules.
+
+### Added
+
+- **Import a marked-up review copy** — bring an editor's marked-up `.docx`
+  (the review copy Quill exports) back into the project so their Word comments
+  land as inline annotations anchored to the exact phrase, closing the
+  round-trip from export to editorial feedback.
+- **Annotation threads** — reply to an annotation and resolve it, so editorial
+  back-and-forth lives on the annotation itself rather than in a separate tool.
+- **Automatic backup to a Git remote** — opt in and Quill pushes the project to
+  a configured remote on a cadence in the background, so a working copy lives
+  off-machine without a manual step.
+- **Scheduled local backups** — opt in to automatic local archives on a cadence,
+  keeping the N most recent and pruning the rest.
+- **Automatic stale-lock recovery** — a project lock left behind by a crashed or
+  killed session is detected as stale and reclaimed automatically, instead of
+  forcing a manual unlock.
+- **Typeset scene-break dividers** — a scene break renders as a centered
+  divider in the editor (revealed as raw marks when the cursor is on the line),
+  with the following paragraph set flush-left after a break or a code block.
+- **Regex in project-wide find** — project-wide find gains regular-expression
+  search, at parity with chapter find.
+- **Authoritative configuration reference** — `docs/configuration.md` documents
+  every configuration key, with a drift-guard that keeps it in sync with the
+  code.
+
+### Changed
+
+- **Oversized offline full-book scans fold chapter-by-chapter** — when an
+  offline model can't fit the whole book, the full-book scan now folds the
+  analysis chapter by chapter on-device (or refuses with a clear message)
+  instead of failing with an opaque error.
+- **Configuration types consolidated** — the `[ai]` and `[image]` config data
+  moved into `config/`, single-sourcing the configuration model.
+- **Internal quality pass** — five oversized modules were split into cohesive
+  submodules (`project`, `ui/editor`, `buffer/tests`, `export/style`,
+  `frontmatter`).
+
+### Fixed
+
+- **Longest-sentences report** — the sentence splitter no longer fuses sentences
+  across a scene or paragraph break, and no longer leaks a closing quote onto
+  the next sentence.
+- **Continuous-view read** — a failed chapter read while reading in the
+  continuous view no longer strands the cursor at the boundary; it rewinds
+  instead.
+- **Onboarding + lock banner** — the read-only lock banner stays visible under
+  the first-run onboarding card instead of being hidden by it.
+- **Annotation remap** — remapping annotations across an edit burst is now
+  linear rather than O(edits × annotations).
+
+[0.5.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.5.0
+
 ## [0.4.0] - 2026-07-07
 
 A publishing- and reliability-focused release. It carries a book from draft to a
