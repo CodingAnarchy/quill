@@ -522,6 +522,11 @@ home = "~/Writing"
 Every project under that folder then appears in the browser, ready to open —
 no need to have opened it before. Without it, the browser just shows recents.
 
+Every setting in `config.toml` — this `[projects]` table, `[editor]`, `[theme]`,
+`[ai]`, `[image]`, `[snippets]`, and `[workflows]`/`[triggers]` — with its
+default, valid values, and an example, is documented in one place:
+[`docs/configuration.md`](docs/configuration.md).
+
 Renamed your book or series and want the folder to match? **Rename project
 folder** (in the Ctrl-K menu) moves the open project's directory without
 quitting: it's prefilled with the book title, so accepting it makes the folder
