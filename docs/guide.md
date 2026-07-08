@@ -246,6 +246,19 @@ point it at a .zip, then give it a new folder to unpack into. Quill reproduces
 the project there and opens it. It won't overwrite an existing project — pick an
 empty folder — so a stray path can never clobber work in progress.
 
+If the project is under version control and points at a remote (Ctrl-V →
+"Set remote"), Quill can keep that remote as an always-current off-site backup so
+you never have to remember to push. It's opt-in per project: add a [backup]
+section with enabled = true. By default it then pushes after each save; set
+interval_mins = N to also push at least every N minutes during a long session
+(and on_save = false to rely on the timer alone). The push runs in the background
+and never blocks editing; when it can't reach the remote — offline, a login
+problem, or the remote is ahead — the status bar says so and Quill retries on the
+next cadence rather than losing the attempt. Once a backup succeeds, the status
+bar shows how long ago ("git · backed up 2m ago"). With backup off (the default)
+or no remote set, nothing changes — the remote is only ever updated by an explicit
+Push.
+
 
 REPORTS
 

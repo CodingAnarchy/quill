@@ -322,6 +322,10 @@ impl App {
         // the next idle tick recomputes the count off-thread (#779), rather than
         // re-walking the tree on every idle burst.
         self.mark_vc_status_dirty();
+        // A save reached disk: note that an automatic off-site backup is owed
+        // (#887). Just sets a flag — the actual push is decided and spawned off the
+        // save path by the cadence hook, so a save never touches the network.
+        self.mark_backup_on_save();
         if !self.edit_dirty() {
             self.clear_recovery();
         }

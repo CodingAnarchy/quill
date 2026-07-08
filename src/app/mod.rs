@@ -41,6 +41,7 @@ mod api_keys;
 mod archive;
 mod assist;
 mod assistant;
+mod backup;
 mod bible_review;
 mod corkboard;
 mod dispatch;
@@ -322,6 +323,28 @@ pub struct App {
     /// moved on (or typed unsaved edits) skips the destructive reload rather than
     /// overwriting a now-active chapter's buffer from the just-pulled disk state.
     pull_origin: Option<PathBuf>,
+    /// Automatic off-site backup config (#887): the opt-in `[backup]` section,
+    /// layered per project. Drives whether a save / the timed cadence transparently
+    /// pushes to the remote. Off by default — no behavior change when disabled.
+    pub(crate) backup: crate::config::BackupConfig,
+    /// The in-flight automatic backup push (#887), on its own worker task so it
+    /// never collides with the author's manual push/pull (`vc_task`). Polled each
+    /// loop tick by [`App::poll_backup`].
+    backup_task: Task<backup::BackupOutcome>,
+    /// Whether a save has landed since the last backup, so the on-save trigger
+    /// owes a push (#887). Set on the post-save tail, cleared when a backup fires
+    /// (or is gated off for want of a remote); read by the cadence hook.
+    backup_pending: bool,
+    /// When the last automatic backup was *attempted* (#887) — the clock the timed
+    /// interval measures against and the reschedule point after a failure. Advanced
+    /// on every attempt, success or not, so a failed push waits out one interval
+    /// before retrying rather than hammering an offline remote every tick.
+    last_backup_attempt: std::time::Instant,
+    /// When the last backup *succeeded* (#887), so the author can see how current
+    /// the off-site copy is. `None` until the first success this session; only a
+    /// successful push stamps it, so a run of failures never claims the work is
+    /// backed up.
+    last_backup: Option<std::time::Instant>,
     /// A background local-model download (#382): `(model id, result)`, polled in
     /// the event loop so a multi-gigabyte fetch never blocks the editor.
     download_task: Task<(String, Result<(), String>)>,
@@ -580,6 +603,11 @@ impl App {
             ai_task: Task::idle(),
             vc_task: Task::idle(),
             pull_origin: None,
+            backup: crate::config::BackupConfig::load(),
+            backup_task: Task::idle(),
+            backup_pending: false,
+            last_backup_attempt: std::time::Instant::now(),
+            last_backup: None,
             download_task: Task::idle(),
             download_progress: None,
             downloaded_models: Vec::new(),

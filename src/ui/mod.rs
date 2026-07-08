@@ -700,12 +700,32 @@ fn ai_tag(app: &App) -> String {
 }
 
 /// Version-control indicator (#54/#132): a clean repo shows "git", an
-/// uncommitted one shows the changed-file count.
+/// uncommitted one shows the changed-file count. When automatic backup is on and
+/// has succeeded this session, a "backed up N ago" note (#887) tells the author
+/// how current the off-site copy is.
 fn vc_tag(app: &App) -> String {
-    match (app.under_vc, app.vc_changes) {
-        (false, _) => String::new(),
-        (true, 0) => " · git".into(),
+    let base = match (app.under_vc, app.vc_changes) {
+        (false, _) => return String::new(),
+        (true, 0) => " · git".to_string(),
         (true, n) => format!(" · git ●{n}"),
+    };
+    match app.last_backup_age() {
+        Some(age) => format!("{base} · backed up {}", backup_age_label(age)),
+        None => base,
+    }
+}
+
+/// A compact "how long ago the last backup succeeded" label (#887): seconds under
+/// a minute, then minutes, then hours — enough for the author to see the off-site
+/// copy is current without a precise timestamp cluttering the status bar.
+fn backup_age_label(age: std::time::Duration) -> String {
+    let secs = age.as_secs();
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else {
+        format!("{}h ago", secs / 3600)
     }
 }
 

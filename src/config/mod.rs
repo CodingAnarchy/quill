@@ -44,7 +44,9 @@ pub use load::load_section;
 pub use splice::{add_workflow, remove_value, set_values};
 pub use splice::{set_value, strip_value};
 pub use types::theme_name;
-pub use types::{load_snippets, load_theme, EditorConfig, GeneralConfig, ProjectsConfig, Snippet};
+pub use types::{
+    load_snippets, load_theme, BackupConfig, EditorConfig, GeneralConfig, ProjectsConfig, Snippet,
+};
 
 /// Quill's config directory: `$XDG_CONFIG_HOME/quill`, else `$HOME/.config/quill`.
 /// Home of the config file and other global state shared across projects (e.g.

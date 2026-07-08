@@ -436,7 +436,9 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         app.poll_ai();
         app.tick_sprint(); // end a writing sprint when its time is up (#299)
         app.tick_autosave(); // idle-timer autosave, when enabled (#409)
+        app.tick_backup(); // automatic off-site backup on its cadence, when enabled (#887)
         app.poll_assistant(); // advance the assistant pane's tool-use loop (#307)
+        app.poll_backup(); // surface a finished automatic backup (worker thread) (#887)
         app.poll_vc(); // surface a finished push/pull (worker thread) before drawing
         app.poll_model_download(); // surface a finished local-model download (#382)
         tui.draw(app)?;

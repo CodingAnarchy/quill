@@ -77,6 +77,74 @@ impl EditorConfig {
     }
 }
 
+/// The `[backup]` section (#887): opt-in, per-project automatic push to the
+/// configured Git remote, so the remote is an always-current off-site backup
+/// instead of a manual `git push` the author has to remember. Off by default;
+/// like every settings section it layers per project through `[quill.backup]`
+/// in the project's `book.toml`, so one book can back up automatically while the
+/// rest don't (#710).
+///
+/// The cadence has two independent triggers, either or both of which may be on
+/// once `enabled` is set:
+/// * `on_save` — push after a save lands (the buffer reached disk), so the remote
+///   tracks the author's saves.
+/// * `interval_mins` — push at least this often while the editor is open, catching
+///   a long session that saves rarely. `0` (the default) leaves the timed trigger
+///   off, so `on_save` alone drives backups.
+///
+/// With `enabled = false` (the default) nothing here has any effect; with it on
+/// but no remote configured, the hook is a no-op too — a backup needs somewhere
+/// to go.
+#[derive(Clone, Deserialize)]
+#[serde(default)]
+pub struct BackupConfig {
+    /// Whether automatic remote backup is on for this project (#887). Off by
+    /// default — with it off the remote is only ever updated by an explicit
+    /// push, exactly as before.
+    pub enabled: bool,
+    /// Push after a save reaches disk (#887). On by default *once `enabled` is
+    /// set*, so the common "back up whenever I save" case needs only
+    /// `enabled = true`; set `on_save = false` to rely on the timed interval
+    /// alone.
+    pub on_save: bool,
+    /// Push at least this often, in minutes, while the editor is open (#887) —
+    /// the cadence that catches a long session with few saves. `0` (the default)
+    /// leaves the timed trigger off; `on_save` still applies.
+    pub interval_mins: u64,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            on_save: true,
+            interval_mins: 0,
+        }
+    }
+}
+
+impl BackupConfig {
+    /// Load the `[backup]` section, layering the open project's `[quill.backup]`
+    /// override over the global config (#887/#710). Best-effort: a missing or
+    /// unreadable file yields the defaults (backup off).
+    pub fn load() -> Self {
+        load_section("backup")
+    }
+
+    /// Whether a save should trigger a backup: only when backup is enabled and
+    /// the on-save trigger is on (#887).
+    pub const fn backs_up_on_save(&self) -> bool {
+        self.enabled && self.on_save
+    }
+
+    /// The timed backup cadence, if enabled and a positive interval is set (#887).
+    /// `None` when backup is off or `interval_mins` is `0` (the timed trigger off).
+    pub fn interval(&self) -> Option<std::time::Duration> {
+        (self.enabled && self.interval_mins > 0)
+            .then(|| std::time::Duration::from_secs(self.interval_mins * 60))
+    }
+}
+
 /// The `[general]` section (#837): app-level flags that aren't editor behavior,
 /// a theme, or a project setting. Today it carries only the first-run marker.
 #[derive(Clone, Deserialize, Default)]
@@ -295,5 +363,67 @@ mod tests {
     #[test]
     fn no_projects_home_is_none() {
         assert_eq!(ProjectsConfig::default().home_dir(), None);
+    }
+
+    #[test]
+    fn backup_is_off_by_default() {
+        let cfg = BackupConfig::default();
+        assert!(!cfg.enabled, "backup is off by default (#887)");
+        assert!(
+            !cfg.backs_up_on_save(),
+            "no on-save backup while disabled, even though on_save defaults true"
+        );
+        assert_eq!(cfg.interval(), None, "no timed cadence while disabled");
+    }
+
+    #[test]
+    fn enabling_backup_opts_into_on_save_by_default() {
+        // `enabled = true` alone gives the common "back up whenever I save" case:
+        // on_save defaults on, the timed interval stays off (#887).
+        let cfg: BackupConfig = toml::from_str("enabled = true").unwrap();
+        assert!(
+            cfg.backs_up_on_save(),
+            "on_save is on by default once enabled"
+        );
+        assert_eq!(
+            cfg.interval(),
+            None,
+            "timed cadence off until interval_mins is set"
+        );
+    }
+
+    #[test]
+    fn on_save_can_be_opted_out_while_a_timed_interval_drives_backups() {
+        let cfg: BackupConfig =
+            toml::from_str("enabled = true\non_save = false\ninterval_mins = 15").unwrap();
+        assert!(!cfg.backs_up_on_save(), "on_save explicitly off");
+        assert_eq!(
+            cfg.interval(),
+            Some(std::time::Duration::from_secs(15 * 60)),
+            "the timed interval is minutes → a duration"
+        );
+    }
+
+    #[test]
+    fn a_zero_interval_leaves_the_timed_trigger_off() {
+        let cfg: BackupConfig = toml::from_str("enabled = true\ninterval_mins = 0").unwrap();
+        assert_eq!(
+            cfg.interval(),
+            None,
+            "interval_mins = 0 is the timed trigger off"
+        );
+    }
+
+    #[test]
+    fn a_disabled_project_gates_off_a_set_interval() {
+        // Even a positive interval yields no cadence while backup is disabled — the
+        // whole feature is opt-in behind `enabled` (#887).
+        let cfg = BackupConfig {
+            enabled: false,
+            on_save: true,
+            interval_mins: 30,
+        };
+        assert_eq!(cfg.interval(), None);
+        assert!(!cfg.backs_up_on_save());
     }
 }
