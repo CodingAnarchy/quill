@@ -869,6 +869,27 @@ impl App {
         }
     }
 
+    /// Open the project's custom dictionary in a reference pane to view and edit it
+    /// (#935): the accepted-word list (`dictionary.txt`, one word per line) as a
+    /// plain editable buffer beside the manuscript. Editing and saving it there is
+    /// how the author removes a word or fixes a typo'd entry; closing the pane
+    /// reloads the checker's in-memory set (`close_split_if_any`), so the change
+    /// takes effect without reopening the project. The reload stays off the idle
+    /// spell pass — it fires only when this pane closes, never per tick.
+    pub(crate) fn view_dictionary(&mut self) {
+        let path = self.project.dictionary_path();
+        self.open_file_in_pane(path);
+        // `open_file_in_pane` set its own message; only override it when the pane
+        // actually opened, so an error (e.g. a continuous view in the way) shows.
+        if self.split.is_some() {
+            self.message = Some(
+                "Editing the project dictionary — one word per line; \
+                 Ctrl-w c closes and reloads it."
+                    .into(),
+            );
+        }
+    }
+
     /// The flagged misspelling at (or nearest before) the cursor: the flag the
     /// cursor sits inside, or — right after typing the word — the one it rests just
     /// after. `None` when the cursor isn't on a flag. Shared by the accept (#358)

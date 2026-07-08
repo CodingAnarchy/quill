@@ -51,6 +51,93 @@ fn accepting_a_flagged_word_clears_it_and_persists() {
 }
 
 #[test]
+fn accepted_words_survive_a_reload_and_others_still_flag() {
+    // The acceptance criterion end to end (#935): accept a word, reopen the
+    // project (a fresh App on the same dir), and it's no longer flagged — while a
+    // different invented word still is, and real prose stays clean.
+    let (mut app, dir) = two_chapter_app("spell-persist");
+    app.buffer = Buffer::from_text("Vashti walked on");
+    app.on_idle();
+    let (s, _) = app.spell_flags[0];
+    app.buffer.cursor = app.buffer.cursor_at_byte(s);
+    app.accept_word_at_cursor();
+    assert!(app.spell_flags.is_empty(), "accepted word clears now");
+
+    // Reopen: the persisted word loads from disk, so it isn't re-flagged.
+    let mut reopened = open_test_app(&dir);
+    reopened.buffer = Buffer::from_text("Vashti met Aerendil");
+    reopened.on_idle();
+    assert_eq!(
+        reopened.spell_flags.len(),
+        1,
+        "the accepted 'Vashti' stays clear; the unaccepted 'Aerendil' is flagged: {:?}",
+        reopened.spell_flags
+    );
+    let (s, e) = reopened.spell_flags[0];
+    assert_eq!(&reopened.buffer.text()[s..e], "Aerendil");
+
+    reopened.buffer = Buffer::from_text("the quick brown fox");
+    reopened.on_idle();
+    assert!(
+        reopened.spell_flags.is_empty(),
+        "bundled behavior unchanged"
+    );
+}
+
+#[test]
+fn viewing_the_dictionary_opens_it_in_a_pane() {
+    let (mut app, _dir) = two_chapter_app("spell-view");
+    app.view_dictionary();
+    let path = app.project.dictionary_path();
+    let opened = match app.split_view() {
+        Some(SplitView {
+            content: SplitContent::Editor(other),
+            ..
+        }) => other.path.as_deref() == Some(path.as_path()),
+        _ => false,
+    };
+    assert!(opened, "the dictionary file opens in an editor pane");
+}
+
+#[test]
+fn editing_the_dictionary_pane_reloads_the_checker_on_close() {
+    // Editing the dictionary in its pane and closing it takes effect without a
+    // reopen (#935): a word added in the pane clears the flag right away.
+    let (mut app, _dir) = two_chapter_app("spell-edit-pane");
+    app.buffer = Buffer::from_text("Aerendil sailed");
+    app.on_idle();
+    assert_eq!(app.spell_flags.len(), 1, "the name is flagged first");
+
+    // Open the dictionary pane, focus it, add the word, save, then close.
+    app.view_dictionary();
+    app.on_key(ctrl('w')); // focus the dictionary pane
+    app.on_key(key(KeyCode::Char('w')));
+    type_str(&mut app, "Aerendil\n");
+    app.on_key(ctrl('s')); // write dictionary.txt
+                           // Switch focus back to the manuscript, then close the dictionary pane so the
+                           // close reloads the checker (the real path: edit the list, return to writing).
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char('w')));
+    app.on_key(ctrl('w')); // Ctrl-w c closes the pane → reload + refresh
+    app.on_key(key(KeyCode::Char('c')));
+    assert!(app.split_view().is_none(), "the pane closed");
+
+    // The edit reloaded into the checker without a project reopen, so a fresh
+    // spell pass over prose using the word no longer flags it.
+    assert!(
+        app.project.is_accepted("Aerendil"),
+        "the edit reloaded into the checker"
+    );
+    app.buffer = Buffer::from_text("Aerendil sailed");
+    app.on_idle();
+    assert!(
+        app.spell_flags.is_empty(),
+        "the newly accepted word is no longer flagged: {:?}",
+        app.spell_flags
+    );
+}
+
+#[test]
 fn accepting_with_no_flag_at_the_cursor_says_so() {
     let (mut app, _dir) = two_chapter_app("spell-noflag");
     app.buffer = Buffer::from_text("all real words here");

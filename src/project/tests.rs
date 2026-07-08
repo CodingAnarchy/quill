@@ -72,6 +72,32 @@ fn accepting_a_word_preserves_existing_dictionary_entries() {
     fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn reload_dictionary_picks_up_an_external_edit() {
+    // The in-app view/edit path (#935) writes `dictionary.txt` directly, then asks
+    // the project to re-read it. `reload_dictionary` reflects an added word and
+    // drops a removed one, without reopening the project.
+    let dir = temp_dir("dict-reload");
+    let mut p = Project::create(&dir).unwrap();
+    assert!(p.dictionary.is_empty());
+
+    // A hand-edit adds two words at the dictionary path the app exposes.
+    fs::write(p.dictionary_path(), "Vashti\nAerendil\n").unwrap();
+    assert!(!p.is_accepted("Vashti"), "not yet loaded");
+    p.reload_dictionary();
+    assert!(
+        p.is_accepted("Vashti") && p.is_accepted("Aerendil"),
+        "the external edit loaded"
+    );
+
+    // Removing a word from the file and reloading drops it from the set.
+    fs::write(p.dictionary_path(), "Vashti\n").unwrap();
+    p.reload_dictionary();
+    assert!(p.is_accepted("Vashti"));
+    assert!(!p.is_accepted("Aerendil"), "the removed word is gone");
+    fs::remove_dir_all(&dir).ok();
+}
+
 /// Write an `n`-chapter project corpus (each chapter has front matter and a
 /// ~2.7 KB body) under `dir`, returning the manifest text for the caller to
 /// write. Shared by the open-performance guards.
