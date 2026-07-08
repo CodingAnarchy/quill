@@ -8,15 +8,31 @@
 //! `cargo test` never touches the network.
 
 use super::*;
-use crate::config::BackupConfig;
-use std::time::Instant;
+use crate::config::{self, BackupConfig};
+use std::fs;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
-/// A backup config with the given knobs, saving a few lines per test.
+/// A backup config with the given remote-push knobs, saving a few lines per test.
+/// The local-archive fields (#888) stay at their defaults (off), so these #887
+/// tests exercise the remote push alone.
 fn cfg(enabled: bool, on_save: bool, interval_mins: u64) -> BackupConfig {
     BackupConfig {
         enabled,
         on_save,
         interval_mins,
+        ..Default::default()
+    }
+}
+
+/// A backup config that turns *local* archive backups on with the given hourly
+/// interval and retention count (#888); the remote push stays off.
+fn local_cfg(interval_hours: u64, keep: usize) -> BackupConfig {
+    BackupConfig {
+        local_enabled: true,
+        local_interval_hours: interval_hours,
+        local_keep: keep,
+        ..Default::default()
     }
 }
 
@@ -250,4 +266,207 @@ fn the_status_bar_shows_the_last_backup_once_one_succeeds() {
         after.contains("backed up"),
         "a succeeded backup shows in the status bar:\n{after}"
     );
+}
+
+// --- Scheduled local archive backups (#888) -------------------------------
+//
+// Hermetic (#531): the data dir is pointed at a scratch folder via `set_data_dir`,
+// so archives land there and never the developer's real `~/.local/share`. The
+// cadence is driven with an injected clock; a run writes a real (small) zip so the
+// archive + prune path is exercised end to end, no wall-clock and no network.
+
+/// Count the `.zip` archives directly under `dir` (an absent dir is zero).
+fn zip_count(dir: &Path) -> usize {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "zip"))
+        .count()
+}
+
+#[test]
+fn local_backup_off_by_default_never_fires() {
+    // The default config leaves local backups off: the cadence hook spawns nothing
+    // and nothing is written, exactly as before (#888).
+    let (mut app, _dir) = two_chapter_app("local-off");
+    let data = app_scratch_dir("local-off-data");
+    config::set_data_dir(Some(data.clone()));
+
+    app.age_local_backup_clock_for_test(60 * 60 * 24 * 7); // a week idle
+    assert!(
+        !app.local_backup_due_for_test(Instant::now()),
+        "no local cadence while disabled"
+    );
+    app.tick_local_backup();
+    let bdir = config::backups_dir(&app.project.root).unwrap();
+    assert!(!bdir.exists() || zip_count(&bdir) == 0, "nothing archived");
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn the_local_interval_becomes_due_only_after_it_elapses() {
+    let (mut app, _dir) = two_chapter_app("local-due");
+    app.backup = local_cfg(6, 5); // every 6 hours
+
+    app.age_local_backup_clock_for_test(0);
+    assert!(
+        !app.local_backup_due_for_test(Instant::now()),
+        "not due right after an attempt"
+    );
+    app.age_local_backup_clock_for_test(6 * 3600 - 60);
+    assert!(
+        !app.local_backup_due_for_test(Instant::now()),
+        "not due just before the interval"
+    );
+    app.age_local_backup_clock_for_test(6 * 3600 + 60);
+    assert!(
+        app.local_backup_due_for_test(Instant::now()),
+        "due once the interval has elapsed"
+    );
+}
+
+#[test]
+fn a_due_local_backup_writes_a_zip_and_stamps_the_time() {
+    let (mut app, _dir) = two_chapter_app("local-writes");
+    app.backup = local_cfg(6, 5);
+    let data = app_scratch_dir("local-writes-data");
+    config::set_data_dir(Some(data.clone()));
+    let bdir = config::backups_dir(&app.project.root).unwrap();
+
+    assert!(
+        !app.has_backed_up_locally_for_test(),
+        "no local backup yet at session start"
+    );
+    let out = app.run_local_backup_for_test(&bdir, Some(5));
+    let path = out.expect("the archive is written");
+    assert!(path.exists(), "the zip is on disk: {}", path.display());
+    assert_eq!(zip_count(&bdir), 1, "exactly one archive");
+    assert!(
+        app.has_backed_up_locally_for_test(),
+        "a successful archive stamps the last-local-backup time"
+    );
+    assert!(app.last_local_backup_age().is_some());
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn retention_prunes_older_archives_to_the_keep_count() {
+    // Several archives already in the backups dir, then a new backup: pruning keeps
+    // only the newest `keep` (#888). Names sort by timestamp, so seeding numbered
+    // names stands in for successive backups.
+    let (mut app, _dir) = two_chapter_app("local-prune");
+    app.backup = local_cfg(6, 3); // keep 3
+    let data = app_scratch_dir("local-prune-data");
+    config::set_data_dir(Some(data.clone()));
+    let bdir = config::backups_dir(&app.project.root).unwrap();
+    fs::create_dir_all(&bdir).unwrap();
+    // Four older archives; their names sort before the fresh timestamped one.
+    for name in [
+        "Book-2000-01-01-000000.zip",
+        "Book-2000-01-02-000000.zip",
+        "Book-2000-01-03-000000.zip",
+        "Book-2000-01-04-000000.zip",
+    ] {
+        fs::write(bdir.join(name), b"old").unwrap();
+    }
+    assert_eq!(zip_count(&bdir), 4, "seeded four old archives");
+
+    app.run_local_backup_for_test(&bdir, Some(3))
+        .expect("archived");
+    assert_eq!(
+        zip_count(&bdir),
+        3,
+        "pruned to the retention count of 3 (the newest kept)"
+    );
+    // The newest seeded archive survives; the oldest is gone.
+    assert!(
+        !bdir.join("Book-2000-01-01-000000.zip").exists(),
+        "the oldest was pruned"
+    );
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn zero_retention_keeps_every_archive() {
+    // `local_keep = 0` disables pruning — every archive is kept rather than all
+    // being deleted (#888).
+    let (mut app, _dir) = two_chapter_app("local-keep-all");
+    app.backup = local_cfg(6, 0);
+    let data = app_scratch_dir("local-keep-all-data");
+    config::set_data_dir(Some(data.clone()));
+    let bdir = config::backups_dir(&app.project.root).unwrap();
+    fs::create_dir_all(&bdir).unwrap();
+    for name in ["Book-2000-01-01-000000.zip", "Book-2000-01-02-000000.zip"] {
+        fs::write(bdir.join(name), b"old").unwrap();
+    }
+
+    app.run_local_backup_for_test(&bdir, app.backup.local_retention())
+        .expect("archived");
+    assert_eq!(
+        zip_count(&bdir),
+        3,
+        "the two seeded plus the new one — nothing pruned"
+    );
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+#[test]
+fn a_stale_last_backup_warns_on_open() {
+    // Local backups on, and the newest archive is older than the stale window: the
+    // warning fires. A recent archive is silent (#888). Driven by backdating the
+    // archive's mtime so there's no wall-clock wait.
+    let (app, dir) = two_chapter_app("local-stale");
+    let data = app_scratch_dir("local-stale-data");
+    config::set_data_dir(Some(data.clone()));
+    let bdir = config::backups_dir(&app.project.root).unwrap();
+    fs::create_dir_all(&bdir).unwrap();
+    let archive = bdir.join("Book-2000-01-01-000000.zip");
+    fs::write(&archive, b"old").unwrap();
+    // Backdate the archive's mtime two days into the past.
+    let two_days_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
+    filetime_set(&archive, two_days_ago);
+
+    // Rebuild the app so it re-reads the (now stale) backups dir on open. Local
+    // backups on with the default 24h stale window.
+    let mut app = open_app(&dir);
+    app.backup = local_cfg(6, 5); // local_enabled, default stale_warn_hours = 24
+    let warn = app.stale_local_backup_warning();
+    assert!(
+        warn.as_deref().unwrap_or("").contains("stale"),
+        "a two-day-old archive past the 24h window warns: {warn:?}"
+    );
+
+    // A fresh archive (now) is not stale.
+    filetime_set(&archive, std::time::SystemTime::now());
+    assert!(
+        app.stale_local_backup_warning().is_none(),
+        "a just-written archive doesn't warn"
+    );
+    // And with local backups off, no warning regardless.
+    app.backup = BackupConfig::default();
+    assert!(
+        app.stale_local_backup_warning().is_none(),
+        "no warning when local backups are off"
+    );
+
+    config::set_data_dir(None);
+    fs::remove_dir_all(&data).ok();
+}
+
+/// Set a file's mtime by rewriting it and touching via a fresh handle — the test
+/// backdates an archive to exercise the staleness window without waiting real days.
+/// Uses `filetime` if available, else a best-effort re-open; here we set it through
+/// the standard library's `set_modified` (stable since 1.75).
+fn filetime_set(path: &Path, when: std::time::SystemTime) {
+    let f = fs::OpenOptions::new().write(true).open(path).unwrap();
+    f.set_modified(when).unwrap();
 }

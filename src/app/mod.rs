@@ -345,6 +345,19 @@ pub struct App {
     /// successful push stamps it, so a run of failures never claims the work is
     /// backed up.
     last_backup: Option<std::time::Instant>,
+    /// The in-flight scheduled *local* archive (#888), on its own worker task so a
+    /// zip never blocks the UI and never collides with the remote push (`backup_task`).
+    /// Polled each loop tick by [`App::poll_local_backup`].
+    local_backup_task: Task<backup::LocalBackupOutcome>,
+    /// When the last local archive was *attempted* (#888) — the clock the local
+    /// hourly interval measures against and the reschedule point after a failure.
+    /// Advanced on every attempt so a failing archive waits out one interval before
+    /// retrying rather than hammering the disk every tick.
+    last_local_backup_attempt: std::time::Instant,
+    /// When the last local archive *succeeded* this session (#888), so the author
+    /// can see how current the on-disk copy is. `None` until the first success;
+    /// only a successful archive stamps it.
+    last_local_backup: Option<std::time::Instant>,
     /// A background local-model download (#382): `(model id, result)`, polled in
     /// the event loop so a multi-gigabyte fetch never blocks the editor.
     download_task: Task<(String, Result<(), String>)>,
@@ -608,6 +621,9 @@ impl App {
             backup_pending: false,
             last_backup_attempt: std::time::Instant::now(),
             last_backup: None,
+            local_backup_task: Task::idle(),
+            last_local_backup_attempt: std::time::Instant::now(),
+            last_local_backup: None,
             download_task: Task::idle(),
             download_progress: None,
             downloaded_models: Vec::new(),
@@ -674,6 +690,12 @@ impl App {
         }
         if !snippet_errors.is_empty() {
             warnings.push(format!("Snippets ignored: {}", snippet_errors.join("; ")));
+        }
+        // A stale scheduled-local-backup warning (#888): if local backups are on but
+        // the newest archive is older than the configured window, say so on open so
+        // the author knows their exposure. Best-effort — off when disabled or recent.
+        if let Some(stale) = app.stale_local_backup_warning() {
+            warnings.push(stale);
         }
         if !warnings.is_empty() {
             app.message = Some(warnings.join(" · "));

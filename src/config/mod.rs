@@ -131,6 +131,68 @@ pub fn config_path() -> Option<PathBuf> {
     Some(config_dir()?.join("config.toml"))
 }
 
+/// Quill's data directory: `$XDG_DATA_HOME/quill`, else `$HOME/.local/share/quill`
+/// (#888). Distinct from [`config_dir`] — this holds generated, machine-local data
+/// (the scheduled local archive backups) rather than the user's settings, matching
+/// the XDG split of config vs. data.
+///
+/// In test builds this is hermetic like [`config_dir`] (#528): it returns a
+/// per-thread override (default `None`) instead of the developer's real
+/// `~/.local/share`, so no test writes to the machine's data dir. A test that
+/// exercises backups points it at a temp dir via [`set_data_dir`].
+pub fn data_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        TEST_DATA_DIR.with(|c| c.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        resolve_data_dir(std::env::var_os("XDG_DATA_HOME"), std::env::var_os("HOME"))
+    }
+}
+
+/// The data dir from the raw `$XDG_DATA_HOME` / `$HOME` values: XDG wins, else
+/// `$HOME/.local/share`, else nothing. Pure, so the production resolution stays
+/// unit-tested even though [`data_dir`] is hermetically stubbed in tests (#888).
+#[cfg_attr(test, allow(dead_code))]
+fn resolve_data_dir(xdg: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let base = xdg
+        .map(PathBuf::from)
+        .or_else(|| home.map(|h| PathBuf::from(h).join(".local").join("share")))?;
+    Some(base.join("quill"))
+}
+
+/// The directory holding a project's scheduled local archive backups (#888):
+/// `<data_dir>/backups/<project-folder-name>`. `None` when no data dir resolves
+/// (no `$HOME`, or hermetically stubbed off in tests). The project's own folder
+/// name keys the subdirectory so each book's archives stay separate; an oddly
+/// named root falls back to `project`.
+pub fn backups_dir(project_root: &std::path::Path) -> Option<PathBuf> {
+    let name = project_root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "project".into());
+    Some(data_dir()?.join("backups").join(name))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Per-test override for [`data_dir`] (#888) — mirrors [`TEST_CONFIG_DIR`], so
+    /// backup tests write to a scratch dir and never the developer's real
+    /// `~/.local/share`. Per-thread for the parallel suite.
+    static TEST_DATA_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Point [`data_dir`] resolution at `dir` (or clear it with `None`) for the current
+/// test thread (#888). Test-only; production resolves from `$XDG_DATA_HOME` /
+/// `$HOME`.
+#[cfg(test)]
+pub fn set_data_dir(dir: Option<PathBuf>) {
+    TEST_DATA_DIR.with(|c| *c.borrow_mut() = dir);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +230,35 @@ mod tests {
         assert_eq!(config_path(), Some(dir.join("config.toml")));
         set_config_dir(None);
         assert_eq!(config_dir(), None, "cleared back to hermetic default");
+    }
+
+    #[test]
+    fn production_data_dir_prefers_xdg_then_home_local_share() {
+        // `data_dir` is stubbed in tests, so cover the real resolver directly (#888).
+        assert_eq!(
+            resolve_data_dir(Some("/x".into()), Some("/h".into())),
+            Some(PathBuf::from("/x/quill"))
+        );
+        assert_eq!(
+            resolve_data_dir(None, Some("/h".into())),
+            Some(PathBuf::from("/h/.local/share/quill"))
+        );
+        assert_eq!(resolve_data_dir(None, None), None);
+    }
+
+    #[test]
+    fn data_dir_is_hermetic_by_default_and_backups_dir_keys_by_project() {
+        assert_eq!(data_dir(), None, "no real ~/.local/share is read in tests");
+        let dir = std::env::temp_dir().join("quill-data-hermetic-test");
+        set_data_dir(Some(dir.clone()));
+        assert_eq!(data_dir(), Some(dir.clone()));
+        // A project's backups dir keys off the project folder name.
+        assert_eq!(
+            backups_dir(std::path::Path::new("/tmp/My Novel")),
+            Some(dir.join("backups").join("My Novel"))
+        );
+        set_data_dir(None);
+        assert_eq!(data_dir(), None, "cleared back to hermetic default");
+        assert_eq!(backups_dir(std::path::Path::new("/tmp/x")), None);
     }
 }

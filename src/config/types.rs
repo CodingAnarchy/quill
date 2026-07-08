@@ -77,24 +77,43 @@ impl EditorConfig {
     }
 }
 
-/// The `[backup]` section (#887): opt-in, per-project automatic push to the
-/// configured Git remote, so the remote is an always-current off-site backup
-/// instead of a manual `git push` the author has to remember. Off by default;
-/// like every settings section it layers per project through `[quill.backup]`
-/// in the project's `book.toml`, so one book can back up automatically while the
-/// rest don't (#710).
+/// The default number of local archives to keep per project (#888) once local
+/// backups are on: the most-recent few, enough to roll back a mistake without a
+/// backups folder growing without bound. Older archives past this count are
+/// pruned after each new one lands.
+const DEFAULT_LOCAL_KEEP: usize = 5;
+
+/// The default stale-backup warning window in hours (#888): open a project whose
+/// newest local archive is older than this and the browser/status warns the copy
+/// is stale. A day is long enough not to nag between sessions, short enough that
+/// a real gap is caught.
+const DEFAULT_STALE_WARN_HOURS: u64 = 24;
+
+/// The `[backup]` section (#887/#888): opt-in automatic backup, per project. Two
+/// independent stories share the one section — an off-site push to the configured
+/// Git remote (#887) and a local timestamped `.zip` archive cadence (#888) — so a
+/// book can have either, both, or neither. Off by default; like every settings
+/// section it layers per project through `[quill.backup]` in the project's
+/// `book.toml`, so one book can back up automatically while the rest don't (#710).
 ///
-/// The cadence has two independent triggers, either or both of which may be on
-/// once `enabled` is set:
+/// The remote push has two independent triggers, either or both of which may be
+/// on once `enabled` is set:
 /// * `on_save` — push after a save lands (the buffer reached disk), so the remote
 ///   tracks the author's saves.
 /// * `interval_mins` — push at least this often while the editor is open, catching
 ///   a long session that saves rarely. `0` (the default) leaves the timed trigger
 ///   off, so `on_save` alone drives backups.
 ///
-/// With `enabled = false` (the default) nothing here has any effect; with it on
-/// but no remote configured, the hook is a no-op too — a backup needs somewhere
-/// to go.
+/// The local archive cadence (#888) is gated behind its own `local_enabled` flag,
+/// independent of `enabled`: it needs no remote (or even a git repo), just a
+/// backups directory, so it protects prose off-network. `local_interval_hours`
+/// sets how often it archives; `local_keep` how many recent archives to keep; and
+/// `stale_warn_hours` the window past which an author is warned on open that their
+/// last local backup is old.
+///
+/// With everything off (the default) nothing here has any effect; with the remote
+/// push on but no remote configured, that hook is a no-op too — a push needs
+/// somewhere to go.
 #[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct BackupConfig {
@@ -111,6 +130,23 @@ pub struct BackupConfig {
     /// the cadence that catches a long session with few saves. `0` (the default)
     /// leaves the timed trigger off; `on_save` still applies.
     pub interval_mins: u64,
+    /// Whether scheduled *local* archive backups are on for this project (#888).
+    /// Off by default and independent of `enabled` (the remote push): a local
+    /// snapshot needs no network, so it's opted into on its own.
+    pub local_enabled: bool,
+    /// Archive the project to the backups directory at least this often, in hours,
+    /// while the editor is open (#888). `0` (the default) leaves the local cadence
+    /// off even when `local_enabled` is set — a belt-and-braces guard against a
+    /// zero-interval hammering the disk.
+    pub local_interval_hours: u64,
+    /// How many recent local archives to keep per project (#888); older ones are
+    /// pruned after each new archive lands. Defaults to [`DEFAULT_LOCAL_KEEP`]; a
+    /// `0` disables pruning (keep everything) rather than deleting all backups.
+    pub local_keep: usize,
+    /// Warn on open when the newest local archive is older than this many hours
+    /// (#888). Defaults to [`DEFAULT_STALE_WARN_HOURS`]; `0` turns the staleness
+    /// warning off.
+    pub stale_warn_hours: u64,
 }
 
 impl Default for BackupConfig {
@@ -119,6 +155,10 @@ impl Default for BackupConfig {
             enabled: false,
             on_save: true,
             interval_mins: 0,
+            local_enabled: false,
+            local_interval_hours: 0,
+            local_keep: DEFAULT_LOCAL_KEEP,
+            stale_warn_hours: DEFAULT_STALE_WARN_HOURS,
         }
     }
 }
@@ -142,6 +182,28 @@ impl BackupConfig {
     pub fn interval(&self) -> Option<std::time::Duration> {
         (self.enabled && self.interval_mins > 0)
             .then(|| std::time::Duration::from_secs(self.interval_mins * 60))
+    }
+
+    /// The scheduled local-archive cadence, if local backups are on and a positive
+    /// hourly interval is set (#888). `None` when `local_enabled` is off or
+    /// `local_interval_hours` is `0` — either leaves the local cadence off.
+    pub fn local_interval(&self) -> Option<std::time::Duration> {
+        (self.local_enabled && self.local_interval_hours > 0)
+            .then(|| std::time::Duration::from_secs(self.local_interval_hours * 3600))
+    }
+
+    /// How many local archives to keep per project (#888): `None` when pruning is
+    /// off (`local_keep == 0`, keep everything), else the retention count.
+    pub fn local_retention(&self) -> Option<usize> {
+        (self.local_keep > 0).then_some(self.local_keep)
+    }
+
+    /// The staleness window past which a local backup is considered old (#888):
+    /// `None` when the warning is off (`stale_warn_hours == 0`), else the window as
+    /// a duration. Used on open to warn the author their last backup is old.
+    pub fn stale_after(&self) -> Option<std::time::Duration> {
+        (self.stale_warn_hours > 0)
+            .then(|| std::time::Duration::from_secs(self.stale_warn_hours * 3600))
     }
 }
 
@@ -420,10 +482,79 @@ mod tests {
         // whole feature is opt-in behind `enabled` (#887).
         let cfg = BackupConfig {
             enabled: false,
-            on_save: true,
             interval_mins: 30,
+            ..Default::default()
         };
         assert_eq!(cfg.interval(), None);
         assert!(!cfg.backs_up_on_save());
+    }
+
+    #[test]
+    fn local_backups_are_off_by_default() {
+        let cfg = BackupConfig::default();
+        assert!(!cfg.local_enabled, "local backups off by default (#888)");
+        assert_eq!(cfg.local_interval(), None, "no local cadence while off");
+        // The remote push and the local cadence are independent: enabling the
+        // remote must not turn on the local archive.
+        let remote_only: BackupConfig = toml::from_str("enabled = true").unwrap();
+        assert!(
+            !remote_only.local_enabled,
+            "enabling the remote push leaves local backups off"
+        );
+        assert_eq!(remote_only.local_interval(), None);
+    }
+
+    #[test]
+    fn enabling_local_backups_needs_a_positive_interval() {
+        // `local_enabled` alone isn't a cadence — a positive `local_interval_hours`
+        // is what schedules archives (#888).
+        let no_interval: BackupConfig = toml::from_str("local_enabled = true").unwrap();
+        assert_eq!(
+            no_interval.local_interval(),
+            None,
+            "local_enabled with no interval is still off"
+        );
+        let cfg: BackupConfig =
+            toml::from_str("local_enabled = true\nlocal_interval_hours = 6").unwrap();
+        assert_eq!(
+            cfg.local_interval(),
+            Some(std::time::Duration::from_secs(6 * 3600)),
+            "hours → a duration"
+        );
+    }
+
+    #[test]
+    fn local_retention_defaults_and_zero_keeps_everything() {
+        assert_eq!(
+            BackupConfig::default().local_retention(),
+            Some(DEFAULT_LOCAL_KEEP),
+            "a sensible default retention"
+        );
+        let keep_all: BackupConfig = toml::from_str("local_keep = 0").unwrap();
+        assert_eq!(
+            keep_all.local_retention(),
+            None,
+            "local_keep = 0 keeps everything rather than deleting all"
+        );
+        let keep_three: BackupConfig = toml::from_str("local_keep = 3").unwrap();
+        assert_eq!(keep_three.local_retention(), Some(3));
+    }
+
+    #[test]
+    fn stale_window_defaults_and_can_be_disabled() {
+        assert_eq!(
+            BackupConfig::default().stale_after(),
+            Some(std::time::Duration::from_secs(
+                DEFAULT_STALE_WARN_HOURS * 3600
+            )),
+            "a default staleness window"
+        );
+        let off: BackupConfig = toml::from_str("stale_warn_hours = 0").unwrap();
+        assert_eq!(off.stale_after(), None, "0 turns the warning off");
+        let custom: BackupConfig = toml::from_str("stale_warn_hours = 48").unwrap();
+        assert_eq!(
+            custom.stale_after(),
+            Some(std::time::Duration::from_secs(48 * 3600))
+        );
     }
 }

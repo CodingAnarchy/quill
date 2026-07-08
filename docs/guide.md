@@ -259,6 +259,18 @@ bar shows how long ago ("git · backed up 2m ago"). With backup off (the default
 or no remote set, nothing changes — the remote is only ever updated by an explicit
 Push.
 
+The same [backup] section can also keep scheduled *local* archives — the same
+one-Enter "Archive project…" zip, but on a cadence and with no git or network
+needed. Add local_enabled = true and local_interval_hours = N, and Quill zips the
+whole project into ~/.local/share/quill/backups/<project>/ at least every N hours
+while it's open, keeping the local_keep most recent (5 by default; 0 keeps every
+archive) and pruning the rest. It runs in the background off the editing thread; a
+failure is surfaced, not silent, and retried on the next cadence. Once one lands,
+the status bar shows how long ago ("saved 20m ago"). Open a project whose newest
+local archive is older than stale_warn_hours (24 by default; 0 turns the warning
+off) and Quill warns you up front that the copy is stale. Local backups are off by
+default and independent of the remote push — you can have either, both, or neither.
+
 
 REPORTS
 
