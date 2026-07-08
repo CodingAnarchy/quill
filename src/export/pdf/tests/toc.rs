@@ -1,5 +1,6 @@
 //! Bookmark-outline, copyright-page, Contents-page, and folio tests for the PDF
 //! writer (#583/#603/#651/#711).
+use super::super::meta::roman;
 use super::*;
 
 #[test]
