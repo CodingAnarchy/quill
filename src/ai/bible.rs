@@ -389,6 +389,94 @@ pub fn character_names(root: &Path) -> Vec<String> {
     names
 }
 
+/// One bible entry paired with the chapters it appears in — the shape the
+/// co-occurrence read (#922) works over, read back from the rendered bible files
+/// the trackers wrote. Character appearances come from the per-chapter Arc beats;
+/// motif appearances from the tracker's "Appears in" line.
+pub struct Appearances {
+    pub name: String,
+    pub chapters: Vec<String>,
+}
+
+/// Each character's per-chapter appearances read from `bible/characters/*.md`
+/// (#922): the name from front matter, the chapters from the `## Arc` beats — each
+/// a `- **<chapter>:** <state>` line the profile renderer wrote. Empty when the
+/// character bible is absent. Sorted by name for a deterministic read.
+pub fn character_appearances(root: &Path) -> Vec<Appearances> {
+    let dir = root.join("bible").join("characters");
+    let mut out: Vec<Appearances> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| {
+            let name = front_field(&text, "name")?;
+            Some(Appearances {
+                chapters: arc_chapters(&text),
+                name,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// The chapter titles named by the `## Arc` beats of a character bible file — the
+/// bold label of each `- **<chapter>:** <state>` bullet, up to the next `##`
+/// heading or block marker.
+fn arc_chapters(text: &str) -> Vec<String> {
+    let mut chapters = Vec::new();
+    let mut in_arc = false;
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            in_arc = h.trim() == "Arc";
+        } else if in_arc {
+            if line.starts_with("<!--") {
+                break; // end of the generated block
+            }
+            if let Some(rest) = line.strip_prefix("- **") {
+                if let Some(chapter) = rest.split_once(":**").map(|(c, _)| c.trim()) {
+                    chapters.push(chapter.to_string());
+                }
+            }
+        }
+    }
+    chapters
+}
+
+/// Each motif's appearances read from `bible/theme.md` (#922): the motif name from
+/// its `### <name> — <status>` heading, the chapters from the `- **Appears in:**
+/// <a, b, c>` line the theme renderer wrote. Empty when the theme bible is absent.
+pub fn motif_appearances(root: &Path) -> Vec<Appearances> {
+    let path = root.join("bible").join("theme.md");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut current: Option<Appearances> = None;
+    for line in text.lines() {
+        if let Some(head) = line.strip_prefix("### ") {
+            if let Some(entry) = current.take() {
+                out.push(entry);
+            }
+            // The heading is `<name> — <status>`; keep only the name.
+            let name = head.split(" — ").next().unwrap_or(head).trim().to_string();
+            current = Some(Appearances {
+                name,
+                chapters: Vec::new(),
+            });
+        } else if let Some(entry) = current.as_mut() {
+            if let Some(list) = line.strip_prefix("- **Appears in:** ") {
+                entry.chapters = list.split(", ").map(|c| c.trim().to_string()).collect();
+            }
+        }
+    }
+    if let Some(entry) = current.take() {
+        out.push(entry);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,6 +531,49 @@ mod tests {
         let root = std::path::Path::new("/nonexistent-quill-bible");
         assert!(gazetteer(root).is_empty());
         assert!(character_names(root).is_empty());
+        assert!(character_appearances(root).is_empty());
+        assert!(motif_appearances(root).is_empty());
+    }
+
+    #[test]
+    fn character_appearances_read_the_arc_chapter_titles() {
+        // A rendered character profile (the writer's own `## Arc` shape) reads back
+        // to the chapter titles of its arc beats, in order (#922).
+        let body = "## Arc\n- **One:** arrives\n- **Three:** confronts\n\n";
+        let file = render("name: Mara\n", body, "## Notes\n", "2026-06-19");
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-appear-char-{}", std::process::id()));
+        let chars = root.join("bible").join("characters");
+        std::fs::create_dir_all(&chars).unwrap();
+        std::fs::write(chars.join("mara.md"), file).unwrap();
+
+        let read = character_appearances(&root);
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].name, "Mara");
+        assert_eq!(read[0].chapters, vec!["One", "Three"]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn motif_appearances_read_the_appears_in_line() {
+        // The theme tracker's rendered `### <name> — <status>` + `Appears in` line
+        // reads back to the motif name and its chapters (#922).
+        let body = "## Motifs\n### Mirrors — recurring\n\
+                    - **Appears in:** One, Three\n\n\
+                    ### Storm — faded\n- **Appears in:** Two\n\n";
+        let file = render("title: Themes\n", body, "## Notes\n", "2026-06-19");
+        let mut root = std::env::temp_dir();
+        root.push(format!("quill-appear-motif-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("bible")).unwrap();
+        std::fs::write(root.join("bible").join("theme.md"), file).unwrap();
+
+        let read = motif_appearances(&root);
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].name, "Mirrors");
+        assert_eq!(read[0].chapters, vec!["One", "Three"]);
+        assert_eq!(read[1].name, "Storm");
+        assert_eq!(read[1].chapters, vec!["Two"]);
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

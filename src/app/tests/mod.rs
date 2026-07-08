@@ -72,6 +72,7 @@ mod chapters_filter;
 mod chapters_sections;
 mod clipboard;
 mod configure;
+mod cooccurrence;
 mod corkboard;
 mod editing;
 mod export_styling;

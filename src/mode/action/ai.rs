@@ -44,6 +44,10 @@ pub enum AiAction {
     /// Open the manuscript-health dashboard (#827): open findings grouped by
     /// kind/pass and chapter with counts, jumpable (local; no request).
     Dashboard,
+    /// Open the motif / character co-occurrence report (#922): co-occurring pairs
+    /// and notable absences drawn from the character and theme bibles' chapter-
+    /// appearance data, jumpable (local; no request).
+    CoOccurrence,
     /// Browse the session's "Ask the manuscript" history — past asks, answers, and
     /// their jumpable citations (local; no request) (#609).
     AskHistory,
@@ -272,6 +276,13 @@ impl AiAction {
         AiActionSpec {
             action: Self::Dashboard,
             slug: "health",
+            cost: AiCost::None,
+            weight: ModelWeight::Heavy,
+            bible_key: None,
+        },
+        AiActionSpec {
+            action: Self::CoOccurrence,
+            slug: "cooccurrence",
             cost: AiCost::None,
             weight: ModelWeight::Heavy,
             bible_key: None,

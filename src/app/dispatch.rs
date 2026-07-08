@@ -132,6 +132,7 @@ impl App {
             Mode::BibleReview(_) => self.on_key_bible_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Dashboard(_) => self.on_key_dashboard(key),
+            Mode::CoOccurrence(_) => self.on_key_cooccurrence(key),
             Mode::History(_) => self.on_key_history(key),
             Mode::Annotations { .. } => self.on_key_annotations(key),
             Mode::Corkboard(_) => self.on_key_corkboard(key),

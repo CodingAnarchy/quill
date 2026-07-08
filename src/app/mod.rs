@@ -73,6 +73,7 @@ mod workflows;
 
 mod chapters;
 mod configure;
+mod cooccurrence;
 mod counts;
 mod persistence;
 mod project_ops;

@@ -21,9 +21,9 @@ use std::cell::RefCell;
 
 use crate::app::ListLayout;
 use crate::mode::{
-    BackupBrowser, Corkboard, Dashboard, DashboardRow, DirBrowser, Findings, History, HistoryRow,
-    ImportPreview, Palette, PaletteRow, ProjectBrowser, ProjectSearch, ProjectSearchStage,
-    ReviewImport,
+    BackupBrowser, CoOccurrence, CoOccurrenceRow, Corkboard, Dashboard, DashboardRow, DirBrowser,
+    Findings, History, HistoryRow, ImportPreview, Palette, PaletteRow, ProjectBrowser,
+    ProjectSearch, ProjectSearchStage, ReviewImport,
 };
 use crate::project::Project;
 
@@ -578,6 +578,41 @@ pub(super) fn draw_dashboard(
         &help,
         rows,
         selected_pos,
+        Some(recorder),
+    );
+}
+
+/// Render the motif / character co-occurrence report (#922) as a navigable list:
+/// a bold section header, then each co-occurring pair / notable absence as a
+/// jumpable row. The selected jumpable row is the one Enter jumps to.
+pub(super) fn draw_cooccurrence(
+    frame: &mut Frame,
+    area: Rect,
+    report: &CoOccurrence,
+    recorder: &RefCell<ListLayout>,
+) {
+    let rows: Vec<Line<'static>> = report
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| match row {
+            CoOccurrenceRow::Header(label) => Line::from(Span::styled(
+                (*label).to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            CoOccurrenceRow::Pair { line, .. } | CoOccurrenceRow::Absence { line, .. } => {
+                list_row(i == report.selected, &format!("  {line}"), None)
+            }
+        })
+        .collect();
+    let help = "Co-occurrence — ↑↓ move · enter jump · s save · esc close".to_string();
+    draw_list_overlay_recording(
+        frame,
+        area,
+        " Motif & character co-occurrence ",
+        &help,
+        rows,
+        Some(report.selected),
         Some(recorder),
     );
 }

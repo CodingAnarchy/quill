@@ -17,6 +17,7 @@ pub mod config_gen;
 #[cfg(feature = "local")] // constrained decoding only drives the local backend (#406)
 pub mod constrain;
 pub mod continuity;
+pub mod cooccurrence;
 pub mod cost;
 pub mod editorial;
 pub mod embed;
