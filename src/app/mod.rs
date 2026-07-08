@@ -271,13 +271,17 @@ pub struct App {
     /// `RefCell` (the renderer borrows `App` immutably); empty when no navigable
     /// list overlay is drawn.
     pub(crate) list_layout: std::cell::RefCell<ListLayout>,
-    /// The editor viewport's read-ahead scroll offset (#764): visual rows the view
-    /// is shifted down past the cursor-driven top, decoupled from the cursor. The
-    /// renderer honors it and writes back the value clamped to the content, so a
-    /// wheel-up right after over-scrolling responds immediately; any cursor move /
-    /// edit snaps it back to zero, bringing the view back to the cursor as before.
-    /// A `Cell` so the immutable render path can store the clamped offset.
-    pub(crate) scroll_offset: std::cell::Cell<usize>,
+    /// The editor viewport's signed scroll offset (#764/#936): visual rows the view
+    /// is shifted off the cursor-driven top, decoupled from the cursor. Positive
+    /// scrolls down past the cursor (read-ahead); negative scrolls up above it, so
+    /// the author can page back through earlier prose even with the cursor at the
+    /// bottom of the screen. The renderer honors it and writes back the value
+    /// clamped to the content (top of chapter / no blank tail), so a wheel in the
+    /// clamped direction responds immediately rather than draining a runaway
+    /// accumulation; any cursor move / edit snaps it back to zero, bringing the view
+    /// back to the cursor. A `Cell` so the immutable render path can store the
+    /// clamped offset.
+    pub(crate) scroll_offset: std::cell::Cell<isize>,
     /// Words inserted / deleted today and the count of words moved out of the
     /// manuscript today (deleted chapters). Seeded from the day's snapshot on
     /// load; fed to the progress report and persisted to the history log.

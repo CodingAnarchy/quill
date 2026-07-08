@@ -206,14 +206,17 @@ fn render_body(
     typewriter: bool,
     place_cursor: bool,
     paragraph_indent: bool,
-    // Read-ahead viewport offset in visual rows (#764): shift the cursor-driven top
-    // down by this many rows, clamped so no blank space shows past the end. Zero
-    // (and `None` for a reference pane) leaves the cursor-driven behavior unchanged.
-    scroll_offset: usize,
+    // Signed viewport offset in visual rows (#764/#936): shift the cursor-driven top
+    // by this many rows — positive down (read-ahead), negative up toward the start of
+    // the chapter — clamped so no blank space shows past the end and it never runs
+    // above the first row. Zero (and `None` for a reference pane) leaves the
+    // cursor-driven behavior unchanged. Returns the offset actually applied this
+    // frame (clamped to the content) so the caller can store the clamped value.
+    scroll_offset: isize,
     // When `Some`, record the focused editor's per-visual-row layout here (#757) so
     // a click can be inverted to a buffer byte. `None` for the reference pane.
     mut layout: Option<&mut EditorLayout>,
-) -> usize {
+) -> isize {
     let height = column.height as usize;
     let wrap = column.width as usize;
     let header_rows = |line: usize| {
@@ -286,23 +289,22 @@ fn render_body(
     }
     let mut to_skip = acc.saturating_sub(keep_above);
 
-    // Read-ahead wheel scroll (#764): advance the cursor-driven top by the offset,
-    // clamped so the bottom never shows blank space past the end. Applied by walking
-    // the same rows the fill loop does — starting from the cursor-driven top, skip
-    // `scroll_offset` more visual rows, but stop early if fewer than a screenful
-    // remain below (which would leave a blank tail).
-    // The offset actually applied this frame, clamped to the content — handed back
-    // to the caller so the stored offset can't run away past the last valid row.
-    let mut applied_offset = 0usize;
+    // Wheel scroll (#764/#936): shift the cursor-driven top by the offset — positive
+    // advances toward the end (read-ahead), negative pages back toward the start —
+    // clamped so the bottom never shows blank space past the end and the top never
+    // runs above the first row. Applied by walking the same rows the fill loop does.
+    // The offset actually applied this frame, clamped to the content — handed back to
+    // the caller so the stored offset can't run away past a valid edge.
+    let mut applied_offset = 0isize;
     if scroll_offset > 0 {
+        let want = scroll_offset as usize;
         // Rows from the cursor-driven top toward the end of the document. We only
         // need to know whether at least a screenful plus the requested offset
-        // remains below — `applied_offset` is capped at `scroll_offset` — so stop
-        // counting once we've seen `height + scroll_offset` rows rather than
-        // walking the whole buffer (#778). The clamp result is identical: `room`
-        // is consumed only via `scroll_offset.min(room)`, so any excess past
-        // `height + scroll_offset` never changes the outcome.
-        let enough = height + scroll_offset;
+        // remains below — `applied_offset` is capped at `want` — so stop counting
+        // once we've seen `height + want` rows rather than walking the whole buffer
+        // (#778). The clamp result is identical: `room` is consumed only via
+        // `want.min(room)`, so any excess past `height + want` never changes it.
+        let enough = height + want;
         let mut rows_below = header_rows(top).saturating_sub(to_skip);
         for l in top..total {
             if rows_below >= enough {
@@ -315,8 +317,8 @@ fn render_body(
         }
         // The most we can advance and still fill the screen from the bottom up.
         let room = rows_below.saturating_sub(height);
-        applied_offset = scroll_offset.min(room);
-        let mut advance = applied_offset;
+        let mut advance = want.min(room);
+        applied_offset = advance as isize;
         // Consume `advance` more rows off the current top, moving `top`/`to_skip`.
         while advance > 0 {
             let line_rows = header_rows(top) + body_rows(top);
@@ -330,6 +332,38 @@ fn render_body(
                 top += 1;
             }
         }
+    } else if scroll_offset < 0 {
+        // Page back up: retreat the cursor-driven top toward the start of the
+        // chapter, stopping at the very first row. `moved` records how far we
+        // actually climbed so the stored offset clamps to the top rather than
+        // accumulating past it.
+        let mut remaining = (-scroll_offset) as usize;
+        let mut moved = 0usize;
+        while remaining > 0 {
+            if to_skip > 0 {
+                // Rows still skipped ahead of line `top` retreat one-for-one.
+                let step = remaining.min(to_skip);
+                to_skip -= step;
+                remaining -= step;
+                moved += step;
+            } else if top > 0 {
+                // Step onto the previous line and reveal its last visual row.
+                top -= 1;
+                let line_rows = header_rows(top) + body_rows(top);
+                if line_rows == 0 {
+                    // A zero-row line (a hidden fence) shows nothing — skip past it
+                    // without spending a row of movement.
+                    continue;
+                }
+                to_skip = line_rows - 1;
+                remaining -= 1;
+                moved += 1;
+            } else {
+                // At the first row of the chapter — clamped, no blank space above.
+                break;
+            }
+        }
+        applied_offset = -(moved as isize);
     }
 
     // Record the on-screen layout for click inversion (#757): the column, and one
