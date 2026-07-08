@@ -29,7 +29,7 @@ use candle_transformers::models::quantized_qwen3::ModelWeights as Qwen3;
 use tokenizers::Tokenizer;
 
 use crate::ai::constrain::Constraint;
-use crate::ai::model_select::{self, Accel, Hardware};
+use crate::ai::model_select::{self, Accel, Hardware, STANDARD_CONTEXT_TOKENS};
 use crate::ai::tool_loop::{self, Converse, Turn};
 use crate::ai::{AiError, Backend, Request, Response, Usage};
 
@@ -167,6 +167,15 @@ impl Backend for LocalBackend {
             .map_err(|e| internal(format!("encode: {e}")))?
             .get_ids()
             .to_vec();
+
+        // Pre-flight window guard (#849): a prompt longer than the model's context
+        // window overflows candle's KV cache / position embeddings and dies with an
+        // opaque `forward:` error. Refuse it here — on the real, post-tokenization
+        // length — so NO oversized pass ever reaches `forward`, however routing got
+        // here (the `offline` short-circuit included). This is the last-line floor;
+        // the router refuses / folds a too-big pass upstream, but this backstops any
+        // path that slips through, with an actionable message rather than a fault.
+        preflight_window(prompt_ids.len(), STANDARD_CONTEXT_TOKENS)?;
 
         // A prior inference that panicked mid-decode poisons this lock; recover the
         // guard rather than wedging local AI for the rest of the session — the KV
@@ -413,6 +422,22 @@ const fn internal(msg: String) -> AiError {
     AiError::Internal(msg)
 }
 
+/// Refuse a prompt that can't fit the model's context window (#849): candle would
+/// otherwise overflow the KV cache / position embeddings mid-`forward` and surface
+/// an opaque `forward:` error. A pure size check so it's unit-testable without a
+/// model, and returns an actionable [`AiError::NotConfigured`] naming the size, the
+/// window, and the remedy — the same shape the router's offline refusal uses.
+fn preflight_window(prompt_tokens: usize, window: u32) -> Result<(), AiError> {
+    if prompt_tokens as u64 > u64::from(window) {
+        return Err(AiError::NotConfigured(format!(
+            "this pass is {prompt_tokens} tokens, but the on-device model's window holds \
+             {window} — it can't run on-device at this size. Turn off `[ai] offline` to use \
+             Claude, or narrow the pass's scope."
+        )));
+    }
+    Ok(())
+}
+
 /// Build the `hf-hub` API with its `indicatif` progress bar disabled (#727).
 /// Quill owns the crossterm alternate screen, so any raw progress the library
 /// writes to stderr lands on top of the TUI and corrupts it; download progress
@@ -448,6 +473,24 @@ fn download_error(model: &model_select::Model, cause: impl std::fmt::Display) ->
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn preflight_refuses_an_oversized_prompt_before_candle() {
+        // At/under the window: allowed (candle can hold it).
+        assert!(preflight_window(0, STANDARD_CONTEXT_TOKENS).is_ok());
+        assert!(
+            preflight_window(STANDARD_CONTEXT_TOKENS as usize, STANDARD_CONTEXT_TOKENS).is_ok()
+        );
+        // Over the window: refused with an actionable NotConfigured, never handed to
+        // `forward` to die with an opaque error (#849).
+        let over = STANDARD_CONTEXT_TOKENS as usize + 1;
+        let err = preflight_window(over, STANDARD_CONTEXT_TOKENS).unwrap_err();
+        assert!(matches!(err, AiError::NotConfigured(_)));
+        let msg = err.to_string();
+        assert!(msg.contains(&over.to_string()), "states the size: {msg}");
+        assert!(msg.contains("40960"), "states the window: {msg}");
+        assert!(msg.contains("offline"), "names the remedy: {msg}");
+    }
 
     #[test]
     fn rank_desc_orders_by_logit() {

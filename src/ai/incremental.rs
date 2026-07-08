@@ -99,6 +99,69 @@ pub fn revise_request(
     }
 }
 
+// --- Full-by-folding for the offline-oversized case (#849) ------------------
+
+/// One chapter's size for the fold planner: its file (a chunk boundary always
+/// falls on a chapter seam) and its estimated input-token count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChapterSize<'a> {
+    pub file: &'a str,
+    pub tokens: u32,
+}
+
+/// The next fold step, from [`next_fold_chunk`]. A pure decision over injected
+/// sizes so it's unit-testable without a model.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FoldStep {
+    /// Revise the running bible with these whole chapters (in manuscript order);
+    /// the count consumed from the head of the remaining list.
+    Chunk(Vec<String>),
+    /// The running bible plus even the single smallest next chapter can't fit the
+    /// window — the genuine hard limit. The caller falls through to the graceful
+    /// report rather than truncating or looping forever.
+    HardLimit,
+}
+
+/// Plan the next fold chunk for an offline oversized rebuild (#849): as many WHOLE
+/// chapters from the head of `remaining` (already in manuscript order) as fit the
+/// window alongside the running bible. `window` is the model's context; `overhead`
+/// is `est(system prompt + running bible + MAX_OUTPUT_TOKENS)` — everything the
+/// revise request carries besides the chapter chunk. So the chunk budget is
+/// `window − overhead`, and each chapter is admitted while it still fits.
+///
+/// If the very first (smallest available, since order is fixed we take the head)
+/// chapter can't fit even alone, the running bible has grown past what leaves room
+/// for progress → [`FoldStep::HardLimit`]. Otherwise at least one chapter is always
+/// taken, so the fold strictly advances and terminates.
+pub fn next_fold_chunk(remaining: &[ChapterSize], window: u32, overhead: u32) -> FoldStep {
+    let budget = window.saturating_sub(overhead);
+    let mut chunk = Vec::new();
+    let mut used = 0u32;
+    for ch in remaining {
+        // A single chapter can exceed the whole budget; admit the first one anyway
+        // so the fold can't stall — the pre-flight check still guards the request,
+        // and a lone over-window chapter is the true hard limit handled below.
+        if chunk.is_empty() {
+            if ch.tokens > budget {
+                break; // even one chapter doesn't fit → hard limit
+            }
+            chunk.push(ch.file.to_string());
+            used = ch.tokens;
+            continue;
+        }
+        if used.saturating_add(ch.tokens) > budget {
+            break;
+        }
+        chunk.push(ch.file.to_string());
+        used += ch.tokens;
+    }
+    if chunk.is_empty() {
+        FoldStep::HardLimit
+    } else {
+        FoldStep::Chunk(chunk)
+    }
+}
+
 // --- The per-project state file (bible/.state.toml) -------------------------
 
 /// What one tracker was last built from.
@@ -283,6 +346,87 @@ mod tests {
             "book one's entries survive the merge: {recorded:?}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn sizes<'a>(pairs: &[(&'a str, u32)]) -> Vec<ChapterSize<'a>> {
+        pairs
+            .iter()
+            .map(|&(file, tokens)| ChapterSize { file, tokens })
+            .collect()
+    }
+
+    #[test]
+    fn fold_chunk_packs_whole_chapters_up_to_the_budget() {
+        // window 100, overhead 40 → budget 60. Chapters 30,20,20,50: the first three
+        // fit (70? no — 30+20=50, +20=70 > 60), so 30+20 fit, the third 20 overflows.
+        let chapters = sizes(&[("a", 30), ("b", 20), ("c", 20), ("d", 50)]);
+        assert_eq!(
+            next_fold_chunk(&chapters, 100, 40),
+            FoldStep::Chunk(vec!["a".into(), "b".into()]),
+            "packs whole chapters only up to the budget, never splitting one"
+        );
+    }
+
+    #[test]
+    fn fold_chunk_boundary_is_a_whole_chapter() {
+        // budget 60; a single 60-token chapter fills it exactly, the next is a new
+        // chunk — the boundary lands on the chapter seam, never mid-chapter.
+        let chapters = sizes(&[("a", 60), ("b", 10)]);
+        assert_eq!(
+            next_fold_chunk(&chapters, 100, 40),
+            FoldStep::Chunk(vec!["a".into()])
+        );
+    }
+
+    #[test]
+    fn fold_takes_at_least_one_chapter_so_it_advances() {
+        // A lone chapter larger than the budget is still admitted (so the fold can't
+        // stall); the pre-flight window check guards the actual request.
+        let chapters = sizes(&[("big", 55)]);
+        assert_eq!(
+            next_fold_chunk(&chapters, 100, 40), // budget 60, 55 fits
+            FoldStep::Chunk(vec!["big".into()])
+        );
+    }
+
+    #[test]
+    fn fold_hard_limit_when_the_running_bible_leaves_no_room() {
+        // The running bible has grown so overhead (95) nearly fills the window (100):
+        // budget 5, and even the smallest next chapter (10) can't fit → hard limit,
+        // which the caller turns into the graceful "too large" report.
+        let chapters = sizes(&[("a", 10), ("b", 20)]);
+        assert_eq!(next_fold_chunk(&chapters, 100, 95), FoldStep::HardLimit);
+    }
+
+    #[test]
+    fn folding_the_whole_manuscript_covers_every_chapter_in_order() {
+        // Drive the planner to convergence with a fixed overhead and confirm the
+        // chunks partition the chapters, in order, on seams.
+        let all = sizes(&[
+            ("one", 20),
+            ("two", 20),
+            ("three", 20),
+            ("four", 20),
+            ("five", 20),
+        ]);
+        let mut remaining = all.clone();
+        let mut folded: Vec<String> = Vec::new();
+        while !remaining.is_empty() {
+            match next_fold_chunk(&remaining, 100, 55) {
+                // budget 45 → two 20-token chapters per chunk
+                FoldStep::Chunk(files) => {
+                    assert!(!files.is_empty());
+                    remaining.drain(0..files.len());
+                    folded.extend(files);
+                }
+                FoldStep::HardLimit => panic!("should fit at this overhead"),
+            }
+        }
+        assert_eq!(
+            folded,
+            vec!["one", "two", "three", "four", "five"],
+            "every chapter folded once, in manuscript order"
+        );
     }
 
     #[test]

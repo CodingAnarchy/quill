@@ -80,7 +80,7 @@ are in [`ai-features.md`](ai-features.md).
 | --- | --- | --- | --- |
 | `enabled` | `false` | `true` / `false` | Master switch. With it off, no AI feature is reachable. |
 | `backend` | `"claude"` | `"claude"` / `"local"` | Which provider runs AI passes: the Claude HTTP API (sends the manuscript off-machine, needs a key) or a local on-device model (offline, nothing leaves the machine). |
-| `offline` | `false` | `true` / `false` | Privacy switch: when `true`, force the local backend regardless of `backend`, so nothing is ever sent off-machine. |
+| `offline` | `false` | `true` / `false` | Privacy switch: when `true`, force the local backend regardless of `backend`, so nothing is ever sent off-machine. A full-book scan too big for the on-device window (40960 tokens) is folded chapter-by-chapter for the bible passes, or — where folding can't apply — refused with a clear "too large for the local model" message rather than failing (#849); see `docs/ai-features.md`. |
 | `routing` | `"configured"` | `"configured"` / `"prefer-local"` / `"prefer-cloud"` | Hybrid routing policy (#372): `configured` always uses `backend`; `prefer-local` uses the local model whenever it's downloaded and big enough for the pass; `prefer-cloud` prefers Claude. |
 | `model` | `"claude-opus-4-8"` | a Claude model id | The model id sent to the Claude backend. The local backend picks its own. |
 | `local_models` | `[]` | a list of catalog model ids, e.g. `["1.7B", "8B"]` | The local models you want available; the router picks the best of these per request. Empty means the single hardware-recommended model. Usually managed from the in-app **model manager** (Ctrl-K → model manager) rather than by hand. |

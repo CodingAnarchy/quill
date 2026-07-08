@@ -809,6 +809,9 @@ impl App {
                     "{label} would cost {estimate}. Reply 'y' to run it, anything else to skip."
                 ))
             }
+            // Offline and too big to run/fold on-device (#849): report the refusal
+            // in the pane rather than starting a pass that can't run.
+            AiStart::Refuse(message) => Step::Sync(message),
         }
     }
 

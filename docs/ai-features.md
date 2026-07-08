@@ -158,6 +158,31 @@ rather than to a local long-context model. Even at 40k, Qwen3's larger KV cache
 context memory-hungry, so the recommendation is sized against a realistic working
 window and the in-editor manager (#379) surfaces each model's peak footprint.
 
+**Oversized full-book scans when offline (#849):** normal routing sends a pass
+too big for the local window to Claude with a notice, but `offline = true` has no
+cloud to fall back to. Quill handles the oversized case two ways rather than
+letting the pass hit the model and fault:
+
+- **Fold it, when the pass supports it.** The persistent-bible passes (characters,
+  setting, timeline & continuity, plot, theme) have an incremental-revise path, so
+  an offline full rebuild that doesn't fit is done *by folding*: Quill seeds an
+  empty bible and walks the chapters in manuscript order, each step revising the
+  running bible with as many whole chapters as fit the window (chunk boundaries
+  always land on chapter seams). The model never sees more than one window at a
+  time, and the result is the same shape as a one-shot rebuild — the scan
+  completes on-device, the only way it can at that size. The status line shows
+  "folding on-device — chapter by chapter" while it runs.
+- **Report it clearly, when folding can't apply.** A one-shot pass with no
+  revise/merge step — whole-manuscript "Ask the manuscript", the prose/style,
+  editorial, and voice scans — can't be folded, and neither can a fold whose
+  running bible has itself outgrown the window. Those are *refused* with a
+  plain-language message: the pass needs ~N tokens, the on-device model holds
+  40960, so it can't run offline at this size — turn off `[ai] offline` to use
+  Claude, or narrow the scope (fewer chapters, a single book). Never an opaque
+  candle `forward:` error and never a silently truncated result: a pre-flight
+  window check guards the local completion path, so no oversized pass ever reaches
+  the model, however routing got there.
+
 **Hybrid routing (#372):** instead of one static backend, `[ai] routing` can pick
 local vs remote *per action*, turning the cost estimator from a warning into a
 decision. The policy is a pure function of (estimate, the action's local

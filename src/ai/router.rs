@@ -13,6 +13,7 @@
 //! manuscript-prose boundary.
 
 use crate::ai::cost::Estimate;
+use crate::ai::model_select::STANDARD_CONTEXT_TOKENS;
 use crate::ai::BackendKind;
 
 /// The author's routing preference, from `[ai] routing`. It's a config *value*, so
@@ -36,6 +37,11 @@ pub struct Inputs {
     /// (#378) — resolved by the host from the configured model set. A long-context
     /// model makes this true for a whole-manuscript pass the standard ones can't.
     pub local_fits: bool,
+    /// The estimated input-token count for this pass (#849) — reused from the same
+    /// `context_len / 4` estimate that feeds `local_fits`. When the pass is pinned
+    /// `offline` and this exceeds the on-device window, routing can't send it to the
+    /// cloud, so it surfaces the size (~N tokens) in a graceful refusal instead.
+    pub est_tokens: u32,
     /// The remote (Claude) estimate for this pass.
     pub est: Estimate,
     /// The author's cost-confirm threshold, in dollars.
@@ -53,6 +59,12 @@ pub struct Route {
     pub confirm: Option<Confirm>,
     /// A one-line rationale, surfaced to the author so the choice is never hidden.
     pub reason: String,
+    /// When `Some`, the pass cannot run as routed and must be *refused* with this
+    /// actionable message rather than sent to a backend (#849). The one case today:
+    /// an `offline`-pinned pass too big for the on-device window, where there is no
+    /// cloud to fall back to — the host surfaces the message and runs nothing, so
+    /// the pass never reaches candle to die with an opaque `forward:` error.
+    pub refuse: Option<String>,
 }
 
 /// A pending routing confirmation.
@@ -68,16 +80,61 @@ impl Route {
             backend,
             confirm: None,
             reason: reason.into(),
+            refuse: None,
         }
     }
+
+    /// A backend run gated behind a cost confirm (spend / cancel, optionally
+    /// offering local as a third choice).
+    fn confirm(backend: BackendKind, offer_local: bool, reason: impl Into<String>) -> Self {
+        Self {
+            backend,
+            confirm: Some(Confirm { offer_local }),
+            reason: reason.into(),
+            refuse: None,
+        }
+    }
+
+    /// A refusal: the pass can't run as routed. The default backend is still Local
+    /// (the offline pin), but `refuse` carries the message the host surfaces instead
+    /// of running it (#849).
+    fn refuse(message: String) -> Self {
+        Self {
+            backend: BackendKind::Local,
+            confirm: None,
+            reason: "offline — pass too large for the on-device model".into(),
+            refuse: Some(message),
+        }
+    }
+}
+
+/// The graceful "too big for on-device, offline" refusal message (#849): names the
+/// size (~N tokens) against the model's window and the two remedies — disable
+/// `offline` to use Claude, or narrow the pass's scope. Kept next to `route` so the
+/// pure policy owns the wording; the host surfaces it verbatim.
+pub fn offline_too_big_message(est_tokens: u32) -> String {
+    format!(
+        "This pass needs ~{est_tokens} tokens, but the on-device model's window holds \
+         {STANDARD_CONTEXT_TOKENS}. With `offline` set there's no cloud to fall back to — \
+         turn off `[ai] offline` for this pass to run it on Claude, or narrow its scope \
+         (analyze fewer chapters / a single book)."
+    )
 }
 
 /// Decide local vs remote for one action — pure, total, and independent of any
 /// I/O. See [`Policy`] for what each preference does.
 pub fn route(i: &Inputs) -> Route {
-    // The hard offline pin wins over every policy.
+    // The hard offline pin wins over every policy — but never at the cost of
+    // feeding the on-device model a pass it can't hold (#849). Offline has no cloud
+    // to fall back to, so a too-big pass is *refused* with an actionable message
+    // instead of being sent to candle to die with an opaque `forward:` error. A
+    // foldable pass is dispatched incrementally upstream; this is the floor.
     if i.offline {
-        return Route::run(BackendKind::Local, "offline mode — on-device");
+        return if i.local_fits {
+            Route::run(BackendKind::Local, "offline mode — on-device")
+        } else {
+            Route::refuse(offline_too_big_message(i.est_tokens))
+        };
     }
     let over = i.est.dollars > i.threshold;
     // Local can run this only if a downloaded model's context can hold it (#378);
@@ -123,13 +180,11 @@ pub fn route(i: &Inputs) -> Route {
         // Offer the choice when it actually costs over the threshold.
         Policy::Ask => {
             if over {
-                Route {
-                    backend: BackendKind::Claude,
-                    confirm: Some(Confirm {
-                        offer_local: local_fits,
-                    }),
-                    reason: "over the threshold — choose a backend".into(),
-                }
+                Route::confirm(
+                    BackendKind::Claude,
+                    local_fits,
+                    "over the threshold — choose a backend",
+                )
             } else {
                 Route::run(BackendKind::Claude, "under the threshold — using Claude")
             }
@@ -153,11 +208,7 @@ fn cloudish(backend: BackendKind, over: bool) -> Route {
 /// run, so the confirm reflects only cost intent — as it always has.
 fn cloudish_reason(over: bool, reason: &str) -> Route {
     if over {
-        Route {
-            backend: BackendKind::Claude,
-            confirm: Some(Confirm { offer_local: false }),
-            reason: reason.into(),
-        }
+        Route::confirm(BackendKind::Claude, false, reason)
     } else {
         Route::run(BackendKind::Claude, reason)
     }
@@ -178,6 +229,7 @@ mod tests {
             offline: false,
             local_available: true,
             local_fits: true, // a downloaded model can hold it (host-resolved, #378)
+            est_tokens: est.tokens,
             est,
             threshold: 0.20,
         }
@@ -191,10 +243,42 @@ mod tests {
             Policy::Ask,
             Policy::CostCeiling,
         ] {
+            // A fitting pass pins on-device under every policy (local_fits defaults true).
             let mut i = inputs(policy, est(99.0, 1000));
             i.offline = true;
             assert_eq!(route(&i).backend, BackendKind::Local, "{policy:?}");
             assert!(route(&i).confirm.is_none());
+            assert!(route(&i).refuse.is_none(), "a fitting pass isn't refused");
+        }
+    }
+
+    #[test]
+    fn offline_refuses_a_pass_too_big_for_the_on_device_window() {
+        // The #849 floor: offline-pinned but the pass exceeds the local window, so
+        // there's no cloud to fall back to → a graceful refusal, never a backend run
+        // (which would feed candle a pass it can't hold).
+        for policy in [
+            Policy::Configured,
+            Policy::PreferCloud,
+            Policy::Ask,
+            Policy::CostCeiling,
+            Policy::PreferLocal,
+        ] {
+            let mut i = inputs(policy, est(0.0, 120_000));
+            i.offline = true;
+            i.local_fits = false; // no downloaded model can hold it
+            i.est_tokens = 120_000;
+            let r = route(&i);
+            let msg = r
+                .refuse
+                .as_deref()
+                .unwrap_or_else(|| panic!("{policy:?}: an oversized offline pass must be refused"));
+            assert!(r.confirm.is_none(), "{policy:?}: a refusal isn't a confirm");
+            // The message names the size, the window, and both remedies.
+            assert!(msg.contains("120000"), "states the size: {msg}");
+            assert!(msg.contains("40960"), "states the window: {msg}");
+            assert!(msg.contains("offline"), "names the offline remedy: {msg}");
+            assert!(msg.contains("narrow"), "offers the scope remedy: {msg}");
         }
     }
 
