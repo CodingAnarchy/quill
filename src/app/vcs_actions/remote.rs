@@ -59,6 +59,15 @@ impl App {
         if !self.guard_remote() || self.vc_task.is_busy() {
             return;
         }
+        // Read-only instance (#871): a pull's fast-forward/merge force-checks-out the
+        // tree via libgit2, bypassing the save-path write guards (bug H). Refuse rather
+        // than race the instance that holds the project and clobber its chapter files.
+        if self.project.is_read_only() {
+            self.message = Some(
+                "Read-only: this project is open in another Quill instance; not pulled.".into(),
+            );
+            return;
+        }
         self.leave_continuous(); // the post-pull reload targets the single active chapter
         self.save_edit();
         self.refresh_vc_status();
@@ -170,13 +179,23 @@ impl App {
                     None => msg.text,
                 });
                 // A sync that detected chapters changed on both machines opens the
-                // resolution flow (#963) straight away, so the author resolves them
-                // in-app rather than being left to the git CLI.
-                if !self.sync_conflicts.is_empty() {
-                    self.open_conflict_resolution();
-                }
+                // resolution flow (#963), so the author resolves them in-app rather
+                // than being left to the git CLI. But never clobber an active
+                // prompt/overlay/modal (bug F): if the author isn't in a plain editing
+                // mode, the flow is deferred — `surface_sync_conflicts` stashes it and
+                // a later tick opens it once they're back in the editor, mirroring how
+                // a pull defers its buffer reload.
+                // A clean push/pull/sync carries none, clearing any prior deferral so
+                // a stale pending flag can't fire.
+                self.pending_sync_conflicts = !self.sync_conflicts.is_empty();
+                self.surface_sync_conflicts();
             }
-            Poll::Pending => {}
+            Poll::Pending => {
+                // A sync that landed earlier while the author was in a
+                // prompt/overlay (bug F) surfaces here once they're back in a plain
+                // editing mode — polled every tick, so it opens the moment they return.
+                self.surface_sync_conflicts();
+            }
             // The worker panicked; surface its cause (#838) rather than a generic
             // failure, so an auth/network/rejected push or pull is diagnosable.
             Poll::Died(cause) => {
@@ -187,6 +206,32 @@ impl App {
                 ));
             }
         }
+    }
+
+    /// Open the sync conflict-resolution flow (#963) for a background sync that
+    /// landed with conflicts — but only when the author is in a plain editing mode,
+    /// so it never clobbers an active prompt/overlay/modal (bug F). A sync can land at
+    /// any tick; if the author was mid-rename, in a `:` command, naming a milestone, or
+    /// in the drafts overlay, the surfacing is deferred (`pending_sync_conflicts`) and
+    /// re-attempted each tick from [`poll_vc`], opening the moment they return to the
+    /// editor. A no-op when nothing is pending, or when a resolution flow is already up.
+    fn surface_sync_conflicts(&mut self) {
+        if !self.pending_sync_conflicts {
+            return;
+        }
+        // Already resolving (this or a draft merge): leave the open flow alone.
+        if matches!(self.mode, Mode::ConflictReview(_)) {
+            return;
+        }
+        // Defer while the author is in a prompt/overlay/modal — surfacing now would
+        // discard their in-flight state. The same guard the pass-queue resume uses.
+        if !matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+            || self.overlay.is_some()
+        {
+            return;
+        }
+        self.pending_sync_conflicts = false;
+        self.open_conflict_resolution();
     }
 
     /// Reload the buffer from disk after a pull landed (#870) — but never over
