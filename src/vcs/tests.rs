@@ -67,6 +67,128 @@ fn log_lists_commits_newest_first() {
 }
 
 #[test]
+fn log_carries_parents_and_the_changed_paths_per_commit() {
+    // #964: each commit reports its parent ids (topology) and the paths it changed
+    // versus its first parent (the chapters touched), so the history view can draw a
+    // graph and list what each commit changed.
+    let dir = temp_dir("log-topology");
+    init(&dir).unwrap();
+    fs::write(dir.join("a.md"), "one\n").unwrap();
+    fs::write(dir.join("b.md"), "one\n").unwrap();
+    commit(&dir, "root").unwrap();
+    fs::write(dir.join("a.md"), "two\n").unwrap(); // touch only a.md
+    commit(&dir, "edit-a").unwrap();
+
+    let entries = log(&dir, 10).unwrap(); // [edit-a, root]
+    let edit = &entries[0];
+    let root = &entries[1];
+    // The root has no parent; the second commit's parent is the root.
+    assert!(root.parents.is_empty(), "the root commit has no parent");
+    assert_eq!(edit.parents, vec![root.rev.clone()], "parent is the root");
+    // The second commit changed only a.md; the root reports its whole tree.
+    assert_eq!(edit.changed, vec!["a.md".to_string()], "only a.md changed");
+    assert!(
+        root.changed.contains(&"a.md".to_string()) && root.changed.contains(&"b.md".to_string()),
+        "the root reports its whole tree: {:?}",
+        root.changed
+    );
+    // Every commit carries a non-empty graph column (its node), padded uniformly.
+    assert!(
+        entries.iter().all(|c| c.graph.contains('●')),
+        "each row is a node"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn log_graph_reflects_a_branch_and_merge_topology() {
+    // #964: build a real side branch off the mainline and merge it back, then check
+    // the log's graph shows the branch topology — the merge commit lists two parents,
+    // and while the branch is unresolved the graph draws more than one lane. Hermetic:
+    // the branch + merge are built directly with git2 over a scratch repo.
+    let dir = temp_dir("log-merge-graph");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "base\n").unwrap();
+    commit(&dir, "base").unwrap();
+
+    let repo = git2::Repository::open(&dir).unwrap();
+    let sig = git2::Signature::now("T", "t@t").unwrap();
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+
+    // A side branch off base: add two.md, one commit.
+    let branch = repo.branch("side", &base, false).unwrap();
+    repo.set_head(branch.get().name().unwrap()).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    fs::write(dir.join("two.md"), "side\n").unwrap();
+    let side = commit_on_head(&repo, &sig, "side-work");
+
+    // Back on the mainline, move it forward: edit one.md.
+    let main = repo.find_branch("master", git2::BranchType::Local).unwrap();
+    repo.set_head(main.get().name().unwrap()).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    fs::write(dir.join("one.md"), "mainline edit\n").unwrap();
+    let mainline = commit_on_head(&repo, &sig, "mainline-work");
+
+    // Merge the side branch into the mainline — a two-parent commit.
+    let main_c = repo.find_commit(mainline).unwrap();
+    let side_c = repo.find_commit(side).unwrap();
+    let tree = main_c.tree().unwrap(); // no textual overlap; keep the mainline tree
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "merge side",
+        &tree,
+        &[&main_c, &side_c],
+    )
+    .unwrap();
+
+    let entries = log(&dir, 20).unwrap();
+    let merge = entries
+        .iter()
+        .find(|c| c.summary == "merge side")
+        .expect("the merge commit is in the log");
+    // The merge names both histories as parents — the topological fact the graph draws.
+    assert_eq!(merge.parents.len(), 2, "the merge has two parents");
+    assert!(merge.parents.contains(&mainline.to_string()));
+    assert!(merge.parents.contains(&side.to_string()));
+    // Somewhere in the log the graph fans out to more than one lane (the branch),
+    // and every row is padded to the same width so the columns align.
+    let widths: Vec<usize> = entries.iter().map(|c| c.graph.chars().count()).collect();
+    assert!(
+        widths.iter().all(|w| *w == widths[0]),
+        "graph columns are aligned to one width: {widths:?}"
+    );
+    let max_lanes = entries
+        .iter()
+        .map(|c| c.graph.matches('│').count() + c.graph.matches('●').count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_lanes >= 2,
+        "the branch draws a second lane in the graph: {:?}",
+        entries.iter().map(|c| &c.graph).collect::<Vec<_>>()
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Commit the current index/worktree on HEAD with `message`, returning the new oid.
+/// A small test helper for building branch topology directly with git2.
+fn commit_on_head(repo: &git2::Repository, sig: &git2::Signature, message: &str) -> git2::Oid {
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), sig, sig, message, &tree, &[&parent])
+        .unwrap()
+}
+
+#[test]
 fn show_file_at_reads_a_past_version() {
     let dir = temp_dir("show-at");
     init(&dir).unwrap();
