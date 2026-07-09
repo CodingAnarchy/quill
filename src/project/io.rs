@@ -67,6 +67,62 @@ pub fn cache_chapter(root: &Path, entry: &mut ChapterEntry, marker: &str) {
     entry.cache_meta(front.map(FrontMatter::from_raw).as_ref());
 }
 
+/// Pre-flight the swap renames of [`Project::write_chapters_atomic`] so the loop
+/// is overwhelmingly unlikely to fail partway (#262). Each `dest` is the
+/// already-symlink-resolved destination; rename fails if `dest` is a directory or
+/// its parent isn't a writable directory, so both are checked here before any
+/// rename lands. A pre-flight error aborts with nothing swapped.
+fn preflight_swaps(plan: &[(usize, PathBuf, PathBuf, &String)]) -> std::io::Result<()> {
+    for (_, _, dest, _) in plan {
+        if dest.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("destination is a directory: {}", dest.display()),
+            ));
+        }
+        let parent = dest.parent().filter(|p| !p.as_os_str().is_empty());
+        if let Some(parent) = parent {
+            let meta = fs::metadata(parent)?; // parent must exist and be readable
+            if !meta.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    format!(
+                        "destination parent is not a directory: {}",
+                        parent.display()
+                    ),
+                ));
+            }
+            if meta.permissions().readonly() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("destination parent is not writable: {}", parent.display()),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Roll back the swap renames already applied by [`Project::write_chapters_atomic`]
+/// when a later rename fails (#262), restoring each destination to the `original`
+/// bytes captured before the swap so no chapter is left half-updated. A `None`
+/// original was a file that didn't exist before the swap (a brand-new chapter), so
+/// its rollback removes the just-written file instead of restoring bytes. Best
+/// effort: a rollback write can itself fail (the same fault that broke the swap),
+/// so failures are swallowed — the caller already returns the original error.
+fn rollback_swaps(applied: &[(usize, PathBuf, PathBuf, &String)], originals: &[Option<Vec<u8>>]) {
+    for ((_, _, dest, _), original) in applied.iter().zip(originals) {
+        match original {
+            Some(bytes) => {
+                let _ = atomic::write(dest, bytes);
+            }
+            None => {
+                let _ = fs::remove_file(dest);
+            }
+        }
+    }
+}
+
 impl Project {
     /// Replace this project's chapters with an imported manuscript (#298): write
     /// each chapter body to its own file, rebuild the manifest in reading order,
@@ -199,6 +255,24 @@ impl Project {
             .to_string())
     }
 
+    /// Split chapter `index`'s file into its front matter and prose body in a
+    /// single read, distinguishing a hard read failure (`Err`) from a
+    /// missing/empty file (`Ok`) (#565/#871). Unlike the swallowing
+    /// [`chapter_front_matter`](Self::chapter_front_matter) /
+    /// [`chapter_body`](Self::chapter_body) pair, a permissions/I-O fault surfaces
+    /// as `Err` here rather than collapsing to default front matter + `""` body —
+    /// which the cross-chapter move must know about, since composing a
+    /// destination chapter's new content onto an empty base would durably wipe its
+    /// real prose while reporting success. Off the per-frame path.
+    pub fn try_split_chapter(
+        &self,
+        index: usize,
+    ) -> std::io::Result<(Option<FrontMatter>, String)> {
+        let text = self.try_read_chapter(index)?;
+        let (front, body) = frontmatter::split(&text);
+        Ok((front.map(FrontMatter::from_raw), body.to_string()))
+    }
+
     /// Edit a (non-active) chapter's front matter on disk: read the file, apply
     /// `f` to its [`FrontMatter`], write it back leaving the prose body untouched,
     /// and refresh the cache. The body is preserved verbatim — only the front
@@ -274,9 +348,23 @@ impl Project {
     /// once *all* are durably on disk are they renamed into place. A staging failure
     /// removes whatever temp was already written and returns with every original
     /// untouched, so a failed move never leaves one chapter rewritten and the other
-    /// stale. The same-directory renames at the end are the atomic-write layer's
-    /// final swap, one per file; every temp is already synced, so this last step
-    /// only relinks. Refreshes each chapter's cached word/TODO/metadata after.
+    /// stale. Refreshes each chapter's cached word/TODO/metadata after.
+    ///
+    /// The final swap is guarded on two fronts (#262/#871):
+    ///
+    /// - **Symlink-following.** Each destination is resolved through
+    ///   [`atomic::resolve_symlink`] before the rename, so a chapter symlinked into
+    ///   a synced/shared folder has its *target* replaced and the link preserved,
+    ///   rather than the bare rename replacing the link with a regular file and
+    ///   orphaning the target as silently stale (#871) — the same guarantee
+    ///   [`atomic::write`] gives a single file.
+    /// - **All-or-nothing renames.** Before touching anything the loop pre-flights
+    ///   every destination (parent writable, destination not a directory) so a
+    ///   rename is overwhelmingly unlikely to fail partway; and it captures each
+    ///   original's bytes so that if a later rename *does* fail with an earlier one
+    ///   already applied, it rolls the applied ones back to their originals. On any
+    ///   swap failure the caller sees `Err` with every destination either all-new
+    ///   or all-restored — never a half-updated split state (#262).
     pub(crate) fn write_chapters_atomic(
         &mut self,
         contents: &[(usize, String)],
@@ -284,31 +372,78 @@ impl Project {
         if self.is_read_only() {
             return Err(Self::read_only_error()); // #871: don't race another instance
         }
+        // Resolve each destination through any symlink now (#871), so both the
+        // pre-flight and the swap act on the real target — a bare rename onto the
+        // link would replace it with a regular file and orphan the target. The
+        // resolved path is where the temp is renamed and where a rollback restores.
+        let mut plan: Vec<(usize, PathBuf, PathBuf, &String)> = Vec::with_capacity(contents.len());
+        for (index, content) in contents {
+            let dest = atomic::resolve_symlink(&self.chapter_path(*index))?;
+            let tmp = import_staging_path(&self.root, self.chapter_file(*index));
+            plan.push((*index, tmp, dest, content));
+        }
+
         // Stage every new file to a hidden temp path first; nothing destructive
         // happens until the renames below, so a failure here leaves every original
         // in place — clean up whatever was already staged.
-        let staged: Vec<(usize, PathBuf, &String)> = contents
-            .iter()
-            .map(|(index, content)| {
-                let tmp = import_staging_path(&self.root, self.chapter_file(*index));
-                (*index, tmp, content)
-            })
-            .collect();
-        for (i, (_, tmp, content)) in staged.iter().enumerate() {
+        for (i, (_, tmp, _, content)) in plan.iter().enumerate() {
             if let Err(e) = atomic::write(tmp, content.as_bytes()) {
-                for (_, done, _) in &staged[..i] {
+                for (_, done, _, _) in &plan[..i] {
                     let _ = fs::remove_file(done); // best-effort cleanup
                 }
                 return Err(e);
             }
         }
-        // Every file is durably staged. From here the swap is the destructive step,
-        // but each original being overwritten already has its replacement on disk,
-        // so a rename can't lose an author's words — the temp still holds them.
-        for (index, tmp, _) in &staged {
-            fs::rename(tmp, self.chapter_path(*index))?;
+
+        // Pre-flight every destination so the swap loop is overwhelmingly unlikely
+        // to fail partway: a destination that is a directory (rename would fail) or
+        // whose parent isn't writable is caught here, before any rename lands — so
+        // the common failure modes abort with nothing swapped and all temps cleaned
+        // up, rather than mid-loop with one chapter already rewritten.
+        if let Err(e) = preflight_swaps(&plan) {
+            for (_, tmp, _, _) in &plan {
+                let _ = fs::remove_file(tmp); // best-effort cleanup
+            }
+            return Err(e);
         }
-        for (index, _, _) in &staged {
+
+        // Capture each original's bytes before the swap so a mid-loop failure can
+        // restore the destinations already renamed — the all-or-nothing guarantee.
+        // A missing original (a brand-new chapter file) captures as `None`, and a
+        // rollback removes it rather than restoring bytes.
+        let originals: Vec<Option<Vec<u8>>> = plan
+            .iter()
+            .map(|(_, _, dest, _)| fs::read(dest).ok())
+            .collect();
+
+        // Every file is durably staged and pre-flighted. Swap each temp into place;
+        // on a failure, roll back the renames already applied so no destination is
+        // left half-updated.
+        for (i, (_, tmp, dest, _)) in plan.iter().enumerate() {
+            let failed = {
+                #[cfg(test)]
+                {
+                    atomic::fail_point::should_fail_swap()
+                }
+                #[cfg(not(test))]
+                {
+                    false
+                }
+            };
+            let result = if failed {
+                Err(std::io::Error::other("injected swap failure"))
+            } else {
+                fs::rename(tmp, dest)
+            };
+            if let Err(e) = result {
+                rollback_swaps(&plan[..i], &originals[..i]);
+                for (_, leftover, _, _) in &plan[i..] {
+                    let _ = fs::remove_file(leftover); // best-effort cleanup
+                }
+                return Err(e);
+            }
+        }
+        for (index, _, _, _) in &plan {
             self.read_chapter_cache(*index); // refresh cached word/TODO/metadata
         }
         Ok(())
