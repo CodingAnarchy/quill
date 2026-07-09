@@ -467,6 +467,7 @@ impl App {
             | Pending::Milestone
             | Pending::MilestoneNote
             | Pending::EditMilestoneNote
+            | Pending::CreateDraft
             | Pending::SetRemote
             | Pending::ExCommand
             | Pending::DescribeWorkflow
@@ -665,6 +666,13 @@ impl App {
                                 // close the prompt first, then let it set the mode.
                                 self.mode = closed;
                                 self.edit_milestone_note(text);
+                            }
+                            Pending::CreateDraft => {
+                                // create_draft reopens the drafts overlay (or the
+                                // editor on failure), so close the prompt and let it
+                                // drive the mode (#965).
+                                self.mode = closed;
+                                self.create_draft(text);
                             }
                             Pending::SetRemote => {
                                 self.mode = closed;

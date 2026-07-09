@@ -17,9 +17,10 @@ mod local;
 mod remote;
 
 pub use local::{
-    commit, create_tag, diff, diff_file_to_worktree, diff_tree_to_worktree, init, is_repo,
-    list_tags, log, restore, restore_all, set_tag_message, show_file_at, status, CommitMeta,
-    TagMeta,
+    checkout_branch, commit, create_branch, create_tag, current_branch, diff,
+    diff_file_to_worktree, diff_tree_to_worktree, finalize_branch_merge, init, is_repo,
+    list_branches, list_tags, log, merge_branch, restore, restore_all, set_tag_message,
+    show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
 };
 pub use remote::{finalize_sync, pull, push, remote_url, set_remote, sync, ChapterConflict};
 

@@ -75,6 +75,7 @@ mod clipboard;
 mod configure;
 mod cooccurrence;
 mod corkboard;
+mod drafts;
 mod editing;
 mod export_styling;
 mod folds;

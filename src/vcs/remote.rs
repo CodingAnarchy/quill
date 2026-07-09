@@ -662,8 +662,10 @@ pub fn finalize_sync(
 
 /// Write the remote's version of `path` into the merged tree builder (or stage its
 /// removal when the remote deleted the chapter). The chapter is adopted wholesale —
-/// chapters are atomic files, so there's no sub-file merge to do.
-fn adopt(
+/// chapters are atomic files, so there's no sub-file merge to do. Shared with the
+/// branch merge (#965), which reconciles two local branches with the same
+/// chapter-level three-way.
+pub(super) fn adopt(
     builder: &mut git2::TreeBuilder,
     path: &str,
     theirs: Option<git2::Oid>,
@@ -680,7 +682,8 @@ fn adopt(
 /// Collect every blob (file) in `tree`, keyed by its full path, as `path -> blob id`.
 /// Recurses into subtrees so nested paths are compared too; non-blob entries (the
 /// subtree objects themselves) are skipped, since only files carry chapter text.
-fn collect_blobs(tree: &git2::Tree, out: &mut BTreeMap<String, git2::Oid>) {
+/// Shared with the branch merge (#965).
+pub(super) fn collect_blobs(tree: &git2::Tree, out: &mut BTreeMap<String, git2::Oid>) {
     let _ = tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
         if entry.kind() == Some(git2::ObjectType::Blob) {
             if let Some(name) = entry.name() {
@@ -693,8 +696,9 @@ fn collect_blobs(tree: &git2::Tree, out: &mut BTreeMap<String, git2::Oid>) {
 
 /// The text of a blob by id, lossily decoded as UTF-8 (chapters are Markdown).
 /// Empty string when the blob is absent (the chapter didn't exist on that side) or
-/// can't be read — a missing ancestor reads as "added", the caller's intent.
-fn blob_text(repo: &git2::Repository, oid: Option<git2::Oid>) -> String {
+/// can't be read — a missing ancestor reads as "added", the caller's intent. Shared
+/// with the branch merge (#965).
+pub(super) fn blob_text(repo: &git2::Repository, oid: Option<git2::Oid>) -> String {
     oid.and_then(|oid| repo.find_blob(oid).ok())
         .map(|blob| String::from_utf8_lossy(blob.content()).into_owned())
         .unwrap_or_default()

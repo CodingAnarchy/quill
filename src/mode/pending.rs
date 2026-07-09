@@ -97,6 +97,12 @@ pub enum Pending {
     /// waits in `App::pending_milestone_name`; on Enter the tag is re-annotated
     /// in place, leaving the revision it marks unchanged.
     EditMilestoneNote,
+    /// Text input: the name for a new draft — a branch off the current state (#965).
+    /// On Enter the draft is created and switched to (the working copy is already the
+    /// current state, so switching is a no-op checkout). A blank name cancels; an
+    /// existing name is refused. Drafts track alt endings / POV splits as first-class
+    /// versions.
+    CreateDraft,
     /// Confirm running an AI action whose estimated cost exceeds the threshold.
     /// `force` is whether to force a full bible rebuild (#176); `offer_local` adds
     /// "run locally instead" as a third choice when the hybrid router (#372) found

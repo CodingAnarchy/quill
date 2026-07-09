@@ -369,6 +369,13 @@ pub struct App {
     /// intact) and surfaced here for the conflict-resolution UI (#963); empty after a
     /// clean sync. The last sync's result, not a running log.
     sync_conflicts: Vec<crate::vcs::ChapterConflict>,
+    /// The draft merge (#965) a conflict-resolution flow is finishing, as
+    /// `(into, from)` draft names. `Some` only while resolving a conflicting draft
+    /// merge; it routes [`finalize_conflict_resolution`](App::finalize_conflict_resolution)
+    /// to [`crate::vcs::finalize_branch_merge`] instead of the sync's `finalize_sync`,
+    /// and is cleared when the merge lands (or the flow is abandoned). `None` for a
+    /// sync-conflict resolution, which finalizes against the remote.
+    pending_draft_merge: Option<(String, String)>,
     /// Automatic off-site backup config (#887): the opt-in `[backup]` section,
     /// layered per project. Drives whether a save / the timed cadence transparently
     /// pushes to the remote. Off by default — no behavior change when disabled.
@@ -707,6 +714,7 @@ impl App {
             vc_task: Task::idle(),
             pull_origin: None,
             sync_conflicts: Vec::new(),
+            pending_draft_merge: None,
             backup: crate::config::BackupConfig::load(),
             backup_task: Task::idle(),
             backup_pending: false,

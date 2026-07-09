@@ -13,6 +13,9 @@
 //! - [`sync`] — the two-way sync flow (#962): fetch + reconcile the remote's
 //!   chapter edits with local, off-thread on the shared `vc_task`, exposing the
 //!   per-chapter conflicts it detects for the resolution UI (#963).
+//! - [`drafts`] — branch-as-draft (#965): the drafts overlay and its create /
+//!   switch / list / merge flow, a merge with conflicts routing through the same
+//!   resolution UI (#963).
 //! - [`history`] — the navigable commit-history view (#587) and its
 //!   type-to-filter sub-mode (#822).
 //! - [`restore`] — milestones (#833), the working-tree / project diffs, and the
@@ -26,6 +29,7 @@
 use super::*;
 
 mod commit;
+mod drafts;
 mod history;
 mod remote;
 mod restore;
@@ -88,6 +92,11 @@ impl App {
                     GitAction::Sync,
                 ));
             }
+            items.push(git(
+                "Drafts",
+                "Alternate versions (alt ending, POV split) as branches",
+                GitAction::Drafts,
+            ));
             items.push(git(
                 "Milestone",
                 "Mark a named manuscript version (e.g. “first draft”)",
@@ -162,6 +171,7 @@ impl App {
             GitAction::Push => self.start_push(),
             GitAction::Pull => self.start_pull(),
             GitAction::Sync => self.start_sync(),
+            GitAction::Drafts => self.open_drafts(),
         }
     }
 

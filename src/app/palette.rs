@@ -314,6 +314,7 @@ impl App {
             Action::QueuePasses => self.start_queue_passes(force),
             Action::BackgroundBibleUpdate => self.start_batch_update(),
             Action::ProjectFind => self.open_project_find(),
+            Action::Drafts => self.open_drafts(),
             Action::DescribeConfig => self.start_describe_config(),
             Action::AcceptWord => self.accept_word_at_cursor(),
             Action::ViewDictionary => self.view_dictionary(),

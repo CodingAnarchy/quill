@@ -136,6 +136,12 @@ impl App {
             Mode::ConflictReview(r) => r.resolved.clone(),
             _ => return,
         };
+        // A draft merge (#965) routes to finalize_branch_merge against the two draft
+        // names; a sync-conflict resolution (#963) finalizes against the remote.
+        if let Some((into, from)) = self.pending_draft_merge.take() {
+            self.finalize_draft_merge(&into, &from, &resolved);
+            return;
+        }
         match crate::vcs::finalize_sync(&self.project.root, &resolved) {
             Ok(summary) => {
                 self.sync_conflicts.clear();
@@ -220,9 +226,15 @@ impl App {
                 }
             }
             KeyCode::Esc => {
+                // Abandoning a draft merge leaves both drafts untouched — nothing was
+                // committed — so drop the pending merge and say so (#965).
+                let cancelled_merge = self.pending_draft_merge.take().is_some();
                 self.mode = self.editing_mode();
-                self.message =
-                    Some("Conflict resolution cancelled — both versions are safe.".into());
+                self.message = Some(if cancelled_merge {
+                    "Draft merge cancelled — both drafts are untouched.".into()
+                } else {
+                    "Conflict resolution cancelled — both versions are safe.".into()
+                });
             }
             _ => {}
         }
