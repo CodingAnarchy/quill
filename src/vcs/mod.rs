@@ -20,7 +20,7 @@ pub use local::{
     commit, create_tag, diff, diff_file_to_worktree, diff_tree_to_worktree, init, is_repo,
     list_tags, log, restore, restore_all, show_file_at, status, CommitMeta, TagMeta,
 };
-pub use remote::{pull, push, remote_url, set_remote};
+pub use remote::{pull, push, remote_url, set_remote, sync, ChapterConflict};
 
 // `diff_file` is the commit-to-commit diff primitive the UI doesn't wire yet —
 // reached by name only from the tests, so re-export it there.

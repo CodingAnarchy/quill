@@ -475,16 +475,93 @@ fn git_palette_configures_a_remote_then_offers_sync() {
         Some("https://example.com/book.git"),
     );
 
-    // Now the menu offers Push and Pull, and "Change remote" instead of "Set remote".
+    // Now the menu offers Push, Pull, and Sync, and "Change remote" instead of
+    // "Set remote".
     app.on_key(ctrl('v'));
     let labels = palette_labels(&app);
     assert!(
-        labels.contains(&"Push") && labels.contains(&"Pull"),
+        labels.contains(&"Push") && labels.contains(&"Pull") && labels.contains(&"Sync"),
         "{labels:?}"
     );
     assert!(
         labels.contains(&"Change remote") && !labels.contains(&"Set remote"),
         "{labels:?}"
+    );
+}
+
+// --- Two-way sync (#962) -----------------------------------------------------
+
+#[test]
+fn sync_is_offered_only_once_a_remote_is_configured() {
+    let (mut app, _dir) = two_chapter_app("vc-sync-gated");
+    git_menu(&mut app, 0); // Initialize
+    app.on_key(ctrl('v'));
+    assert!(
+        !palette_labels(&app).contains(&"Sync"),
+        "no Sync before a remote is set"
+    );
+    app.on_key(key(KeyCode::Esc));
+
+    git_menu_label(&mut app, "Set remote");
+    type_str(&mut app, "https://example.com/book.git");
+    app.on_key(key(KeyCode::Enter));
+
+    app.on_key(ctrl('v'));
+    assert!(
+        palette_labels(&app).contains(&"Sync"),
+        "Sync appears once a remote is configured"
+    );
+}
+
+#[test]
+fn a_landing_sync_stashes_per_chapter_conflicts_for_resolution() {
+    // A two-way sync that detects same-chapter conflicts (#962) surfaces them for the
+    // resolution UI (#963) via `sync_conflicts`, never clobbering a side. Driven with
+    // a stand-in worker so no real remote is needed; the conflict detection itself is
+    // covered end-to-end by the vcs tests.
+    let (mut app, _dir) = two_chapter_app("vc-sync-conflicts");
+    git_menu(&mut app, 0); // Initialize
+    assert!(app.sync_conflicts().is_empty(), "none before a sync");
+
+    app.spawn_sync_conflicts_for_test(&["one.md", "two.md"]);
+    app.settle_vc_for_test();
+
+    let paths: Vec<&str> = app
+        .sync_conflicts()
+        .iter()
+        .map(|c| c.path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["one.md", "two.md"],
+        "both conflicts are stashed"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("both machines"),
+        "the author is told chapters conflict: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn a_clean_sync_clears_any_prior_conflicts() {
+    // A subsequent clean sync (or pull) leaves no conflicts, clearing a prior set so
+    // the resolution UI never shows stale entries.
+    let (mut app, _dir) = two_chapter_app("vc-sync-clears");
+    git_menu(&mut app, 0); // Initialize
+    app.spawn_sync_conflicts_for_test(&["one.md"]);
+    app.settle_vc_for_test();
+    assert!(!app.sync_conflicts().is_empty(), "a conflict was stashed");
+
+    // A clean pull carries no conflicts → the prior set is cleared.
+    app.spawn_landing_pull_for_test();
+    app.settle_vc_for_test();
+    assert!(
+        app.sync_conflicts().is_empty(),
+        "a clean sync/pull clears the prior conflicts"
     );
 }
 

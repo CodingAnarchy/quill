@@ -43,14 +43,8 @@ impl App {
         self.start_vc(
             "⟳ Pushing to the remote…",
             move || match crate::vcs::push(&root) {
-                Ok(branch) => VcMsg {
-                    text: format!("Pushed {branch} to the remote."),
-                    reload: false,
-                },
-                Err(e) => VcMsg {
-                    text: e,
-                    reload: false,
-                },
+                Ok(branch) => VcMsg::plain(format!("Pushed {branch} to the remote."), false),
+                Err(e) => VcMsg::plain(e, false),
             },
         );
     }
@@ -81,11 +75,8 @@ impl App {
         self.start_vc(
             "⟳ Pulling from the remote…",
             move || match crate::vcs::pull(&root) {
-                Ok(text) => VcMsg { text, reload: true },
-                Err(e) => VcMsg {
-                    text: e,
-                    reload: false,
-                },
+                Ok(text) => VcMsg::plain(text, true),
+                Err(e) => VcMsg::plain(e, false),
             },
         );
     }
@@ -93,7 +84,7 @@ impl App {
     /// Run a remote op on a worker thread (#134): spawn `work`, stash the receiver
     /// for [`App::poll_vc`], and show `status` until the result lands. The single
     /// place push/pull cross to a background thread.
-    fn start_vc(&mut self, status: &str, work: impl FnOnce() -> VcMsg + Send + 'static) {
+    pub(super) fn start_vc(&mut self, status: &str, work: impl FnOnce() -> VcMsg + Send + 'static) {
         self.vc_task.spawn(work);
         self.message = Some(status.into());
     }
@@ -115,9 +106,8 @@ impl App {
     #[cfg(test)]
     pub(crate) fn spawn_landing_pull_for_test(&mut self) {
         self.pull_origin = Some(self.project.active_path());
-        self.start_vc("⟳ Pulling from the remote…", || VcMsg {
-            text: "Pulled from the remote.".into(),
-            reload: true,
+        self.start_vc("⟳ Pulling from the remote…", || {
+            VcMsg::plain("Pulled from the remote.".into(), true)
         });
     }
 
@@ -145,7 +135,7 @@ impl App {
 
     /// Shared guard for the sync actions: under version control with a remote set.
     /// Sets the explanatory message and returns `false` when not.
-    fn guard_remote(&mut self) -> bool {
+    pub(super) fn guard_remote(&mut self) -> bool {
         if !self.under_vc {
             self.message = Some("Not under version control — Ctrl-v to initialize.".into());
             return false;
@@ -171,6 +161,9 @@ impl App {
                     None
                 };
                 self.pull_origin = None; // this pull is done
+                                         // Stash any per-chapter sync conflicts for the resolution UI (#963);
+                                         // a push/pull or a clean sync carries none, which clears a prior set.
+                self.sync_conflicts = msg.conflicts;
                 self.refresh_vc_status();
                 self.message = Some(match note {
                     Some(note) => format!("{} {note}", msg.text),
