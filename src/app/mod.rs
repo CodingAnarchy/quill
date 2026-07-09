@@ -345,6 +345,11 @@ pub struct App {
     /// moved on (or typed unsaved edits) skips the destructive reload rather than
     /// overwriting a now-active chapter's buffer from the just-pulled disk state.
     pull_origin: Option<PathBuf>,
+    /// Per-chapter conflicts from the last two-way sync (#962) — chapters changed on
+    /// both machines that sync detected but couldn't merge. Preserved (both versions
+    /// intact) and surfaced here for the conflict-resolution UI (#963); empty after a
+    /// clean sync. The last sync's result, not a running log.
+    sync_conflicts: Vec<crate::vcs::ChapterConflict>,
     /// Automatic off-site backup config (#887): the opt-in `[backup]` section,
     /// layered per project. Drives whether a save / the timed cadence transparently
     /// pushes to the remote. Off by default — no behavior change when disabled.
@@ -679,6 +684,7 @@ impl App {
             ai_task: Task::idle(),
             vc_task: Task::idle(),
             pull_origin: None,
+            sync_conflicts: Vec::new(),
             backup: crate::config::BackupConfig::load(),
             backup_task: Task::idle(),
             backup_pending: false,
