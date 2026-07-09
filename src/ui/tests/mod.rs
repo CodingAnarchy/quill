@@ -11,6 +11,7 @@ use crate::project::Project;
 mod corkboard_outline;
 mod editor_render;
 mod fenced_code;
+mod folds;
 mod overlays;
 mod perf;
 

@@ -523,6 +523,8 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | Ctrl-G         | browse chapters (↑/↓, Enter; `/` filter / quick-jump by title·status·POV; `o` open in a pane, `f` reference files) |
 | Ctrl-D         | quick switch: fuzzy-jump to any chapter or scene heading — type a substring to filter, ↑/↓ to move, Enter to jump (records a jump-back point) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `a` assistant pane, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
+| Ctrl-Space     | fold / unfold the section under the cursor (display-only; the file is untouched). Fold-all / expand-all are in the run-action menu (Ctrl-K) |
+| Ctrl-\\         | composition mode: distraction-free — hide the panes and status bar, prose only (Esc or Ctrl-\\ restores) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 
 ### Projects (switch without relaunching)

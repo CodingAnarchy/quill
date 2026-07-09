@@ -4,6 +4,7 @@ use super::*;
 use crate::buffer::{Buffer, Cursor};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
+use std::fmt::Write;
 use std::time::Instant;
 
 /// Performance guard (run with `cargo test --release -- --ignored
@@ -27,7 +28,12 @@ fn render_stays_within_a_frame() {
     let project = Project::scratch_with(&title_refs);
 
     let mut text = String::new();
-    for _ in 0..7500 {
+    for i in 0..7500 {
+        // A `##` scene heading every 50 lines, so the fold path (#975) has real
+        // sections to collapse and the per-row fold lookup is exercised below.
+        if i % 50 == 0 {
+            let _ = writeln!(text, "## Scene {}", i / 50);
+        }
         text.push_str("The night was dark and the road was very long indeed.\n");
     }
     let words = text.split_whitespace().count();
@@ -40,6 +46,10 @@ fn render_stays_within_a_frame() {
     // The first-line paragraph indent (#722) classifies each visible logical line
     // (a bounded highlight lookup per row); on here so the render guard covers it.
     app.paragraph_indent = true;
+    // Fold every section (#975), so the render's per-row fold lookup and the
+    // scroll math's zero-row hidden lines are exercised under the frame budget.
+    let headings = app.edit_buffer().syntax().headings().to_vec();
+    app.folds.fold_all(&headings);
     // A spread of inline annotations (#302) so the per-row/char annotation
     // scan is exercised under the frame budget too.
     app.annotations = (0..50)

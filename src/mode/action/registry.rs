@@ -112,6 +112,12 @@ pub enum Action {
     ToggleFocus,
     /// Toggle the first-line paragraph indent in the editor (#722).
     ToggleParagraphIndent,
+    /// Fold every section in the active chapter to its heading (#975).
+    FoldAll,
+    /// Expand every folded section (#975).
+    ExpandAll,
+    /// Toggle distraction-free composition mode — hide the chrome (#975).
+    ToggleComposition,
     /// Open the read-only corkboard for the active chapter (#589, Phase 1): an
     /// index-card overview built from the chapter's `##`/`###` scene headings —
     /// each card is a heading + its first line of prose — navigable, Enter jumps
@@ -301,6 +307,9 @@ impl Action {
         Self::ToggleTypewriter,
         Self::ToggleFocus,
         Self::ToggleParagraphIndent,
+        Self::FoldAll,
+        Self::ExpandAll,
+        Self::ToggleComposition,
         Self::Settings,
         // Help
         Self::UserGuide,
@@ -356,6 +365,9 @@ impl Action {
             Self::ToggleTypewriter => "view:typewriter",
             Self::ToggleFocus => "view:focus",
             Self::ToggleParagraphIndent => "view:paragraph-indent",
+            Self::FoldAll => "view:fold-all",
+            Self::ExpandAll => "view:expand-all",
+            Self::ToggleComposition => "view:composition",
             Self::Corkboard => "view:corkboard",
             Self::ManuscriptCorkboard => "view:corkboard-all",
             Self::AddAnnotation => "annotate",
@@ -440,6 +452,9 @@ impl Action {
             Self::ToggleTypewriter
             | Self::ToggleFocus
             | Self::ToggleParagraphIndent
+            | Self::FoldAll
+            | Self::ExpandAll
+            | Self::ToggleComposition
             | Self::Settings => "View",
             Self::UserGuide | Self::QuickStart => "Help",
         }
@@ -519,6 +534,9 @@ impl Action {
             Self::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Self::ToggleFocus => "Focus mode (toggle)",
             Self::ToggleParagraphIndent => "Paragraph indent (toggle)",
+            Self::FoldAll => "Fold all sections",
+            Self::ExpandAll => "Expand all sections",
+            Self::ToggleComposition => "Composition mode — distraction-free (toggle)",
             Self::Corkboard => "Corkboard (scene overview)",
             Self::ManuscriptCorkboard => "Corkboard — whole manuscript",
             Self::AddAnnotation => "Annotate selection",

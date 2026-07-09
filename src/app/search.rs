@@ -93,6 +93,9 @@ impl App {
         };
         let buffer = self.edit_buffer_mut();
         buffer.cursor = buffer.cursor_at_byte(target);
+        // Reveal a folded section the jump landed in (#975), so `n`/`N`/`*` still
+        // finds and shows matches inside collapsed regions.
+        self.reveal_fold_at_cursor();
         if wrapped {
             self.message = Some(
                 if backward {
@@ -339,6 +342,9 @@ impl App {
         if let Some((start, _)) = self.search().current_match() {
             let buffer = self.edit_buffer_mut();
             buffer.cursor = buffer.cursor_at_byte(start);
+            // Find still matches inside folded regions (#975): if the match landed in
+            // a collapsed section, reveal it so the cursor isn't hidden away.
+            self.reveal_fold_at_cursor();
         }
     }
 

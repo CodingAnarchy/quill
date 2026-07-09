@@ -31,6 +31,17 @@ rather than its raw marks, revealed back to the marks only when the cursor is on
 that line; the paragraph after a break (or a code block) is set flush-left, the
 way the exports typeset a new scene.
 
+Fold a section to navigate structure in place. Ctrl-Space collapses the heading
+under the cursor and its body — up to the next same-or-higher heading — to just
+its header line, marked with a small triangle; press it again to expand. "Fold
+all sections" and "Expand all sections" in the run-action menu (Ctrl-K) collapse
+or open the whole chapter at once. Folding is display-only: the file and the text
+are untouched, and a find still matches inside a folded section, unfolding it to
+show the match. For a clean writing surface, Ctrl-\ enters composition mode —
+distraction-free, with the panes and status bar hidden so only the centered prose
+shows; Esc or Ctrl-\ restores the layout. It composes with focus mode and folding
+for a surface that shows only the scene you're writing.
+
 Fence a block in ``` to set it apart verbatim — a log readout, a transmission,
 a letter, anything whose line breaks and spacing should be preserved exactly. In
 the editor the block shows as a set-apart, tinted box: the ``` fence lines are
@@ -550,6 +561,8 @@ KEY REFERENCE
   Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading
   Ctrl-B          browse / switch projects
   Ctrl-W          window panes (split, focus, resize, close)
+  Ctrl-Space      fold / unfold the section under the cursor
+  Ctrl-\          composition mode: distraction-free (Esc restores)
   Ctrl-+ / Ctrl-- widen / narrow the text column
   Ctrl-R          progress report
   Ctrl-T          analysis report

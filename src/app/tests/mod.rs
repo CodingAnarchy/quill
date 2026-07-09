@@ -77,6 +77,7 @@ mod cooccurrence;
 mod corkboard;
 mod editing;
 mod export_styling;
+mod folds;
 mod goals;
 mod health;
 mod imports;
