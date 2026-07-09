@@ -54,7 +54,17 @@ resize, and close it with Ctrl-W c or Vim ":q". Press "/" to filter the list as 
 status, or POV) and quick-jump to a chapter; Enter opens the highlighted match,
 Esc keeps the filter for the browser's commands to act on, and a second Esc
 clears it. Press "#" to go straight to a chapter by number (1-based) or title
-without scrolling the list. From the browser you can also create, rename, reorder, and delete
+without scrolling the list.
+
+Ctrl-D opens the quick switcher: a fuzzy jump-to over every chapter *and* every
+scene heading in the book at once. Type a substring to narrow the list (a
+heading also matches on its chapter's title), arrow up and down, and press Enter
+to jump straight to that chapter or scene — no pane, no scrolling. The jump
+records a jump-back point, so backtick-backtick returns to where you were, and it
+stays instant on large or series projects (the list is indexed once when it
+opens, then filtered in memory). Esc closes without moving.
+
+From the browser you can also create, rename, reorder, and delete
 chapters, split the open chapter at the cursor into two ("x"), merge a chapter
 into the one above it ("M"), duplicate a chapter ("c"), and set each chapter's
 status, summary, and section.
@@ -537,6 +547,7 @@ KEY REFERENCE
   Ctrl-L          toggle the continuous manuscript
   Ctrl-N / Ctrl-P next / previous chapter
   Ctrl-G          browse chapters
+  Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading
   Ctrl-B          browse / switch projects
   Ctrl-W          window panes (split, focus, resize, close)
   Ctrl-+ / Ctrl-- widen / narrow the text column

@@ -149,6 +149,7 @@ impl App {
             Mode::ImportPreview(_) => self.on_key_import_preview(key),
             Mode::ReviewImport(_) => self.on_key_review_import(key),
             Mode::BackupBrowser(_) => self.on_key_backup_browser(key),
+            Mode::QuickSwitch(_) => self.on_key_quick_switch(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
             Mode::Visual { .. } => self.on_key_visual(key),
@@ -291,6 +292,11 @@ impl App {
                 self.select(self.project.active_index());
             }
 
+            // Open the fuzzy quick-switcher (#976): a Ctrl-P-style overlay that
+            // jumps to any chapter or scene heading by typing a substring. Ctrl-d
+            // ("dart" to a scene) — the go-to keys N/P/G step and browse chapters;
+            // this reaches scenes too, without opening a pane.
+            KeyCode::Char('d') => self.open_quick_switch(),
             // Undo / redo (#145). Ctrl-z undoes a burst of typing; Ctrl-y redoes.
             // (Vim's redo, Ctrl-r, is taken by the progress report; in Vim mode
             // `u` undoes and Ctrl-y redoes.)

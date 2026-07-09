@@ -438,6 +438,7 @@ impl App {
                 | Mode::Tree(_)
                 | Mode::ProjectBrowser(_)
                 | Mode::DirBrowser(_)
+                | Mode::QuickSwitch(_)
         );
         if !is_list {
             return false;

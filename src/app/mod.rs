@@ -81,6 +81,7 @@ mod persistence;
 mod project_ops;
 mod project_search;
 mod prompts;
+mod quick_switch;
 mod sequenced;
 mod series_bible;
 mod spell;

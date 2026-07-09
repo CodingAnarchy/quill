@@ -89,6 +89,7 @@ mod pass_queue;
 mod project_search;
 mod projects;
 mod prompt_editing;
+mod quick_switch;
 mod recovery;
 mod research_notebook;
 mod resume;

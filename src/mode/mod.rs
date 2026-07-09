@@ -189,4 +189,12 @@ pub enum Mode {
     /// closes. Read-only over the working project until a restore is confirmed. Boxed
     /// (carries the backup list).
     BackupBrowser(Box<BackupBrowser>),
+    /// The fuzzy chapter/scene quick-switcher (#976): a `Ctrl-P`-style overlay
+    /// listing every chapter and every scene heading, narrowed live by a typed
+    /// substring; Enter jumps to the highlighted target (reusing the go-to +
+    /// jumplist paths). The target index is built once when the switcher opens
+    /// (cached metadata + a one-time headings read per chapter), so filtering as
+    /// you type reads no files and stays fast at series scale. Boxed (carries the
+    /// full target list).
+    QuickSwitch(Box<QuickSwitch>),
 }
