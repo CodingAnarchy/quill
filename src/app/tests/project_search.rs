@@ -3,6 +3,7 @@
 //! (front matter left untouched).
 
 use super::*;
+use crate::mode::ProjectSearchStage;
 use crossterm::event::KeyCode;
 
 #[test]
@@ -386,4 +387,120 @@ fn project_regex_composes_with_case_sensitivity() {
     // Chapter two: "will he" and nothing else lowercase-will. So 2 total.
     let n = app.project_search().matches.len();
     assert_eq!(n, 2, "lowercase will+any-char in each chapter");
+}
+
+// --- #977: grouped results pane --------------------------------------------
+
+/// A three-chapter fixture with an uneven distribution of the query term "mist":
+/// chapter one has it twice, chapter two once, chapter three not at all — so the
+/// grouped counts (2, 1) and the two-chapter span are unambiguous.
+fn mist_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n\n\
+         [[chapters]]\ntitle = \"Three\"\nfile = \"three.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "mist over the mist.\n").unwrap();
+    fs::write(dir.join("two.md"), "a lone mist.\n").unwrap();
+    fs::write(dir.join("three.md"), "clear skies.\n").unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn grouped_view_reports_per_chapter_counts_and_total() {
+    let (mut app, _dir) = mist_app("psearch-grouped-counts");
+    app.open_project_find();
+    type_str(&mut app, "mist");
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('g'))); // → Grouped
+
+    let ps = app.project_search();
+    assert!(matches!(ps.stage, ProjectSearchStage::Grouped));
+    // Total: 3 matches across 2 chapters (the third has none).
+    assert_eq!(ps.matches.len(), 3, "3 matches total");
+    assert_eq!(ps.chapter_span(), 2, "across 2 chapters");
+
+    let groups = ps.grouped();
+    assert_eq!(groups.len(), 2, "only the two chapters with matches");
+    assert_eq!(groups[0].chapter, 0);
+    assert_eq!(groups[0].count, 2, "chapter one has two");
+    assert_eq!(groups[1].chapter, 1);
+    assert_eq!(groups[1].count, 1, "chapter two has one");
+}
+
+#[test]
+fn grouped_view_jumps_to_the_selected_chapters_first_match() {
+    let (mut app, _dir) = mist_app("psearch-grouped-jump");
+    assert_eq!(app.project.active_index(), 0);
+
+    app.open_project_find();
+    type_str(&mut app, "mist");
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('g'))); // → Grouped
+    app.on_key(key(KeyCode::Down)); // select chapter two's group
+    app.on_key(key(KeyCode::Enter)); // jump to its first match
+
+    assert_eq!(
+        app.project.active_index(),
+        1,
+        "jumped to the selected chapter"
+    );
+    assert!(
+        app.buffer.text().contains("a lone mist"),
+        "opened chapter two"
+    );
+}
+
+#[test]
+fn grouped_view_toggles_back_to_the_flat_list() {
+    let (mut app, _dir) = mist_app("psearch-grouped-toggle");
+    app.open_project_find();
+    type_str(&mut app, "mist");
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('g'))); // → Grouped
+    assert!(matches!(
+        app.project_search().stage,
+        ProjectSearchStage::Grouped
+    ));
+    app.on_key(key(KeyCode::Char('g'))); // back → Results
+    assert!(matches!(
+        app.project_search().stage,
+        ProjectSearchStage::Results
+    ));
+    // The flat step-through still works from Results (n advances the match).
+    app.on_key(key(KeyCode::Char('n')));
+    assert_eq!(app.project_search().selected, 1, "n still steps matches");
+}
+
+#[test]
+fn grouped_view_options_reshape_the_groups() {
+    // Whole-word toggled on from the grouped pane re-runs the search and the
+    // grouped counts track it (#570/#891 options apply to the grouped results).
+    let (mut app, _dir) = will_app("psearch-grouped-options");
+    app.open_project_find();
+    type_str(&mut app, "Will");
+    app.on_key(key(KeyCode::Enter)); // Results: 4 substring matches
+    app.on_key(key(KeyCode::Char('g'))); // → Grouped
+                                         // Before: "Will"/"will"(in willing) in one.md = 2; "will"/"Will" in two.md = 2.
+    let before = app.project_search().grouped();
+    assert_eq!(before.iter().map(|g| g.count).sum::<usize>(), 4);
+    assert_eq!(before[0].count, 2);
+    assert_eq!(before[1].count, 2);
+
+    app.on_key(ctrl('w')); // whole-word, re-runs in place
+    assert!(
+        matches!(app.project_search().stage, ProjectSearchStage::Grouped),
+        "stays in the grouped pane"
+    );
+    let after = app.project_search().grouped();
+    // Whole-word drops the "will" inside "willing": one.md → 1 ("Will"),
+    // two.md → 2 ("will", "Will").
+    assert_eq!(after.iter().map(|g| g.count).sum::<usize>(), 3);
+    assert_eq!(after[0].count, 1, "willing no longer counts");
+    assert_eq!(after[1].count, 2);
 }
