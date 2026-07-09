@@ -28,7 +28,7 @@ pub use editor::HeaderCache;
 use list_overlay::{
     draw_annotations, draw_backup_browser, draw_cooccurrence, draw_corkboard, draw_dashboard,
     draw_dir_browser, draw_findings, draw_history, draw_import_preview, draw_list_overlay,
-    draw_model_manager, draw_palette, draw_project_browser, draw_project_search,
+    draw_model_manager, draw_palette, draw_project_browser, draw_project_search, draw_quick_switch,
     draw_review_import, list_row, marker, row_style,
 };
 pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
@@ -120,6 +120,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Mode::BackupBrowser(browser) => modal(frame, area, |f, r| {
             draw_backup_browser(f, r, browser, &app.list_layout);
         }),
+        Mode::QuickSwitch(switch) => modal(frame, area, |f, r| draw_quick_switch(f, r, switch)),
         Mode::Prompt(_) => dim_backdrop(frame, area),
         _ => {}
     }

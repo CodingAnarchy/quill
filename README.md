@@ -521,6 +521,7 @@ isn't editing is never touched; turn the setting off for plain-ASCII input. See
 | Ctrl-B         | browse projects: switch to a recently-opened project, or press `b` to browse the filesystem for any project (saves the current first) |
 | Ctrl-N / Ctrl-P| next / previous chapter         |
 | Ctrl-G         | browse chapters (↑/↓, Enter; `/` filter / quick-jump by title·status·POV; `o` open in a pane, `f` reference files) |
+| Ctrl-D         | quick switch: fuzzy-jump to any chapter or scene heading — type a substring to filter, ↑/↓ to move, Enter to jump (records a jump-back point) |
 | Ctrl-W then …  | window panes: `s`/`v` split, `a` assistant pane, `w` switch pane, `</>`/`+-` resize, `=` even up, `c`/`q` close (with a report/AI answer open, `s`/`v` docks it beside the editor) — see [`docs/windows.md`](docs/windows.md) |
 | Ctrl-+ / Ctrl- | widen / narrow the text column  |
 

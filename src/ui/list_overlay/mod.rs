@@ -35,6 +35,7 @@ mod choosers;
 mod findings;
 mod history;
 mod imports;
+mod quick_switch;
 mod search;
 
 pub(super) use annotations::{draw_annotations, draw_corkboard};
@@ -46,6 +47,7 @@ pub use choosers::{draw_startup_browser, draw_startup_chooser};
 pub(super) use findings::{draw_cooccurrence, draw_dashboard, draw_findings};
 pub(super) use history::draw_history;
 pub(super) use imports::{draw_import_preview, draw_review_import};
+pub(super) use quick_switch::draw_quick_switch;
 pub(super) use search::draw_project_search;
 
 /// The selection marker for a list row.

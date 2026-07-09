@@ -300,6 +300,51 @@ fn the_backup_browser_lists_dates_sizes_and_the_restore_key() {
 }
 
 #[test]
+fn the_quick_switcher_lists_chapters_and_scenes_with_the_query_and_count() {
+    // The fuzzy quick-switcher (#976) lists chapter and scene rows, marking scenes
+    // with the ¶ tag and the chapter as dimmed context; the help line echoes the
+    // typed query and the match count.
+    use crate::mode::{QuickSwitch, QuickTarget};
+
+    let target = |title: &str, chapter_title: &str, is_scene: bool| QuickTarget {
+        chapter: 0,
+        byte: 0,
+        title: title.into(),
+        chapter_title: chapter_title.into(),
+        haystack: format!("{title} {chapter_title}").to_lowercase(),
+        is_scene,
+    };
+    let mut app = app_with("body\n");
+    let mut switch = QuickSwitch::new(vec![
+        target("Chapter One", "", false),
+        target("The Arrival", "Chapter One", true),
+        target("The Departure", "Chapter One", true),
+    ]);
+    switch.query = "the".into();
+    app.mode = Mode::QuickSwitch(Box::new(switch));
+
+    let screen = render(&app, 90, 20);
+    assert!(screen.contains(" Go to "), "titled 'Go to':\n{screen}");
+    assert!(
+        screen.contains("The Arrival") && screen.contains("The Departure"),
+        "the matching scene rows are listed:\n{screen}"
+    );
+    // The "the" query filtered to two scenes; only two rows show.
+    assert!(
+        screen.contains("2 matches"),
+        "the chapter row was filtered out, leaving 2 scene rows:\n{screen}"
+    );
+    assert!(
+        screen.contains("¶ The Arrival"),
+        "scene rows carry the ¶ scene tag:\n{screen}"
+    );
+    assert!(
+        screen.contains("the") && screen.contains("2 matches"),
+        "the help line echoes the query and count:\n{screen}"
+    );
+}
+
+#[test]
 fn the_grouped_results_pane_shows_per_chapter_counts_and_a_total() {
     // The grouped project-find pane (#977): one row per chapter with its match
     // count, over a total ("N matches across M chapters").
