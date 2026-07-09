@@ -340,3 +340,121 @@ fn try_chapter_body_distinguishes_error_from_empty() {
     fs::remove_dir(dir.join("one.md")).ok();
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- write_chapters_atomic swap loop (#262/#974) ----------------------------
+
+/// Seed a minimal two-chapter project so the multi-file atomic write has two
+/// destinations to swap. Each chapter has distinct prose so a half-updated state
+/// is detectable.
+fn seed_two_chapter_project(dir: &Path) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+        Project::manifest_path(dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "# One\n\nOriginal one prose here.\n").unwrap();
+    fs::write(dir.join("two.md"), "# Two\n\nOriginal two prose here.\n").unwrap();
+}
+
+// The final swap of `write_chapters_atomic` must be all-or-nothing: if a *later*
+// rename fails with an earlier one already applied, the applied one is rolled back
+// so no chapter is left half-updated (#262). Before this fix the loop was a bare
+// `fs::rename` per file with no rollback, so a mid-loop failure durably rewrote the
+// first chapter and left the second stale — the split state the feature promises to
+// prevent. We arm the new swap fail-point on the second rename.
+#[test]
+fn write_chapters_atomic_rolls_back_a_partial_swap() {
+    let dir = temp_dir("chapters-atomic-partial-swap");
+    seed_two_chapter_project(&dir);
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two_before = fs::read_to_string(dir.join("two.md")).unwrap();
+    let mut project = Project::open(&dir).unwrap();
+
+    // Fail the *second* swap rename, after the first has already been applied.
+    crate::atomic::fail_point::arm_swap_failure_on_nth(2);
+    let result = project.write_chapters_atomic(&[
+        (0, "# One\n\nREWRITTEN one.\n".to_string()),
+        (1, "# Two\n\nREWRITTEN two.\n".to_string()),
+    ]);
+
+    assert!(result.is_err(), "the partial swap surfaces as an error");
+    // Neither chapter is left in the rewritten state — the first swap was rolled
+    // back, the second never happened. All-or-nothing.
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        one_before,
+        "the first chapter's swap was rolled back to its original"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        two_before,
+        "the second chapter was never rewritten"
+    );
+    // No stray temp files were orphaned.
+    let strays: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+        .collect();
+    assert!(strays.is_empty(), "temp file left behind: {strays:?}");
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+// A chapter file symlinked into a synced/shared folder must have the multi-file
+// atomic write follow the link to its *target* and preserve the link itself —
+// never replace it with a regular file that orphans the target as silently stale
+// (#871). Before this fix the swap was a bare rename onto the link path, which
+// replaced the link. Unix-only (relies on `std::os::unix::fs::symlink`).
+#[cfg(unix)]
+#[test]
+fn write_chapters_atomic_writes_through_a_symlinked_chapter() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("chapters-atomic-symlink");
+    fs::create_dir_all(&dir).unwrap();
+    let synced = dir.join("synced");
+    fs::create_dir_all(&synced).unwrap();
+    // The real chapter file lives in the synced folder; `two.md` is a link to it.
+    let real_target = synced.join("real-two.md");
+    fs::write(&real_target, "# Two\n\nOriginal two prose here.\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "# One\n\nOriginal one prose here.\n").unwrap();
+    symlink(&real_target, dir.join("two.md")).unwrap();
+
+    let mut project = Project::open(&dir).unwrap();
+    project
+        .write_chapters_atomic(&[
+            (0, "# One\n\nREWRITTEN one.\n".to_string()),
+            (1, "# Two\n\nREWRITTEN two.\n".to_string()),
+        ])
+        .unwrap();
+
+    // The link is still a link, and the real target carries the new content.
+    assert!(
+        fs::symlink_metadata(dir.join("two.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the atomic write must not replace the symlink with a regular file"
+    );
+    assert_eq!(
+        fs::read_to_string(&real_target).unwrap(),
+        "# Two\n\nREWRITTEN two.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "# One\n\nREWRITTEN one.\n"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}

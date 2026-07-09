@@ -114,7 +114,7 @@ where
 /// link's own directory so a relative link (`../shared/ch1.md`) points where it
 /// should. A dangling link (target's directory is gone) surfaces as the write's
 /// own error at `File::create`, never a silent replacement of the link.
-fn resolve_symlink(path: &Path) -> io::Result<PathBuf> {
+pub fn resolve_symlink(path: &Path) -> io::Result<PathBuf> {
     // `symlink_metadata` does not follow the link, so this distinguishes a
     // symlink from a regular file; a `NotFound` (nothing there yet) is the
     // ordinary create case and leaves the path unchanged.
@@ -192,6 +192,13 @@ pub mod fail_point {
         // multi-write operation can be failed at a chosen step without arming
         // between the internal writes it doesn't expose.
         static FAIL_ON_NTH: Cell<usize> = const { Cell::new(0) };
+        // Countdown to a one-shot failure on the Nth *swap rename* of
+        // `Project::write_chapters_atomic` (#262/#974), independent of the
+        // staging-write countdowns above. This targets the bare-rename swap loop
+        // that runs *after* every temp is durably staged — the window where a
+        // later rename can fail with an earlier one already applied — which the
+        // staging fail-points never reach. `0` means disarmed.
+        static FAIL_SWAP_ON_NTH: Cell<usize> = const { Cell::new(0) };
     }
 
     /// Arm a one-shot failure that fires inside the next [`super::write`] on this
@@ -217,6 +224,31 @@ pub mod fail_point {
             return true;
         }
         FAIL_ON_NTH.with(|f| match f.get() {
+            0 => false,
+            1 => {
+                f.set(0);
+                true
+            }
+            n => {
+                f.set(n - 1);
+                false
+            }
+        })
+    }
+
+    /// Arm a one-shot failure that fires on the `n`th swap rename (1-based) of the
+    /// next [`Project::write_chapters_atomic`](crate::project::Project::write_chapters_atomic)
+    /// on this thread — the bare-rename swap loop that runs after every temp is
+    /// staged. Lets a test drive the partial-swap window (an earlier rename applied,
+    /// a later one failing) that the staging fail-points can't reach.
+    pub fn arm_swap_failure_on_nth(n: usize) {
+        FAIL_SWAP_ON_NTH.with(|f| f.set(n));
+    }
+
+    /// Whether the current swap rename should fail, consuming the one-shot
+    /// countdown so it fires exactly once on the armed step.
+    pub fn should_fail_swap() -> bool {
+        FAIL_SWAP_ON_NTH.with(|f| match f.get() {
             0 => false,
             1 => {
                 f.set(0);

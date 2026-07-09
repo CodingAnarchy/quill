@@ -689,6 +689,82 @@ fn cross_chapter_move_is_atomic_on_a_write_failure() {
     assert!(strays.is_empty(), "temp file left behind: {strays:?}");
 }
 
+// A *hard* read failure on the destination chapter must ABORT the move — never
+// compose the destination's new content onto an empty body, which would durably
+// wipe its real prose while reporting success and capture that empty state in the
+// undo (#565/#871). We isolate the *read* hazard (distinct from the write-side
+// pre-flight) with a chmod-000 destination file: it is a *regular* file whose path
+// a rename could still land on (so the swap pre-flight passes), but whose contents
+// `read_to_string` cannot read — exactly the "unreadable but writable" case where
+// the old swallowing read would blank the real prose. Unix-only (POSIX perms).
+#[cfg(unix)]
+#[test]
+fn cross_chapter_move_aborts_when_the_destination_cannot_be_read() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = app_scratch_dir("corkboard-ms-cross-dest-read-fail");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "# Chapter One\n\n## Alpha\n\nA.\n").unwrap();
+    // The destination carries real prose that must survive an aborted move.
+    let two_body = "# Chapter Two\n\n## Beta\n\nBeta's real prose here.\n";
+    fs::write(dir.join("two.md"), two_body).unwrap();
+    let dir = TempProject::new(dir);
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+
+    let mut app = open_test_app(&dir);
+    app.open_manuscript_corkboard();
+    // Make the destination unreadable *after* open (open cached its metadata). A
+    // regular file with no read permission: readable as a path, unreadable as bytes.
+    fs::set_permissions(dir.join("two.md"), fs::Permissions::from_mode(0o000)).unwrap();
+    // Under root the read bit is bypassed, so the file stays readable and there's
+    // nothing to assert — skip rather than false-pass. Checked *before* the move,
+    // since a buggy blanking move replaces the file with a readable empty one.
+    if fs::read_to_string(dir.join("two.md")).is_ok() {
+        fs::set_permissions(dir.join("two.md"), fs::Permissions::from_mode(0o644)).unwrap();
+        return;
+    }
+
+    // Alpha is chapter one's only scene; move it down into chapter two, whose file
+    // can't be read. The move must abort rather than compose onto an empty body.
+    app.on_key(key(KeyCode::Char('J')));
+
+    // Restore perms so the file can be read back and the temp dir cleaned up.
+    fs::set_permissions(dir.join("two.md"), fs::Permissions::from_mode(0o644)).unwrap();
+
+    // A message reports the failure to read the chapter.
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Move failed: could not read chapter"),
+        "the read failure aborts the move: {:?}",
+        app.message
+    );
+    // The destination's real prose is byte-for-byte intact — NOT blanked.
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        two_body,
+        "the destination's prose must survive an unreadable-destination move"
+    );
+    // The source chapter is unchanged too (its scene was NOT removed).
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), one_before);
+    // Nothing was captured for undo — there is nothing to revert.
+    assert!(app.cork_undo.is_none(), "an aborted move records no undo");
+    // No stray temp files were orphaned by the aborted move.
+    let strays: Vec<_> = fs::read_dir(&*dir)
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+        .collect();
+    assert!(strays.is_empty(), "temp file left behind: {strays:?}");
+}
+
 #[test]
 fn cross_chapter_move_is_undoable_from_the_board() {
     // The board's `u` restores the prior arrangement of a cross-chapter move: both

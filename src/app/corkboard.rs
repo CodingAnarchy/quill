@@ -302,9 +302,27 @@ impl App {
             self.reopen_board_for(true, chapter, scene);
             return;
         }
-        // Read both chapters as (front matter, body), off the keystroke path.
-        let (src_front, src_body) = self.split_chapter_file(src);
-        let (dst_front, dst_body) = self.split_chapter_file(dst);
+        // Read both chapters as (front matter, body), off the keystroke path. A
+        // *hard* read error on either file must abort the move: composing the
+        // destination's new content onto an empty body would durably wipe its real
+        // prose while reporting success, and the undo would capture that empty
+        // state (#565/#871). Both reads are guarded before anything is written.
+        let (src_front, src_body) = match self.split_chapter_file(src) {
+            Ok(pair) => pair,
+            Err(e) => {
+                self.message = Some(format!("Move failed: could not read chapter: {e}"));
+                self.reopen_board_for(true, chapter, scene);
+                return;
+            }
+        };
+        let (dst_front, dst_body) = match self.split_chapter_file(dst) {
+            Ok(pair) => pair,
+            Err(e) => {
+                self.message = Some(format!("Move failed: could not read chapter: {e}"));
+                self.reopen_board_for(true, chapter, scene);
+                return;
+            }
+        };
         let src_blocks = scenes(&src_body, Syntax::new(&src_body).headings());
         let Some(block) = src_blocks.get(scene) else {
             self.reopen_board_for(true, chapter, scene);
@@ -412,10 +430,16 @@ impl App {
     /// Read chapter `index` from disk and split it into its [`FrontMatter`] (default
     /// when the file has none) and prose body (#974). Off the keystroke path; used by
     /// the cross-chapter move to work on both the source and destination files.
-    fn split_chapter_file(&self, index: usize) -> (FrontMatter, String) {
-        let front = self.project.chapter_front_matter(index).unwrap_or_default();
-        let body = self.project.chapter_body(index);
-        (front, body)
+    ///
+    /// A *hard* read failure (permissions, an I/O fault, the path being a
+    /// directory) is propagated as `Err` rather than collapsing to default front
+    /// matter + an empty body, so the caller aborts the move instead of composing
+    /// the destination's new content onto an empty base — which would durably wipe
+    /// its real prose while reporting success (#565/#871). A missing file is the
+    /// legitimate "empty chapter" case and yields the default front matter + `""`.
+    fn split_chapter_file(&self, index: usize) -> std::io::Result<(FrontMatter, String)> {
+        let (front, body) = self.project.try_split_chapter(index)?;
+        Ok((front.unwrap_or_default(), body))
     }
 
     /// Reload the active chapter's buffer from disk after an off-buffer edit changed
