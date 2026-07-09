@@ -107,6 +107,32 @@ pub fn create_tag(root: &Path, name: &str, message: &str) -> Result<(), String> 
     Ok(())
 }
 
+/// Re-annotate an existing milestone (#966) with a new note, leaving it pointing
+/// at the same commit — the edit path for a milestone's free-text note. Recreates
+/// the annotated tag in place (`force`) on its current target, so the name, the
+/// revision, and the whole-project diff/restore that resolve through it are all
+/// unchanged; only the annotation the author reads changes. Errors when no
+/// milestone by that name exists, rather than creating one silently.
+pub fn set_tag_message(root: &Path, name: &str, message: &str) -> Result<(), String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    // Resolve the tag to the commit it marks, so the re-tag keeps the same target.
+    let target = repo
+        .revparse_single(&format!("refs/tags/{name}"))
+        .and_then(|obj| obj.peel(git2::ObjectType::Commit))
+        .map_err(|_| format!("No milestone named '{name}'."))?;
+    let sig = signature(&repo)?;
+    // An empty note falls back to the name, matching create — a milestone always
+    // carries an annotation, so `list_tags` keeps listing it.
+    let msg = if message.trim().is_empty() {
+        name
+    } else {
+        message
+    };
+    repo.tag(name, &target, &sig, msg, true)
+        .map_err(|e| format!("edit milestone note: {e}"))?;
+    Ok(())
+}
+
 /// Every annotated milestone (#833), newest first by the tag's own creation time.
 /// Empty when the project has no milestones. Lightweight tags (created outside
 /// Quill) are skipped — a milestone always carries a name and annotation.

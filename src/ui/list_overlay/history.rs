@@ -11,9 +11,9 @@ use crate::app::ListLayout;
 use crate::mode::{History, HistoryRow};
 
 /// Render the history as a navigable list (#587): named milestones (#833) lead the
-/// list, each labeled "◆ <name>", above the commits, each a commit's date, short id,
-/// and summary. The selected row is the one the chapter- and project-scoped diff /
-/// restore actions address.
+/// list, each labeled "◆ <name>" with its note (#966) when it has one, above the
+/// commits, each a commit's date, short id, and summary. The selected row is the one
+/// the chapter- and project-scoped diff / restore actions address.
 pub(in crate::ui) fn draw_history(
     frame: &mut Frame,
     area: Rect,
@@ -28,6 +28,11 @@ pub(in crate::ui) fn draw_history(
     let query = history.filter.to_lowercase();
     let all = history.rows();
     let label = |row: &HistoryRow| match row {
+        // The tag falls back to its name when created without a note (#966), so
+        // only a note distinct from the name is worth showing beside the milestone.
+        HistoryRow::Milestone(t) if !t.message.is_empty() && t.message != t.name => {
+            format!("◆ {}  {}  — {}", t.name, t.when, t.message)
+        }
         HistoryRow::Milestone(t) => format!("◆ {}  {}", t.name, t.when),
         HistoryRow::Commit(c) => format!("{}  {}  {}", c.when, c.id, c.summary),
     };
@@ -44,7 +49,7 @@ pub(in crate::ui) fn draw_history(
     let help = if history.typing {
         format!("Filter: {}_", history.filter)
     } else if history.filter.is_empty() {
-        "History — ↑↓ move · d/r chapter · D/R project · / filter · esc close".to_string()
+        "History — ↑↓ move · d/r chapter · D/R project · n note · / filter · esc close".to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears",

@@ -83,8 +83,20 @@ pub enum Pending {
     /// Text input: a message for a version-control commit (#131).
     Commit,
     /// Text input: the name for a manuscript milestone — an annotated tag over the
-    /// whole project (#833). On Enter the milestone is created on the current HEAD.
+    /// whole project (#833). On Enter, Quill asks for an optional note (#966)
+    /// before creating the milestone on the current HEAD.
     Milestone,
+    /// Text input: an optional free-text note for the milestone being created
+    /// (#966), asked right after its name. The name waits in
+    /// `App::pending_milestone_name` (kept off the `Copy` `Pending` enum); on
+    /// Enter the milestone is created carrying this note as its annotation. A
+    /// blank note is fine — the milestone is created without one.
+    MilestoneNote,
+    /// Text input: a new note for an existing milestone (#966), edited from the
+    /// history view and prefilled with the current note. The milestone's name
+    /// waits in `App::pending_milestone_name`; on Enter the tag is re-annotated
+    /// in place, leaving the revision it marks unchanged.
+    EditMilestoneNote,
     /// Confirm running an AI action whose estimated cost exceeds the threshold.
     /// `force` is whether to force a full bible rebuild (#176); `offer_local` adds
     /// "run locally instead" as a third choice when the hybrid router (#372) found

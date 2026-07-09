@@ -27,8 +27,9 @@ use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BookField, Command, Finding, FindingKind, Findings, GitAction, History, ImportPreview,
-    MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
+    BookField, Command, Finding, FindingKind, Findings, GitAction, History, HistoryRow,
+    ImportPreview, MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles,
+    VimState,
 };
 use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::recovery;
@@ -505,6 +506,12 @@ pub struct App {
     /// commit — held while the y/N prompt is open; taken when the restore runs.
     /// Kept off the `Copy` `Pending` enum so the revision string lives here.
     pending_restore_rev: Option<String>,
+    /// The name of the milestone a note prompt (#966) targets — the just-named
+    /// milestone awaiting its optional note, or the existing milestone whose note
+    /// is being edited. Held while the note input is open; taken when the
+    /// milestone is created or re-annotated. Kept off the `Copy` `Pending` enum so
+    /// the name string lives here.
+    pending_milestone_name: Option<String>,
     /// A setup-wizard setting concept (#282) deferred until the characters draft
     /// finishes — only one AI pass runs at a time, so the second is queued here
     /// and fired by `poll_ai` when the first completes.
@@ -708,6 +715,7 @@ impl App {
             pending_switch: None,
             pending_manage: None,
             pending_restore_rev: None,
+            pending_milestone_name: None,
             wizard_pending_setting: None,
             import_source: None,
             pending_import_source: None,

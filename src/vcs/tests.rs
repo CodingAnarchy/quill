@@ -217,6 +217,43 @@ fn create_tag_refuses_a_duplicate_name() {
 }
 
 #[test]
+fn set_tag_message_edits_a_note_in_place() {
+    // #966: a milestone's note can be edited later without moving the milestone —
+    // the tag keeps its name and the revision it marks, only the annotation changes.
+    let dir = temp_dir("tag-note-edit");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "x\n").unwrap();
+    commit(&dir, "first").unwrap();
+    create_tag(&dir, "beta", "sent to beta readers").unwrap();
+
+    let before = list_tags(&dir)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.name == "beta")
+        .expect("the milestone should list back");
+    assert_eq!(before.message, "sent to beta readers");
+
+    set_tag_message(&dir, "beta", "beta round two").unwrap();
+    let after = list_tags(&dir)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.name == "beta")
+        .expect("the milestone should still list back");
+    assert_eq!(after.message, "beta round two", "the note is updated");
+    assert_eq!(
+        after.rev, before.rev,
+        "the milestone still marks the same commit"
+    );
+
+    // Editing a milestone that doesn't exist is an error, not a silent create.
+    assert!(
+        set_tag_message(&dir, "no-such-milestone", "x").is_err(),
+        "editing a nonexistent milestone's note is refused"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn create_tag_needs_a_commit() {
     // #833: there must be something to tag — a milestone marks a committed state.
     let dir = temp_dir("tag-unborn");

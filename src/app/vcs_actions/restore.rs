@@ -17,10 +17,11 @@ impl App {
         }
     }
 
-    /// Prompt for a milestone name (#833), then create the annotated tag on the
-    /// current HEAD. Flushes unsaved edits and commits nothing itself — a milestone
-    /// marks the last committed state, so it hints when there's uncommitted work
-    /// rather than silently tagging a stale snapshot.
+    /// Prompt for a milestone name (#833), then for an optional note (#966), then
+    /// create the annotated tag on the current HEAD. Flushes unsaved edits and
+    /// commits nothing itself — a milestone marks the last committed state, so it
+    /// hints when there's uncommitted work rather than silently tagging a stale
+    /// snapshot.
     pub(super) fn start_milestone(&mut self) {
         if !self.under_vc {
             self.message = Some("Not under version control — Ctrl-v to initialize.".into());
@@ -30,20 +31,65 @@ impl App {
         self.open_prompt(Pending::Milestone, "Milestone name: ", "", None);
     }
 
-    /// Create the named milestone (#833) from the prompt — an annotated tag over the
-    /// whole project on the current HEAD. A blank name cancels.
-    pub(crate) fn create_milestone(&mut self, name: &str) {
+    /// After the milestone name is entered (#833), ask for its optional note (#966).
+    /// A blank name cancels here, before the note prompt opens; a valid name is
+    /// stashed in `pending_milestone_name` for [`create_milestone`] to pick up when
+    /// the note comes back.
+    pub(crate) fn prompt_milestone_note(&mut self, name: &str) {
         let name = name.trim();
         if name.is_empty() {
+            self.mode = self.editing_mode(); // close the name prompt, don't chain
             self.message = Some("Milestone cancelled — empty name.".into());
             return;
         }
+        self.pending_milestone_name = Some(name.to_string());
+        self.open_prompt(
+            Pending::MilestoneNote,
+            "Milestone note (optional): ",
+            "",
+            None,
+        );
+    }
+
+    /// Create the named milestone (#833) from the stashed name and the just-entered
+    /// `note` (#966) — an annotated tag over the whole project on the current HEAD.
+    /// The note becomes the tag's annotation, shown beside the milestone in the
+    /// history view; a blank note leaves the milestone without one.
+    pub(crate) fn create_milestone(&mut self, note: &str) {
+        let Some(name) = self.pending_milestone_name.take() else {
+            return;
+        };
+        let note = note.trim();
         self.message = Some(
-            match crate::vcs::create_tag(&self.project.root, name, name) {
+            match crate::vcs::create_tag(&self.project.root, &name, note) {
                 Ok(()) => format!("Milestone '{name}' created."),
                 Err(e) => format!("Milestone: {e}"),
             },
         );
+    }
+
+    /// Edit the note on the milestone selected in the history view (#966). Stashes
+    /// its name and opens a note prompt prefilled with the current note, so the
+    /// author revises it in place. The prompt returns to [`edit_milestone_note`].
+    pub(crate) fn start_edit_milestone_note(&mut self, name: &str, note: &str) {
+        self.pending_milestone_name = Some(name.to_string());
+        self.open_prompt(Pending::EditMilestoneNote, "Milestone note: ", note, None);
+    }
+
+    /// Re-annotate the stashed milestone with the just-entered `note` (#966),
+    /// leaving the revision it marks unchanged. Reopens the history view so the
+    /// edited note shows immediately.
+    pub(crate) fn edit_milestone_note(&mut self, note: &str) {
+        let Some(name) = self.pending_milestone_name.take() else {
+            return;
+        };
+        match crate::vcs::set_tag_message(&self.project.root, &name, note.trim()) {
+            Ok(()) => {
+                self.message = Some(format!("Milestone '{name}' note updated."));
+                self.open_history(); // refresh the list so the new note shows
+            }
+            Err(e) => self.message = Some(format!("Milestone: {e}")),
+        }
     }
 
     /// Show the whole-manuscript diff since the last commit as a read-only overlay
