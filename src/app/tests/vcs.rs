@@ -214,6 +214,40 @@ fn git_palette_shows_commit_history() {
 }
 
 #[test]
+fn history_renders_the_commit_graph_and_changed_chapters() {
+    // #964: the history view draws a commit graph (a `●` node per commit) and lists
+    // the chapters each commit changed. Two commits touching different chapters, then
+    // render the overlay and check both the node glyph and a changed-chapter name show.
+    let (mut app, _dir) = two_chapter_app("vc-hist-graph");
+    git_menu(&mut app, 0); // Initialize
+
+    // First commit touches the active chapter (one.md).
+    type_str(&mut app, "The night was dark.");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "first draft");
+
+    // A second commit that changes the same chapter again.
+    type_str(&mut app, " Then it was long.");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "revise it");
+
+    git_menu_label(&mut app, "History");
+    let screen = crate::ui::render_to_string(&app, 100, 24);
+    assert!(
+        screen.contains('●'),
+        "the history view draws a commit-graph node:\n{screen}"
+    );
+    assert!(
+        screen.contains("one.md"),
+        "each commit lists the chapters it changed:\n{screen}"
+    );
+    assert!(
+        screen.contains("first draft") && screen.contains("revise it"),
+        "the commit summaries still render:\n{screen}"
+    );
+}
+
+#[test]
 fn history_diffs_the_chapter_against_a_chosen_commit() {
     let (mut app, _dir) = two_chapter_app("vc-hist-diff");
     git_menu(&mut app, 0); // Initialize
