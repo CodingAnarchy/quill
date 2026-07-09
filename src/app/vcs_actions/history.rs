@@ -40,9 +40,10 @@ impl App {
     /// (skipping filtered-out rows), `d` diffs the current chapter against the
     /// selected row, `r` restores the chapter to it (into the editable buffer for
     /// review-and-save). `D`/`R` (#833) diff / restore the *whole project* against
-    /// the selection — a milestone or any commit. Esc closes. `/` starts a
-    /// type-to-filter query (#822) that narrows the list to rows whose summary, id,
-    /// or date match; Esc clears the filter before it closes the view.
+    /// the selection — a milestone or any commit. `n` edits the note on a selected
+    /// milestone (#966). Esc closes. `/` starts a type-to-filter query (#822) that
+    /// narrows the list to rows whose summary, id, or date match; Esc clears the
+    /// filter before it closes the view.
     pub(crate) fn on_key_history(&mut self, key: KeyEvent) {
         let Mode::History(history) = &self.mode else {
             return;
@@ -67,6 +68,7 @@ impl App {
             KeyCode::Char('r') => self.restore_from_selected_commit(),
             KeyCode::Char('D') => self.diff_project_against_selected(),
             KeyCode::Char('R') => self.restore_project_from_selected(),
+            KeyCode::Char('n') => self.edit_selected_milestone_note(),
             // Esc clears an active filter first (restoring the full list), then a
             // second Esc closes the view.
             KeyCode::Esc => {
@@ -190,6 +192,33 @@ impl App {
                 return i;
             }
         }
+    }
+
+    /// Edit the note on the selected milestone (#966), `n` from the history view.
+    /// Only a milestone row carries a note, so a commit selection is a no-op with a
+    /// hint. The prompt is prefilled with the current note (empty when the tag has
+    /// only its name-fallback annotation, so there's no phantom text to clear).
+    fn edit_selected_milestone_note(&mut self) {
+        let q = self.history_query();
+        let Mode::History(h) = &self.mode else {
+            return;
+        };
+        let Some(row) = h.row(h.selected).filter(|r| r.matches(&q)) else {
+            return;
+        };
+        let HistoryRow::Milestone(tag) = row else {
+            self.message = Some("Notes attach to milestones, not commits.".into());
+            return;
+        };
+        // The tag falls back to its name when created without a note, so an empty
+        // note prefill means "no note yet" rather than the name showing as text.
+        let note = if tag.message == tag.name {
+            String::new()
+        } else {
+            tag.message.clone()
+        };
+        let name = tag.name.clone();
+        self.start_edit_milestone_note(&name, &note);
     }
 
     /// The revision id of the row selected in the history view, or `None` when that

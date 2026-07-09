@@ -611,11 +611,24 @@ fn history_restore_acts_on_the_filtered_match() {
 // --- Milestones + whole-project restore/diff (#833) -------------------------
 
 /// Create a named milestone through the Git palette — the "Milestone" item prompts
-/// for a name, which is typed and submitted.
+/// for a name, then for an optional note (#966); both are typed and submitted. The
+/// note is left blank here; [`make_milestone_with_note`] exercises the note path.
 fn make_milestone(app: &mut App, name: &str) {
+    make_milestone_with_note(app, name, "");
+}
+
+/// Create a named milestone with a free-text note (#966): name → Enter → note →
+/// Enter, driving the two-step prompt the palette opens.
+fn make_milestone_with_note(app: &mut App, name: &str, note: &str) {
     git_menu_label(app, "Milestone");
     assert!(matches!(app.mode, Mode::Prompt(_)), "milestone prompts");
     type_str(app, name);
+    app.on_key(key(KeyCode::Enter));
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the note prompt follows the name"
+    );
+    type_str(app, note);
     app.on_key(key(KeyCode::Enter));
 }
 
@@ -785,6 +798,90 @@ fn history_project_diff_spans_the_whole_manuscript() {
     assert!(
         overlay_text(&app).contains("changed since the milestone"),
         "the project diff against the milestone shows the edit"
+    );
+}
+
+/// The note a milestone carries (#966), or `None` when it isn't in the open
+/// history view. Reads the stored annotation the history view lists.
+fn milestone_note(app: &App, name: &str) -> Option<String> {
+    match &app.mode {
+        Mode::History(h) => h
+            .milestones
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.message.clone()),
+        _ => None,
+    }
+}
+
+#[test]
+fn milestone_note_persists_shows_and_can_be_edited() {
+    // #966: a milestone can carry a free-text note set at creation, the history
+    // view lists it, it survives reopening, and it can be edited in place with `n`
+    // without disturbing the revision the milestone marks.
+    let (mut app, dir) = two_chapter_app("vc-milestone-note");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "first draft");
+
+    make_milestone_with_note(&mut app, "beta", "sent to beta readers");
+
+    // The note persists on disk and lists back in the history view.
+    git_menu_label(&mut app, "History");
+    assert_eq!(
+        milestone_note(&app, "beta").as_deref(),
+        Some("sent to beta readers"),
+        "the note is stored on the milestone"
+    );
+
+    // Edit the note in place with `n`: the milestone leads the list (row 0), so it
+    // is the selection. Enter opens the note prompt prefilled; retype and submit.
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "n opens the note editor"
+    );
+    // Clear the prefilled note, then type the new one.
+    for _ in 0..40 {
+        app.on_key(key(KeyCode::Backspace));
+    }
+    type_str(&mut app, "submission draft");
+    app.on_key(key(KeyCode::Enter));
+
+    // The edit reopens history; the new note is listed and the rev is unchanged.
+    assert!(matches!(app.mode, Mode::History(_)), "history reopens");
+    assert_eq!(
+        milestone_note(&app, "beta").as_deref(),
+        Some("submission draft"),
+        "the note was edited in place: {:?}",
+        app.message
+    );
+
+    // Restore-from-milestone still works after the note edit. Move past it, then
+    // restore the whole project to the milestone with `R`.
+    app.on_key(key(KeyCode::Esc)); // close history to edit the manuscript
+    type_str(&mut app, "words after the milestone");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "more work");
+
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Char('D'))); // whole-project diff against the milestone
+    assert!(
+        overlay_text(&app).contains("words after the milestone"),
+        "diff-from-milestone still spans the manuscript after the note edit"
+    );
+    app.on_key(key(KeyCode::Esc)); // close the diff overlay, back to history
+
+    app.on_key(key(KeyCode::Char('R'))); // restore the whole project to the milestone
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "restore confirms first"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+    assert!(
+        !fs::read_to_string(dir.join("one.md"))
+            .unwrap()
+            .contains("words after the milestone"),
+        "restore-from-milestone still rewinds the tree after the note edit"
     );
 }
 
