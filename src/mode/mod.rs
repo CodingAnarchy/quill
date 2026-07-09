@@ -195,6 +195,14 @@ pub enum Mode {
     /// closes. Read-only over the working project until a restore is confirmed. Boxed
     /// (carries the backup list).
     BackupBrowser(Box<BackupBrowser>),
+    /// The branch-as-draft overlay (#965): the project's drafts (local branches)
+    /// listed one per row, the current one marked. Enter switches to the selected
+    /// draft (the working copy follows and the active chapter reloads), `n` creates a
+    /// new draft from the current state, `m` merges the selected draft into the
+    /// current one — a clean merge lands a two-parent commit, a conflicting one routes
+    /// to the conflict-resolution UI (#963). Esc closes. Boxed (carries the draft
+    /// list). Drafts unlock alt endings / POV splits as first-class versions.
+    Drafts(Box<DraftsMenu>),
     /// The fuzzy chapter/scene quick-switcher (#976): a `Ctrl-P`-style overlay
     /// listing every chapter and every scene heading, narrowed live by a typed
     /// substring; Enter jumps to the highlighted target (reusing the go-to +

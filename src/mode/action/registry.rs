@@ -96,6 +96,12 @@ pub enum Action {
     BackgroundBibleUpdate,
     /// Find & replace across every chapter in the project (#295).
     ProjectFind,
+    /// Open the drafts overlay (#965): create / switch / list / merge draft branches
+    /// — alternate versions (alt ending, POV split) tracked as first-class drafts.
+    /// The one version-control entry the flat run-action registry can host: it just
+    /// opens the overlay (no repo/remote-state-dependent availability, no async
+    /// spawn), unlike the rest of the context-sensitive Git palette.
+    Drafts,
     /// Describe a configuration change in words; the AI proposes settings (#303).
     DescribeConfig,
     /// Accept the flagged word at the cursor into the project dictionary (#358).
@@ -225,6 +231,7 @@ impl Action {
         Self::NewProjectFromNotes,
         Self::ImportManuscript,
         Self::ImportReviewComments,
+        Self::Drafts,
         Self::ArchiveProject,
         Self::RestoreArchive,
         Self::BrowseBackups,
@@ -357,6 +364,7 @@ impl Action {
             Self::QueuePasses => "bible:queue",
             Self::BackgroundBibleUpdate => "bible:background-update",
             Self::ProjectFind => "find:project",
+            Self::Drafts => "drafts",
             Self::DescribeConfig => "config:describe",
             Self::AcceptWord => "dict:accept",
             Self::ViewDictionary => "dict:view",
@@ -409,6 +417,7 @@ impl Action {
             | Self::NewProjectFromNotes
             | Self::ImportManuscript
             | Self::ImportReviewComments
+            | Self::Drafts
             | Self::ArchiveProject
             | Self::RestoreArchive
             | Self::BrowseBackups => "Project",
@@ -526,6 +535,7 @@ impl Action {
             Self::QueuePasses => "Queue bible passes (resumable)",
             Self::BackgroundBibleUpdate => "Queue a background bible update (batch, ~24h)",
             Self::ProjectFind => "Find across manuscript",
+            Self::Drafts => "Drafts (alt versions / branches)…",
             Self::DescribeConfig => "Configure by description",
             Self::AcceptWord => "Add word to dictionary",
             Self::ViewDictionary => "View project dictionary",
@@ -738,4 +748,7 @@ pub enum GitAction {
     /// Two-way sync: fetch and reconcile the remote's chapter edits with local work,
     /// detecting per-chapter conflicts (#962).
     Sync,
+    /// Open the drafts overlay (#965): create / switch / list / merge draft branches —
+    /// alternate versions (alt ending, POV split) tracked as first-class drafts.
+    Drafts,
 }

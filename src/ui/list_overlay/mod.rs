@@ -33,6 +33,7 @@ mod annotations;
 mod backups;
 mod choosers;
 mod conflicts;
+mod drafts;
 mod findings;
 mod history;
 mod imports;
@@ -46,6 +47,7 @@ pub(super) use choosers::{
 };
 pub use choosers::{draw_startup_browser, draw_startup_chooser};
 pub(super) use conflicts::draw_conflict_review;
+pub(super) use drafts::draw_drafts;
 pub(super) use findings::{draw_cooccurrence, draw_dashboard, draw_findings};
 pub(super) use history::draw_history;
 pub(super) use imports::{draw_import_preview, draw_review_import};

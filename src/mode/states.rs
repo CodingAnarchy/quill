@@ -954,6 +954,24 @@ impl QuickSwitch {
     }
 }
 
+/// State for an open [`Mode::Drafts`] — the branch-as-draft overlay (#965). Lists
+/// the project's drafts (local branches), one row each, with the current one
+/// marked. Enter switches to the selected draft (the working copy follows), `n`
+/// creates a new draft from the current state, `m` merges the selected draft into
+/// the current one (a clean merge lands a commit; conflicts route to the #963
+/// resolution UI), Esc closes. `drafts` and `current` are captured when the overlay
+/// opens, so the list is a stable target for the arrow keys; `selected` indexes into
+/// `drafts`.
+pub struct DraftsMenu {
+    /// Every draft (local branch), sorted, captured when the overlay opened.
+    pub(crate) drafts: Vec<String>,
+    /// The name of the draft currently checked out — marked in the list and the
+    /// target a merge folds a selected draft into.
+    pub(crate) current: String,
+    /// The selected row (index into `drafts`).
+    pub(crate) selected: usize,
+}
+
 /// Which step of the find / replace interaction is active.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SearchStage {

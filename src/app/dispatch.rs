@@ -164,6 +164,7 @@ impl App {
             Mode::ImportPreview(_) => self.on_key_import_preview(key),
             Mode::ReviewImport(_) => self.on_key_review_import(key),
             Mode::BackupBrowser(_) => self.on_key_backup_browser(key),
+            Mode::Drafts(_) => self.on_key_drafts(key),
             Mode::QuickSwitch(_) => self.on_key_quick_switch(key),
             Mode::Insert => self.on_key_insert(key),
             Mode::Normal => self.on_key_normal(key),
