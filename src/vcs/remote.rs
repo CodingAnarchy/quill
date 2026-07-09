@@ -562,7 +562,7 @@ pub fn finalize_sync(
     opts.remote_callbacks(cbs);
     remote
         .fetch(&[&branch], Some(&mut opts), None)
-        .map_err(|e| friendly(&e))?;
+        .map_err(|e| classify(&e).message())?;
 
     let fetch_head = repo
         .find_reference("FETCH_HEAD")
