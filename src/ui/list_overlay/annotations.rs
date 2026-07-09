@@ -145,7 +145,7 @@ pub(in crate::ui) fn draw_annotations(
     );
 }
 
-/// Render the corkboard (#589 / #636 / #701): scenes as index cards, each a status
+/// Render the corkboard (#589 / #636 / #701 / #974): scenes as index cards, each a status
 /// badge + scene heading over its synopsis (the author's one-liner, or the first
 /// line of prose as a fallback), indented by heading level so nested scenes read as
 /// a hierarchy. Navigable; the author reorders scenes, edits each synopsis, and
@@ -213,7 +213,7 @@ pub(in crate::ui) fn draw_corkboard(
         frame,
         area,
         &title,
-        "Corkboard — ↑↓ move · enter jump · K/J reorder · e synopsis · s status · esc close",
+        "Corkboard — ↑↓ move · enter jump · K/J reorder · e synopsis · s status · u undo · esc close",
         rows,
         Some(selected_row),
         rec,

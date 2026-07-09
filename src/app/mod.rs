@@ -191,6 +191,13 @@ pub struct App {
     /// carries no edit delta to re-anchor through).
     anno_undo: std::collections::VecDeque<Vec<crate::annotation::Live>>,
     anno_redo: std::collections::VecDeque<Vec<crate::annotation::Live>>,
+    /// The single undoable cross-chapter scene move on the manuscript corkboard
+    /// (#974). A cross-chapter move rewrites two chapter files at once, outside the
+    /// buffer's own rope-level undo, so it captures both chapters' pre-move contents
+    /// here; the board's `u` key restores them (and reopens the board on the moved
+    /// scene). `None` when there's nothing to undo — one level, cleared once used or
+    /// once another structural corkboard edit supersedes it.
+    cork_undo: Option<corkboard::CrossMoveUndo>,
     /// Transient Vim Normal-mode state (#202): pending count, multi-key command,
     /// and last find. Only meaningful while `vim` is on.
     vim_state: VimState,
@@ -645,6 +652,7 @@ impl App {
             annotations_context,
             anno_undo: std::collections::VecDeque::new(),
             anno_redo: std::collections::VecDeque::new(),
+            cork_undo: None,
             vim_state: VimState::default(),
             vim_keys,
             should_quit: false,
