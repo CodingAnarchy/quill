@@ -26,6 +26,15 @@ const SCENE_BREAK_GLYPH: &str = "* * *";
 /// "expandable" affordance. An expanded heading shows no glyph.
 const FOLD_GLYPH: &str = "▸ ";
 
+/// The display width (in terminal cells) of [`FOLD_GLYPH`], computed once so the
+/// cursor-x math in the parent renderer can shift the caret past the display-only
+/// glyph on a collapsed heading row — mirroring how the first-line paragraph indent
+/// (#722) is added back after being peeled. Kept beside the glyph so the two can't
+/// drift.
+pub(super) fn fold_glyph_cells() -> u16 {
+    unicode_width::UnicodeWidthStr::width(FOLD_GLYPH) as u16
+}
+
 /// The "what to highlight in this span" overlays threaded through the body
 /// renderer (#431): one cohesive bundle, built once per pane and passed by
 /// reference through `render_body → styled_line → styled_row`, so a new overlay

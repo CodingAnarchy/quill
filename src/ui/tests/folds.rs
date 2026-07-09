@@ -153,6 +153,58 @@ fn the_cursor_maps_correctly_across_a_fold() {
 }
 
 #[test]
+fn revealing_a_fold_at_the_cursor_places_the_terminal_caret() {
+    use ratatui::{backend::TestBackend, Terminal};
+    // Bug E: a jump lands the cursor inside a collapsed section. Before the reveal
+    // the caret's line is a zero-row hidden line, so the render never calls
+    // `set_cursor_position` and the terminal caret sticks stale. After the reveal the
+    // fold opens and the caret is placed on its (now visible) line.
+    let mut app = app_with(CHAPTER);
+    // Fold the `#` title, which hides the `##` scene heading lines below it.
+    let title = app
+        .edit_buffer()
+        .syntax()
+        .headings()
+        .iter()
+        .find(|h| h.title == "Title")
+        .unwrap()
+        .start;
+    app.folds.toggle(title);
+    // Jump the cursor onto the (hidden) "## Scene two" heading, as a jump path would.
+    let scene = app
+        .edit_buffer()
+        .syntax()
+        .headings()
+        .iter()
+        .find(|h| h.title == "Scene two")
+        .unwrap()
+        .start;
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(scene);
+    assert!(
+        app.fold_view().is_hidden(app.edit_buffer().cursor.line),
+        "before the reveal the caret's line is hidden by the title fold"
+    );
+
+    // The centralized reveal (invoked on every jump path) opens the enclosing fold.
+    assert!(app.reveal_fold_at_cursor(), "the reveal opened the fold");
+    assert!(
+        !app.fold_view().is_hidden(app.edit_buffer().cursor.line),
+        "the caret's line is visible after the reveal"
+    );
+
+    // Render: the terminal caret is now placed, and it lands on the heading text.
+    let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+    terminal.draw(|f| draw(f, &app)).unwrap();
+    let pos = terminal.get_cursor_position().unwrap();
+    let buf = terminal.backend().buffer().clone();
+    assert_eq!(
+        buf[(pos.x, pos.y)].symbol(),
+        "#",
+        "the caret sits on the heading's first character (its `#`) on a visible row"
+    );
+}
+
+#[test]
 fn composition_mode_hides_the_chrome_and_restores_it() {
     let mut app = app_with_chapters(&["One", "Two"], CHAPTER);
     app.outline_visible = true;
@@ -203,4 +255,81 @@ fn composition_mode_composes_with_folding() {
         "the fold still hides its body"
     );
     assert!(screen.contains("Scene two"), "unfolded sections still show");
+}
+
+#[test]
+fn a_collapsed_heading_row_maps_a_click_to_its_start_byte() {
+    // Bug I: the collapsed-heading fold glyph "▸ " is a display-only prefix that
+    // isn't in the buffer. A per-character click→byte walk would land the cursor a
+    // couple of columns too far into the heading text. The row is recorded
+    // non-editable, so a click on it maps to the heading's start byte instead — no
+    // glyph-width desync.
+    let mut app = app_with(CHAPTER);
+    let start = app
+        .edit_buffer()
+        .syntax()
+        .headings()
+        .iter()
+        .find(|h| h.title == "Scene one")
+        .unwrap()
+        .start;
+    app.folds.toggle(start);
+    render(&app, 60, 20); // populate the click layout
+
+    let hline = app.edit_buffer().cursor_at_byte(start).line;
+    let layout = app.editor_layout.borrow();
+    let vrow = layout
+        .rows
+        .iter()
+        .find(|r| r.line == hline)
+        .expect("the collapsed heading has a recorded row");
+    assert!(
+        !vrow.editable,
+        "the collapsed heading row is non-editable so a click maps to its start"
+    );
+    // `click_target` (the click inverse) maps a non-editable row to byte 0 of its
+    // line — the heading's start — regardless of where in the row the click fell.
+    assert_eq!(
+        vrow.line_start, start,
+        "the row's line start is the heading's start byte"
+    );
+}
+
+#[test]
+fn the_caret_on_a_collapsed_heading_renders_past_the_fold_glyph() {
+    use ratatui::{backend::TestBackend, Terminal};
+    // Bug I: the display-only fold glyph shifts the heading text right on screen, so
+    // the caret placed on a collapsed heading must shift with it — otherwise it
+    // renders a couple of cells left of the text, over the glyph instead of the `#`.
+    let mut app = app_with(CHAPTER);
+    let start = app
+        .edit_buffer()
+        .syntax()
+        .headings()
+        .iter()
+        .find(|h| h.title == "Scene one")
+        .unwrap()
+        .start;
+    app.folds.toggle(start);
+    // Park the caret at the collapsed heading's start (col 0) — where a fold snap or
+    // a same-chapter jump leaves it.
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(start);
+
+    let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+    terminal.draw(|f| draw(f, &app)).unwrap();
+    let pos = terminal.get_cursor_position().unwrap();
+    let buf = terminal.backend().buffer().clone();
+    // The glyph "▸ " precedes the heading; the caret must land on the heading's
+    // first character (its `#`), not on the glyph two cells to its left.
+    assert_eq!(
+        buf[(pos.x, pos.y)].symbol(),
+        "#",
+        "the caret tracks the glyph-shifted heading text, landing on its `#`"
+    );
+    // And the cell two columns left is the fold glyph, confirming the shift is real.
+    assert_eq!(
+        buf[(pos.x - 2, pos.y)].symbol(),
+        "▸",
+        "the fold glyph sits two cells left of the caret"
+    );
 }

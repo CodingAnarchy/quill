@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::buffer::Cursor;
-use crate::mode::Action;
+use crate::mode::{Action, Mode};
 
 /// A one-chapter project whose body has two `##` scenes, each with a body line.
 fn folding_app(name: &str) -> (App, TempProject) {
@@ -18,6 +18,24 @@ fn folding_app(name: &str) -> (App, TempProject) {
     fs::write(
         dir.join("one.md"),
         "## Scene one\n\nThe river ran cold.\n\n## Scene two\n\nThe city slept.\n",
+    )
+    .unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+/// A one-chapter project with a `#` title over two `##` scenes — so folding the
+/// title hides the scene *heading* lines, letting a jump target one that's hidden.
+fn titled_folding_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("one.md"),
+        "# Title\n\n## Scene one\n\nThe river ran cold.\n\n## Scene two\n\nThe city slept.\n",
     )
     .unwrap();
     let app = open_test_app(&dir);
@@ -131,5 +149,124 @@ fn search_reveals_a_match_inside_a_folded_section() {
     assert!(
         text[cursor_byte..].starts_with("river"),
         "the cursor landed on the match inside the (now revealed) section"
+    );
+}
+
+/// Whether the fold view hides the cursor's current line — the caret-hiding bug the
+/// reveal guards against (#975 bug E).
+fn cursor_is_hidden(app: &App) -> bool {
+    let line = app.edit_buffer().cursor.line;
+    app.fold_view().is_hidden(line)
+}
+
+#[test]
+fn arrowing_down_from_a_folded_heading_reveals_the_fold() {
+    // Bug E(ii): pressing Down from a folded heading moves the cursor into the
+    // hidden body; the motion reveal must unfold it so the caret stays on a visible
+    // line rather than a zero-row hidden one.
+    let (mut app, _dir) = folding_app("fold-arrow-down");
+    let one = heading_start(&app, "Scene one");
+    app.folds.toggle(one);
+    // Park the cursor on the folded heading line itself (visible).
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(one);
+    assert!(!cursor_is_hidden(&app), "the heading line starts visible");
+
+    // Down moves into the section body, which is hidden by the fold.
+    app.on_key(key(KeyCode::Down));
+
+    assert!(
+        !app.folds.is_folded(one),
+        "arrowing into the folded body reveals the section"
+    );
+    assert!(
+        !cursor_is_hidden(&app),
+        "the cursor is left on a visible line, not a zero-row hidden one"
+    );
+}
+
+#[test]
+fn quick_switch_jump_into_a_folded_heading_reveals_it() {
+    // Bug E(i): a same-chapter quick-switch jump lands on a scene heading that a
+    // higher-level fold has hidden. The jump must reveal the enclosing fold so the
+    // landing line is visible.
+    let (mut app, _dir) = titled_folding_app("fold-qs-jump");
+    let title = heading_start(&app, "Title");
+    app.folds.toggle(title); // hides both `##` scenes' heading lines
+    let scene = heading_start(&app, "Scene two");
+    assert!(
+        app.fold_view()
+            .is_hidden(app.edit_buffer().cursor_at_byte(scene).line),
+        "the scene heading line is hidden under the title fold"
+    );
+
+    // Open the switcher and jump to "Scene two" (same chapter).
+    app.on_key(ctrl('d'));
+    type_str(&mut app, "scene two");
+    app.on_key(key(KeyCode::Enter));
+
+    assert!(matches!(app.mode, Mode::Insert), "the switcher closed");
+    assert_eq!(
+        app.edit_buffer().cursor_byte(),
+        scene,
+        "landed on the scene"
+    );
+    assert!(
+        !cursor_is_hidden(&app),
+        "the jump revealed the fold so the cursor is on a visible line"
+    );
+}
+
+#[test]
+fn project_search_jump_into_a_folded_section_reveals_it() {
+    // Bug E(i): a same-chapter manuscript-find jump lands on a match inside a folded
+    // body; the jump must reveal the fold so the caret isn't hidden.
+    let (mut app, _dir) = folding_app("fold-projsearch-jump");
+    let one = heading_start(&app, "Scene one");
+    app.folds.toggle(one); // hides "The river ran cold."
+
+    // Manuscript-wide find for "river", then jump to the (single) match.
+    app.open_project_find();
+    type_str(&mut app, "river");
+    app.on_key(key(KeyCode::Enter)); // run search → Results
+    app.on_key(key(KeyCode::Enter)); // jump to the selected match
+
+    assert!(matches!(app.mode, Mode::Insert), "the overlay closed");
+    let cursor_byte = app.edit_buffer().cursor_byte();
+    assert!(
+        app.edit_buffer().text()[cursor_byte..].starts_with("river"),
+        "the cursor landed on the match"
+    );
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "the jump revealed the fold so the caret is visible"
+    );
+}
+
+#[test]
+fn mark_restore_into_a_folded_section_reveals_it() {
+    // Bug E(i): returning to a mark set inside a section that was later folded must
+    // reveal the fold so the restored caret is on a visible line.
+    let (mut app, _dir) = folding_app("fold-mark-restore");
+    let one = heading_start(&app, "Scene one");
+    // Set mark `a` inside the first scene's body.
+    let body = app.edit_buffer().text().find("river").unwrap();
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(body);
+    app.set_mark('a');
+    // Move away, then fold the scene the mark lives in.
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+    app.folds.toggle(one);
+    assert!(app.folds.is_folded(one));
+
+    // Jump back to the mark — it's inside the folded body.
+    app.jump_to_mark('a');
+
+    assert_eq!(
+        app.edit_buffer().cursor_byte(),
+        body,
+        "restored to the mark"
+    );
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "the restore revealed the fold so the caret is visible"
     );
 }

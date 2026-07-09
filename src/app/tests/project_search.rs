@@ -21,6 +21,39 @@ fn project_search_finds_matches_across_every_chapter() {
 }
 
 #[test]
+fn a_failed_flush_aborts_the_search_instead_of_using_stale_ranges() {
+    // Bug K: matches are computed against chapter bodies read from disk. If the
+    // active chapter can't flush its pending edits first, its disk body is stale
+    // while its live buffer has diverged — applying stale byte ranges to that buffer
+    // can run an offset past its length and panic `Buffer::replace_byte_range`. So a
+    // flush failure must abort the search, not proceed.
+    let (mut app, _dir) = two_chapter_app("psearch-flush-fail");
+    // Force the active buffer's save to fail: dirty, but with no path to write to.
+    app.buffer.insert_char('x');
+    assert!(app.buffer.dirty, "the active buffer has unsaved edits");
+    app.buffer.path = None; // save() now errors with "no file path set"
+
+    app.open_project_find();
+    type_str(&mut app, "chapter");
+    app.on_key(key(KeyCode::Enter));
+
+    // Still on the query stage (not showing results), with an explanatory message —
+    // nothing was searched against stale content.
+    match &app.mode {
+        Mode::ProjectSearch(s) => assert!(
+            matches!(s.stage, ProjectSearchStage::Query),
+            "the search aborted on the query stage rather than listing results"
+        ),
+        _ => panic!("expected the search overlay to stay open on the query stage"),
+    }
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("aborted"),
+        "the abort is surfaced: {:?}",
+        app.message
+    );
+}
+
+#[test]
 fn no_matches_reports_and_closes() {
     let (mut app, _dir) = two_chapter_app("psearch-none");
     app.open_project_find();

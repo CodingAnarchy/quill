@@ -226,7 +226,18 @@ impl App {
     /// re-run after a mode toggle.
     fn collect_project_matches(&mut self, query: &str) -> Result<Vec<ProjectMatch>, String> {
         let opts = self.project_search().opts;
-        let _ = self.flush_active();
+        // The active chapter's pending edits must reach disk before we scan bodies
+        // from disk — otherwise matches are computed against stale content while a
+        // later replace applies those byte ranges to the *divergent* live buffer,
+        // and `Buffer::replace_byte_range` panics if an offset runs past the buffer.
+        // Abort rather than proceed with stale ranges (reliability audit).
+        if self.flush_active().is_err() {
+            return Err(
+                "Couldn't save the current chapter, so the search was aborted \
+                 to avoid replacing against stale text."
+                    .to_string(),
+            );
+        }
         let mut matches = Vec::new();
         for i in 0..self.chapter_count() {
             let body = self.project.chapter_body(i);
@@ -308,6 +319,11 @@ impl App {
         if let Some((chapter, start)) = target {
             self.activate_chapter(chapter);
             self.buffer.cursor = self.buffer.cursor_at_byte(start);
+            // A same-chapter jump leaves the folds intact (`activate_chapter` no-ops
+            // when the chapter is already active), so the match byte can land inside a
+            // collapsed section. Reveal the fold so the cursor stays on a visible line
+            // (#975); a cross-chapter jump already cleared folds, so this no-ops.
+            self.reveal_fold_at_cursor();
         }
     }
 

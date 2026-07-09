@@ -27,8 +27,8 @@ pub use header::HeaderCache;
 use focus::{first_row_indent, focus_paragraph, starts_paragraph};
 use header::header_inserts;
 use rows::{
-    folded_heading_line, record_row, row_count, row_kind, row_starts_for, styled_line,
-    visible_width_before, RowKind, SpanHighlights,
+    fold_glyph_cells, folded_heading_line, record_row, row_count, row_kind, row_starts_for,
+    styled_line, visible_width_before, RowKind, SpanHighlights,
 };
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
@@ -475,13 +475,20 @@ fn render_body(
             // The byte span of this visual row within its logical line.
             let rs = starts.get(sub).copied().unwrap_or(0);
             let re = starts.get(sub + 1).copied().unwrap_or(text.len());
+            // A collapsed heading (#975) is rendered with a leading display-only fold
+            // glyph that isn't in the buffer, so a per-character click→byte walk would
+            // land the cursor ~glyph-width cells too far right (bug I). Record it as a
+            // non-editable row (like a divider) so a click maps to the heading's start
+            // byte — the one sensible edit point on a collapsed header — and the glyph
+            // never desyncs the click map. The cursor-x below adds the glyph width so
+            // the caret still renders over the heading text.
             record_row(
                 &mut layout,
                 ll,
                 buffer,
                 rs,
                 re,
-                true,
+                !collapsed,
                 verbatim,
                 indent && sub == 0,
             );
@@ -508,6 +515,14 @@ fn render_body(
             // paragraph's first visual row (#722) — continuation rows aren't indented.
             if paragraph_indent && cursor_subrow == 0 && starts_paragraph(buffer, cursor_line) {
                 col_width += PARAGRAPH_INDENT.len() as u16;
+            }
+            // A collapsed heading (#975) renders with a leading display-only fold
+            // glyph that isn't in the buffer, so the heading text — and any caret on it
+            // — sits that many cells further right than the raw character widths imply.
+            // Add the glyph width so the caret tracks the on-screen text (bug I),
+            // mirroring the first-line-indent shift above.
+            if folds.is_collapsed_heading(cursor_line) {
+                col_width += fold_glyph_cells();
             }
             let screen_x = column.x + col_width.min(column.width.saturating_sub(1));
             frame.set_cursor_position((screen_x, screen_y));

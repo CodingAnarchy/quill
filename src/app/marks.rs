@@ -106,5 +106,10 @@ impl App {
         }
         let at = pos.byte.min(self.buffer.len_bytes());
         self.buffer.cursor = self.buffer.cursor_at_byte(at);
+        // Returning to a mark / jumplist position in the *same* chapter doesn't clear
+        // folds, so the restored byte can sit inside a collapsed section. Reveal the
+        // fold so the cursor lands on a visible line (#975); a cross-chapter restore
+        // already cleared folds, so this no-ops.
+        self.reveal_fold_at_cursor();
     }
 }
