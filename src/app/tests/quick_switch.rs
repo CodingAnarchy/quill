@@ -4,8 +4,10 @@
 //! of project size (a `cargo perf` guard).
 
 use super::*;
+use crate::app::quick_switch::scene_headings;
 use crate::mode::{Mode, QuickSwitch};
 use crate::project::Project;
+use crate::syntax::Syntax;
 use std::fs;
 
 /// A two-chapter project whose chapters each carry scene headings, opened and
@@ -192,6 +194,42 @@ fn selection_resets_to_the_top_as_the_query_narrows() {
     assert_eq!(s.current().map(|t| t.title.as_str()), Some("Gamma"));
 }
 
+#[test]
+fn the_lightweight_heading_scan_matches_the_full_parse() {
+    // Bug J: the switcher's off-buffer chapters extract headings without a full
+    // tree-sitter parse when the body is plain ATX markdown. The fast path must be
+    // byte-for-byte identical to `Syntax::new(..).headings()`, and any body it can't
+    // safely handle (setext underlines, `---` scene breaks) must fall back to the
+    // parse — so the switcher's targets never drift. Cover a spread of shapes.
+    let bodies = [
+        // Plain ATX (the fast path).
+        "# Chapter\n\n## Scene one\n\nRain.\n\n## Scene two\n\nSnow.\n",
+        "## a\n### b\n#### c\n",
+        // Leading spaces (0–3 allowed), trailing hashes, indent > 3 (not a heading).
+        "   ## Indented\n\n#### Deep ####\n\n    #### too indented\n",
+        // `#` without a following space is not a heading; 7 hashes isn't either.
+        "##NoSpace\n\n####### Seven\n\n#\n",
+        // Headings inside a fenced code block must be ignored.
+        "```\n## in fence\n```\n\n## real\n",
+        "~~~rust\n## tilde fence\n~~~\n\n## after\n",
+        // Setext + scene-break bodies force the fallback — must still match the parse.
+        "Setext Title\n---\n\n## After\n",
+        "Intro\n===\n\n## Scene\n",
+        "## Scene\n\nBody.\n\n---\n\n## Next\n",
+        // Empty and heading-free bodies.
+        "",
+        "Just prose with no headings at all.\n",
+    ];
+    for body in bodies {
+        let fast = scene_headings(body);
+        let parsed = Syntax::new(body).headings().to_vec();
+        assert_eq!(
+            fast, parsed,
+            "the heading scan must match the full parse for body {body:?}"
+        );
+    }
+}
+
 /// Performance guard (`cargo perf`). The per-keystroke work is filtering the
 /// pre-built index, which must not grow with the project: the index is captured
 /// once when the switcher opens, so a keystroke only re-scans it in memory — no
@@ -249,4 +287,75 @@ fn filtering_is_independent_of_project_size() {
     // A pure in-memory substring scan of a series-sized index is sub-millisecond;
     // a regression to per-keystroke file reads would blow far past this.
     assert!(per.as_millis() < 5, "quick-switch filter took {per:?}");
+}
+
+/// Performance guard (`cargo perf`). Opening the switcher builds its index over the
+/// whole project (#976 bug J): one heading extraction per chapter. That extraction
+/// must stay cheap — a full tree-sitter parse (block *and* inline emphasis trees)
+/// per chapter stalls the Ctrl-D keystroke on a series. The lightweight ATX scan
+/// keeps the open near the cost of the file reads alone, so opening scales linearly
+/// and stays well within an interactive budget even on a series-sized project. If a
+/// change reintroduces a per-chapter full parse on open, this catches it. See
+/// `docs/performance.md`.
+#[test]
+#[ignore = "release-only perf guard; run via cargo perf"]
+fn opening_the_switcher_is_fast_in_a_series_sized_project() {
+    use std::time::Instant;
+
+    // A series' worth of chapters, each with a handful of ATX scene headings and a
+    // realistic body — the switcher reads and scans every one on open.
+    let n = 600;
+    let dir = crate::testutil::scratch_dir("perf", "qs-open");
+    let dir = TempProject::new(dir);
+    let mut manifest = String::from("title = \"Series\"\n\n");
+    for i in 0..n {
+        let file = format!("ch{i}.md");
+        write!(
+            manifest,
+            "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+        )
+        .unwrap();
+        let mut body = format!("# Chapter {i}\n\n");
+        for s in 0..4 {
+            write!(body, "## Scene {s} the arrival at dawn\n\n").unwrap();
+            for _ in 0..10 {
+                body.push_str("The night was dark and the road was very long indeed.\n");
+            }
+            body.push('\n');
+        }
+        fs::write(dir.join(&file), body).unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+    let mut app = open_test_app(&dir);
+
+    // One untimed open pays one-off allocation / CPU-ramp costs.
+    app.open_quick_switch();
+    app.mode = Mode::Insert;
+
+    let opens = 20;
+    let t = Instant::now();
+    for _ in 0..opens {
+        app.open_quick_switch();
+        // The index is captured; close it so the next iteration rebuilds from disk.
+        app.mode = Mode::Insert;
+    }
+    let per = t.elapsed() / opens;
+
+    println!("quick-switch open over a {n}-chapter project = {per:?}");
+    // Sanity: the index really was built for every chapter + its scenes.
+    app.open_quick_switch();
+    let Mode::QuickSwitch(s) = &app.mode else {
+        panic!("open");
+    };
+    assert!(
+        s.targets.len() >= n * 5,
+        "every chapter and its scenes are indexed"
+    );
+    // Reading + lightweight-scanning 600 chapters stays comfortably interactive; a
+    // regression to a full tree-sitter parse per chapter blows well past this.
+    assert!(
+        per.as_millis() < 60,
+        "opening the switcher took {per:?} over {n} chapters"
+    );
 }

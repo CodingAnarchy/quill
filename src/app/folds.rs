@@ -271,7 +271,7 @@ impl App {
     /// Reveal the folded section the cursor now sits in, if any (#975): the search
     /// jump / click / navigation reveal, so a fold never hides the cursor. Called on
     /// the paths that move the cursor programmatically. Returns whether a fold opened.
-    pub(super) fn reveal_fold_at_cursor(&mut self) -> bool {
+    pub(crate) fn reveal_fold_at_cursor(&mut self) -> bool {
         if self.folds.is_empty() {
             return false;
         }

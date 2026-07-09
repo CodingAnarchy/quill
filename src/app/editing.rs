@@ -242,6 +242,13 @@ impl App {
             }
             self.manuscript = Some(m);
         }
+        // A motion can carry the cursor into a collapsed section of the current
+        // chapter (e.g. Down from a folded heading into its hidden body). Reveal the
+        // fold the cursor entered so it never lands on a zero-row hidden line — the
+        // renderer's cursor-follow would otherwise never place the terminal caret and
+        // keystrokes would insert blind into the invisible body (#975). The
+        // continuous view clears folds, so this is a cheap no-op there.
+        self.reveal_fold_at_cursor();
     }
 
     /// Save the active edit target (the continuous window, or the single chapter).
