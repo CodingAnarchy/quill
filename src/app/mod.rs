@@ -839,6 +839,14 @@ impl App {
                     .as_ref()
                     .map_or(&self.buffer, Manuscript::buffer)
             }
+            Mode::ConflictReview(r) => {
+                if let Some(b) = &r.editing {
+                    return b;
+                }
+                self.manuscript
+                    .as_ref()
+                    .map_or(&self.buffer, Manuscript::buffer)
+            }
             _ => self
                 .manuscript
                 .as_ref()
@@ -850,6 +858,15 @@ impl App {
         match &mut self.mode {
             Mode::EditMeta(m) => &mut m.buffer,
             Mode::BibleReview(r) => {
+                if let Some(b) = &mut r.editing {
+                    return b;
+                }
+                match &mut self.manuscript {
+                    Some(m) => m.buffer_mut(),
+                    None => &mut self.buffer,
+                }
+            }
+            Mode::ConflictReview(r) => {
                 if let Some(b) = &mut r.editing {
                     return b;
                 }

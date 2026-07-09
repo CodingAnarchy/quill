@@ -528,6 +528,138 @@ fn sync_diverged(
     })
 }
 
+/// Complete a two-way [`sync`] the author has resolved by hand (#963). A [`sync`]
+/// that found per-chapter conflicts left the repo exactly as it was — no merge
+/// commit, both versions preserved. Once the author has chosen a final text for
+/// every conflicting chapter (keep local / take remote / a hand-merged blend),
+/// this lands them: it re-derives the same three-way merge, layers the clean
+/// remote-only edits and the author's `resolutions` (path → chosen text) onto the
+/// local tree, and records the two-parent merge commit so both histories stay
+/// reachable — the exact finalization the conflict-free path does, with the
+/// conflicting chapters filled in by the author instead of aborted.
+///
+/// It re-fetches `origin` so it works against the live remote head rather than a
+/// stale `FETCH_HEAD`, and (like [`sync`]) refuses a dirty tree up front so the
+/// merge checkout can't overwrite an uncommitted edit. `resolutions` must cover
+/// every still-conflicting chapter; a chapter not in the map keeps its local
+/// version. Returns the author-facing summary.
+pub fn finalize_sync(
+    root: &Path,
+    resolutions: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    if is_dirty(&repo)? {
+        return Err(DIRTY_PULL.to_string());
+    }
+
+    let branch = current_branch(&repo)?;
+    let mut remote = repo
+        .find_remote("origin")
+        .map_err(|_| NO_REMOTE.to_string())?;
+    let mut cbs = git2::RemoteCallbacks::new();
+    cbs.credentials(credentials);
+    let mut opts = git2::FetchOptions::new();
+    opts.remote_callbacks(cbs);
+    remote
+        .fetch(&[&branch], Some(&mut opts), None)
+        .map_err(|e| friendly(&e))?;
+
+    let fetch_head = repo
+        .find_reference("FETCH_HEAD")
+        .map_err(|e| e.to_string())?;
+    let fetched = repo
+        .reference_to_annotated_commit(&fetch_head)
+        .map_err(|e| e.to_string())?;
+
+    let local = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| e.to_string())?;
+    let theirs = repo.find_commit(fetched.id()).map_err(|e| e.to_string())?;
+
+    let base_tree = match repo.merge_base(local.id(), theirs.id()) {
+        Ok(base) => Some(
+            repo.find_commit(base)
+                .and_then(|c| c.tree())
+                .map_err(|e| e.to_string())?,
+        ),
+        Err(_) => None,
+    };
+    let local_tree = local.tree().map_err(|e| e.to_string())?;
+    let their_tree = theirs.tree().map_err(|e| e.to_string())?;
+
+    let mut base = BTreeMap::new();
+    if let Some(t) = &base_tree {
+        collect_blobs(t, &mut base);
+    }
+    let mut ours = BTreeMap::new();
+    collect_blobs(&local_tree, &mut ours);
+    let mut theirs_blobs = BTreeMap::new();
+    collect_blobs(&their_tree, &mut theirs_blobs);
+
+    let mut paths: Vec<String> = base
+        .keys()
+        .chain(ours.keys())
+        .chain(theirs_blobs.keys())
+        .cloned()
+        .collect();
+    paths.sort();
+    paths.dedup();
+
+    // Rebuild the merged tree exactly as sync_diverged would, but this time the
+    // both-sides-changed chapters aren't dead-ends: they take the author's chosen
+    // text. Start from local so a keep-local resolution (and every local-only edit)
+    // is already in place.
+    let mut builder = repo
+        .treebuilder(Some(&local_tree))
+        .map_err(|e| e.to_string())?;
+    for path in paths {
+        let b = base.get(&path).copied();
+        let o = ours.get(&path).copied();
+        let t = theirs_blobs.get(&path).copied();
+
+        if let Some(chosen) = resolutions.get(&path) {
+            // A resolved conflict: write the author's final text verbatim.
+            let oid = repo
+                .blob(chosen.as_bytes())
+                .map_err(|e| format!("write resolution: {e}"))?;
+            builder
+                .insert(&path, oid, git2::FileMode::Blob.into())
+                .map_err(|e| e.to_string())?;
+            continue;
+        }
+        if o == t {
+            continue;
+        }
+        if o == b {
+            // Only the remote changed it — adopt the remote version.
+            adopt(&mut builder, &path, t)?;
+        }
+        // Only local changed it (t == b) — already in the builder from local_tree.
+    }
+
+    let tree_id = builder.write().map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
+    let sig = signature(&repo)?;
+    let message = format!("Sync remote changes into {branch}");
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        &message,
+        &tree,
+        &[&local, &theirs],
+    )
+    .map_err(|e| format!("sync commit: {e}"))?;
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "Resolved {} conflicting chapter(s) and completed the sync.",
+        resolutions.len()
+    ))
+}
+
 /// Write the remote's version of `path` into the merged tree builder (or stage its
 /// removal when the remote deleted the chapter). The chapter is adopted wholesale —
 /// chapters are atomic files, so there's no sub-file merge to do.

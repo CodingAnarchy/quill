@@ -599,6 +599,174 @@ fn a_clean_sync_clears_any_prior_conflicts() {
     );
 }
 
+/// Build a real bare remote plus a clone `b` opened as an app, driven into a
+/// same-chapter conflict against `a`'s pushed edit (#963). Returns the app on
+/// `b`, its `TempProject`, and the two extra scratch dirs to clean up. `b`'s
+/// `one.md` holds "B's rewrite"; the remote holds "A's rewrite" — a real conflict
+/// a live sync will detect.
+fn conflicted_sync_app(name: &str) -> (App, TempProject, PathBuf, PathBuf) {
+    use crate::vcs::{commit, push, set_remote};
+
+    let manifest = "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n";
+
+    let remote = app_scratch_dir(&format!("{name}-bare"));
+    git2::Repository::init_bare(&remote).unwrap();
+    let url = remote.to_str().unwrap();
+
+    // Clone a: seed the shared first commit, push it.
+    let a = app_scratch_dir(&format!("{name}-a"));
+    fs::write(Project::manifest_path(&a), manifest).unwrap();
+    fs::write(a.join("one.md"), "shared draft\n").unwrap();
+    crate::vcs::init(&a).unwrap();
+    commit(&a, "first").unwrap();
+    set_remote(&a, url).unwrap();
+    push(&a).unwrap();
+
+    // Clone b (the app): clone the remote, then edit one.md differently and commit —
+    // both sides now diverge on the same chapter.
+    let b = app_scratch_dir(&format!("{name}-b"));
+    fs::remove_dir_all(&b).ok();
+    git2::Repository::clone(url, &b).unwrap();
+    fs::write(b.join("one.md"), "B's rewrite\n").unwrap();
+    commit(&b, "b-edit").unwrap();
+
+    // a rewrites the same chapter and pushes → the remote now conflicts with b.
+    fs::write(a.join("one.md"), "A's rewrite\n").unwrap();
+    commit(&a, "a-edit").unwrap();
+    push(&a).unwrap();
+
+    let app = open_test_app(&b);
+    (app, TempProject::new(b), a, remote)
+}
+
+#[test]
+fn a_sync_conflict_opens_the_resolution_flow_with_a_safety_snapshot() {
+    // A real two-way sync that hits a same-chapter conflict (#963) opens the
+    // resolution overlay, tags a safety milestone (neither version lost), and
+    // leaves the local file exactly as it was until the author resolves.
+    let (mut app, b, a, remote) = conflicted_sync_app("vc-resolve-open");
+    let before = fs::read_to_string(b.join("one.md")).unwrap();
+
+    git_menu_label(&mut app, "Sync");
+    app.settle_vc_for_test();
+
+    assert!(
+        matches!(app.mode, Mode::ConflictReview(_)),
+        "the resolution overlay opened"
+    );
+    assert_eq!(app.sync_conflicts().len(), 1, "one chapter conflicts");
+    // A safety milestone was tagged before anything was applied.
+    let tags = crate::vcs::list_tags(&b).unwrap();
+    assert!(
+        tags.iter().any(|t| t.name.starts_with("pre-sync-")),
+        "a safety snapshot exists: {:?}",
+        tags.iter().map(|t| &t.name).collect::<Vec<_>>()
+    );
+    // Nothing was clobbered before the author chose — the local text is untouched.
+    assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), before);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn keeping_local_completes_the_sync_with_the_local_text() {
+    let (mut app, b, a, remote) = conflicted_sync_app("vc-resolve-local");
+    git_menu_label(&mut app, "Sync");
+    app.settle_vc_for_test();
+
+    app.on_key(key(KeyCode::Char('l'))); // keep local
+
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "the flow completed back to the editor"
+    );
+    assert!(app.sync_conflicts().is_empty(), "conflicts cleared");
+    assert_eq!(
+        fs::read_to_string(b.join("one.md")).unwrap(),
+        "B's rewrite\n"
+    );
+    // A real merge landed: a fresh commit sees a clean tree.
+    assert_eq!(crate::vcs::commit(&b, "clean").unwrap(), None);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn taking_remote_completes_the_sync_with_the_remote_text() {
+    let (mut app, b, a, remote) = conflicted_sync_app("vc-resolve-remote");
+    git_menu_label(&mut app, "Sync");
+    app.settle_vc_for_test();
+
+    app.on_key(key(KeyCode::Char('r'))); // take remote
+
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(
+        fs::read_to_string(b.join("one.md")).unwrap(),
+        "A's rewrite\n"
+    );
+    assert_eq!(crate::vcs::commit(&b, "clean").unwrap(), None);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn merging_lands_the_hand_edited_text() {
+    let (mut app, b, a, remote) = conflicted_sync_app("vc-resolve-merge");
+    git_menu_label(&mut app, "Sync");
+    app.settle_vc_for_test();
+
+    app.on_key(key(KeyCode::Char('m'))); // open the merge editor
+    assert!(
+        matches!(&app.mode, Mode::ConflictReview(r) if r.editing.is_some()),
+        "the merge editor opened, seeded with both versions"
+    );
+    // The seed carries both versions, so neither is lost going in.
+    let seeded = app.edit_buffer().text();
+    assert!(
+        seeded.contains("B's rewrite") && seeded.contains("A's rewrite"),
+        "{seeded}"
+    );
+
+    // Replace it with a blended version and accept (Ctrl-S).
+    *app.edit_buffer_mut() = Buffer::from_text("Both rewrites, blended\n");
+    app.on_key(ctrl('s'));
+
+    assert!(matches!(app.mode, Mode::Insert));
+    assert_eq!(
+        fs::read_to_string(b.join("one.md")).unwrap(),
+        "Both rewrites, blended\n"
+    );
+    assert_eq!(crate::vcs::commit(&b, "clean").unwrap(), None);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn cancelling_resolution_keeps_both_versions() {
+    let (mut app, b, a, remote) = conflicted_sync_app("vc-resolve-cancel");
+    git_menu_label(&mut app, "Sync");
+    app.settle_vc_for_test();
+
+    app.on_key(key(KeyCode::Esc)); // abandon the flow
+
+    assert!(matches!(app.mode, Mode::Insert));
+    // Local is untouched…
+    assert_eq!(
+        fs::read_to_string(b.join("one.md")).unwrap(),
+        "B's rewrite\n"
+    );
+    // …and the safety snapshot (with both committed sides reachable) survives.
+    let tags = crate::vcs::list_tags(&b).unwrap();
+    assert!(tags.iter().any(|t| t.name.starts_with("pre-sync-")));
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
 #[test]
 fn a_dead_vc_worker_surfaces_its_cause_not_a_generic_message() {
     // A push/pull worker that dies used to report a bare "Remote operation
