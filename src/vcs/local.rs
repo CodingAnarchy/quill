@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::remote::{adopt, blob_text, collect_blobs, ChapterConflict};
+use super::remote::{
+    adopt, blob_text, collect_blobs, index_from_tree, stage_blob, ChapterConflict,
+};
 
 /// Editor state and scratch that should never be committed — Quill's own
 /// metadata and OS cruft. Everything else (chapter `.md` files, `book.toml`, the
@@ -911,7 +913,8 @@ fn reconcile_trees(
 
     let mut merged = Vec::new();
     let mut conflicts = Vec::new();
-    let mut builder = repo.treebuilder(Some(ours)).map_err(|e| e.to_string())?;
+    // An index (not a flat TreeBuilder) so nested chapter paths merge correctly.
+    let mut index = index_from_tree(ours)?;
 
     for path in paths {
         let b = base_blobs.get(&path).copied();
@@ -923,9 +926,7 @@ fn reconcile_trees(
             let oid = repo
                 .blob(chosen.as_bytes())
                 .map_err(|e| format!("write resolution: {e}"))?;
-            builder
-                .insert(&path, oid, git2::FileMode::Blob.into())
-                .map_err(|e| e.to_string())?;
+            stage_blob(&mut index, &path, oid)?;
             continue;
         }
         if o == t {
@@ -933,10 +934,10 @@ fn reconcile_trees(
         }
         if o == b {
             // Only the source draft changed this chapter — adopt its version.
-            adopt(&mut builder, &path, t)?;
+            adopt(&mut index, &path, t)?;
             merged.push(path);
         } else if t == b {
-            // Only the target draft changed it — keep ours (already in the builder).
+            // Only the target draft changed it — keep ours (already in the index).
         } else {
             // Both changed it, differently — a per-chapter conflict (#965).
             conflicts.push(ChapterConflict {
@@ -948,7 +949,7 @@ fn reconcile_trees(
         }
     }
 
-    let tree = builder.write().map_err(|e| e.to_string())?;
+    let tree = index.write_tree_to(repo).map_err(|e| e.to_string())?;
     Ok(Reconciled {
         tree,
         merged,
