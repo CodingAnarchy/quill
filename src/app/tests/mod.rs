@@ -102,6 +102,7 @@ mod spell;
 mod sprint;
 mod typography;
 mod vcs;
+mod vcs_concurrency;
 mod vim;
 mod workflows;
 

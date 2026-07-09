@@ -31,6 +31,15 @@ impl App {
         if !self.guard_remote() || self.vc_task.is_busy() {
             return;
         }
+        // Read-only instance (#871): the sync's merge force-checks-out the tree via
+        // libgit2, bypassing the save-path write guards (bug H). Refuse rather than
+        // race the instance that holds the project and clobber its chapter files.
+        if self.project.is_read_only() {
+            self.message = Some(
+                "Read-only: this project is open in another Quill instance; not synced.".into(),
+            );
+            return;
+        }
         self.leave_continuous(); // the post-sync reload targets the single active chapter
         self.save_edit();
         self.refresh_vc_status();
@@ -77,6 +86,13 @@ impl App {
         if self.sync_conflicts.is_empty() {
             return;
         }
+        // This is the SYNC path: clear any stale draft-merge target (bug F). If a
+        // background sync landed while a conflicting draft merge was mid-resolution,
+        // `pending_draft_merge` would otherwise still be set — and
+        // `finalize_conflict_resolution` takes it FIRST, misrouting these sync
+        // resolutions to `finalize_draft_merge` against the wrong refs. A sync
+        // resolution always finalizes against the remote, so it owns no draft merge.
+        self.pending_draft_merge = None;
         // Safety milestone (#963): tag the current HEAD so both authors' committed
         // work is recoverable regardless of how the resolution goes. A duplicate
         // name (a prior aborted attempt) is fine to ignore — the earlier tag already

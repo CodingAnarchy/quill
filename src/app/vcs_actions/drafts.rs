@@ -39,6 +39,13 @@ impl App {
             self.message = Some("Not under version control — Ctrl-v to initialize.".into());
             return;
         }
+        // Refuse while a background VCS op (push/pull/sync) is in flight (bug F): a
+        // draft switch/merge from the overlay would race the in-flight op and could
+        // land a conflict-resolution flow that a landing sync then clobbers.
+        if self.vc_task.is_busy() {
+            self.message = Some("A sync is still running — try drafts again in a moment.".into());
+            return;
+        }
         self.save_edit();
         let Ok(current) = crate::vcs::current_branch(&self.project.root) else {
             self.message =
@@ -130,6 +137,20 @@ impl App {
         let Some(name) = self.selected_draft() else {
             return;
         };
+        // Read-only instance (#871): the checkout force-overwrites the whole tree via
+        // libgit2, bypassing the write guards on save (bug H). Refuse rather than race
+        // the instance that holds the project and clobber its chapter files.
+        if self.project.is_read_only() {
+            self.message = Some(
+                "Read-only: this project is open in another Quill instance; drafts not switched."
+                    .into(),
+            );
+            return;
+        }
+        if self.vc_task.is_busy() {
+            self.message = Some("A sync is still running — try again in a moment.".into());
+            return;
+        }
         self.leave_continuous(); // the reload targets the single active chapter
         self.save_edit();
         self.refresh_vc_status();
@@ -165,6 +186,23 @@ impl App {
         let Some(from) = self.selected_draft() else {
             return;
         };
+        // Read-only instance (#871): the merge checkout force-overwrites the tree via
+        // libgit2, bypassing the write guards (bug H) — refuse rather than clobber the
+        // owning instance's files.
+        if self.project.is_read_only() {
+            self.message = Some(
+                "Read-only: this project is open in another Quill instance; drafts not merged."
+                    .into(),
+            );
+            return;
+        }
+        // Refuse while a background VCS op is in flight (bug F): a landing sync's
+        // conflict-resolution flow would race — and could misroute — this merge's.
+        if self.vc_task.is_busy() {
+            self.message =
+                Some("A sync is still running — try the merge again in a moment.".into());
+            return;
+        }
         let into = match crate::vcs::current_branch(&self.project.root) {
             Ok(name) => name,
             Err(e) => {

@@ -369,6 +369,12 @@ pub struct App {
     /// intact) and surfaced here for the conflict-resolution UI (#963); empty after a
     /// clean sync. The last sync's result, not a running log.
     sync_conflicts: Vec<crate::vcs::ChapterConflict>,
+    /// A background sync landed with conflicts (#962) while the author was in a
+    /// prompt/overlay/modal, so surfacing the resolution overlay was deferred rather
+    /// than clobbering their in-flight state (bug F). `poll_vc` sets this when it
+    /// can't open the flow immediately and re-checks each tick, opening it once the
+    /// author is back in a plain editing mode. Cleared when the flow finally opens.
+    pending_sync_conflicts: bool,
     /// The draft merge (#965) a conflict-resolution flow is finishing, as
     /// `(into, from)` draft names. `Some` only while resolving a conflicting draft
     /// merge; it routes [`finalize_conflict_resolution`](App::finalize_conflict_resolution)
@@ -714,6 +720,7 @@ impl App {
             vc_task: Task::idle(),
             pull_origin: None,
             sync_conflicts: Vec::new(),
+            pending_sync_conflicts: false,
             pending_draft_merge: None,
             backup: crate::config::BackupConfig::load(),
             backup_task: Task::idle(),
