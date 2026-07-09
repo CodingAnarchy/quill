@@ -25,6 +25,9 @@ impl App {
         match Manuscript::open(&self.project) {
             Ok(m) => {
                 self.manuscript = Some(m);
+                // Folds are keyed on the single-chapter buffer's byte offsets (#975);
+                // the continuous window is a different buffer, so clear them.
+                self.folds.clear();
                 // A Visual selection's anchor is a byte in the single-chapter
                 // buffer; it's meaningless against the manuscript window, so drop
                 // back to the resting mode (#205).
@@ -63,6 +66,9 @@ impl App {
         match Buffer::from_path(self.project.active_path()) {
             Ok(buffer) => {
                 self.buffer = buffer;
+                // The reopened single chapter is a fresh buffer; drop any folds keyed
+                // on the continuous window's byte offsets (#975).
+                self.folds.clear();
                 self.message = Some("Chapter view".into());
             }
             Err(e) => self.message = Some(format!("Open failed: {e}")),

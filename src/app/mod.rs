@@ -52,6 +52,7 @@ mod editing;
 mod export_style;
 mod exporting;
 mod findings_store;
+mod folds;
 mod fonts;
 mod health;
 mod images;
@@ -93,6 +94,7 @@ mod wizard;
 
 pub use assistant::{Assistant, Entry, Speaker};
 pub use backup::BackupEntry;
+pub use folds::{FoldState, FoldView};
 // The key-dispatch helpers moved to `dispatch` (#759); re-imported here so the
 // `app`-module call sites keep spelling them unqualified / via `super::`.
 use dispatch::{build_keymap, scroll_target};
@@ -212,6 +214,15 @@ pub struct App {
     /// indent the first line of each prose paragraph, display-only. A toggle
     /// (palette action); off by default.
     pub paragraph_indent: bool,
+    /// Heading/scene folding (#975): the collapsed sections, keyed by heading start
+    /// byte. Purely display-only — the renderer hides a folded section's body lines
+    /// and marks its heading, never touching the rope or the file. Empty by default.
+    pub folds: FoldState,
+    /// Distraction-free composition mode (#975): a runtime toggle that hides the
+    /// chrome (outline pane, status bar, and any split) so only the centered prose
+    /// column shows. Composes with focus mode and folding. Off by default; a
+    /// per-session view state, never persisted.
+    pub distraction_free: bool,
     /// Autosave interval in seconds (#409), from `[editor]`; `0` is off.
     pub(crate) autosave_interval_secs: u64,
     /// Time of the last input burst (reset each idle tick), so autosave can fire
@@ -652,6 +663,8 @@ impl App {
             typewriter,
             focus_mode,
             paragraph_indent,
+            folds: FoldState::default(),
+            distraction_free: false,
             autosave_interval_secs,
             last_activity: std::time::Instant::now(),
             outline_visible: false,
@@ -851,6 +864,9 @@ impl App {
         let buffer = self.edit_buffer_mut();
         buffer.refresh_syntax();
         buffer.seal_undo_group(); // a fresh burst of typing becomes a new undo group
+                                  // Drop fold keys whose heading the reparse just deleted or rewrote (#975), so
+                                  // a stale fold can never hide live prose.
+        self.prune_folds();
         self.refresh_spell_flags();
         self.sync_annotations();
         self.tally_words();

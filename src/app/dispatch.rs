@@ -58,6 +58,20 @@ impl App {
             self.scroll_offset.set(0);
         }
 
+        // Esc leaves distraction-free composition mode (#975) from an editing mode,
+        // restoring the chrome — the promised "toggle back" that isn't a second
+        // Ctrl-\. Guarded to the resting editing modes and no overlay, so it never
+        // pre-empts Esc where a prompt/menu/Vim-insert owns it; a Visual selection
+        // keeps Esc for collapsing the selection first.
+        if key.code == KeyCode::Esc
+            && self.distraction_free
+            && self.overlay.is_none()
+            && matches!(self.mode, Mode::Insert | Mode::Normal)
+        {
+            self.toggle_distraction_free();
+            return;
+        }
+
         // F1 opens the user's guide from an editing mode (#281). Guarded so it
         // doesn't pre-empt a key's meaning elsewhere: with an overlay already up,
         // F1 falls through and closes it like any other key; in a prompt/menu the
@@ -304,6 +318,14 @@ impl App {
             KeyCode::Char('y') => self.history_step(true),
             // Find (#144). Ctrl-f opens the query; from there `r` starts a replace.
             KeyCode::Char('f') => self.open_find(),
+            // Fold / unfold the section under the cursor (#975): collapse a heading
+            // and its body to the header line, in place, or expand it. Ctrl-Space —
+            // the "collapse this" key, free in the editor. Fold-all / expand-all and
+            // the composition-mode toggle live in the run-action menu (Ctrl-k).
+            KeyCode::Char(' ') => self.toggle_fold_at_cursor(),
+            // Toggle distraction-free composition mode (#975): hide the chrome so
+            // only the prose shows. Ctrl-\ — a free key; Esc also exits it.
+            KeyCode::Char('\\') => self.toggle_distraction_free(),
             // Window/split prefix (#163): the next key is a window command
             // (s/v split, w/h/j/k/l focus, c/q close). Vim's Ctrl-w.
             KeyCode::Char('w') => self.window_pending = true,

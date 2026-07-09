@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use super::*;
 use crate::app::mouse::EditorLayout;
+use crate::app::FoldView;
 use crate::buffer::Buffer;
 use crate::syntax::HighlightKind;
 
@@ -26,8 +27,8 @@ pub use header::HeaderCache;
 use focus::{first_row_indent, focus_paragraph, starts_paragraph};
 use header::header_inserts;
 use rows::{
-    record_row, row_count, row_kind, row_starts_for, styled_line, visible_width_before, RowKind,
-    SpanHighlights,
+    folded_heading_line, record_row, row_count, row_kind, row_starts_for, styled_line,
+    visible_width_before, RowKind, SpanHighlights,
 };
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
@@ -101,6 +102,10 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         annotations: &annotations,
         focus,
     };
+    // Heading/scene folds (#975): the lines a collapsed section hides (rendered as
+    // zero rows) and the headings that carry a collapse marker. Display-only —
+    // computed off the syntax cache, never touching the buffer.
+    let folds = app.fold_view();
     // Record the focused editor's layout so a click can invert screen → byte
     // (#757), and honor the read-ahead wheel-scroll offset (#764). Both apply only
     // to the focused editing pane, never a reference pane.
@@ -111,6 +116,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         buffer,
         &inserts,
         &highlights,
+        &folds,
         app.typewriter,
         editing,
         app.paragraph_indent,
@@ -179,12 +185,16 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         focus: None,
     };
     let inserts = scene_break_inserts(buffer);
+    // A reference pane shows a different chapter — folds apply only to the buffer
+    // the author is editing, so it never folds (#975).
+    let folds = FoldView::none();
     render_body(
         frame,
         column,
         buffer,
         &inserts,
         &highlights,
+        &folds,
         false,
         false,
         app.paragraph_indent,
@@ -203,6 +213,10 @@ fn render_body(
     buffer: &Buffer,
     inserts: &[(usize, Vec<Line<'static>>)],
     hl: &SpanHighlights,
+    // Heading/scene folds (#975): a collapsed section's body lines render as zero
+    // rows (like a concealed fence), and its heading shows a fold marker. Empty for
+    // the reference pane and whenever nothing is folded.
+    folds: &FoldView,
     typewriter: bool,
     place_cursor: bool,
     paragraph_indent: bool,
@@ -230,6 +244,18 @@ fn render_body(
     // lockstep with the fill loop's `styled_line` so scroll math matches the render.
     let syntax = buffer.syntax();
     let line_rows = |line: usize| {
+        // A line hidden inside a collapsed fold (#975) contributes no visual rows,
+        // exactly like a concealed fence — so it drops out of the scroll math and
+        // the fill loop alike, and the section reads as just its header.
+        if folds.is_hidden(line) {
+            return 0;
+        }
+        // A collapsed heading is always a single row (its marker line), regardless
+        // of how the raw heading text would soft-wrap — kept in lockstep with the
+        // fill loop's `folded_heading_line`, which emits exactly one row.
+        if folds.is_collapsed_heading(line) {
+            return 1;
+        }
         let start = buffer.line_start_byte(line);
         let text = buffer.line(line);
         let kind = row_kind(syntax, start, &text, &hl.conceal);
@@ -255,6 +281,12 @@ fn render_body(
         first_row_indent(paragraph_indent, buffer, cursor_line),
     );
     let (cursor_subrow, _) = crate::wrap::visual_pos(&cline, &cstarts, cursor_byte - cline_start);
+    // The cursor's line always contributes at least one row to the scroll math, even
+    // if a fold hid it (#975) — the fold logic snaps the cursor onto a visible line,
+    // but this keeps the centering arithmetic (below) from underflowing on any frame
+    // where the cursor momentarily sits on a zero-row folded line.
+    let cursor_line_rows = body_rows(cursor_line).max(1);
+    let cursor_subrow = cursor_subrow.min(cursor_line_rows - 1);
 
     // Follow the cursor by *visual* row, keeping it near the page centre. Normally
     // the centre is clamped so we never scroll past the top or leave blank space at
@@ -270,7 +302,7 @@ fn render_body(
     let keep_above = if typewriter {
         target_above.min(above_avail)
     } else {
-        let mut below_avail = body_rows(cursor_line) - 1 - cursor_subrow;
+        let mut below_avail = cursor_line_rows - 1 - cursor_subrow;
         let mut l = cursor_line;
         while l + 1 < total && below_avail < height {
             l += 1;
@@ -380,6 +412,14 @@ fn render_body(
     let mut ll = top;
     let mut skip = to_skip;
     'fill: while lines.len() < height && ll < total {
+        // A line hidden inside a collapsed fold (#975) contributes nothing — not its
+        // body and not any header insert keyed on it (e.g. a scene break that now
+        // lives inside the folded section). Skip it whole, in lockstep with
+        // `line_rows` returning 0, so the scroll math and the render agree.
+        if folds.is_hidden(ll) {
+            ll += 1;
+            continue;
+        }
         if let Some((_, block)) = inserts.iter().find(|(at, _)| *at == ll) {
             for line in block {
                 if skip > 0 {
@@ -399,13 +439,28 @@ fn render_body(
         let text = buffer.line(ll);
         let kind = row_kind(syntax, line_start, &text, &hl.conceal);
         let verbatim = matches!(kind, RowKind::Code { verbatim: true });
-        let starts = row_starts_for(
-            kind,
-            &text,
-            wrap,
-            if indent { PARAGRAPH_INDENT.len() } else { 0 },
-        );
-        let body = styled_line(syntax, line_start, &text, hl, wrap, indent, kind);
+        // A collapsed heading (#975) renders its header text with a leading fold
+        // glyph so the author sees the section is folded; the byte span still maps
+        // per raw character so the cursor and clicks land correctly on the heading.
+        let collapsed = folds.is_collapsed_heading(ll);
+        // A collapsed heading is one row spanning the whole line (like a concealed
+        // scene break), so a click on it maps to the heading's start; otherwise the
+        // usual per-wrap-row starts drive the click map.
+        let starts = if collapsed {
+            vec![0]
+        } else {
+            row_starts_for(
+                kind,
+                &text,
+                wrap,
+                if indent { PARAGRAPH_INDENT.len() } else { 0 },
+            )
+        };
+        let body = if collapsed {
+            folded_heading_line(syntax, line_start, &text, hl)
+        } else {
+            styled_line(syntax, line_start, &text, hl, wrap, indent, kind)
+        };
         for (sub, line) in body.into_iter().enumerate() {
             if skip > 0 {
                 skip -= 1;

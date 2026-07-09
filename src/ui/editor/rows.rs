@@ -21,6 +21,11 @@ use super::{ByteRange, PARAGRAPH_INDENT};
 /// the printed-book convention of three spaced asterisks, centered in the column.
 const SCENE_BREAK_GLYPH: &str = "* * *";
 
+/// The glyph a collapsed heading (#975) carries so the author can see the section
+/// is folded: a right-pointing triangle before the header text, the near-universal
+/// "expandable" affordance. An expanded heading shows no glyph.
+const FOLD_GLYPH: &str = "▸ ";
+
 /// The "what to highlight in this span" overlays threaded through the body
 /// renderer (#431): one cohesive bundle, built once per pane and passed by
 /// reference through `render_body → styled_line → styled_row`, so a new overlay
@@ -244,6 +249,30 @@ pub(super) fn styled_line(
             }
         })
         .collect()
+}
+
+/// Render a collapsed heading (#975) as a single row: its styled header text with a
+/// leading fold glyph, so the author sees the section is folded and can expand it.
+/// Display-only, like the scene-break divider — the raw heading line is untouched in
+/// the buffer. Returned as a one-element `Vec` so it drops straight into the fill
+/// loop beside `styled_line`.
+pub(super) fn folded_heading_line(
+    syntax: &Syntax,
+    line_start: usize,
+    text: &str,
+    hl: &SpanHighlights,
+) -> Vec<Line<'static>> {
+    // Style the raw heading text as it renders normally (concealment applied), then
+    // prepend the fold glyph in the heading color so the marker reads as part of it.
+    let row = styled_row(syntax, line_start, text, 0, text.len(), hl);
+    let glyph_style = row.spans.first().map_or_else(
+        || Style::default().fg(theme::current().heading),
+        |s| s.style,
+    );
+    let mut spans = Vec::with_capacity(row.spans.len() + 1);
+    spans.push(Span::styled(FOLD_GLYPH, glyph_style));
+    spans.extend(row.spans);
+    vec![Line::from(spans)]
 }
 
 /// Set a fenced-code row apart (#723): tint every cell — the row's characters and

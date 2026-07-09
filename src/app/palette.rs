@@ -334,6 +334,9 @@ impl App {
                     on_off(self.paragraph_indent)
                 ));
             }
+            Action::FoldAll => self.fold_all(),
+            Action::ExpandAll => self.expand_all_folds(),
+            Action::ToggleComposition => self.toggle_distraction_free(),
             Action::Corkboard => self.open_corkboard(),
             Action::ManuscriptCorkboard => self.open_manuscript_corkboard(),
             Action::AddAnnotation => self.start_annotation(),

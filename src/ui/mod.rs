@@ -129,6 +129,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
 /// Draw the editor base layer: the prose pane (with the outline strip when shown)
 /// and the status line beneath it. Always drawn; modal overlays float on top.
 fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
+    // Distraction-free composition mode (#975): hide every piece of chrome — the
+    // outline pane, the status bar, and any split — so the whole screen is the
+    // centered prose column. Reuses the single-pane editor path (the same one focus
+    // mode already dims into). Toggling off restores the full layout below.
+    if app.distraction_free {
+        app.pane_rects.set(None); // no split on screen — no click target
+        Editor(app).render(frame, area);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])

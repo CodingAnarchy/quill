@@ -18,6 +18,9 @@ impl App {
         match Buffer::from_path(self.project.chapter_path(index)) {
             Ok(buffer) => {
                 self.buffer = buffer;
+                // Folds are keyed on byte offsets in the chapter just left (#975);
+                // they don't carry to the next chapter, so clear them on a switch.
+                self.folds.clear();
                 self.project.set_active(index);
                 // No need to cache the new active chapter's count: while active,
                 // chapter_word_count reads it live from the buffer.
