@@ -26,7 +26,13 @@ pub(in crate::ui) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &Pro
             )
         }
         ProjectSearchStage::Results => format!(
-            "'{}'{modes} — {n} {} in {span} {} · ↑↓ move · enter jump · r replace · ^C case · ^W word · ^R regex · esc close",
+            "'{}'{modes} — {n} {} in {span} {} · ↑↓ move · enter jump · g group · r replace · ^C case · ^W word · ^R regex · esc close",
+            ps.query,
+            matches(n),
+            chapters(span),
+        ),
+        ProjectSearchStage::Grouped => format!(
+            "'{}'{modes} — {n} {} across {span} {} · ↑↓ move · enter jump · g list · r replace · ^C case · ^W word · ^R regex · esc close",
             ps.query,
             matches(n),
             chapters(span),
@@ -47,6 +53,33 @@ pub(in crate::ui) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &Pro
             chapters(span),
         ),
     };
+    // The grouped pane (#977) shows one row per chapter with its count; every
+    // other stage shows the flat match list.
+    if ps.stage == ProjectSearchStage::Grouped {
+        let rows: Vec<Line<'static>> = ps
+            .grouped()
+            .iter()
+            .enumerate()
+            .map(|(i, g)| {
+                let count = if g.count == 1 {
+                    "1 match".to_string()
+                } else {
+                    format!("{} matches", g.count)
+                };
+                list_row(i == ps.group_selected, &g.title, Some(count))
+            })
+            .collect();
+        draw_list_overlay(
+            frame,
+            area,
+            " Find across manuscript ",
+            &help,
+            rows,
+            Some(ps.group_selected),
+        );
+        return;
+    }
+
     // Rows: the match list, with the selection highlighted while navigating.
     let show_selection = matches!(
         ps.stage,
