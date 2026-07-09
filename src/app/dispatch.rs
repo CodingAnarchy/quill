@@ -131,6 +131,7 @@ impl App {
             Mode::Nav { .. } => self.on_key_nav(key),
             Mode::EditMeta(_) => self.on_key_edit_meta(key),
             Mode::BibleReview(_) => self.on_key_bible_review(key),
+            Mode::ConflictReview(_) => self.on_key_conflict_review(key),
             Mode::Findings(_) => self.on_key_findings(key),
             Mode::Dashboard(_) => self.on_key_dashboard(key),
             Mode::CoOccurrence(_) => self.on_key_cooccurrence(key),

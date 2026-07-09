@@ -67,6 +67,12 @@ pub enum Mode {
     /// edit / keep choices. Boxed (carries the conflict queue and a scratch
     /// buffer while editing).
     BibleReview(Box<BibleReview>),
+    /// Resolving chapters a two-way sync (#962) found changed on both machines
+    /// (#963): a diff of local vs remote for each conflicting chapter, with
+    /// keep-local / take-remote / merge choices; resolving all completes the sync.
+    /// Boxed (carries the conflict queue, the accumulated resolutions, and a
+    /// scratch buffer while merging).
+    ConflictReview(Box<ConflictReview>),
     /// Triaging continuity findings: a navigable list where each can be jumped to
     /// (open its chapter) or dismissed. Read-only over the prose. Boxed (carries
     /// the findings list).

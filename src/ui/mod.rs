@@ -26,10 +26,10 @@ mod overlay;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 pub use editor::HeaderCache;
 use list_overlay::{
-    draw_annotations, draw_backup_browser, draw_cooccurrence, draw_corkboard, draw_dashboard,
-    draw_dir_browser, draw_findings, draw_history, draw_import_preview, draw_list_overlay,
-    draw_model_manager, draw_palette, draw_project_browser, draw_project_search, draw_quick_switch,
-    draw_review_import, list_row, marker, row_style,
+    draw_annotations, draw_backup_browser, draw_conflict_review, draw_cooccurrence, draw_corkboard,
+    draw_dashboard, draw_dir_browser, draw_findings, draw_history, draw_import_preview,
+    draw_list_overlay, draw_model_manager, draw_palette, draw_project_browser, draw_project_search,
+    draw_quick_switch, draw_review_import, list_row, marker, row_style,
 };
 pub use list_overlay::{draw_startup_browser, draw_startup_chooser};
 use overlay::{draw_bible_review, draw_overlay, draw_tree};
@@ -78,6 +78,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     app.list_layout.borrow_mut().clear();
     match &app.mode {
         Mode::BibleReview(review) => modal(frame, area, |f, r| draw_bible_review(f, r, review)),
+        Mode::ConflictReview(review) => {
+            modal(frame, area, |f, r| draw_conflict_review(f, r, review));
+        }
         Mode::Findings(findings) => modal(frame, area, |f, r| {
             draw_findings(f, r, findings, &app.project, &app.list_layout);
         }),

@@ -4,6 +4,7 @@
 //! hermetic (#531): they build repositories under a scratch dir, or use a bare
 //! repo as a stand-in remote, so nothing reaches the network.
 
+use std::collections::BTreeMap;
 use std::fs;
 
 use super::*;
@@ -743,6 +744,164 @@ fn sync_refuses_a_dirty_tree_and_preserves_edits() {
     assert!(err.to_lowercase().contains("uncommitted"), "{err}");
     // The author's words are still on disk.
     assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), uncommitted);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+// --- Resolving a two-way sync conflict (#963) --------------------------------
+
+/// Drive two clones into a same-chapter conflict and run [`sync`] on `b`, which
+/// detects it without writing anything. Returns the scratch dirs plus the detected
+/// conflict, so each resolution-path test starts from the exact post-sync state the
+/// resolution UI acts on.
+fn conflicted_clones(
+    name: &str,
+) -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    ChapterConflict,
+) {
+    let (remote, a, b) = two_clones(name);
+
+    fs::write(a.join("one.md"), "# One\n\nA's rewrite.\n").unwrap();
+    commit(&a, "a-edit").unwrap();
+    push(&a).unwrap();
+    fs::write(b.join("one.md"), "# One\n\nB's rewrite.\n").unwrap();
+    commit(&b, "b-edit").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert_eq!(out.conflicts.len(), 1, "one chapter conflicts");
+    let conflict = out.conflicts.into_iter().next().unwrap();
+    (remote, a, b, conflict)
+}
+
+/// The merge commit b now sits on: both parents' summaries plus its own message,
+/// so a test can assert the two-parent merge landed and both histories are reachable.
+fn merge_summaries(dir: &std::path::Path) -> Vec<String> {
+    log(dir, 20)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect()
+}
+
+#[test]
+fn finalize_sync_keeps_the_local_version() {
+    // Keep-local: the author's chosen text is their local version. finalize_sync
+    // writes it and lands the two-parent merge — nothing from the remote clobbers it.
+    let (remote, a, b, conflict) = conflicted_clones("finalize-local");
+
+    let mut resolutions = BTreeMap::new();
+    resolutions.insert(conflict.path.clone(), conflict.local.clone());
+    let summary = finalize_sync(&b, &resolutions).unwrap();
+    assert!(summary.contains("completed the sync"), "{summary}");
+
+    // The chosen (local) text is on disk and the tree is clean (a real merge landed).
+    assert_eq!(
+        fs::read_to_string(b.join("one.md")).unwrap(),
+        conflict.local
+    );
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+    // Both parents are reachable through the two-parent merge.
+    let summaries = merge_summaries(&b);
+    assert!(summaries.iter().any(|s| s == "a-edit"), "{summaries:?}");
+    assert!(summaries.iter().any(|s| s == "b-edit"), "{summaries:?}");
+    assert!(
+        summaries.iter().any(|s| s.contains("Sync remote")),
+        "{summaries:?}"
+    );
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn finalize_sync_takes_the_remote_version() {
+    // Take-remote: the chosen text is the fetched remote version. It replaces local
+    // on disk, and the merge commit still records both parents.
+    let (remote, a, b, conflict) = conflicted_clones("finalize-remote");
+
+    let mut resolutions = BTreeMap::new();
+    resolutions.insert(conflict.path.clone(), conflict.remote.clone());
+    finalize_sync(&b, &resolutions).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(b.join("one.md")).unwrap(),
+        conflict.remote
+    );
+    assert!(conflict.remote.contains("A's rewrite"), "sanity");
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+    let summaries = merge_summaries(&b);
+    assert!(summaries.iter().any(|s| s == "a-edit"), "{summaries:?}");
+    assert!(summaries.iter().any(|s| s == "b-edit"), "{summaries:?}");
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn finalize_sync_lands_a_hand_merged_version() {
+    // Merge: the author blends both into a new text. finalize_sync writes exactly
+    // that and completes the sync, losing neither side's ideas.
+    let (remote, a, b, conflict) = conflicted_clones("finalize-merge");
+
+    let blended = "# One\n\nA's rewrite, plus B's rewrite.\n";
+    let mut resolutions = BTreeMap::new();
+    resolutions.insert(conflict.path, blended.to_string());
+    finalize_sync(&b, &resolutions).unwrap();
+
+    assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), blended);
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+    // b is ahead of the remote and can push the completed merge.
+    push(&b).unwrap();
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn finalize_sync_also_lands_the_clean_remote_only_edits() {
+    // A conflict on one.md alongside a clean remote-only new chapter: resolving the
+    // conflict lands both the resolution and the adopted remote edit in one merge.
+    let (remote, a, b) = two_clones("finalize-mixed");
+
+    // a adds a brand-new chapter (clean, remote-only) AND edits the shared one.
+    fs::write(a.join("two.md"), "# Two\n\nA's new chapter.\n").unwrap();
+    fs::write(a.join("one.md"), "# One\n\nA's rewrite.\n").unwrap();
+    commit(&a, "a-adds-and-edits").unwrap();
+    push(&a).unwrap();
+    // b edits the shared one differently → a conflict on one.md only.
+    fs::write(b.join("one.md"), "# One\n\nB's rewrite.\n").unwrap();
+    commit(&b, "b-edit").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert_eq!(out.conflicts.len(), 1);
+    let conflict = out.conflicts.into_iter().next().unwrap();
+    assert_eq!(conflict.path, "one.md");
+
+    let mut resolutions = BTreeMap::new();
+    resolutions.insert(conflict.path, conflict.local);
+    finalize_sync(&b, &resolutions).unwrap();
+
+    // The resolved chapter kept b's text…
+    assert!(fs::read_to_string(b.join("one.md"))
+        .unwrap()
+        .contains("B's rewrite"));
+    // …and the clean remote-only chapter was adopted in the same merge.
+    assert!(
+        b.join("two.md").exists(),
+        "the clean remote edit landed too"
+    );
+    assert!(fs::read_to_string(b.join("two.md"))
+        .unwrap()
+        .contains("A's new chapter"));
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
 
     fs::remove_dir_all(&a).ok();
     fs::remove_dir_all(&b).ok();

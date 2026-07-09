@@ -169,6 +169,12 @@ impl App {
                     Some(note) => format!("{} {note}", msg.text),
                     None => msg.text,
                 });
+                // A sync that detected chapters changed on both machines opens the
+                // resolution flow (#963) straight away, so the author resolves them
+                // in-app rather than being left to the git CLI.
+                if !self.sync_conflicts.is_empty() {
+                    self.open_conflict_resolution();
+                }
             }
             Poll::Pending => {}
             // The worker panicked; surface its cause (#838) rather than a generic
