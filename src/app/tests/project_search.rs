@@ -444,6 +444,131 @@ fn mist_app(name: &str) -> (App, TempProject) {
     (app, TempProject::new(dir))
 }
 
+// --- #1014: replace-all preview --------------------------------------------
+
+/// Drive the replace flow up to the preview stage: search `query`, start a
+/// replace, type `replacement`, then open the replace-all preview (`a`).
+fn open_replace_preview(app: &mut App, query: &str, replacement: &str) {
+    app.open_project_find();
+    type_str(app, query);
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('r'))); // → Replacement
+    type_str(app, replacement);
+    app.on_key(key(KeyCode::Enter)); // → Step
+    app.on_key(key(KeyCode::Char('a'))); // → Preview
+}
+
+#[test]
+fn preview_reports_per_chapter_counts_with_context() {
+    // The uneven "mist" fixture: chapter one has two, chapter two one, chapter
+    // three none — so the per-chapter breakdown is unambiguous.
+    let (mut app, _dir) = mist_app("psearch-preview-counts");
+    open_replace_preview(&mut app, "mist", "fog");
+
+    let ps = app.project_search();
+    assert!(
+        matches!(ps.stage, ProjectSearchStage::Preview),
+        "on the preview stage before any write"
+    );
+    let rows = ps.preview_rows();
+    assert_eq!(rows.len(), 2, "only the two chapters with matches");
+    assert_eq!(rows[0].title, "One");
+    assert_eq!(rows[0].count, 2, "chapter one has two matches");
+    assert!(
+        rows[0].context.contains("mist"),
+        "the row carries a context snippet: {:?}",
+        rows[0].context
+    );
+    assert_eq!(rows[1].title, "Two");
+    assert_eq!(rows[1].count, 1, "chapter two has one match");
+    assert!(rows[1].context.contains("mist"), "{:?}", rows[1].context);
+}
+
+#[test]
+fn cancelling_the_preview_changes_nothing() {
+    let (mut app, dir) = mist_app("psearch-preview-cancel");
+    open_replace_preview(&mut app, "mist", "fog");
+    // Esc from the preview backs out to stepping, writing nothing.
+    app.on_key(key(KeyCode::Esc));
+
+    assert!(
+        matches!(app.project_search().stage, ProjectSearchStage::Step),
+        "cancel returns to the step stage, overlay still open"
+    );
+    // Every chapter is byte-for-byte what it was — the sweep never ran.
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "mist over the mist.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "a lone mist.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("three.md")).unwrap(),
+        "clear skies.\n"
+    );
+}
+
+#[test]
+fn confirming_the_preview_applies_exactly_the_previewed_matches() {
+    let (mut app, dir) = mist_app("psearch-preview-confirm");
+    open_replace_preview(&mut app, "mist", "fog");
+    // Snapshot exactly what the preview promised: total, per-chapter counts.
+    let previewed_total: usize = app
+        .project_search()
+        .preview_rows()
+        .iter()
+        .map(|r| r.count)
+        .sum();
+    assert_eq!(previewed_total, 3, "the preview showed 3 matches");
+
+    app.on_key(key(KeyCode::Char('y'))); // confirm the sweep
+
+    // The message reflects exactly the previewed total and chapter span.
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Replaced 3 occurrences across 2 chapters"),
+        "{:?}",
+        app.message
+    );
+    // Every previewed match — and only those — was rewritten; the match-free
+    // chapter is untouched.
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "fog over the fog.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "a lone fog.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("three.md")).unwrap(),
+        "clear skies.\n",
+        "the match-free chapter is left alone"
+    );
+}
+
+#[test]
+fn preview_confirms_on_enter_too() {
+    // Enter is a confirm alias, so the author isn't forced to reach for `y`.
+    let (mut app, dir) = mist_app("psearch-preview-enter");
+    open_replace_preview(&mut app, "mist", "fog");
+    app.on_key(key(KeyCode::Enter));
+
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Replaced 3"),
+        "{:?}",
+        app.message
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "a lone fog.\n"
+    );
+}
+
 #[test]
 fn grouped_view_reports_per_chapter_counts_and_total() {
     let (mut app, _dir) = mist_app("psearch-grouped-counts");

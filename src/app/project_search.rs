@@ -7,8 +7,12 @@
 //! split off and never searched or rewritten). Chapter files are read one at a
 //! time, on demand — never all bodies held at once — so a series-sized project
 //! stays within the existing open/scan budgets. A cross-file replace can't ride
-//! the single buffer's undo, so the replace-all is confirmed before it runs; the
-//! active chapter's edits go through its live buffer (so those are undoable).
+//! the single buffer's undo, so the replace-all is previewed then confirmed
+//! before it runs: the [`Preview`](ProjectSearchStage::Preview) stage shows a
+//! per-chapter breakdown (match count + context) of exactly the ranges the sweep
+//! will rewrite (#1014), so the author can verify the spread before committing —
+//! cancelling changes nothing. The active chapter's edits go through its live
+//! buffer (so those are undoable).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -137,16 +141,18 @@ impl App {
                 self.project_search_advance(-1);
             }
             (ProjectSearchStage::Step, KeyCode::Char('a')) => {
-                self.project_search_mut().stage = ProjectSearchStage::Confirm;
+                self.project_search_mut().stage = ProjectSearchStage::Preview;
             }
             (ProjectSearchStage::Step, KeyCode::Enter) => self.finish_project_replace(),
 
-            // --- Confirming the irreversible replace-all -------------------
-            (ProjectSearchStage::Confirm, KeyCode::Char('y' | 'Y')) => {
+            // --- Previewing then confirming the replace-all (#1014) --------
+            // The preview shows a per-chapter breakdown (count + context) of the
+            // exact matches the sweep will rewrite. y/Enter commits; anything else
+            // cancels back to stepping, having changed nothing on disk.
+            (ProjectSearchStage::Preview, KeyCode::Char('y' | 'Y') | KeyCode::Enter) => {
                 self.replace_project_all();
             }
-            (ProjectSearchStage::Confirm, _) => {
-                // Anything else backs out to stepping, nothing replaced.
+            (ProjectSearchStage::Preview, _) => {
                 self.project_search_mut().stage = ProjectSearchStage::Step;
             }
 
