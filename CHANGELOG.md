@@ -5,6 +5,84 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-09
+
+Version control for prose. Quill now backs the manuscript with real git-grade
+history that reads like a writing tool, not a developer one: write on two
+machines and reconcile, keep parallel drafts of a chapter and merge the one you
+like, and resolve any overlap chapter-by-chapter without leaving the editor.
+Alongside it, structural authoring gets sharper — move scenes across chapters on
+the corkboard, fold a long chapter down to its scene headings (or drop into a
+distraction-free composition mode), jump anywhere by fuzzy name, and read
+project-wide find results grouped by chapter. Before shipping, the new
+sync/merge, cross-chapter move, and folding paths went through an adversarial
+reliability audit; the fixes below close every data-loss and merge-failure edge
+case it surfaced, so the two-machine and multi-draft workflows are safe on real
+manuscripts (nested story-bible files and all).
+
+### Added
+
+- **Two-way sync** — fetch and merge remote chapter edits, not just push, so two
+  machines (or two people) can each write and reconcile their changes into one
+  history.
+- **In-app conflict resolution** — when a sync or draft merge overlaps, resolve
+  it chapter-by-chapter inside Quill (keep mine, keep theirs, or open the
+  conflicting versions) instead of dropping to a git command line.
+- **Branch-as-draft** — keep parallel drafts of the manuscript as named branches
+  you can create, switch between, list, and merge, so you can try an alternate
+  version of a chapter and fold back the one you keep.
+- **Branch/merge commit graph in history** — the history view draws the branch
+  and merge structure of the project's timeline, so a manuscript with drafts and
+  merges is legible at a glance.
+- **Milestone notes** — attach an optional note to a milestone to record what it
+  marks, so a tagged point in the history carries its own context.
+- **Actionable remote-error taxonomy** — sync/push failures are triaged into
+  clear categories (auth, rejected, offline, other) with guidance, instead of a
+  raw libgit2 message.
+- **Move scenes across chapters on the corkboard** — drag a scene card from one
+  chapter to another and both chapter files are rewritten together atomically,
+  with undo, so restructuring across chapter seams is a single safe gesture.
+- **Heading/scene folding and distraction-free composition** — collapse a chapter
+  to its headings (or a section under a heading) to navigate a long chapter by
+  structure, and toggle a distraction-free composition mode for drafting.
+- **Fuzzy chapter/scene quick-switcher (Ctrl-D)** — jump to any chapter or scene
+  heading across the project by typing part of its name.
+- **Grouped results pane in project find** — project-wide find results are grouped
+  by chapter, so a match list across a large manuscript is easy to scan and jump
+  through.
+
+### Changed
+
+- **Internal quality pass** — five oversized modules were split into cohesive
+  submodules (`mode`, `project/series`, the spell-check methods out of `app`,
+  `ui/list_overlay`, and `ai/embed`), keeping files under the size guideline as
+  the version-control surface grew.
+
+### Fixed
+
+- **Sync and draft-merge on real projects with a story bible** — the three-way
+  merge built the merged tree with a flat builder that rejected nested paths, so
+  any diverged sync or draft merge touching a `bible/…` (or other nested) file
+  failed. It now builds through the git index and handles nested files, with the
+  merge exercised across a story bible.
+- **Cross-chapter scene move no longer risks prose on a read error** — a move now
+  aborts (and records no undo) if a chapter can't be read, instead of composing
+  the destination onto empty content and overwriting real prose; the multi-file
+  swap also rolls back on a partial failure and preserves a symlinked chapter.
+- **Sync conflicts never clobber the current view or misroute a resolution** — a
+  background sync that lands with conflicts is deferred until you're back in an
+  editing context rather than overwriting an open prompt or overlay, and a stale
+  pending draft merge can no longer route a sync resolution to the wrong refs.
+- **No silent drop when the remote moves mid-resolution** — if the remote gains a
+  new conflicting edit while you're resolving a sync, Quill now aborts and asks
+  you to sync again instead of quietly discarding the remote change.
+- **Cursor stays visible when navigating into a folded section** — jumping or
+  arrowing into a collapsed region reveals it so the caret is never stranded on a
+  hidden line, and clicking a collapsed heading now lands on the right character.
+- **Background git operations respect the read-only instance lock** — sync, pull,
+  and draft checkout refuse to run from a secondary read-only instance, mirroring
+  the save-path guard.
+
 ## [0.6.0] - 2026-07-08
 
 A semantic-manuscript release, built on an on-device embedding index of the
@@ -88,6 +166,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[0.7.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.7.0
 [0.6.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.6.0
 
 ## [0.5.0] - 2026-07-07
