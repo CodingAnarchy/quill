@@ -10,6 +10,9 @@
 //!   and the commit itself.
 //! - [`remote`] — the remote push / pull worker (#134), its `poll_vc` landing
 //!   path (#870), and the remote URL prompt.
+//! - [`sync`] — the two-way sync flow (#962): fetch + reconcile the remote's
+//!   chapter edits with local, off-thread on the shared `vc_task`, exposing the
+//!   per-chapter conflicts it detects for the resolution UI (#963).
 //! - [`history`] — the navigable commit-history view (#587) and its
 //!   type-to-filter sub-mode (#822).
 //! - [`restore`] — milestones (#833), the working-tree / project diffs, and the
@@ -27,15 +30,32 @@ mod history;
 mod remote;
 mod restore;
 mod status;
+mod sync;
 
 pub use status::VC_STATUS_INTERVAL;
 
-/// The result of a remote push/pull (#134), sent back from the worker thread to
-/// the UI thread. `reload` asks the UI to re-read the active chapter, since a pull
-/// can change files on disk.
+/// The result of a remote push / pull / sync (#134, #962), sent back from the
+/// worker thread to the UI thread. `reload` asks the UI to re-read the active
+/// chapter, since a pull or a clean sync can change files on disk. `conflicts`
+/// carries the per-chapter conflicts a two-way sync detected (#962) — empty for a
+/// push, pull, or clean sync — so [`poll_vc`](App::poll_vc) can stash them for the
+/// resolution UI (#963) without either side being clobbered.
 pub struct VcMsg {
     text: String,
     reload: bool,
+    conflicts: Vec<crate::vcs::ChapterConflict>,
+}
+
+impl VcMsg {
+    /// A push/pull result with no sync conflicts — the common shape for the ops that
+    /// predate two-way sync, so their call sites stay a two-field literal.
+    const fn plain(text: String, reload: bool) -> Self {
+        Self {
+            text,
+            reload,
+            conflicts: Vec::new(),
+        }
+    }
 }
 
 impl App {
@@ -61,6 +81,11 @@ impl App {
                     "Pull",
                     "Bring down the remote's latest changes",
                     GitAction::Pull,
+                ));
+                items.push(git(
+                    "Sync",
+                    "Two-way sync: merge the remote's chapter edits with yours",
+                    GitAction::Sync,
                 ));
             }
             items.push(git(
@@ -136,6 +161,7 @@ impl App {
             GitAction::SetRemote => self.start_set_remote(),
             GitAction::Push => self.start_push(),
             GitAction::Pull => self.start_pull(),
+            GitAction::Sync => self.start_sync(),
         }
     }
 

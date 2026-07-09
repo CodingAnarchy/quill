@@ -465,6 +465,8 @@ impl App {
             | Pending::NameGen(_)
             | Pending::Commit
             | Pending::Milestone
+            | Pending::MilestoneNote
+            | Pending::EditMilestoneNote
             | Pending::SetRemote
             | Pending::ExCommand
             | Pending::DescribeWorkflow
@@ -649,8 +651,20 @@ impl App {
                                 }
                             }
                             Pending::Milestone => {
+                                // Chains straight into the optional-note prompt
+                                // (#966), which reopens a prompt itself — so don't
+                                // close the mode here.
+                                self.prompt_milestone_note(text);
+                            }
+                            Pending::MilestoneNote => {
                                 self.mode = closed;
                                 self.create_milestone(text);
+                            }
+                            Pending::EditMilestoneNote => {
+                                // edit_milestone_note reopens the history view, so
+                                // close the prompt first, then let it set the mode.
+                                self.mode = closed;
+                                self.edit_milestone_note(text);
                             }
                             Pending::SetRemote => {
                                 self.mode = closed;

@@ -646,6 +646,10 @@ pub struct ProjectSearch {
     pub(crate) matches: Vec<ProjectMatch>,
     /// Index into `matches` of the current (highlighted) row.
     pub(crate) selected: usize,
+    /// Index into [`grouped`](Self::grouped) of the highlighted chapter row in
+    /// the grouped results pane (#977). Kept separate from `selected` so the
+    /// flat list and the grouped overview each remember their own cursor.
+    pub(crate) group_selected: usize,
     /// How many occurrences have been replaced, reported when the flow ends.
     pub(crate) replaced: usize,
     /// Case-sensitive / whole-word toggles (#570), same default as [`Search`].
@@ -660,6 +664,7 @@ impl ProjectSearch {
             replacement: String::new(),
             matches: Vec::new(),
             selected: 0,
+            group_selected: 0,
             replaced: 0,
             opts: MatchOpts::default(),
         }
@@ -667,10 +672,38 @@ impl ProjectSearch {
 
     /// The number of distinct chapters the current matches span.
     pub(crate) fn chapter_span(&self) -> usize {
-        let mut chapters: Vec<usize> = self.matches.iter().map(|m| m.chapter).collect();
-        chapters.dedup();
-        chapters.len()
+        self.grouped().len()
     }
+
+    /// The current matches grouped by chapter (#977), in chapter order, each
+    /// with its per-chapter count and the index of its first match (the jump
+    /// target). Matches are already collected in chapter-then-document order, so
+    /// each chapter's matches are one contiguous run.
+    pub(crate) fn grouped(&self) -> Vec<ChapterGroup> {
+        let mut groups: Vec<ChapterGroup> = Vec::new();
+        for (i, m) in self.matches.iter().enumerate() {
+            match groups.last_mut() {
+                Some(g) if g.chapter == m.chapter => g.count += 1,
+                _ => groups.push(ChapterGroup {
+                    chapter: m.chapter,
+                    title: m.title.clone(),
+                    count: 1,
+                    first_match: i,
+                }),
+            }
+        }
+        groups
+    }
+}
+
+/// One chapter's row in the grouped results pane (#977): which chapter, its
+/// title, how many matches fell in it, and the index (into
+/// [`ProjectSearch::matches`]) of its first match — the row's jump target.
+pub struct ChapterGroup {
+    pub(crate) chapter: usize,
+    pub(crate) title: String,
+    pub(crate) count: usize,
+    pub(crate) first_match: usize,
 }
 
 /// One manuscript-wide match (#295): which chapter, the byte range within that
@@ -694,6 +727,10 @@ pub enum ProjectSearchStage {
     Query,
     /// Results listed; navigate, jump to a match, or start a replace.
     Results,
+    /// The grouped results pane (#977): one row per chapter with its match
+    /// count and a total. Navigate chapters, jump to a chapter's first match, or
+    /// toggle back to the flat list.
+    Grouped,
     /// Typing the replacement text.
     Replacement,
     /// Stepping through matches, choosing replace / skip; `a` triggers the

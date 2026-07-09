@@ -475,16 +475,93 @@ fn git_palette_configures_a_remote_then_offers_sync() {
         Some("https://example.com/book.git"),
     );
 
-    // Now the menu offers Push and Pull, and "Change remote" instead of "Set remote".
+    // Now the menu offers Push, Pull, and Sync, and "Change remote" instead of
+    // "Set remote".
     app.on_key(ctrl('v'));
     let labels = palette_labels(&app);
     assert!(
-        labels.contains(&"Push") && labels.contains(&"Pull"),
+        labels.contains(&"Push") && labels.contains(&"Pull") && labels.contains(&"Sync"),
         "{labels:?}"
     );
     assert!(
         labels.contains(&"Change remote") && !labels.contains(&"Set remote"),
         "{labels:?}"
+    );
+}
+
+// --- Two-way sync (#962) -----------------------------------------------------
+
+#[test]
+fn sync_is_offered_only_once_a_remote_is_configured() {
+    let (mut app, _dir) = two_chapter_app("vc-sync-gated");
+    git_menu(&mut app, 0); // Initialize
+    app.on_key(ctrl('v'));
+    assert!(
+        !palette_labels(&app).contains(&"Sync"),
+        "no Sync before a remote is set"
+    );
+    app.on_key(key(KeyCode::Esc));
+
+    git_menu_label(&mut app, "Set remote");
+    type_str(&mut app, "https://example.com/book.git");
+    app.on_key(key(KeyCode::Enter));
+
+    app.on_key(ctrl('v'));
+    assert!(
+        palette_labels(&app).contains(&"Sync"),
+        "Sync appears once a remote is configured"
+    );
+}
+
+#[test]
+fn a_landing_sync_stashes_per_chapter_conflicts_for_resolution() {
+    // A two-way sync that detects same-chapter conflicts (#962) surfaces them for the
+    // resolution UI (#963) via `sync_conflicts`, never clobbering a side. Driven with
+    // a stand-in worker so no real remote is needed; the conflict detection itself is
+    // covered end-to-end by the vcs tests.
+    let (mut app, _dir) = two_chapter_app("vc-sync-conflicts");
+    git_menu(&mut app, 0); // Initialize
+    assert!(app.sync_conflicts().is_empty(), "none before a sync");
+
+    app.spawn_sync_conflicts_for_test(&["one.md", "two.md"]);
+    app.settle_vc_for_test();
+
+    let paths: Vec<&str> = app
+        .sync_conflicts()
+        .iter()
+        .map(|c| c.path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["one.md", "two.md"],
+        "both conflicts are stashed"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("both machines"),
+        "the author is told chapters conflict: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn a_clean_sync_clears_any_prior_conflicts() {
+    // A subsequent clean sync (or pull) leaves no conflicts, clearing a prior set so
+    // the resolution UI never shows stale entries.
+    let (mut app, _dir) = two_chapter_app("vc-sync-clears");
+    git_menu(&mut app, 0); // Initialize
+    app.spawn_sync_conflicts_for_test(&["one.md"]);
+    app.settle_vc_for_test();
+    assert!(!app.sync_conflicts().is_empty(), "a conflict was stashed");
+
+    // A clean pull carries no conflicts → the prior set is cleared.
+    app.spawn_landing_pull_for_test();
+    app.settle_vc_for_test();
+    assert!(
+        app.sync_conflicts().is_empty(),
+        "a clean sync/pull clears the prior conflicts"
     );
 }
 
@@ -611,11 +688,24 @@ fn history_restore_acts_on_the_filtered_match() {
 // --- Milestones + whole-project restore/diff (#833) -------------------------
 
 /// Create a named milestone through the Git palette — the "Milestone" item prompts
-/// for a name, which is typed and submitted.
+/// for a name, then for an optional note (#966); both are typed and submitted. The
+/// note is left blank here; [`make_milestone_with_note`] exercises the note path.
 fn make_milestone(app: &mut App, name: &str) {
+    make_milestone_with_note(app, name, "");
+}
+
+/// Create a named milestone with a free-text note (#966): name → Enter → note →
+/// Enter, driving the two-step prompt the palette opens.
+fn make_milestone_with_note(app: &mut App, name: &str, note: &str) {
     git_menu_label(app, "Milestone");
     assert!(matches!(app.mode, Mode::Prompt(_)), "milestone prompts");
     type_str(app, name);
+    app.on_key(key(KeyCode::Enter));
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the note prompt follows the name"
+    );
+    type_str(app, note);
     app.on_key(key(KeyCode::Enter));
 }
 
@@ -785,6 +875,90 @@ fn history_project_diff_spans_the_whole_manuscript() {
     assert!(
         overlay_text(&app).contains("changed since the milestone"),
         "the project diff against the milestone shows the edit"
+    );
+}
+
+/// The note a milestone carries (#966), or `None` when it isn't in the open
+/// history view. Reads the stored annotation the history view lists.
+fn milestone_note(app: &App, name: &str) -> Option<String> {
+    match &app.mode {
+        Mode::History(h) => h
+            .milestones
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.message.clone()),
+        _ => None,
+    }
+}
+
+#[test]
+fn milestone_note_persists_shows_and_can_be_edited() {
+    // #966: a milestone can carry a free-text note set at creation, the history
+    // view lists it, it survives reopening, and it can be edited in place with `n`
+    // without disturbing the revision the milestone marks.
+    let (mut app, dir) = two_chapter_app("vc-milestone-note");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "first draft");
+
+    make_milestone_with_note(&mut app, "beta", "sent to beta readers");
+
+    // The note persists on disk and lists back in the history view.
+    git_menu_label(&mut app, "History");
+    assert_eq!(
+        milestone_note(&app, "beta").as_deref(),
+        Some("sent to beta readers"),
+        "the note is stored on the milestone"
+    );
+
+    // Edit the note in place with `n`: the milestone leads the list (row 0), so it
+    // is the selection. Enter opens the note prompt prefilled; retype and submit.
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "n opens the note editor"
+    );
+    // Clear the prefilled note, then type the new one.
+    for _ in 0..40 {
+        app.on_key(key(KeyCode::Backspace));
+    }
+    type_str(&mut app, "submission draft");
+    app.on_key(key(KeyCode::Enter));
+
+    // The edit reopens history; the new note is listed and the rev is unchanged.
+    assert!(matches!(app.mode, Mode::History(_)), "history reopens");
+    assert_eq!(
+        milestone_note(&app, "beta").as_deref(),
+        Some("submission draft"),
+        "the note was edited in place: {:?}",
+        app.message
+    );
+
+    // Restore-from-milestone still works after the note edit. Move past it, then
+    // restore the whole project to the milestone with `R`.
+    app.on_key(key(KeyCode::Esc)); // close history to edit the manuscript
+    type_str(&mut app, "words after the milestone");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "more work");
+
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Char('D'))); // whole-project diff against the milestone
+    assert!(
+        overlay_text(&app).contains("words after the milestone"),
+        "diff-from-milestone still spans the manuscript after the note edit"
+    );
+    app.on_key(key(KeyCode::Esc)); // close the diff overlay, back to history
+
+    app.on_key(key(KeyCode::Char('R'))); // restore the whole project to the milestone
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "restore confirms first"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+    assert!(
+        !fs::read_to_string(dir.join("one.md"))
+            .unwrap()
+            .contains("words after the milestone"),
+        "restore-from-milestone still rewinds the tree after the note edit"
     );
 }
 

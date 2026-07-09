@@ -27,8 +27,9 @@ use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::history;
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BookField, Command, Finding, FindingKind, Findings, GitAction, History, ImportPreview,
-    MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles, VimState,
+    BookField, Command, Finding, FindingKind, Findings, GitAction, History, HistoryRow,
+    ImportPreview, MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles,
+    VimState,
 };
 use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::recovery;
@@ -345,6 +346,11 @@ pub struct App {
     /// moved on (or typed unsaved edits) skips the destructive reload rather than
     /// overwriting a now-active chapter's buffer from the just-pulled disk state.
     pull_origin: Option<PathBuf>,
+    /// Per-chapter conflicts from the last two-way sync (#962) — chapters changed on
+    /// both machines that sync detected but couldn't merge. Preserved (both versions
+    /// intact) and surfaced here for the conflict-resolution UI (#963); empty after a
+    /// clean sync. The last sync's result, not a running log.
+    sync_conflicts: Vec<crate::vcs::ChapterConflict>,
     /// Automatic off-site backup config (#887): the opt-in `[backup]` section,
     /// layered per project. Drives whether a save / the timed cadence transparently
     /// pushes to the remote. Off by default — no behavior change when disabled.
@@ -506,6 +512,12 @@ pub struct App {
     /// commit — held while the y/N prompt is open; taken when the restore runs.
     /// Kept off the `Copy` `Pending` enum so the revision string lives here.
     pending_restore_rev: Option<String>,
+    /// The name of the milestone a note prompt (#966) targets — the just-named
+    /// milestone awaiting its optional note, or the existing milestone whose note
+    /// is being edited. Held while the note input is open; taken when the
+    /// milestone is created or re-annotated. Kept off the `Copy` `Pending` enum so
+    /// the name string lives here.
+    pending_milestone_name: Option<String>,
     /// A setup-wizard setting concept (#282) deferred until the characters draft
     /// finishes — only one AI pass runs at a time, so the second is queued here
     /// and fired by `poll_ai` when the first completes.
@@ -673,6 +685,7 @@ impl App {
             ai_task: Task::idle(),
             vc_task: Task::idle(),
             pull_origin: None,
+            sync_conflicts: Vec::new(),
             backup: crate::config::BackupConfig::load(),
             backup_task: Task::idle(),
             backup_pending: false,
@@ -709,6 +722,7 @@ impl App {
             pending_switch: None,
             pending_manage: None,
             pending_restore_rev: None,
+            pending_milestone_name: None,
             wizard_pending_setting: None,
             import_source: None,
             pending_import_source: None,

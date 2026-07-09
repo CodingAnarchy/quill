@@ -40,15 +40,21 @@ impl App {
             // Ctrl-C / Ctrl-W flip case-sensitive / whole-word. Available while
             // typing the query and while reviewing results (re-runs the search
             // so the list reflects the new modes).
-            (ProjectSearchStage::Query | ProjectSearchStage::Results, KeyCode::Char('c'))
-                if ctrl =>
-            {
+            (
+                ProjectSearchStage::Query
+                | ProjectSearchStage::Results
+                | ProjectSearchStage::Grouped,
+                KeyCode::Char('c'),
+            ) if ctrl => {
                 self.project_search_mut().opts.case_sensitive ^= true;
                 self.rerun_project_search_if_listed();
             }
-            (ProjectSearchStage::Query | ProjectSearchStage::Results, KeyCode::Char('w'))
-                if ctrl =>
-            {
+            (
+                ProjectSearchStage::Query
+                | ProjectSearchStage::Results
+                | ProjectSearchStage::Grouped,
+                KeyCode::Char('w'),
+            ) if ctrl => {
                 self.project_search_mut().opts.whole_word ^= true;
                 self.rerun_project_search_if_listed();
             }
@@ -56,9 +62,12 @@ impl App {
             // expression rather than a literal, at parity with the chapter find.
             // Guarded on `ctrl`, so a plain `r` at Results still promotes to
             // replace (below).
-            (ProjectSearchStage::Query | ProjectSearchStage::Results, KeyCode::Char('r'))
-                if ctrl =>
-            {
+            (
+                ProjectSearchStage::Query
+                | ProjectSearchStage::Results
+                | ProjectSearchStage::Grouped,
+                KeyCode::Char('r'),
+            ) if ctrl => {
                 self.project_search_mut().opts.regex ^= true;
                 self.rerun_project_search_if_listed();
             }
@@ -81,6 +90,28 @@ impl App {
             }
             (ProjectSearchStage::Results, KeyCode::Enter) => self.jump_to_project_match(),
             (ProjectSearchStage::Results, KeyCode::Char('r')) => {
+                self.project_search_mut().stage = ProjectSearchStage::Replacement;
+            }
+            // `g` toggles into the grouped results pane (#977) — one row per
+            // chapter with its count and a total — and back.
+            (ProjectSearchStage::Results, KeyCode::Char('g')) => {
+                self.enter_grouped_view();
+            }
+
+            // --- Grouped results pane (#977) -------------------------------
+            // One row per chapter with its match count; navigate chapters, jump
+            // to a chapter's first match, or toggle back to the flat list.
+            (ProjectSearchStage::Grouped, KeyCode::Char('n') | KeyCode::Down) => {
+                self.project_group_advance(1);
+            }
+            (ProjectSearchStage::Grouped, KeyCode::Char('N') | KeyCode::Up) => {
+                self.project_group_advance(-1);
+            }
+            (ProjectSearchStage::Grouped, KeyCode::Enter) => self.jump_to_project_group(),
+            (ProjectSearchStage::Grouped, KeyCode::Char('g')) => {
+                self.project_search_mut().stage = ProjectSearchStage::Results;
+            }
+            (ProjectSearchStage::Grouped, KeyCode::Char('r')) => {
                 self.project_search_mut().stage = ProjectSearchStage::Replacement;
             }
 
@@ -156,11 +187,15 @@ impl App {
     }
 
     /// Re-run the search in place after a mode toggle (#570) while results are
-    /// listed, so the list tracks the new modes. Unlike [`run_project_search`],
-    /// it keeps the overlay open even if the new modes leave nothing — the author
-    /// can toggle back rather than being kicked out — and never resets the stage.
+    /// listed — either the flat list or the grouped pane (#977) — so it tracks the
+    /// new modes. Unlike [`run_project_search`], it keeps the overlay open even if
+    /// the new modes leave nothing — the author can toggle back rather than being
+    /// kicked out — and never changes the stage.
     fn rerun_project_search_if_listed(&mut self) {
-        if self.project_search().stage != ProjectSearchStage::Results {
+        if !matches!(
+            self.project_search().stage,
+            ProjectSearchStage::Results | ProjectSearchStage::Grouped
+        ) {
             return;
         }
         let query = self.project_search().query.clone();
@@ -177,6 +212,11 @@ impl App {
         let s = self.project_search_mut();
         s.matches = matches;
         s.selected = 0;
+        // Clamp the grouped cursor: the new modes can shrink the group list.
+        let groups = s.grouped().len();
+        if s.group_selected >= groups {
+            s.group_selected = groups.saturating_sub(1);
+        }
     }
 
     /// Scan every chapter body for `query` under the current modes, building the
@@ -214,6 +254,46 @@ impl App {
         }
         let n = s.matches.len() as i32;
         s.selected = (s.selected as i32 + dir).rem_euclid(n) as usize;
+    }
+
+    /// Switch to the grouped results pane (#977), landing the chapter cursor on
+    /// the group that contains the currently selected match so the two views stay
+    /// in sync when toggling between them.
+    fn enter_grouped_view(&mut self) {
+        let selected = self.project_search().selected;
+        let group = self
+            .project_search()
+            .grouped()
+            .iter()
+            .position(|g| selected < g.first_match + g.count)
+            .unwrap_or(0);
+        let s = self.project_search_mut();
+        s.group_selected = group;
+        s.stage = ProjectSearchStage::Grouped;
+    }
+
+    /// Move the highlighted chapter in the grouped pane by `dir`, wrapping.
+    fn project_group_advance(&mut self, dir: i32) {
+        let groups = self.project_search().grouped().len();
+        if groups == 0 {
+            return;
+        }
+        let s = self.project_search_mut();
+        s.group_selected = (s.group_selected as i32 + dir).rem_euclid(groups as i32) as usize;
+    }
+
+    /// Jump to the selected chapter group's first match (#977): sync the flat
+    /// cursor to that match, then jump as usual.
+    fn jump_to_project_group(&mut self) {
+        let first = self
+            .project_search()
+            .grouped()
+            .get(self.project_search().group_selected)
+            .map(|g| g.first_match);
+        if let Some(first) = first {
+            self.project_search_mut().selected = first;
+        }
+        self.jump_to_project_match();
     }
 
     /// Jump the editor to the selected match: open its chapter (single-chapter

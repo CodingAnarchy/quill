@@ -217,6 +217,43 @@ fn create_tag_refuses_a_duplicate_name() {
 }
 
 #[test]
+fn set_tag_message_edits_a_note_in_place() {
+    // #966: a milestone's note can be edited later without moving the milestone —
+    // the tag keeps its name and the revision it marks, only the annotation changes.
+    let dir = temp_dir("tag-note-edit");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "x\n").unwrap();
+    commit(&dir, "first").unwrap();
+    create_tag(&dir, "beta", "sent to beta readers").unwrap();
+
+    let before = list_tags(&dir)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.name == "beta")
+        .expect("the milestone should list back");
+    assert_eq!(before.message, "sent to beta readers");
+
+    set_tag_message(&dir, "beta", "beta round two").unwrap();
+    let after = list_tags(&dir)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.name == "beta")
+        .expect("the milestone should still list back");
+    assert_eq!(after.message, "beta round two", "the note is updated");
+    assert_eq!(
+        after.rev, before.rev,
+        "the milestone still marks the same commit"
+    );
+
+    // Editing a milestone that doesn't exist is an error, not a silent create.
+    assert!(
+        set_tag_message(&dir, "no-such-milestone", "x").is_err(),
+        "editing a nonexistent milestone's note is refused"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn create_tag_needs_a_commit() {
     // #833: there must be something to tag — a milestone marks a committed state.
     let dir = temp_dir("tag-unborn");
@@ -525,6 +562,191 @@ fn push_without_a_remote_explains() {
     let err = push(&dir).unwrap_err();
     assert!(err.contains("No remote"), "{err}");
     fs::remove_dir_all(&dir).ok();
+}
+
+// --- Two-way sync (#962) -----------------------------------------------------
+
+/// Set up a bare stand-in remote plus two working clones `a` and `b`, both holding
+/// the same seeded `one.md` first commit. The shared scaffold for the sync tests —
+/// no network, everything under the scratch dir.
+fn two_clones(name: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let remote = temp_dir(&format!("{name}-bare"));
+    git2::Repository::init_bare(&remote).unwrap();
+    let url = remote.to_str().unwrap();
+
+    let a = temp_dir(&format!("{name}-a"));
+    init(&a).unwrap();
+    fs::write(a.join("one.md"), "# One\n\nShared draft.\n").unwrap();
+    commit(&a, "first").unwrap();
+    set_remote(&a, url).unwrap();
+    push(&a).unwrap();
+
+    let b = temp_dir(&format!("{name}-b"));
+    fs::remove_dir_all(&b).ok();
+    git2::Repository::clone(url, &b).unwrap();
+
+    (remote, a, b)
+}
+
+#[test]
+fn sync_merges_disjoint_chapter_edits_cleanly() {
+    // Two machines edit *different* chapters concurrently, then one pushes. The
+    // other syncs a diverged branch: every chapter was touched by only one side, so
+    // the chapter-level three-way merges with no conflicts and both sides' work
+    // lands on disk.
+    let (remote, a, b) = two_clones("sync-disjoint");
+
+    // a adds two.md and pushes; b edits its own one.md but hasn't pushed.
+    fs::write(a.join("two.md"), "# Two\n\nA's chapter.\n").unwrap();
+    commit(&a, "a-adds-two").unwrap();
+    push(&a).unwrap();
+    fs::write(b.join("one.md"), "# One\n\nB's revised draft.\n").unwrap();
+    commit(&b, "b-edits-one").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert!(out.conflicts.is_empty(), "disjoint edits don't conflict");
+    assert!(out.reload, "the tree changed on disk");
+    assert!(
+        out.merged.iter().any(|p| p == "two.md"),
+        "a's chapter merged in: {:?}",
+        out.merged
+    );
+    // a's added chapter is now on disk in b…
+    assert!(b.join("two.md").exists(), "a's chapter merged onto b");
+    assert!(fs::read_to_string(b.join("two.md"))
+        .unwrap()
+        .contains("A's chapter"));
+    // …and b's own concurrent edit is preserved untouched.
+    assert!(fs::read_to_string(b.join("one.md"))
+        .unwrap()
+        .contains("B's revised draft"));
+
+    // The reconciliation is a real two-parent merge commit — both histories reachable.
+    let summaries: Vec<String> = log(&b, 20)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect();
+    assert!(summaries.iter().any(|s| s == "a-adds-two"), "{summaries:?}");
+    assert!(
+        summaries.iter().any(|s| s == "b-edits-one"),
+        "{summaries:?}"
+    );
+    assert!(
+        summaries.iter().any(|s| s.contains("Sync remote")),
+        "{summaries:?}"
+    );
+    // b is now ahead of the remote and can push the merge.
+    push(&b).unwrap();
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_detects_a_same_chapter_conflict_without_clobbering() {
+    // Both machines edit the *same* chapter differently. Sync must detect a
+    // per-chapter conflict, preserve both versions (local on disk, remote in the
+    // returned conflict), and leave the repo untouched — never a half-merged tree.
+    let (remote, a, b) = two_clones("sync-conflict");
+
+    fs::write(
+        a.join("one.md"),
+        "# One\n\nA's rewrite of the shared chapter.\n",
+    )
+    .unwrap();
+    commit(&a, "a-edit").unwrap();
+    push(&a).unwrap();
+    let b_content = "# One\n\nB's rewrite of the shared chapter.\n";
+    fs::write(b.join("one.md"), b_content).unwrap();
+    commit(&b, "b-edit").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert_eq!(out.conflicts.len(), 1, "one chapter conflicts");
+    assert!(!out.reload, "nothing was written on a conflict");
+    let conflict = &out.conflicts[0];
+    assert_eq!(conflict.path, "one.md");
+    // Both versions are preserved for the resolution UI (#963), neither clobbered.
+    assert!(
+        conflict.local.contains("B's rewrite"),
+        "local kept: {:?}",
+        conflict.local
+    );
+    assert!(
+        conflict.remote.contains("A's rewrite"),
+        "remote kept: {:?}",
+        conflict.remote
+    );
+    assert!(
+        conflict.base.contains("Shared draft"),
+        "the ancestor is carried: {:?}",
+        conflict.base
+    );
+    assert!(out.summary.contains("both machines"), "{}", out.summary);
+
+    // b's committed work is exactly as it was — no conflict markers, no half-merge.
+    assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), b_content);
+    // The repo isn't left mid-merge: a fresh commit sees a clean tree.
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_fast_forwards_when_only_the_remote_moved() {
+    // b is strictly behind: a pushed a new commit and b has none of its own. Sync
+    // fast-forwards, exactly like a pull, and reports no per-chapter merges.
+    let (remote, a, b) = two_clones("sync-ff");
+
+    fs::write(a.join("one.md"), "# One\n\nRevised on a.\n").unwrap();
+    commit(&a, "second").unwrap();
+    push(&a).unwrap();
+
+    let out = sync(&b).unwrap();
+    assert!(out.conflicts.is_empty() && out.merged.is_empty());
+    assert!(out.reload, "the fast-forward changed the tree");
+    assert!(fs::read_to_string(b.join("one.md"))
+        .unwrap()
+        .contains("Revised on a"));
+
+    // A second sync with nothing new is a no-op, not an error.
+    let again = sync(&b).unwrap();
+    assert!(
+        again.summary.to_lowercase().contains("in sync"),
+        "{}",
+        again.summary
+    );
+    assert!(!again.reload);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_refuses_a_dirty_tree_and_preserves_edits() {
+    // #639 guard applies to sync too: an uncommitted edit must not be overwritten by
+    // the merge checkout. Sync refuses before touching the network and leaves the
+    // edit on disk.
+    let (remote, a, b) = two_clones("sync-dirty");
+
+    fs::write(a.join("one.md"), "# One\n\nRevised on a.\n").unwrap();
+    commit(&a, "second").unwrap();
+    push(&a).unwrap();
+
+    let uncommitted = "# One\n\nUnsaved-to-git work on b.\n";
+    fs::write(b.join("one.md"), uncommitted).unwrap();
+    let err = sync(&b).unwrap_err();
+    assert!(err.to_lowercase().contains("uncommitted"), "{err}");
+    // The author's words are still on disk.
+    assert_eq!(fs::read_to_string(b.join("one.md")).unwrap(), uncommitted);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
 }
 
 #[test]

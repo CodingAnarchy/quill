@@ -717,4 +717,7 @@ pub enum GitAction {
     Push,
     /// Pull the remote's changes down (#134).
     Pull,
+    /// Two-way sync: fetch and reconcile the remote's chapter edits with local work,
+    /// detecting per-chapter conflicts (#962).
+    Sync,
 }

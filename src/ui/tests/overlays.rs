@@ -343,3 +343,43 @@ fn the_quick_switcher_lists_chapters_and_scenes_with_the_query_and_count() {
         "the help line echoes the query and count:\n{screen}"
     );
 }
+
+#[test]
+fn the_grouped_results_pane_shows_per_chapter_counts_and_a_total() {
+    // The grouped project-find pane (#977): one row per chapter with its match
+    // count, over a total ("N matches across M chapters").
+    use crate::mode::{ProjectMatch, ProjectSearch, ProjectSearchStage};
+
+    let mut app = app_with_chapters(&["Alpha", "Beta"], "body\n");
+    let mut ps = ProjectSearch::new();
+    ps.query = "mist".into();
+    ps.stage = ProjectSearchStage::Grouped;
+    let m = |chapter: usize, title: &str| ProjectMatch {
+        chapter,
+        start: 0,
+        end: 4,
+        title: title.into(),
+        context: "the mist".into(),
+    };
+    // Two matches in Alpha, one in Beta: 3 across 2 chapters.
+    ps.matches = vec![m(0, "Alpha"), m(0, "Alpha"), m(1, "Beta")];
+    app.mode = Mode::ProjectSearch(Box::new(ps));
+
+    let screen = render(&app, 100, 16);
+    assert!(
+        screen.contains("3 matches across 2 chapters"),
+        "the total is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Alpha") && screen.contains("2 matches"),
+        "the per-chapter count is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Beta") && screen.contains("1 match"),
+        "the singular count is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("enter jump") && screen.contains("g list"),
+        "the jump/toggle keys are advertised:\n{screen}"
+    );
+}
