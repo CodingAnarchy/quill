@@ -523,31 +523,220 @@ fn manuscript_board_is_reachable_from_the_continuous_view() {
 }
 
 #[test]
-fn manuscript_board_refuses_a_cross_chapter_reorder() {
-    // Moving the first chapter's last scene *down* would cross into chapter two —
-    // deferred, so it's a no-op with an explanatory message (#701).
+fn manuscript_board_moves_a_scene_down_into_the_next_chapter() {
+    // Moving chapter one's last scene *down* crosses into chapter two (#974): its
+    // prose leaves chapter one and lands at the top of chapter two, and the board
+    // reopens on the moved scene, now in chapter two.
     let (mut app, dir) = multi_scene_app(
-        "corkboard-ms-cross",
+        "corkboard-ms-cross-down",
         "# Chapter One\n\n## Alpha\n\nA.\n",
         "# Chapter Two\n\n## Beta\n\nB.\n",
     );
     app.open_manuscript_corkboard();
-    // "Alpha" is the last (only) scene of chapter one; move it down.
+    // "Alpha" is the last (only) scene of chapter one; move it down into chapter two.
     app.on_key(key(KeyCode::Char('J')));
 
-    // Order unchanged, a message explains why, and neither file was rewritten.
+    // The board stays open, manuscript-wide, with Alpha now under chapter two,
+    // before Beta, and the moved card still selected.
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("manuscript corkboard stays open after a cross-chapter move");
+    };
+    assert!(board.manuscript);
     assert_eq!(card_titles(&app), vec!["Alpha", "Beta"]);
-    assert!(app
-        .message
-        .as_deref()
-        .unwrap_or("")
-        .contains("Cross-chapter"));
     assert_eq!(
-        fs::read_to_string(dir.join("one.md")).unwrap(),
-        "# Chapter One\n\n## Alpha\n\nA.\n"
+        board.cards[0].chapter,
+        Some(1),
+        "Alpha now belongs to chapter two"
     );
+    assert_eq!(board.cards[1].chapter, Some(1));
+    assert_eq!(board.cards[board.selected].title, "Alpha");
+
+    // Chapter one lost the prose; chapter two gained it at the top.
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(
+        !one.contains("## Alpha"),
+        "the scene left chapter one: {one:?}"
+    );
+    assert!(!one.contains("A.\n") || !one.contains("Alpha"));
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(
+        two.contains("## Alpha\n\nA."),
+        "chapter two gained the prose: {two:?}"
+    );
+    assert!(two.find("## Alpha").unwrap() < two.find("## Beta").unwrap());
+}
+
+#[test]
+fn manuscript_board_moves_a_scene_up_into_the_previous_chapter() {
+    // Moving chapter two's first scene *up* crosses into chapter one (#974): it
+    // lands after chapter one's last scene, staying adjacent across the seam.
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-cross-up",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    app.open_manuscript_corkboard();
+    // Select "Beta" (chapter two's first scene) and move it up into chapter one.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('K')));
+
+    assert_eq!(card_titles(&app), vec!["Alpha", "Beta"]);
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("board stays open");
+    };
     assert_eq!(
-        fs::read_to_string(dir.join("two.md")).unwrap(),
-        "# Chapter Two\n\n## Beta\n\nB.\n"
+        board.cards[1].chapter,
+        Some(0),
+        "Beta now belongs to chapter one"
     );
+    assert_eq!(board.cards[board.selected].title, "Beta");
+
+    // Chapter one gained Beta after Alpha; chapter two lost it.
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(one.find("## Alpha").unwrap() < one.find("## Beta").unwrap());
+    assert!(
+        one.contains("## Beta\n\nB."),
+        "chapter one gained the prose: {one:?}"
+    );
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(
+        !two.contains("## Beta"),
+        "the scene left chapter two: {two:?}"
+    );
+}
+
+#[test]
+fn cross_chapter_move_carries_the_scenes_metadata() {
+    // The moved scene's synopsis + status travel with it into the destination's
+    // `scenes:` front matter, and the source's block for it is dropped (#974).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-cross-meta",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    app.open_manuscript_corkboard();
+    // Annotate Alpha (chapter one): a synopsis and a non-default status.
+    app.on_key(key(KeyCode::Char('s'))); // Stub -> Draft
+    app.on_key(key(KeyCode::Char('e')));
+    type_str(&mut app, "the opening");
+    app.on_key(key(KeyCode::Enter));
+    // Re-select Alpha and move it down into chapter two.
+    let alpha = card_titles(&app).iter().position(|t| t == "Alpha").unwrap();
+    for _ in 0..alpha {
+        app.on_key(key(KeyCode::Down));
+    }
+    app.on_key(key(KeyCode::Char('J')));
+
+    // On the board, the moved Alpha card carries its metadata.
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("board stays open");
+    };
+    let moved = board.cards.iter().find(|c| c.title == "Alpha").unwrap();
+    assert_eq!(moved.synopsis, "the opening");
+    assert_eq!(moved.status, crate::frontmatter::SceneStatus::Draft);
+
+    // On disk: chapter two carries Alpha's metadata; chapter one no longer does.
+    let reopened = open_test_app(&dir);
+    let two_meta = reopened.project.chapter_front_matter(1).unwrap().scenes();
+    let alpha_meta = two_meta
+        .iter()
+        .find(|m| m.synopsis == "the opening")
+        .unwrap();
+    assert_eq!(alpha_meta.status, crate::frontmatter::SceneStatus::Draft);
+    let one_meta = reopened
+        .project
+        .chapter_front_matter(0)
+        .map(|f| f.scenes())
+        .unwrap_or_default();
+    assert!(
+        !one_meta.iter().any(|m| m.synopsis == "the opening"),
+        "chapter one no longer carries the moved scene's metadata: {one_meta:?}"
+    );
+}
+
+#[test]
+fn cross_chapter_move_is_atomic_on_a_write_failure() {
+    // A write failure mid-move must leave *both* files byte-for-byte intact — no
+    // partial state where one chapter changed and the other didn't (#262 / #974).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-cross-atomic",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two_before = fs::read_to_string(dir.join("two.md")).unwrap();
+    app.open_manuscript_corkboard();
+
+    // Arm a failure on the second staged write of the move (the destination), after
+    // the source's temp is already written but before either is renamed.
+    crate::atomic::fail_point::arm_pre_rename_failure_on_nth(2);
+    app.on_key(key(KeyCode::Char('J'))); // move Alpha down — this must fail
+
+    // A message reports the failure, and neither file was rewritten.
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Move failed"),
+        "the failure is reported: {:?}",
+        app.message
+    );
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), one_before);
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), two_before);
+    // No stray temp files were orphaned by the aborted move.
+    let strays: Vec<_> = fs::read_dir(&*dir)
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+        .collect();
+    assert!(strays.is_empty(), "temp file left behind: {strays:?}");
+}
+
+#[test]
+fn cross_chapter_move_is_undoable_from_the_board() {
+    // The board's `u` restores the prior arrangement of a cross-chapter move: both
+    // files return to their exact pre-move contents (#974).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-cross-undo",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two_before = fs::read_to_string(dir.join("two.md")).unwrap();
+    app.open_manuscript_corkboard();
+    app.on_key(key(KeyCode::Char('J'))); // move Alpha down into chapter two
+                                         // The move happened.
+    assert!(!fs::read_to_string(dir.join("one.md"))
+        .unwrap()
+        .contains("## Alpha"));
+
+    app.on_key(key(KeyCode::Char('u'))); // undo it
+
+    // Both files are back to exactly their pre-move contents, and the board reopens
+    // on the restored scene in chapter one.
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), one_before);
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), two_before);
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("board reopens after undo");
+    };
+    let alpha = board.cards.iter().find(|c| c.title == "Alpha").unwrap();
+    assert_eq!(alpha.chapter, Some(0), "Alpha is back in chapter one");
+}
+
+#[test]
+fn cross_chapter_move_is_a_noop_at_the_manuscript_ends() {
+    // The very first scene can't move up (no chapter before it) and the very last
+    // can't move down (none after) — a no-op that leaves both files untouched (#974).
+    let (mut app, dir) = multi_scene_app(
+        "corkboard-ms-cross-ends",
+        "# Chapter One\n\n## Alpha\n\nA.\n",
+        "# Chapter Two\n\n## Beta\n\nB.\n",
+    );
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two_before = fs::read_to_string(dir.join("two.md")).unwrap();
+    app.open_manuscript_corkboard();
+    app.on_key(key(KeyCode::Char('K'))); // Alpha up — nothing above chapter one
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('J'))); // Beta down — nothing below chapter two
+
+    assert_eq!(card_titles(&app), vec!["Alpha", "Beta"]);
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), one_before);
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), two_before);
 }

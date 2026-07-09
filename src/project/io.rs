@@ -261,6 +261,59 @@ impl Project {
         Ok(())
     }
 
+    /// Atomically rewrite the full contents of several chapter files at once
+    /// (#974): the cross-chapter scene move on the manuscript corkboard carries a
+    /// scene's prose + `scenes:` metadata from a source chapter into a destination
+    /// chapter, so *both* files must land together or neither. `contents` is the
+    /// verbatim new bytes for each `(index, content)` (front matter already joined
+    /// on by the caller).
+    ///
+    /// Multi-file durability mirrors [`import_chapters`](Self::import_chapters):
+    /// every new file is staged to a hidden sibling temp path first — the step
+    /// where a disk-full / permissions / (in tests) injected fault lands — and only
+    /// once *all* are durably on disk are they renamed into place. A staging failure
+    /// removes whatever temp was already written and returns with every original
+    /// untouched, so a failed move never leaves one chapter rewritten and the other
+    /// stale. The same-directory renames at the end are the atomic-write layer's
+    /// final swap, one per file; every temp is already synced, so this last step
+    /// only relinks. Refreshes each chapter's cached word/TODO/metadata after.
+    pub(crate) fn write_chapters_atomic(
+        &mut self,
+        contents: &[(usize, String)],
+    ) -> std::io::Result<()> {
+        if self.is_read_only() {
+            return Err(Self::read_only_error()); // #871: don't race another instance
+        }
+        // Stage every new file to a hidden temp path first; nothing destructive
+        // happens until the renames below, so a failure here leaves every original
+        // in place — clean up whatever was already staged.
+        let staged: Vec<(usize, PathBuf, &String)> = contents
+            .iter()
+            .map(|(index, content)| {
+                let tmp = import_staging_path(&self.root, self.chapter_file(*index));
+                (*index, tmp, content)
+            })
+            .collect();
+        for (i, (_, tmp, content)) in staged.iter().enumerate() {
+            if let Err(e) = atomic::write(tmp, content.as_bytes()) {
+                for (_, done, _) in &staged[..i] {
+                    let _ = fs::remove_file(done); // best-effort cleanup
+                }
+                return Err(e);
+            }
+        }
+        // Every file is durably staged. From here the swap is the destructive step,
+        // but each original being overwritten already has its replacement on disk,
+        // so a rename can't lose an author's words — the temp still holds them.
+        for (index, tmp, _) in &staged {
+            fs::rename(tmp, self.chapter_path(*index))?;
+        }
+        for (index, _, _) in &staged {
+            self.read_chapter_cache(*index); // refresh cached word/TODO/metadata
+        }
+        Ok(())
+    }
+
     /// Write the manifest back to `book.toml`. A standalone novel serializes the
     /// flat manifest exactly as before; a multi-book series (#328) folds the live
     /// active book back into the series list and writes the `[[books]]` form.

@@ -25,9 +25,23 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::App;
-use crate::frontmatter::SceneMeta;
+use crate::frontmatter::{self, FrontMatter, SceneMeta};
 use crate::mode::{Card, Corkboard, Mode, Pending};
 use crate::syntax::{Heading, Syntax};
+
+/// One undoable cross-chapter scene move (#974): the source and destination
+/// chapters' full contents *before* the move, so the board's `u` can restore the
+/// exact prior arrangement with the same atomic two-file write. A cross-chapter
+/// move rewrites two files outside the buffer's rope-level undo, so its undo is
+/// this captured snapshot rather than a rope step. `selected` is the scene's
+/// original (chapter, within-chapter index), so the restored board reopens on it.
+pub(super) struct CrossMoveUndo {
+    src: usize,
+    src_content: String,
+    dst: usize,
+    dst_content: String,
+    selected: (usize, usize),
+}
 
 impl App {
     /// Open the corkboard for the active chapter (#589 / #636), or report when the
@@ -132,11 +146,13 @@ impl App {
             .collect()
     }
 
-    /// Key handling for the corkboard (#589 / #636 / #701): move (arrows / j-k),
-    /// jump the editor cursor to the selected scene (Enter), reorder the selected
-    /// scene up (`K` / `[`) or down (`J` / `]`), edit its synopsis (`e`), cycle its
-    /// status (`s` / Space), close (Esc). On the manuscript-wide board every edit
-    /// first targets the selected card's chapter, then rebuilds the board.
+    /// Key handling for the corkboard (#589 / #636 / #701 / #974): move (arrows /
+    /// j-k), jump the editor cursor to the selected scene (Enter), reorder the
+    /// selected scene up (`K` / `[`) or down (`J` / `]`) — which on the
+    /// manuscript-wide board carries a scene across a chapter boundary at the ends
+    /// (#974) — edit its synopsis (`e`), cycle its status (`s` / Space), undo the
+    /// last cross-chapter move (`u`), close (Esc). On the manuscript-wide board every
+    /// edit first targets the selected card's chapter, then rebuilds the board.
     pub(crate) fn on_key_corkboard(&mut self, key: KeyEvent) {
         let Mode::Corkboard(board) = &mut self.mode else {
             return;
@@ -152,6 +168,7 @@ impl App {
             KeyCode::Char('J' | ']') => self.reorder_scene(selected, 1),
             KeyCode::Char('e') => self.prompt_scene_synopsis(selected),
             KeyCode::Char('s' | ' ') => self.cycle_scene_status(selected),
+            KeyCode::Char('u') => self.undo_cross_move(),
             KeyCode::Esc => self.mode = self.editing_mode(),
             _ => {}
         }
@@ -213,31 +230,33 @@ impl App {
     /// Rewrites the whole body once (off the keystroke path), persists, and
     /// rebuilds the cards with the moved scene still selected.
     fn reorder_scene(&mut self, index: usize, dir: isize) {
-        // On the manuscript-wide board (#701), reorder stays inside the card's own
-        // chapter: a move past a chapter boundary would touch the manifest and
-        // rewrite two files, which is deferred. Focus the chapter, then work in its
-        // within-chapter scene indices.
+        // Resolve the card's target, then focus its chapter so the per-chapter
+        // machinery below works in that file's within-chapter scene indices.
         let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
             return;
         };
         self.focus_chapter(chapter);
-        let Some(other) = scene.checked_add_signed(dir) else {
-            return;
-        };
         let buffer = self.edit_buffer();
         let text = buffer.text();
         let scenes = scenes(&text, buffer.syntax().headings());
-        if scene >= scenes.len() || other >= scenes.len() {
-            // At a chapter boundary — the neighbour is in another chapter (or off
-            // the end). Cross-chapter reorder is deferred (#701).
+        // Whether the neighbour is off this chapter's ends: moving up from the first
+        // scene, or down from the last. On the manuscript-wide board (#701) that
+        // reaches into the adjacent chapter — a cross-chapter move (#974). On the
+        // per-chapter board it's simply a no-op at the ends.
+        let other = scene.checked_add_signed(dir);
+        let crosses = scene >= scenes.len() || other.is_none_or(|o| o >= scenes.len());
+        if crosses {
             if manuscript && !scenes.is_empty() {
-                self.message = Some(
-                    "Cross-chapter reorder isn't supported yet — reorder within a chapter.".into(),
-                );
+                self.cross_chapter_move(chapter, scene, dir);
+            } else {
+                self.reopen_board_for(manuscript, chapter, scene);
             }
-            self.reopen_board_for(manuscript, chapter, scene);
             return;
         }
+        let Some(other) = other else {
+            self.reopen_board_for(manuscript, chapter, scene);
+            return;
+        };
         // The two adjacent scene blocks, in body order (lower index first).
         let (a, b) = (scene.min(other), scene.max(other));
         let mut body = String::with_capacity(text.len());
@@ -253,6 +272,162 @@ impl App {
 
         self.rewrite_chapter(&body, &meta);
         self.reopen_board_for(manuscript, chapter, other);
+    }
+
+    /// Move the scene at within-chapter index `scene` of `chapter` across a chapter
+    /// boundary in `dir` (−1 up into the previous chapter, +1 down into the next)
+    /// (#974): the whole scene block (heading + prose + any folded-in `###`
+    /// sub-beats) leaves the source chapter and lands in the destination, carrying
+    /// its `scenes:` metadata entry (synopsis + status). Moving down inserts the
+    /// scene *before* the destination's first scene; moving up inserts it *after*
+    /// the destination's last, so it stays adjacent across the seam. Both files are
+    /// rewritten atomically — a failure leaves neither changed (#262) — and the
+    /// prior arrangement is captured so the board's `u` restores it. The board
+    /// reopens on the moved scene, now in its new chapter.
+    fn cross_chapter_move(&mut self, chapter: Option<usize>, scene: usize, dir: isize) {
+        let Some(src) = chapter else { return }; // manuscript board only
+        let dst = if dir < 0 {
+            src.checked_sub(1)
+        } else {
+            (src + 1 < self.chapter_count()).then_some(src + 1)
+        };
+        let Some(dst) = dst else {
+            // No chapter beyond this end (the manuscript's first or last scene).
+            self.reopen_board_for(true, chapter, scene);
+            return;
+        };
+        // Flush the active buffer so both source and destination read their current
+        // bytes from disk — either may be the active chapter.
+        if self.flush_active().is_err() {
+            self.reopen_board_for(true, chapter, scene);
+            return;
+        }
+        // Read both chapters as (front matter, body), off the keystroke path.
+        let (src_front, src_body) = self.split_chapter_file(src);
+        let (dst_front, dst_body) = self.split_chapter_file(dst);
+        let src_blocks = scenes(&src_body, Syntax::new(&src_body).headings());
+        let Some(block) = src_blocks.get(scene) else {
+            self.reopen_board_for(true, chapter, scene);
+            return;
+        };
+        // The scene block leaves the source body; its metadata entry leaves the
+        // source `scenes:`, both reconciled to the source's scene count first.
+        let moved_prose = src_body[block.start..block.end].to_string();
+        let mut src_meta = src_front.scenes();
+        src_meta.resize(src_blocks.len(), SceneMeta::default());
+        let moved_meta = src_meta.remove(scene);
+        let mut new_src_body = String::with_capacity(src_body.len());
+        new_src_body.push_str(&src_body[..block.start]);
+        new_src_body.push_str(&src_body[block.end..]);
+
+        // Insert into the destination: moving down lands before its first scene,
+        // moving up lands after its last, so the scene stays adjacent across the
+        // seam. `at` is the byte offset in the destination body and `pos` the
+        // metadata index; both fall back to the body's own bounds when the
+        // destination has no scenes of its own yet.
+        let dst_blocks = scenes(&dst_body, Syntax::new(&dst_body).headings());
+        let (at, pos) = if dir < 0 {
+            (
+                dst_blocks.last().map_or(dst_body.len(), |b| b.end),
+                dst_blocks.len(),
+            )
+        } else {
+            (dst_blocks.first().map_or(dst_body.len(), |b| b.start), 0)
+        };
+        let insert = normalized_scene_block(&moved_prose);
+        let mut new_dst_body = String::with_capacity(dst_body.len() + insert.len());
+        new_dst_body.push_str(&dst_body[..at]);
+        new_dst_body.push_str(&insert);
+        new_dst_body.push_str(&dst_body[at..]);
+        let mut dst_meta = dst_front.scenes();
+        dst_meta.resize(dst_blocks.len(), SceneMeta::default());
+        dst_meta.insert(pos.min(dst_meta.len()), moved_meta);
+
+        // Capture both chapters' prior contents before the write, so the board's
+        // `u` can restore the exact prior arrangement even though this edit lands
+        // outside the buffer's own rope-level undo.
+        let undo = CrossMoveUndo {
+            src,
+            src_content: join_chapter(&src_front, &src_body),
+            dst,
+            dst_content: join_chapter(&dst_front, &dst_body),
+            selected: (src, scene),
+        };
+
+        // Rewrite both files atomically: build each chapter's full new contents
+        // (front matter with the moved `scenes:` entry, then body) and write the
+        // pair in one all-or-nothing step.
+        let new_src = compose_chapter(&src_front, &src_meta, &new_src_body);
+        let new_dst = compose_chapter(&dst_front, &dst_meta, &new_dst_body);
+        if let Err(e) = self
+            .project
+            .write_chapters_atomic(&[(src, new_src), (dst, new_dst)])
+        {
+            self.message = Some(format!("Move failed: {e}"));
+            self.reopen_board_for(true, chapter, scene);
+            return;
+        }
+        self.cork_undo = Some(undo);
+        // If the active chapter was one of the two, its on-disk content changed
+        // under the live buffer — reload it so the buffer and the board agree.
+        self.reload_active_after_disk_edit();
+        self.cache_focus_words();
+        // The board reopens on the moved scene, now the `pos`-th scene of `dst`.
+        self.reopen_board_for(true, Some(dst), pos);
+    }
+
+    /// Undo the last cross-chapter scene move (#974): restore both chapters to the
+    /// exact contents captured before the move, atomically, and reopen the board on
+    /// the scene in its original chapter. A no-op (with a message) when there's
+    /// nothing to undo — the one level a cross-chapter move records, cleared once
+    /// used. The within-chapter reorder / status / synopsis edits go through the
+    /// buffer + front-matter machinery and aren't part of this one-level structural
+    /// undo.
+    fn undo_cross_move(&mut self) {
+        let Some(undo) = self.cork_undo.take() else {
+            self.message = Some("Nothing to undo on the board.".into());
+            return;
+        };
+        // Flush the active buffer first so the restore lands cleanly even if the
+        // active chapter is one of the two being reverted.
+        if self.flush_active().is_err() {
+            self.cork_undo = Some(undo); // keep it — the undo didn't happen
+            return;
+        }
+        if let Err(e) = self.project.write_chapters_atomic(&[
+            (undo.src, undo.src_content.clone()),
+            (undo.dst, undo.dst_content.clone()),
+        ]) {
+            self.message = Some(format!("Undo failed: {e}"));
+            self.cork_undo = Some(undo); // keep it — the undo didn't happen
+            return;
+        }
+        self.reload_active_after_disk_edit();
+        self.cache_focus_words();
+        let (chapter, scene) = undo.selected;
+        self.message = Some("Reverted the cross-chapter move.".into());
+        self.reopen_board_for(true, Some(chapter), scene);
+    }
+
+    /// Read chapter `index` from disk and split it into its [`FrontMatter`] (default
+    /// when the file has none) and prose body (#974). Off the keystroke path; used by
+    /// the cross-chapter move to work on both the source and destination files.
+    fn split_chapter_file(&self, index: usize) -> (FrontMatter, String) {
+        let front = self.project.chapter_front_matter(index).unwrap_or_default();
+        let body = self.project.chapter_body(index);
+        (front, body)
+    }
+
+    /// Reload the active chapter's buffer from disk after an off-buffer edit changed
+    /// its file (#974): the cross-chapter move (and its undo) rewrites two chapter
+    /// files directly, and if one of them is the active chapter the live buffer is
+    /// now stale. Reloads it from disk so the buffer, the pane, and the board agree.
+    /// A no-op-safe reload — a read failure is surfaced but the board still reopens.
+    fn reload_active_after_disk_edit(&mut self) {
+        match crate::buffer::Buffer::from_path(self.project.active_path()) {
+            Ok(buffer) => self.buffer = buffer,
+            Err(e) => self.message = Some(format!("Open failed: {e}")),
+        }
     }
 
     /// Cycle the selected scene's status (stub → draft → done → stub) and persist
@@ -427,14 +602,38 @@ impl App {
     }
 }
 
+/// Re-attach `front`'s block verbatim to `body` (#974): a chapter's on-disk bytes
+/// from the [`FrontMatter`] it was split into and its prose. An empty front matter
+/// yields the bare body, matching how the loader round-trips a file with none.
+fn join_chapter(front: &FrontMatter, body: &str) -> String {
+    let front = (!front.is_empty()).then(|| front.as_str());
+    frontmatter::join(front, body).into_owned()
+}
+
+/// A chapter's full new contents for the cross-chapter move (#974): a clone of
+/// `front` with its `scenes:` sequence set to `meta` (every other front-matter key
+/// preserved), re-attached to `body`. The one place the moved scene's metadata is
+/// written into a chapter that isn't the active buffer.
+fn compose_chapter(front: &FrontMatter, meta: &[SceneMeta], body: &str) -> String {
+    let mut front = front.clone();
+    front.set_scenes(meta);
+    join_chapter(&front, body)
+}
+
+/// Normalize a scene block for insertion into another chapter's body (#974): the
+/// extracted block ends where the next heading began (or the body ended), so it may
+/// carry a run of trailing blank lines — trim it to a single trailing newline so the
+/// inserted scene sits cleanly against the destination's next scene rather than
+/// accreting blank lines across repeated moves. A block with no trailing newline
+/// gains one so the following heading still starts its own line.
+fn normalized_scene_block(block: &str) -> String {
+    let trimmed = block.trim_end_matches(['\n', ' ', '\t']);
+    format!("{trimmed}\n\n")
+}
+
 /// Build one corkboard card per scene of a chapter body (#589 / #636 / #698 /
-/// #701): scenes in document order, each with the scene heading's byte offset for
-/// the jump and its metadata (synopsis + status) reconciled by position — a chapter
-/// with no metadata (or fewer entries than scenes) still lists every scene, padded
-/// with the default (blank synopsis, stub status). A scene owns its deeper sub-beats
-/// and the `#` chapter title is not a card (#698). `chapter` / `chapter_title` tag
-/// the cards for the manuscript-wide board (#701) and are `None` / empty on the
-/// per-chapter board. Shared by both boards so scene identity is defined once.
+/// #701 / #974): scenes in document order, each with the scene heading's byte
+/// offset for the jump and its metadata (synopsis + status) reconciled by position.
 fn cards_for(
     text: &str,
     headings: &[Heading],
