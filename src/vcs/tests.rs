@@ -1031,6 +1031,146 @@ fn finalize_sync_also_lands_the_clean_remote_only_edits() {
 }
 
 #[test]
+fn sync_merges_a_nested_chapter_across_a_divergence() {
+    // Regression for the flat-TreeBuilder bug: real projects track nested files under
+    // `bible/` and `submission/`. The three-way merge built the merged tree with a
+    // single-level TreeBuilder, which rejects any entry name containing "/", so any
+    // diverged sync touching a nested path aborted with a cryptic libgit2 error.
+    // Here a adds `bible/setting.md` and edits an existing nested file while b makes a
+    // disjoint edit — the reconcile must succeed and land the nested content on disk.
+    let (remote, a, b) = two_clones("sync-nested");
+
+    // Seed a nested chapter on both sides via the remote so it's in the merge base.
+    fs::create_dir_all(a.join("bible")).unwrap();
+    fs::write(a.join("bible/alice.md"), "# Alice\n\nOriginal note.\n").unwrap();
+    commit(&a, "seed-nested").unwrap();
+    push(&a).unwrap();
+    // Bring the seeded nested file into b so both share it as the ancestor.
+    let out = sync(&b).unwrap();
+    assert!(out.conflicts.is_empty());
+    assert!(b.join("bible/alice.md").exists(), "nested seed reached b");
+
+    // a: add a brand-new nested chapter AND edit the shared nested one, then push.
+    fs::write(
+        a.join("bible/setting.md"),
+        "# Setting\n\nThe fog-bound harbor.\n",
+    )
+    .unwrap();
+    fs::write(
+        a.join("bible/alice.md"),
+        "# Alice\n\nRevised on a — sharper.\n",
+    )
+    .unwrap();
+    commit(&a, "a-nested-edits").unwrap();
+    push(&a).unwrap();
+
+    // b: a disjoint edit to a top-level chapter (no overlap with a's nested changes).
+    fs::write(b.join("one.md"), "# One\n\nB's disjoint edit.\n").unwrap();
+    commit(&b, "b-edits-one").unwrap();
+
+    // Before the fix this returned Err("invalid name for a tree entry - …").
+    let out = sync(&b).unwrap();
+    assert!(
+        out.conflicts.is_empty(),
+        "disjoint nested/top-level edits don't conflict: {:?}",
+        out.conflicts
+    );
+    assert!(out.reload, "the merged tree was written to disk");
+
+    // The new nested chapter landed with a's content…
+    assert!(
+        b.join("bible/setting.md").exists(),
+        "the added nested chapter merged onto b"
+    );
+    assert_eq!(
+        fs::read_to_string(b.join("bible/setting.md")).unwrap(),
+        "# Setting\n\nThe fog-bound harbor.\n"
+    );
+    // …the edited nested chapter took a's revision (remote-only edit adopted)…
+    assert!(fs::read_to_string(b.join("bible/alice.md"))
+        .unwrap()
+        .contains("Revised on a"));
+    // …and b's own disjoint edit is preserved untouched.
+    assert!(fs::read_to_string(b.join("one.md"))
+        .unwrap()
+        .contains("B's disjoint edit"));
+    // A real, clean two-parent merge landed — a fresh commit sees nothing to do.
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+    // And the completed merge pushes back cleanly.
+    push(&b).unwrap();
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn finalize_sync_refuses_when_the_remote_changed_again_mid_resolution() {
+    // Regression for the silent-drop bug: finalize_sync re-fetches the live remote and
+    // rebuilds the three-way, but only applies the `resolutions` captured at detection
+    // time. If a third push lands a fresh both-changed conflict on a *different*
+    // chapter — one the author never resolved — the old code fell through every branch
+    // and silently kept local, dropping the new remote edit under a two-parent merge.
+    // It must instead refuse and tell the author to sync again.
+    let (remote, a, b) = two_clones("finalize-stale");
+
+    // Seed a second shared chapter so both sides can later diverge on it.
+    fs::write(a.join("two.md"), "# Two\n\nShared second chapter.\n").unwrap();
+    commit(&a, "seed-two").unwrap();
+    push(&a).unwrap();
+    let out = sync(&b).unwrap();
+    assert!(out.conflicts.is_empty() && b.join("two.md").exists());
+
+    // a and b diverge on one.md → the conflict the author will resolve.
+    fs::write(a.join("one.md"), "# One\n\nA's rewrite.\n").unwrap();
+    commit(&a, "a-edit-one").unwrap();
+    push(&a).unwrap();
+    fs::write(b.join("one.md"), "# One\n\nB's rewrite.\n").unwrap();
+    commit(&b, "b-edit-one").unwrap();
+    // b edits two.md as well (local side of a future conflict).
+    fs::write(b.join("two.md"), "# Two\n\nB's take on two.\n").unwrap();
+    commit(&b, "b-edit-two").unwrap();
+
+    // b syncs and sees the one.md conflict; captures its resolution.
+    let out = sync(&b).unwrap();
+    let one_conflict = out
+        .conflicts
+        .into_iter()
+        .find(|c| c.path == "one.md")
+        .expect("one.md conflicts");
+
+    // Now a THIRD push lands after detection: a edits two.md differently, so two.md is
+    // now a genuine both-changed conflict that b never resolved.
+    fs::write(a.join("two.md"), "# Two\n\nA's late take on two.\n").unwrap();
+    commit(&a, "a-edit-two-late").unwrap();
+    push(&a).unwrap();
+
+    // The author finalizes with only the one.md resolution they knew about.
+    let mut resolutions = BTreeMap::new();
+    resolutions.insert(one_conflict.path, one_conflict.local);
+    let err = finalize_sync(&b, &resolutions).unwrap_err();
+    assert!(
+        err.contains("changed again") && err.contains("two.md"),
+        "refuses and names the newly-conflicting chapter: {err}"
+    );
+
+    // Nothing was committed: no merge landed, and a's late edit was NOT silently
+    // dropped — b's local two.md is untouched and the tree still has b's own work.
+    assert!(fs::read_to_string(b.join("two.md"))
+        .unwrap()
+        .contains("B's take on two"));
+    let summaries = merge_summaries(&b);
+    assert!(
+        !summaries.iter().any(|s| s.contains("Sync remote")),
+        "no partial merge commit landed: {summaries:?}"
+    );
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
 fn init_is_idempotent_and_preserves_an_existing_gitignore() {
     let dir = temp_dir("idempotent");
     fs::write(dir.join(".gitignore"), "# hand-tuned\n/custom/\n").unwrap();

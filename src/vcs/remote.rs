@@ -442,10 +442,9 @@ fn sync_diverged(
 
     let mut merged = Vec::new();
     let mut conflicts = Vec::new();
-    // Start the merged tree from local; clean remote-only edits are layered on.
-    let mut builder = repo
-        .treebuilder(Some(&local_tree))
-        .map_err(|e| e.to_string())?;
+    // Start the merged tree from local; clean remote-only edits are layered on. An
+    // index (not a flat TreeBuilder) so nested chapter paths merge correctly.
+    let mut index = index_from_tree(&local_tree)?;
 
     for path in paths {
         let b = base.get(&path).copied();
@@ -457,10 +456,10 @@ fn sync_diverged(
         }
         if o == b {
             // Only the remote changed this chapter — adopt its version.
-            adopt(&mut builder, &path, t)?;
+            adopt(&mut index, &path, t)?;
             merged.push(path);
         } else if t == b {
-            // Only local changed it — keep ours (already in the builder base).
+            // Only local changed it — keep ours (already in the index base).
         } else {
             // Both changed it, differently — a per-chapter conflict (#962).
             conflicts.push(ChapterConflict {
@@ -495,8 +494,9 @@ fn sync_diverged(
     }
 
     // Clean reconciliation: commit the merged tree as a two-parent merge so both
-    // histories stay reachable, then bring the working tree up to it.
-    let tree_id = builder.write().map_err(|e| e.to_string())?;
+    // histories stay reachable, then bring the working tree up to it. `write_tree_to`
+    // persists the merged tree into the repo's odb without touching the on-disk index.
+    let tree_id = index.write_tree_to(repo).map_err(|e| e.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
     let sig = signature(repo)?;
     let message = format!("Sync remote changes into {branch}");
@@ -609,10 +609,10 @@ pub fn finalize_sync(
     // Rebuild the merged tree exactly as sync_diverged would, but this time the
     // both-sides-changed chapters aren't dead-ends: they take the author's chosen
     // text. Start from local so a keep-local resolution (and every local-only edit)
-    // is already in place.
-    let mut builder = repo
-        .treebuilder(Some(&local_tree))
-        .map_err(|e| e.to_string())?;
+    // is already in place. An index (not a flat TreeBuilder) so nested chapter paths
+    // merge correctly.
+    let mut index = index_from_tree(&local_tree)?;
+    let mut fresh_conflicts = Vec::new();
     for path in paths {
         let b = base.get(&path).copied();
         let o = ours.get(&path).copied();
@@ -623,9 +623,7 @@ pub fn finalize_sync(
             let oid = repo
                 .blob(chosen.as_bytes())
                 .map_err(|e| format!("write resolution: {e}"))?;
-            builder
-                .insert(&path, oid, git2::FileMode::Blob.into())
-                .map_err(|e| e.to_string())?;
+            stage_blob(&mut index, &path, oid)?;
             continue;
         }
         if o == t {
@@ -633,12 +631,28 @@ pub fn finalize_sync(
         }
         if o == b {
             // Only the remote changed it — adopt the remote version.
-            adopt(&mut builder, &path, t)?;
+            adopt(&mut index, &path, t)?;
+        } else if t == b {
+            // Only local changed it — already in the index from local_tree.
+        } else {
+            // Both changed it, differently, yet the author never resolved it — the
+            // remote must have moved again between detection and finalization (a
+            // third push landed). Committing here would silently drop that new remote
+            // edit, so refuse (mirrors finalize_branch_merge's guard).
+            fresh_conflicts.push(path);
         }
-        // Only local changed it (t == b) — already in the builder from local_tree.
     }
 
-    let tree_id = builder.write().map_err(|e| e.to_string())?;
+    if !fresh_conflicts.is_empty() {
+        return Err(format!(
+            "The remote changed again while you were resolving — {} chapter(s) now \
+             conflict that weren't covered ({}). Run Sync again to pick them up.",
+            fresh_conflicts.len(),
+            fresh_conflicts.join(", "),
+        ));
+    }
+
+    let tree_id = index.write_tree_to(&repo).map_err(|e| e.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
     let sig = signature(&repo)?;
     let message = format!("Sync remote changes into {branch}");
@@ -660,23 +674,64 @@ pub fn finalize_sync(
     ))
 }
 
-/// Write the remote's version of `path` into the merged tree builder (or stage its
+/// Write the remote's version of `path` into the merged tree index (or stage its
 /// removal when the remote deleted the chapter). The chapter is adopted wholesale —
 /// chapters are atomic files, so there's no sub-file merge to do. Shared with the
 /// branch merge (#965), which reconciles two local branches with the same
 /// chapter-level three-way.
+///
+/// The merged tree is assembled through a [`git2::Index`] rather than a flat
+/// `TreeBuilder`: libgit2's single-level `TreeBuilder` rejects any entry name
+/// containing `/`, so nested chapter paths (`bible/setting.md`, `submission/…`)
+/// abort the whole merge. An index seeded with `read_tree` handles the full path
+/// natively and writes the nested subtrees for us.
 pub(super) fn adopt(
-    builder: &mut git2::TreeBuilder,
+    index: &mut git2::Index,
     path: &str,
     theirs: Option<git2::Oid>,
 ) -> Result<(), String> {
     match theirs {
-        Some(oid) => builder
-            .insert(path, oid, git2::FileMode::Blob.into())
-            .map(|_| ())
+        Some(oid) => stage_blob(index, path, oid),
+        None => index
+            .remove_path(Path::new(path))
             .map_err(|e| e.to_string()),
-        None => builder.remove(path).map_err(|e| e.to_string()),
     }
+}
+
+/// Stage `oid` at `path` in the merged tree `index` as a regular-file blob. Builds
+/// the [`git2::IndexEntry`] by hand (rather than `add_path`, which would read the
+/// working directory) so the merge stays purely in-memory; the timestamp/ownership
+/// fields are zeroed since only the path, mode, and blob id matter for `write_tree`.
+pub(super) fn stage_blob(
+    index: &mut git2::Index,
+    path: &str,
+    oid: git2::Oid,
+) -> Result<(), String> {
+    let entry = git2::IndexEntry {
+        ctime: git2::IndexTime::new(0, 0),
+        mtime: git2::IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: git2::FileMode::Blob.into(),
+        uid: 0,
+        gid: 0,
+        file_size: 0,
+        id: oid,
+        flags: 0,
+        flags_extended: 0,
+        path: path.as_bytes().to_vec(),
+    };
+    index.add(&entry).map_err(|e| e.to_string())
+}
+
+/// Seed a fresh in-memory index with the blobs of `tree`, the starting point for a
+/// three-way merge. Kept off the repository's on-disk index so the merge never
+/// touches the working index or the checkout; the caller layers adoptions/removals
+/// on top and calls [`git2::Index::write_tree_to`] to persist the merged tree.
+pub(super) fn index_from_tree(tree: &git2::Tree) -> Result<git2::Index, String> {
+    let mut index = git2::Index::new().map_err(|e| e.to_string())?;
+    index.read_tree(tree).map_err(|e| e.to_string())?;
+    Ok(index)
 }
 
 /// Collect every blob (file) in `tree`, keyed by its full path, as `path -> blob id`.
