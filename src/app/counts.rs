@@ -175,4 +175,78 @@ impl App {
             .map(|b| self.book_word_count(b))
             .sum()
     }
+
+    /// Today's net word change (#1012): words added minus removed, from the daily
+    /// tally the idle tick maintains. Reads the cached counters only — no
+    /// manuscript walk — so it's O(1) and safe on every draw. Negative when the
+    /// author cut more than they wrote today.
+    pub const fn day_net_words(&self) -> i64 {
+        self.added as i64 - self.removed as i64
+    }
+
+    /// This writing session's net output (#1012): the growth in the daily tally
+    /// since the session baseline ([`record_session`](Self::record_session) advances
+    /// it), so it's just this run's writing, not the day's accumulated total. Reads
+    /// the cached counters only — O(1). Negative when the session was a net trim.
+    pub const fn session_net_words(&self) -> i64 {
+        let added = self.added.saturating_sub(self.session_base_added);
+        let removed = self.removed.saturating_sub(self.session_base_removed);
+        added as i64 - removed as i64
+    }
+
+    /// The configured daily word target (#1012), the `[goals] daily` key — `None`
+    /// when unset. The ambient below-target cue and the recap read this; it's the
+    /// same cached goal the progress report projects against, no file read.
+    pub fn daily_target(&self) -> Option<usize> {
+        self.project.goals().and_then(|g| g.daily)
+    }
+
+    /// How far under the daily target today's net is (#1012), or `None` when there's
+    /// nothing to nudge about: no target set, or the net already meets it. The single
+    /// source of truth for whether the status-bar cue shows and by how much — reads
+    /// only the cached tally + goal, so it's O(1) per draw. A net at or above the
+    /// target (or a negative net still below a target) yields `Some(remaining)` only
+    /// while genuinely short; a met target returns `None`.
+    pub fn daily_target_shortfall(&self) -> Option<usize> {
+        let target = self.daily_target()?;
+        let net = self.day_net_words();
+        (net < target as i64).then(|| (target as i64 - net).max(0) as usize)
+    }
+
+    /// Whether the ambient below-target cue is currently showing (#1012): the nudge
+    /// is enabled, not dismissed this session, and today's net is under a set daily
+    /// target. The single predicate the status-bar tag and the Esc-dismiss handler
+    /// both read, so they can't drift. O(1) — cached tally + goal only.
+    pub fn nudge_showing(&self) -> bool {
+        self.daily_nudge && !self.nudge_dismissed && self.daily_target_shortfall().is_some()
+    }
+
+    /// Seed today's tally directly (#1012), for render tests outside the `app`
+    /// module that can't reach the private counters. Sets the day's added/removed so
+    /// the below-target cue and recap have a known net, without driving a full edit.
+    #[cfg(test)]
+    pub const fn set_day_tally_for_test(&mut self, added: usize, removed: usize) {
+        self.added = added;
+        self.removed = removed;
+    }
+
+    /// The end-of-session recap (#1012): a quiet one-line summary of this session's
+    /// net words and the day's net, shown on quit. `None` when the session wrote
+    /// nothing (net zero) so a glance-and-quit run stays silent. When a daily target
+    /// is set, notes whether the day met it. Pure string work over the cached tally.
+    pub fn session_recap(&self) -> Option<String> {
+        let session = self.session_net_words();
+        if session == 0 {
+            return None;
+        }
+        let day = self.day_net_words();
+        let target_note = match self.daily_target() {
+            Some(target) if day >= target as i64 => format!(" · daily target met ({target})"),
+            Some(target) => format!(" · {} short of {target}", (target as i64 - day).max(0)),
+            None => String::new(),
+        };
+        Some(format!(
+            "This session: {session:+} words · today: {day:+} net{target_note}"
+        ))
+    }
 }

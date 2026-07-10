@@ -839,6 +839,23 @@ fn session_target_tag(app: &App) -> String {
     })
 }
 
+/// The ambient below-target cue (#1012): when the daily nudge is on, a daily
+/// target is set, today's net is under it, and the author hasn't dismissed it,
+/// a quiet tag shows how far short the day is (e.g. "◈ 180 to daily goal · Esc").
+/// Reads only the cached daily tally + goal (`daily_target_shortfall`), so it's
+/// O(1) per frame — no manuscript walk. Empty (nothing rendered) whenever the cue
+/// shouldn't show, so the bar is unchanged for authors who never set a target or
+/// who opted out.
+fn daily_nudge_tag(app: &App) -> String {
+    if !app.nudge_showing() {
+        return String::new();
+    }
+    app.daily_target_shortfall()
+        .map_or_else(String::new, |short| {
+            format!(" · ◈ {short} to daily goal · Esc")
+        })
+}
+
 /// While browsing, the bar describes the *selected* chapter: its title, and
 /// (unless a transient message is up) its summary / POV / status.
 fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (String, String) {
@@ -925,14 +942,15 @@ fn editor_status_bar(app: &App) -> (String, String) {
         |m| format!("{m}  "),
     );
     let left = format!(
-        " {name}{dirty}{}{}{}{}{}{}{}",
+        " {name}{dirty}{}{}{}{}{}{}{}{}",
         read_only_tag(app),
         vc_tag(app),
         local_backup_tag(app),
         ai_tag(app),
         sprint_tag(app),
         chapter_goal_tag(app),
-        session_target_tag(app)
+        session_target_tag(app),
+        daily_nudge_tag(app)
     );
     (left, right)
 }

@@ -206,6 +206,11 @@ fn main() -> io::Result<()> {
     // including a `?` error — leaves the terminal usable.
     let mut tui = Tui::new()?;
     let result = run(&mut tui, &mut app);
+    // The quiet on-quit recap (#1012): this session's net words and the day's net,
+    // read from the daily tally already maintained (no new counting). Captured
+    // before `record_session` advances the baseline, then printed *after* the TUI
+    // drops so it lands on the restored plain terminal rather than the alt screen.
+    let recap = app.session_recap();
     // Record today's momentum so it survives the next reopen.
     app.persist_snapshot();
     // Record this session's output to the per-session log (#835) — the calendar
@@ -213,6 +218,12 @@ fn main() -> io::Result<()> {
     app.record_session();
     // Remember where the author left off, to resume here next open (#588).
     app.persist_position();
+    // Drop the TUI (leaving the alternate screen, restoring the terminal) before
+    // printing the recap, so it appears on the normal screen the author returns to.
+    drop(tui);
+    if let Some(recap) = recap {
+        println!("{recap}");
+    }
     result
 }
 
