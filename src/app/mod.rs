@@ -651,6 +651,12 @@ pub struct App {
     /// run (and any confirm chained after it) reaches the pass with the concern
     /// intact; taken when the pass spawns, `None` when no accuracy pass is pending.
     pub(crate) accuracy_concern: Option<String>,
+    /// The character pair the author chose for a relationship-trajectory pass
+    /// (#1046) — e.g. "Alice / Bob". Captured when the author submits it in the pair
+    /// prompt so the cost-gated run (and any confirm chained after it) reaches the
+    /// pass with the pair intact; taken when the pass spawns, `None` when no
+    /// relationship pass is pending.
+    pub(crate) relationship_pair: Option<String>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
     /// The system-clipboard seam (#811): a yank / delete / Visual copy writes the
@@ -845,6 +851,7 @@ impl App {
             qa_store,
             pending_qa_question: None,
             accuracy_concern: None,
+            relationship_pair: None,
             message: None,
             clipboard: Box::new(crate::clipboard::Osc52Clipboard::new()),
             mouse_anchor: None,

@@ -274,6 +274,7 @@ impl App {
                     | AiAction::NameGen
                     | AiAction::Editorial
                     | AiAction::Accuracy
+                    | AiAction::Relationship
             ) | Action::RefreshSeriesBible
                 | Action::RefreshBibles
                 | Action::QueuePasses
@@ -801,6 +802,21 @@ impl App {
                     );
                 }
             }
+            // Author-invoked relationship trajectory (#1046): prompt for the character
+            // pair first, then run. On the confirmed / cost-gated re-entry the pair is
+            // already captured, so spawn the pass instead of re-prompting.
+            AiAction::Relationship => {
+                if self.relationship_pair.is_some() {
+                    self.analyze_relationship();
+                } else {
+                    self.open_prompt(
+                        Pending::RelationshipPair,
+                        "Character pair (e.g. Alice / Bob): ",
+                        "",
+                        None,
+                    );
+                }
+            }
         }
     }
 }
@@ -917,6 +933,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Accuracy => (
             "Cultural & historical accuracy",
             "Flag inaccuracies for a concern you name — accuracy, not sensitivity",
+        ),
+        AiAction::Relationship => (
+            "Relationship trajectory",
+            "Track a pair's arc per chapter + flag inconsistencies (no fixes)",
         ),
     }
 }

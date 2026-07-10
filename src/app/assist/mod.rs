@@ -139,6 +139,14 @@ pub(super) fn describe_accuracy(f: &ai::accuracy::AccuracyFinding) -> (String, V
     (format!("{}{at}", f.detail), f.chapters.clone())
 }
 
+pub(super) fn describe_relationship(
+    f: &ai::relationship::TrajectoryFinding,
+) -> (String, Vec<String>) {
+    // The inconsistency (kind + note), naming what drifts in the pair's arc — an
+    // observation the author acts on, never a rewrite of the relationship.
+    (f.summarize(), f.chapters.clone())
+}
+
 pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
     let summary = if f.character.is_empty() {
         format!("{}: {}", f.kind, f.detail)
@@ -218,6 +226,9 @@ pub(super) fn recheck_parser(
                 .unwrap_or_default()
         },
         // Non-finding actions never reach here (`recheck_request` returns `None`).
+        // Like the accuracy pass (#973), relationship (#1046) needs its author-chosen
+        // argument — the pair — which isn't stored per-finding, so `recheck_request`
+        // returns `None` and it never reaches this parser.
         _ => |_, _, _| Vec::new(),
     }
 }

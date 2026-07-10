@@ -41,6 +41,9 @@ pub enum FindingKind {
     Voice,
     /// Echo / near-duplicate passage pairs (#920) — the semantic-repetition scan.
     Echo,
+    /// Relationship-trajectory inconsistencies (#1046) — a chosen pair's arc
+    /// contradicting itself or reversing off-page with no on-page setup.
+    Relationship,
     /// Not a re-runnable analysis pass (Q&A citations / answer rows), or an
     /// unrecognized persisted slug.
     Other,
@@ -62,6 +65,7 @@ impl FindingKind {
             Self::Accuracy => "accuracy",
             Self::Voice => "voice",
             Self::Echo => "echo",
+            Self::Relationship => "relationship",
             Self::Other => "other",
         }
     }
@@ -80,6 +84,7 @@ impl FindingKind {
             Self::Accuracy => "Cultural & historical accuracy",
             Self::Voice => "Character voice",
             Self::Echo => "Echoes & near-duplicates",
+            Self::Relationship => "Relationship trajectory",
             Self::Other => "Other",
         }
     }
@@ -99,6 +104,7 @@ impl FindingKind {
             Self::Accuracy,
             Self::Voice,
             Self::Echo,
+            Self::Relationship,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)

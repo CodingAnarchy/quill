@@ -328,6 +328,7 @@ impl Action {
         Self::Ai(AiAction::NameGen),
         Self::Ai(AiAction::Editorial),
         Self::Ai(AiAction::Accuracy),
+        Self::Ai(AiAction::Relationship),
         Self::RefreshBibles,
         Self::QueuePasses,
         Self::BackgroundBibleUpdate,
@@ -588,6 +589,7 @@ impl Action {
             Self::Ai(AiAction::NameGen) => "AI · Name generator",
             Self::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
             Self::Ai(AiAction::Accuracy) => "AI · Cultural & historical accuracy (flags, no fixes)",
+            Self::Ai(AiAction::Relationship) => "AI · Relationship trajectory (flags, no fixes)",
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
             Self::QuickStart => "Quick-start (first-run card)",
@@ -724,6 +726,11 @@ impl Action {
                         // prose, so it passes the two-layer prose guard. The concern
                         // is its free-text argument (see `text_arg`).
                         | AiAction::Accuracy
+                        // Read-only relationship trajectory (#1046): tracks a pair's
+                        // arc and flags inconsistencies — findings, no prose — so it
+                        // passes the two-layer prose guard. The pair is its free-text
+                        // argument (see `text_arg`).
+                        | AiAction::Relationship
                         | AiAction::Ask
                         | AiAction::Brainstorm
                         | AiAction::DraftCharacters
@@ -744,6 +751,8 @@ impl Action {
             Self::Ai(AiAction::DraftCharacters | AiAction::DraftSetting) => Some("concept"),
             // The named period / place / domain to check accuracy against (#973).
             Self::Ai(AiAction::Accuracy) => Some("concern"),
+            // The character pair whose relationship trajectory to track (#1046).
+            Self::Ai(AiAction::Relationship) => Some("pair"),
             _ => None,
         }
     }

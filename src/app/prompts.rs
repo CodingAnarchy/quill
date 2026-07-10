@@ -521,6 +521,7 @@ impl App {
             | Pending::DraftCharacters
             | Pending::DraftSetting
             | Pending::AccuracyConcern
+            | Pending::RelationshipPair
             | Pending::NewProject
             | Pending::ConvertToSeries
             | Pending::AddBook
@@ -777,6 +778,24 @@ impl App {
                                     // Cost-gate the run; the confirmed path re-enters
                                     // `run_ai_action`, which spawns (concern now set).
                                     self.start_ai_action(AiAction::Accuracy, false);
+                                }
+                            }
+                            Pending::RelationshipPair => {
+                                // Back to editing; capture the chosen pair, then run the
+                                // relationship-trajectory pass through the cost gate
+                                // (#1046). A blank entry cancels — the pass tracks a
+                                // pair, so it needs one to track.
+                                self.mode = closed;
+                                if text.is_empty() {
+                                    self.message = Some(
+                                        "Relationship pass cancelled — name a character pair."
+                                            .into(),
+                                    );
+                                } else {
+                                    self.relationship_pair = Some(text.to_string());
+                                    // Cost-gate the run; the confirmed path re-enters
+                                    // `run_ai_action`, which spawns (pair now set).
+                                    self.start_ai_action(AiAction::Relationship, false);
                                 }
                             }
                             Pending::NameNewWorkflow => {

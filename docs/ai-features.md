@@ -373,6 +373,23 @@ The palette actions:
   the author supplied, never makes representation judgments, never flags depictions
   as offensive, and never imposes a check the author didn't ask for. Accuracy the
   author opts into, not policing.
+- **Relationship trajectory** (#1046) — an **author-invoked**, opt-in pass that
+  tracks how the bond between a chosen character *pair* changes across the book,
+  not just its current state. Where the character pass and the relationship index
+  (#707) capture relationships as a static current-state snapshot, this reads the
+  manuscript for one pair the author names ("Alice / Bob") and reconstructs the
+  **trajectory** — the relationship's state per chapter (allied → estranged →
+  reconciled), an arc rather than one label. From that trajectory it flags
+  **inconsistencies** as findings, and only two kinds: a state that *contradicts*
+  an earlier established one (a coldness with no prior break on the page), and a
+  *reversal that happens off-page* (the state flips between chapters with no
+  on-page beat setting it up). Each finding names the pair and the chapters
+  involved and lands in the shared revision triage / findings / health dashboard
+  like every other analysis pass. **Off by default, run per pair, on the author's
+  request** (the palette action prompts for the pair; the assistant supplies it as
+  the `pair` argument). Analysis only, grounded in the AI boundary: it *observes
+  the drift and flags it*, never a rewrite, a proposed "better arc", or a suggestion
+  for how to set up a missing beat — the author decides what to change.
 - **Character voice** (#183) — checks the manuscript against the character
   bible's **voice profiles** (the character pass now captures speech patterns,
   vocabulary/register, verbal tics, and sentence rhythm per character, editable

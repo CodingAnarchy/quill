@@ -11,11 +11,12 @@ use super::super::*;
 use super::write_failure_message;
 use super::{
     describe_accuracy, describe_continuity, describe_editorial, describe_naming, describe_plot,
-    describe_scaffold, describe_setting, describe_style, describe_theme, describe_voice,
-    findings_from,
+    describe_relationship, describe_scaffold, describe_setting, describe_style, describe_theme,
+    describe_voice, findings_from,
 };
 use crate::ai::accuracy::{self, Accuracy};
 use crate::ai::naming::{self, Naming};
+use crate::ai::relationship::{self, Trajectory};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
 use crate::ai::voice;
@@ -136,6 +137,29 @@ impl App {
             move |manuscript, model| accuracy::build_request(manuscript, &concern, model),
             accuracy::parse,
             Outcome::Accuracy,
+        );
+    }
+
+    /// Start a relationship-trajectory pass (#1046) for the pair the author chose
+    /// (`relationship_pair`, set by the prompt) — track the pair's state per chapter
+    /// and flag inconsistencies (contradictions / off-page reversals), applied by
+    /// [`App::poll_ai`] into the revision-triage list. Findings only; author-invoked;
+    /// it observes the drift, never rewrites the arc. The pair is *taken* here (one
+    /// pass per submission), so a later run re-prompts rather than reusing a stale
+    /// pair; a missing / blank pair is a no-op (the prompt always sets one first).
+    pub(crate) fn analyze_relationship(&mut self) {
+        let Some(pair) = self.relationship_pair.take() else {
+            return;
+        };
+        let pair = pair.trim().to_string();
+        if pair.is_empty() {
+            return;
+        }
+        self.spawn_manuscript_pass(
+            "⟳ Tracking relationship…",
+            move |manuscript, model| relationship::build_request(manuscript, &pair, model),
+            relationship::parse,
+            Outcome::Relationship,
         );
     }
 
@@ -381,6 +405,23 @@ impl App {
             None,
             AiAction::Accuracy,
             describe_accuracy,
+        );
+        self.show_findings(findings);
+    }
+
+    /// Apply a relationship-trajectory pass (#1046): surface each inconsistency in
+    /// the chosen pair's arc as a triage finding (the drift + the chapters it spans).
+    /// Pure analysis — nothing is written, no prose is produced, and the trajectory
+    /// itself is observation only; the author reads the arc and decides.
+    pub(crate) fn apply_relationship(&mut self, result: Result<Trajectory, ai::AiError>) {
+        let Some(trajectory) = self.ok_or_report(result) else {
+            return;
+        };
+        let findings = findings_from(
+            &trajectory.findings,
+            None,
+            AiAction::Relationship,
+            describe_relationship,
         );
         self.show_findings(findings);
     }
