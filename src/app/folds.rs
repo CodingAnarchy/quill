@@ -169,8 +169,9 @@ impl FoldState {
 
 /// The byte offset where the section opened by heading `idx` ends: the start of the
 /// next heading at the same or a higher (numerically lower) level, or the document
-/// end if none follows. Shared by [`FoldState::view`] and [`FoldState::reveal_at`].
-fn section_end_byte(headings: &[Heading], idx: usize) -> usize {
+/// end if none follows. Shared by [`FoldState::view`] and [`FoldState::reveal_at`],
+/// and by the outline restructure (#1008), which moves a section's whole span.
+pub fn section_end_byte(headings: &[Heading], idx: usize) -> usize {
     let level = headings[idx].level;
     headings[idx + 1..]
         .iter()
