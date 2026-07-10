@@ -99,6 +99,7 @@ mod recovery;
 mod research_notebook;
 mod resume;
 mod review_import;
+mod session_recap;
 mod similar;
 mod snippets;
 mod spell;

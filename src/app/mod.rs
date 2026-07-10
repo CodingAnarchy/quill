@@ -600,6 +600,16 @@ pub struct App {
     /// state, never persisted; `None` until the author sets one. Independent of a
     /// timed sprint — the author can run either, both, or neither.
     pub(crate) session_target: Option<sprint::SessionTarget>,
+    /// The ambient below-target cue (#1012), from `[editor] daily_nudge`; on by
+    /// default. When on and a `[goals] daily` target is set, a quiet status-bar tag
+    /// shows how far under it today's net is — reading only the cached daily tally,
+    /// so it costs nothing per draw.
+    pub(crate) daily_nudge: bool,
+    /// Whether the author dismissed the below-target cue this session (#1012). A
+    /// per-session flag (never persisted): once dismissed the tag stays hidden for
+    /// the rest of the run, so it's non-modal and can be waved off. Reset on the
+    /// next launch, so tomorrow's pace surfaces afresh.
+    pub(crate) nudge_dismissed: bool,
     /// The "Ask the manuscript" history (#609), newest last: each ask, its
     /// grounded answer, and the chapters it cited. Lets the author re-open a past
     /// lookup (and re-jump its citations) without re-asking. Loaded from the
@@ -654,6 +664,7 @@ impl App {
         let focus_mode = editor.focus_mode;
         let paragraph_indent = editor.paragraph_indent;
         let autosave_interval_secs = editor.autosave_interval_secs;
+        let daily_nudge = editor.daily_nudge;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let (theme, theme_warnings) = crate::config::load_theme();
         // Make the loaded palette the active one for rendering (#300). `ui::draw`
@@ -798,6 +809,8 @@ impl App {
             pending_restore_backup: None,
             sprint: None,
             session_target: None,
+            daily_nudge,
+            nudge_dismissed: false,
             qa_log,
             qa_store,
             pending_qa_question: None,

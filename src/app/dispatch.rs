@@ -72,6 +72,21 @@ impl App {
             return;
         }
 
+        // Esc dismisses the ambient below-target cue (#1012) when it's the only
+        // thing Esc would act on: in a resting editing mode, no overlay, no
+        // distraction-free (handled above), and the cue actually showing. It's a
+        // waved-off, non-modal signal — dismissed for the rest of the session, so
+        // Esc goes back to its usual job. Guarded to Insert/Normal so a Visual
+        // selection keeps Esc for collapsing first.
+        if key.code == KeyCode::Esc
+            && self.overlay.is_none()
+            && matches!(self.mode, Mode::Insert | Mode::Normal)
+            && self.nudge_showing()
+        {
+            self.nudge_dismissed = true;
+            return;
+        }
+
         // F1 opens the user's guide from an editing mode (#281). Guarded so it
         // doesn't pre-empt a key's meaning elsewhere: with an overlay already up,
         // F1 falls through and closes it like any other key; in a prompt/menu the

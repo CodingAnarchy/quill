@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::buffer::Cursor;
+use crate::project::Goals;
 use crate::syntax::Heading;
 use ratatui::style::Color;
 use ratatui::{backend::TestBackend, Terminal};
@@ -147,6 +148,46 @@ fn visual_mode_status_bar_shows_the_selected_count() {
     assert!(
         !screen.contains("4 words"),
         "document count is replaced by the selection count:\n{screen}"
+    );
+}
+
+#[test]
+fn the_below_target_cue_shows_in_the_status_bar_and_dismisses() {
+    // A daily target set, and today's net under it, so the ambient cue (#1012)
+    // shows the shortfall in the editor status bar.
+    let mut app = app_with("one two three\n");
+    app.project.manifest.goals = Some(Goals {
+        daily: Some(100),
+        ..Goals::default()
+    });
+    app.set_day_tally_for_test(20, 0); // today's net is 20, 80 short of the 100 target
+    assert!(
+        render(&app, 80, 8).contains("80 to daily goal"),
+        "the cue shows the shortfall:\n{}",
+        render(&app, 80, 8)
+    );
+    // Dismissed for the session: the tag is gone.
+    app.nudge_dismissed = true;
+    assert!(
+        !render(&app, 80, 8).contains("to daily goal"),
+        "a dismissed cue leaves the bar:\n{}",
+        render(&app, 80, 8)
+    );
+    // Turned off entirely (config): also no cue, even undismissed.
+    app.nudge_dismissed = false;
+    app.daily_nudge = false;
+    assert!(
+        !render(&app, 80, 8).contains("to daily goal"),
+        "an opted-out cue never shows:\n{}",
+        render(&app, 80, 8)
+    );
+    // Meeting the target removes it (nudge back on, net now over the target).
+    app.daily_nudge = true;
+    app.set_day_tally_for_test(120, 0);
+    assert!(
+        !render(&app, 80, 8).contains("to daily goal"),
+        "a met target shows no cue:\n{}",
+        render(&app, 80, 8)
     );
 }
 

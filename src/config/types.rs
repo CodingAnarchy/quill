@@ -59,6 +59,12 @@ pub struct EditorConfig {
     /// front-matter-preserving path as Ctrl-S (but without firing on-save
     /// workflows). `0` (the default) turns autosave off — behavior unchanged.
     pub autosave_interval_secs: u64,
+    /// The ambient below-target cue (#1012): when a `[goals] daily` target is set
+    /// and today's net is under it, a quiet, dismissible status-bar tag shows how
+    /// far short the day is. **On by default** — set `daily_nudge = false` to turn
+    /// it off entirely for authors who don't want it. It never appears without a
+    /// daily target, so a project with no target is unaffected either way.
+    pub daily_nudge: bool,
 }
 
 impl Default for EditorConfig {
@@ -73,6 +79,7 @@ impl Default for EditorConfig {
             focus_mode: false,
             paragraph_indent: false,
             autosave_interval_secs: 0,
+            daily_nudge: true,
         }
     }
 }
@@ -379,6 +386,20 @@ mod tests {
         // Turning it on doesn't disturb the other opt-ins (smart typography stays
         // at its own default).
         assert!(on.smart_typography, "unrelated defaults are untouched");
+    }
+
+    #[test]
+    fn the_daily_nudge_is_on_by_default_and_opt_out() {
+        // The below-target cue ships on (#1012) so the pace feedback is ambient;
+        // opt out with `daily_nudge = false` under `[editor]`.
+        assert!(
+            EditorConfig::default().daily_nudge,
+            "daily_nudge is on by default"
+        );
+        let off: EditorConfig = toml::from_str("daily_nudge = false").unwrap();
+        assert!(!off.daily_nudge, "opt out with daily_nudge = false");
+        // Turning it off doesn't disturb the other defaults.
+        assert!(off.smart_typography, "unrelated defaults are untouched");
     }
 
     #[test]
