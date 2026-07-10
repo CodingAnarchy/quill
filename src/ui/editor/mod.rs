@@ -19,9 +19,13 @@ use crate::buffer::Buffer;
 use crate::syntax::HighlightKind;
 
 mod focus;
+mod galley;
 mod header;
 mod rows;
 
+pub use galley::{galley_last_top, galley_next_top, galley_prev_top};
+// The galley page renderer is dispatched from `ui::draw_editor_base` (#1003).
+pub use galley::render_galley;
 pub use header::HeaderCache;
 
 use focus::{first_row_indent, focus_paragraph, starts_paragraph};

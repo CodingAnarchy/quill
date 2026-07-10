@@ -97,7 +97,7 @@ mod wizard;
 
 pub use assistant::{Assistant, Entry, Speaker};
 pub use backup::BackupEntry;
-pub use folds::{FoldState, FoldView};
+pub use folds::{FoldState, FoldView, GalleyState};
 // The key-dispatch helpers moved to `dispatch` (#759); re-imported here so the
 // `app`-module call sites keep spelling them unqualified / via `super::`.
 use dispatch::{build_keymap, scroll_target};
@@ -262,6 +262,16 @@ pub struct App {
     /// column shows. Composes with focus mode and folding. Off by default; a
     /// per-session view state, never persisted.
     pub distraction_free: bool,
+    /// Galley proofreading mode (#1003): `Some` while the read-only, paginated proofing
+    /// view is on, carrying the current page's top line and the line-number toggle;
+    /// `None` in the normal editor. A per-session view state, never persisted. Read-only
+    /// and page-driven, so it never disturbs the edit buffer's cursor or scroll.
+    pub galley: Option<GalleyState>,
+    /// The galley page geometry the last frame drew at (wrap column, page height in rows)
+    /// (#1003): recorded by the galley renderer so the Space/Backspace paging can advance
+    /// by exactly one screenful of visual rows without re-deriving the layout. Zero until
+    /// the first galley frame paints.
+    pub(crate) galley_geometry: std::cell::Cell<(u16, u16)>,
     /// Autosave interval in seconds (#409), from `[editor]`; `0` is off.
     pub(crate) autosave_interval_secs: u64,
     /// Time of the last input burst (reset each idle tick), so autosave can fire
@@ -741,6 +751,8 @@ impl App {
             paragraph_indent,
             folds: FoldState::default(),
             distraction_free: false,
+            galley: None,
+            galley_geometry: std::cell::Cell::new((0, 0)),
             autosave_interval_secs,
             last_activity: std::time::Instant::now(),
             outline_visible: false,

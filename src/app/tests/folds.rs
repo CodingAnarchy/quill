@@ -242,6 +242,144 @@ fn project_search_jump_into_a_folded_section_reveals_it() {
     );
 }
 
+/// A one-chapter project with a long body so the galley pages more than once — many
+/// short paragraphs, each its own line, so pagination has plenty of rows to walk.
+fn galley_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    let mut body = String::new();
+    for i in 1..=60 {
+        let _ = writeln!(body, "Paragraph number {i} of the proofing pass.\n");
+    }
+    fs::write(dir.join("one.md"), body).unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn galley_mode_toggles_on_and_off_and_is_read_only() {
+    let (mut app, _dir) = galley_app("galley-toggle");
+    assert!(!app.in_galley(), "off by default");
+
+    app.toggle_galley();
+    assert!(app.in_galley(), "the toggle enters proofreading mode");
+
+    // Read-only: an ordinary character key does nothing to the buffer while proofing.
+    let before = app.edit_buffer().text();
+    app.on_key(key(KeyCode::Char('Z')));
+    app.on_key(key(KeyCode::Enter));
+    app.on_key(key(KeyCode::Backspace));
+    assert_eq!(
+        app.edit_buffer().text(),
+        before,
+        "no key edits the manuscript while proofing"
+    );
+    assert!(
+        app.in_galley(),
+        "and those keys don't leave the mode either"
+    );
+
+    // Esc exits back to editing.
+    app.on_key(key(KeyCode::Esc));
+    assert!(!app.in_galley(), "Esc leaves proofreading mode");
+
+    // The run-action toggle round-trips too.
+    app.run_action(Action::ToggleGalley, false);
+    assert!(app.in_galley(), "the action enters proofreading mode");
+    app.run_action(Action::ToggleGalley, false);
+    assert!(!app.in_galley(), "the action exits it");
+}
+
+#[test]
+fn galley_paging_moves_the_page_top_forward_and_back() {
+    let (mut app, _dir) = galley_app("galley-paging");
+    app.toggle_galley();
+    // Give the paging its geometry (a frame would normally record this).
+    app.galley_geometry.set((72, 20));
+    let start = app.galley.expect("in galley").top_line;
+
+    // Space pages forward — the page top advances into the chapter.
+    app.on_key(key(KeyCode::Char(' ')));
+    let after_fwd = app.galley.expect("in galley").top_line;
+    assert!(after_fwd > start, "Space pages the galley forward");
+
+    // Backspace pages back to where it started (one screenful each way).
+    app.on_key(key(KeyCode::Backspace));
+    let after_back = app.galley.expect("in galley").top_line;
+    assert!(
+        after_back <= start,
+        "Backspace pages the galley back toward the top"
+    );
+
+    // Back-paging clamps at the very first line rather than underflowing.
+    for _ in 0..20 {
+        app.on_key(key(KeyCode::Backspace));
+    }
+    assert_eq!(
+        app.galley.expect("in galley").top_line,
+        0,
+        "back-paging clamps at the start of the chapter"
+    );
+}
+
+#[test]
+fn galley_line_numbers_toggle_on() {
+    let (mut app, _dir) = galley_app("galley-line-numbers");
+    app.toggle_galley();
+    assert!(
+        !app.galley.expect("in galley").line_numbers,
+        "line numbers off by default"
+    );
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(
+        app.galley.expect("in galley").line_numbers,
+        "`n` turns line numbers on"
+    );
+    app.on_key(key(KeyCode::Char('n')));
+    assert!(
+        !app.galley.expect("in galley").line_numbers,
+        "`n` toggles them back off"
+    );
+}
+
+#[test]
+fn entering_and_leaving_galley_preserves_the_edit_cursor_and_scroll() {
+    let (mut app, _dir) = galley_app("galley-preserve");
+    // Park the edit cursor deep in the chapter and set a read-ahead scroll offset, as
+    // the edit view would have while working.
+    let body = app.edit_buffer().text();
+    let at = body
+        .find("Paragraph number 40")
+        .expect("the marker paragraph");
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(at);
+    let cursor_before = app.edit_buffer().cursor;
+    app.scroll_offset.set(3);
+
+    // Enter, page around, toggle line numbers, then leave.
+    app.toggle_galley();
+    app.galley_geometry.set((72, 20));
+    app.on_key(key(KeyCode::Char(' ')));
+    app.on_key(key(KeyCode::Char(' ')));
+    app.on_key(key(KeyCode::Char('n')));
+    app.on_key(key(KeyCode::Esc));
+
+    assert!(!app.in_galley(), "left the mode");
+    assert_eq!(
+        app.edit_buffer().cursor,
+        cursor_before,
+        "the edit cursor is exactly where it was before proofing"
+    );
+    assert_eq!(
+        app.scroll_offset.get(),
+        3,
+        "the edit view's scroll offset is undisturbed by a proofing pass"
+    );
+}
+
 #[test]
 fn mark_restore_into_a_folded_section_reveals_it() {
     // Bug E(i): returning to a mark set inside a section that was later folded must

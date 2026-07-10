@@ -46,6 +46,15 @@ impl App {
         // A fresh keystroke clears any stale status message.
         self.message = None;
 
+        // Galley proofreading mode (#1003) is read-only and owns all input while it's on:
+        // Space/Backspace page forward/back, `n` toggles the reference line numbers, and
+        // Esc (or Ctrl-\) leaves — dropping straight back to the untouched edit position.
+        // Every other key does nothing, so no edit can slip in during a proofing pass.
+        if self.in_galley() {
+            self.on_key_galley(key);
+            return;
+        }
+
         // Any editing-mode keystroke (a cursor move or an edit) snaps a read-ahead
         // wheel scroll (#764) back to the cursor, as the acceptance criteria call
         // for. Overlay / prompt / list keys leave it alone — they don't drive the
@@ -214,6 +223,28 @@ impl App {
             Mode::Visual { .. } => app.on_key_visual(key),
             _ => {}
         });
+    }
+
+    /// Handle a key while the read-only galley proofreading mode is on (#1003). The whole
+    /// mode is these few keys — page forward/back, line numbers, exit — and nothing else,
+    /// so the manuscript can't be edited during a proofing pass. Exiting leaves the edit
+    /// buffer's cursor and scroll exactly as they were.
+    fn on_key_galley(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            // Page forward / back — the galley's whole navigation.
+            KeyCode::Char(' ') | KeyCode::PageDown => self.galley_page_forward(),
+            KeyCode::Backspace | KeyCode::PageUp => self.galley_page_back(),
+            // Toggle the reference line-number gutter.
+            KeyCode::Char('n') => self.toggle_galley_line_numbers(),
+            // Esc, or the composition-family toggle key Ctrl-\, exits back to editing.
+            KeyCode::Esc => self.exit_galley(),
+            KeyCode::Char('\\') if ctrl => self.exit_galley(),
+            // Quitting still works from a proofing pass (it routes through the same
+            // unsaved-changes guard); every other key is inert — the mode is read-only.
+            KeyCode::Char('q' | 'c') if ctrl => self.request_quit(),
+            _ => {}
+        }
     }
 
     /// The editor's resting mode: Vim Normal when Vim mode is on, else the
