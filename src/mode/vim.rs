@@ -59,6 +59,14 @@ pub struct VimState {
     /// any command that edits is recorded here automatically, with no per-command
     /// bookkeeping, because recording keys off whether the buffer changed.
     pub(crate) dot: DotRepeat,
+    /// The recent-edit-locations ring (#1010): where edits recently happened, so
+    /// the author can step back through their trail without dropping marks by
+    /// hand. Updated automatically on the edit path; independent of [`marks`] and
+    /// the [`jumplist`], which it lives alongside. See [`EditRing`].
+    ///
+    /// [`marks`]: Self::marks
+    /// [`jumplist`]: Self::jumplist
+    pub(crate) edits: EditRing,
 }
 
 /// Vim `.` (repeat) state (#1004). The design records the raw key sequence of a
@@ -104,6 +112,32 @@ pub struct LastChange {
     /// The keys that made up the change (e.g. `d`,`w` for `dw`; `c`,`i`,`"`,…,
     /// `Esc` for `ci"…<Esc>`), replayed in order at the cursor.
     pub(crate) keys: Vec<KeyEvent>,
+}
+
+/// The bounded ring of recent edit locations (#1010): a breadcrumb of where the
+/// author has been editing, cycled back through with the go-to-recent commands
+/// and used for the `gi`-style "jump to last insertion." Filled automatically on
+/// the edit path — the author never manages it — and kept independent of the
+/// manually-set Vim marks and the nav jumplist, which it coexists with.
+///
+/// Entries are **coalesced by line**: consecutive edits on the same line of the
+/// same chapter fold into one entry (moved to the newest slot) rather than
+/// flooding the ring with a slot per keystroke, so cycling steps between *places*
+/// the author edited, not individual characters. Bounded (older entries drop), so
+/// it can never grow without limit on the hot path. `last_insertion` records the
+/// most recent *insertion* specifically, for the direct "jump to last insertion."
+#[derive(Default)]
+pub struct EditRing {
+    /// Recent edit spots, oldest first / newest last. Each entry is one line the
+    /// author edited (coalesced); bounded — the oldest drops once full.
+    pub(crate) spots: VecDeque<JumpPos>,
+    /// A cursor into `spots` while cycling back through them: `None` when not
+    /// mid-cycle (the next "go to older edit" starts from the newest). Reset the
+    /// moment a fresh edit lands, so a new edit re-anchors the walk at the newest.
+    pub(crate) cursor: Option<usize>,
+    /// Where text was last *inserted* (#1010) — the `gi` target. Distinct from the
+    /// ring's newest spot, which also advances on deletions.
+    pub(crate) last_insertion: Option<JumpPos>,
 }
 
 /// A recorded editor position for a Vim mark or the jump-back list (#825): which

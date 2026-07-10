@@ -126,6 +126,43 @@ impl App {
         }
     }
 
+    /// Open the go-to-line prompt (#1010): a direct "jump to line N" outside Vim's
+    /// `:N`, reachable from the run-action menu (and its `Ctrl-G` shortcut). Numeric
+    /// input, prefilled with the current line so the author can nudge from where
+    /// they are.
+    pub(crate) fn open_go_to_line(&mut self) {
+        let current = self.edit_buffer().cursor.line + 1; // 1-based, like the prompt asks for
+        self.open_prompt(
+            Pending::GoToLine,
+            "Go to line: ",
+            &current.to_string(),
+            None,
+        );
+    }
+
+    /// Resolve the go-to-line prompt's entry (#1010): a 1-based line number moves
+    /// the cursor there (clamped to the last content line, first non-blank column,
+    /// like Vim's `{count}G`), pushing the jumplist first so `` `` `` returns. A
+    /// non-numeric entry is reported; out-of-range clamps rather than failing.
+    fn go_to_line_input(&mut self, text: &str) {
+        let trimmed = text.trim();
+        let Ok(n) = trimmed.parse::<usize>() else {
+            self.message = Some(format!("Not a line number: {trimmed}"));
+            return;
+        };
+        // Record where we left so `` `` `` returns, like any big jump (#825).
+        self.push_jump();
+        let target = n.saturating_sub(1); // 1-based → 0-based
+        let last = self.edit_buffer().last_line_index();
+        self.edit_buffer_mut().move_to_line(target.min(last));
+        // The target line can sit inside a collapsed section (#975); reveal it so
+        // the cursor lands somewhere visible.
+        self.reveal_fold_at_cursor();
+        if target > last {
+            self.message = Some(format!("Past the end — moved to line {}.", last + 1));
+        }
+    }
+
     /// `:{N}` — move the cursor to 1-based line `n`, clamped to the buffer's last
     /// content line, landing on its first non-blank column like Vim's `{count}G`.
     fn ex_goto_line(&mut self, digits: &str) {
@@ -450,6 +487,7 @@ impl App {
             }
             // The text prompts share the editing keys; only Enter differs.
             Pending::GoToChapter
+            | Pending::GoToLine
             | Pending::NewChapter { .. }
             | Pending::SplitChapter { .. }
             | Pending::Duplicate { .. }
@@ -533,6 +571,14 @@ impl App {
                                             Some(format!("No chapter matches '{text}'."));
                                     }
                                     self.select(fallback);
+                                }
+                            }
+                            Pending::GoToLine => {
+                                // Back to editing, then move to the entered line
+                                // (#1010). A blank / non-numeric entry just closes.
+                                self.mode = closed;
+                                if !text.is_empty() {
+                                    self.go_to_line_input(text);
                                 }
                             }
                             Pending::NewChapter { at } => {
