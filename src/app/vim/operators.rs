@@ -72,12 +72,17 @@ impl App {
     /// started and landed (extended over the landing grapheme when `inclusive`).
     /// The cursor is restored, so this is a pure range computation shared by the
     /// delete/change operators and the case operators (#1006).
+    ///
+    /// Returns `None` when the motion doesn't move the cursor (`target == start`).
+    /// Vim treats a failed operator+motion (`df<absent>`, `dt<absent>`, `de` at a
+    /// word's last char) as a full no-op — it must NOT synthesize a one-grapheme
+    /// span and delete/case-map the char under the cursor (M3).
     fn charwise_range(
         &mut self,
         n: usize,
         inclusive: bool,
         step: &impl Fn(&mut Buffer),
-    ) -> (usize, usize) {
+    ) -> Option<(usize, usize)> {
         let buf = self.edit_buffer_mut();
         let start = buf.cursor_byte();
         let saved = buf.cursor;
@@ -86,15 +91,18 @@ impl App {
         }
         let target = buf.cursor_byte();
         buf.cursor = saved;
+        if target == start {
+            return None;
+        }
         let hi = start.max(target);
-        (
+        Some((
             start.min(target),
             if inclusive {
                 buf.grapheme_after(hi)
             } else {
                 hi
             },
-        )
+        ))
     }
     /// A charwise motion: move the cursor, or — when an operator is pending —
     /// delete/change the span from the cursor to where the motion lands.
@@ -103,13 +111,19 @@ impl App {
         // A pending case operator (`g~w`, `gU$`, #1006) shares the same range
         // computation as delete/change; resolve its span and case-map it.
         if let Some((kind, n)) = self.take_case_op(count) {
-            let (lo, hi) = self.charwise_range(n, inclusive, &step);
-            self.apply_case(kind, lo, hi);
+            // A motion that can't move (`g~f<absent>`) cancels the operator — a
+            // full no-op, never a one-grapheme case-map of the char here (M3).
+            if let Some((lo, hi)) = self.charwise_range(n, inclusive, &step) {
+                self.apply_case(kind, lo, hi);
+            }
             return;
         }
         if let Some((op, n)) = self.take_op(count) {
-            let (lo, hi) = self.charwise_range(n, inclusive, &step);
-            self.operate_charwise(op, lo, hi);
+            // Same for delete/change: a failed motion (`df<absent>`) is a no-op,
+            // not a deletion of the grapheme under the cursor (M3).
+            if let Some((lo, hi)) = self.charwise_range(n, inclusive, &step) {
+                self.operate_charwise(op, lo, hi);
+            }
         } else {
             self.edit_move(move |b| {
                 for _ in 0..count {

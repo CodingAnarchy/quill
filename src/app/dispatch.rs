@@ -210,6 +210,11 @@ impl App {
             && !key.modifiers.contains(KeyModifiers::CONTROL)
             && self.vim_state.pending == crate::mode::VimPending::None
             && self.vim_state.op.is_none()
+            // A pending `g~`/`gu`/`gU` case operator (#1006) must not be shadowed:
+            // `.` isn't a motion, so it should fall through to normal dispatch,
+            // where `resolve_case_prefix` cancels the operator (matching Vim),
+            // rather than replaying the previous change and dropping the operator.
+            && self.case_op.is_none()
         {
             // `{count}.` repeats the change that many times (Vim's behavior); a
             // bare `.` repeats once. Either way the count is consumed here.

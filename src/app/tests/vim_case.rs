@@ -150,3 +150,156 @@ fn dot_repeats_a_g_tilde_word_operator() {
         ". repeated the g~ word operator"
     );
 }
+
+// --- M2: `g~` then `.` must not replay a previous unrelated change ---------
+
+#[test]
+fn g_tilde_then_dot_cancels_and_does_not_replay_the_last_change() {
+    // A `g~`/`gu`/`gU` armed and immediately followed by `.` must NOT hit the dot
+    // fast-path — which would replay the previous change while silently discarding
+    // the armed operator. `.` isn't a motion, so the case operator cancels
+    // (matching Vim); no replay, no edit.
+    //
+    // The prior change here is a `~` toggle. If the buggy fast-path fires, it
+    // replays `~` while the Toggle case operator is still armed, so the replayed
+    // `~` reads as the doubled `g~~` and toggles the WHOLE line — a visible,
+    // wrong edit. The fix keeps `.` off the fast-path, so nothing is replayed.
+    let (mut app, _dir) = case_app("case-g-tilde-dot", "alpha bravo\n");
+    type_str(&mut app, "~"); // real prior change: toggle the leading 'a' -> 'A'
+    assert_eq!(
+        app.buffer.text(),
+        "Alpha bravo\n",
+        "~ toggled the first char"
+    );
+    seek(&mut app, 0); // back to the line start
+    let after_real = app.buffer.text();
+    let seq_before = app.buffer.edit_seq();
+    // Arm `g~`, then press `.`.
+    type_str(&mut app, "g~");
+    assert!(app.case_op.is_some(), "g~ armed the case operator");
+    app.on_key(key(KeyCode::Char('.')));
+    assert!(
+        app.case_op.is_none(),
+        "`.` cancelled the pending case operator"
+    );
+    assert_eq!(
+        app.buffer.text(),
+        after_real,
+        "`.` after g~ made no edit — it neither replayed the ~ nor toggled the line"
+    );
+    assert_eq!(
+        app.buffer.edit_seq(),
+        seq_before,
+        "the cancelled g~. bumped no edit sequence"
+    );
+}
+
+// --- M1: a no-op case/transpose must not dirty, undo, or retarget `.` ------
+
+#[test]
+fn a_noop_case_command_does_not_dirty_undo_or_retarget_dot() {
+    // `~` on a caseless char, `gU` over already-uppercase text, and `gs` on
+    // identical chars all map to themselves. Each must be a true no-op: no dirty
+    // flag, no undo step, and — crucially — no `.` retarget, so a prior real
+    // change is still what `.` repeats (the edit_seq never moves).
+    let (mut app, _dir) = case_app("case-noop", "AB 5 xx yo\n");
+    // A real change first: `~` toggles the leading 'A' -> 'a'; this is what `.`
+    // should keep repeating through every following no-op.
+    type_str(&mut app, "~");
+    assert_eq!(app.buffer.text(), "aB 5 xx yo\n", "~ toggled the A");
+    // Baseline the change-tracking state after the one real edit.
+    app.buffer.dirty = false;
+    let seq_after_real = app.buffer.edit_seq();
+
+    // No-op 1: `~` on the digit '5' (caseless).
+    seek(&mut app, 3);
+    type_str(&mut app, "~");
+    // No-op 2: `gU` over a caseless span (the space at byte 2) — upper-casing a
+    // space maps it to itself.
+    seek(&mut app, 2);
+    type_str(&mut app, "gUl");
+    // No-op 3: `gs` swapping the two identical 'x' chars in "xx".
+    seek(&mut app, 6); // on the second 'x'
+    type_str(&mut app, "gs");
+
+    assert_eq!(
+        app.buffer.text(),
+        "aB 5 xx yo\n",
+        "every no-op left the text unchanged"
+    );
+    assert!(
+        !app.buffer.dirty,
+        "a no-op case/transpose did not dirty the buffer"
+    );
+    assert_eq!(
+        app.buffer.edit_seq(),
+        seq_after_real,
+        "no-ops bumped no edit sequence (so `.` was not retargeted)"
+    );
+    // Undo should reach back past the no-ops to the one real change and revert it.
+    app.on_key(key(KeyCode::Char('u')));
+    assert_eq!(
+        app.buffer.text(),
+        "AB 5 xx yo\n",
+        "one undo reverts the real change — the no-ops pushed no undo steps"
+    );
+
+    // And `.` still repeats the original `~` toggle, not any of the no-ops. Redo
+    // the real change, move to a fresh cased char, and repeat.
+    app.on_key(key(KeyCode::Char('.')));
+    // `.` re-applies the recorded `~` at the cursor (start of line -> 'A' toggled).
+    assert_eq!(
+        app.buffer.text(),
+        "aB 5 xx yo\n",
+        "`.` repeated the original ~ toggle across the no-ops"
+    );
+}
+
+// --- M3: `df<char-not-on-line>` is a full no-op ---------------------------
+
+#[test]
+fn df_with_an_absent_target_deletes_nothing() {
+    // A failed operator+motion (`df` for a char that isn't on the line) is a full
+    // no-op in Vim — it must NOT delete the grapheme under the cursor.
+    let (mut app, _dir) = case_app("case-df-absent", "hello\n");
+    let seq_before = app.buffer.edit_seq();
+    type_str(&mut app, "dfz"); // 'z' isn't on the line
+    assert_eq!(
+        app.buffer.text(),
+        "hello\n",
+        "df for an absent char deleted nothing"
+    );
+    assert_eq!(
+        app.buffer.edit_seq(),
+        seq_before,
+        "the cancelled df bumped no edit sequence"
+    );
+    assert!(
+        app.vim_state.op.is_none(),
+        "the delete operator was cancelled"
+    );
+}
+
+#[test]
+fn a_replayed_df_deletes_nothing_on_a_line_lacking_the_target() {
+    // A recorded `dfx` replayed by `.` on a line without 'x' must also be a no-op
+    // — it must not silently delete a char under the cursor (M3).
+    let (mut app, _dir) = case_app("case-df-dot", "axbc\nqrst\n");
+    type_str(&mut app, "dfx"); // deletes "ax" up to and incl. 'x'
+    assert_eq!(app.buffer.text(), "bc\nqrst\n", "dfx deleted through the x");
+    // Move to the second line (no 'x') and repeat with `.`.
+    app.buffer.cursor = app.buffer.cursor_at_byte(3); // start of "qrst"
+    let text_before_dot = app.buffer.text();
+    let seq_before_dot = app.buffer.edit_seq();
+    app.on_key(key(KeyCode::Char('.')));
+    assert_eq!(
+        app.buffer.text(),
+        text_before_dot,
+        "replayed dfx on a line without x deleted nothing"
+    );
+    assert_eq!(
+        app.buffer.edit_seq(),
+        seq_before_dot,
+        "the no-op replay bumped no edit sequence"
+    );
+}
