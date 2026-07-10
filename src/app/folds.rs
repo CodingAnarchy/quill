@@ -19,6 +19,41 @@ use crate::app::App;
 use crate::buffer::Buffer;
 use crate::syntax::Heading;
 
+/// Galley proofreading mode (#1003): a distinct read-only presentation that paginates
+/// the active chapter one screen-page at a time — Space/Backspace to page forward and
+/// back — instead of the continuous, cursor-following scroll of the edit view. Proofing
+/// against a still page (rather than a moving wall of text) surfaces the errors a scroll
+/// glides past. It is a sibling of the distraction-free composition mode ([`App::
+/// toggle_distraction_free`]): both hide the chrome and show only the centered prose, but
+/// the galley never edits and never follows the cursor — it is its own paged, read-only
+/// view, so entering and leaving it leaves the edit buffer's cursor and scroll untouched.
+///
+/// The state is the current page's top logical line and whether line numbers are shown;
+/// it lives beside the buffer, never inside it, so the rope and the file are untouched
+/// exactly as folding is. `None` on the app means proofing is off (the normal editor).
+#[derive(Clone, Copy)]
+pub struct GalleyState {
+    /// The logical (buffer) line that starts the page currently on screen. Paging moves
+    /// this to the first line of the next / previous screenful of visual rows; the
+    /// renderer draws from here down, never from the cursor.
+    pub top_line: usize,
+    /// Whether each visual row is prefixed with its 1-based logical line number (#1003) —
+    /// a reference gutter for a proofing pass. Toggled on with `n`, off by default.
+    pub line_numbers: bool,
+}
+
+impl GalleyState {
+    /// Enter proofing with the page opening on `top_line` (usually the edit cursor's
+    /// line, so a pass starts where the author was), line numbers off.
+    #[must_use]
+    const fn opening_at(top_line: usize) -> Self {
+        Self {
+            top_line,
+            line_numbers: false,
+        }
+    }
+}
+
 /// The set of collapsed headings, keyed by each heading's start byte in the buffer
 /// (#975). Empty by default — nothing folds until the author collapses a section.
 #[derive(Default, Clone)]
@@ -305,5 +340,85 @@ impl App {
         }
         let headings = self.edit_buffer().syntax().headings().to_vec();
         self.folds.prune(&headings);
+    }
+
+    /// Whether the read-only galley proofreading mode is on (#1003).
+    #[must_use]
+    pub const fn in_galley(&self) -> bool {
+        self.galley.is_some()
+    }
+
+    /// Enter (or leave) the galley proofreading mode (#1003): a distinct read-only,
+    /// paginated presentation of the active chapter. Entering opens the first page on the
+    /// edit cursor's own line so the pass starts where the author was, and — crucially —
+    /// touches neither the buffer cursor nor the edit view's scroll offset, so leaving
+    /// drops straight back to the exact edit position. Leaving simply forgets the paging
+    /// state. Composes atop the same chrome-free presentation as composition mode.
+    pub(crate) fn toggle_galley(&mut self) {
+        if self.galley.is_some() {
+            self.galley = None;
+            self.message = Some("Proofreading mode off.".into());
+        } else {
+            let top = self.edit_buffer().cursor.line;
+            self.galley = Some(GalleyState::opening_at(top));
+            self.message = Some(
+                "Proofreading mode — Space/Backspace page · n line numbers · Esc exits.".into(),
+            );
+        }
+    }
+
+    /// Leave the galley proofreading mode (#1003) if it is on — the Esc / toggle-off exit
+    /// that restores the edit view exactly as it was (the cursor and scroll were never
+    /// disturbed while proofing). A no-op when proofing is already off.
+    pub(super) fn exit_galley(&mut self) {
+        if self.galley.is_some() {
+            self.galley = None;
+            self.message = Some("Proofreading mode off.".into());
+        }
+    }
+
+    /// Page the galley forward (#1003): advance the page top to the first logical line of
+    /// the next screenful of visual rows, clamped so the last page can't scroll past the
+    /// end of the chapter (no blank pages beyond the final line). Read-only — it moves the
+    /// page, never the edit cursor.
+    pub(super) fn galley_page_forward(&mut self) {
+        let (wrap, height) = self.galley_geometry.get();
+        let (wrap, height) = (wrap as usize, height as usize);
+        let buffer = self.edit_buffer();
+        let Some(g) = self.galley else { return };
+        // The furthest a page may start and still fill the screen from the bottom — so the
+        // final page shows the chapter's tail, not blank space past the end.
+        let last_top = crate::ui::galley_last_top(buffer, wrap, height);
+        let next = crate::ui::galley_next_top(buffer, g.top_line, wrap, height).min(last_top);
+        if next > g.top_line {
+            if let Some(g) = self.galley.as_mut() {
+                g.top_line = next;
+            }
+        }
+    }
+
+    /// Page the galley back (#1003): retreat the page top to the first line of the
+    /// previous screenful of visual rows, clamped at the start of the chapter. Read-only.
+    pub(super) fn galley_page_back(&mut self) {
+        let (wrap, height) = self.galley_geometry.get();
+        let buffer = self.edit_buffer();
+        let Some(g) = self.galley else { return };
+        let prev = crate::ui::galley_prev_top(buffer, g.top_line, wrap as usize, height as usize);
+        if let Some(g) = self.galley.as_mut() {
+            g.top_line = prev;
+        }
+    }
+
+    /// Toggle the galley's reference line numbers (#1003) — the gutter that numbers each
+    /// visual row, on request during a proofing pass.
+    pub(crate) fn toggle_galley_line_numbers(&mut self) {
+        if let Some(g) = self.galley.as_mut() {
+            g.line_numbers = !g.line_numbers;
+            self.message = Some(if g.line_numbers {
+                "Line numbers on.".into()
+            } else {
+                "Line numbers off.".into()
+            });
+        }
     }
 }

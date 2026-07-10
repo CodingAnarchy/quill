@@ -147,6 +147,9 @@ pub enum Action {
     ExpandAll,
     /// Toggle distraction-free composition mode — hide the chrome (#975).
     ToggleComposition,
+    /// Toggle the read-only galley proofreading mode — a paginated, page-at-a-time
+    /// read-through of the chapter (#1003).
+    ToggleGalley,
     /// Open the read-only corkboard for the active chapter (#589, Phase 1): an
     /// index-card overview built from the chapter's `##`/`###` scene headings —
     /// each card is a heading + its first line of prose — navigable, Enter jumps
@@ -347,6 +350,7 @@ impl Action {
         Self::FoldAll,
         Self::ExpandAll,
         Self::ToggleComposition,
+        Self::ToggleGalley,
         Self::Settings,
         // Help
         Self::UserGuide,
@@ -413,6 +417,7 @@ impl Action {
             Self::FoldAll => "view:fold-all",
             Self::ExpandAll => "view:expand-all",
             Self::ToggleComposition => "view:composition",
+            Self::ToggleGalley => "view:galley",
             Self::Corkboard => "view:corkboard",
             Self::ManuscriptCorkboard => "view:corkboard-all",
             Self::AddAnnotation => "annotate",
@@ -508,6 +513,7 @@ impl Action {
             | Self::FoldAll
             | Self::ExpandAll
             | Self::ToggleComposition
+            | Self::ToggleGalley
             | Self::Settings => "View",
             Self::UserGuide | Self::QuickStart => "Help",
         }
@@ -598,6 +604,7 @@ impl Action {
             Self::FoldAll => "Fold all sections",
             Self::ExpandAll => "Expand all sections",
             Self::ToggleComposition => "Composition mode — distraction-free (toggle)",
+            Self::ToggleGalley => "Proofread — galley reading mode (toggle)",
             Self::Corkboard => "Corkboard (scene overview)",
             Self::ManuscriptCorkboard => "Corkboard — whole manuscript",
             Self::AddAnnotation => "Annotate selection",

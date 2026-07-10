@@ -4,8 +4,16 @@
 //! across a fold; composition mode hides the chrome and restores it. Modeled on
 //! the scene-break display-only tests.
 
+use std::fmt::Write;
+
 use super::*;
 use crate::buffer::Cursor;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+/// A plain (no-modifier) key event — the galley paging tests press Space, `n`, etc.
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
 
 /// A three-section chapter: a title and two `##` scenes, each with a body line.
 const CHAPTER: &str =
@@ -255,6 +263,100 @@ fn composition_mode_composes_with_folding() {
         "the fold still hides its body"
     );
     assert!(screen.contains("Scene two"), "unfolded sections still show");
+}
+
+/// A many-paragraph chapter whose lines are individually identifiable, so a render test
+/// can tell which page is on screen. Each paragraph is one numbered line.
+fn galley_chapter() -> String {
+    let mut body = String::new();
+    for i in 1..=60 {
+        let _ = writeln!(body, "Line {i} of the galley proofing pass.\n");
+    }
+    body
+}
+
+#[test]
+fn galley_mode_paginates_and_pages_forward() {
+    let mut app = app_with(&galley_chapter());
+    // Proof from the top of the chapter (the cursor rests at the buffer end after the
+    // test buffer is typed in; a real pass usually starts at the beginning).
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+    app.toggle_galley();
+
+    // The first page shows the opening lines but not the far tail — it's paginated,
+    // not the whole scroll.
+    let page1 = render(&app, 60, 12);
+    assert!(
+        page1.contains("Line 1 of"),
+        "the first page opens the chapter"
+    );
+    assert!(
+        !page1.contains("Line 60 of"),
+        "a page is one screenful, not the whole chapter"
+    );
+
+    // Page forward: the visible window advances to later lines.
+    let top1 = app.galley.expect("in galley").top_line;
+    app.on_key(key(KeyCode::Char(' ')));
+    let top2 = app.galley.expect("in galley").top_line;
+    assert!(top2 > top1, "Space advanced the page top");
+    let page2 = render(&app, 60, 12);
+    assert!(
+        !page2.contains("Line 1 of"),
+        "the opening line has paged off screen"
+    );
+    // The new page shows a later stretch of the chapter — some numbered line past the
+    // first screenful, not the opening lines.
+    assert!(
+        page2.lines().any(|l| l.contains(" of the galley")),
+        "the next screenful of prose is shown"
+    );
+    assert!(
+        !page2.contains("Line 2 of"),
+        "early lines that belong to page one are no longer shown"
+    );
+}
+
+#[test]
+fn galley_mode_shows_no_chrome() {
+    // In the galley there is no status bar and no outline pane — just the page.
+    let mut app = app_with_chapters(&["One", "Two"], &galley_chapter());
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+    app.outline_visible = true;
+    app.toggle_galley();
+    let screen = render(&app, 80, 12);
+    assert!(
+        !screen.contains("Two"),
+        "the outline pane chrome is hidden while proofing"
+    );
+    assert!(
+        !screen.contains("words · ln"),
+        "the editor status bar is hidden while proofing"
+    );
+    assert!(screen.contains("Line 1 of"), "the prose page shows");
+}
+
+#[test]
+fn galley_line_numbers_render_a_gutter() {
+    let mut app = app_with(&galley_chapter());
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+    app.toggle_galley();
+    let plain = render(&app, 60, 8);
+    // With numbers off, the first prose row starts at the text, not a digit gutter.
+    let first = plain.lines().find(|l| l.contains("Line 1 of")).unwrap();
+    assert!(
+        first.trim_start().starts_with("Line 1"),
+        "no gutter when line numbers are off"
+    );
+
+    app.toggle_galley_line_numbers();
+    let numbered = render(&app, 60, 8);
+    let row = numbered.lines().find(|l| l.contains("Line 1 of")).unwrap();
+    // The logical line number (1) prefixes the row in a numeric gutter.
+    assert!(
+        row.trim_start().starts_with('1'),
+        "the line-number gutter prefixes the prose row: {row:?}"
+    );
 }
 
 #[test]

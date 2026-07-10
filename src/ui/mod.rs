@@ -25,6 +25,9 @@ mod list_overlay;
 mod overlay;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 pub use editor::HeaderCache;
+// Galley proofreading pagination (#1003): the read-only paged view's page-advance math,
+// shared with the app-layer Space/Backspace paging so render and paging step in lockstep.
+pub use editor::{galley_last_top, galley_next_top, galley_prev_top};
 use list_overlay::{
     draw_annotations, draw_backup_browser, draw_conflict_review, draw_cooccurrence, draw_corkboard,
     draw_dashboard, draw_dir_browser, draw_drafts, draw_findings, draw_history,
@@ -135,6 +138,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
 /// Draw the editor base layer: the prose pane (with the outline strip when shown)
 /// and the status line beneath it. Always drawn; modal overlays float on top.
 fn draw_editor_base(frame: &mut Frame, area: Rect, app: &App) {
+    // Galley proofreading mode (#1003): a distinct read-only, paginated presentation —
+    // one screen-page of the chapter at a time, chrome-free like composition mode, but
+    // page-driven and never editable. Drawn straight into the whole screen and returns,
+    // so no status bar, outline, or split shows while proofing.
+    if app.in_galley() {
+        app.pane_rects.set(None); // no split on screen — no click target
+        editor::render_galley(frame, area, app);
+        return;
+    }
+
     // Distraction-free composition mode (#975): hide every piece of chrome — the
     // outline pane, the status bar, and any split — so the whole screen is the
     // centered prose column. Reuses the single-pane editor path (the same one focus
