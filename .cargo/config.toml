@@ -7,5 +7,18 @@
 # core and false-fails their sub-frame thresholds. They're ignored by default
 # because plain `cargo test` is a debug build, where the unoptimized code is
 # 3–18× slower and would false-fail the thresholds.
+#
+# `cargo perf` is hermetic: it runs `--ignored` offline, and the two network
+# catalog-vetting checks (`catalog_gguf_files_exist_on_huggingface`,
+# `embed_catalog_files_exist_on_huggingface`, #726) no-op unless the
+# `QUILL_CATALOG_CHECK` env guard is set — so the sweep never reaches
+# HuggingFace and can't false-fail offline (#1022).
+#
+# `cargo perf-catalog` runs *only* those two checks; it still needs the guard
+# set, so invoke it as `QUILL_CATALOG_CHECK=1 cargo perf-catalog`. Run it before
+# a release, or whenever a `MODELS`/`EMBED_MODELS` row's repo/filename changes,
+# to catch a bad GGUF/safetensors filename here rather than in a user's failed
+# download. (A cargo alias can't set env itself, hence the inline prefix.)
 [alias]
 perf = "test --release -- --ignored --nocapture --test-threads=1"
+perf-catalog = "test --release files_exist_on_huggingface -- --ignored --nocapture"

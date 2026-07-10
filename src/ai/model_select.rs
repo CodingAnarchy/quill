@@ -560,6 +560,21 @@ const fn accel_label(hw: Hardware) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+
+    /// Env var that opts the network catalog-vetting checks in. The `cargo perf`
+    /// timing sweep (`--ignored`) does **not** set it, so those two checks no-op
+    /// there and the gate stays hermetic/offline (#1022). The dedicated
+    /// `cargo perf-catalog` alias sets it to run them deliberately (#726).
+    const CATALOG_CHECK_ENV: &str = "QUILL_CATALOG_CHECK";
+
+    /// True only when the catalog-vetting env guard is set (to any non-empty
+    /// value). When false the two HuggingFace HEAD checks return early — they're
+    /// `#[ignore]`d for the network dependency, but the `--ignored` timing sweep
+    /// would otherwise still run them and false-fail offline (#1022).
+    fn catalog_check_opted_in() -> bool {
+        env::var_os(CATALOG_CHECK_ENV).is_some_and(|v| !v.is_empty())
+    }
 
     /// A Metal (unified-memory) machine with `ram_gb` total RAM.
     fn metal(ram_gb: u32) -> Hardware {
@@ -797,13 +812,23 @@ mod tests {
     ///
     /// **Opt-in / non-hermetic on purpose** — it reaches HuggingFace, so it's
     /// `#[ignore]`d and kept out of the default and `--features local` suites (they
-    /// must never touch the network, #531). Run it before a release, and whenever a
+    /// must never touch the network, #531). It's *also* kept out of the `cargo perf`
+    /// timing sweep, which runs every `--ignored` test offline: this check only does
+    /// its network work when the [`CATALOG_CHECK_ENV`] guard is set, so the sweep
+    /// no-ops it and stays hermetic (#1022). Run it before a release, and whenever a
     /// `MODELS` row's `gguf_repo`/`gguf_file` changes, to catch a bad filename here
-    /// rather than in a user's failed download:
-    /// `cargo test catalog_gguf_files_exist_on_huggingface -- --ignored --nocapture`
+    /// rather than in a user's failed download, via the dedicated alias:
+    /// `cargo perf-catalog`
     #[test]
     #[ignore = "release gate: reaches HuggingFace to vet catalog filenames; not hermetic (#726)"]
     fn catalog_gguf_files_exist_on_huggingface() {
+        if !catalog_check_opted_in() {
+            // Hermetic by default: the `cargo perf` timing sweep runs `--ignored`
+            // offline and must not reach the network. Run `cargo perf-catalog`
+            // (sets QUILL_CATALOG_CHECK) to vet the catalog deliberately (#1022).
+            println!("skipping catalog HEAD checks: {CATALOG_CHECK_ENV} not set");
+            return;
+        }
         let mut missing = Vec::new();
         for m in MODELS {
             let url = m.gguf_resolve_url();
@@ -855,12 +880,21 @@ mod tests {
     /// following the redirect — a present file answers `302` (→ CDN), a missing one
     /// `404`. **Opt-in / non-hermetic on purpose** (reaches HuggingFace), so it's
     /// `#[ignore]`d and kept out of the default and `--features local` suites (they
-    /// must never touch the network, #531). Run it before a release, and whenever an
-    /// `EMBED_MODELS` row's `repo`/`weights_file` changes:
-    /// `cargo test embed_catalog_files_exist_on_huggingface -- --ignored --nocapture`
+    /// must never touch the network, #531), and — like its GGUF twin — out of the
+    /// `cargo perf` timing sweep: it only does network work when the
+    /// [`CATALOG_CHECK_ENV`] guard is set, so the offline `--ignored` sweep no-ops
+    /// it and stays hermetic (#1022). Run it before a release, and whenever an
+    /// `EMBED_MODELS` row's `repo`/`weights_file` changes, via the dedicated alias:
+    /// `cargo perf-catalog`
     #[test]
     #[ignore = "release gate: reaches HuggingFace to vet catalog filenames; not hermetic (#726)"]
     fn embed_catalog_files_exist_on_huggingface() {
+        if !catalog_check_opted_in() {
+            // Hermetic by default (see the sibling GGUF check): the `cargo perf`
+            // sweep runs `--ignored` offline. `cargo perf-catalog` opts in (#1022).
+            println!("skipping catalog HEAD checks: {CATALOG_CHECK_ENV} not set");
+            return;
+        }
         let mut missing = Vec::new();
         for m in EMBED_MODELS {
             let url = m.weights_resolve_url();
