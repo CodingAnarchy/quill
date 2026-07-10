@@ -582,6 +582,11 @@ impl Buffer {
         let (rb, rg) = graphemes[right];
         let end = rb + rg.len();
         let swapped = format!("{rg}{lg}");
+        // Swapping two identical graphemes changes nothing — a true no-op, so no
+        // edit (no dirty flag, no undo step, no `.` retarget) (#1006 / M1).
+        if swapped == line[lb..end] {
+            return None;
+        }
         // The cursor lands just after the moved-forward (originally left) grapheme —
         // i.e. one grapheme right of where it was, as `xp` leaves it.
         let cursor = base + lb + rg.len() + lg.len();
@@ -625,6 +630,11 @@ impl Buffer {
         let word_a = &line[a_s..a_e];
         let word_b = &line[b_s..b_e];
         let swapped = format!("{word_b}{gap}{word_a}");
+        // Two identical adjacent words swap to the same text — a no-op, so no edit
+        // (no dirty flag, no undo step, no `.` retarget) (#1006 / M1).
+        if swapped == line[a_s..b_e] {
+            return None;
+        }
         // Land at the start of word A in its new (second) position.
         let cursor = base + a_s + word_b.len() + gap.len();
         Some(CaseEdit {
@@ -646,6 +656,12 @@ impl Buffer {
         let line = self.line(line_no);
         let (b, g) = line.grapheme_indices(true).nth(self.cursor.col)?;
         let toggled = toggle_case(g);
+        // Toggling a caseless grapheme (space, digit, punctuation) yields the same
+        // text — a no-op, so no edit (no dirty flag, no undo step, no `.` retarget)
+        // (#1006 / M1).
+        if toggled == g {
+            return None;
+        }
         let end = b + g.len();
         Some(CaseEdit {
             lo: base + b,
@@ -669,6 +685,12 @@ impl Buffer {
             CaseChange::Upper => src.to_uppercase(),
             CaseChange::Lower => src.to_lowercase(),
         };
+        // Mapping already-cased text to itself (`gU` over uppercase, `gu` over
+        // lowercase, `g~` over caseless) changes nothing — a no-op, so no edit
+        // (no dirty flag, no undo step, no `.` retarget) (#1006 / M1).
+        if mapped == src {
+            return None;
+        }
         Some(CaseEdit {
             lo,
             hi,
