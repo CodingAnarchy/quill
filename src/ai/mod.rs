@@ -38,6 +38,7 @@ pub mod model_select;
 pub mod namegen;
 pub mod naming;
 pub mod plot;
+pub mod retrieval;
 pub mod router;
 pub mod scaffold;
 pub mod scene_brief;
@@ -71,7 +72,7 @@ use std::fmt::Write as _;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A provider that turns a [`Request`] into a [`Response`] — the Claude HTTP
 /// client or the local candle model. `Send + Sync` so a loaded backend can be
@@ -570,11 +571,28 @@ answer names no chapter or the manuscript does not contain the answer. If the \
 manuscript does not contain the answer, say so plainly in `answer` rather than \
 guessing.";
 
+/// System prompt for the offline bible-grounded retrieval loop (#856). Unlike
+/// [`QA_SYSTEM`], the manuscript is NOT in context — the model gathers it by calling
+/// read-only lookup tools (read a chapter, search the manuscript, read a bible
+/// section). It answers only from what it read and cites the chapters it drew from.
+/// It has no tool that writes prose, and must never draft, rewrite, or produce
+/// manuscript text — only answer *about* the manuscript.
+pub const QA_SYSTEM_RETRIEVAL: &str = "You are a writing assistant answering a question \
+about a novel manuscript that is too large to read all at once. You are seeded with a \
+compact story bible and the chapter list. Gather what you need with the read-only tools \
+— read:chapter to read a chapter's prose, search:manuscript to find where a phrase \
+occurs, read:bible to read a bible section, list:chapters to list the chapters — then \
+answer ONLY from what you read. Put the answer prose in `answer` and list in \
+`citations` the exact chapter titles you drew from (so the author can jump to them). If \
+what you gathered does not contain the answer, say so plainly rather than guessing. You \
+have no tool that writes or edits prose: never draft, rewrite, or produce manuscript \
+text — only answer about the manuscript.";
+
 /// A grounded Q&A reply (#609): the answer prose plus the chapter titles it was
 /// drawn from, so the author can jump to each cited chapter (like a
 /// [`Finding`](crate::mode::Finding)). The AI answers *about* the manuscript — it
 /// never writes into it; `citations` are retrieval, not prose.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Answer {
     /// The answer prose, grounded in the manuscript.
     pub answer: String,

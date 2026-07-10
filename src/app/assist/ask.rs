@@ -5,6 +5,43 @@
 use super::super::*;
 
 use crate::ai::embed::Breadth;
+use crate::ai::model_select::local_window;
+use crate::ai::retrieval::{self, BibleSeed, LexicalSearch};
+use crate::ai::BackendKind;
+
+/// The bible sections the offline retrieval loop seeds with (#856), each `(name,
+/// bible-file)` under `bible/`. The compact global index — characters, setting,
+/// timeline, plot, theme, outline — that carries the diffuse, holistic structure
+/// targeted chapter reads miss. Read on the UI thread and moved into the worker.
+const BIBLE_SECTIONS: &[(&str, &str)] = &[
+    ("characters", "characters"), // a directory of per-character files
+    ("setting", "setting.md"),
+    ("timeline", "timeline.md"),
+    ("plot", "plot.md"),
+    ("theme", "theme.md"),
+    ("outline", "outline.md"),
+];
+
+/// Whether an offline Q&A pass is too big for the on-device window and so must take
+/// the retrieval read-loop (#856) rather than a whole-book completion. `manuscript_len`
+/// is the whole active book's character length; `window_tokens` the model's context
+/// window. Uses the same `chars / 4 ≈ tokens` upper bound the cost estimate uses, so
+/// the decision can't drift from the pre-flight guard that would otherwise refuse
+/// (#849). Pure — the seam the app test drives without a backend.
+fn retrieval_oversized(manuscript_len: usize, window_tokens: u32) -> bool {
+    (manuscript_len / 4) as u64 > u64::from(window_tokens)
+}
+
+/// The #849 refusal, kept as the correct fallback when the offline retrieval loop
+/// genuinely can't proceed — the resolved local backend exposes no tool-use transport
+/// (`Converse`), so no read-loop can run. Actionable, like the router's own refusal.
+fn retrieval_unavailable(chapters: usize) -> String {
+    format!(
+        "This manuscript ({chapters} chapters) is too large for the on-device model's \
+         window, and offline reading isn't available on this backend. Turn off `[ai] \
+         offline` to use Claude, or narrow the scope (fewer chapters, a single book)."
+    )
+}
 
 /// Parse an optional retrieval-breadth marker off the front of an Ask question
 /// (#931), returning the requested [`Breadth`] and the question with the marker
@@ -171,6 +208,14 @@ impl App {
         if question.is_empty() {
             return;
         }
+        // Offline path only (#856): when the resolved backend is local and the whole
+        // book won't fit its window, gather the answer by an agentic read-loop rather
+        // than refusing (#849). The cloud path (Claude's 1M window + caching) is
+        // unchanged below.
+        if self.offline_qa_is_oversized() {
+            self.ask_offline_retrieval(&question);
+            return;
+        }
         // Capture the question so the answer can be filed under it in the session
         // Q&A log when it returns (#609). Set before the spawn so it's recorded
         // even if the request is a no-op (the spawn clears it on a not-ready gate).
@@ -196,6 +241,73 @@ impl App {
                 Outcome::Answer(backend.complete(&ai::build_qa_request(context, &question, &model)))
             },
         );
+    }
+
+    /// Whether an "Ask the manuscript" request must take the offline retrieval loop
+    /// (#856): the resolved backend is local (an `offline` pin or a `local` backend)
+    /// AND the whole active book exceeds the on-device model's context window. When
+    /// false, Ask uses its normal path (cloud whole-book, or a local book that fits).
+    /// A pure size/backend check on data already on hand — no filesystem read, so it's
+    /// off the keystroke path.
+    fn offline_qa_is_oversized(&self) -> bool {
+        self.ai.backend() == BackendKind::Local
+            && retrieval_oversized(
+                self.manuscript_text().len(),
+                local_window(&self.ai.local_models),
+            )
+    }
+
+    /// Run the offline bible-grounded retrieval loop for `question` (#856): assemble
+    /// the corpus (the active book's chapters) and the compact bible seed on the UI
+    /// thread, then drive the read-loop off the worker thread through the local
+    /// backend's [`Converse`](crate::ai::tool_loop::Converse) transport. The result is
+    /// wrapped as the same [`Outcome::Answer`] the whole-book path returns, so the Q&A
+    /// log, citations, and jump handling are all unchanged (one Q&A path). If the
+    /// backend has no tool-use transport, fall back to the #849 refusal — the correct
+    /// fallback when the loop genuinely can't proceed.
+    fn ask_offline_retrieval(&mut self, question: &str) {
+        let question = question.to_string();
+        self.pending_qa_question = Some(question.clone());
+        let chapters = self.ask_index_chapters();
+        let bible = self.bible_seed();
+        let max_turns = self.ai.retrieval_max_turns;
+        let window = local_window(&self.ai.local_models);
+        self.spawn_outcome("⟳ Reading the manuscript on-device…", move |backend| {
+            let Some(converse) = backend.as_converse() else {
+                return Outcome::Answer(Err(ai::AiError::NotConfigured(retrieval_unavailable(
+                    chapters.len(),
+                ))));
+            };
+            let search = LexicalSearch::new(chapters);
+            let result =
+                retrieval::run_retrieval(converse, &search, &bible, &question, max_turns, window)
+                    .map(|answer| retrieval::answer_response(&answer));
+            Outcome::Answer(result)
+        });
+    }
+
+    /// The compact story-bible seed for the retrieval loop (#856): the existing bible
+    /// files under `bible/` (characters, setting, timeline, plot, theme, outline) as
+    /// named sections — the global index the loop opens with and [`READ_BIBLE`] serves.
+    /// Empty sections are dropped; an empty seed makes the loop search-only and its
+    /// answer discloses the weaker coverage. Reads the bible files on the UI thread,
+    /// then moves the seed into the worker.
+    ///
+    /// [`READ_BIBLE`]: crate::ai::retrieval::READ_BIBLE
+    fn bible_seed(&self) -> BibleSeed {
+        let root = &self.project.root;
+        let sections = BIBLE_SECTIONS
+            .iter()
+            .map(|&(name, rel)| {
+                let text = if rel.contains('.') {
+                    bible::raw_file(root, rel)
+                } else {
+                    bible::raw_dir(root, rel)
+                };
+                (name.to_string(), text)
+            })
+            .collect();
+        BibleSeed::new(sections)
     }
 
     /// Apply a completed Q&A result (#609): parse the grounded answer, record it in
@@ -272,7 +384,25 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_breadth, Breadth};
+    use super::{parse_breadth, retrieval_oversized, Breadth};
+    use crate::ai::model_select::STANDARD_CONTEXT_TOKENS;
+
+    #[test]
+    fn oversized_is_a_pure_window_check() {
+        // A book that fits the window takes the normal path; one that exceeds it
+        // (chars/4 tokens > window) takes the read-loop (#856), matching the #849
+        // pre-flight guard's own chars/4 estimate so the decision can't drift.
+        let window = STANDARD_CONTEXT_TOKENS; // 40960 tokens
+        assert!(
+            !retrieval_oversized(4 * window as usize, window),
+            "a book that exactly fills the window is not oversized"
+        );
+        assert!(
+            retrieval_oversized(4 * window as usize + 4, window),
+            "a book past the window takes the retrieval loop"
+        );
+        assert!(!retrieval_oversized(0, window), "an empty book fits");
+    }
 
     #[test]
     fn no_marker_is_normal_breadth_and_untouched_question() {

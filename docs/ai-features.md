@@ -172,9 +172,14 @@ letting the pass hit the model and fault:
   time, and the result is the same shape as a one-shot rebuild — the scan
   completes on-device, the only way it can at that size. The status line shows
   "folding on-device — chapter by chapter" while it runs.
+- **Read it, for offline Q&A (#856).** "Ask the manuscript" no longer refuses the
+  oversized offline case: it runs the bible-grounded agentic read-loop described
+  under *Ask the manuscript* above, gathering only the passages it needs with
+  read-only lookup tools and answering with chapter citations, rather than sending
+  the whole book to a window that can't hold it.
 - **Report it clearly, when folding can't apply.** A one-shot pass with no
-  revise/merge step — whole-manuscript "Ask the manuscript", the prose/style,
-  editorial, and voice scans — can't be folded, and neither can a fold whose
+  revise/merge step — the prose/style, editorial, and voice scans — can't be folded,
+  and neither can a fold whose
   running bible has itself outgrown the window. Those are *refused* with a
   plain-language message: the pass needs ~N tokens, the on-device model holds
   40960, so it can't run offline at this size — turn off `[ai] offline` to use
@@ -268,6 +273,31 @@ The palette actions:
   embedding model is on disk (or the build has no `local` feature), Ask degrades
   gracefully to sending the whole active book, exactly as before — the citations
   stay jumpable either way. The index only ever reads prose to retrieve and cite it.
+
+  **Offline Q&A over an oversized manuscript (#856).** The whole-book Ask fits
+  Claude's 1M window but not the on-device model's ~40 960 tokens, so offline a book
+  that overflows the local window used to be the non-foldable refusal of #849. Now
+  the *offline* path runs a **bible-grounded agentic read-loop** instead: the model
+  is seeded with the compact story bible as a global index (characters, setting,
+  timeline, plot, theme, outline) plus the chapter list — never the whole
+  manuscript — and calls **read-only lookup tools** to pull in only what it needs:
+  `read:chapter` (one chapter's prose), `search:manuscript` (a lexical search that
+  returns the chapters and excerpts where a phrase occurs — a *retrieval interface*
+  behind which #831's semantic index slots with no change to the loop),
+  `read:bible` (a bible section), and `list:chapters`. It accumulates excerpts,
+  **compacting** older raw dumps to short notes as the running context nears the
+  window (so a long sweep stays within it), then answers with **chapter citations**
+  — jumpable exactly like the whole-book Ask. The loop has a higher turn cap than the
+  assistant's 8 (`[ai] retrieval_max_turns`, default 24), and on hitting it still
+  answers with what it gathered and discloses that coverage was incomplete rather
+  than erroring. Every answer discloses it was assembled from targeted excerpts, not
+  a full read, so a holistic answer stays hedged; with no story bible the loop still
+  runs (search-only) and says so. Every tool is a read-only lookup — the output is an
+  answer *about* the manuscript plus citations, never prose written into it — so this
+  changes only *how context is gathered*, not *what the AI produces*. The cloud Ask
+  path is unchanged (the novel fits Claude's window and prompt-caches). When the loop
+  genuinely can't proceed (the local backend exposes no tool-use transport), the #849
+  refusal remains the fallback.
 - **Word search** (#290) — an in-context thesaurus: name a word or phrase (the
   word under the cursor is prefilled) plus optional plain-language constraints
   (count, closeness, syllable count, language of origin, rarity); the current

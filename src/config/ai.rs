@@ -157,6 +157,15 @@ pub struct AiConfig {
     /// existing config that never mentions the key at the safe off state.
     #[serde(default = "default_background_batch_update")]
     pub background_batch_update: bool,
+    /// The turn cap for the offline bible-grounded Q&A retrieval loop (#856) — how
+    /// many read/search tool turns the on-device model may take before it must
+    /// answer with what it gathered. Deliberately larger than the assistant pane's
+    /// fixed cap of 8: each on-device turn is free and slow-but-correct is the
+    /// accepted trade for an answer that otherwise can't exist offline. Defaults to
+    /// [`retrieval::RETRIEVAL_MAX_TURNS`](crate::ai::retrieval::RETRIEVAL_MAX_TURNS);
+    /// the cloud assistant loop's cap is unaffected.
+    #[serde(default = "default_retrieval_max_turns")]
+    pub retrieval_max_turns: usize,
     /// Memoized OS-keychain read for the Claude key, so the store is consulted at
     /// most once per session rather than on every palette-gating check (and, on a
     /// changed dev binary, prompts at most once). Not config — skipped on load and
@@ -183,9 +192,16 @@ impl Default for AiConfig {
             refresh_after_changes: 5,
             echo_detection: true,
             background_batch_update: false,
+            retrieval_max_turns: default_retrieval_max_turns(),
             keychain_cache: OnceCell::new(),
         }
     }
+}
+
+/// The default offline Q&A retrieval turn cap (#856) — the module constant, so the
+/// config default can't drift from the loop's own default.
+const fn default_retrieval_max_turns() -> usize {
+    crate::ai::retrieval::RETRIEVAL_MAX_TURNS
 }
 
 impl AiConfig {
