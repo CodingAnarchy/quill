@@ -699,6 +699,19 @@ impl Manuscript {
         self.segments[..seg].iter().map(|s| s.lines).sum()
     }
 
+    /// The last global line index of the segment (chapter) containing `line`
+    /// (#1005 follow-up). The chapters in the window are concatenated with a
+    /// single `\n` seam and no blank line, so a plain "blank line or thematic
+    /// break" boundary check never sees the seam — a forward-scanning join or
+    /// reflow in a chapter's last paragraph would otherwise fold in or gather
+    /// the next chapter's first line across it. Callers clamp their forward scan
+    /// to this line so they stop at the seam.
+    pub fn segment_end_line(&self, line: usize) -> usize {
+        let seg = self.owner_of_line(line);
+        // `lines` is always ≥ 1, so this never underflows.
+        self.segment_start_line(seg) + self.segments[seg].lines - 1
+    }
+
     fn window_lo(&self) -> usize {
         self.segments[0].index
     }

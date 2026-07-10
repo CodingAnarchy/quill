@@ -235,24 +235,32 @@ impl App {
         // Build the merged text by folding each following line up in turn, stopping
         // at a boundary. `end_line` is the last line consumed; the replaced range
         // runs from the current line's start to just past `end_line`.
+        // In the continuous view, clamp the forward scan to the current chapter's
+        // segment (#1005 follow-up): chapters are concatenated with a single `\n`
+        // seam and no blank line, so without this the join would fold the next
+        // chapter's first line up across the seam — and since the range edit is
+        // clamped to the chapter, that text would be duplicated.
+        let scan_last = self.paragraph_scan_last(start_line);
         let (merged, end_line) = {
             let buf = self.edit_buffer();
-            let last = buf.line_count().saturating_sub(1);
             let mut merged = buf.line(start_line);
             let mut end_line = start_line;
             for _ in 0..joins {
                 let next = end_line + 1;
-                if next > last {
+                if next > scan_last {
                     break; // no line below to join — chapter/document end
                 }
                 let below = buf.line(next);
-                // A blank line is a paragraph boundary and a thematic break is a
-                // scene divider (#908): never fold either into the prose above it.
-                if below.trim().is_empty() || is_thematic_break(below.trim()) {
+                let below_t = below.trim();
+                // A blank line is a paragraph boundary, a thematic break is a scene
+                // divider (#908), and an ATX heading is a section boundary: never
+                // fold any of them into the prose above it.
+                if below_t.is_empty() || is_thematic_break(below_t) || is_atx_heading(below_t) {
                     break;
                 }
-                // Likewise never join out of a scene break itself.
-                if is_thematic_break(merged.trim()) {
+                // Likewise never join out of a scene break or heading itself.
+                let merged_t = merged.trim();
+                if is_thematic_break(merged_t) || is_atx_heading(merged_t) {
                     break;
                 }
                 merged = join_two(&merged, &below);
@@ -263,18 +271,9 @@ impl App {
         if end_line == start_line {
             return; // nothing below to join — leave the buffer untouched
         }
-        let (lo, hi) = {
-            let buf = self.edit_buffer();
-            (
-                buf.line_start_byte(start_line),
-                buf.next_line_byte(end_line),
-            )
-        };
-        // `next_line_byte` of a non-final line includes its trailing newline; put it
-        // back so the joined paragraph keeps its own line ending.
-        let has_newline = hi > self.edit_buffer().len_bytes()
-            || self.edit_buffer().byte_slice(hi.saturating_sub(1), hi) == "\n";
-        let replacement = if has_newline {
+        let lo = self.edit_buffer().line_start_byte(start_line);
+        let (hi, append_newline) = self.paragraph_replace_tail(end_line);
+        let replacement = if append_newline {
             format!("{merged}\n")
         } else {
             merged
@@ -313,15 +312,9 @@ impl App {
             return;
         }
         let wrapped = wrap_words(&words, self.wrap_w());
-        let (lo, hi) = {
-            let buf = self.edit_buffer();
-            (buf.line_start_byte(first), buf.next_line_byte(last))
-        };
-        // Preserve the paragraph's trailing newline if it had one (every line but a
-        // final unterminated document line does).
-        let has_newline = hi > self.edit_buffer().len_bytes()
-            || self.edit_buffer().byte_slice(hi.saturating_sub(1), hi) == "\n";
-        let replacement = if has_newline {
+        let lo = self.edit_buffer().line_start_byte(first);
+        let (hi, append_newline) = self.paragraph_replace_tail(last);
+        let replacement = if append_newline {
             format!("{wrapped}\n")
         } else {
             wrapped
@@ -340,10 +333,18 @@ impl App {
         let buf = self.edit_buffer();
         let last = buf.line_count().saturating_sub(1);
         let cur = line.min(last);
+        // In the continuous view the paragraph stops at the chapter seam (#1005
+        // follow-up), so reflow never gathers the next chapter's first line across
+        // it — the concatenation seam is a single `\n` with no blank line, which the
+        // blank/thematic-break check alone would miss.
+        let scan_last = self.paragraph_scan_last(cur);
         let is_boundary = |i: usize| {
             let t = buf.line(i);
             let t = t.trim();
-            t.is_empty() || is_thematic_break(t)
+            // Blank line, scene divider (#908), or ATX heading (#1005 follow-up) —
+            // each bounds the paragraph, so a heading directly above prose is never
+            // folded in.
+            t.is_empty() || is_thematic_break(t) || is_atx_heading(t)
         };
         if is_boundary(cur) {
             return None;
@@ -353,10 +354,60 @@ impl App {
             first -= 1;
         }
         let mut end = cur;
-        while end < last && !is_boundary(end + 1) {
+        while end < scan_last && !is_boundary(end + 1) {
             end += 1;
         }
         Some((first, end))
+    }
+
+    /// The last line a forward-scanning join/reflow may reach from `line` (#1005
+    /// follow-up). In the single-chapter view that's the buffer's final line; in
+    /// the continuous view it's clamped to the end of the chapter segment holding
+    /// `line`, so the scan never crosses a chapter seam.
+    fn paragraph_scan_last(&self, line: usize) -> usize {
+        let buf_last = self.edit_buffer().line_count().saturating_sub(1);
+        self.manuscript
+            .as_ref()
+            .map_or(buf_last, |m| m.segment_end_line(line).min(buf_last))
+    }
+
+    /// The end byte `hi` of the replaced range for a join/reflow whose last line is
+    /// `end_line`, and whether the replacement should re-append a trailing newline
+    /// (#1005 follow-up). Both are derived structurally, never by slicing the byte
+    /// before `hi` — that byte can be a UTF-8 continuation byte when the final
+    /// grapheme is multibyte (em-dash, curly quote, accent, emoji), and ropey
+    /// panics on a non-char-boundary slice.
+    ///
+    /// - In the single-chapter view (and for a non-final chapter line), the range
+    ///   runs to just past `end_line` (including its `\n`) and the replacement
+    ///   re-appends the newline — unless `end_line` is the buffer's final line with
+    ///   no trailing newline, in which case there's nothing to re-append.
+    /// - In the continuous view, when `end_line` is a chapter segment's last line
+    ///   (and not the buffer's final line) its trailing `\n` is the chapter seam.
+    ///   [`Manuscript::replace_byte_range`] preserves that seam newline by clamping
+    ///   the range back off it, so the range must stop *before* the seam and the
+    ///   replacement must not re-append a newline — otherwise the seam's `\n` and a
+    ///   re-appended `\n` would stack into a spurious blank line.
+    fn paragraph_replace_tail(&self, end_line: usize) -> (usize, bool) {
+        let buf = self.edit_buffer();
+        let buf_last = buf.line_count().saturating_sub(1);
+        let next_line = buf.next_line_byte(end_line);
+        if end_line >= buf_last {
+            // Buffer's final line: it carries a trailing `\n` only if the whole
+            // buffer does. `next_line_byte` already excludes any absent newline.
+            return (next_line, buf.text().ends_with('\n'));
+        }
+        // A non-final line always ends in `\n`. In the continuous view, if this is a
+        // chapter seam the clamp keeps that newline, so stop the range before it and
+        // don't re-append.
+        if self
+            .manuscript
+            .as_ref()
+            .is_some_and(|m| m.segment_end_line(end_line) == end_line)
+        {
+            return (next_line.saturating_sub(1), false);
+        }
+        (next_line, true)
     }
 
     /// Move the cursor a screenful of visual rows up or down (#641) — PageUp /
@@ -623,4 +674,17 @@ fn wrap_words(words: &[String], width: usize) -> String {
         }
     }
     out
+}
+
+/// Whether `line` (already trimmed of surrounding whitespace) is a Markdown ATX
+/// heading (#1005 follow-up): 1–6 leading `#` followed by a space or the end of
+/// the line. Join/reflow treat a heading as a paragraph boundary so `## Scene`
+/// directly above prose (no blank line) is never folded into the prose line.
+fn is_atx_heading(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|&b| b == b'#').count();
+    (1..=6).contains(&hashes)
+        && trimmed[hashes..]
+            .chars()
+            .next()
+            .is_none_or(|c| c == ' ' || c == '\t')
 }
