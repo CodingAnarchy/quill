@@ -20,9 +20,12 @@ fn init_creates_a_repo_and_gitignore() {
         ignore.contains("/bible/.state.toml"),
         "the AI scoping cache is ignored (#90)"
     );
+    // The durable findings store is deliberately *tracked* (#1051), not ignored, so
+    // it's captured at each milestone and the findings diff can read it out of
+    // history. Its own ignore line from the pre-#1051 default must be gone.
     assert!(
-        ignore.contains("/bible/findings.toml"),
-        "the durable triage store is editor state, not manuscript (#591)"
+        !ignore.contains("/bible/findings.toml"),
+        "the durable triage store is tracked so the findings diff can read it (#1051)"
     );
     fs::remove_dir_all(&dir).ok();
 }

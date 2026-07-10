@@ -35,13 +35,15 @@ pub use history::diff_file;
 
 /// Editor state and scratch that should never be committed — Quill's own
 /// metadata and OS cruft. Everything else (chapter `.md` files, `book.toml`, the
-/// `bible/` and `submission/` artifacts) is tracked.
+/// `bible/` and `submission/` artifacts) is tracked. The durable findings store
+/// (`bible/findings.toml`) is deliberately *tracked* (#1051): committing it at each
+/// milestone is what lets the findings diff read the store as it stood at a past
+/// point in history and report which findings a revision resolved / introduced.
 const GITIGNORE: &str = "\
 # Quill editor state — not part of the manuscript
 /.quill/
 /unused/
 /bible/.state.toml
-/bible/findings.toml
 
 # OS / editor cruft
 .DS_Store
