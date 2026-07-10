@@ -508,3 +508,126 @@ fn restructure_persists_to_disk() {
     let on_disk = fs::read_to_string(dir.join("one.md")).unwrap();
     assert_eq!(on_disk, "## Scene B\n\nBeta.\n\n## Scene A\n\nAlpha.\n");
 }
+
+// --- Refused in the continuous view (lost-update guard) --------------------
+
+/// A two-chapter project whose chapters each hold headings, so the continuous
+/// view spans both and there's a heading skeleton to (attempt to) restructure.
+fn two_heading_chapters(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "## A\n\nAlpha.\n\n## B\n\nBeta.\n").unwrap();
+    fs::write(dir.join("two.md"), "## C\n\nGamma.\n\n## D\n\nDelta.\n").unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn focusing_the_outline_is_refused_in_the_continuous_view() {
+    // In the continuous view the outline / restructure keys read and rewrite the
+    // stale single-chapter `self.buffer`, not the live window — so entering is
+    // refused with a note (mirroring the corkboard), leaving nothing behind.
+    let (mut app, _dir) = two_heading_chapters("outline-cont-refused");
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some());
+    // The fixture opens in the modeless editor (Insert).
+    assert!(matches!(app.mode, Mode::Insert));
+
+    app.focus_outline();
+
+    assert!(
+        !matches!(app.mode, Mode::Outline { .. }),
+        "the outline is not focused in the continuous view"
+    );
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "the editing mode is unchanged"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Leave the continuous view"),
+        "reported the refusal: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn ctrl_o_does_not_focus_the_outline_in_the_continuous_view() {
+    // The real key path: Ctrl-O reveals the pane, but a second press (which would
+    // focus it in the single view) is refused in the continuous view.
+    let (mut app, _dir) = two_heading_chapters("outline-cont-ctrl-o");
+    app.vim = true;
+    app.mode = Mode::Normal;
+    app.on_key(ctrl('l')); // enter continuous view
+
+    app.on_key(ctrl('o')); // reveal the pane
+    assert!(app.outline_visible);
+    app.on_key(ctrl('o')); // would focus — refused in continuous view
+
+    assert!(
+        !matches!(app.mode, Mode::Outline { .. }),
+        "Ctrl-O can't focus the outline in the continuous view"
+    );
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("Leave the continuous view"));
+}
+
+#[test]
+fn a_restructure_key_in_the_continuous_view_mutates_nothing() {
+    // The whole point: because the outline can't be focused, the `K`/`J`/`<`/`>`
+    // restructure gestures are unreachable in the continuous view — they route only
+    // through `on_key_outline`, and `focus_outline` (the sole gate into
+    // `Mode::Outline`) is refused here. So a would-be restructure leaves both
+    // chapter files byte-for-byte unchanged (no split-brain write of the stale
+    // `self.buffer` to disk). We call `outline_reheading`/`outline_move_section`'s
+    // gate directly and confirm we never reach the restructure: `focus_outline`
+    // returns without a `Mode::Outline`, so `on_key_outline` (where the keys live)
+    // is never entered.
+    let (mut app, dir) = two_heading_chapters("outline-cont-no-mutate");
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+    let two_before = fs::read_to_string(dir.join("two.md")).unwrap();
+
+    app.on_key(ctrl('l')); // enter continuous view
+    app.focus_outline(); // refused — mode stays editing, so the keys are unreachable
+    assert!(
+        !matches!(app.mode, Mode::Outline { .. }),
+        "never entered the outline, so K/J/</> can't restructure"
+    );
+    app.on_key(ctrl('l')); // leave — saves the window on the way out
+
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        one_before,
+        "chapter one unchanged on disk"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        two_before,
+        "chapter two unchanged on disk"
+    );
+}
+
+#[test]
+fn focusing_the_outline_still_works_in_the_single_chapter_view() {
+    // The guard is scoped to the continuous view: the single-chapter outline is
+    // unaffected and focuses as before.
+    let (mut app, _dir) = two_heading_chapters("outline-single-still-works");
+    assert!(app.manuscript.is_none());
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.focus_outline();
+    assert!(
+        matches!(app.mode, Mode::Outline { .. }),
+        "the single-chapter outline focuses normally"
+    );
+}

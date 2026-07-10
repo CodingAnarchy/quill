@@ -32,7 +32,21 @@ impl App {
     /// highlight), or the first heading. A no-op with a message when the chapter
     /// has no headings — there's nothing to navigate. Operates on the active
     /// chapter's buffer, the exact list the pane renders and jumps by.
+    ///
+    /// Refused in the continuous view (like the corkboard): the pane and the
+    /// `<`/`>`/`K`/`J` restructure gestures reachable only once it's focused all
+    /// read and rewrite `self.buffer` — the *stale* single-chapter buffer left
+    /// from before the window opened, not the live multi-chapter buffer on screen.
+    /// Entering here would show a different chapter's headings than what's visible
+    /// and land any restructure on the invisible stale buffer, which `flush_active`
+    /// would then write to disk — a lost update. The author leaves the view
+    /// (Ctrl-l) first, so `self.buffer` is the live, single-chapter buffer again.
     pub(crate) fn focus_outline(&mut self) {
+        if self.manuscript.is_some() {
+            self.message =
+                Some("Leave the continuous view (Ctrl-l) to restructure headings.".into());
+            return;
+        }
         let headings = self.buffer.syntax().headings();
         if headings.is_empty() {
             self.message =

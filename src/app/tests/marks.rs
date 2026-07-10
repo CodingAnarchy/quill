@@ -602,3 +602,122 @@ fn bracket_bracket_keys_drive_the_scene_heading_motion() {
         "`[[` → first heading"
     );
 }
+
+// --- Continuous-view positions are chapter-local (#1010 jump-back bug) -----
+
+#[test]
+fn current_position_is_chapter_local_in_the_continuous_view() {
+    // The window concatenates c0/c1/c2 ("alpha"/"beta"/"gamma"). With the cursor
+    // in a *later* chapter the buffer byte is absolute — but the recorded position
+    // must name that chapter and a byte *within* it, not `active_index()` + the
+    // absolute offset.
+    let (mut app, _dir) = three_chapter_app("cont-pos-local");
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some());
+    // active_index stays pinned to chapter 0 where the view opened.
+    assert_eq!(app.project.active_index(), 0);
+
+    // Move into chapter 2 ("gamma") and sit at the end of its first line.
+    app.on_key(key(KeyCode::Down)); // into c1
+    app.on_key(key(KeyCode::Down)); // into c2
+    app.on_key(key(KeyCode::End));
+    let m = app.manuscript.as_ref().unwrap();
+    assert_eq!(m.current_chapter(), 2, "cursor is in chapter 2");
+    let abs = app.edit_buffer().cursor_byte();
+    let base = m
+        .segment_spans()
+        .into_iter()
+        .find_map(|(idx, start, _)| (idx == 2).then_some(start))
+        .unwrap();
+    assert!(base > 0, "chapter 2's segment is not at buffer byte 0");
+
+    let pos = app.current_position();
+    assert_eq!(
+        pos.chapter, 2,
+        "records the cursor's true chapter, not index 0"
+    );
+    assert_eq!(
+        pos.byte,
+        abs - base,
+        "records a chapter-local byte, not the absolute one"
+    );
+    // "gamma" is 5 bytes; End of its first line sits at the local offset 5.
+    assert_eq!(pos.byte, 5, "chapter-local offset within \"gamma\"");
+}
+
+#[test]
+fn a_continuous_view_edit_round_trips_to_the_right_chapter() {
+    // The end-to-end guarantee: an edit made in a later segment of the continuous
+    // view records a ring spot that `restore_jump` lands *in that chapter at the
+    // edit's byte* — not at the end of the wrong (opening) chapter.
+    let (mut app, _dir) = three_chapter_app("cont-ring-roundtrip");
+    app.on_key(ctrl('l')); // enter continuous view
+
+    // Move into chapter 2 ("gamma") and append there — this records an edit spot.
+    app.on_key(key(KeyCode::Down)); // c1
+    app.on_key(key(KeyCode::Down)); // c2
+    app.on_key(key(KeyCode::End));
+    type_str(&mut app, "!"); // "gamma!" — the edit spot is local byte 6 in chapter 2
+    app.on_idle(); // seal the edit group
+
+    // The ring holds the spot with the true chapter and a chapter-local byte.
+    let spot = *app.vim_state.edits.spots.back().unwrap();
+    assert_eq!(
+        spot.chapter, 2,
+        "the spot names chapter 2, not the opening 0"
+    );
+    assert_eq!(spot.byte, 6, "chapter-local byte within \"gamma!\"");
+
+    // Wander to the top of the window, then cycle back to the edit. `restore_jump`
+    // leaves the continuous view, opens chapter 2, and places the cursor.
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(0);
+    app.jump_to_older_edit();
+    assert!(app.manuscript.is_none(), "restore left the continuous view");
+    assert_eq!(
+        app.project.active_index(),
+        2,
+        "landed in chapter 2, not the opening chapter"
+    );
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        6,
+        "cursor at the edit's byte in chapter 2, not the end of the wrong chapter"
+    );
+    assert_eq!(
+        app.buffer.text(),
+        "gamma!\n",
+        "the edit persisted to chapter 2"
+    );
+}
+
+#[test]
+fn a_mark_set_in_the_continuous_view_round_trips_to_the_right_chapter() {
+    // A Vim mark set with the cursor in a later segment jumps back to that chapter
+    // and byte, the same chapter-local contract the ring gets.
+    let (mut app, _dir) = three_chapter_app("cont-mark-roundtrip");
+    app.vim = true;
+    app.on_key(ctrl('l')); // enter continuous view
+    app.mode = Mode::Normal;
+
+    // Sit in chapter 1 ("beta") and set mark 'a' there.
+    app.on_key(key(KeyCode::Down)); // c1
+    app.on_key(key(KeyCode::End)); // end of "beta"
+    assert_eq!(app.manuscript.as_ref().unwrap().current_chapter(), 1);
+    type_str(&mut app, "ma");
+    let mark = *app.vim_state.marks.get(&'a').unwrap();
+    assert_eq!(mark.chapter, 1, "mark names chapter 1");
+    assert_eq!(mark.byte, 4, "chapter-local byte at the end of \"beta\"");
+
+    // Jump to it: leaves the continuous view, opens chapter 1, restores the byte.
+    type_str(&mut app, "`a");
+    assert!(
+        app.manuscript.is_none(),
+        "the mark jump left continuous view"
+    );
+    assert_eq!(app.project.active_index(), 1, "re-opened chapter 1");
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        4,
+        "cursor at the marked byte in chapter 1"
+    );
+}
