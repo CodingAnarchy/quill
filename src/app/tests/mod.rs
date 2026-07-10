@@ -107,6 +107,7 @@ mod typography;
 mod vcs;
 mod vcs_concurrency;
 mod vim;
+mod vim_case;
 mod vim_dot;
 mod workflows;
 

@@ -21,7 +21,7 @@ mod history;
 mod motions;
 use history::Snapshot;
 pub use motions::CharClass;
-pub use motions::{FindKind, TextObject};
+pub use motions::{CaseChange, CaseEdit, FindKind, TextObject};
 
 /// Initial window size (bytes) [`Buffer::grapheme_after`](Buffer::grapheme_after)
 /// scans forward from the offset before falling back to a wider window (#693). A
