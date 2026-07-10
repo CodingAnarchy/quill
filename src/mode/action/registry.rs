@@ -329,6 +329,7 @@ impl Action {
         Self::Ai(AiAction::Editorial),
         Self::Ai(AiAction::Accuracy),
         Self::Ai(AiAction::Relationship),
+        Self::Ai(AiAction::Foreshadow),
         Self::RefreshBibles,
         Self::QueuePasses,
         Self::BackgroundBibleUpdate,
@@ -590,6 +591,9 @@ impl Action {
             Self::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
             Self::Ai(AiAction::Accuracy) => "AI · Cultural & historical accuracy (flags, no fixes)",
             Self::Ai(AiAction::Relationship) => "AI · Relationship trajectory (flags, no fixes)",
+            Self::Ai(AiAction::Foreshadow) => {
+                "AI · Foreshadow & payoff (flags dangling setups, no fixes)"
+            }
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
             Self::QuickStart => "Quick-start (first-run card)",
@@ -731,6 +735,10 @@ impl Action {
                         // passes the two-layer prose guard. The pair is its free-text
                         // argument (see `text_arg`).
                         | AiAction::Relationship
+                        // Read-only foreshadow / payoff scan (#1047): produces
+                        // findings (dangling concrete setups), no prose and no
+                        // drafted payoff, so it passes the two-layer prose guard.
+                        | AiAction::Foreshadow
                         | AiAction::Ask
                         | AiAction::Brainstorm
                         | AiAction::DraftCharacters

@@ -10,11 +10,12 @@ use super::super::*;
 
 use super::write_failure_message;
 use super::{
-    describe_accuracy, describe_continuity, describe_editorial, describe_naming, describe_plot,
-    describe_relationship, describe_scaffold, describe_setting, describe_style, describe_theme,
-    describe_voice, findings_from,
+    describe_accuracy, describe_continuity, describe_editorial, describe_foreshadow,
+    describe_naming, describe_plot, describe_relationship, describe_scaffold, describe_setting,
+    describe_style, describe_theme, describe_voice, findings_from,
 };
 use crate::ai::accuracy::{self, Accuracy};
+use crate::ai::foreshadow::{self, Foreshadow};
 use crate::ai::naming::{self, Naming};
 use crate::ai::relationship::{self, Trajectory};
 use crate::ai::scaffold::{self, Scaffold};
@@ -160,6 +161,20 @@ impl App {
             move |manuscript, model| relationship::build_request(manuscript, &pair, model),
             relationship::parse,
             Outcome::Relationship,
+        );
+    }
+
+    /// Start a foreshadow / payoff scan (#1047): pair each concrete seeded detail
+    /// (an object, a named threat, a promised meeting, a planted clue) with its
+    /// resolution and flag the UNPAID ones, applied by [`App::poll_ai`] into the
+    /// revision-triage list. Findings only; author-invoked; never drafts the payoff.
+    /// Distinct from — and narrower than — the plot pass's thematic-thread tracking.
+    pub(crate) fn analyze_foreshadow(&mut self) {
+        self.spawn_manuscript_pass(
+            "⟳ Scanning setups & payoffs…",
+            foreshadow::build_request,
+            foreshadow::parse,
+            Outcome::Foreshadow,
         );
     }
 
@@ -422,6 +437,22 @@ impl App {
             None,
             AiAction::Relationship,
             describe_relationship,
+        );
+        self.show_findings(findings);
+    }
+
+    /// Apply a foreshadow / payoff scan (#1047): surface each unpaid concrete setup
+    /// as a triage finding (the flagged setup passage + why it reads as unpaid, its
+    /// chapter). Pure analysis — nothing is written, no payoff is drafted.
+    pub(crate) fn apply_foreshadow(&mut self, result: Result<Foreshadow, ai::AiError>) {
+        let Some(foreshadow) = self.ok_or_report(result) else {
+            return;
+        };
+        let findings = findings_from(
+            &foreshadow.findings,
+            None,
+            AiAction::Foreshadow,
+            describe_foreshadow,
         );
         self.show_findings(findings);
     }

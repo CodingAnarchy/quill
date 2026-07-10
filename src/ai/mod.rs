@@ -24,6 +24,7 @@ pub mod cost;
 pub mod editorial;
 pub mod embed;
 pub mod fal;
+pub mod foreshadow;
 mod http;
 pub mod image;
 pub mod import;
@@ -221,6 +222,11 @@ pub enum Outcome {
     /// (the arc) + inconsistency flags (contradictions / off-page reversals).
     /// Findings only; author-invoked; observes drift, never rewrites the arc.
     Relationship(Result<relationship::Trajectory, AiError>),
+    /// Foreshadow / payoff scan — concrete seeded details (an object, a named
+    /// threat, a promised meeting, a planted clue) that are set up then never paid
+    /// off (#1047). Findings only; author-invoked; distinct from the plot pass's
+    /// thematic-thread tracking.
+    Foreshadow(Result<foreshadow::Foreshadow, AiError>),
     /// Semantic "find similar scenes" (#924): the passages most similar to a
     /// selection / query, ranked with scores + jumpable citations. `None` when no
     /// embedding model is available (graceful degradation, not an error).
@@ -276,6 +282,7 @@ impl Outcome {
             Self::Editorial(r) => r.as_ref().err(),
             Self::Accuracy(r) => r.as_ref().err(),
             Self::Relationship(r) => r.as_ref().err(),
+            Self::Foreshadow(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
             Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),

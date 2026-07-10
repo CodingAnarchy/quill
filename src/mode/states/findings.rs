@@ -38,6 +38,10 @@ pub enum FindingKind {
     /// Cultural & historical accuracy findings (#973) — inaccuracy flags for an
     /// author-named concern. Accuracy, not sensitivity / representation.
     Accuracy,
+    /// Foreshadow / payoff findings (#1047) — concrete seeded details (an object,
+    /// a named threat, a promised meeting, a planted clue) set up then never paid
+    /// off. Distinct from the plot pass's thematic-thread tracking.
+    Foreshadow,
     Voice,
     /// Echo / near-duplicate passage pairs (#920) — the semantic-repetition scan.
     Echo,
@@ -63,6 +67,7 @@ impl FindingKind {
             Self::Style => "style",
             Self::Editorial => "editorial",
             Self::Accuracy => "accuracy",
+            Self::Foreshadow => "foreshadow",
             Self::Voice => "voice",
             Self::Echo => "echo",
             Self::Relationship => "relationship",
@@ -82,6 +87,7 @@ impl FindingKind {
             Self::Style => "Prose & style",
             Self::Editorial => "Editorial",
             Self::Accuracy => "Cultural & historical accuracy",
+            Self::Foreshadow => "Foreshadow & payoff",
             Self::Voice => "Character voice",
             Self::Echo => "Echoes & near-duplicates",
             Self::Relationship => "Relationship trajectory",
@@ -102,6 +108,7 @@ impl FindingKind {
             Self::Style,
             Self::Editorial,
             Self::Accuracy,
+            Self::Foreshadow,
             Self::Voice,
             Self::Echo,
             Self::Relationship,

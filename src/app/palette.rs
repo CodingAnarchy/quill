@@ -275,6 +275,7 @@ impl App {
                     | AiAction::Editorial
                     | AiAction::Accuracy
                     | AiAction::Relationship
+                    | AiAction::Foreshadow
             ) | Action::RefreshSeriesBible
                 | Action::RefreshBibles
                 | Action::QueuePasses
@@ -787,6 +788,7 @@ impl App {
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::NameGen => self.start_namegen(),
             AiAction::Editorial => self.analyze_editorial(),
+            AiAction::Foreshadow => self.analyze_foreshadow(),
             // Author-invoked accuracy (#973): prompt for the named concern first,
             // then run. On the confirmed / cost-gated re-entry the concern is already
             // captured, so spawn the pass instead of re-prompting.
@@ -937,6 +939,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Relationship => (
             "Relationship trajectory",
             "Track a pair's arc per chapter + flag inconsistencies (no fixes)",
+        ),
+        AiAction::Foreshadow => (
+            "Foreshadow & payoff",
+            "Flag concrete setups that never pay off — flags only, no drafted payoff",
         ),
     }
 }
