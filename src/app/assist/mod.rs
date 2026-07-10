@@ -159,6 +159,26 @@ pub(super) fn describe_foreshadow(f: &ai::foreshadow::UnpaidSetup) -> (String, V
     (format!("{}{at}", f.detail), f.chapters.clone())
 }
 
+pub(super) fn describe_factcheck(f: &ai::factcheck::FactCheckFinding) -> (String, Vec<String>) {
+    // Cite the contradicted research note, the contradiction, then the flagged
+    // passage (when quoted) — an observation the author acts on, never a fix.
+    let at = f
+        .passage
+        .trim()
+        .is_empty()
+        .then(String::new)
+        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.passage.trim()));
+    let note = f.note.trim();
+    let summary = if note.is_empty() {
+        format!("{}{at}", f.detail)
+    } else {
+        // Reuse the notebook's own citation phrasing so a finding reads the same as
+        // a bible entry that grounds against the note (#932).
+        format!("{}: {}{at}", ai::bible::cite_research(note), f.detail)
+    };
+    (summary, f.chapters.clone())
+}
+
 pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
     let summary = if f.character.is_empty() {
         format!("{}: {}", f.kind, f.detail)

@@ -10,11 +10,12 @@ use super::super::*;
 
 use super::write_failure_message;
 use super::{
-    describe_accuracy, describe_continuity, describe_editorial, describe_foreshadow,
-    describe_naming, describe_plot, describe_relationship, describe_scaffold, describe_setting,
-    describe_style, describe_theme, describe_voice, findings_from,
+    describe_accuracy, describe_continuity, describe_editorial, describe_factcheck,
+    describe_foreshadow, describe_naming, describe_plot, describe_relationship, describe_scaffold,
+    describe_setting, describe_style, describe_theme, describe_voice, findings_from,
 };
 use crate::ai::accuracy::{self, Accuracy};
+use crate::ai::factcheck::{self, FactCheck};
 use crate::ai::foreshadow::{self, Foreshadow};
 use crate::ai::naming::{self, Naming};
 use crate::ai::relationship::{self, Trajectory};
@@ -175,6 +176,30 @@ impl App {
             foreshadow::build_request,
             foreshadow::parse,
             Outcome::Foreshadow,
+        );
+    }
+
+    /// Start a research-notebook fact-check (#1049): read the author's own research
+    /// notebook (`bible/research.md`, #932) and flag manuscript passages that
+    /// contradict a note the author wrote — applied by [`App::poll_ai`] into the
+    /// revision-triage list. Findings only; author-invoked; grounded *solely* in the
+    /// author's notes (no external facts), distinct from the accuracy pass. When the
+    /// notebook is absent or holds no authored notes (only the seed template), there
+    /// is nothing to check against, so the pass is a no-op with a nudge rather than a
+    /// costed call with no basis.
+    pub(crate) fn analyze_factcheck(&mut self) {
+        let research =
+            std::fs::read_to_string(bible::research_path(&self.project.root)).unwrap_or_default();
+        if bible::research_notes(&self.project.root).is_empty() {
+            self.message =
+                Some("Add notes to your research notebook (bible/research.md) first".into());
+            return;
+        }
+        self.spawn_manuscript_pass(
+            "⟳ Fact-checking against your research notes…",
+            move |manuscript, model| factcheck::build_request(manuscript, &research, model),
+            factcheck::parse,
+            Outcome::FactCheck,
         );
     }
 
@@ -453,6 +478,23 @@ impl App {
             None,
             AiAction::Foreshadow,
             describe_foreshadow,
+        );
+        self.show_findings(findings);
+    }
+
+    /// Apply a research-notebook fact-check (#1049): surface each contradiction of an
+    /// author's note as a triage finding (the cited note, how the passage disagrees,
+    /// and the flagged passage). Pure analysis — nothing is written, no prose is
+    /// produced, and every finding is grounded in a note the author wrote.
+    pub(crate) fn apply_factcheck(&mut self, result: Result<FactCheck, ai::AiError>) {
+        let Some(factcheck) = self.ok_or_report(result) else {
+            return;
+        };
+        let findings = findings_from(
+            &factcheck.findings,
+            None,
+            AiAction::FactCheck,
+            describe_factcheck,
         );
         self.show_findings(findings);
     }

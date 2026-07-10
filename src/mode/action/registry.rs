@@ -330,6 +330,7 @@ impl Action {
         Self::Ai(AiAction::Accuracy),
         Self::Ai(AiAction::Relationship),
         Self::Ai(AiAction::Foreshadow),
+        Self::Ai(AiAction::FactCheck),
         Self::RefreshBibles,
         Self::QueuePasses,
         Self::BackgroundBibleUpdate,
@@ -594,6 +595,9 @@ impl Action {
             Self::Ai(AiAction::Foreshadow) => {
                 "AI · Foreshadow & payoff (flags dangling setups, no fixes)"
             }
+            Self::Ai(AiAction::FactCheck) => {
+                "AI · Fact-check vs. research notebook (flags, no fixes)"
+            }
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
             Self::QuickStart => "Quick-start (first-run card)",
@@ -739,6 +743,11 @@ impl Action {
                         // findings (dangling concrete setups), no prose and no
                         // drafted payoff, so it passes the two-layer prose guard.
                         | AiAction::Foreshadow
+                        // Read-only research-notebook fact-check (#1049): produces
+                        // findings grounded in the author's own notes, no prose — it
+                        // passes the two-layer prose guard. No argument (it reads
+                        // `bible/research.md` directly).
+                        | AiAction::FactCheck
                         | AiAction::Ask
                         | AiAction::Brainstorm
                         | AiAction::DraftCharacters

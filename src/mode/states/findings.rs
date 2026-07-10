@@ -42,6 +42,10 @@ pub enum FindingKind {
     /// a named threat, a promised meeting, a planted clue) set up then never paid
     /// off. Distinct from the plot pass's thematic-thread tracking.
     Foreshadow,
+    /// Research-notebook fact-check findings (#1049) — passages that contradict a
+    /// note the author wrote in `bible/research.md`. Grounded in the author's own
+    /// ledger; not sensitivity / representation, and distinct from Accuracy.
+    FactCheck,
     Voice,
     /// Echo / near-duplicate passage pairs (#920) — the semantic-repetition scan.
     Echo,
@@ -68,6 +72,7 @@ impl FindingKind {
             Self::Editorial => "editorial",
             Self::Accuracy => "accuracy",
             Self::Foreshadow => "foreshadow",
+            Self::FactCheck => "factcheck",
             Self::Voice => "voice",
             Self::Echo => "echo",
             Self::Relationship => "relationship",
@@ -88,6 +93,7 @@ impl FindingKind {
             Self::Editorial => "Editorial",
             Self::Accuracy => "Cultural & historical accuracy",
             Self::Foreshadow => "Foreshadow & payoff",
+            Self::FactCheck => "Research-notebook fact-check",
             Self::Voice => "Character voice",
             Self::Echo => "Echoes & near-duplicates",
             Self::Relationship => "Relationship trajectory",
@@ -109,6 +115,7 @@ impl FindingKind {
             Self::Editorial,
             Self::Accuracy,
             Self::Foreshadow,
+            Self::FactCheck,
             Self::Voice,
             Self::Echo,
             Self::Relationship,
