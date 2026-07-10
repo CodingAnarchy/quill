@@ -542,6 +542,67 @@ fn active_style_flag_hits_are_underlined_and_clear_when_off() {
 }
 
 #[test]
+fn proximity_repeats_are_dim_marked_in_view_and_clear_when_off() {
+    // A word echoed within the window (#1002) dim-marks in the visible viewport
+    // while the toggle is on; toggling off clears the cache so nothing dims, and the
+    // prose is never modified.
+    let before = "She turned, then he turned.\n";
+    let mut app = app_with(before);
+    app.toggle_proximity_repeats(); // on: computes the marks for the visible window
+    assert!(
+        !app.proximity_repeats.is_empty(),
+        "the close repeat is detected in view"
+    );
+
+    let dimmed = |app: &App| -> bool {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..40).any(|x| {
+            (0..8).any(|y| {
+                buf[(x, y)]
+                    .style()
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            })
+        })
+    };
+
+    assert!(
+        dimmed(&app),
+        "the near-proximity repeat is dim-marked in view"
+    );
+
+    // Toggling off clears the cache, so nothing dims on the next frame.
+    app.toggle_proximity_repeats();
+    assert!(
+        app.proximity_repeats.is_empty(),
+        "toggling off clears the cache"
+    );
+    assert!(!dimmed(&app), "clearing the marking removes the dim marker");
+
+    // The marking only observes — the prose is untouched by either toggle.
+    assert_eq!(app.edit_buffer().text(), before, "prose is never modified");
+}
+
+#[test]
+fn distant_proximity_repeat_is_not_marked() {
+    // The same word repeated far apart (past the window) is ordinary recurrence, not
+    // a near-echo, so nothing is cached to mark.
+    let mut filler = String::new();
+    for i in 0..40 {
+        write!(filler, "filler{i} ").unwrap();
+    }
+    let mut app = app_with(&format!("She turned away. {filler} He turned back.\n"));
+    app.toggle_proximity_repeats();
+    assert!(
+        app.proximity_repeats.is_empty(),
+        "a distant repeat is not a near-echo: {:?}",
+        app.proximity_repeats
+    );
+}
+
+#[test]
 fn markers_reappear_when_cursor_enters_the_span() {
     let mut app = app_with("*italic* word");
     app.buffer.cursor = Cursor { line: 0, col: 3 }; // inside "italic"
