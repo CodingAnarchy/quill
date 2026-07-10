@@ -4,6 +4,7 @@
 //! paragraph or scene boundary and never touch a word.
 
 use super::*;
+use std::fs;
 
 /// A Vim app in Normal mode over `text`, cursor at byte 0 — a controlled buffer
 /// for the join/reflow tests.
@@ -13,6 +14,30 @@ fn jr_app(name: &str, text: &str) -> (App, TempProject) {
     app.mode = Mode::Normal;
     app.buffer = Buffer::from_text(text);
     (app, dir)
+}
+
+/// A two-chapter project whose chapter bodies are `first` and `second`, opened in
+/// the continuous view with Vim mode on, resting in Normal — a real manuscript
+/// (not the `jr_app` `manuscript = None` shim) so the seam-clamp tests exercise
+/// the actual chapter concatenation and write-back (#1005 follow-up).
+fn jr_continuous_app(name: &str, first: &str, second: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), first).unwrap();
+    fs::write(dir.join("two.md"), second).unwrap();
+
+    let mut app = open_test_app(&dir);
+    app.vim = true;
+    app.mode = Mode::Normal;
+    app.on_key(ctrl('l')); // enter continuous view
+    assert!(app.manuscript.is_some(), "continuous view is active");
+    (app, TempProject::new(dir))
 }
 
 /// The words of a buffer, in order, ignoring all whitespace — used to assert that
@@ -200,5 +225,125 @@ fn gq_is_one_undo_step() {
         app.buffer.text(),
         "the quick\nbrown fox\n",
         "a single undo restores the pre-reflow paragraph"
+    );
+}
+
+// --- Regression tests (#1005 follow-up) ---------------------------------------
+
+#[test]
+fn j_on_a_last_line_ending_in_an_em_dash_without_a_newline_does_not_panic() {
+    // After the join, the merged line is the buffer's last line, ends in a
+    // multibyte em-dash, and has no trailing newline — so `hi == len_bytes()` and
+    // probing `hi-1..hi` slices a UTF-8 continuation byte, which ropey panics on
+    // before the structural fix. `J` must fold the next line up and keep the
+    // (still unterminated) line ending.
+    let (mut app, _dir) = jr_app("jr-join-emdash-eof", "first line\nsecond line—");
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(
+        app.buffer.text(),
+        "first line second line—",
+        "J joined without panicking and preserved the missing trailing newline"
+    );
+}
+
+#[test]
+fn gq_on_a_last_paragraph_ending_in_an_em_dash_without_a_newline_does_not_panic() {
+    // Same multibyte-final-grapheme/no-trailing-newline hazard on the reflow path.
+    let (mut app, _dir) = jr_app("jr-reflow-emdash-eof", "the quick\nbrown fox—");
+    app.wrap_width.set(72);
+    app.on_key(key(KeyCode::Char('g')));
+    app.on_key(key(KeyCode::Char('q')));
+    assert_eq!(
+        app.buffer.text(),
+        "the quick brown fox—",
+        "gq reflowed without panicking and preserved the missing trailing newline"
+    );
+}
+
+#[test]
+fn j_in_continuous_view_stops_at_the_chapter_seam_and_does_not_duplicate_text() {
+    // Chapters are concatenated `foo\nbar\n` with a single seam and no blank line.
+    // Before the fix, `J` on the last paragraph of chapter one scanned across the
+    // seam, folding chapter two's line into the replacement string; the range edit
+    // then clamped to chapter one, duplicating that text (`foo\n\nbar\n` → wrong).
+    // With the seam clamp, `J` has nothing below to join within the chapter, so the
+    // buffer is untouched and neither chapter's file changes.
+    let (mut app, dir) = jr_continuous_app("jr-cont-join-seam", "foo\n", "bar\n");
+    assert_eq!(
+        app.edit_buffer().text(),
+        "foo\nbar\n",
+        "the two chapters concatenate"
+    );
+    app.on_key(key(KeyCode::Char('J'))); // cursor on chapter one's only line
+    assert_eq!(
+        app.edit_buffer().text(),
+        "foo\nbar\n",
+        "J at the chapter seam did nothing — no fold across it, no duplication"
+    );
+    // Leaving persists the (unchanged) chapters to their own files, each intact.
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "foo\n");
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "bar\n");
+}
+
+#[test]
+fn gq_in_continuous_view_stops_at_the_chapter_seam() {
+    // Reflow on chapter one's last paragraph must not gather chapter two's first
+    // line across the seam. Chapter one is a two-line paragraph; reflow flows it to
+    // one line and leaves chapter two untouched.
+    let (mut app, dir) = jr_continuous_app(
+        "jr-cont-reflow-seam",
+        "the quick\nbrown fox\n",
+        "the lazy dog\n",
+    );
+    app.wrap_width.set(72);
+    app.on_key(key(KeyCode::Char('g')));
+    app.on_key(key(KeyCode::Char('q')));
+    assert_eq!(
+        app.edit_buffer().text(),
+        "the quick brown fox\nthe lazy dog\n",
+        "reflow stayed inside chapter one, never pulling chapter two across the seam"
+    );
+    app.on_key(ctrl('l'));
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "the quick brown fox\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "the lazy dog\n"
+    );
+}
+
+#[test]
+fn j_does_not_fold_a_heading_into_the_prose_below_it() {
+    // `## Scene` sits directly above prose with no blank line. `J` on the heading
+    // must treat it as a boundary and not fold the prose up into `## Scene Text`.
+    let (mut app, _dir) = jr_app("jr-join-heading", "## Scene\nText follows\n");
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(
+        app.buffer.text(),
+        "## Scene\nText follows\n",
+        "J left the heading intact — a heading is a paragraph boundary"
+    );
+}
+
+#[test]
+fn gq_leaves_a_heading_above_the_prose_intact() {
+    // The cursor is on the prose directly under a heading (no blank line). Reflow
+    // must re-wrap only the prose and never fold the heading marker in.
+    let (mut app, _dir) = jr_app(
+        "jr-reflow-heading",
+        "## Scene\nthe quick brown\nfox jumps\n",
+    );
+    app.wrap_width.set(72);
+    // Move the cursor onto the prose (line 1), off the heading.
+    app.on_key(key(KeyCode::Down));
+    app.on_key(key(KeyCode::Char('g')));
+    app.on_key(key(KeyCode::Char('q')));
+    assert_eq!(
+        app.buffer.text(),
+        "## Scene\nthe quick brown fox jumps\n",
+        "reflow re-wrapped the prose and left the heading untouched"
     );
 }
