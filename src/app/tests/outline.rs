@@ -288,3 +288,223 @@ fn outline_esc_clears_the_filter_then_returns_to_editing() {
     app.on_key(key(KeyCode::Esc));
     assert!(matches!(app.mode, Mode::Insert));
 }
+
+// --- Restructure from the outline (#1008) --------------------------------
+
+/// Focus the outline and step the selection to heading `n` (0-based over the live
+/// heading list). Robust to the starting mode: parks the cursor at the top and
+/// re-enters the focused outline from editing, so a prior gesture that left the
+/// outline focused (or moved the selection) doesn't skew the result.
+fn focus_and_select(app: &mut App, n: usize) {
+    // Return to editing first (Ctrl-O from a focused outline hides the pane), then
+    // put the cursor at the document top so focusing lands on the first heading.
+    if matches!(app.mode, Mode::Outline { .. }) {
+        app.on_key(key(KeyCode::Esc));
+        if matches!(app.mode, Mode::Outline { .. }) {
+            app.on_key(key(KeyCode::Esc)); // a second Esc clears a filter, then exits
+        }
+    }
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    if !app.outline_visible {
+        app.on_key(ctrl('o')); // show
+    }
+    app.on_key(ctrl('o')); // focus — selection at the first heading (cursor at top)
+                           // Step to `n` from a known selection of 0.
+    for _ in 0..8 {
+        if matches!(app.mode, Mode::Outline { selected: 0, .. }) {
+            break;
+        }
+        app.on_key(key(KeyCode::Up));
+    }
+    for _ in 0..n {
+        app.on_key(key(KeyCode::Down));
+    }
+}
+
+#[test]
+fn demote_then_promote_changes_the_heading_level() {
+    let body = "## Scene A\n\nText.\n\n## Scene B\n\nMore.\n";
+    let (mut app, _dir) = outline_app("outline-reheading", body);
+    focus_and_select(&mut app, 0); // "## Scene A"
+
+    // `>` demotes: one more `#`. Only the marker run changes; the title and body stay.
+    app.on_key(key(KeyCode::Char('>')));
+    assert_eq!(
+        app.buffer.text(),
+        "### Scene A\n\nText.\n\n## Scene B\n\nMore.\n"
+    );
+    assert_eq!(app.buffer.syntax().headings()[0].level, 3);
+
+    // `<` promotes back to level 2, then again to level 1.
+    app.on_key(key(KeyCode::Char('<')));
+    assert_eq!(app.buffer.syntax().headings()[0].level, 2);
+    app.on_key(key(KeyCode::Char('<')));
+    assert_eq!(
+        app.buffer.text(),
+        "# Scene A\n\nText.\n\n## Scene B\n\nMore.\n"
+    );
+    assert_eq!(app.buffer.syntax().headings()[0].level, 1);
+
+    // Promoting a level-1 heading is a no-op with a message — never an empty prefix.
+    app.on_key(key(KeyCode::Char('<')));
+    assert_eq!(app.buffer.syntax().headings()[0].level, 1);
+    assert!(app.message.as_deref().unwrap_or("").contains("top-level"));
+}
+
+#[test]
+fn demote_clamps_at_the_deepest_level() {
+    let body = "###### Deep\n\nText.\n";
+    let (mut app, _dir) = outline_app("outline-reheading-clamp", body);
+    focus_and_select(&mut app, 0);
+    app.on_key(key(KeyCode::Char('>'))); // already level 6 — no-op
+    assert_eq!(app.buffer.text(), body);
+    assert_eq!(app.buffer.syntax().headings()[0].level, 6);
+    assert!(app.message.as_deref().unwrap_or("").contains("deepest"));
+}
+
+#[test]
+fn reheading_is_one_undo_step() {
+    let body = "## Scene A\n\nText.\n\n## Scene B\n\nMore.\n";
+    let (mut app, _dir) = outline_app("outline-reheading-undo", body);
+    focus_and_select(&mut app, 0);
+    app.on_key(key(KeyCode::Char('>'))); // level 2 -> 3
+    assert_eq!(app.buffer.syntax().headings()[0].level, 3);
+
+    // A single undo restores the whole gesture — level and text back to the start.
+    assert!(app.buffer.undo());
+    app.buffer.refresh_syntax();
+    assert_eq!(app.buffer.text(), body);
+    assert_eq!(app.buffer.syntax().headings()[0].level, 2);
+}
+
+#[test]
+fn move_section_down_carries_the_heading_and_its_body() {
+    let body = "## Scene A\n\nAlpha body.\n\n## Scene B\n\nBeta body.\n";
+    let (mut app, _dir) = outline_app("outline-move-down", body);
+    focus_and_select(&mut app, 0); // "## Scene A"
+
+    // `J` moves Scene A down past Scene B — the whole block travels, so the order
+    // flips and every byte of both bodies is preserved (nothing dropped/split).
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(
+        app.buffer.text(),
+        "## Scene B\n\nBeta body.\n\n## Scene A\n\nAlpha body.\n"
+    );
+    // The outline followed the moved section: it's now the second heading (index 1).
+    assert!(matches!(app.mode, Mode::Outline { selected: 1, .. }));
+    let titles: Vec<_> = app
+        .buffer
+        .syntax()
+        .headings()
+        .iter()
+        .map(|h| h.title.clone())
+        .collect();
+    assert_eq!(titles, vec!["Scene B", "Scene A"]);
+}
+
+#[test]
+fn move_section_up_is_the_inverse_and_undoes_in_one_step() {
+    let body = "## Scene A\n\nAlpha.\n\n## Scene B\n\nBeta.\n";
+    let (mut app, _dir) = outline_app("outline-move-up", body);
+    focus_and_select(&mut app, 1); // "## Scene B"
+
+    app.on_key(key(KeyCode::Char('K'))); // move B up past A
+    assert_eq!(
+        app.buffer.text(),
+        "## Scene B\n\nBeta.\n\n## Scene A\n\nAlpha.\n"
+    );
+    assert!(matches!(app.mode, Mode::Outline { selected: 0, .. }));
+
+    // One undo restores the original order (a single gesture-scoped edit).
+    assert!(app.buffer.undo());
+    app.buffer.refresh_syntax();
+    assert_eq!(app.buffer.text(), body);
+    assert!(!app.buffer.undo(), "the move was exactly one undo step");
+}
+
+#[test]
+fn move_section_carries_folded_in_subheadings() {
+    // Scene A owns a "### Beat" sub-heading; moving A must carry the sub-beat and its
+    // body as one block, never splitting the section at the deeper heading.
+    let body = "## Scene A\n\nAlpha.\n\n### Beat\n\nBeat body.\n\n## Scene B\n\nBeta.\n";
+    let (mut app, _dir) = outline_app("outline-move-subheading", body);
+    focus_and_select(&mut app, 0); // "## Scene A" (its "### Beat" is a sub-beat)
+
+    app.on_key(key(KeyCode::Char('J'))); // move A (with its ### Beat) past B
+    assert_eq!(
+        app.buffer.text(),
+        "## Scene B\n\nBeta.\n\n## Scene A\n\nAlpha.\n\n### Beat\n\nBeat body.\n"
+    );
+    // Every heading survived, reordered as whole blocks.
+    let titles: Vec<_> = app
+        .buffer
+        .syntax()
+        .headings()
+        .iter()
+        .map(|h| h.title.clone())
+        .collect();
+    assert_eq!(titles, vec!["Scene B", "Scene A", "Beat"]);
+}
+
+#[test]
+fn move_section_is_a_no_op_at_the_boundaries() {
+    let body = "## Scene A\n\nAlpha.\n\n## Scene B\n\nBeta.\n";
+    let (mut app, _dir) = outline_app("outline-move-bounds", body);
+
+    // Up from the first sibling: no-op with a message, text untouched.
+    focus_and_select(&mut app, 0);
+    app.on_key(key(KeyCode::Char('K')));
+    assert_eq!(app.buffer.text(), body);
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("first section"));
+
+    // Down from the last sibling: likewise a no-op.
+    focus_and_select(&mut app, 1);
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(app.buffer.text(), body);
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("last section"));
+}
+
+#[test]
+fn move_section_only_reorders_among_siblings() {
+    // A shallower "# Title" separates two level-2 scenes. Moving Scene A up must not
+    // jump past the chapter title (its parent) — Scene A is the first sibling under
+    // the title, so up is a no-op.
+    let body = "# Title\n\n## Scene A\n\nAlpha.\n\n## Scene B\n\nBeta.\n";
+    let (mut app, _dir) = outline_app("outline-move-siblings", body);
+    focus_and_select(&mut app, 1); // "## Scene A" (index 1; "# Title" is 0)
+
+    app.on_key(key(KeyCode::Char('K'))); // no sibling above — bounded by the title
+    assert_eq!(app.buffer.text(), body);
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("first section"));
+
+    // But down past its sibling Scene B works, carrying the body.
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(
+        app.buffer.text(),
+        "# Title\n\n## Scene B\n\nBeta.\n\n## Scene A\n\nAlpha.\n"
+    );
+}
+
+#[test]
+fn restructure_persists_to_disk() {
+    let body = "## Scene A\n\nAlpha.\n\n## Scene B\n\nBeta.\n";
+    let (mut app, dir) = outline_app("outline-restructure-persist", body);
+    focus_and_select(&mut app, 0);
+    app.on_key(key(KeyCode::Char('J'))); // move Scene A down; the gesture saves
+
+    assert!(!app.buffer.dirty, "the gesture flushed the chapter to disk");
+    let on_disk = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert_eq!(on_disk, "## Scene B\n\nBeta.\n\n## Scene A\n\nAlpha.\n");
+}

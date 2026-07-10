@@ -5,13 +5,26 @@
 //! Ctrl-O press, once the pane is up) enters [`Mode::Outline`], where a
 //! selection cursor moves over the headings and Enter jumps the editor cursor to
 //! the selected heading's byte offset — the same `Heading.start` the corkboard
-//! jumps by. It's read-only over the prose; Enter (or Esc) returns to editing
-//! and leaves the pane visible, so the author can keep navigating by section.
+//! jumps by. Enter (or Esc) returns to editing and leaves the pane visible, so the
+//! author can keep navigating by section.
+//!
+//! The focused outline also *restructures* the manuscript's skeleton (#1008),
+//! keyboard-native, without opening the corkboard: `<` / `>` promote or demote the
+//! selected heading's level (fewer / more `#`), and `K` / `J` move the selected
+//! section — its heading plus the whole body under it, folded-in deeper sub-headings
+//! and all — up or down past its adjacent sibling, carrying the body with it. Each is
+//! one gesture-scoped, undoable edit: it reuses the section-span logic
+//! ([`section_end_byte`], shared with the folds and the corkboard) to find the block,
+//! and rewrites the affected bytes through [`crate::buffer::Buffer::replace_byte_range`]
+//! — the same undoable, incrementally-reparsed edit path find-and-replace uses — so a
+//! single `u` reverses the move and body text is never split, dropped, or corrupted.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::folds::section_end_byte;
 use super::App;
 use crate::mode::Mode;
+use crate::syntax::Heading;
 
 impl App {
     /// Focus the outline pane (#657) so its headings can be navigated. Starts the
@@ -79,6 +92,12 @@ impl App {
         }
         match key.code {
             KeyCode::Char('/') => self.set_outline_typing(true),
+            // Restructure the skeleton (#1008): promote/demote the heading's level,
+            // or move the whole section past its sibling — one undoable gesture each.
+            KeyCode::Char('<') => self.outline_reheading(selected, -1),
+            KeyCode::Char('>') => self.outline_reheading(selected, 1),
+            KeyCode::Char('K' | '[') => self.outline_move_section(selected, -1),
+            KeyCode::Char('J' | ']') => self.outline_move_section(selected, 1),
             KeyCode::Up | KeyCode::Char('k') => {
                 let s = self.outline_step(false);
                 self.set_outline_selected(s);
@@ -243,5 +262,129 @@ impl App {
                 return i;
             }
         }
+    }
+
+    /// Promote (`dir` −1, one fewer `#`) or demote (`dir` +1, one more `#`) the
+    /// level of the selected heading (#1008), rewriting just its `#` prefix through
+    /// the undoable edit path. Clamped to the `#`…`######` range: a level-1 heading
+    /// won't promote and a level-6 won't demote (a no-op with a note). Only the
+    /// marker run changes — the heading text and every byte of the body under it are
+    /// untouched — so the whole gesture is one undo step. Leaves the outline focused
+    /// on the same heading; the pane re-derives its level on the next reparse.
+    fn outline_reheading(&mut self, selected: usize, dir: isize) {
+        let buffer = &self.buffer;
+        let headings = buffer.syntax().headings();
+        let Some(h) = headings.get(selected) else {
+            return;
+        };
+        let level = h.level;
+        let new_level = match dir {
+            d if d < 0 => level.saturating_sub(1),
+            _ => level.saturating_add(1),
+        };
+        if new_level == 0 || new_level > 6 || new_level == level {
+            self.message = Some(if dir < 0 {
+                "Already a top-level heading — can't promote further.".into()
+            } else {
+                "Already the deepest heading level — can't demote further.".into()
+            });
+            return;
+        }
+        // The heading's `#` marker run: from its start byte to the first non-`#`
+        // byte (the parser's `start` is the line's first `#`). Replace only that run
+        // with `new_level` hashes, so the title and the body stay byte-for-byte.
+        let text = self.buffer.text();
+        let start = h.start;
+        let marks_end = text[start..]
+            .find(|c: char| c != '#')
+            .map_or(text.len(), |off| start + off);
+        let hashes = "#".repeat(new_level as usize);
+        self.buffer.replace_byte_range(start, marks_end, &hashes);
+        self.commit_outline_edit();
+        self.message = Some(if dir < 0 {
+            "Heading promoted.".into()
+        } else {
+            "Heading demoted.".into()
+        });
+    }
+
+    /// Move the selected section up (`dir` −1) or down (`dir` +1) past its adjacent
+    /// sibling (#1008): its heading and the entire block of body under it — including
+    /// any deeper sub-headings that fold into it — swap places with the neighbouring
+    /// sibling's whole block, carrying every byte of prose. A *sibling* is the
+    /// nearest heading in that direction at the same level with no shallower heading
+    /// between them (so a section never jumps out from under its parent). A no-op at
+    /// the first/last sibling (a note, no edit). One undoable `replace_byte_range`
+    /// over the two adjacent blocks, so a single `u` restores the prior order and the
+    /// body is never split. The outline follows the moved section to its new slot.
+    fn outline_move_section(&mut self, selected: usize, dir: isize) {
+        let headings = self.buffer.syntax().headings().to_vec();
+        let Some(sibling) = sibling_index(&headings, selected, dir) else {
+            self.message = Some(if dir < 0 {
+                "Already the first section at this level.".into()
+            } else {
+                "Already the last section at this level.".into()
+            });
+            return;
+        };
+        let text = self.buffer.text();
+        let len = text.len();
+        // The two blocks in body order (lower start first); `a` precedes `b`.
+        let (a, b) = (selected.min(sibling), selected.max(sibling));
+        let a_start = headings[a].start;
+        let b_start = headings[b].start;
+        let b_end = section_end_byte(&headings, b).min(len);
+        // The sibling scan guarantees `a`'s block ends exactly where `b`'s begins, so
+        // the pair `[a_start, b_end)` is one contiguous span holding just the two
+        // blocks — swapping their order reorders the sections without touching a byte
+        // outside them. `a` runs to `b`'s start; `b` runs to the span end.
+        let block_a = &text[a_start..b_start];
+        let block_b = &text[b_start..b_end];
+        // Trim each block's trailing blank lines and rejoin the swapped pair with one
+        // blank line between the headings, restoring the span's original trailing
+        // whitespace (a final newline, typically) so spacing stays even across
+        // repeated moves rather than the last block accreting or losing blanks. Only
+        // trailing whitespace is trimmed — every non-blank byte of prose is carried.
+        let tail = &text[a_start..b_end][text[a_start..b_end].trim_end().len()..];
+        let swapped = format!("{}\n\n{}{}", block_b.trim_end(), block_a.trim_end(), tail);
+        self.buffer.replace_byte_range(a_start, b_end, &swapped);
+        self.commit_outline_edit();
+        // Follow the moved section: after the swap the selected heading sits where
+        // its sibling was in body order, so its new index is the sibling's old one.
+        self.set_outline_selected(sibling);
+        self.message = Some("Section moved.".into());
+    }
+
+    /// Finish an outline restructure gesture (#1008): seal the undo group so the
+    /// whole rewrite is one `u`, refresh the syntax so the pane and any follow-up
+    /// key see the new heading list at once, and save + re-cache the chapter through
+    /// [`Self::flush_active`] so the change is durable (matching the corkboard's
+    /// per-gesture persist). A save failure surfaces a message but leaves the
+    /// in-buffer edit — the author can retry the save.
+    fn commit_outline_edit(&mut self) {
+        self.buffer.seal_undo_group();
+        self.buffer.refresh_syntax();
+        let _ = self.flush_active();
+    }
+}
+
+/// The index of the selected heading's adjacent sibling in `dir` (−1 previous, +1
+/// next), or `None` at that end (#1008). Siblings share a level with no shallower
+/// heading between them, so a section reorders only among peers under the same
+/// parent — never past a heading that owns it. A heading deeper than `selected` is
+/// one of its sub-beats (skipped); a shallower one is a boundary the scan stops at.
+fn sibling_index(headings: &[Heading], selected: usize, dir: isize) -> Option<usize> {
+    let level = headings.get(selected)?.level;
+    let mut i = selected;
+    loop {
+        i = i.checked_add_signed(dir)?;
+        let h = headings.get(i)?;
+        if h.level < level {
+            return None; // hit the parent / a shallower boundary before a sibling
+        }
+        if h.level == level {
+            return Some(i); // the adjacent peer
+        }
+        // h.level > level: a sub-heading of a neighbour — keep scanning past it.
     }
 }
