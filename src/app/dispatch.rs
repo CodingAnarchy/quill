@@ -166,10 +166,39 @@ impl App {
             Mode::BackupBrowser(_) => self.on_key_backup_browser(key),
             Mode::Drafts(_) => self.on_key_drafts(key),
             Mode::QuickSwitch(_) => self.on_key_quick_switch(key),
-            Mode::Insert => self.on_key_insert(key),
-            Mode::Normal => self.on_key_normal(key),
-            Mode::Visual { .. } => self.on_key_visual(key),
+            // The three editing modes route through the dot-repeat recorder
+            // (#1004), which brackets the real handler to capture the keys of a
+            // change command (and to intercept `.` itself for replay).
+            Mode::Insert | Mode::Normal | Mode::Visual { .. } => self.on_key_editing(key),
         }
+    }
+
+    /// Dispatch an editing-mode key (Normal / Insert / Visual) to its handler,
+    /// wrapped in dot-repeat recording (#1004): `.` in Normal mode replays the
+    /// last change, and every other key is offered to the recorder so a change
+    /// command's keys are captured for replay. Kept here (a thin router seam)
+    /// rather than in the Vim match arms so it stays out of the way of other
+    /// Normal-mode binding work.
+    fn on_key_editing(&mut self, key: KeyEvent) {
+        // In Normal mode `.` repeats the last change and is never itself recorded.
+        if matches!(self.mode, Mode::Normal)
+            && matches!(key.code, KeyCode::Char('.'))
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.vim_state.pending == crate::mode::VimPending::None
+            && self.vim_state.op.is_none()
+        {
+            // `{count}.` repeats the change that many times (Vim's behavior); a
+            // bare `.` repeats once. Either way the count is consumed here.
+            let count = self.vim_state.count.take().unwrap_or(1);
+            self.dot_repeat(count);
+            return;
+        }
+        self.dot_record_around(key, |app, key| match app.mode {
+            Mode::Insert => app.on_key_insert(key),
+            Mode::Normal => app.on_key_normal(key),
+            Mode::Visual { .. } => app.on_key_visual(key),
+            _ => {}
+        });
     }
 
     /// The editor's resting mode: Vim Normal when Vim mode is on, else the
