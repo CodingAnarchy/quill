@@ -807,6 +807,38 @@ fn sprint_tag(app: &App) -> String {
     })
 }
 
+/// The active chapter's stored word goal (#1011): a live fill bar toward the
+/// front-matter `goal` as the author writes, shown only when the chapter has a
+/// goal set. The goal is the value cached on the chapter entry at open — never a
+/// per-draw file read — and the count is the live active-chapter count (the
+/// buffer, so it moves as you type), so this stays O(1) per frame.
+fn chapter_goal_tag(app: &App) -> String {
+    let active = app.project.active_index();
+    app.project
+        .chapter_goal(active)
+        .map_or_else(String::new, |goal| {
+            let words = app.chapter_word_count(active);
+            format!(
+                " · {}",
+                crate::app::sprint::chapter_goal_segment(words, goal)
+            )
+        })
+}
+
+/// A per-session word target (#1011): a live fill bar toward the words-this-session
+/// goal, shown only when the author has set one. The words-written figure diffs
+/// the maintained running project total against the session baseline (O(1)), so it
+/// fills as words are added without any per-draw file work.
+fn session_target_tag(app: &App) -> String {
+    app.session_target.as_ref().map_or_else(String::new, |t| {
+        let written = t.written(app.project_word_count());
+        format!(
+            " · {}",
+            crate::app::sprint::session_target_segment(written, t.target())
+        )
+    })
+}
+
 /// While browsing, the bar describes the *selected* chapter: its title, and
 /// (unless a transient message is up) its summary / POV / status.
 fn nav_status_bar(app: &App, selected: usize, filter: &str, typing: bool) -> (String, String) {
@@ -893,12 +925,14 @@ fn editor_status_bar(app: &App) -> (String, String) {
         |m| format!("{m}  "),
     );
     let left = format!(
-        " {name}{dirty}{}{}{}{}{}",
+        " {name}{dirty}{}{}{}{}{}{}{}",
         read_only_tag(app),
         vc_tag(app),
         local_backup_tag(app),
         ai_tag(app),
-        sprint_tag(app)
+        sprint_tag(app),
+        chapter_goal_tag(app),
+        session_target_tag(app)
     );
     (left, right)
 }

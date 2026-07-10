@@ -60,6 +60,9 @@ pub enum Action {
     StartSprint,
     /// Stop the active writing sprint (#299).
     StopSprint,
+    /// Set (or clear) a per-session word target (#1011): a goal to write toward
+    /// this session, with a live indicator that fills as words are added.
+    SetSessionTarget,
     /// Switch the active book of a multi-book series (#329).
     SwitchBook,
     /// Create a series / add / remove / reorder books (#648) — the book-management
@@ -310,6 +313,7 @@ impl Action {
         Self::InsertSnippet,
         Self::StartSprint,
         Self::StopSprint,
+        Self::SetSessionTarget,
         // View
         Self::ToggleTypewriter,
         Self::ToggleFocus,
@@ -353,6 +357,7 @@ impl Action {
             Self::BrowseBackups => "backups:browse",
             Self::StartSprint => "sprint:start",
             Self::StopSprint => "sprint:stop",
+            Self::SetSessionTarget => "session:target",
             Self::SwitchBook => "book:switch",
             Self::ManageBooks => "book:manage",
             Self::SeriesTree => "tree",
@@ -457,7 +462,8 @@ impl Action {
             | Self::ReviewAnnotations
             | Self::InsertSnippet
             | Self::StartSprint
-            | Self::StopSprint => "Editing",
+            | Self::StopSprint
+            | Self::SetSessionTarget => "Editing",
             Self::ToggleTypewriter
             | Self::ToggleFocus
             | Self::ToggleParagraphIndent
@@ -524,6 +530,7 @@ impl Action {
             Self::BrowseBackups => "Browse backups…",
             Self::StartSprint => "Start a writing sprint",
             Self::StopSprint => "Stop the writing sprint",
+            Self::SetSessionTarget => "Set a session word target",
             Self::SwitchBook => "Switch book",
             Self::ManageBooks => "Manage books (series)…",
             Self::SeriesTree => "Project tree",

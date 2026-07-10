@@ -43,6 +43,13 @@ fn render_stays_within_a_frame() {
     app.outline_visible = true;
     app.focus_mode = true;
     app.typewriter = true;
+    // Live word-goal indicators (#1011) on: a stored chapter goal and a session
+    // target, both drawn into the status bar every frame. Each reads a cached
+    // count (the manifest goal, the maintained running total) — O(1), no file
+    // read — so having them active must not push the frame past budget.
+    let active = app.project.active_index();
+    app.project.manifest.chapters[active].goal = Some(3000);
+    app.begin_session_target("50000");
     // The first-line paragraph indent (#722) classifies each visible logical line
     // (a bounded highlight lookup per row); on here so the render guard covers it.
     app.paragraph_indent = true;

@@ -495,7 +495,8 @@ impl App {
             | Pending::RestoreArchiveSource
             | Pending::RestoreArchiveDest
             | Pending::SetApiKey(_)
-            | Pending::SprintDuration => {
+            | Pending::SprintDuration
+            | Pending::SessionTarget => {
                 // Line editing shared by every text prompt (#706): typing and
                 // deletion happen at the caret, which the arrows / Home / End
                 // move and Ctrl/Alt-Backspace word-deletes back through.
@@ -838,6 +839,11 @@ impl App {
                             Pending::SprintDuration => {
                                 // begin_sprint restores the editing mode and reports.
                                 self.begin_sprint(text);
+                            }
+                            Pending::SessionTarget => {
+                                // begin_session_target restores the editing mode and
+                                // reports; a blank entry clears any running target.
+                                self.begin_session_target(text);
                             }
                             Pending::SetApiKey(which) => {
                                 // Back to editing; store_api_key may chain a strip

@@ -216,6 +216,9 @@ pub enum Pending {
     RestoreArchiveDest,
     /// Text input: how many minutes a writing sprint should run (#299).
     SprintDuration,
+    /// Text input: the per-session word target (#1011) — how many words to write
+    /// this session. A blank entry clears any running target; zero is rejected.
+    SessionTarget,
     /// Text input: the remote URL to back the project up to (#134).
     SetRemote,
     /// Text input: a Vim Ex command (`:w`, `:q`, `:wq`, …) typed after `:` (#207).
