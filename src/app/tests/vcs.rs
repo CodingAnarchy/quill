@@ -44,10 +44,18 @@ fn palette_labels(app: &App) -> Vec<&str> {
 }
 
 fn overlay_text(app: &App) -> String {
+    // Join the spans *within* a line with no separator (a line may now carry
+    // several spans — the word-level diff, #1013 — so a phrase that reads as one
+    // line must reassemble as one line), then the lines with newlines.
     app.overlay_lines()
         .expect("an overlay should be open")
         .iter()
-        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -269,6 +277,88 @@ fn history_diffs_the_chapter_against_a_chosen_commit() {
         diff.contains("+") && diff.contains("Then it was long"),
         "the diff shows what changed since that commit: {diff}"
     );
+}
+
+#[test]
+fn history_diff_highlights_only_the_changed_word_within_a_line() {
+    // A one-word revision should light up only that word, not the whole line
+    // (#1013): the shared words render dim, the swapped word bold in the
+    // added / removed color. Line-level context (the `+`/`-` markers, the
+    // unchanged surrounding text) is preserved.
+    use ratatui::style::Modifier;
+
+    let (mut app, _dir) = two_chapter_app("vc-word-diff");
+    git_menu(&mut app, 0); // Initialize
+
+    // Commit "dark", then revise the single adjective to "bright" and save. Each
+    // version replaces the whole buffer (a clean one-line change), the way the
+    // author would retype the line.
+    let path = app.project.active_path();
+    app.buffer = Buffer::from_file_text(&path, "The night was dark and cold.\n");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "original");
+    app.buffer = Buffer::from_file_text(&path, "The night was bright and cold.\n");
+    app.on_key(ctrl('s'));
+
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Char('d')));
+
+    let lines = app.overlay_lines().expect("diff overlay open").to_vec();
+    // The added line: its spans carry per-word styling now.
+    let added = lines
+        .iter()
+        .find(|l| l.spans.iter().any(|s| s.content.contains("bright")))
+        .expect("an added line mentioning the new word");
+    let removed = lines
+        .iter()
+        .find(|l| l.spans.iter().any(|s| s.content.contains("dark")))
+        .expect("a removed line mentioning the old word");
+
+    let bold_added: Vec<&str> = added
+        .spans
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    let bold_removed: Vec<&str> = removed
+        .spans
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    // Only the changed word is emphasized on each side.
+    assert_eq!(bold_added, vec!["bright"], "only the new word is bold");
+    assert_eq!(bold_removed, vec!["dark"], "only the old word is bold");
+
+    // The shared words are present but *not* emphasized — visually distinct from
+    // the change, so the line still reads as context.
+    let night = added
+        .spans
+        .iter()
+        .find(|s| s.content.contains("night"))
+        .expect("shared context word present");
+    assert!(
+        !night.style.add_modifier.contains(Modifier::BOLD),
+        "unchanged words within the line are not emphasized"
+    );
+
+    // The changed word carries the added color; the shared word does not.
+    let theme = crate::theme::current();
+    let bright = added
+        .spans
+        .iter()
+        .find(|s| s.content == "bright")
+        .expect("changed span");
+    assert_eq!(bright.style.fg, Some(theme.added));
+    assert_ne!(
+        night.style.fg,
+        Some(theme.added),
+        "shared context is not colored like an addition"
+    );
+
+    // Line-level context preserved: the diff still carries its `+`/`-` markers.
+    assert_eq!(added.spans.first().map(|s| s.content.as_ref()), Some("+"));
+    assert_eq!(removed.spans.first().map(|s| s.content.as_ref()), Some("-"));
 }
 
 #[test]
