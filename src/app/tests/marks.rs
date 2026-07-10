@@ -2,10 +2,12 @@
 //! a direct jump to a line number, the automatic breadcrumb of recent edit
 //! spots cycled back through (bounded), the `gi`-style jump to the last
 //! insertion, and that the ring survives ordinary navigation and coexists with
-//! the manually-set Vim marks.
+//! the manually-set Vim marks. Also the scene-heading motion (#1009): stepping
+//! heading-to-heading within a chapter and crossing into adjacent chapters.
 
 use super::*;
 use crate::mode::Action;
+use crate::project::Project;
 
 /// A one-chapter project whose single chapter holds `body`, opened in the
 /// modeless editor (Insert). Distinct known-length lines make line/byte
@@ -327,4 +329,276 @@ fn empty_ring_and_no_insertion_are_graceful_no_ops() {
         .as_deref()
         .unwrap_or("")
         .contains("No insertion"));
+}
+
+// --- Scene-heading motion (#1009) -----------------------------------------
+
+/// A project whose chapters hold the given bodies (`c0.md`, `c1.md`, …), opened
+/// on chapter 0 in the modeless editor. Each body's headings drive the
+/// scene-heading motion.
+fn scene_app(name: &str, bodies: &[&str]) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    let mut manifest = String::from("title = \"Book\"\n\n");
+    for (i, body) in bodies.iter().enumerate() {
+        write!(
+            manifest,
+            "[[chapters]]\ntitle = \"C{i}\"\nfile = \"c{i}.md\"\n\n"
+        )
+        .unwrap();
+        fs::write(dir.join(format!("c{i}.md")), body).unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn next_scene_heading_lands_on_each_heading_in_turn() {
+    // A lead-in line, then three headings with prose between them — so the first
+    // heading isn't at byte 0 and "step forward from the top" lands on it.
+    let body = "lead-in prose\n\n# One\n\nalpha prose\n\n# Two\n\nbeta prose\n\n# Three\n\ngamma\n";
+    let (mut app, _dir) = scene_app("scene-next", &[body]);
+    // Start at the very top (before the first heading).
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    let headings: Vec<usize> = app
+        .buffer
+        .syntax()
+        .headings()
+        .iter()
+        .map(|h| h.start)
+        .collect();
+    assert_eq!(headings.len(), 3, "three headings parsed");
+
+    // Each `]]` lands on the next heading in document order.
+    app.jump_to_scene_heading(true);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[0],
+        "first `]]` → heading 1"
+    );
+    app.jump_to_scene_heading(true);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[1],
+        "second `]]` → heading 2"
+    );
+    app.jump_to_scene_heading(true);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[2],
+        "third `]]` → heading 3"
+    );
+}
+
+#[test]
+fn previous_scene_heading_walks_back_up() {
+    let body = "# One\n\nalpha\n\n# Two\n\nbeta\n\n# Three\n\ngamma\n";
+    let (mut app, _dir) = scene_app("scene-prev", &[body]);
+    let headings: Vec<usize> = app
+        .buffer
+        .syntax()
+        .headings()
+        .iter()
+        .map(|h| h.start)
+        .collect();
+    // Start at the end of the buffer.
+    app.buffer.cursor = app.buffer.cursor_at_byte(app.buffer.len_bytes());
+    app.jump_to_scene_heading(false);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[2],
+        "first `[[` → heading 3"
+    );
+    app.jump_to_scene_heading(false);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[1],
+        "second `[[` → heading 2"
+    );
+    app.jump_to_scene_heading(false);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[0],
+        "third `[[` → heading 1"
+    );
+}
+
+#[test]
+fn next_scene_heading_crosses_into_the_next_chapter() {
+    // Chapter 0 has one heading; the author is past it. Chapter 1 has a heading.
+    let (mut app, _dir) = scene_app(
+        "scene-cross-next",
+        &[
+            "# Only\n\nalpha prose here\n",
+            "# Next chapter head\n\nbeta\n",
+        ],
+    );
+    // Move past chapter 0's single heading, so there's nothing left forward here.
+    app.buffer.cursor = app.buffer.cursor_at_byte(app.buffer.len_bytes());
+    app.jump_to_scene_heading(true);
+    // Crossed into chapter 1, landed on its first heading (byte 0).
+    assert_eq!(app.project.active_index(), 1, "crossed into chapter 1");
+    assert_eq!(app.buffer.cursor_byte(), 0, "landed on chapter 1's heading");
+}
+
+#[test]
+fn previous_scene_heading_crosses_back_and_lands_on_the_last_heading() {
+    // Chapter 0 has two headings; chapter 1 has one. From chapter 1 above its
+    // heading, `[[` crosses back and lands on chapter 0's *last* heading.
+    let ch0 = "# A\n\none\n\n# B\n\ntwo\n";
+    let (mut app, _dir) = scene_app("scene-cross-prev", &[ch0, "# C\n\nthree\n"]);
+    // Open chapter 1 and sit at its top (before its only heading).
+    app.activate_chapter(1);
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.jump_to_scene_heading(false);
+    assert_eq!(app.project.active_index(), 0, "crossed back into chapter 0");
+    // Chapter 0's last heading is "# B", not "# A".
+    let last = app.buffer.syntax().headings().last().unwrap().start;
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        last,
+        "landed on chapter 0's last heading"
+    );
+}
+
+#[test]
+fn next_scene_heading_skips_a_chapter_with_no_headings() {
+    // Chapter 1 is prose-only; the forward crossing should skip it to chapter 2.
+    let (mut app, _dir) = scene_app(
+        "scene-skip-empty",
+        &[
+            "# Start\n\nalpha\n",
+            "just prose, no heading\n",
+            "# Far\n\ngamma\n",
+        ],
+    );
+    app.buffer.cursor = app.buffer.cursor_at_byte(app.buffer.len_bytes());
+    app.jump_to_scene_heading(true);
+    assert_eq!(
+        app.project.active_index(),
+        2,
+        "skipped heading-less chapter 1"
+    );
+    assert_eq!(app.buffer.cursor_byte(), 0, "landed on chapter 2's heading");
+}
+
+#[test]
+fn next_scene_heading_reports_the_end_of_the_manuscript() {
+    let (mut app, _dir) = scene_app("scene-end-fwd", &["# Only\n\nalpha\n"]);
+    // Past the single heading, with no later chapter.
+    app.buffer.cursor = app.buffer.cursor_at_byte(app.buffer.len_bytes());
+    let before = app.buffer.cursor_byte();
+    app.jump_to_scene_heading(true);
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        before,
+        "cursor unmoved at the end"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No next scene heading"),
+        "reported the end: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn previous_scene_heading_reports_the_start_of_the_manuscript() {
+    let (mut app, _dir) = scene_app("scene-end-back", &["# Only\n\nalpha\n"]);
+    // Above the only heading, in the first chapter.
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.jump_to_scene_heading(false);
+    assert_eq!(app.buffer.cursor_byte(), 0, "cursor unmoved at the start");
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No previous scene heading"),
+        "reported the start: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn crossing_scene_heading_pushes_the_jumplist_so_back_jump_returns() {
+    let (mut app, _dir) = scene_app(
+        "scene-jumpback",
+        &["# Only\n\nalpha prose\n", "# Next\n\nbeta\n"],
+    );
+    // Sit at a known spot in chapter 0, past its heading.
+    let spot = app.buffer.len_bytes();
+    app.buffer.cursor = app.buffer.cursor_at_byte(spot);
+    app.jump_to_scene_heading(true); // crosses to chapter 1
+    assert_eq!(app.project.active_index(), 1, "crossed forward");
+    app.jump_back(); // `` `` ``
+    assert_eq!(
+        app.project.active_index(),
+        0,
+        "back-jump returns to chapter 0"
+    );
+}
+
+#[test]
+fn scene_heading_motion_works_without_opening_the_outline() {
+    // The motion runs straight from the editor — the mode never becomes the outline.
+    // A lead-in line keeps the first heading off byte 0 so stepping lands on it.
+    let body = "lead\n\n# One\n\nalpha\n\n# Two\n\nbeta\n";
+    let (mut app, _dir) = scene_app("scene-no-overlay", &[body]);
+    app.mode = Mode::Insert;
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.jump_to_scene_heading(true);
+    assert!(
+        matches!(app.mode, Mode::Insert),
+        "stayed in the editor, no overlay"
+    );
+    let first = app.buffer.syntax().headings()[0].start;
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        first,
+        "moved to the first heading"
+    );
+}
+
+#[test]
+fn bracket_bracket_keys_drive_the_scene_heading_motion() {
+    // The `]]` / `[[` Normal-mode bindings route to the motion (#1009).
+    // A lead-in line keeps the first heading off byte 0 so `]]` from the top
+    // lands on it.
+    let body = "lead\n\n# One\n\nalpha\n\n# Two\n\nbeta\n";
+    let (mut app, _dir) = scene_app("scene-keys", &[body]);
+    app.vim = true;
+    app.mode = Mode::Normal;
+    let headings: Vec<usize> = app
+        .buffer
+        .syntax()
+        .headings()
+        .iter()
+        .map(|h| h.start)
+        .collect();
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    // `]]` → next heading.
+    app.on_key(key(KeyCode::Char(']')));
+    app.on_key(key(KeyCode::Char(']')));
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[0],
+        "`]]` → first heading"
+    );
+    app.on_key(key(KeyCode::Char(']')));
+    app.on_key(key(KeyCode::Char(']')));
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[1],
+        "`]]` → second heading"
+    );
+    // `[[` → previous heading.
+    app.on_key(key(KeyCode::Char('[')));
+    app.on_key(key(KeyCode::Char('[')));
+    assert_eq!(
+        app.buffer.cursor_byte(),
+        headings[0],
+        "`[[` → first heading"
+    );
 }

@@ -82,8 +82,10 @@ impl App {
                 return;
             }
             // `]s` / `[s` jump to the next / previous misspelling (#359); `]r` / `[r`
-            // step the active style-flag sweep (#1001). Vim's own bracket-nav
-            // bindings; any other second key cancels.
+            // step the active style-flag sweep (#1001); `]]` / `[[` step scene
+            // heading to scene heading (#1009, Vim's own section motion); `]a` / `[a`
+            // step to the next / previous OPEN annotation (#1009). Vim's own
+            // bracket-nav bindings; any other second key cancels.
             VimPending::Bracket { forward } => {
                 self.vim_state.pending = VimPending::None;
                 self.vim_state.count = None;
@@ -91,6 +93,9 @@ impl App {
                 match c {
                     's' => self.navigate_spell_flag(dir),
                     'r' => self.navigate_style_flag(dir),
+                    ']' if forward => self.jump_to_scene_heading(true),
+                    '[' if !forward => self.jump_to_scene_heading(false),
+                    'a' => self.jump_to_open_annotation(forward),
                     _ => {}
                 }
                 return;
