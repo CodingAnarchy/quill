@@ -149,6 +149,7 @@ impl App {
         let editor = config::EditorConfig::load();
         self.vim = editor.vim;
         self.smart_typography = editor.smart_typography;
+        self.auto_pair = editor.auto_pair;
         self.focus_width = editor.column_width;
         self.typewriter = editor.typewriter;
         self.focus_mode = editor.focus_mode;
@@ -172,6 +173,10 @@ pub fn settings_vocab() -> Vec<(String, String)> {
         (
             "editor.smart_typography".to_string(),
             "Smart curly quotes, em-dashes, and ellipses as you type — true or false".to_string(),
+        ),
+        (
+            "editor.auto_pair".to_string(),
+            "Auto-close quotes and brackets as you type, skipping over an existing closer — true or false".to_string(),
         ),
         (
             "editor.column_width".to_string(),
@@ -226,6 +231,7 @@ pub fn validate_change(key: &str, value: &str) -> Result<String, String> {
     match key {
         "editor.vim"
         | "editor.smart_typography"
+        | "editor.auto_pair"
         | "editor.typewriter"
         | "editor.focus_mode"
         | "editor.paragraph_indent" => {

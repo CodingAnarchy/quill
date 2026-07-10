@@ -40,6 +40,7 @@ impl App {
                 Command::EditSettingText(SettingTextKnob::ColumnWidth),
             ),
             bool_row(SettingBool::SmartTypography, self.smart_typography),
+            bool_row(SettingBool::AutoPair, self.auto_pair),
             bool_row(SettingBool::Vim, self.vim),
             PaletteItem::new(
                 "Autosave interval",
@@ -396,9 +397,9 @@ mod tests {
         let Mode::Palette(p) = &app.mode else {
             panic!("the setter opens a palette");
         };
-        // Theme, width, smart typography, vim, autosave, typewriter, focus,
-        // paragraph indent, stopwords.
-        assert_eq!(p.items.len(), 9);
+        // Theme, width, smart typography, auto-pair, vim, autosave, typewriter,
+        // focus, paragraph indent, stopwords.
+        assert_eq!(p.items.len(), 10);
         assert_eq!(p.title, "Settings");
     }
 

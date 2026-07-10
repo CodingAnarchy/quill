@@ -135,6 +135,7 @@ except the `[editor.keys]` remaps, which are hand-edited.
 | --- | --- | --- | --- |
 | `vim` | `false` | `true` / `false` | Opt-in Vim-style modal editing (#27). Off by default the editor behaves exactly as it always has. |
 | `smart_typography` | `true` | `true` / `false` | As you type, straight quotes become curly (`“” ‘’`), `--` becomes an em-dash (`—`), and `...` an ellipsis (`…`) (#296). Set `false` for plain ASCII punctuation and an exact byte-for-byte round-trip of what you type. |
+| `auto_pair` | `false` | `true` / `false` | Auto-close quotes and brackets as you type (#1007): typing an opener (`"`, `(`, `[`, or an opening curly quote) inserts its matching closer and drops the cursor between the pair; typing the closer when it's already at the cursor skips past it instead of duplicating. Off by default. Composes with `smart_typography` — with both on, a `"` becomes a correctly-oriented curly-quote pair. |
 | `column_width` | `72` | `32`–`160` (characters) | The centered text column's starting width (#303). The runtime `Ctrl-+` / `Ctrl--` adjustment still applies on top. |
 | `typewriter` | `false` | `true` / `false` | Typewriter scrolling (#301): keep the cursor's line pinned at the vertical centre of the page, the text scrolling under it. |
 | `focus_mode` | `false` | `true` / `false` | Focus mode (#301): dim every paragraph but the one under the cursor. |

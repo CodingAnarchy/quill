@@ -30,6 +30,13 @@ pub struct EditorConfig {
     /// (`…`). **On by default** — set `smart_typography = false` for plain ASCII
     /// punctuation (and an exact byte-for-byte round-trip of what you type).
     pub smart_typography: bool,
+    /// Auto-pair quotes and brackets (#1007): typing an opener (`"`, `(`, `[`, or
+    /// an opening curly quote) inserts its matching closer and drops the cursor
+    /// between the pair; typing the closer when it's already at the cursor skips
+    /// past it instead of duplicating. **Off by default** — opt in with
+    /// `auto_pair = true`. Composes with `smart_typography`: with both on, a `"`
+    /// becomes a correctly-oriented open/close curly-quote pair.
+    pub auto_pair: bool,
     /// The centered text column width in characters (#303). Defaults to 72; the
     /// runtime `+`/`-` adjustment still applies on top, this just sets the start.
     pub column_width: u16,
@@ -60,6 +67,7 @@ impl Default for EditorConfig {
             vim: false,
             keys: HashMap::new(),
             smart_typography: true,
+            auto_pair: false,
             column_width: 72,
             typewriter: false,
             focus_mode: false,
@@ -357,6 +365,21 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_pair_is_off_by_default_and_opt_in() {
+        // Auto-pair ships off (#1007) so authors who type both marks are unaffected;
+        // opt in with `auto_pair = true` under `[editor]`.
+        assert!(
+            !EditorConfig::default().auto_pair,
+            "auto_pair is off by default"
+        );
+        let on: EditorConfig = toml::from_str("auto_pair = true").unwrap();
+        assert!(on.auto_pair, "opt in with auto_pair = true");
+        // Turning it on doesn't disturb the other opt-ins (smart typography stays
+        // at its own default).
+        assert!(on.smart_typography, "unrelated defaults are untouched");
+    }
 
     #[test]
     fn snippets_parse_sorts_strings_and_reports_non_strings() {

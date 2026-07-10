@@ -137,6 +137,11 @@ pub struct App {
     /// quotes / em-dashes / ellipses as the author types prose. On by default;
     /// when off, typed punctuation is inserted verbatim.
     pub smart_typography: bool,
+    /// Auto-pair quotes and brackets (#1007), from the `[editor]` config: typing an
+    /// opener inserts its matching closer with the cursor between, and typing a
+    /// closer that's already at the cursor skips past it. Off by default; when off,
+    /// each mark is inserted exactly as typed.
+    pub auto_pair: bool,
     /// The active color theme (#300), from the `[theme]` config. Threaded through
     /// the render path so the palette is data, not hard-coded literals.
     pub theme: crate::theme::Theme,
@@ -637,6 +642,7 @@ impl App {
         let editor = crate::config::EditorConfig::load();
         let vim = editor.vim;
         let smart_typography = editor.smart_typography;
+        let auto_pair = editor.auto_pair;
         let typewriter = editor.typewriter;
         let focus_mode = editor.focus_mode;
         let paragraph_indent = editor.paragraph_indent;
@@ -677,6 +683,7 @@ impl App {
             mode: if vim { Mode::Normal } else { Mode::Insert },
             vim,
             smart_typography,
+            auto_pair,
             theme,
             spell_flags: Vec::new(),
             spell_scratch: String::new(),

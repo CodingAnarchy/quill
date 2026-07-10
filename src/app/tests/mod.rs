@@ -57,6 +57,7 @@ mod analysis;
 mod annotations;
 mod archive;
 mod assistant;
+mod auto_pair;
 mod autosave;
 mod backup;
 mod backup_browser;
@@ -159,6 +160,7 @@ pub fn open_test_app(dir: &Path) -> App {
     let mut app = App::new(buffer, project);
     app.vim = false;
     app.smart_typography = false;
+    app.auto_pair = false;
     app.mode = Mode::Insert;
     app.workflows = Vec::new();
     app.triggers = Triggers::default();

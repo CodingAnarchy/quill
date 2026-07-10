@@ -452,6 +452,16 @@ impl Buffer {
         self.rope.slice(start..end).to_string()
     }
 
+    /// The single character immediately *at* the cursor (the one a Forward-Delete
+    /// would remove), or `None` at the very end of the buffer. Used by auto-pair
+    /// (#1007) to decide whether typing a closer should skip over an existing one.
+    /// O(1) — it reads just the one char at the cursor's char index, never scanning
+    /// the line or the document, so it stays off the per-keystroke cost ceiling.
+    pub fn char_after_cursor(&self) -> Option<char> {
+        let idx = self.cursor_char_idx();
+        (idx < self.rope.len_chars()).then(|| self.rope.char(idx))
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let idx = self.cursor_char_idx();
         let mut buf = [0u8; 4];
