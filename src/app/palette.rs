@@ -291,6 +291,8 @@ impl App {
             Action::ProgressReport => self.open_progress_report(),
             Action::AnalysisReport => self.open_analysis_report(),
             Action::WritingHistory => self.open_writing_history(),
+            Action::RevisionPlan => self.export_revision_plan(),
+            Action::HealthTrend => self.export_health_trend(),
             Action::Ai(a) => self.start_ai_action(a, force),
             Action::EnableAi => self.offer_enable_ai(None),
             Action::UserGuide => self.open_guide(),
