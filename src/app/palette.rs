@@ -273,6 +273,7 @@ impl App {
                     | AiAction::Thesaurus
                     | AiAction::NameGen
                     | AiAction::Editorial
+                    | AiAction::Accuracy
             ) | Action::RefreshSeriesBible
                 | Action::RefreshBibles
                 | Action::QueuePasses
@@ -783,6 +784,21 @@ impl App {
             AiAction::Thesaurus => self.start_thesaurus(),
             AiAction::NameGen => self.start_namegen(),
             AiAction::Editorial => self.analyze_editorial(),
+            // Author-invoked accuracy (#973): prompt for the named concern first,
+            // then run. On the confirmed / cost-gated re-entry the concern is already
+            // captured, so spawn the pass instead of re-prompting.
+            AiAction::Accuracy => {
+                if self.accuracy_concern.is_some() {
+                    self.analyze_accuracy();
+                } else {
+                    self.open_prompt(
+                        Pending::AccuracyConcern,
+                        "Accuracy concern (e.g. 1850s London): ",
+                        "",
+                        None,
+                    );
+                }
+            }
         }
     }
 }
@@ -895,6 +911,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::Editorial => (
             "Editorial read",
             "Flag structural / continuity / line issues — no fixes",
+        ),
+        AiAction::Accuracy => (
+            "Cultural & historical accuracy",
+            "Flag inaccuracies for a concern you name — accuracy, not sensitivity",
         ),
     }
 }

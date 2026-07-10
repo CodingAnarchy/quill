@@ -645,6 +645,12 @@ pub struct App {
     /// when it's sent so the answer can be filed under it in [`qa_log`](Self::qa_log);
     /// taken when the answer applies, `None` when no ask is pending.
     pub(crate) pending_qa_question: Option<String>,
+    /// The accuracy concern the author named for a cultural & historical accuracy
+    /// pass (#973) — the period / place / domain to check against ("1850s London").
+    /// Captured when the author submits it in the concern prompt so the cost-gated
+    /// run (and any confirm chained after it) reaches the pass with the concern
+    /// intact; taken when the pass spawns, `None` when no accuracy pass is pending.
+    pub(crate) accuracy_concern: Option<String>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
     /// The system-clipboard seam (#811): a yank / delete / Visual copy writes the
@@ -838,6 +844,7 @@ impl App {
             qa_log,
             qa_store,
             pending_qa_question: None,
+            accuracy_concern: None,
             message: None,
             clipboard: Box::new(crate::clipboard::Osc52Clipboard::new()),
             mouse_anchor: None,

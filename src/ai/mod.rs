@@ -8,6 +8,7 @@
 //! `docs/ai-features.md`. AI is opt-in and off by default: the manuscript only
 //! leaves the machine on an explicit request, with a key supplied by the author.
 
+pub mod accuracy;
 pub mod ad_creative;
 pub mod batch;
 pub mod bible;
@@ -211,6 +212,9 @@ pub enum Outcome {
     NameGen(Result<Vec<namegen::Name>, AiError>),
     /// Editorial read — fix-free flags (structural / continuity / line) (#293).
     Editorial(Result<Vec<editorial::Note>, AiError>),
+    /// Cultural & historical accuracy — inaccuracy flags for an author-named
+    /// concern (#973). Findings only; author-invoked; accuracy, not sensitivity.
+    Accuracy(Result<accuracy::Accuracy, AiError>),
     /// Semantic "find similar scenes" (#924): the passages most similar to a
     /// selection / query, ranked with scores + jumpable citations. `None` when no
     /// embedding model is available (graceful degradation, not an error).
@@ -264,6 +268,7 @@ impl Outcome {
             Self::Thesaurus(r) => r.as_ref().err(),
             Self::NameGen(r) => r.as_ref().err(),
             Self::Editorial(r) => r.as_ref().err(),
+            Self::Accuracy(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
             Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),

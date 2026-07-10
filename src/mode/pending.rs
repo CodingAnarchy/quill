@@ -234,6 +234,10 @@ pub enum Pending {
     DraftCharacters,
     /// Text input: a concept to draft a starter setting bible from (#257).
     DraftSetting,
+    /// Text input: the concern (period / place / domain, e.g. "1850s London") to run
+    /// a cultural & historical accuracy check against (#973). Author-invoked;
+    /// accuracy, not sensitivity / representation.
+    AccuracyConcern,
     /// Text input: a plain-language description of a workflow to generate (#232).
     DescribeWorkflow,
     /// Text input: confirm or edit the name for the workflow the AI proposed

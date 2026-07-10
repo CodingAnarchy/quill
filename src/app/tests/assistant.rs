@@ -508,6 +508,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "ai:style",
         "ai:voice",
         "ai:editorial",
+        "ai:accuracy",
         "ai:ask",
         "ai:brainstorm",
         "ai:draft-characters",

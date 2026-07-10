@@ -311,6 +311,7 @@ impl Action {
         Self::Ai(AiAction::Thesaurus),
         Self::Ai(AiAction::NameGen),
         Self::Ai(AiAction::Editorial),
+        Self::Ai(AiAction::Accuracy),
         Self::RefreshBibles,
         Self::QueuePasses,
         Self::BackgroundBibleUpdate,
@@ -562,6 +563,7 @@ impl Action {
             Self::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
             Self::Ai(AiAction::NameGen) => "AI · Name generator",
             Self::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
+            Self::Ai(AiAction::Accuracy) => "AI · Cultural & historical accuracy (flags, no fixes)",
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
             Self::QuickStart => "Quick-start (first-run card)",
@@ -694,6 +696,10 @@ impl Action {
                         | AiAction::Style
                         | AiAction::Voice
                         | AiAction::Editorial
+                        // Read-only accuracy analysis (#973): produces findings, no
+                        // prose, so it passes the two-layer prose guard. The concern
+                        // is its free-text argument (see `text_arg`).
+                        | AiAction::Accuracy
                         | AiAction::Ask
                         | AiAction::Brainstorm
                         | AiAction::DraftCharacters
@@ -712,6 +718,8 @@ impl Action {
             Self::Ai(AiAction::Ask) => Some("question"),
             Self::Ai(AiAction::Brainstorm) => Some("premise"),
             Self::Ai(AiAction::DraftCharacters | AiAction::DraftSetting) => Some("concept"),
+            // The named period / place / domain to check accuracy against (#973).
+            Self::Ai(AiAction::Accuracy) => Some("concern"),
             _ => None,
         }
     }

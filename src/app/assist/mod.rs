@@ -127,6 +127,18 @@ pub(super) fn describe_editorial(n: &ai::editorial::Note) -> (String, Vec<String
     )
 }
 
+pub(super) fn describe_accuracy(f: &ai::accuracy::AccuracyFinding) -> (String, Vec<String>) {
+    // The flagged passage (when quoted) then why it may be off for the named concern
+    // — an observation the author acts on, never a fix.
+    let at = f
+        .passage
+        .trim()
+        .is_empty()
+        .then(String::new)
+        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.passage.trim()));
+    (format!("{}{at}", f.detail), f.chapters.clone())
+}
+
 pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
     let summary = if f.character.is_empty() {
         format!("{}: {}", f.kind, f.detail)

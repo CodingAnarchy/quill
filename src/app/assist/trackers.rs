@@ -10,9 +10,11 @@ use super::super::*;
 
 use super::write_failure_message;
 use super::{
-    describe_continuity, describe_editorial, describe_naming, describe_plot, describe_scaffold,
-    describe_setting, describe_style, describe_theme, describe_voice, findings_from,
+    describe_accuracy, describe_continuity, describe_editorial, describe_naming, describe_plot,
+    describe_scaffold, describe_setting, describe_style, describe_theme, describe_voice,
+    findings_from,
 };
+use crate::ai::accuracy::{self, Accuracy};
 use crate::ai::naming::{self, Naming};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
@@ -111,6 +113,29 @@ impl App {
             ai::editorial::build_request,
             ai::editorial::parse,
             Outcome::Editorial,
+        );
+    }
+
+    /// Start a cultural & historical accuracy pass (#973) for the concern the author
+    /// named (`accuracy_concern`, set by the prompt) — flag passages that read as
+    /// factually / period / culturally inaccurate for that named concern, applied by
+    /// [`App::poll_ai`] into the revision-triage list. Findings only; author-invoked;
+    /// accuracy, NOT a sensitivity / representation review. The concern is *taken*
+    /// here (one pass per submission), so a later run re-prompts rather than reusing a
+    /// stale concern; a missing concern is a no-op (the prompt always sets one first).
+    pub(crate) fn analyze_accuracy(&mut self) {
+        let Some(concern) = self.accuracy_concern.take() else {
+            return;
+        };
+        let concern = concern.trim().to_string();
+        if concern.is_empty() {
+            return;
+        }
+        self.spawn_manuscript_pass(
+            "⟳ Checking accuracy…",
+            move |manuscript, model| accuracy::build_request(manuscript, &concern, model),
+            accuracy::parse,
+            Outcome::Accuracy,
         );
     }
 
@@ -341,6 +366,22 @@ impl App {
             return;
         };
         let findings = findings_from(&notes, None, AiAction::Editorial, describe_editorial);
+        self.show_findings(findings);
+    }
+
+    /// Apply a cultural & historical accuracy pass (#973): surface each inaccuracy
+    /// observation as a triage finding (the flagged passage + why it may be off for
+    /// the named concern). Pure analysis — nothing is written, no prose is produced.
+    pub(crate) fn apply_accuracy(&mut self, result: Result<Accuracy, ai::AiError>) {
+        let Some(accuracy) = self.ok_or_report(result) else {
+            return;
+        };
+        let findings = findings_from(
+            &accuracy.findings,
+            None,
+            AiAction::Accuracy,
+            describe_accuracy,
+        );
         self.show_findings(findings);
     }
 

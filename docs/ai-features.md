@@ -320,6 +320,29 @@ The palette actions:
   author decides what to change. The analysis category of the assistant-not-
   co-writer rule, taken to its sharpest: advice you accept or ignore, not prose to
   adopt.
+- **Cultural & historical accuracy** (#973) — an **author-invoked**, opt-in
+  accuracy pass. The author *names* a concern to check against — a period, place,
+  or cultural/technical domain ("1850s London", "Heian-era court protocol",
+  "18th-century sailing") — and the pass reads the manuscript (or the active
+  book/chapter scope, like the other passes) and flags passages that read as
+  factually, period, or culturally **inaccurate** *relative to that named concern*
+  (an anachronism, a detail that contradicts the named setting, a cultural/technical
+  detail a knowledgeable reader would find wrong). Each finding is the flagged
+  passage plus a short why-it-may-be-off note, surfaced in the shared revision
+  triage / findings / health dashboard like every other analysis pass. **Off by
+  default, run per concern, on the author's request** (the Ctrl-K / Ctrl-A action
+  prompts for the concern; the assistant supplies it as the `concern` argument).
+  Analysis only, grounded in the AI boundary: it *observes and flags*, never a
+  rewrite, a corrected sentence, or replacement prose — the author decides what to
+  change.
+
+  **Accuracy, not sensitivity — deliberately.** This is a *craft tool* for getting
+  named details right where the author asks. It is explicitly **NOT** a sensitivity,
+  representation, bias, or political-correctness review — a contrary aim that is out
+  of scope for Quill. The distinction is intentional: it checks *only* the concern
+  the author supplied, never makes representation judgments, never flags depictions
+  as offensive, and never imposes a check the author didn't ask for. Accuracy the
+  author opts into, not policing.
 - **Character voice** (#183) — checks the manuscript against the character
   bible's **voice profiles** (the character pass now captures speech patterns,
   vocabulary/register, verbal tics, and sentence rhythm per character, editable
@@ -363,7 +386,8 @@ The palette actions:
   falls back to a prose excerpt + the setting bible. Confirms before generating
   (billed per image).
 - **Revision triage** (#82) — every finding surfaced this session (continuity,
-  setting, style, naming, structural gaps), aggregated into one de-duplicated
+  setting, style, naming, structural gaps, cultural & historical accuracy #973),
+  aggregated into one de-duplicated
   list in the findings overlay. Local only — no request. Marking a finding as an
   `xxx` TODO is the durable outcome (it lands in the chapter and feeds the
   report's TODO count); dismissals are in-session.
@@ -520,13 +544,15 @@ UI thread where the editor state lives.
 
 The assistant can run the **mechanical** actions (save, export, the reports,
 spelling navigation, view toggles) and the **analysis passes** (continuity,
-characters, setting, scaffold, naming, style, voice, editorial). A pass runs as a
+characters, setting, scaffold, naming, style, voice, editorial, cultural &
+historical accuracy). A pass runs as a
 normal background request and its findings open in the editor exactly as from the
 palette; the pane reports that it ran and the conversation continues.
 
 It can also run the actions that take an **argument** (#390): ask the manuscript a
-question, brainstorm from a premise, or draft a character / setting bible from a
-concept. Each tool's input schema is derived from the action itself (the single
+question, brainstorm from a premise, draft a character / setting bible from a
+concept, or run the cultural & historical accuracy pass for a named concern (#973).
+Each tool's input schema is derived from the action itself (the single
 source from #306), so the model supplies the argument and the action runs with it
 instead of opening a prompt the assistant couldn't answer; a Q&A answer comes back
 in the conversation. (The thesaurus, name generator, and image passes stay out —

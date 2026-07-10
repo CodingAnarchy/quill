@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::mode::{Mode, Pending, PromptState, WizardStep};
+use crate::mode::{AiAction, Mode, Pending, PromptState, WizardStep};
 use crate::text::{match_ranges_opts, MatchOpts};
 
 use super::App;
@@ -520,6 +520,7 @@ impl App {
             | Pending::Brainstorm
             | Pending::DraftCharacters
             | Pending::DraftSetting
+            | Pending::AccuracyConcern
             | Pending::NewProject
             | Pending::ConvertToSeries
             | Pending::AddBook
@@ -759,6 +760,24 @@ impl App {
                                 // Back to editing; the setting bible arrives asynchronously.
                                 self.mode = closed;
                                 self.draft_setting(text);
+                            }
+                            Pending::AccuracyConcern => {
+                                // Back to editing; capture the named concern, then run
+                                // the accuracy pass through the normal cost gate (#973).
+                                // A blank concern cancels — the pass needs a concern to
+                                // check against (accuracy is per named concern, always).
+                                self.mode = closed;
+                                if text.is_empty() {
+                                    self.message = Some(
+                                        "Accuracy check cancelled — name a concern to check."
+                                            .into(),
+                                    );
+                                } else {
+                                    self.accuracy_concern = Some(text.to_string());
+                                    // Cost-gate the run; the confirmed path re-enters
+                                    // `run_ai_action`, which spawns (concern now set).
+                                    self.start_ai_action(AiAction::Accuracy, false);
+                                }
                             }
                             Pending::NameNewWorkflow => {
                                 self.mode = closed;
