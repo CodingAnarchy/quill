@@ -26,6 +26,14 @@ pub fn sentences(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The untrimmed byte spans `(start, end)` of each sentence in `text`, in order
+/// (#1001). Unlike [`sentences`] the spans are byte offsets *into `text`*, so a
+/// caller can map a flagged long sentence back to its position in the buffer and
+/// jump the cursor there. The public window over the segmenter's own spans.
+pub fn sentence_byte_spans(text: &str) -> Vec<(usize, usize)> {
+    sentence_spans(text)
+}
+
 /// Byte spans `(start, end)` of each sentence in `text`. A run of terminators
 /// (`.`, `!`, `?`, `…`) ends a sentence when it is followed by the end of the
 /// text or by whitespace and then a capital / digit / opening quote — so

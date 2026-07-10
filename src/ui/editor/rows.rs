@@ -50,6 +50,10 @@ pub(super) struct SpanHighlights<'a> {
     pub(super) current: Option<ByteRange>,
     /// Misspelled-word ranges, underlined (#357).
     pub(super) spell: &'a [ByteRange],
+    /// Active style-flag ranges, underlined (#1001) — the current sweep category's
+    /// hits, marked in place like a misspelling so the author can see each as they
+    /// step through it. Empty (no underline) when no sweep is active.
+    pub(super) style_flags: &'a [ByteRange],
     /// Annotated spans, tinted background (#302).
     pub(super) annotations: &'a [ByteRange],
     /// The focus-mode paragraph; everything outside it dims (#301).
@@ -361,6 +365,10 @@ fn styled_row(
         .current
         .is_some_and(|(s, e)| s < seg_end && e > seg_start);
     let spell_here = hl.spell.iter().any(|&(s, e)| s < seg_end && e > seg_start);
+    let style_flag_here = hl
+        .style_flags
+        .iter()
+        .any(|&(s, e)| s < seg_end && e > seg_start);
     let annotated_here = hl
         .annotations
         .iter()
@@ -372,6 +380,7 @@ fn styled_row(
         && !match_here
         && !current_here
         && !spell_here
+        && !style_flag_here
         && !annotated_here
         && focus_covers_row
     {
@@ -399,8 +408,11 @@ fn styled_row(
             hl.current,
             theme,
         );
-        // Misspelled words (#357) get an underline, layered on whatever else.
-        if hl.spell.iter().any(|&(s, e)| abs >= s && abs < e) {
+        // Misspelled words (#357) and active style-flag hits (#1001) get an
+        // underline, layered on whatever else — the shared "flagged in place" mark.
+        if hl.spell.iter().any(|&(s, e)| abs >= s && abs < e)
+            || hl.style_flags.iter().any(|&(s, e)| abs >= s && abs < e)
+        {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
         // Annotated spans (#302) get a tinted background, layered on the rest.

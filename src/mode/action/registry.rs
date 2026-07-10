@@ -115,6 +115,10 @@ pub enum Action {
     NextMisspelling,
     /// Jump the cursor to the previous misspelled word (#359).
     PrevMisspelling,
+    /// Open the style-flag sweep picker (#1001): pick a flag category (adverbs,
+    /// filter words, weak / passive verbs, long sentences, over-used words) to
+    /// underline and step through with `]r` / `[r`.
+    StyleFlagSweep,
     /// Toggle typewriter scrolling — pin the cursor line to the page centre (#301).
     ToggleTypewriter,
     /// Toggle focus mode — dim every paragraph but the current one (#301).
@@ -308,6 +312,7 @@ impl Action {
         Self::ViewDictionary,
         Self::NextMisspelling,
         Self::PrevMisspelling,
+        Self::StyleFlagSweep,
         Self::AddAnnotation,
         Self::ReviewAnnotations,
         Self::InsertSnippet,
@@ -375,6 +380,7 @@ impl Action {
             Self::ViewDictionary => "dict:view",
             Self::NextMisspelling => "spell:next",
             Self::PrevMisspelling => "spell:prev",
+            Self::StyleFlagSweep => "style:sweep",
             Self::ToggleTypewriter => "view:typewriter",
             Self::ToggleFocus => "view:focus",
             Self::ToggleParagraphIndent => "view:paragraph-indent",
@@ -458,6 +464,7 @@ impl Action {
             | Self::ViewDictionary
             | Self::NextMisspelling
             | Self::PrevMisspelling
+            | Self::StyleFlagSweep
             | Self::AddAnnotation
             | Self::ReviewAnnotations
             | Self::InsertSnippet
@@ -548,6 +555,7 @@ impl Action {
             Self::ViewDictionary => "View project dictionary",
             Self::NextMisspelling => "Next misspelling",
             Self::PrevMisspelling => "Previous misspelling",
+            Self::StyleFlagSweep => "Style-flag sweep (pick a category)",
             Self::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Self::ToggleFocus => "Focus mode (toggle)",
             Self::ToggleParagraphIndent => "Paragraph indent (toggle)",

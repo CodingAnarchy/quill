@@ -508,6 +508,40 @@ fn an_annotated_span_is_marked_in_the_editor() {
 }
 
 #[test]
+fn active_style_flag_hits_are_underlined_and_clear_when_off() {
+    // The sweep's cached hits (#1001) underline in place like a misspelling, and
+    // clearing the sweep removes the mark on the next frame.
+    let mut app = app_with("She walked slowly.\n");
+    // Underline the adverb "slowly" (bytes 11..17).
+    app.style_flag_category = Some(crate::analysis::FlagCategory::Adverbs);
+    app.style_flags = vec![(11, 17)];
+
+    let underlined = |app: &App| -> bool {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..40).any(|x| {
+            (0..8).any(|y| {
+                buf[(x, y)]
+                    .style()
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::UNDERLINED)
+            })
+        })
+    };
+
+    assert!(underlined(&app), "the active flag hit is underlined");
+
+    // Toggling the sweep off clears the cache, so nothing underlines.
+    app.style_flag_category = None;
+    app.style_flags.clear();
+    assert!(
+        !underlined(&app),
+        "clearing the sweep removes the underline"
+    );
+}
+
+#[test]
 fn markers_reappear_when_cursor_enters_the_span() {
     let mut app = app_with("*italic* word");
     app.buffer.cursor = Cursor { line: 0, col: 3 }; // inside "italic"

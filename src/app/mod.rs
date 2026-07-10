@@ -88,6 +88,7 @@ mod sequenced;
 mod series_bible;
 mod spell;
 pub mod sprint; // the writing-sprint state + status segment, read by the UI (#299)
+mod style_flags; // the style-flag sweep: pick a category, step through it, underline it (#1001)
 mod tree;
 mod vim;
 mod wizard;
@@ -147,6 +148,15 @@ pub struct App {
     /// (#780), so `refresh_spell_flags` doesn't allocate a fresh whole-document
     /// `String` every idle tick — it refills this in place instead.
     spell_scratch: String,
+    /// The style-flag category the author is sweeping (#1001), or `None` when the
+    /// sweep is off. When set, its occurrences in the active buffer are underlined
+    /// and `]r` / `[r` step between them; toggling it off clears the marks.
+    pub(crate) style_flag_category: Option<crate::analysis::FlagCategory>,
+    /// Byte ranges of the active [`style_flag_category`](Self::style_flag_category)'s
+    /// occurrences in the edit buffer (#1001), recomputed on the idle tick (never the
+    /// keystroke path or per draw) and underlined by the editor. Empty when no sweep
+    /// is active.
+    pub(crate) style_flags: Vec<(usize, usize)>,
     /// One-shot per-action backend override from the hybrid router (#372): set just
     /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
     /// backend. A `Cell` so the read-only `backend_spec` can take it.
@@ -670,6 +680,8 @@ impl App {
             theme,
             spell_flags: Vec::new(),
             spell_scratch: String::new(),
+            style_flag_category: None,
+            style_flags: Vec::new(),
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
@@ -914,6 +926,7 @@ impl App {
                                   // a stale fold can never hide live prose.
         self.prune_folds();
         self.refresh_spell_flags();
+        self.refresh_style_flags();
         self.sync_annotations();
         self.tally_words();
         self.refresh_vc_status_on_idle();

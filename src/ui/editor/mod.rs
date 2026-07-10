@@ -94,11 +94,15 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         && !app.assistant_pane_focused();
     // Focus mode (#301): the un-dimmed span is the paragraph under the cursor.
     let focus = app.focus_mode.then(|| focus_paragraph(buffer));
+    // Active style-flag hits (#1001), computed on idle; underlined like a
+    // misspelling under the prose while a sweep is on (empty otherwise).
+    let style_flags = app.style_flags.as_slice();
     let highlights = SpanHighlights {
         conceal,
         matches: search_matches,
         current: current_match,
         spell,
+        style_flags,
         annotations: &annotations,
         focus,
     };
@@ -181,6 +185,7 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         matches: &[],
         current: None,
         spell: &[],
+        style_flags: &[],
         annotations: &[],
         focus: None,
     };
