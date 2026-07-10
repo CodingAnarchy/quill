@@ -106,7 +106,9 @@ pub fn flag_ranges(
 /// Replace heading and thematic-break lines with spaces of the same byte length,
 /// leaving every other byte (and all newlines) exactly where it is — so a span
 /// scanned from the result still points at the right place in the original buffer.
-fn mask_structure(text: &str) -> String {
+/// Crate-visible so the proximity-repeat pass (#1002) masks the same structural
+/// lines this sweep does, keeping one definition.
+pub(super) fn mask_structure(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while !rest.is_empty() {
@@ -195,7 +197,10 @@ fn overused_words(text: &str, lists: &WordLists) -> Vec<(usize, usize)> {
 }
 
 /// A word that counts toward the over-used tally: long enough and not a stopword.
-fn is_content_word(lower: &str, lists: &WordLists) -> bool {
+/// Crate-visible so the proximity-repeat pass (#1002) shares one definition of a
+/// "content word" (the report's most-used-words basis) — a common function word
+/// like "the" or "and" is never a proximity repeat, so the signal stays meaningful.
+pub(super) fn is_content_word(lower: &str, lists: &WordLists) -> bool {
     lower.len() > 2 && !lists.is_stopword(lower)
 }
 

@@ -97,12 +97,16 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
     // Active style-flag hits (#1001), computed on idle; underlined like a
     // misspelling under the prose while a sweep is on (empty otherwise).
     let style_flags = app.style_flags.as_slice();
+    // Near-proximity word repeats (#1002), computed on idle; dim-marked in place
+    // while the toggle is on (empty otherwise).
+    let proximity = app.proximity_repeats.as_slice();
     let highlights = SpanHighlights {
         conceal,
         matches: search_matches,
         current: current_match,
         spell,
         style_flags,
+        proximity,
         annotations: &annotations,
         focus,
     };
@@ -186,6 +190,7 @@ pub(super) fn render_reference_pane(frame: &mut Frame, area: Rect, app: &App, bu
         current: None,
         spell: &[],
         style_flags: &[],
+        proximity: &[],
         annotations: &[],
         focus: None,
     };

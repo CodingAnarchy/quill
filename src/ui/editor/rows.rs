@@ -54,6 +54,11 @@ pub(super) struct SpanHighlights<'a> {
     /// hits, marked in place like a misspelling so the author can see each as they
     /// step through it. Empty (no underline) when no sweep is active.
     pub(super) style_flags: &'a [ByteRange],
+    /// Near-proximity repeated content words, dim-marked (#1002) — a word echoed
+    /// within a short window of the visible text, surfaced in place as a subdued
+    /// marker while the toggle is on so the local repetition is visible where it
+    /// happens. Empty (no marking) when the toggle is off.
+    pub(super) proximity: &'a [ByteRange],
     /// Annotated spans, tinted background (#302).
     pub(super) annotations: &'a [ByteRange],
     /// The focus-mode paragraph; everything outside it dims (#301).
@@ -369,6 +374,10 @@ fn styled_row(
         .style_flags
         .iter()
         .any(|&(s, e)| s < seg_end && e > seg_start);
+    let proximity_here = hl
+        .proximity
+        .iter()
+        .any(|&(s, e)| s < seg_end && e > seg_start);
     let annotated_here = hl
         .annotations
         .iter()
@@ -381,6 +390,7 @@ fn styled_row(
         && !current_here
         && !spell_here
         && !style_flag_here
+        && !proximity_here
         && !annotated_here
         && focus_covers_row
     {
@@ -414,6 +424,12 @@ fn styled_row(
             || hl.style_flags.iter().any(|&(s, e)| abs >= s && abs < e)
         {
             style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        // Near-proximity repeats (#1002) get a dim marker — a subdued cue that this
+        // content word was echoed within a short window, layered on the rest so the
+        // author sees the local repetition without it shouting like a misspelling.
+        if hl.proximity.iter().any(|&(s, e)| abs >= s && abs < e) {
+            style = style.add_modifier(Modifier::DIM);
         }
         // Annotated spans (#302) get a tinted background, layered on the rest.
         if hl.annotations.iter().any(|&(s, e)| abs >= s && abs < e) {

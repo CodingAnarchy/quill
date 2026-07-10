@@ -83,6 +83,7 @@ mod persistence;
 mod project_ops;
 mod project_search;
 mod prompts;
+mod proximity_repeats; // the near-proximity word-repeat marking: toggle, dim-mark in place (#1002)
 mod quick_switch;
 mod sequenced;
 mod series_bible;
@@ -163,6 +164,15 @@ pub struct App {
     /// keystroke path or per draw) and underlined by the editor. Empty when no sweep
     /// is active.
     pub(crate) style_flags: Vec<(usize, usize)>,
+    /// Whether the near-proximity word-repeat marking is on (#1002): a deliberate
+    /// revision-pass aid, off by default so it's never always-on noise. When on, the
+    /// visible window's content words echoed within a short span dim-mark in place,
+    /// recomputed on the idle tick; toggling it off clears the cache and the marks.
+    pub(crate) proximity_repeats_on: bool,
+    /// Byte ranges of near-proximity repeated content words in the edit buffer
+    /// (#1002), recomputed on the idle tick (never the keystroke path or per draw)
+    /// and dim-marked by the editor. Empty when the marking is off.
+    pub(crate) proximity_repeats: Vec<(usize, usize)>,
     /// One-shot per-action backend override from the hybrid router (#372): set just
     /// before an AI request, consumed by `backend_spec`. `None` ⇒ the session
     /// backend. A `Cell` so the read-only `backend_spec` can take it.
@@ -696,6 +706,8 @@ impl App {
             spell_scratch: String::new(),
             style_flag_category: None,
             style_flags: Vec::new(),
+            proximity_repeats_on: false,
+            proximity_repeats: Vec::new(),
             routed_backend: std::cell::Cell::new(None),
             ai_in_flight: std::cell::Cell::new(None),
             routed_model: std::cell::Cell::new(None),
@@ -942,6 +954,7 @@ impl App {
         self.prune_folds();
         self.refresh_spell_flags();
         self.refresh_style_flags();
+        self.refresh_proximity_repeats();
         self.sync_annotations();
         self.tally_words();
         self.refresh_vc_status_on_idle();

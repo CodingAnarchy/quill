@@ -26,6 +26,9 @@ pub use style::{
 mod flags;
 pub use flags::{flag_ranges, FlagCategory};
 
+mod proximity;
+pub use proximity::proximity_repeats;
+
 /// Raw text statistics for a span of prose — the basis for every readability
 /// score. Additive across chapters, so the whole-manuscript figures are the sum
 /// of the per-chapter ones rather than an average of averages.
