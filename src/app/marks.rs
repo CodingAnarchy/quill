@@ -21,6 +21,7 @@
 //! through it pushes the jumplist like any big jump, so `` `` `` still comes back.
 
 use crate::mode::{JumpPos, Mode};
+use crate::syntax::Syntax;
 
 use super::App;
 
@@ -106,7 +107,7 @@ impl App {
     /// the chapter shrank since the position was recorded. A stale chapter index
     /// (deleted / reordered away) is dropped with a notice rather than jumping
     /// somewhere wrong.
-    fn restore_jump(&mut self, pos: JumpPos) {
+    pub(super) fn restore_jump(&mut self, pos: JumpPos) {
         if pos.chapter >= self.project.manifest.chapters.len() {
             self.message = Some("That position's chapter is gone.".into());
             return;
@@ -255,5 +256,84 @@ impl App {
         };
         self.push_jump();
         self.restore_jump(pos);
+    }
+
+    // --- Scene-heading motion (#1009) -------------------------------------
+
+    /// `]]` / `[[`: step the cursor to the next (`forward`) or previous scene
+    /// heading (#1009), so the author walks a chapter's beats with one keystroke
+    /// instead of a trip through the outline. Works from any cursor position and
+    /// in either view — the headings come from the loaded buffer's live parse.
+    ///
+    /// Within the loaded buffer it's a plain cursor move (the jumplist isn't flooded
+    /// by beat-stepping). When there's no heading left in the current direction it
+    /// crosses into the nearest adjacent chapter that *has* one — the first heading
+    /// forward, the last heading backward — as a big jump: it pushes the jumplist
+    /// (so `` `` `` returns) and activates that chapter through the shared
+    /// [`restore_jump`](Self::restore_jump) machinery. At the very ends of the
+    /// manuscript it reports that there's no more rather than moving silently.
+    pub(crate) fn jump_to_scene_heading(&mut self, forward: bool) {
+        let cur = self.edit_buffer().cursor_byte();
+        // The next heading within the loaded buffer, in the requested direction.
+        let within = {
+            let headings = self.edit_buffer().syntax().headings();
+            if forward {
+                headings.iter().find(|h| h.start > cur).map(|h| h.start)
+            } else {
+                headings
+                    .iter()
+                    .rev()
+                    .find(|h| h.start < cur)
+                    .map(|h| h.start)
+            }
+        };
+        if let Some(at) = within {
+            let buffer = self.edit_buffer_mut();
+            buffer.cursor = buffer.cursor_at_byte(at);
+            self.reveal_fold_at_cursor();
+            return;
+        }
+        // No heading left this way in the current chapter — cross into the nearest
+        // adjacent chapter that has one. The scan reads each candidate chapter's
+        // body off disk once (off the keystroke path) rather than loading it.
+        let active = self.project.active_index();
+        let count = self.chapter_count();
+        let target = if forward {
+            (active + 1..count).find_map(|ch| self.first_heading_in_chapter(ch).map(|b| (ch, b)))
+        } else {
+            (0..active)
+                .rev()
+                .find_map(|ch| self.last_heading_in_chapter(ch).map(|b| (ch, b)))
+        };
+        match target {
+            Some((chapter, byte)) => {
+                self.push_jump();
+                self.restore_jump(JumpPos { chapter, byte });
+            }
+            None => {
+                self.message = Some(if forward {
+                    "No next scene heading.".into()
+                } else {
+                    "No previous scene heading.".into()
+                });
+            }
+        }
+    }
+
+    /// The byte offset of chapter `ch`'s first heading, or `None` when it has none
+    /// (#1009). Reads the chapter body off disk and parses its headings — one read
+    /// per scanned chapter, off the keystroke path — so a heading in an unloaded
+    /// chapter is a valid cross-chapter jump target.
+    fn first_heading_in_chapter(&self, ch: usize) -> Option<usize> {
+        let body = self.project.chapter_body(ch);
+        Syntax::new(&body).headings().first().map(|h| h.start)
+    }
+
+    /// The byte offset of chapter `ch`'s last heading, or `None` when it has none
+    /// (#1009) — the backward-crossing counterpart of
+    /// [`first_heading_in_chapter`](Self::first_heading_in_chapter).
+    fn last_heading_in_chapter(&self, ch: usize) -> Option<usize> {
+        let body = self.project.chapter_body(ch);
+        Syntax::new(&body).headings().last().map(|h| h.start)
     }
 }

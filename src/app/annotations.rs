@@ -15,7 +15,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::App;
 use crate::annotation::{Live, Remapper, Reply};
-use crate::mode::{Mode, Pending};
+use crate::mode::{JumpPos, Mode, Pending};
 
 impl App {
     /// Reconcile annotations with the buffer on the idle tick (#302/#370): reload
@@ -731,6 +731,95 @@ impl App {
             (base + n - 1) % n
         };
         self.set_annotations_selected(open[target]);
+    }
+
+    /// `]a` / `[a`: step the cursor to the next (`forward`) or previous OPEN
+    /// (unresolved) annotation (#1009), so a reviewer's still-open notes are a
+    /// comment-to-comment keystroke rather than a trip through the review overlay.
+    /// Works from any cursor position and in either view, and only lands on OPEN
+    /// threads — resolved ones are skipped.
+    ///
+    /// Within the loaded buffer it's a plain cursor move (the loaded notes are
+    /// buffer-absolute, matched against the cursor byte). When there's no open note
+    /// left this way in the loaded chapter(s) it crosses into the nearest adjacent
+    /// chapter that has one — read from that chapter's side file, so an unloaded
+    /// chapter's open notes are still reachable — as a big jump that pushes the
+    /// jumplist (so `` `` `` returns) and activates the chapter. At the ends it
+    /// reports there's no more rather than moving silently.
+    pub(crate) fn jump_to_open_annotation(&mut self, forward: bool) {
+        let cur = self.edit_buffer().cursor_byte();
+        // The next OPEN note within the loaded buffer, in the requested direction.
+        // The list is kept sorted by start, so a directional scan finds the nearest.
+        let within = {
+            let open = self
+                .annotations
+                .iter()
+                .filter(|a| !a.resolved)
+                .map(|a| a.start);
+            if forward {
+                open.filter(|&s| s > cur).min()
+            } else {
+                open.filter(|&s| s < cur).max()
+            }
+        };
+        if let Some(at) = within {
+            let buffer = self.edit_buffer_mut();
+            let at = at.min(buffer.len_bytes());
+            buffer.cursor = buffer.cursor_at_byte(at);
+            self.reveal_fold_at_cursor();
+            return;
+        }
+        // No open note left this way in the loaded chapter(s) — cross into the
+        // nearest adjacent chapter that has one, reading its side file directly so
+        // an unloaded chapter's open notes are reachable without loading it.
+        let active = self.project.active_index();
+        let count = self.chapter_count();
+        let target = if forward {
+            (active + 1..count).find_map(|ch| self.first_open_annotation(ch).map(|b| (ch, b)))
+        } else {
+            (0..active)
+                .rev()
+                .find_map(|ch| self.last_open_annotation(ch).map(|b| (ch, b)))
+        };
+        match target {
+            Some((chapter, byte)) => {
+                self.push_jump();
+                self.restore_jump(JumpPos { chapter, byte });
+            }
+            None => {
+                self.message = Some(if forward {
+                    "No next open annotation.".into()
+                } else {
+                    "No previous open annotation.".into()
+                });
+            }
+        }
+    }
+
+    /// The chapter-local byte offset of chapter `ch`'s first OPEN annotation, or
+    /// `None` when it has no open notes (#1009). Reads the chapter's side file so an
+    /// unloaded chapter is still a valid cross-chapter jump target.
+    fn first_open_annotation(&self, ch: usize) -> Option<usize> {
+        let file = self.project.chapter_file(ch);
+        self.project
+            .annotations_for(file)
+            .into_iter()
+            .filter(|a| !a.resolved)
+            .map(|a| a.start)
+            .min()
+    }
+
+    /// The chapter-local byte offset of chapter `ch`'s last OPEN annotation, or
+    /// `None` when it has none (#1009) — the backward-crossing counterpart of
+    /// [`first_open_annotation`](Self::first_open_annotation).
+    fn last_open_annotation(&self, ch: usize) -> Option<usize> {
+        let file = self.project.chapter_file(ch);
+        self.project
+            .annotations_for(file)
+            .into_iter()
+            .filter(|a| !a.resolved)
+            .map(|a| a.start)
+            .max()
     }
 
     /// Write the loaded chapters' live annotations to their side files (#302/#370):
