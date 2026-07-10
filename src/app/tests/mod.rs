@@ -111,6 +111,8 @@ mod vcs_concurrency;
 mod vim;
 mod vim_case;
 mod vim_dot;
+mod vim_ex;
+mod vim_marks;
 mod workflows;
 
 fn ctrl(c: char) -> KeyEvent {
