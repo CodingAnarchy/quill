@@ -35,6 +35,7 @@ mod remote;
 mod restore;
 mod status;
 mod sync;
+mod word_diff;
 
 pub use status::VC_STATUS_INTERVAL;
 
@@ -220,17 +221,103 @@ impl App {
 
 /// Color a unified diff for the changes overlay (#135): additions green, removals
 /// red, file/hunk headers and context dimmed. Mirrors the bible-review diff.
+///
+/// Within a hunk, a run of removed lines followed by a run of added ones is a
+/// replacement; each removed line is paired positionally with the added line that
+/// replaced it and word-diffed (#1013), so the shared words read as dim context
+/// and only the changed words carry the removed / added color. This is purely
+/// additive — a line with no counterpart, or a full rewrite with nothing in
+/// common, still renders as a plain whole-line removal / addition.
 fn diff_lines(patch: &str) -> Vec<Line<'static>> {
     let theme = crate::theme::current();
-    patch
-        .lines()
-        .map(|l| {
-            let color = match l.chars().next() {
-                Some('+') => theme.added,
-                Some('-') => theme.removed,
-                _ => theme.dim,
-            };
-            Line::from(Span::styled(l.to_string(), Style::default().fg(color)))
-        })
-        .collect()
+    let plain = |l: &str| {
+        let color = match l.chars().next() {
+            Some('+') => theme.added,
+            Some('-') => theme.removed,
+            _ => theme.dim,
+        };
+        Line::from(Span::styled(l.to_string(), Style::default().fg(color)))
+    };
+
+    let raw: Vec<&str> = patch.lines().collect();
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        // A `-`/`+` body pair (never the `---`/`+++` file headers) is a candidate
+        // replacement block. Collect the removed run and the added run that follows
+        // it, then pair them line-for-line for the intra-line word diff.
+        if is_removed(raw[i]) {
+            let del_start = i;
+            while i < raw.len() && is_removed(raw[i]) {
+                i += 1;
+            }
+            let dels = &raw[del_start..i];
+            let add_start = i;
+            while i < raw.len() && is_added(raw[i]) {
+                i += 1;
+            }
+            let adds = &raw[add_start..i];
+            emit_replacement(&mut out, dels, adds, &plain, theme);
+            continue;
+        }
+        out.push(plain(raw[i]));
+        i += 1;
+    }
+    out
+}
+
+/// A removed content line (`-…`) but not the `---` old-file header.
+fn is_removed(line: &str) -> bool {
+    line.starts_with('-') && !line.starts_with("---")
+}
+
+/// An added content line (`+…`) but not the `+++` new-file header.
+fn is_added(line: &str) -> bool {
+    line.starts_with('+') && !line.starts_with("+++")
+}
+
+/// Render a removed run and the added run that replaced it. Rows that pair up
+/// (same index in each run) and share at least one word are word-diffed (#1013);
+/// unmatched rows, or pairs with nothing in common, fall back to `plain` whole-
+/// line coloring. Emits all removed lines first, then all added lines, preserving
+/// the unified-diff order.
+fn emit_replacement(
+    out: &mut Vec<Line<'static>>,
+    dels: &[&str],
+    adds: &[&str],
+    plain: &impl Fn(&str) -> Line<'static>,
+    theme: crate::theme::Theme,
+) {
+    for (row, del) in dels.iter().enumerate() {
+        match adds
+            .get(row)
+            .map(|add| word_diff::segments(&del[1..], &add[1..]))
+        {
+            Some((del_segs, add_segs)) if word_diff::is_useful(&del_segs, &add_segs) => {
+                out.push(Line::from(word_diff::spans(
+                    '-',
+                    &del_segs,
+                    theme.removed,
+                    theme.dim,
+                )));
+            }
+            _ => out.push(plain(del)),
+        }
+    }
+    for (row, add) in adds.iter().enumerate() {
+        match dels
+            .get(row)
+            .map(|del| word_diff::segments(&del[1..], &add[1..]))
+        {
+            Some((del_segs, add_segs)) if word_diff::is_useful(&del_segs, &add_segs) => {
+                out.push(Line::from(word_diff::spans(
+                    '+',
+                    &add_segs,
+                    theme.added,
+                    theme.dim,
+                )));
+            }
+            _ => out.push(plain(add)),
+        }
+    }
 }
