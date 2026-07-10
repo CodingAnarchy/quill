@@ -204,6 +204,42 @@ fn the_vim_bracket_r_bindings_step_the_sweep() {
 }
 
 #[test]
+fn switching_chapters_clears_the_old_chapters_flag_cache() {
+    // BUG 1 (#1001): the highlight cache holds byte spans into the chapter just
+    // left. `activate_chapter` must refresh it so the new chapter never renders a
+    // frame of phantom underlines from the old chapter's spans before the next
+    // idle tick. Chapter one has two adverbs; chapter two has none — so a correctly
+    // refreshed cache is *empty* on chapter two, and every cached span (there are
+    // none) would otherwise mark unrelated prose.
+    let (mut app, _dir) = adverb_app("flag-switch-clears-cache");
+    app.start_style_flag_sweep(FlagCategory::Adverbs);
+    assert_eq!(app.style_flags.len(), 2, "chapter one's adverbs are cached");
+
+    // Switch to chapter two directly (as a browser jump / `:goto` would), WITHOUT
+    // an intervening idle tick. The cache must already reflect chapter two.
+    app.activate_chapter(1);
+    assert_eq!(app.project.active_index(), 1);
+    assert!(
+        app.style_flags.is_empty(),
+        "no phantom marks carried over: chapter two has no adverbs, so the \
+         refreshed cache is empty — got {:?}",
+        app.style_flags
+    );
+
+    // Belt-and-braces for a chapter that *does* have hits: every cached span must
+    // index live chapter-three prose (not a stale chapter-one offset).
+    app.activate_chapter(2);
+    let text = app.buffer.text();
+    assert!(
+        app.style_flags
+            .iter()
+            .all(|&(s, e)| e <= text.len() && text[s..e].ends_with("ly")),
+        "every cached span marks a live chapter-three adverb: {:?} over {text:?}",
+        app.style_flags
+    );
+}
+
+#[test]
 fn the_picker_lists_categories_and_selecting_one_starts_the_sweep() {
     let (mut app, _dir) = adverb_app("flag-picker");
     app.open_style_flag_picker();

@@ -89,8 +89,9 @@ impl App {
             .iter()
             .find(|&&(s, _)| s >= cur)
             .map_or(self.style_flags[0].0, |&(s, _)| s);
-        let buffer = self.edit_buffer_mut();
-        buffer.cursor = buffer.cursor_at_byte(target);
+        // The first hit can sit inside a collapsed section (#975); reveal it so
+        // turning the sweep on doesn't strand the cursor on a hidden line.
+        self.land_cursor_revealing(target);
         self.message = Some(format!(
             "{} sweep on ({} in this chapter) \u{2014} ]r/[r to step, off to clear.",
             category.label(),
@@ -139,8 +140,9 @@ impl App {
                 .map(|&(s, _)| s)
         };
         if let Some(target) = within {
-            let buffer = self.edit_buffer_mut();
-            buffer.cursor = buffer.cursor_at_byte(target);
+            // The hit can sit inside a collapsed section (#975); land on it and
+            // reveal the fold so the cursor isn't hidden away (mirrors search.rs).
+            self.land_cursor_revealing(target);
             return;
         }
         // Nothing left in this chapter's buffer that direction: cross chapters. The
@@ -151,6 +153,17 @@ impl App {
         } else {
             self.step_across_chapters(dir, category);
         }
+    }
+
+    /// Move the edit cursor to byte `target` and reveal any collapsed section it
+    /// lands inside (#975), so a same-buffer sweep landing never strands the cursor
+    /// on a folded (zero-row) line. The single landing site the within-chapter
+    /// step, the continuous-view wrap, and the sweep's first-hit jump funnel
+    /// through, mirroring search.rs's reveal-after-jump.
+    fn land_cursor_revealing(&mut self, target: usize) {
+        let buffer = self.edit_buffer_mut();
+        buffer.cursor = buffer.cursor_at_byte(target);
+        self.reveal_fold_at_cursor();
     }
 
     /// No more hits ahead in the (continuous-view) buffer: wrap to the first / last
@@ -165,8 +178,8 @@ impl App {
         } else {
             self.style_flags.last().map_or(first, |&(s, _)| s)
         };
-        let buffer = self.edit_buffer_mut();
-        buffer.cursor = buffer.cursor_at_byte(target);
+        // The wrap target can sit inside a collapsed section (#975); reveal it.
+        self.land_cursor_revealing(target);
         self.message = Some(format!(
             "{}: wrapped to the {} hit.",
             category.label(),
@@ -209,11 +222,11 @@ impl App {
                 ranges.last().map(|&(s, _)| s)
             };
             if let Some(target) = landing {
+                // `activate_chapter` refreshes the flag cache for the newly opened
+                // chapter (#1001), so the hit spans are already correct here. Place
+                // the cursor on the found hit (clamped, in case the live buffer
+                // differs from the disk read) and reveal any fold hiding it.
                 self.activate_chapter(idx);
-                // The activate refreshed nothing about the flag cache; recompute for
-                // the newly opened chapter and place the cursor on the found hit
-                // (clamped, in case the live buffer differs from the disk read).
-                self.refresh_style_flags();
                 let at = target.min(self.buffer.len_bytes());
                 self.buffer.cursor = self.buffer.cursor_at_byte(at);
                 self.reveal_fold_at_cursor();

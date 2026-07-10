@@ -21,6 +21,14 @@ impl App {
                 // Folds are keyed on byte offsets in the chapter just left (#975);
                 // they don't carry to the next chapter, so clear them on a switch.
                 self.folds.clear();
+                // The highlight caches (#1001/#1002/spell) hold byte spans into the
+                // chapter just left; carried into the new buffer they'd render as
+                // phantom marks until the next idle tick recomputes them. Refresh
+                // them here so they track the new chapter immediately (each is a
+                // cheap no-op when its feature is off).
+                self.refresh_spell_flags();
+                self.refresh_style_flags();
+                self.refresh_proximity_repeats();
                 self.project.set_active(index);
                 // No need to cache the new active chapter's count: while active,
                 // chapter_word_count reads it live from the buffer.
