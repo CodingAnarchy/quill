@@ -79,6 +79,12 @@ pub enum AiAction {
     /// established one, or a reversal that happens off-page with no on-page setup.
     /// Findings only; author-invoked; observes the drift, never rewrites the arc.
     Relationship,
+    /// Foreshadow / payoff scan — author-invoked (#1047): pair a concrete seeded
+    /// detail (an object, a named threat, a promised meeting, a planted clue) with
+    /// its resolution and flag the UNPAID ones, naming the setup passage + chapter.
+    /// Findings only; author-invoked. Narrower than — and distinct from — the plot
+    /// pass's thematic-thread tracking; it never drafts the payoff.
+    Foreshadow,
 }
 
 /// What a network pass costs (#82/#372) — the *data* side of the cost estimate,
@@ -354,6 +360,13 @@ impl AiAction {
             weight: ModelWeight::Heavy,
             bible_key: None,
         },
+        AiActionSpec {
+            action: Self::Foreshadow,
+            slug: "ai:foreshadow",
+            cost: AiCost::Manuscript,
+            weight: ModelWeight::Heavy,
+            bible_key: None,
+        },
     ];
 
     /// This action's descriptor — its single source of slug / cost / bible key.
@@ -422,6 +435,7 @@ impl AiAction {
             Self::Editorial => FindingKind::Editorial,
             Self::Accuracy => FindingKind::Accuracy,
             Self::Relationship => FindingKind::Relationship,
+            Self::Foreshadow => FindingKind::Foreshadow,
             Self::Voice => FindingKind::Voice,
             Self::Echo => FindingKind::Echo,
             _ => FindingKind::Other,

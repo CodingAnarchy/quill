@@ -147,6 +147,18 @@ pub(super) fn describe_relationship(
     (f.summarize(), f.chapters.clone())
 }
 
+pub(super) fn describe_foreshadow(f: &ai::foreshadow::UnpaidSetup) -> (String, Vec<String>) {
+    // The what-was-planted-and-why-it's-unpaid note, then the setup passage (when
+    // quoted) — an observation the author acts on, never a drafted payoff.
+    let at = f
+        .setup
+        .trim()
+        .is_empty()
+        .then(String::new)
+        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.setup.trim()));
+    (format!("{}{at}", f.detail), f.chapters.clone())
+}
+
 pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
     let summary = if f.character.is_empty() {
         format!("{}: {}", f.kind, f.detail)
@@ -213,6 +225,11 @@ pub(super) fn recheck_parser(
         AiAction::Voice => |text, a, book| {
             voice::parse(text)
                 .map(|v| findings_from(&v.findings, book, a, describe_voice))
+                .unwrap_or_default()
+        },
+        AiAction::Foreshadow => |text, a, book| {
+            ai::foreshadow::parse(text)
+                .map(|f| findings_from(&f.findings, book, a, describe_foreshadow))
                 .unwrap_or_default()
         },
         AiAction::Plot => |text, a, book| {

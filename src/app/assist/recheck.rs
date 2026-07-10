@@ -259,6 +259,7 @@ impl App {
             AiAction::Style => style::build_request(scoped, &model),
             AiAction::Scaffold => scaffold::build_request(scoped, &model),
             AiAction::Editorial => ai::editorial::build_request(scoped, &model),
+            AiAction::Foreshadow => ai::foreshadow::build_request(scoped, &model),
             AiAction::Naming => {
                 let entities = self.known_entities();
                 naming::build_request(scoped, &entities)

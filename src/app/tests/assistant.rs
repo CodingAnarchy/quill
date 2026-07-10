@@ -510,6 +510,7 @@ fn the_allowlist_is_exactly_the_vetted_safe_set() {
         "ai:editorial",
         "ai:accuracy",
         "ai:relationship",
+        "ai:foreshadow",
         "ai:ask",
         "ai:brainstorm",
         "ai:draft-characters",
