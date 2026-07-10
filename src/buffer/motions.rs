@@ -551,6 +551,132 @@ impl Buffer {
         Some((lo_bound + lo, lo_bound + hi))
     }
 
+    /// Transpose the two characters around the cursor — Vim's classic `xp` in one
+    /// gesture (#1006). Swaps the grapheme under the cursor with the one before it
+    /// and moves the cursor one grapheme right; at the end of the line it swaps the
+    /// two trailing graphemes (matching `xp`'s effect there). Confined to the
+    /// current line — it never pulls a character across a line boundary — and a
+    /// no-op when the line has fewer than two graphemes or the cursor sits at the
+    /// line start with nothing under it. Returns the byte range to rewrite, the
+    /// swapped text, and where the cursor lands, for the caller's edit primitive.
+    pub fn transpose_chars_edit(&self) -> Option<CaseEdit> {
+        let line_no = self.cursor.line;
+        let base = self.line_start_byte(line_no);
+        let line = self.line(line_no);
+        let graphemes: Vec<(usize, &str)> = line.grapheme_indices(true).collect();
+        if graphemes.len() < 2 {
+            return None;
+        }
+        // The pair to swap: the grapheme before the cursor and the one under it. At
+        // (or past) the line end, fall back to the last two graphemes — `xp` there.
+        let col = self.cursor.col;
+        let right = if col == 0 {
+            return None; // nothing before the cursor to swap with
+        } else if col >= graphemes.len() {
+            graphemes.len() - 1
+        } else {
+            col
+        };
+        let left = right - 1;
+        let (lb, lg) = graphemes[left];
+        let (rb, rg) = graphemes[right];
+        let end = rb + rg.len();
+        let swapped = format!("{rg}{lg}");
+        // The cursor lands just after the moved-forward (originally left) grapheme —
+        // i.e. one grapheme right of where it was, as `xp` leaves it.
+        let cursor = base + lb + rg.len() + lg.len();
+        Some(CaseEdit {
+            lo: base + lb,
+            hi: base + end,
+            text: swapped,
+            cursor,
+        })
+    }
+
+    /// Transpose the word under (or before) the cursor with the next word on the
+    /// same line (#1006) — swap two adjacent words, keeping the whitespace between
+    /// them in place. Words are the same run-of-word-characters the word motions
+    /// use; punctuation and whitespace runs are skipped over to find the two word
+    /// runs. Confined to the current line, so it never joins words across a line
+    /// break, and a no-op when there isn't a following word to swap with. The
+    /// cursor lands at the start of the (now-second) word that moved forward.
+    pub fn transpose_words_edit(&self) -> Option<CaseEdit> {
+        let line_no = self.cursor.line;
+        let base = self.line_start_byte(line_no);
+        let line = self.line(line_no);
+        // Byte ranges of the word runs on the line, in order.
+        let words: Vec<(usize, usize)> = word_runs(&line);
+        if words.len() < 2 {
+            return None;
+        }
+        let cur = col_to_byte(&line, self.cursor.col);
+        // The first word of the pair is the last word that starts at or before the
+        // cursor (the word the cursor is in, or — for a cursor in a gap or past the
+        // last word — the word to its left). Clamp so there's always a successor to
+        // swap with: past the last word, transpose the final two.
+        let first = words
+            .iter()
+            .rposition(|&(s, _)| s <= cur)
+            .unwrap_or(0)
+            .min(words.len() - 2);
+        let (a_s, a_e) = words[first];
+        let (b_s, b_e) = words[first + 1];
+        let gap = &line[a_e..b_s];
+        let word_a = &line[a_s..a_e];
+        let word_b = &line[b_s..b_e];
+        let swapped = format!("{word_b}{gap}{word_a}");
+        // Land at the start of word A in its new (second) position.
+        let cursor = base + a_s + word_b.len() + gap.len();
+        Some(CaseEdit {
+            lo: base + a_s,
+            hi: base + b_e,
+            text: swapped,
+            cursor,
+        })
+    }
+
+    /// Toggle the case of the grapheme under the cursor — Vim's `~` (#1006). The
+    /// cursor advances one grapheme right afterward, as in Vim. A no-op on an empty
+    /// line or with the cursor past the last grapheme (nothing under it), so `~`
+    /// never runs past the line end. Returns the single-grapheme range, its
+    /// case-swapped text, and the landing cursor byte.
+    pub fn toggle_case_edit(&self) -> Option<CaseEdit> {
+        let line_no = self.cursor.line;
+        let base = self.line_start_byte(line_no);
+        let line = self.line(line_no);
+        let (b, g) = line.grapheme_indices(true).nth(self.cursor.col)?;
+        let toggled = toggle_case(g);
+        let end = b + g.len();
+        Some(CaseEdit {
+            lo: base + b,
+            hi: base + end,
+            text: toggled,
+            cursor: base + end,
+        })
+    }
+
+    /// Case-map the text in byte range `[lo, hi)` for the `g~` / `gu` / `gU`
+    /// operators (#1006): the toggled / lower-cased / upper-cased replacement.
+    /// Pure — the caller writes it back through the edit primitive so the change is
+    /// one undo step and `.`-repeatable. Returns `None` when the range is empty.
+    pub fn case_map_edit(&self, lo: usize, hi: usize, kind: CaseChange) -> Option<CaseEdit> {
+        if lo >= hi {
+            return None;
+        }
+        let src = self.byte_slice(lo, hi);
+        let mapped = match kind {
+            CaseChange::Toggle => toggle_case(&src),
+            CaseChange::Upper => src.to_uppercase(),
+            CaseChange::Lower => src.to_lowercase(),
+        };
+        Some(CaseEdit {
+            lo,
+            hi,
+            text: mapped,
+            cursor: lo,
+        })
+    }
+
     /// The byte span `[start, end)` of the paragraph (run of non-blank lines, or of
     /// blank lines) around the cursor — the window the sentence object scans within.
     fn paragraph_bounds(&self) -> (usize, usize) {
@@ -567,6 +693,68 @@ impl Buffer {
         }
         (self.line_start_byte(first), self.next_line_byte(end))
     }
+}
+
+/// A computed case / transpose edit (#1006): the byte range to rewrite, its
+/// replacement text, and where the cursor should land afterward. The buffer's
+/// motion layer computes this purely; the App writes it back through the standard
+/// range-edit primitive so the change is one undo step and `.`-repeatable.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CaseEdit {
+    pub lo: usize,
+    pub hi: usize,
+    pub text: String,
+    pub cursor: usize,
+}
+
+/// Which way the `g~` / `gu` / `gU` operators map case (#1006).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CaseChange {
+    /// `g~`: swap each character's case.
+    Toggle,
+    /// `gU`: upper-case.
+    Upper,
+    /// `gu`: lower-case.
+    Lower,
+}
+
+/// Swap the case of every cased character in `s` — each upper becomes lower and
+/// vice versa. Non-cased characters (digits, punctuation, spaces) pass through.
+/// The building block for `~` and the `g~` operator (#1006).
+fn toggle_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_uppercase() {
+            out.extend(c.to_lowercase());
+        } else if c.is_lowercase() {
+            out.extend(c.to_uppercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The byte ranges `[start, end)` of the word runs on a single line's `text`, in
+/// order — the runs of word-characters the word motions treat as words, skipping
+/// whitespace and punctuation between them. Backs the word-transpose (#1006),
+/// which swaps two adjacent runs while leaving the gap between them in place.
+fn word_runs(text: &str) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut start: Option<usize> = None;
+    for (b, g) in text.grapheme_indices(true) {
+        if CharClass::of(g) == CharClass::Word {
+            if start.is_none() {
+                start = Some(b);
+            }
+        } else if let Some(s) = start.take() {
+            runs.push((s, b));
+        }
+    }
+    if let Some(s) = start {
+        runs.push((s, text.len()));
+    }
+    runs
 }
 
 /// The byte offsets that split `text` into sentences — the point *after* each

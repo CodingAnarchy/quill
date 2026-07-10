@@ -25,23 +25,35 @@ impl App {
         match self.vim_state.pending {
             VimPending::G => {
                 self.vim_state.pending = VimPending::None;
-                if c == 'g' {
-                    let target = self
-                        .vim_state
-                        .count
-                        .take()
-                        .map_or(0, |n| n.saturating_sub(1));
-                    self.goto_line(target); // gg → first line (or {count}gg); operator-aware
-                } else if c == 'q' || c == 'w' {
+                match c {
+                    'g' => {
+                        let target = self
+                            .vim_state
+                            .count
+                            .take()
+                            .map_or(0, |n| n.saturating_sub(1));
+                        self.goto_line(target); // gg → first line (or {count}gg); operator-aware
+                    }
                     // `gq` / `gw` reflow the current paragraph to the wrap column
                     // (#1005), collapsing its hard breaks. A single-edit change, so
                     // `.` repeats it (#1004).
-                    self.vim_state.count = None;
-                    self.vim_state.op = None;
-                    self.reflow_paragraph();
-                } else {
-                    self.vim_state.count = None; // an unknown `g_` aborts
-                    self.vim_state.op = None;
+                    'q' | 'w' => {
+                        self.vim_state.count = None;
+                        self.vim_state.op = None;
+                        self.reflow_paragraph();
+                    }
+                    // Case operators (#1006): `g~`/`gu`/`gU` begin an operator that
+                    // toggles / lower-cases / upper-cases the following motion or
+                    // text object. `g~~`/`guu`/`gUU` (a repeated key) act on the line.
+                    '~' | 'u' | 'U' => self.case_operator(c),
+                    // Transpose (#1006): `gs` swaps the two characters around the
+                    // cursor (the classic `xp`); `gS` swaps two adjacent words.
+                    's' => self.transpose_chars(),
+                    'S' => self.transpose_words(),
+                    _ => {
+                        self.vim_state.count = None; // an unknown `g_` aborts
+                        self.vim_state.op = None;
+                    }
                 }
                 return;
             }
@@ -173,6 +185,14 @@ impl App {
         // Terminal commands consume the count.
         let raw = self.vim_state.count.take();
         let count = raw.unwrap_or(1);
+
+        // A case operator (`g~`/`gu`/`gU`, #1006) awaiting its motion resolves its
+        // own doubled key (`g~~`) linewise here and cancels on a non-motion; a true
+        // motion falls through to the dispatch below, which consults `case_op`.
+        if self.case_op.is_some() && self.resolve_case_prefix(c, count) {
+            return;
+        }
+
         match c {
             // Operators: `d`/`c`/`y` await a motion or text object; a repeated
             // operator (`dd`/`cc`/`yy`) acts linewise on the current line(s).
@@ -194,12 +214,13 @@ impl App {
                     linewise: c == 'V',
                 }
             }
-            // `i`/`a` are a text-object prefix while an operator is pending,
-            // otherwise they enter Insert.
-            'i' if self.vim_state.op.is_some() => {
+            // `i`/`a` are a text-object prefix while an operator (delete/change/yank
+            // or a `g~`/`gu`/`gU` case op, #1006) is pending, otherwise they enter
+            // Insert.
+            'i' if self.vim_state.op.is_some() || self.case_op.is_some() => {
                 self.vim_state.pending = VimPending::Object { around: false }
             }
-            'a' if self.vim_state.op.is_some() => {
+            'a' if self.vim_state.op.is_some() || self.case_op.is_some() => {
                 self.vim_state.pending = VimPending::Object { around: true }
             }
             'i' => self.mode = Mode::Insert,
@@ -231,6 +252,8 @@ impl App {
             // A single-edit change, so `.` repeats it (#1004).
             'J' => self.join_lines(count),
             'u' => self.history_step(false),
+            // `~`: toggle the case of the character under the cursor (#1006).
+            '~' => self.vim_repeat(count, Self::toggle_case_under_cursor),
 
             // Character motions (charwise: move, or an operator range).
             'h' => self.charwise(count, false, Buffer::move_left),
@@ -325,6 +348,15 @@ impl App {
             's' => Some(TextObject::Sentence),
             _ => None,
         };
+        // A pending case operator (`g~iw`, `gUaw`, …) acts on the object's range;
+        // otherwise the delete/change/yank operator does (#1006).
+        if let Some((kind, _)) = self.take_case_op(1) {
+            self.vim_state.op = None;
+            if let Some((lo, hi)) = object.and_then(|o| self.edit_buffer().text_object(o, around)) {
+                self.apply_case(kind, lo, hi);
+            }
+            return;
+        }
         match (object, self.vim_state.op.take()) {
             (Some(object), Some((op, _))) => {
                 if let Some((lo, hi)) = self.edit_buffer().text_object(object, around) {
@@ -345,30 +377,49 @@ impl App {
             .map(|(op, opc)| (op, count.saturating_mul(opc)))
     }
 
+    /// The byte range `[lo, hi)` a charwise motion covers from the cursor: run the
+    /// `step` `n` times on a scratch cursor, then take the span between where it
+    /// started and landed (extended over the landing grapheme when `inclusive`).
+    /// The cursor is restored, so this is a pure range computation shared by the
+    /// delete/change operators and the case operators (#1006).
+    fn charwise_range(
+        &mut self,
+        n: usize,
+        inclusive: bool,
+        step: &impl Fn(&mut Buffer),
+    ) -> (usize, usize) {
+        let buf = self.edit_buffer_mut();
+        let start = buf.cursor_byte();
+        let saved = buf.cursor;
+        for _ in 0..n {
+            step(buf);
+        }
+        let target = buf.cursor_byte();
+        buf.cursor = saved;
+        let hi = start.max(target);
+        (
+            start.min(target),
+            if inclusive {
+                buf.grapheme_after(hi)
+            } else {
+                hi
+            },
+        )
+    }
+
     /// A charwise motion: move the cursor, or — when an operator is pending —
     /// delete/change the span from the cursor to where the motion lands.
     /// `inclusive` covers the landing grapheme (Vim's `e`, `$`, `f`, `t`).
     fn charwise(&mut self, count: usize, inclusive: bool, step: impl Fn(&mut Buffer)) {
+        // A pending case operator (`g~w`, `gU$`, #1006) shares the same range
+        // computation as delete/change; resolve its span and case-map it.
+        if let Some((kind, n)) = self.take_case_op(count) {
+            let (lo, hi) = self.charwise_range(n, inclusive, &step);
+            self.apply_case(kind, lo, hi);
+            return;
+        }
         if let Some((op, n)) = self.take_op(count) {
-            let (lo, hi) = {
-                let buf = self.edit_buffer_mut();
-                let start = buf.cursor_byte();
-                let saved = buf.cursor;
-                for _ in 0..n {
-                    step(buf);
-                }
-                let target = buf.cursor_byte();
-                buf.cursor = saved;
-                let hi = start.max(target);
-                (
-                    start.min(target),
-                    if inclusive {
-                        buf.grapheme_after(hi)
-                    } else {
-                        hi
-                    },
-                )
-            };
+            let (lo, hi) = self.charwise_range(n, inclusive, &step);
             self.operate_charwise(op, lo, hi);
         } else {
             self.edit_move(move |b| {
@@ -382,6 +433,12 @@ impl App {
     /// A linewise vertical motion (`j`/`k`): move by visual rows, or — with an
     /// operator pending — delete/change whole lines.
     fn vertical(&mut self, count: usize, down: bool) {
+        if let Some((kind, n)) = self.take_case_op(count) {
+            let cur = self.edit_buffer().cursor.line;
+            let other = if down { cur + n } else { cur.saturating_sub(n) };
+            self.case_lines(kind, cur.min(other), cur.max(other));
+            return;
+        }
         if let Some((op, n)) = self.take_op(count) {
             let cur = self.edit_buffer().cursor.line;
             let other = if down { cur + n } else { cur.saturating_sub(n) };
@@ -399,6 +456,11 @@ impl App {
     /// Jump to `target` (0-based line): move the cursor, or — with an operator
     /// pending (`dG`, `dgg`) — act linewise over the lines between.
     fn goto_line(&mut self, target: usize) {
+        if let Some((kind, _)) = self.take_case_op(1) {
+            let cur = self.edit_buffer().cursor.line;
+            self.case_lines(kind, cur.min(target), cur.max(target));
+            return;
+        }
         if let Some((op, _)) = self.take_op(1) {
             let cur = self.edit_buffer().cursor.line;
             self.operate_linewise(op, cur.min(target), cur.max(target));
@@ -658,6 +720,8 @@ impl App {
             'y' => self.visual_operate(Op::Yank, anchor, linewise),
             // `p` replaces the selection with the register.
             'p' => self.visual_put(anchor, linewise),
+            // `~` / `u` / `U` case-map the selection, then leave Visual (#1006).
+            '~' | 'u' | 'U' => self.visual_case(c, anchor, linewise),
             // `m` annotates the selection with a note (#302), then leaves Visual.
             'm' => {
                 let (start, end) = self.selection_bytes(anchor, linewise);
@@ -744,6 +808,7 @@ impl App {
         // the motion arrows already consumed any operator via charwise/vertical.
         self.vim_state.pending = VimPending::None;
         self.vim_state.op = None;
+        self.case_op = None; // a dangling `g~`/`gu`/`gU` (#1006) cancels too
     }
 
     /// Take the pending count, defaulting to 1, and clear it.
@@ -835,6 +900,7 @@ impl App {
     fn dot_composing(&self) -> bool {
         matches!(self.mode, Mode::Insert)
             || self.vim_state.op.is_some()
+            || self.case_op.is_some() // a `g~`/`gu`/`gU` awaiting its motion (#1006)
             || self.vim_state.pending != VimPending::None
     }
 
@@ -883,6 +949,7 @@ impl App {
         // settling `Esc`. Clear any transient Vim state the replay left pending.
         self.vim_state.dot.replaying = false;
         self.vim_state.op = None;
+        self.case_op = None;
         self.vim_state.pending = VimPending::None;
         // Close the replay's undo group so a following edit (a keystroke or a
         // further `.`) is its own step, not folded into this repeat.
@@ -911,7 +978,7 @@ impl App {
 /// arms of [`App::on_key_normal`]; a new motion added there must be listed here
 /// to work in Visual mode too (forwarding fails safe — an omission just means the
 /// motion doesn't extend a selection, never a stray edit).
-const fn is_motion_key(c: char) -> bool {
+pub(super) const fn is_motion_key(c: char) -> bool {
     c.is_ascii_digit()
         || matches!(
             c,

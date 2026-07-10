@@ -348,3 +348,114 @@ fn word_motion_is_decoupled_from_document_size() {
         "word motion scaled with document size (small={small_dt:?}, big={big_dt:?}, {ratio:.1}×)"
     );
 }
+
+// --- Transpose and case (#1006) ----------------------------------------
+
+#[test]
+fn transpose_chars_swaps_the_two_around_the_cursor() {
+    // "teh" with the cursor on the last char swaps it with the one before it.
+    let mut b = Buffer::from_text("teh");
+    b.cursor = Cursor { line: 0, col: 2 }; // on 'h'
+    let edit = b.transpose_chars_edit().expect("transpose applies");
+    assert_eq!((edit.lo, edit.hi), (1, 3));
+    assert_eq!(edit.text, "he", "e and h swap");
+    b.replace_byte_range(edit.lo, edit.hi, &edit.text);
+    assert_eq!(b.line(0), "the");
+
+    // At (or past) the line end it swaps the last two, like `xp`.
+    let mut b = Buffer::from_text("teh");
+    b.cursor = Cursor { line: 0, col: 3 }; // past the end
+    let edit = b.transpose_chars_edit().unwrap();
+    b.replace_byte_range(edit.lo, edit.hi, &edit.text);
+    assert_eq!(b.line(0), "the");
+}
+
+#[test]
+fn transpose_chars_respects_line_and_start_boundaries() {
+    // At column 0 there's nothing before the cursor — no transpose.
+    let mut b = Buffer::from_text("ab\ncd");
+    b.cursor = Cursor { line: 0, col: 0 };
+    assert!(b.transpose_chars_edit().is_none());
+
+    // A one-grapheme line has no pair to swap.
+    let mut b = Buffer::from_text("x\ny");
+    b.cursor = Cursor { line: 0, col: 1 };
+    assert!(b.transpose_chars_edit().is_none());
+
+    // The swap never pulls a character from the next line.
+    let mut b = Buffer::from_text("ab\ncd");
+    b.cursor = Cursor { line: 0, col: 2 }; // past "ab"
+    let edit = b.transpose_chars_edit().unwrap();
+    assert!(edit.hi <= 2, "stays within the first line");
+    b.replace_byte_range(edit.lo, edit.hi, &edit.text);
+    assert_eq!(b.line(0), "ba");
+    assert_eq!(b.line(1), "cd");
+}
+
+#[test]
+fn transpose_words_swaps_adjacent_words() {
+    let mut b = Buffer::from_text("quick brown fox");
+    b.cursor = Cursor { line: 0, col: 2 }; // inside "quick"
+    let edit = b.transpose_words_edit().expect("two words to swap");
+    b.replace_byte_range(edit.lo, edit.hi, &edit.text);
+    assert_eq!(b.line(0), "brown quick fox", "the gap is preserved");
+
+    // With a cursor in the gap, the word to the left is the first of the pair.
+    let mut b = Buffer::from_text("alpha  beta");
+    b.cursor = Cursor { line: 0, col: 6 }; // in the double space
+    let edit = b.transpose_words_edit().unwrap();
+    b.replace_byte_range(edit.lo, edit.hi, &edit.text);
+    assert_eq!(b.line(0), "beta  alpha", "double space kept intact");
+}
+
+#[test]
+fn transpose_words_needs_two_words_on_the_line() {
+    let mut b = Buffer::from_text("lonely\nsecond word");
+    b.cursor = Cursor { line: 0, col: 3 };
+    assert!(
+        b.transpose_words_edit().is_none(),
+        "a single word can't be transposed, and never joins the next line"
+    );
+}
+
+#[test]
+fn toggle_case_flips_the_char_under_the_cursor() {
+    let mut b = Buffer::from_text("hello");
+    b.cursor = Cursor { line: 0, col: 0 };
+    let edit = b.toggle_case_edit().unwrap();
+    assert_eq!(edit.text, "H");
+    b.replace_byte_range(edit.lo, edit.hi, &edit.text);
+    assert_eq!(b.line(0), "Hello");
+
+    // An uppercase char toggles the other way.
+    let mut b = Buffer::from_text("THe");
+    b.cursor = Cursor { line: 0, col: 1 }; // 'H'
+    let edit = b.toggle_case_edit().unwrap();
+    assert_eq!(edit.text, "h");
+}
+
+#[test]
+fn toggle_case_is_a_noop_past_the_line_end() {
+    let mut b = Buffer::from_text("hi\nthere");
+    b.cursor = Cursor { line: 0, col: 2 }; // past "hi"
+    assert!(b.toggle_case_edit().is_none(), "nothing under the cursor");
+}
+
+#[test]
+fn case_map_edit_upper_lower_and_toggle() {
+    let b = Buffer::from_text("MixEd cAse");
+    // Whole-range toggle.
+    let e = b.case_map_edit(0, 10, CaseChange::Toggle).unwrap();
+    assert_eq!(e.text, "mIXeD CaSE");
+    // Upper / lower.
+    assert_eq!(
+        b.case_map_edit(0, 5, CaseChange::Upper).unwrap().text,
+        "MIXED"
+    );
+    assert_eq!(
+        b.case_map_edit(0, 5, CaseChange::Lower).unwrap().text,
+        "mixed"
+    );
+    // An empty range is a no-op.
+    assert!(b.case_map_edit(3, 3, CaseChange::Toggle).is_none());
+}

@@ -91,6 +91,7 @@ pub mod sprint; // the writing-sprint state + status segment, read by the UI (#2
 mod style_flags; // the style-flag sweep: pick a category, step through it, underline it (#1001)
 mod tree;
 mod vim;
+mod vim_case;
 mod wizard;
 
 pub use assistant::{Assistant, Entry, Speaker};
@@ -217,6 +218,12 @@ pub struct App {
     /// should run, built from the `[editor.keys]` config. Empty (no remaps) by
     /// default, so the built-in bindings apply unchanged.
     vim_keys: HashMap<char, char>,
+    /// A pending case-change operator (`g~` / `gu` / `gU`, #1006) and its count,
+    /// awaiting a motion or text object — the parallel to [`VimState::op`] for the
+    /// case operators, which don't yank/delete and so aren't `Op`s. `None` when no
+    /// case operator is in flight. Lives on `App` (like `vim_state`) so it survives
+    /// the multi-key command; consumed by the motion that follows it.
+    pub(crate) case_op: Option<(crate::buffer::CaseChange, usize)>,
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
@@ -696,6 +703,7 @@ impl App {
             cork_undo: None,
             vim_state: VimState::default(),
             vim_keys,
+            case_op: None,
             should_quit: false,
             focus_width: editor.column_width,
             typewriter,
