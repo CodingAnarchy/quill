@@ -73,6 +73,12 @@ pub enum AiAction {
     /// concern the author names (e.g. "1850s London"). Findings only; author-invoked;
     /// accuracy, NOT sensitivity / representation review.
     Accuracy,
+    /// Relationship trajectory — author-invoked, per a chosen character pair (#1046):
+    /// track the pair's relationship state per chapter (allied → estranged →
+    /// reconciled) and flag inconsistencies — a state that contradicts an earlier
+    /// established one, or a reversal that happens off-page with no on-page setup.
+    /// Findings only; author-invoked; observes the drift, never rewrites the arc.
+    Relationship,
 }
 
 /// What a network pass costs (#82/#372) — the *data* side of the cost estimate,
@@ -341,6 +347,13 @@ impl AiAction {
             weight: ModelWeight::Heavy,
             bible_key: None,
         },
+        AiActionSpec {
+            action: Self::Relationship,
+            slug: "ai:relationship",
+            cost: AiCost::Manuscript,
+            weight: ModelWeight::Heavy,
+            bible_key: None,
+        },
     ];
 
     /// This action's descriptor — its single source of slug / cost / bible key.
@@ -408,6 +421,7 @@ impl AiAction {
             Self::Style => FindingKind::Style,
             Self::Editorial => FindingKind::Editorial,
             Self::Accuracy => FindingKind::Accuracy,
+            Self::Relationship => FindingKind::Relationship,
             Self::Voice => FindingKind::Voice,
             Self::Echo => FindingKind::Echo,
             _ => FindingKind::Other,

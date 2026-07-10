@@ -38,6 +38,7 @@ pub mod model_select;
 pub mod namegen;
 pub mod naming;
 pub mod plot;
+pub mod relationship;
 pub mod retrieval;
 pub mod router;
 pub mod scaffold;
@@ -216,6 +217,10 @@ pub enum Outcome {
     /// Cultural & historical accuracy — inaccuracy flags for an author-named
     /// concern (#973). Findings only; author-invoked; accuracy, not sensitivity.
     Accuracy(Result<accuracy::Accuracy, AiError>),
+    /// Relationship-trajectory tracking (#1046): a chosen pair's per-chapter state
+    /// (the arc) + inconsistency flags (contradictions / off-page reversals).
+    /// Findings only; author-invoked; observes drift, never rewrites the arc.
+    Relationship(Result<relationship::Trajectory, AiError>),
     /// Semantic "find similar scenes" (#924): the passages most similar to a
     /// selection / query, ranked with scores + jumpable citations. `None` when no
     /// embedding model is available (graceful degradation, not an error).
@@ -270,6 +275,7 @@ impl Outcome {
             Self::NameGen(r) => r.as_ref().err(),
             Self::Editorial(r) => r.as_ref().err(),
             Self::Accuracy(r) => r.as_ref().err(),
+            Self::Relationship(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
             Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),

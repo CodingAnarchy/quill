@@ -238,6 +238,9 @@ pub enum Pending {
     /// a cultural & historical accuracy check against (#973). Author-invoked;
     /// accuracy, not sensitivity / representation.
     AccuracyConcern,
+    /// Text input: the character pair (e.g. "Alice / Bob") whose relationship
+    /// trajectory to track across the book (#1046). Author-invoked; findings only.
+    RelationshipPair,
     /// Text input: a plain-language description of a workflow to generate (#232).
     DescribeWorkflow,
     /// Text input: confirm or edit the name for the workflow the AI proposed

@@ -775,6 +775,12 @@ impl App {
                 self.accuracy_concern = Some(text.to_string());
                 self.analyze_accuracy();
             }
+            // Author-invoked relationship trajectory (#1046): the model supplies the
+            // character pair; capture it and run the read-only findings pass (no prose).
+            Action::Ai(AiAction::Relationship) => {
+                self.relationship_pair = Some(text.to_string());
+                self.analyze_relationship();
+            }
             _ => return Step::Sync(format!("{} can't take an argument here.", action.label())),
         }
         if self.ai_task.is_busy() {
