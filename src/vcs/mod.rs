@@ -8,10 +8,12 @@
 //! the later tickets through this same module.
 //!
 //! Two cohesive halves make up the module (#659): [`local`] is the offline,
-//! working-tree side (init/status/log/show/diff/restore/commit) and [`remote`] is
-//! the network/auth side (set_remote/remote_url/push/pull and credential
-//! resolution). Both are re-exported here so `crate::vcs::…` callers see one flat
-//! surface and never care which half a function lives in.
+//! working-tree side (init/status/log/show/diff/restore/commit and the drafts and
+//! commit-graph layout) and [`remote`] is the network/auth side (set_remote/
+//! remote_url/push/pull/sync, credential resolution, and the remote-error taxonomy).
+//! Each half is a directory of concern submodules (#968–#972 pattern), but both are
+//! re-exported here so `crate::vcs::…` callers see one flat surface and never care
+//! which half — or which submodule — a function lives in.
 
 mod local;
 mod remote;
