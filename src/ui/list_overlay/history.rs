@@ -64,8 +64,12 @@ pub(in crate::ui) fn draw_history(
         .collect();
     let help = if history.typing {
         format!("Filter: {}_", history.filter)
+    } else if history.findings_anchor.is_some() {
+        // Mid findings-diff (#1051): point A is picked; nudge toward point B.
+        "Findings diff — pick point B and press f · esc close".to_string()
     } else if history.filter.is_empty() {
-        "History — ↑↓ move · d/r chapter · D/R project · n note · / filter · esc close".to_string()
+        "History — ↑↓ move · d/r chapter · D/R project · f findings · n note · / filter · esc close"
+            .to_string()
     } else {
         format!(
             "Filter “{}” — {} match{} · esc clears",

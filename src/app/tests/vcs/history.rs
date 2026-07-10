@@ -211,6 +211,141 @@ fn history_restores_the_chapter_from_a_chosen_commit() {
     );
 }
 
+/// Write the durable findings store (`bible/findings.toml`) with the given open
+/// findings — a helper for the findings-diff tests (#1051). Each entry is one open
+/// (not dismissed) finding on chapter "One". Mirrors the [`FindingsStore`] record
+/// shape so the app reads it back through `show_file_at` exactly as it would a real
+/// store committed at a past milestone.
+fn write_findings_store(root: &std::path::Path, summaries: &[&str]) {
+    let entries: Vec<String> = summaries
+        .iter()
+        .map(|s| {
+            format!(
+                "[[findings]]\nsummary = \"{s}\"\nkind = \"continuity\"\n\
+                 chapters = [\"One\"]\ndismissed = false\n"
+            )
+        })
+        .collect();
+    let dir = root.join("bible");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("findings.toml"), entries.join("\n")).unwrap();
+}
+
+// The findings diff (#1051): the author picks two points in history and sees which
+// findings resolved, which were introduced, and which stayed open — a pure local
+// comparison of the durable store committed at each point, no AI request. Commit a
+// store at point A, revise it at point B, then anchor A with `f` and diff against B.
+#[test]
+fn findings_diff_classifies_between_two_history_points() {
+    let (mut app, _dir) = two_chapter_app("vc-findings-diff");
+    git_menu(&mut app, 0); // Initialize
+
+    // Point A: two open findings.
+    write_findings_store(&app.project.root, &["a plot hole", "the locket color"]);
+    commit_via_menu(&mut app, "point A");
+
+    // Point B: the plot hole is resolved (gone), the locket carries over, and a new
+    // dangling thread is introduced.
+    write_findings_store(
+        &app.project.root,
+        &["the locket color", "a dangling thread"],
+    );
+    commit_via_menu(&mut app, "point B");
+
+    // History lists [point B (newest), point A]. Anchor the *earlier* point A first,
+    // then diff against the current selection at B.
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Down)); // move to "point A"
+    app.on_key(key(KeyCode::Char('f'))); // anchor point A
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("point A set"),
+        "the first f anchors point A: {:?}",
+        app.message
+    );
+    app.on_key(key(KeyCode::Up)); // back to "point B"
+    app.on_key(key(KeyCode::Char('f'))); // diff A → B
+
+    let report = overlay_text(&app);
+    assert!(
+        report.contains("Resolved (1)") && report.contains("a plot hole"),
+        "the plot hole gone at B is resolved: {report}"
+    );
+    assert!(
+        report.contains("Introduced (1)") && report.contains("a dangling thread"),
+        "the new finding at B is introduced: {report}"
+    );
+    assert!(
+        report.contains("Still open (1)") && report.contains("the locket color"),
+        "the carried-over finding stays open: {report}"
+    );
+    // The history view stays open behind the overlay, and the anchor was cleared.
+    match &app.mode {
+        Mode::History(h) => assert!(
+            h.findings_anchor.is_none(),
+            "the anchor resets after the diff"
+        ),
+        _ => panic!("history stays open behind the diff overlay"),
+    }
+}
+
+// The findings diff never asks the AI (#1051): it's a pure read of two committed
+// stores. We drive the whole flow with no backend wired and assert no AI request was
+// dispatched — the overlay still renders from local data alone.
+#[test]
+fn findings_diff_makes_no_ai_request() {
+    let (mut app, _dir) = two_chapter_app("vc-findings-diff-no-ai");
+    git_menu(&mut app, 0); // Initialize
+
+    write_findings_store(&app.project.root, &["only at A"]);
+    commit_via_menu(&mut app, "A");
+    write_findings_store(&app.project.root, &["only at B"]);
+    commit_via_menu(&mut app, "B");
+
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Down)); // point A
+    app.on_key(key(KeyCode::Char('f'))); // anchor
+    app.on_key(key(KeyCode::Up)); // point B
+    app.on_key(key(KeyCode::Char('f'))); // diff — purely local
+
+    assert!(
+        !app.ai_task.is_busy(),
+        "the findings diff dispatches no AI request"
+    );
+    let report = overlay_text(&app);
+    assert!(
+        report.contains("Resolved (1)") && report.contains("only at A"),
+        "the diff rendered from the committed stores alone: {report}"
+    );
+}
+
+// Empty stores diff cleanly (#1051): two points with no findings compare to nothing,
+// and the flow reports "nothing to compare" rather than opening an empty overlay.
+#[test]
+fn findings_diff_of_empty_stores_reports_nothing() {
+    let (mut app, _dir) = two_chapter_app("vc-findings-diff-empty");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "A"); // no findings store at either point
+    type_str(&mut app, "a small edit");
+    app.on_key(ctrl('s'));
+    commit_via_menu(&mut app, "B");
+
+    git_menu_label(&mut app, "History");
+    app.on_key(key(KeyCode::Down)); // point A
+    app.on_key(key(KeyCode::Char('f'))); // anchor
+    app.on_key(key(KeyCode::Up)); // point B
+    app.on_key(key(KeyCode::Char('f'))); // diff
+
+    assert!(app.overlay.is_none(), "no overlay for an empty comparison");
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("nothing to compare"),
+        "an empty diff reports it: {:?}",
+        app.message
+    );
+}
+
 #[test]
 fn git_palette_commits_with_a_message() {
     let (mut app, _dir) = two_chapter_app("vcs-commit");

@@ -104,6 +104,61 @@ fn store_path(root: &Path) -> PathBuf {
     root.join("bible").join("findings.toml")
 }
 
+/// The project-relative path of the findings store, so a caller can read the same
+/// file out of git history (a past milestone or branch) via
+/// [`crate::vcs::show_file_at`] — the basis for the findings diff (#1051).
+pub(super) const fn store_rel_path() -> &'static str {
+    "bible/findings.toml"
+}
+
+/// How a finding changed between two points in history (#1051). Each finding —
+/// keyed by its content, the same span/kind identity the store dedups on — lands
+/// in exactly one bucket relative to the two chosen points.
+#[derive(Default, Debug)]
+pub(super) struct FindingsDiff {
+    /// Open at A, gone at B — the revision closed these out.
+    pub(super) resolved: Vec<Finding>,
+    /// New at B, absent at A — the work surfaced (or created) these.
+    pub(super) introduced: Vec<Finding>,
+    /// Open at both points — carried through unchanged.
+    pub(super) still_open: Vec<Finding>,
+}
+
+impl FindingsDiff {
+    /// No change at all between the two points — nothing resolved, introduced, or
+    /// even carried over (both stores empty, or identical *and* empty).
+    pub(super) const fn is_empty(&self) -> bool {
+        self.resolved.is_empty() && self.introduced.is_empty() && self.still_open.is_empty()
+    }
+}
+
+/// Classify the open findings of two history points (#1051): purely local, over
+/// two already-generated stores — no AI request, no model call, no prose. A
+/// finding open at A but not B is **resolved**; open at B but not A is
+/// **introduced**; open at both is **still open**. Identity is the store's own
+/// content key (kind + span), so a re-produced finding matches across the two
+/// points exactly as a re-run matches a prior dismissal. Dismissed records don't
+/// count as open on either side, so they never appear in the diff.
+pub(super) fn diff_findings(before: &FindingsStore, after: &FindingsStore) -> FindingsDiff {
+    let a: std::collections::HashSet<String> = before.open().iter().map(key).collect();
+    let b: std::collections::HashSet<String> = after.open().iter().map(key).collect();
+    let mut diff = FindingsDiff::default();
+    for f in before.open() {
+        // Resolved: open at the earlier point, gone by the later one.
+        if !b.contains(&key(&f)) {
+            diff.resolved.push(f);
+        }
+    }
+    for f in after.open() {
+        if a.contains(&key(&f)) {
+            diff.still_open.push(f);
+        } else {
+            diff.introduced.push(f);
+        }
+    }
+    diff
+}
+
 impl FindingsStore {
     /// Load the store, or the empty default when it's missing/unreadable (best
     /// effort — a corrupt file just starts triage fresh, never blocks the editor).
@@ -112,6 +167,15 @@ impl FindingsStore {
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
             .unwrap_or_default()
+    }
+
+    /// Parse a store from raw TOML — the store as it existed at a past point, read
+    /// out of git history (the blob at a milestone or branch) rather than off disk
+    /// (#1051). Unparseable or empty text yields the empty store, matching
+    /// [`load`](Self::load)'s best-effort behavior, so a point that predates the
+    /// store (or has a corrupt one) simply diffs as "no findings there".
+    pub(super) fn from_toml(text: &str) -> Self {
+        toml::from_str(text).unwrap_or_default()
     }
 
     fn save(&self, root: &Path) {
@@ -187,7 +251,7 @@ impl FindingsStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{store_path, FindingsStore};
+    use super::{diff_findings, store_path, FindingsStore};
     use crate::atomic;
     use crate::mode::{Finding, FindingKind};
 
@@ -315,5 +379,101 @@ mod tests {
         assert!(!reloaded.is_dismissed(&finding("a doomed addition")));
         assert_eq!(reloaded.open().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- Findings diff between two history points (#1051) --------------------
+
+    /// Build a store holding the given open findings — the store as it stood at one
+    /// point in history, for the diff tests. Round-trips through TOML so it's exactly
+    /// what [`FindingsStore::from_toml`] parses out of a git blob.
+    fn store_with(findings: &[Finding]) -> FindingsStore {
+        let mut store = FindingsStore::default();
+        for f in findings {
+            store.findings.push(super::Record::from(f, false));
+        }
+        FindingsStore::from_toml(&toml::to_string(&store).unwrap())
+    }
+
+    // The core classification (#1051): a finding open at A but gone at B is resolved,
+    // one new at B is introduced, one at both stays open — a pure local comparison of
+    // two already-generated stores, no AI request anywhere in reach.
+    #[test]
+    fn diff_classifies_resolved_introduced_and_still_open() {
+        let carried = finding("the locket keeps changing color");
+        let before = store_with(&[finding("a plot hole in ch.1"), carried.clone()]);
+        let after = store_with(&[carried, finding("a new dangling thread")]);
+
+        let diff = diff_findings(&before, &after);
+
+        let summaries = |fs: &[Finding]| fs.iter().map(|f| f.summary.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            summaries(&diff.resolved),
+            vec!["a plot hole in ch.1".to_string()],
+            "gone at B → resolved"
+        );
+        assert_eq!(
+            summaries(&diff.introduced),
+            vec!["a new dangling thread".to_string()],
+            "new at B → introduced"
+        );
+        assert_eq!(
+            summaries(&diff.still_open),
+            vec!["the locket keeps changing color".to_string()],
+            "present at both → still open"
+        );
+    }
+
+    // Two empty stores diff cleanly (#1051): no findings on either side means every
+    // bucket is empty and the diff reports itself as empty — the "nothing to compare"
+    // case the UI turns into a message rather than an overlay.
+    #[test]
+    fn diff_of_two_empty_stores_is_empty() {
+        let diff = diff_findings(&FindingsStore::default(), &FindingsStore::default());
+        assert!(diff.resolved.is_empty());
+        assert!(diff.introduced.is_empty());
+        assert!(diff.still_open.is_empty());
+        assert!(
+            diff.is_empty(),
+            "no findings at either point → an empty diff"
+        );
+    }
+
+    // A dismissed finding isn't "open" on either side, so it never shows in the diff
+    // (#1051) — the diff measures the open triage list, matching what the author acts
+    // on, not the full history of every flag ever seen.
+    #[test]
+    fn dismissed_findings_are_excluded_from_the_diff() {
+        let dir = crate::testutil::scratch_dir("findings-store", "diff-dismissed");
+        let mut before = FindingsStore::load(&dir);
+        let dismissed = finding("dismissed noise");
+        before.remember(&dir, &finding("real open finding"));
+        before.remember(&dir, &dismissed);
+        before.dismiss(&dir, &dismissed);
+
+        // Point B keeps only the real finding open (the dismissed one is gone).
+        let after = store_with(&[finding("real open finding")]);
+        let diff = diff_findings(&before, &after);
+
+        assert!(
+            diff.resolved.is_empty(),
+            "a dismissed finding was never open, so dropping it isn't a resolution"
+        );
+        assert_eq!(diff.still_open.len(), 1, "the real finding carries through");
+        assert!(diff.introduced.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // from_toml is the store-at-a-ref reader (#1051): it parses a real store body and
+    // shrugs off a corrupt or empty one as the empty store, exactly like the on-disk
+    // load — so a point that predates the findings file diffs as "nothing there".
+    #[test]
+    fn from_toml_parses_a_store_and_tolerates_junk() {
+        let store = store_with(&[finding("a finding")]);
+        let body = toml::to_string(&store).unwrap();
+        assert_eq!(FindingsStore::from_toml(&body).open().len(), 1);
+        assert!(FindingsStore::from_toml("not valid toml @#$")
+            .open()
+            .is_empty());
+        assert!(FindingsStore::from_toml("").open().is_empty());
     }
 }

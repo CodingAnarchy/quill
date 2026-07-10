@@ -19,6 +19,10 @@ pub struct History {
     pub(crate) selected: usize,
     pub(crate) filter: String,
     pub(crate) typing: bool,
+    /// The first point picked for a findings diff (#1051): the revision the author
+    /// anchored with `f`, awaiting a second `f` on another row to compare against.
+    /// `None` until a first point is chosen, cleared once the diff runs.
+    pub(crate) findings_anchor: Option<String>,
 }
 
 /// One row of the history view (#833): a named milestone or a commit. Milestones

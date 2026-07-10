@@ -30,6 +30,7 @@ impl App {
                     selected: 0,
                     filter: String::new(),
                     typing: false,
+                    findings_anchor: None,
                 }));
             }
             Err(e) => self.message = Some(format!("Could not read history: {e}")),
@@ -40,10 +41,13 @@ impl App {
     /// (skipping filtered-out rows), `d` diffs the current chapter against the
     /// selected row, `r` restores the chapter to it (into the editable buffer for
     /// review-and-save). `D`/`R` (#833) diff / restore the *whole project* against
-    /// the selection — a milestone or any commit. `n` edits the note on a selected
-    /// milestone (#966). Esc closes. `/` starts a type-to-filter query (#822) that
-    /// narrows the list to rows whose summary, id, or date match; Esc clears the
-    /// filter before it closes the view.
+    /// the selection — a milestone or any commit. `f` (#1051) picks two points and
+    /// diffs the durable findings store between them — first `f` anchors a point,
+    /// second `f` on another row reports which findings resolved / were introduced /
+    /// stayed open, a pure local comparison with no AI request. `n` edits the note on
+    /// a selected milestone (#966). Esc closes. `/` starts a type-to-filter query
+    /// (#822) that narrows the list to rows whose summary, id, or date match; Esc
+    /// clears the filter before it closes the view.
     pub(crate) fn on_key_history(&mut self, key: KeyEvent) {
         let Mode::History(history) = &self.mode else {
             return;
@@ -68,6 +72,7 @@ impl App {
             KeyCode::Char('r') => self.restore_from_selected_commit(),
             KeyCode::Char('D') => self.diff_project_against_selected(),
             KeyCode::Char('R') => self.restore_project_from_selected(),
+            KeyCode::Char('f') => self.findings_diff_step(),
             KeyCode::Char('n') => self.edit_selected_milestone_note(),
             // Esc clears an active filter first (restoring the full list), then a
             // second Esc closes the view.
@@ -309,4 +314,117 @@ impl App {
         };
         self.start_restore_project(Some(rev));
     }
+
+    /// One `f` press in the findings-diff flow (#1051). The first press anchors the
+    /// selected row as point A (a hint confirms it). The second press, on a different
+    /// row, diffs the durable findings store between the two points and reports the
+    /// result; pressing `f` again on the same row is a no-op with a nudge. Anchoring
+    /// on a hidden (filtered-out) row is refused, matching the diff/restore actions.
+    fn findings_diff_step(&mut self) {
+        let Some(rev) = self.selected_commit_rev() else {
+            return;
+        };
+        let anchor = match &self.mode {
+            Mode::History(h) => h.findings_anchor.clone(),
+            _ => return,
+        };
+        match anchor {
+            None => {
+                self.set_findings_anchor(Some(rev));
+                self.message =
+                    Some("Findings diff: point A set — pick another row and press f.".into());
+            }
+            Some(a) if a == rev => {
+                self.message = Some("Pick a different row for point B.".into());
+            }
+            Some(a) => {
+                self.set_findings_anchor(None);
+                self.show_findings_diff(&a, &rev);
+            }
+        }
+    }
+
+    fn set_findings_anchor(&mut self, anchor: Option<String>) {
+        if let Mode::History(h) = &mut self.mode {
+            h.findings_anchor = anchor;
+        }
+    }
+
+    /// Diff the durable findings store between two revisions (#1051) and open the
+    /// result in the read-only report overlay. Pure and local: it reads
+    /// `bible/findings.toml` as it existed at each point out of git history (never a
+    /// model call, never prose), classifies each finding as resolved / introduced /
+    /// still-open by its content key, and renders the three groups. The history view
+    /// stays open behind the overlay.
+    fn show_findings_diff(&mut self, rev_a: &str, rev_b: &str) {
+        let before = match self.findings_store_at(rev_a) {
+            Ok(store) => store,
+            Err(e) => {
+                self.message = Some(format!("Findings diff failed: {e}"));
+                return;
+            }
+        };
+        let after = match self.findings_store_at(rev_b) {
+            Ok(store) => store,
+            Err(e) => {
+                self.message = Some(format!("Findings diff failed: {e}"));
+                return;
+            }
+        };
+        let diff = findings_store::diff_findings(&before, &after);
+        if diff.is_empty() {
+            self.message = Some("No findings at either point — nothing to compare.".into());
+            return;
+        }
+        self.overlay = Some(Overlay::report("findings diff", findings_diff_lines(&diff)));
+    }
+
+    /// Read the durable findings store as it existed at `rev` (#1051) — the
+    /// `bible/findings.toml` blob out of git history, parsed the same best-effort way
+    /// as the on-disk load. A revision with no store yet (it predates findings, or
+    /// the file was absent) reads as the empty store, so it diffs cleanly against a
+    /// point that has one. Errors only when the revision itself can't be resolved.
+    fn findings_store_at(&self, rev: &str) -> Result<findings_store::FindingsStore, String> {
+        let text =
+            crate::vcs::show_file_at(&self.project.root, rev, findings_store::store_rel_path())?
+                .unwrap_or_default();
+        Ok(findings_store::FindingsStore::from_toml(&text))
+    }
+}
+
+/// Render a findings diff (#1051) as report lines: a header line per group
+/// (resolved / introduced / still-open) with its count, then one line per finding
+/// carrying its pass label, chapters, and summary. Resolved reads green, introduced
+/// red, still-open dim — the same additions/removals palette the diff overlays use.
+/// A group with no findings is omitted entirely.
+fn findings_diff_lines(diff: &findings_store::FindingsDiff) -> Vec<Line<'static>> {
+    let theme = theme::current();
+    let mut lines = Vec::new();
+    let mut group = |title: &str, color: ratatui::style::Color, items: &[Finding]| {
+        if items.is_empty() {
+            return;
+        }
+        if !lines.is_empty() {
+            lines.push(Line::from(String::new()));
+        }
+        lines.push(Line::from(Span::styled(
+            format!("{title} ({})", items.len()),
+            Style::default().fg(theme.heading),
+        )));
+        for f in items {
+            let chapters = if f.chapters.is_empty() {
+                "(no chapter)".to_string()
+            } else {
+                f.chapters.join(", ")
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  [{}] {} — {}", f.kind.label(), chapters, f.summary),
+                Style::default().fg(color),
+            )));
+        }
+    };
+    group("Resolved", theme.added, &diff.resolved);
+    group("Introduced", theme.removed, &diff.introduced);
+    group("Still open", theme.dim, &diff.still_open);
+    lines
 }
