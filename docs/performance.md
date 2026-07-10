@@ -23,6 +23,34 @@ of a core and false-fail their sub-frame thresholds. Run `cargo perf`
 rendering, or project load. `--nocapture` prints each measured time next to its
 target.
 
+`cargo perf` is **hermetic and deterministic** (#1022): it needs no network and
+no machine isolation, so a green run means performance is green — full stop. Two
+things make that true. Single-threaded execution (above) means a parallel build
+or several busy worktrees can't starve a timing guard into a false fail, so you
+never have to re-run to shake off a contention flake. And the `--ignored` sweep
+no longer picks up the network catalog checks: it runs offline without a
+`--skip` flag.
+
+### The catalog check is separate (network, run deliberately)
+
+Two `#[ignore]`d tests — `catalog_gguf_files_exist_on_huggingface` and
+`embed_catalog_files_exist_on_huggingface` (#726, in `src/ai/model_select.rs`) —
+HEAD each `MODELS`/`EMBED_MODELS` row's weights URL on HuggingFace to catch a
+catalog that names a file a user's download would 404 on. They reach the network,
+so they are *not* part of the offline perf gate. They no-op unless the
+`QUILL_CATALOG_CHECK` env guard is set; the `cargo perf` sweep doesn't set it, so
+those tests pass trivially and the gate stays offline. Run them deliberately —
+before a release, or whenever a row's repo/filename changes — with the dedicated
+alias plus the guard:
+
+```sh
+QUILL_CATALOG_CHECK=1 cargo perf-catalog   # runs *only* the two HuggingFace catalog checks
+```
+
+(The alias filters to the two tests by name; a cargo alias can't set env itself,
+hence the inline `QUILL_CATALOG_CHECK=1` prefix. Without the guard the checks
+skip and report why.)
+
 Each benchmark lives next to the code it guards (so a regression points at the
 cause) and asserts against a written-down budget — it *fails* if exceeded,
 rather than just reporting. This file is the index; the budgets and rationale
