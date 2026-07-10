@@ -288,36 +288,126 @@ fn emit_replacement(
     plain: &impl Fn(&str) -> Line<'static>,
     theme: crate::theme::Theme,
 ) {
+    // Word-diff each paired row (same index in both runs) exactly once, and reuse
+    // the result for the removed- and added-side rendering below — the diff is
+    // symmetric, so computing it per side would double the quadratic LCS cost.
+    // `segments_if_short` also caps the line length, falling back to plain
+    // coloring for a pathological pair rather than allocating a huge table.
+    let paired: Vec<Option<(Vec<word_diff::Seg>, Vec<word_diff::Seg>)>> = dels
+        .iter()
+        .enumerate()
+        .map(|(row, del)| {
+            adds.get(row)
+                .and_then(|add| word_diff::segments_if_short(&del[1..], &add[1..]))
+                .filter(|(del_segs, add_segs)| word_diff::is_useful(del_segs, add_segs))
+        })
+        .collect();
+
     for (row, del) in dels.iter().enumerate() {
-        match adds
-            .get(row)
-            .map(|add| word_diff::segments(&del[1..], &add[1..]))
-        {
-            Some((del_segs, add_segs)) if word_diff::is_useful(&del_segs, &add_segs) => {
-                out.push(Line::from(word_diff::spans(
-                    '-',
-                    &del_segs,
-                    theme.removed,
-                    theme.dim,
-                )));
-            }
-            _ => out.push(plain(del)),
+        match paired.get(row).and_then(Option::as_ref) {
+            Some((del_segs, _)) => out.push(Line::from(word_diff::spans(
+                '-',
+                del_segs,
+                theme.removed,
+                theme.dim,
+            ))),
+            None => out.push(plain(del)),
         }
     }
     for (row, add) in adds.iter().enumerate() {
-        match dels
-            .get(row)
-            .map(|del| word_diff::segments(&del[1..], &add[1..]))
-        {
-            Some((del_segs, add_segs)) if word_diff::is_useful(&del_segs, &add_segs) => {
-                out.push(Line::from(word_diff::spans(
-                    '+',
-                    &add_segs,
-                    theme.added,
-                    theme.dim,
-                )));
-            }
-            _ => out.push(plain(add)),
+        match paired.get(row).and_then(Option::as_ref) {
+            Some((_, add_segs)) => out.push(Line::from(word_diff::spans(
+                '+',
+                add_segs,
+                theme.added,
+                theme.dim,
+            ))),
+            None => out.push(plain(add)),
         }
+    }
+}
+
+#[cfg(test)]
+mod diff_render_tests {
+    use super::diff_lines;
+    use ratatui::style::Modifier;
+    use ratatui::text::Line;
+    use std::time::Instant;
+
+    /// Reassemble a rendered [`Line`]'s span contents back into its text.
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// A line was word-diffed iff at least one span carries the BOLD modifier the
+    /// [`word_diff::spans`] renderer puts on a *changed* word — a plain whole-line
+    /// `-`/`+` fallback is a single unbolded span.
+    fn is_word_diffed(line: &Line<'_>) -> bool {
+        line.spans
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::BOLD))
+    }
+
+    #[test]
+    fn short_pair_gets_word_level_highlighting() {
+        // A one-word revision on a normal-length line still word-diffs: the shared
+        // words render as (dim, unbolded) context and only "bright" / "dark" is
+        // bolded on each side (unchanged pre-fix behavior).
+        let patch = "-the night was dark\n+the night was bright\n";
+        let lines = diff_lines(patch);
+        assert_eq!(lines.len(), 2);
+        assert!(is_word_diffed(&lines[0]), "removed side word-diffed");
+        assert!(is_word_diffed(&lines[1]), "added side word-diffed");
+        assert_eq!(line_text(&lines[0]), "-the night was dark");
+        assert_eq!(line_text(&lines[1]), "+the night was bright");
+    }
+
+    #[test]
+    fn long_pair_falls_back_to_plain_and_is_fast() {
+        // Two ~50k-token lines sharing a common prefix: the old code would build a
+        // ~50k×50k `usize` LCS table (tens of GB) twice. The length guard must fall
+        // back to plain whole-line coloring — a single unbolded span per side — and
+        // return promptly, never allocating the table.
+        let long = "word ".repeat(50_000);
+        let old = format!("{long}alpha");
+        let new = format!("{long}omega");
+        let patch = format!("-{old}\n+{new}\n");
+
+        let start = Instant::now();
+        let lines = diff_lines(&patch);
+        let elapsed = start.elapsed();
+
+        assert_eq!(lines.len(), 2);
+        // Plain fallback: no bolded changed-word spans on either side.
+        assert!(!is_word_diffed(&lines[0]), "removed side is plain");
+        assert!(!is_word_diffed(&lines[1]), "added side is plain");
+        assert_eq!(line_text(&lines[0]), format!("-{old}"));
+        assert_eq!(line_text(&lines[1]), format!("+{new}"));
+        // Generous ceiling: building the table would take seconds / OOM; the guarded
+        // path is well under this even on a slow debug build.
+        assert!(
+            elapsed.as_secs() < 2,
+            "guarded diff should be prompt, took {elapsed:?}",
+        );
+    }
+
+    #[test]
+    fn pair_marks_the_same_words_on_both_sides() {
+        // The word diff is computed once per pair and reused for the `-` and `+`
+        // side, so the removed and added lines must agree on which word changed:
+        // "dark" bolded on the `-` line, "bright" on the `+` line, and the shared
+        // "the night was" unbolded on both.
+        let patch = "-the night was dark\n+the night was bright\n";
+        let lines = diff_lines(patch);
+
+        let bold_text = |line: &Line<'_>| -> String {
+            line.spans
+                .iter()
+                .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+                .map(|s| s.content.as_ref())
+                .collect()
+        };
+        assert_eq!(bold_text(&lines[0]), "dark");
+        assert_eq!(bold_text(&lines[1]), "bright");
     }
 }

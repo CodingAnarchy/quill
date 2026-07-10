@@ -16,6 +16,18 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
+/// Byte budget for a single line before the word diff falls back to plain
+/// whole-line coloring. The LCS table is `(old_tokens+1) × (new_tokens+1)`
+/// `usize` cells and the fill is O(old·new), so an unbounded pair — a long
+/// revised paragraph or a pasted base64 / data blob, which Markdown prose keeps
+/// on one unwrapped line — can allocate tens of gigabytes and hang for seconds
+/// (this runs from the history/compare gesture, never the keystroke path, but
+/// it's still a plausible novelist action). 8 KiB is comfortably above any real
+/// prose paragraph yet caps the worst-case table at a few million cells; past it
+/// the caller renders the pair as line-granular `-`/`+` instead (see
+/// [`segments_if_short`]).
+const MAX_LINE_BYTES: usize = 8 * 1024;
+
 /// A tokenized run of one line: a *word* (a maximal run of non-whitespace) or a
 /// *gap* (a maximal run of whitespace). Splitting on the boundary — rather than
 /// on bytes — keeps the diff aligned to words while still preserving the exact
@@ -111,6 +123,19 @@ pub(super) fn segments(old_line: &str, new_line: &str) -> (Vec<Seg>, Vec<Seg>) {
     (old_segs, new_segs)
 }
 
+/// [`segments`] with a length guard: `None` when either line exceeds
+/// [`MAX_LINE_BYTES`], so the caller falls back to plain whole-line coloring
+/// rather than building an unbounded `(old·new)` LCS table over a pathological
+/// pair (a long unwrapped paragraph or a pasted data blob). The check is on
+/// bytes — cheap, and a strict over-estimate of the token counts that drive the
+/// table — so the quadratic work only ever runs on real-length lines.
+pub(super) fn segments_if_short(old_line: &str, new_line: &str) -> Option<(Vec<Seg>, Vec<Seg>)> {
+    if old_line.len() > MAX_LINE_BYTES || new_line.len() > MAX_LINE_BYTES {
+        return None;
+    }
+    Some(segments(old_line, new_line))
+}
+
 /// Append `token` to `segs`, merging into the trailing segment when it shares the
 /// same [`Kind`] so a multi-word change reads as a single highlighted span.
 fn push(segs: &mut Vec<Seg>, token: &str, kind: Kind) {
@@ -163,7 +188,7 @@ pub(super) fn spans(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_useful, segments, spans, tokenize, Kind};
+    use super::{is_useful, segments, segments_if_short, spans, tokenize, Kind, MAX_LINE_BYTES};
     use ratatui::style::{Color, Modifier};
 
     fn changed_text(segs: &[super::Seg]) -> String {
@@ -248,6 +273,28 @@ mod tests {
     fn shared_words_make_it_useful() {
         let (o, n) = segments("the night was dark", "the night was bright");
         assert!(is_useful(&o, &n));
+    }
+
+    #[test]
+    fn short_pair_word_diffs() {
+        // A normal-length pair is under the byte budget, so the guard returns the
+        // same segments `segments` would — word-level diffing is unaffected.
+        let old = "the night was dark";
+        let new = "the night was bright";
+        assert_eq!(segments_if_short(old, new), Some(segments(old, new)));
+    }
+
+    #[test]
+    fn oversized_pair_falls_back() {
+        // Either side past the budget bails out to `None` so the caller renders the
+        // pair line-granular, never building the unbounded LCS table.
+        let long = "x ".repeat(MAX_LINE_BYTES); // ~2× the budget in bytes
+        assert!(long.len() > MAX_LINE_BYTES);
+        assert_eq!(segments_if_short(&long, "short"), None);
+        assert_eq!(segments_if_short("short", &long), None);
+        // A pair right at the budget still diffs.
+        let at = "a".repeat(MAX_LINE_BYTES);
+        assert!(segments_if_short(&at, &at).is_some());
     }
 
     #[test]
