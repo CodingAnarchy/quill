@@ -63,6 +63,11 @@ pub enum Pending {
     /// number selects that chapter; otherwise the first chapter whose title
     /// matches (case-insensitive) is opened.
     GoToChapter,
+    /// Numeric input: a 1-based line number to move the cursor to in the active
+    /// chapter (#1010) — a direct go-to-line outside Vim's `:N`. Clamped to the
+    /// buffer's last content line, landing on its first non-blank column like Vim's
+    /// `{count}G`; a blank or non-numeric entry is a no-op.
+    GoToLine,
     /// Text input: title for a new chapter to insert at `at`.
     NewChapter { at: usize },
     /// Text input: new title for the chapter at `at`.

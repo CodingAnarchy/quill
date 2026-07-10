@@ -108,6 +108,9 @@ impl App {
             Some(m) => m.insert_char(c),
             None => self.buffer.insert_char(c),
         }
+        // Record the insertion onto the recent-edit ring and as the `gi` target
+        // (#1010); coalesces per line, so a typed sentence is one spot.
+        self.record_insertion();
     }
 
     pub(super) fn edit_backspace(&mut self) {
@@ -115,6 +118,7 @@ impl App {
             Some(m) => m.backspace(),
             None => self.buffer.backspace(),
         }
+        self.record_edit_location(); // a deletion is an edit spot too (#1010)
     }
 
     /// Forward Delete (#641): remove the grapheme at the cursor, or join the next
@@ -126,6 +130,7 @@ impl App {
                 self.buffer.delete_forward();
             }
         }
+        self.record_edit_location(); // (#1010)
     }
 
     /// Delete the previous word (#641): Ctrl/Alt-Backspace.
@@ -136,6 +141,7 @@ impl App {
                 self.buffer.delete_word_back();
             }
         }
+        self.record_edit_location(); // (#1010)
     }
 
     /// Replace the active buffer's byte range `[lo, hi)` with `text` (#700) — the
@@ -146,12 +152,23 @@ impl App {
     /// Returns whether any text actually changed (a fully-clamped seam edit is a
     /// no-op).
     pub(super) fn edit_replace_range(&mut self, lo: usize, hi: usize, text: &str) -> bool {
-        if let Some(m) = &mut self.manuscript {
+        let changed = if let Some(m) = &mut self.manuscript {
             m.replace_byte_range(lo, hi, text)
         } else {
             self.buffer.replace_byte_range(lo, hi, text);
             true
+        };
+        // A range edit (an operator's change/delete, find-and-replace) is an edit
+        // spot too (#1010); a replacement that inserted text also updates the `gi`
+        // target. A fully-clamped seam no-op recorded nothing, so skip it.
+        if changed {
+            if text.is_empty() {
+                self.record_edit_location();
+            } else {
+                self.record_insertion();
+            }
         }
+        changed
     }
 
     /// Move the cursor a screenful of visual rows up or down (#641) — PageUp /

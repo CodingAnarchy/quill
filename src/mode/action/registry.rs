@@ -111,6 +111,18 @@ pub enum Action {
     AcceptWord,
     /// Open the project's custom dictionary in a pane to view and edit it (#935).
     ViewDictionary,
+    /// Prompt for a line number and move the cursor there (#1010) — a direct
+    /// go-to-line outside Vim's `:N`.
+    GoToLine,
+    /// Step the cursor back to an older spot in the recent-edit ring (#1010) — the
+    /// automatic breadcrumb of where the author has been editing.
+    RecentEditBack,
+    /// Step the cursor forward toward a newer spot in the recent-edit ring (#1010),
+    /// the inverse of [`RecentEditBack`](Self::RecentEditBack).
+    RecentEditForward,
+    /// Jump the cursor to the last insertion point (#1010) — the `gi`-style return
+    /// to where the author last added prose.
+    LastInsertion,
     /// Jump the cursor to the next misspelled word (#359).
     NextMisspelling,
     /// Jump the cursor to the previous misspelled word (#359).
@@ -308,6 +320,10 @@ impl Action {
         Self::Corkboard,
         Self::ManuscriptCorkboard,
         // Editing
+        Self::GoToLine,
+        Self::RecentEditBack,
+        Self::RecentEditForward,
+        Self::LastInsertion,
         Self::AcceptWord,
         Self::ViewDictionary,
         Self::NextMisspelling,
@@ -378,6 +394,10 @@ impl Action {
             Self::DescribeConfig => "config:describe",
             Self::AcceptWord => "dict:accept",
             Self::ViewDictionary => "dict:view",
+            Self::GoToLine => "goto:line",
+            Self::RecentEditBack => "goto:recent-back",
+            Self::RecentEditForward => "goto:recent-forward",
+            Self::LastInsertion => "goto:last-insertion",
             Self::NextMisspelling => "spell:next",
             Self::PrevMisspelling => "spell:prev",
             Self::StyleFlagSweep => "style:sweep",
@@ -460,7 +480,11 @@ impl Action {
             | Self::ViewResearch
             | Self::Corkboard
             | Self::ManuscriptCorkboard => "Bible",
-            Self::AcceptWord
+            Self::GoToLine
+            | Self::RecentEditBack
+            | Self::RecentEditForward
+            | Self::LastInsertion
+            | Self::AcceptWord
             | Self::ViewDictionary
             | Self::NextMisspelling
             | Self::PrevMisspelling
@@ -553,6 +577,10 @@ impl Action {
             Self::DescribeConfig => "Configure by description",
             Self::AcceptWord => "Add word to dictionary",
             Self::ViewDictionary => "View project dictionary",
+            Self::GoToLine => "Go to line…",
+            Self::RecentEditBack => "Go to a recent edit (back)",
+            Self::RecentEditForward => "Go to a recent edit (forward)",
+            Self::LastInsertion => "Go to last insertion",
             Self::NextMisspelling => "Next misspelling",
             Self::PrevMisspelling => "Previous misspelling",
             Self::StyleFlagSweep => "Style-flag sweep (pick a category)",
