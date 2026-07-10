@@ -47,12 +47,35 @@ pub(in crate::ui) fn draw_project_search(frame: &mut Frame, area: Rect, ps: &Pro
             "'{}' → '{}' · y replace · n skip · a replace all · enter done ({n} left)",
             ps.query, ps.replacement,
         ),
-        ProjectSearchStage::Confirm => format!(
-            "Replace all {n} {} across {span} {}? (y/N)",
+        ProjectSearchStage::Preview => format!(
+            "Replace all {n} {} across {span} {}: '{}' → '{}' · y/enter confirm · esc cancel",
             matches(n),
             chapters(span),
+            ps.query,
+            ps.replacement,
         ),
     };
+    // The replace-all preview (#1014): one row per affected chapter with its
+    // match count and a context snippet, so the author sees exactly where the
+    // sweep lands before committing. Read-only — no selection cursor.
+    if ps.stage == ProjectSearchStage::Preview {
+        let rows: Vec<Line<'static>> = ps
+            .preview_rows()
+            .into_iter()
+            .map(|r| {
+                let count = if r.count == 1 {
+                    "1 match".to_string()
+                } else {
+                    format!("{} matches", r.count)
+                };
+                let label = format!("{} — {}", r.title, r.context);
+                list_row(false, &label, Some(count))
+            })
+            .collect();
+        draw_list_overlay(frame, area, " Find across manuscript ", &help, rows, None);
+        return;
+    }
+
     // The grouped pane (#977) shows one row per chapter with its count; every
     // other stage shows the flat match list.
     if ps.stage == ProjectSearchStage::Grouped {

@@ -383,3 +383,52 @@ fn the_grouped_results_pane_shows_per_chapter_counts_and_a_total() {
         "the jump/toggle keys are advertised:\n{screen}"
     );
 }
+
+#[test]
+fn the_replace_all_preview_shows_a_per_chapter_breakdown_with_context() {
+    // The replace-all preview (#1014): before the sweep, one row per affected
+    // chapter with its match count and a context snippet, over the total and the
+    // confirm/cancel keys.
+    use crate::mode::{ProjectMatch, ProjectSearch, ProjectSearchStage};
+
+    let mut app = app_with_chapters(&["Alpha", "Beta"], "body\n");
+    let mut ps = ProjectSearch::new();
+    ps.query = "Kate".into();
+    ps.replacement = "Katherine".into();
+    ps.stage = ProjectSearchStage::Preview;
+    let m = |chapter: usize, title: &str, context: &str| ProjectMatch {
+        chapter,
+        start: 0,
+        end: 4,
+        title: title.into(),
+        context: context.into(),
+    };
+    ps.matches = vec![
+        m(0, "Alpha", "Kate opened the door"),
+        m(0, "Alpha", "then Kate left"),
+        m(1, "Beta", "Kate again"),
+    ];
+    app.mode = Mode::ProjectSearch(Box::new(ps));
+
+    let screen = render(&app, 100, 16);
+    assert!(
+        screen.contains("Replace all 3 matches across 2 chapters"),
+        "the total is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("'Kate' → 'Katherine'") && screen.contains("y/enter confirm"),
+        "the query/replacement and confirm keys are shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Alpha") && screen.contains("2 matches"),
+        "the per-chapter count is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Beta") && screen.contains("1 match"),
+        "the singular count is shown:\n{screen}"
+    );
+    assert!(
+        screen.contains("Kate opened the door"),
+        "the first match's context snippet is shown:\n{screen}"
+    );
+}

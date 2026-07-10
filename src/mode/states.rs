@@ -707,6 +707,27 @@ impl ProjectSearch {
         self.grouped().len()
     }
 
+    /// The replace-all preview (#1014): one row per affected chapter, each with
+    /// its match count and a context snippet (the first match's line), in chapter
+    /// order. Built from the same `matches` the sweep will rewrite, so the preview
+    /// reflects exactly what the confirmed replace applies — nothing more, nothing
+    /// less. The active chapter's live edits were flushed before `matches` was
+    /// collected, so the snippets are drawn from the same bytes the sweep sees.
+    pub(crate) fn preview_rows(&self) -> Vec<PreviewRow> {
+        self.grouped()
+            .into_iter()
+            .map(|g| PreviewRow {
+                context: self
+                    .matches
+                    .get(g.first_match)
+                    .map(|m| m.context.clone())
+                    .unwrap_or_default(),
+                title: g.title,
+                count: g.count,
+            })
+            .collect()
+    }
+
     /// The current matches grouped by chapter (#977), in chapter order, each
     /// with its per-chapter count and the index of its first match (the jump
     /// target). Matches are already collected in chapter-then-document order, so
@@ -738,6 +759,15 @@ pub struct ChapterGroup {
     pub(crate) first_match: usize,
 }
 
+/// One chapter's row in the replace-all preview (#1014): the chapter's title, how
+/// many matches will be rewritten in it, and a context snippet (the first match's
+/// line) so the author can see *where* the sweep lands before committing.
+pub struct PreviewRow {
+    pub(crate) title: String,
+    pub(crate) count: usize,
+    pub(crate) context: String,
+}
+
 /// One manuscript-wide match (#295): which chapter, the byte range within that
 /// chapter's prose body, and a short context snippet for the results list.
 pub struct ProjectMatch {
@@ -765,11 +795,14 @@ pub enum ProjectSearchStage {
     Grouped,
     /// Typing the replacement text.
     Replacement,
-    /// Stepping through matches, choosing replace / skip; `a` triggers the
-    /// confirmed replace-all.
+    /// Stepping through matches, choosing replace / skip; `a` opens the
+    /// replace-all preview.
     Step,
-    /// y/N confirm before the irreversible manuscript-wide replace-all.
-    Confirm,
+    /// The replace-all preview (#1014): a per-chapter breakdown of how many
+    /// matches will be rewritten, each with a context snippet, shown before the
+    /// irreversible manuscript-wide sweep. y/Enter confirms; anything else cancels
+    /// (changing nothing).
+    Preview,
 }
 
 /// State for the manuscript-import preview (#702): the split the parser produced,
