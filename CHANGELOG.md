@@ -5,6 +5,112 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-10
+
+The Revision Desk. Quill has always been a strong tool for *drafting*; this
+release makes the second and third pass — proofing, tightening, restructuring,
+and hitting goals — just as first-class and keyboard-fast. Repeat an edit with
+`.`, join and reflow, transpose and case-fix, auto-pair quotes; step through the
+style report's flags in the buffer like a spelling sweep and catch words echoed a
+few sentences apart; jump by line, scene, or annotation and trace your recent
+edits; restructure a chapter from the outline; read a galley in a paginated
+proofing mode; watch live word goals fill and get a quiet session recap. It's all
+author-driven mechanics: Quill flags, jumps, counts, moves, and formats — the
+words stay yours. Alongside the editor work, the AI gains an opt-in **cultural &
+historical accuracy** pass (author-invoked, findings only — accuracy you ask for,
+never a sensitivity or representation review), and the version-control workflow
+shipped in 0.7.0 is now fully documented. Before release, the new
+gestures — folding navigation, cross-chapter moves, the reflow/restructure
+paths — went through an adversarial reliability audit; the fixes below close a
+reachable crash and two continuous-view data-loss edge cases it surfaced.
+
+### Added
+
+- **Repeat the last change with `.`** — Vim's repeat command, for both Normal-mode
+  changes and Visual-mode operations, so a repetitive revision edit (cut a filler
+  word, fix a punctuation habit) is one keystroke instead of a manual re-do.
+- **Step through the style report's flags in the editor** — walk each occurrence
+  of a chosen category (passive voice, filter words, long sentences, over-used
+  words) with `]r`/`[r`, the current hits underlined in place like a misspelling —
+  navigation only, never a rewrite.
+- **Flag near-proximity word repeats** — surface a content word echoed within a few
+  sentences (the local repetition a global word count misses) as a dim mark while
+  you revise; toggleable, purely lexical and offline.
+- **Join lines and reflow a paragraph** — `J` joins, `gq`/`gw` re-wraps the
+  paragraph, collapsing ragged line breaks after a cut. Whitespace only; never
+  alters a word or crosses a scene/chapter boundary.
+- **Transpose and case-fix** — `gs`/`gS` swap characters/words (the classic `xp`),
+  `~`/`g~`/`gu`/`gU` toggle or set case over a motion or text object, for fast typo
+  cleanup.
+- **Opt-in auto-pair for quotes and brackets** — typing an opener inserts its closer
+  with the cursor between; over-typing a closer skips past it. Off by default
+  (`[editor] auto_pair`), composes with smart typography.
+- **Restructure headings and sections from the outline** — promote/demote a heading
+  (`<`/`>`) and move a section with its whole body (`K`/`J`) without opening the
+  corkboard; one undoable, gesture-scoped rewrite.
+- **Scene-heading and open-annotation motions** — `]]`/`[[` step to the next/previous
+  scene heading and `]a`/`[a` to the next/previous unresolved annotation, across
+  chapters, without opening an overlay.
+- **Go to a line, and step back through recent edits** — a go-to-line prompt plus a
+  bounded ring of recent edit locations (and a `gi`-style jump to the last
+  insertion) so returning to where you were is automatic.
+- **Live per-chapter and per-session word goals** — a chapter fills toward its stored
+  goal as you write, and an optional session target fills alongside it, updated
+  from cached counts with no per-frame file work.
+- **Session recap and a gentle below-target nudge** — a quiet summary of the session
+  and the day's net on quit, and an optional dismissible status-bar cue when the
+  day is under the `[goals] daily` target.
+- **Word-level diff in the history and milestone compare view** — a changed line now
+  highlights the specific words that differ, so a prose revision reads the way a
+  novelist thinks about it rather than lighting the whole line.
+- **Preview per-chapter match counts before a project-wide replace** — a manuscript-wide
+  find-and-replace shows how many matches are in each chapter, with context, to
+  confirm or cancel before it rewrites files.
+- **Paginated galley proofreading mode** — a distinct read-only mode that renders the
+  chapter one screen-page at a time (with optional line numbers), so a proofing
+  pass reads like a printed galley instead of a scroll.
+- **Opt-in cultural & historical accuracy analysis** — an author-invoked pass that
+  checks the manuscript against a concern you *name* ("1850s London", "18th-century
+  sailing") and flags passages that read as factually, period, or culturally
+  inaccurate for it — as findings you act on, never a rewrite. It checks only the
+  concern you asked for; it is deliberately **not** a sensitivity, representation,
+  or bias review.
+
+### Changed
+
+- **Version-control workflow is now documented** — the README and a new
+  `docs/version-control.md` cover two-way sync, drafts, in-app conflict resolution,
+  the branch/merge history graph, and milestones, so the 0.7.0 suite is
+  discoverable instead of implied to be push-only.
+- **Internal quality pass** — the oversized `vcs` modules and five other files past
+  the size guideline were split into cohesive submodules, and the `cargo perf` gate
+  was made hermetic (the network model-catalog check no longer runs with the timing
+  guards) and contention-resilient, so a green perf run is reproducible offline.
+
+### Fixed
+
+- **`J`/`gq` no longer crash, corrupt, or mangle across boundaries** — a reachable
+  panic on a paragraph ending in a multibyte character with no trailing newline, a
+  continuous-view join/reflow that duplicated the next chapter's text across the
+  seam, and reflow folding a heading into adjacent prose are all fixed.
+- **Outline restructure and jump-back respect the continuous view** — restructuring
+  is refused in the continuous view (it previously edited and saved an invisible
+  stale buffer, losing on-screen edits), and the recent-edit ring / marks now record
+  the correct chapter and offset there.
+- **Navigating into a folded section keeps the cursor visible** — stepping a style or
+  spell flag, `:{line}`, and the annotation-review jump now reveal the fold at the
+  cursor, and switching chapters clears the previous chapter's highlight caches so no
+  phantom marks render.
+- **Vim edit-mechanics edge cases** — `.` no longer misfires while a `g~`/`gu`/`gU`
+  operator is armed, a no-op case/transpose no longer marks the buffer dirty or
+  retargets `.`, and a failed operator+motion (`df<absent>`) is now a true no-op.
+- **Revision highlights no longer lag while typing** — the style-flag and
+  proximity-repeat caches are invalidated on edit, so a mark never briefly sits on
+  shifted offsets during an active typing burst.
+- **Word-diff is guarded against pathological line lengths** — a very long single-line
+  paragraph in the compare view falls back to plain line coloring instead of building
+  a huge LCS table, and each line pair is diffed once rather than twice.
+
 ## [0.7.0] - 2026-07-09
 
 Version control for prose. Quill now backs the manuscript with real git-grade
@@ -166,6 +272,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[0.8.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.8.0
 [0.7.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.7.0
 [0.6.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.6.0
 
