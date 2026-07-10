@@ -62,13 +62,17 @@ impl App {
                 }
                 return;
             }
-            // `]s` / `[s` jump to the next / previous misspelling (#359), Vim's
-            // own spell-nav bindings; any other second key cancels.
+            // `]s` / `[s` jump to the next / previous misspelling (#359); `]r` / `[r`
+            // step the active style-flag sweep (#1001). Vim's own bracket-nav
+            // bindings; any other second key cancels.
             VimPending::Bracket { forward } => {
                 self.vim_state.pending = VimPending::None;
                 self.vim_state.count = None;
-                if c == 's' {
-                    self.navigate_spell_flag(if forward { 1 } else { -1 });
+                let dir = if forward { 1 } else { -1 };
+                match c {
+                    's' => self.navigate_spell_flag(dir),
+                    'r' => self.navigate_style_flag(dir),
+                    _ => {}
                 }
                 return;
             }

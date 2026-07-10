@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// "To be" forms — the weak-/passive-verb proxy.
-const TO_BE: &[&str] = &["am", "is", "are", "was", "were", "be", "been", "being"];
+pub const TO_BE: &[&str] = &["am", "is", "are", "was", "were", "be", "been", "being"];
 
 /// Filtering verbs that distance the reader ("she *saw* the door" → "the door").
 const FILTER_WORDS: &[&str] = &[
@@ -138,11 +138,15 @@ impl WordLists {
         adjust(&mut self.filter_words, add, remove);
     }
 
-    fn is_stopword(&self, word: &str) -> bool {
+    /// Whether `word` (lowercased) is an excluded frequency word. Crate-visible so
+    /// the flag-sweep scanner (#1001) shares the report's exact stopword definition.
+    pub(crate) fn is_stopword(&self, word: &str) -> bool {
         self.stopwords.contains(word)
     }
 
-    fn is_filter_word(&self, word: &str) -> bool {
+    /// Whether `word` (lowercased) is a filtering verb. Crate-visible so the
+    /// flag-sweep scanner (#1001) flags the same words the report counts.
+    pub(crate) fn is_filter_word(&self, word: &str) -> bool {
         self.filter_words.contains(word)
     }
 }
@@ -210,8 +214,10 @@ pub fn style_flags(text: &str, lists: &WordLists) -> StyleFlags {
     flags
 }
 
-/// Whether a lowercased word is counted as an `-ly` manner adverb.
-fn is_ly_adverb(word: &str) -> bool {
+/// Whether a lowercased word is counted as an `-ly` manner adverb. Visible within
+/// the (private) analysis module so the flag-sweep scanner (#1001) marks exactly
+/// what the report tallies.
+pub fn is_ly_adverb(word: &str) -> bool {
     word.len() > 3 && word.ends_with("ly") && !NON_ADVERB_LY.contains(&word)
 }
 

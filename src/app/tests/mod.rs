@@ -100,6 +100,7 @@ mod similar;
 mod snippets;
 mod spell;
 mod sprint;
+mod style_flags;
 mod typography;
 mod vcs;
 mod vcs_concurrency;

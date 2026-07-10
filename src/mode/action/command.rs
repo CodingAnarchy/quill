@@ -7,6 +7,8 @@
 
 use super::{Action, AiAction, ExportFormat, ExportScope, GitAction};
 
+use crate::analysis::FlagCategory;
+
 /// A command reachable from a palette — the AI menu (Ctrl-A), the version-control
 /// menu (Ctrl-V), and the export menu (Ctrl-E) share one palette mechanism.
 #[derive(Clone)]
@@ -70,6 +72,13 @@ pub enum Command {
         word: String,
         replacement: String,
     },
+    /// Start the style-flag sweep for the chosen category (#1001) — the pick step
+    /// of the sweep's category menu. Turns on the underline and jumps to the first
+    /// occurrence; `]r` / `[r` then step through them.
+    PickStyleFlag(FlagCategory),
+    /// Turn the style-flag sweep off (#1001) — clears the active category and its
+    /// underlines. The "(off)" entry at the top of the sweep's category menu.
+    ClearStyleFlags,
     /// Open the role picker for the curated font family at this index in
     /// [`crate::fonts::FAMILIES`] (#494) — body, heading, or both.
     PickFontRole(usize),

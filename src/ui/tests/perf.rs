@@ -63,6 +63,12 @@ fn render_stays_within_a_frame() {
             reviewer: None,
         })
         .collect();
+    // An active style-flag sweep (#1001) with a spread of cached hits, so the body
+    // render's per-row/char flag scan is timed too. The cache is read, never
+    // recomputed per draw — if a change moved the flag computation onto the render
+    // path, this guard (over a window-sized buffer) would blow the frame budget.
+    app.style_flag_category = Some(crate::analysis::FlagCategory::Adverbs);
+    app.style_flags = (0..200).map(|i| (i * 37, i * 37 + 6)).collect();
 
     let mut terminal = Terminal::new(TestBackend::new(100, 60)).unwrap();
     terminal.draw(|f| draw(f, &app)).unwrap(); // warm

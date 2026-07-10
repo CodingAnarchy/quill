@@ -320,6 +320,7 @@ impl App {
             Action::ViewDictionary => self.view_dictionary(),
             Action::NextMisspelling => self.navigate_spell_flag(1),
             Action::PrevMisspelling => self.navigate_spell_flag(-1),
+            Action::StyleFlagSweep => self.open_style_flag_picker(),
             Action::ToggleTypewriter => {
                 self.typewriter = !self.typewriter;
                 self.message = Some(format!("Typewriter scrolling {}.", on_off(self.typewriter)));
@@ -516,6 +517,8 @@ impl App {
                         word,
                         replacement,
                     }) => self.replace_misspelling(start, end, &word, &replacement),
+                    Some(Command::PickStyleFlag(cat)) => self.start_style_flag_sweep(cat),
+                    Some(Command::ClearStyleFlags) => self.clear_style_flags(),
                     Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
                     Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),
                     Some(Command::OpenStylePicker(p)) => self.open_style_picker(p),

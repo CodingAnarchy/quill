@@ -16,12 +16,15 @@ use crate::buffer::count_words;
 use crate::export::is_thematic_break;
 
 mod sentence;
-pub use sentence::{count_sentences, sentences};
+pub use sentence::{count_sentences, sentence_byte_spans, sentences};
 
 mod style;
 pub use style::{
     style_flags, tally_content_words, tally_phrases, top_counts, StyleFlags, WordLists,
 };
+
+mod flags;
+pub use flags::{flag_ranges, FlagCategory};
 
 /// Raw text statistics for a span of prose — the basis for every readability
 /// score. Additive across chapters, so the whole-manuscript figures are the sum
@@ -80,8 +83,9 @@ pub fn prose(text: &str) -> String {
 }
 
 /// Whether `line` is a Markdown ATX heading (`#`…`######` followed by a space or
-/// the end of the line).
-fn is_heading(line: &str) -> bool {
+/// the end of the line). Visible within the (private) analysis module so the
+/// flag-sweep scanner (#1001) masks the same structural lines [`prose`] drops.
+pub fn is_heading(line: &str) -> bool {
     let trimmed = line.trim_start();
     let hashes = trimmed.len() - trimmed.trim_start_matches('#').len();
     hashes > 0 && matches!(trimmed[hashes..].chars().next(), None | Some(' ' | '\t'))

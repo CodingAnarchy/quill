@@ -202,11 +202,7 @@ impl App {
         let threshold = self.project.manifest.run_on_threshold();
         // The effective stopword / filter-word lists: built-in defaults adjusted
         // by the project's `[analysis]` overrides (#119), built once for the report.
-        let mut lists = analysis::WordLists::new();
-        if let Some(a) = &self.project.manifest.analysis {
-            lists.override_stopwords(&a.stopwords_add, &a.stopwords_remove);
-            lists.override_filter_words(&a.filter_words_add, &a.filter_words_remove);
-        }
+        let lists = self.analysis_word_lists();
         let mut chapters = Vec::with_capacity(self.chapter_count());
         let mut longest = analysis::LongestSentences::new(5);
         let mut word_counts = HashMap::new();
@@ -268,6 +264,19 @@ impl App {
             overall_variety: analysis::lexical_variety_tokens(&tokens),
         };
         analysis::lines(&report)
+    }
+
+    /// The effective frequency word lists (#119): the built-in stopword / filter
+    /// sets adjusted by the project's `[analysis]` overrides. Shared by the analysis
+    /// report and the style-flag sweep (#1001) so a flag matches exactly what the
+    /// report counts.
+    pub(crate) fn analysis_word_lists(&self) -> analysis::WordLists {
+        let mut lists = analysis::WordLists::new();
+        if let Some(a) = &self.project.manifest.analysis {
+            lists.override_stopwords(&a.stopwords_add, &a.stopwords_remove);
+            lists.override_filter_words(&a.filter_words_add, &a.filter_words_remove);
+        }
+        lists
     }
 
     /// The part groupings for the pacing section. Empty when the book defines no
