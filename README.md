@@ -93,6 +93,22 @@ keystrokes that stay out of the way.
 - **Writing analytics** — a **month calendar heatmap** of daily activity plus
   **per-session records** (words, elapsed time, words-per-minute), alongside the
   writing-streak history, all read from Quill's append-only day/session log.
+- **Version control** — put a project under version control (**Ctrl-V**) and
+  Quill backs it with real Git history, presented as a writing tool. **Commit**
+  snapshots the manuscript (with a pre-commit review of what changes); set a
+  remote and **two-way sync** fetches and merges the remote's chapter edits — not
+  just pushes — so you can write the same book on two machines and reconcile them
+  into one history. When a sync (or a draft merge) overlaps, **resolve conflicts
+  chapter-by-chapter in-app** — keep mine, take theirs, or hand-merge — instead of
+  dropping to the command line. **Drafts** keep parallel named versions of the
+  manuscript (an alt ending, a POV split) you create, switch between, and merge
+  back, with the one you keep folded in. The **history view** draws the branch and
+  merge graph of the timeline so drafts and merges read at a glance, and
+  **milestones** name a point (with an optional note) you can diff against or
+  restore the whole project to. State lives in a normal Git repo in the project
+  (drafts are branches, milestones are tags), so it's also readable by any Git
+  tool — but you never need one. Full walkthrough in
+  [`docs/version-control.md`](docs/version-control.md).
 - **Named milestones** — mark a point in the project's history by name, then
   **restore the whole project** to it or **diff** the current manuscript against
   it — a coarse, whole-project checkpoint above the per-chapter save/recovery.
@@ -611,7 +627,9 @@ For backups you don't have to remember, an opt-in `[backup]` table automates two
 kinds. A project under version control that points at a remote (Ctrl-V → **Set
 remote**) can push to it on a cadence in the background — an always-current
 off-site copy without a manual push, with the status bar reporting the last
-success or a failure to retry. Independently, Quill can keep **scheduled local
+success or a failure to retry. (That's the automated backup path; the remote is
+also two-way — you can **sync** the remote's edits back down, keep drafts, and
+resolve conflicts in-app. See [`docs/version-control.md`](docs/version-control.md).) Independently, Quill can keep **scheduled local
 archives** — the same `.zip`, written on a cadence to
 `~/.local/share/quill/backups/<project>/`, keeping the N most recent and pruning
 the rest, and warning you at open if the newest copy has gone stale. Both are off
