@@ -993,6 +993,34 @@ impl App {
         self.last_activity = std::time::Instant::now();
     }
 
+    /// Drop the revision-pass highlight caches on an edit (#1035), so the
+    /// style-flag (#1001) and proximity-repeat (#1002) marks never render on
+    /// pre-edit byte spans while the author is actively typing. Both caches are
+    /// computed on the idle tick and address byte offsets into the buffer as it
+    /// was at that tick; an insert or delete shifts everything after it, so
+    /// between the edit and the next idle recompute a cached span points at the
+    /// wrong characters. Clearing them here suppresses the marks for the length
+    /// of an active typing burst — they reappear at the correct offsets on the
+    /// next idle pass ([`on_idle`](Self::on_idle) re-runs both refreshes), which
+    /// is the behavior we want (a mark shouldn't drift onto the wrong word
+    /// mid-keystroke). This mirrors how the spell underline already blinks off
+    /// while a misspelled word is being retyped.
+    ///
+    /// O(1) on the keystroke path: it truncates two small window-scoped vectors
+    /// (no destructors to run, capacity retained for the next refresh) and does
+    /// no rope, document-, or span-proportional work. The early return keeps it
+    /// free once the caches are already empty (the common case — no pass on, or
+    /// still mid-burst). Called from the shared edit chokepoint
+    /// ([`record_edit_location`](Self::record_edit_location)), never per draw.
+    pub(crate) fn invalidate_revision_highlights(&mut self) {
+        if !self.style_flags.is_empty() {
+            self.style_flags.clear();
+        }
+        if !self.proximity_repeats.is_empty() {
+            self.proximity_repeats.clear();
+        }
+    }
+
     /// On idle, re-check a read-only project's instance lock and reclaim it if the
     /// holder we deferred to at open has since crashed (#890). A no-op unless we're
     /// running read-only; when the reclaim succeeds the project becomes writable
