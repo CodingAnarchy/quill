@@ -200,6 +200,20 @@ pub enum Action {
     /// (theme, column width, smart typography, Vim mode, autosave, typewriter /
     /// focus) and the `[analysis]` stopwords, no AI required (#592).
     Settings,
+    /// Export a chapter-ordered, confidence-ranked revision plan (#1055):
+    /// `export/revision-plan-<date>.md`, an author-workable to-do built from the
+    /// open findings — chapters in reading order, highest cross-pass confidence
+    /// (#921) first, dismissed/resolved findings already dropped. Reformats findings
+    /// already produced (an off-manuscript artifact like the synopsis); authors no
+    /// prose, makes no request. Empty findings yield a clean "nothing to plan".
+    RevisionPlan,
+    /// Export the manuscript-health trend snapshot (#1052):
+    /// `export/health-<date>.md`, the findings grouped by kind/chapter with counts,
+    /// headed by the trend since the prior recorded run — which categories fell
+    /// (revision working) and which rose. Records this run into the small
+    /// `bible/health-trend.toml` side-file and renders from those tallies alone, so
+    /// it's pure local aggregation — no request, no manuscript re-scan.
+    HealthTrend,
     /// Export the story bible as one clean, shareable Markdown document (#708):
     /// the scattered `bible/` files assembled in order (characters, relationships,
     /// setting, timeline, plot, outline) with the generated/notes markers and YAML
@@ -275,12 +289,14 @@ impl Action {
         Self::PrepareForKdp,
         Self::PrepareForIngramSpark,
         Self::ExportBible,
+        Self::RevisionPlan,
         Self::BrowseFonts,
         Self::SetExportStyle,
         // Reports
         Self::ProgressReport,
         Self::AnalysisReport,
         Self::WritingHistory,
+        Self::HealthTrend,
         // AI
         Self::EnableAi,
         Self::Ai(AiAction::Ask),
@@ -374,6 +390,8 @@ impl Action {
             Self::ProgressReport => "report:progress",
             Self::AnalysisReport => "report:analysis",
             Self::WritingHistory => "report:history",
+            Self::RevisionPlan => "export:revision-plan",
+            Self::HealthTrend => "report:health-trend",
             // The AI slugs are the single source in `AiAction::SPECS` (#563).
             Self::Ai(a) => a.slug(),
             Self::EnableAi => "ai:enable",
@@ -471,9 +489,13 @@ impl Action {
             | Self::PrepareForKdp
             | Self::PrepareForIngramSpark
             | Self::ExportBible
+            | Self::RevisionPlan
             | Self::BrowseFonts
             | Self::SetExportStyle => "Export",
-            Self::ProgressReport | Self::AnalysisReport | Self::WritingHistory => "Reports",
+            Self::ProgressReport
+            | Self::AnalysisReport
+            | Self::WritingHistory
+            | Self::HealthTrend => "Reports",
             Self::Ai(_)
             | Self::EnableAi
             | Self::RefreshBibles
@@ -535,6 +557,8 @@ impl Action {
             Self::ProgressReport => "Progress report",
             Self::AnalysisReport => "Analysis report",
             Self::WritingHistory => "Writing history",
+            Self::RevisionPlan => "Export revision plan (chapter-ordered, ranked)",
+            Self::HealthTrend => "Export health trend (across drafts)",
             Self::Ai(AiAction::Ask) => "AI · Ask the manuscript",
             Self::Ai(AiAction::Characters) => "AI · Character bible",
             Self::Ai(AiAction::Continuity) => "AI · Timeline & continuity",

@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::app::health::{consensus, dashboard_rows};
+use crate::app::health::{consensus, dashboard_rows, revision_plan_text};
 use crate::mode::{DashboardRow, Finding, FindingKind};
 
 /// A UI finding of `kind` on `chapter` with the given summary — the shape a pass
@@ -263,5 +263,282 @@ fn arrow_keys_skip_header_rows() {
     assert_eq!(
         d.finding_at(d.selected).map(|f| f.kind),
         Some(FindingKind::Style)
+    );
+}
+
+// --- Health trend across drafts (#1052) ------------------------------------
+
+/// The trend line the health snapshot leads with — read back from the saved
+/// `export/health-<date>.md`, the `_Trend …_` line. `None` when no trend was
+/// written (the first recorded run has no prior to compare against).
+fn saved_trend_line(dir: &std::path::Path) -> Option<String> {
+    let name = format!("health-{}.md", crate::date::iso(crate::date::today()));
+    let body = fs::read_to_string(dir.join("export").join(&name)).ok()?;
+    body.lines()
+        .find(|l| l.starts_with("_Trend "))
+        .map(str::to_string)
+}
+
+#[test]
+fn the_first_recorded_run_has_nothing_to_trend_against() {
+    // A single recorded run seeds the side-file but has no prior run to compare
+    // against, so its snapshot carries no trend line.
+    let (mut app, dir) = two_chapter_app("health-trend-first");
+    app.accumulate_triage(&[finding(FindingKind::Continuity, "One", "object: locket")]);
+    app.export_health_trend();
+    assert!(
+        saved_trend_line(&dir).is_none(),
+        "the first recorded run has nothing to trend against"
+    );
+    // But the run *was* recorded: the side-file exists with today's tally.
+    let recorded = fs::read_to_string(dir.join("bible").join("health-trend.toml"))
+        .expect("the run is persisted to the side-file");
+    assert!(recorded.contains("continuity = 1"), "{recorded}");
+    drop(dir);
+}
+
+#[test]
+fn a_run_records_counts_and_the_next_run_shows_the_change() {
+    // A prior draft's run is on file (an earlier date, as it would be across
+    // drafts); today's run mutates the standing findings — a continuity finding
+    // cleared (down), a style finding added (up) — and the trend it writes reflects
+    // that delta by kind, computed from the small persisted tallies, never a
+    // manuscript re-scan.
+    let (mut app, dir) = two_chapter_app("health-trend-change");
+
+    // Seed the previous draft's recorded run: two continuity findings, an earlier
+    // date, so today's run has a genuine cross-draft baseline to compare against.
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        dir.join("bible").join("health-trend.toml"),
+        "[[runs]]\ndate = \"2000-01-01\"\n[runs.counts]\ncontinuity = 2\n",
+    )
+    .unwrap();
+
+    // Today: one continuity finding remains, and a style one has appeared.
+    app.accumulate_triage(&[
+        finding(FindingKind::Continuity, "Two", "time: sunset twice"),
+        finding(FindingKind::Style, "One", "pov: head-hop"),
+    ]);
+    app.export_health_trend();
+
+    let trend = saved_trend_line(&dir).expect("the second run writes a trend line");
+    assert!(
+        trend.contains("since 2000-01-01"),
+        "the trend names the prior run: {trend}"
+    );
+    assert!(
+        trend.contains("Continuity down 1"),
+        "the cleared continuity finding shows as a fall: {trend}"
+    );
+    assert!(
+        trend.contains("Prose & style up 1"),
+        "the new style finding shows as a rise: {trend}"
+    );
+    // Net: -1 continuity + 1 style = no net change in total open findings.
+    assert!(
+        trend.contains("no net change"),
+        "net total is flat: {trend}"
+    );
+    drop(dir);
+}
+
+#[test]
+fn opening_the_dashboard_surfaces_the_trend_since_a_prior_run() {
+    // A run recorded on a previous open, then a second open after the counts fall:
+    // the dashboard opens and its status message is the trend since the prior run,
+    // so the point-in-time view reads as a trend.
+    let (mut app, dir) = two_chapter_app("health-trend-dashboard");
+    app.accumulate_triage(&[
+        finding(FindingKind::Continuity, "One", "object: locket"),
+        finding(FindingKind::Continuity, "Two", "time: sunset twice"),
+    ]);
+    // Seed a prior run under an earlier date directly in the side-file, so the
+    // second open (today) has a genuine baseline to compare against without needing
+    // to advance the clock.
+    let trend_file = dir.join("bible").join("health-trend.toml");
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        &trend_file,
+        "[[runs]]\ndate = \"2000-01-01\"\n[runs.counts]\ncontinuity = 5\n",
+    )
+    .unwrap();
+
+    app.open_health_dashboard();
+    assert!(matches!(app.mode, Mode::Dashboard(_)), "dashboard opened");
+    let msg = app.message.as_deref().unwrap_or("");
+    assert!(
+        msg.contains("since 2000-01-01"),
+        "the trend names the prior run's date: {msg}"
+    );
+    assert!(
+        msg.contains("Continuity down 3"),
+        "5 → 2 continuity findings reads as a fall of 3: {msg}"
+    );
+    assert!(msg.contains("fewer findings"), "the net total fell: {msg}");
+    drop(dir);
+}
+
+// --- Revision-plan export (#1055) ------------------------------------------
+
+#[test]
+fn revision_plan_is_chapter_ordered_and_confidence_ranked() {
+    // Two chapters, each with findings of differing cross-pass agreement. The plan
+    // groups by chapter in first-seen order, and within a chapter ranks the
+    // higher-confidence (more passes agreeing) finding first.
+    let consensus_span = "One — a dangling thread";
+    let findings = consensus(&[
+        finding(FindingKind::Style, "One", "pov: head-hop"), // lone (confidence 1)
+        finding(FindingKind::Continuity, "One", consensus_span), // corroborated below
+        finding(FindingKind::Plot, "One", consensus_span),   // → confidence 2
+        finding(FindingKind::Setting, "Two", "the manor moved"),
+    ]);
+    let plan = revision_plan_text(&findings);
+
+    // Chapter One's section comes before Chapter Two's (first-seen order).
+    let one = plan.find("## One").expect("chapter One section");
+    let two = plan.find("## Two").expect("chapter Two section");
+    assert!(one < two, "chapters are in reading order:\n{plan}");
+
+    // Within Chapter One, the two-pass consensus finding outranks the lone one.
+    let consensus_at = plan.find(consensus_span).expect("consensus finding listed");
+    let lone_at = plan.find("pov: head-hop").expect("lone finding listed");
+    assert!(
+        consensus_at < lone_at,
+        "the higher-confidence finding is ranked first:\n{plan}"
+    );
+
+    // Confidence is shown as stars: the consensus finding carries two, the lone one.
+    assert!(
+        plan.contains("★★ [Continuity]"),
+        "the consensus finding shows two-star confidence:\n{plan}"
+    );
+    // The plan is a to-do (checkboxes) and folds in the agreement signal.
+    assert!(plan.contains("- [ ] "), "entries are checkboxes:\n{plan}");
+    assert!(
+        plan.contains("flagged by continuity + plot"),
+        "cross-pass agreement is folded in:\n{plan}"
+    );
+}
+
+#[test]
+fn empty_findings_yield_a_nothing_to_plan_document() {
+    let plan = revision_plan_text(&[]);
+    assert!(plan.contains("# Revision plan"), "titled: {plan}");
+    assert!(
+        plan.contains("Nothing to plan"),
+        "empty findings give a clean nothing-to-plan state: {plan}"
+    );
+}
+
+#[test]
+fn revision_plan_export_writes_only_reformatted_findings_no_prose() {
+    // The export writes to `export/revision-plan-<date>.md` and its content is drawn
+    // entirely from the findings' own fields — summaries, kinds, chapters — never
+    // any manuscript prose (the chapters' bodies are "first chapter" / "second
+    // chapter"; neither may leak into the plan).
+    let (mut app, dir) = two_chapter_app("revision-plan-export");
+    app.accumulate_triage(&[
+        finding(FindingKind::Continuity, "One", "object: locket"),
+        finding(FindingKind::Style, "Two", "pov: head-hop"),
+    ]);
+    app.export_revision_plan();
+
+    let name = format!(
+        "revision-plan-{}.md",
+        crate::date::iso(crate::date::today())
+    );
+    let body = fs::read_to_string(dir.join("export").join(&name))
+        .expect("the revision plan is written under export/");
+    assert!(body.contains("object: locket") && body.contains("pov: head-hop"));
+    assert!(
+        !body.contains("first chapter") && !body.contains("second chapter"),
+        "no manuscript prose is written into the plan:\n{body}"
+    );
+    drop(dir);
+}
+
+#[test]
+fn revision_plan_with_no_open_findings_exports_the_clean_state() {
+    let (mut app, dir) = two_chapter_app("revision-plan-empty");
+    app.export_revision_plan();
+    let name = format!(
+        "revision-plan-{}.md",
+        crate::date::iso(crate::date::today())
+    );
+    let body = fs::read_to_string(dir.join("export").join(&name))
+        .expect("the plan is written even when empty");
+    assert!(body.contains("Nothing to plan"), "{body}");
+    drop(dir);
+}
+
+/// Performance guard (`cargo perf`). Recording and rendering the health trend
+/// (#1052) must cost the same whether the project is two chapters or a series of
+/// thousands: it reads only the small persisted tallies and folds a fixed set of
+/// findings, never the manuscript. Opening the dashboard over a large project with
+/// a bounded findings set must cost the same at series scale as at two chapters —
+/// a regression that made the trend re-scan chapters would show as the large
+/// project growing far more expensive. Mirrors `tally_is_independent_of_project_size`.
+///
+/// The guard is *comparative*: it times opening the dashboard over a 2-chapter and
+/// a 2000-chapter project with the identical (small) findings set, and asserts the
+/// large project isn't meaningfully slower. This isolates the "no manuscript-
+/// proportional recompute" claim from the fixed per-open cost (the small side-file
+/// write's fsync), which is the same at either scale.
+#[test]
+#[ignore = "release-only perf guard; run via cargo perf"]
+fn health_trend_render_is_independent_of_project_size() {
+    use std::time::{Duration, Instant};
+
+    // A project of `n` chapters, with a fixed four-finding triage set spread across
+    // the first few chapters — the tally and trend fold over these, never the
+    // chapters — timed over repeated dashboard opens (each records + renders).
+    fn time_open(name: &str, n: usize) -> Duration {
+        let dir = crate::testutil::scratch_dir("perf", name);
+        let dir = TempProject::new(dir);
+        let mut manifest = String::from("title = \"Series\"\n\n");
+        for i in 0..n {
+            let file = format!("ch{i}.md");
+            write!(
+                manifest,
+                "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+            )
+            .unwrap();
+            fs::write(dir.join(&file), "Some prose in this chapter.\n").unwrap();
+        }
+        fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+        let project = Project::open(&dir).unwrap();
+        let buffer = Buffer::from_path(project.active_path()).unwrap();
+        let mut app = App::new(buffer, project);
+        app.accumulate_triage(&[
+            finding(FindingKind::Continuity, "Ch0", "object: locket"),
+            finding(FindingKind::Continuity, "Ch1", "time: sunset twice"),
+            finding(FindingKind::Style, "Ch2", "pov: head-hop"),
+            finding(FindingKind::Plot, "Ch3", "thread: the letter"),
+        ]);
+
+        app.open_health_dashboard(); // warm (seeds the side-file)
+        let iters = 200;
+        let t = Instant::now();
+        for _ in 0..iters {
+            app.open_health_dashboard(); // records the run + renders the trend
+        }
+        t.elapsed() / iters
+    }
+
+    let small = time_open("health-trend-small", 2);
+    let large = time_open("health-trend-large", 2000);
+    println!("health-trend open: 2 chapters = {small:?}, 2000 chapters = {large:?}");
+
+    // The large project must not cost appreciably more than the small one: the work
+    // is over the four findings and the small side-file, not the manuscript. Allow a
+    // generous multiple for scheduling / filesystem noise on the fixed per-open cost;
+    // a per-chapter re-scan would blow this by orders of magnitude.
+    let ceiling = small * 3 + Duration::from_millis(2);
+    assert!(
+        large <= ceiling,
+        "series-scale open ({large:?}) must not exceed ~small-scale ({small:?}); \
+         trend render must not scan the manuscript"
     );
 }
