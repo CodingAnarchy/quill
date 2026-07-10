@@ -110,6 +110,7 @@ mod tests {
             "vim",
             "keys",
             "smart_typography",
+            "auto_pair",
             "column_width",
             "typewriter",
             "focus_mode",

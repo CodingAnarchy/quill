@@ -135,6 +135,8 @@ pub enum SettingBool {
     Vim,
     /// Smart typography as you type (`editor.smart_typography`).
     SmartTypography,
+    /// Auto-pair quotes and brackets as you type (`editor.auto_pair`).
+    AutoPair,
     /// Typewriter scrolling (`editor.typewriter`).
     Typewriter,
     /// Focus mode (`editor.focus_mode`).
@@ -149,6 +151,7 @@ impl SettingBool {
         match self {
             Self::Vim => "editor.vim",
             Self::SmartTypography => "editor.smart_typography",
+            Self::AutoPair => "editor.auto_pair",
             Self::Typewriter => "editor.typewriter",
             Self::FocusMode => "editor.focus_mode",
             Self::ParagraphIndent => "editor.paragraph_indent",
@@ -160,6 +163,7 @@ impl SettingBool {
         match self {
             Self::Vim => "Vim mode",
             Self::SmartTypography => "Smart typography",
+            Self::AutoPair => "Auto-pair brackets",
             Self::Typewriter => "Typewriter scrolling",
             Self::FocusMode => "Focus mode",
             Self::ParagraphIndent => "Paragraph indent",

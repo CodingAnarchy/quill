@@ -82,9 +82,13 @@ impl App {
     // --- Edit dispatch (single chapter or continuous) ----------------------
 
     pub(super) fn edit_insert_char(&mut self, c: char) {
-        // Smart typography (#296): substitute curly quotes / em-dash / ellipsis
-        // for the punctuation just typed, keyed off the text before the cursor.
-        // Only the prose-edit path runs this; prompts and titles insert verbatim.
+        // Resolve the character actually going into the buffer, applying smart
+        // typography (#296) first so auto-pair composes on the oriented glyph.
+        // Smart typography substitutes curly quotes / em-dash / ellipsis for the
+        // punctuation just typed, keyed off the text before the cursor. Only the
+        // prose-edit path runs this; prompts and titles insert verbatim.
+        let mut delete = 0usize;
+        let mut effective = c;
         if self.smart_typography {
             // The substitution only inspects the last ≤2 chars before the cursor.
             // Smart typography stays on inside fenced blocks too — they hold
@@ -94,15 +98,51 @@ impl App {
                 Some(m) => m.buffer().text_before_cursor(2),
                 None => self.buffer.text_before_cursor(2),
             };
-            if let Some((delete, replacement)) = typography::substitute(c, &before) {
-                for _ in 0..delete {
-                    self.edit_backspace();
-                }
-                self.edit_insert_raw(replacement);
+            if let Some((d, replacement)) = typography::substitute(c, &before) {
+                delete = d;
+                effective = replacement;
+            }
+        }
+
+        // Auto-pair (#1007): typing a closer that's already at the cursor skips
+        // past it instead of duplicating. A substitution that consumes preceding
+        // characters (`--` → em-dash, `...` → ellipsis) is never a closer, so this
+        // only fires for the single-char quote/bracket glyphs. O(1): it inspects
+        // only the one character immediately at the cursor, never scanning.
+        if self.auto_pair && delete == 0 && is_auto_pair_closer(effective) {
+            let at_cursor = match &self.manuscript {
+                Some(m) => m.buffer().char_after_cursor(),
+                None => self.buffer.char_after_cursor(),
+            };
+            if at_cursor == Some(effective) {
+                self.edit_move(Buffer::move_right);
                 return;
             }
         }
-        self.edit_insert_raw(c);
+
+        // Apply the (possibly substituted) insertion.
+        for _ in 0..delete {
+            self.edit_backspace();
+        }
+        self.edit_insert_raw(effective);
+
+        // Auto-pair (#1007): typing an opener drops in its matching closer and puts
+        // the cursor back between the pair. O(1) — insert one char and move left.
+        // The closer goes straight onto the buffer (not through `edit_insert_raw`):
+        // the opener already recorded the insertion, and the cursor ends up *before*
+        // the closer, so recording the closer's end byte would leave a stale
+        // edit-ring spot past the cursor that a later insert would invalidate.
+        if self.auto_pair && delete == 0 {
+            if let Some(closer) = auto_pair_closer(effective) {
+                if let Some(m) = &mut self.manuscript {
+                    m.insert_char(closer);
+                    m.buffer_mut().move_left();
+                } else {
+                    self.buffer.insert_char(closer);
+                    self.buffer.move_left();
+                }
+            }
+        }
     }
 
     /// Insert `c` verbatim into the active buffer (single or continuous), with no
@@ -512,6 +552,34 @@ impl App {
         // save still reopens where the author was working (#588).
         self.persist_position();
     }
+}
+
+/// The opening curly double quote `“` — smart typography's oriented open-quote
+/// glyph (#296), an auto-pair opener whose closer is the closing curly `”`.
+const LDQUO: char = '\u{201C}';
+/// The closing curly double quote `”` — smart typography's oriented close-quote
+/// glyph, and the closer auto-pair inserts (and skips over) for an open curly.
+const RDQUO: char = '\u{201D}';
+
+/// The closer auto-pair (#1007) inserts for the opener `c`, or `None` when `c`
+/// isn't an opener. Covers the straight quote and the two bracket pairs, plus the
+/// oriented open curly quote (`“`) so it composes with smart typography (#296): a
+/// `"` becomes `“…”` with the cursor between. O(1) — a small `match`, no scan.
+const fn auto_pair_closer(c: char) -> Option<char> {
+    match c {
+        '(' => Some(')'),
+        '[' => Some(']'),
+        '"' => Some('"'),
+        LDQUO => Some(RDQUO),
+        _ => None,
+    }
+}
+
+/// Whether `c` is a closer auto-pair (#1007) skips over when it's already at the
+/// cursor — the mirror of [`auto_pair_closer`]'s targets, including the oriented
+/// close curly quote (`”`) so over-typing a smart-typography closer skips too.
+const fn is_auto_pair_closer(c: char) -> bool {
+    matches!(c, ')' | ']' | '"' | RDQUO)
 }
 
 /// Join two lines with a single normalized separator (#1005): the current line's
