@@ -255,6 +255,51 @@ project; and a transient read error is told apart from an empty file, so a hiccu
 never zero-word-caches a chapter or wrongly offers recovery.
 
 
+VERSION CONTROL
+
+Ctrl-V opens the version-control menu — real Git history, presented as a writing
+tool. On a project that isn't under version control yet it offers only
+"Initialize"; choose it and Quill starts a repository (with a sensible .gitignore
+that leaves editor scratch out). From then on the menu offers Commit, Drafts,
+Milestone, History, the diffs and restores, and Set remote — plus Push, Pull, and
+Sync once a remote is set.
+
+"Commit" snapshots the whole project. Quill saves the active chapter, shows you a
+pre-commit review — the changed files and a diff of what the commit captures — then
+asks for a message, so you never commit blind.
+
+To write the same book on more than one machine, point the project at a remote
+(Ctrl-V → "Set remote", then paste the URL — Quill uses your existing Git
+credentials). "Sync" is then the key action: it fetches the remote and merges its
+chapter edits with yours, chapter by chapter. Chapters only one side changed fold
+in cleanly; chapters both sides changed differently come back as conflicts to
+resolve. Sync commits nothing over unsaved work — it saves first and asks you to
+commit a dirty tree before running. (Push and Pull are the one-way halves if you
+want them; Sync is the two-way flow.)
+
+When a sync — or a draft merge — hits a conflicting chapter, Quill opens the
+resolution view instead of a command line, one chapter at a time: press l to keep
+your version, r to take theirs, or m to blend them by hand in a scratch buffer
+seeded with both (Ctrl-S accepts the merge, Esc backs out). Esc abandons the whole
+resolution — nothing is committed and both versions stay safe. A safety milestone
+is tagged before you start, so no version can be lost.
+
+"Drafts" (Ctrl-V → Drafts) keeps parallel named versions of the manuscript — an
+alt ending, a POV experiment. The overlay lists your drafts with the current one
+marked: press n to create one from the current state (it prompts for a name),
+Enter to switch to the selected draft (the open chapter reloads), or m to merge
+the selected draft into the current one. Switching and merging save first and
+refuse a dirty tree, so a draft never overwrites unsaved work; a merge that
+overlaps routes through the same conflict resolution above.
+
+"History" (Ctrl-V → History) browses the timeline: milestones first, then commits,
+each row drawing a small branch/merge graph so drafts and merges read at a glance.
+From a selected row, d diffs the current chapter against it and r restores the
+chapter to it; D and R do the same for the whole project; n edits a milestone's
+note; / filters the list. (Milestones themselves are made from Ctrl-V → Milestone,
+or the "Milestones" action in the Ctrl-K menu, as above.)
+
+
 ARCHIVE & BACKUP
 
 To keep an offline backup — no git, no remote, no account — run "Archive
@@ -277,7 +322,9 @@ empty folder — so a stray path can never clobber work in progress.
 If the project is under version control and points at a remote (Ctrl-V →
 "Set remote"), Quill can keep that remote as an always-current off-site backup so
 you never have to remember to push. It's opt-in per project: add a [backup]
-section with enabled = true. By default it then pushes after each save; set
+section with enabled = true. (This is just the automatic-push half of the remote;
+the remote is two-way — sync its edits back down, keep drafts, resolve conflicts —
+covered under VERSION CONTROL above.) By default it then pushes after each save; set
 interval_mins = N to also push at least every N minutes during a long session
 (and on_save = false to rely on the timer alone). The push runs in the background
 and never blocks editing; when it can't reach the remote — offline, a login
@@ -560,6 +607,7 @@ KEY REFERENCE
   Ctrl-G          browse chapters
   Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading
   Ctrl-B          browse / switch projects
+  Ctrl-V          version control (commit, sync, drafts, milestones, history)
   Ctrl-W          window panes (split, focus, resize, close)
   Ctrl-Space      fold / unfold the section under the cursor
   Ctrl-\          composition mode: distraction-free (Esc restores)
