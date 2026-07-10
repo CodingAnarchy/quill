@@ -53,11 +53,16 @@ impl App {
         self.dot_settle();
     }
     /// Whether a change command is mid-composition: an operator or a multi-key
-    /// command is awaiting its next key, or we're in Insert mode (an `i`/`c…`
-    /// session runs until `Esc`). Visual mode is a selection being built, not a
-    /// committed change, so it doesn't count as composing here.
+    /// command is awaiting its next key, we're in Insert mode (an `i`/`c…` session
+    /// runs until `Esc`), or we're in Visual mode building a selection toward an
+    /// operator (#1034). A visual command (`vlld`, `V~`, `viwc…<Esc>`) composes
+    /// from the `v`/`V` entry — itself recorded, since it starts at rest in Normal
+    /// — through the terminating operator that drops back to Normal (or Insert, for
+    /// `c`). An `Esc` that cancels the selection edits nothing, so `dot_settle`
+    /// discards the recording and the previous `.` target survives, exactly as a
+    /// bare Normal-mode motion does.
     fn dot_composing(&self) -> bool {
-        matches!(self.mode, Mode::Insert)
+        matches!(self.mode, Mode::Insert | Mode::Visual { .. })
             || self.vim_state.op.is_some()
             || self.case_op.is_some() // a `g~`/`gu`/`gU` awaiting its motion (#1006)
             || self.vim_state.pending != VimPending::None

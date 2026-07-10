@@ -104,6 +104,118 @@ fn a_pure_motion_is_not_repeated() {
 }
 
 #[test]
+fn dot_repeats_a_visual_delete() {
+    // #1034: a change made in Visual mode (`v{motion}d`) is recorded so `.`
+    // repeats it, re-entering Visual, re-selecting an equivalent span, deleting.
+    let (mut app, _dir) = dot_app("dot-visual-d", "abcdefgh\n");
+    // `vll` selects "abc" (inclusive of the landing char); `d` deletes it.
+    type_str(&mut app, "vlld");
+    assert_eq!(app.buffer.text(), "defgh\n", "visual delete removed abc");
+    assert!(matches!(app.mode, Mode::Normal), "delete left Visual");
+    // `.` repeats the whole visual delete at the cursor: selects "def", deletes.
+    dot(&mut app);
+    assert_eq!(app.buffer.text(), "gh\n", ". repeated the visual delete");
+    assert!(matches!(app.mode, Mode::Normal), ". lands back in Normal");
+}
+
+#[test]
+fn dot_repeats_a_visual_case_toggle() {
+    // #1034: `~` over a Visual selection case-maps the span; `.` repeats it at the
+    // cursor. Visual case leaves the cursor at the selection's start (Vim's rule),
+    // so `.` re-selects a same-width span from wherever the cursor then sits — here
+    // moved onto "def" first.
+    let (mut app, _dir) = dot_app("dot-visual-tilde", "abcdefgh\n");
+    type_str(&mut app, "vll~"); // toggle-case "abc" -> "ABC"
+    assert_eq!(app.buffer.text(), "ABCdefgh\n", "visual ~ upcased abc");
+    assert!(matches!(app.mode, Mode::Normal), "~ left Visual");
+    app.buffer.cursor = app.buffer.cursor_at_byte(3); // onto "def"
+    dot(&mut app); // repeat the 3-char toggle over "def"
+    assert_eq!(
+        app.buffer.text(),
+        "ABCDEFgh\n",
+        ". repeated the visual toggle"
+    );
+}
+
+#[test]
+fn dot_repeats_a_visual_lowercase() {
+    // #1034: `gu` (via `u`) over a Visual selection lowercases it; `.` repeats.
+    let (mut app, _dir) = dot_app("dot-visual-gu", "ABCDEFGH\n");
+    type_str(&mut app, "vllu"); // lowercase "ABC" -> "abc"
+    assert_eq!(app.buffer.text(), "abcDEFGH\n", "visual u lowercased ABC");
+    app.buffer.cursor = app.buffer.cursor_at_byte(3); // onto "DEF"
+    dot(&mut app); // repeat the 3-char lowercase over "DEF"
+    assert_eq!(
+        app.buffer.text(),
+        "abcdefGH\n",
+        ". repeated the visual lowercase"
+    );
+}
+
+#[test]
+fn repeated_visual_change_is_one_undo_step() {
+    // #1034 acceptance: the repeated visual change is a single undo step.
+    let (mut app, _dir) = dot_app("dot-visual-undo", "abcdefgh\n");
+    type_str(&mut app, "vlld"); // delete "abc" -> "defgh\n"
+    app.buffer.seal_undo_group(); // as an idle tick would, closing the original
+    dot(&mut app); // repeat -> "gh\n"
+    assert_eq!(app.buffer.text(), "gh\n", "repeat applied");
+    app.on_key(key(KeyCode::Char('u')));
+    assert_eq!(
+        app.buffer.text(),
+        "defgh\n",
+        "a single undo reverses the whole repeated visual delete"
+    );
+}
+
+#[test]
+fn a_normal_change_after_a_visual_one_still_repeats() {
+    // #1034 acceptance: no cross-contamination — a Normal-mode change made after a
+    // visual one becomes the new `.` target, and repeats correctly.
+    let (mut app, _dir) = dot_app("dot-visual-then-normal", "one two three four\n");
+    type_str(&mut app, "vld"); // visual-delete "on" -> "e two three four\n"
+    assert_eq!(app.buffer.text(), "e two three four\n");
+    // A Normal-mode `dw` now: it must become the last change, not the visual one.
+    type_str(&mut app, "dw"); // delete "e " -> "two three four\n"
+    assert_eq!(app.buffer.text(), "two three four\n");
+    // `.` repeats the *Normal* `dw` (deletes "two "), not the earlier visual delete.
+    dot(&mut app);
+    assert_eq!(
+        app.buffer.text(),
+        "three four\n",
+        ". repeated the later Normal change, not the visual one"
+    );
+}
+
+#[test]
+fn a_cancelled_visual_selection_does_not_become_the_repeat() {
+    // #1034: entering Visual and pressing Esc edits nothing, so it must not clobber
+    // the previous `.` target (mirrors a bare Normal-mode motion).
+    let (mut app, _dir) = dot_app("dot-visual-esc", "one two three\n");
+    type_str(&mut app, "dw"); // real prior change -> "two three\n"
+    assert_eq!(app.buffer.text(), "two three\n");
+    // Enter Visual, extend, then cancel with Esc — a pure selection, no edit.
+    type_str(&mut app, "vll");
+    app.on_key(key(KeyCode::Esc));
+    assert!(matches!(app.mode, Mode::Normal), "Esc cancelled Visual");
+    assert_eq!(
+        app.buffer.text(),
+        "two three\n",
+        "no edit from the selection"
+    );
+    // Put the cursor back at the start so the check isolates *which* change `.`
+    // repeats (the cancelled selection left the cursor at its end).
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    // `.` still repeats the `dw` delete, not the cancelled selection.
+    dot(&mut app);
+    assert_eq!(
+        app.buffer.text(),
+        "three\n",
+        ". repeated the delete, not the cancelled visual selection"
+    );
+}
+
+#[test]
 fn dot_with_no_prior_change_is_a_no_op() {
     let (mut app, _dir) = dot_app("dot-none", "unchanged\n");
     let before = app.buffer.text();
