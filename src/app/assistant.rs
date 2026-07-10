@@ -769,6 +769,12 @@ impl App {
             Action::Ai(AiAction::Brainstorm) => self.brainstorm(text),
             Action::Ai(AiAction::DraftCharacters) => self.draft_characters(text),
             Action::Ai(AiAction::DraftSetting) => self.draft_setting(text),
+            // Author-invoked accuracy (#973): the model supplies the concern; capture
+            // it and run the read-only findings pass (no prose produced).
+            Action::Ai(AiAction::Accuracy) => {
+                self.accuracy_concern = Some(text.to_string());
+                self.analyze_accuracy();
+            }
             _ => return Step::Sync(format!("{} can't take an argument here.", action.label())),
         }
         if self.ai_task.is_busy() {

@@ -68,6 +68,11 @@ pub enum AiAction {
     NameGen,
     /// Editorial read — flag structural / continuity / line issues, no fixes (#293).
     Editorial,
+    /// Cultural & historical accuracy — author-invoked, per a named concern (#973):
+    /// flag passages that read as factually / period / culturally INACCURATE for the
+    /// concern the author names (e.g. "1850s London"). Findings only; author-invoked;
+    /// accuracy, NOT sensitivity / representation review.
+    Accuracy,
 }
 
 /// What a network pass costs (#82/#372) — the *data* side of the cost estimate,
@@ -329,6 +334,13 @@ impl AiAction {
             weight: ModelWeight::Heavy,
             bible_key: None,
         },
+        AiActionSpec {
+            action: Self::Accuracy,
+            slug: "ai:accuracy",
+            cost: AiCost::Manuscript,
+            weight: ModelWeight::Heavy,
+            bible_key: None,
+        },
     ];
 
     /// This action's descriptor — its single source of slug / cost / bible key.
@@ -395,6 +407,7 @@ impl AiAction {
             Self::Naming => FindingKind::Naming,
             Self::Style => FindingKind::Style,
             Self::Editorial => FindingKind::Editorial,
+            Self::Accuracy => FindingKind::Accuracy,
             Self::Voice => FindingKind::Voice,
             Self::Echo => FindingKind::Echo,
             _ => FindingKind::Other,

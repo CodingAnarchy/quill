@@ -35,6 +35,9 @@ pub enum FindingKind {
     Naming,
     Style,
     Editorial,
+    /// Cultural & historical accuracy findings (#973) — inaccuracy flags for an
+    /// author-named concern. Accuracy, not sensitivity / representation.
+    Accuracy,
     Voice,
     /// Echo / near-duplicate passage pairs (#920) — the semantic-repetition scan.
     Echo,
@@ -56,6 +59,7 @@ impl FindingKind {
             Self::Naming => "naming",
             Self::Style => "style",
             Self::Editorial => "editorial",
+            Self::Accuracy => "accuracy",
             Self::Voice => "voice",
             Self::Echo => "echo",
             Self::Other => "other",
@@ -73,6 +77,7 @@ impl FindingKind {
             Self::Naming => "Names & terms",
             Self::Style => "Prose & style",
             Self::Editorial => "Editorial",
+            Self::Accuracy => "Cultural & historical accuracy",
             Self::Voice => "Character voice",
             Self::Echo => "Echoes & near-duplicates",
             Self::Other => "Other",
@@ -91,6 +96,7 @@ impl FindingKind {
             Self::Naming,
             Self::Style,
             Self::Editorial,
+            Self::Accuracy,
             Self::Voice,
             Self::Echo,
         ]

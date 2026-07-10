@@ -44,6 +44,7 @@ impl Drop for TempProject {
 }
 
 mod actions;
+mod ai_accuracy;
 mod ai_characters;
 mod ai_continuity;
 mod ai_cost_routing;

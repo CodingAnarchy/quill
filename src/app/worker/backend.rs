@@ -475,6 +475,7 @@ impl App {
             Outcome::Thesaurus(r) => self.apply_thesaurus(r),
             Outcome::NameGen(r) => self.apply_namegen(r),
             Outcome::Editorial(r) => self.apply_editorial(r),
+            Outcome::Accuracy(r) => self.apply_accuracy(r),
             Outcome::SemanticFind(r) => self.apply_semantic_find(r),
             Outcome::Echo(r) => self.apply_echo(r),
             Outcome::Recheck(r) => self.apply_recheck(r),
