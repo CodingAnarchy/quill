@@ -573,6 +573,11 @@ pub struct App {
     /// An active writing sprint (#299): a timed session with a live word count.
     /// Session state, never persisted; `None` when no sprint is running.
     pub(crate) sprint: Option<sprint::Sprint>,
+    /// An optional per-session word target (#1011): a goal to write toward this
+    /// session, with a live indicator that fills as words are added. Session
+    /// state, never persisted; `None` until the author sets one. Independent of a
+    /// timed sprint — the author can run either, both, or neither.
+    pub(crate) session_target: Option<sprint::SessionTarget>,
     /// The "Ask the manuscript" history (#609), newest last: each ask, its
     /// grounded answer, and the chapters it cited. Lets the author re-open a past
     /// lookup (and re-jump its citations) without re-asking. Loaded from the
@@ -765,6 +770,7 @@ impl App {
             pending_archive_source: None,
             pending_restore_backup: None,
             sprint: None,
+            session_target: None,
             qa_log,
             qa_store,
             pending_qa_question: None,

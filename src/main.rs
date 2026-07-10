@@ -446,6 +446,7 @@ fn run(tui: &mut Tui, app: &mut App) -> io::Result<()> {
         // so its answer appears within the poll window even with no keypress.
         app.poll_ai();
         app.tick_sprint(); // end a writing sprint when its time is up (#299)
+        app.tick_session_target(); // signal reaching the session word target (#1011)
         app.tick_autosave(); // idle-timer autosave, when enabled (#409)
         app.tick_backup(); // automatic off-site backup on its cadence, when enabled (#887)
         app.tick_local_backup(); // scheduled local archive on its cadence, when enabled (#888)

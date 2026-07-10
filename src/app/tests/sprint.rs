@@ -122,3 +122,127 @@ fn a_running_sprint_does_not_finish_early() {
         "a fresh sprint keeps running across ticks"
     );
 }
+
+// --- Per-session word target (#1011) ---
+
+#[test]
+fn the_target_action_opens_the_word_prompt() {
+    let (mut app, _dir) = two_chapter_app("target-action");
+    app.run_action(Action::SetSessionTarget, false);
+    assert!(matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::SessionTarget)));
+}
+
+#[test]
+fn choosing_a_count_sets_a_running_target() {
+    let (mut app, _dir) = two_chapter_app("target-begin");
+    app.begin_session_target("500");
+    assert!(app.session_target.is_some(), "a target is now set");
+    assert!(app
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("Session target set"));
+}
+
+#[test]
+fn a_non_number_target_is_rejected() {
+    let (mut app, _dir) = two_chapter_app("target-bad");
+    app.begin_session_target("lots");
+    assert!(app.session_target.is_none(), "no target for bad input");
+    assert!(app.message.as_deref().unwrap_or("").contains("whole words"));
+}
+
+#[test]
+fn a_blank_target_clears_any_running_one() {
+    let (mut app, _dir) = two_chapter_app("target-clear");
+    app.begin_session_target("500");
+    assert!(app.session_target.is_some());
+    app.begin_session_target("   ");
+    assert!(app.session_target.is_none(), "blank clears the target");
+    assert!(app.message.as_deref().unwrap_or("").contains("cleared"));
+}
+
+#[test]
+fn the_indicator_fills_from_cached_counts_as_words_are_written() {
+    let (mut app, _dir) = two_chapter_app("target-fills");
+    app.begin_session_target("500");
+    let before = app
+        .session_target
+        .as_ref()
+        .unwrap()
+        .written(app.project_word_count());
+    assert_eq!(before, 0, "the indicator starts empty");
+    type_str(&mut app, "three more words here now");
+    let after = app
+        .session_target
+        .as_ref()
+        .unwrap()
+        .written(app.project_word_count());
+    assert!(after > before, "the indicator fills as words are added");
+}
+
+#[test]
+fn removing_words_does_not_fill_the_indicator_backwards() {
+    let (mut app, _dir) = two_chapter_app("target-cut");
+    type_str(&mut app, "some words to cut back down");
+    app.begin_session_target("500"); // baseline after the writing
+    let baseline = app.project_word_count();
+    // Cut back below the baseline: progress floors at zero, not negative.
+    for _ in 0..30 {
+        app.on_key(key(KeyCode::Backspace));
+    }
+    assert!(app.project_word_count() < baseline, "words were removed");
+    assert_eq!(
+        app.session_target
+            .as_ref()
+            .unwrap()
+            .written(app.project_word_count()),
+        0,
+        "a cut below the baseline shows no progress"
+    );
+}
+
+#[test]
+fn reaching_the_target_is_signaled_once_and_non_disruptively() {
+    let (mut app, _dir) = two_chapter_app("target-reached");
+    app.begin_session_target("3"); // a tiny target, easy to cross
+    app.message = None;
+    type_str(&mut app, "one two three four");
+    app.tick_session_target();
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Session target reached"),
+        "reaching the target posts a status message"
+    );
+    // Non-disruptive: the target stays set (the filled indicator remains) and a
+    // second tick doesn't re-announce it.
+    assert!(app.session_target.is_some(), "the target is not cleared");
+    app.message = None;
+    app.tick_session_target();
+    assert!(
+        app.message.is_none(),
+        "the reached target is announced only once"
+    );
+}
+
+#[test]
+fn live_chapter_progress_reflects_the_cached_goal_and_live_count() {
+    let (mut app, _dir) = two_chapter_app("chapter-goal-live");
+    // The active chapter carries a stored front-matter goal (cached on the
+    // manifest at open); progress reads that plus the live buffer count — no file
+    // read on the render path.
+    let active = app.project.active_index();
+    app.project.manifest.chapters[active].goal = Some(6);
+    let goal = app.project.chapter_goal(active).unwrap();
+    let before = app.chapter_word_count(active);
+    assert!(before < goal, "starts short of the goal");
+    type_str(&mut app, "several more words toward the goal now");
+    let after = app.chapter_word_count(active);
+    assert!(
+        after > before,
+        "the live chapter count rises as the author types: {before} → {after}"
+    );
+    assert!(after >= goal, "and crosses the stored goal");
+}

@@ -303,6 +303,7 @@ impl App {
             Action::BrowseBackups => self.open_backup_browser(),
             Action::StartSprint => self.start_sprint(),
             Action::StopSprint => self.stop_sprint(),
+            Action::SetSessionTarget => self.set_session_target(),
             Action::SwitchBook => self.open_book_switcher(),
             Action::ManageBooks => self.open_manage_books(),
             Action::SeriesTree => self.open_tree(),
