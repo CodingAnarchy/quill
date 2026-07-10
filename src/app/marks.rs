@@ -199,6 +199,10 @@ impl App {
         if !self.records_edits() {
             return;
         }
+        // The edit just shifted the byte offsets the revision-pass highlight
+        // caches address; drop them so no stale span renders until the next idle
+        // recompute (#1035). O(1): truncates two small vectors, no rope work.
+        self.invalidate_revision_highlights();
         let pos = self.current_position();
         let line = self.edit_buffer().cursor.line;
         // Whether the newest spot sits on the same line as this edit — only

@@ -267,3 +267,152 @@ fn the_picker_lists_categories_and_selecting_one_starts_the_sweep() {
     assert_eq!(app.style_flag_category, Some(FlagCategory::Adverbs));
     assert!(!app.style_flags.is_empty());
 }
+
+#[test]
+fn editing_invalidates_the_flag_cache_until_the_next_idle_tick() {
+    // #1035: the flag cache holds byte spans computed on the last idle tick. An
+    // edit shifts every offset after the caret, so between the keystroke and the
+    // next idle recompute a cached span points at the wrong characters. The edit
+    // path drops the cache so no stale span renders during an active typing
+    // burst; the idle recompute restores it at the correct new offsets.
+    let (mut app, _dir) = adverb_app("flag-edit-invalidates");
+    app.mode = Mode::Insert;
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    app.start_style_flag_sweep(FlagCategory::Adverbs);
+    let before = app.style_flags.clone();
+    assert_eq!(before.len(), 2, "chapter one's two adverbs are cached");
+
+    // Type one character at the start of the line. Every hit now sits one byte
+    // later than the cached span says — so the cache must not survive the edit.
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    type_str(&mut app, "X");
+    assert!(
+        app.style_flags.is_empty(),
+        "the edit drops the stale cache so no mark renders on a shifted span: {:?}",
+        app.style_flags
+    );
+
+    // The idle recompute brings the marks back, now addressing the post-edit
+    // offsets — each still lands on a real "-ly" adverb, shifted by the insert.
+    app.on_idle();
+    let after = app.style_flags.clone();
+    assert_eq!(after.len(), 2, "the idle pass recomputes both hits");
+    let text = app.buffer.text();
+    assert!(
+        after
+            .iter()
+            .all(|&(s, e)| e <= text.len() && text[s..e].ends_with("ly")),
+        "every recomputed span marks a live adverb at its new offset: {after:?} over {text:?}"
+    );
+    // The recompute shifted the spans forward by the inserted byte — proof the
+    // pre-edit cache would have marked the wrong characters had it survived.
+    assert_eq!(
+        after[0].0,
+        before[0].0 + 1,
+        "the first hit moved one byte past the insert"
+    );
+}
+
+#[test]
+fn toggling_off_still_clears_after_an_edit_invalidation() {
+    // The edit invalidation and the explicit "(off)" clear must compose: an edit
+    // empties the cache, and turning the sweep off then leaves it off (no active
+    // category, nothing to recompute on the next idle tick).
+    let (mut app, _dir) = adverb_app("flag-edit-then-off");
+    app.mode = Mode::Insert;
+    app.start_style_flag_sweep(FlagCategory::Adverbs);
+    assert!(!app.style_flags.is_empty());
+
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    type_str(&mut app, "X");
+    assert!(app.style_flags.is_empty(), "the edit invalidated the cache");
+
+    app.clear_style_flags();
+    assert!(app.style_flag_category.is_none(), "sweep is off");
+    // An idle tick after turning the sweep off must not resurrect the marks.
+    app.on_idle();
+    assert!(
+        app.style_flags.is_empty(),
+        "the sweep is off, so idle recomputes nothing: {:?}",
+        app.style_flags
+    );
+}
+
+#[test]
+fn edit_invalidation_does_no_document_proportional_work() {
+    // #1035: the invalidation must stay O(1) on the keystroke path — it truncates
+    // two small window-scoped vectors and does no rope or document-sized work.
+    // A pre-populated cache and an empty one must invalidate in the same trivial
+    // time regardless of buffer size, so this can never regress into a per-
+    // keystroke document scan. (The heavy recompute stays on the idle tick, timed
+    // by `flag_pass_is_fast_at_window_size` / `proximity_pass_is_fast_at_window_size`.)
+    let (mut app, _dir) = adverb_app("flag-invalidate-o1");
+    // Fill both caches with a spread of spans, then invalidate directly (the same
+    // call the edit path makes) — it clears both without touching the buffer.
+    app.style_flag_category = Some(FlagCategory::Adverbs);
+    app.style_flags = (0..500).map(|i| (i * 3, i * 3 + 2)).collect();
+    app.proximity_repeats_on = true;
+    app.proximity_repeats = (0..500).map(|i| (i * 3, i * 3 + 2)).collect();
+    let before = app.buffer.text();
+
+    app.invalidate_revision_highlights();
+    assert!(app.style_flags.is_empty(), "style cache dropped");
+    assert!(app.proximity_repeats.is_empty(), "proximity cache dropped");
+    // Invalidation only truncates the caches — it never rewrites the prose.
+    assert_eq!(
+        app.buffer.text(),
+        before,
+        "invalidation left the buffer alone"
+    );
+
+    // A second call with the caches already empty is a no-op (the early-out keeps
+    // it free in the common mid-burst case).
+    app.invalidate_revision_highlights();
+    assert!(app.style_flags.is_empty() && app.proximity_repeats.is_empty());
+}
+
+#[test]
+fn editing_invalidates_the_proximity_cache_until_the_next_idle_tick() {
+    // #1035, the proximity-repeat (#1002) side of the same fix: a near-echo's
+    // dim-mark spans are cached on idle; an edit shifts their offsets, so the
+    // edit path drops them and the idle recompute restores them in place.
+    let dir = app_scratch_dir("proximity-edit-invalidates");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    // A content word echoed within the window — the near repeat #1002 marks.
+    fs::write(dir.join("one.md"), "She turned, then he turned.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _dir = TempProject::new(dir);
+    app.mode = Mode::Insert;
+
+    app.toggle_proximity_repeats();
+    assert!(
+        !app.proximity_repeats.is_empty(),
+        "the close repeat is cached"
+    );
+
+    // Insert at the start: every cached span is now one byte stale.
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    type_str(&mut app, "X");
+    assert!(
+        app.proximity_repeats.is_empty(),
+        "the edit drops the stale proximity cache: {:?}",
+        app.proximity_repeats
+    );
+
+    // Idle recompute restores the marks at the shifted offsets (still on).
+    app.on_idle();
+    assert!(
+        !app.proximity_repeats.is_empty(),
+        "the idle pass recomputes the near repeat at its new offset"
+    );
+    let text = app.buffer.text();
+    assert!(
+        app.proximity_repeats.iter().all(|&(_, e)| e <= text.len()),
+        "every recomputed span indexes live prose: {:?}",
+        app.proximity_repeats
+    );
+}
