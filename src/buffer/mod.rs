@@ -82,6 +82,12 @@ pub struct Buffer {
     /// rope without an edit delta, so annotations are restored, not re-mapped.
     /// Read-and-cleared via [`take_checkpointed`](Buffer::take_checkpointed).
     checkpointed: bool,
+    /// Monotonic count of text-mutating edits (#1004): bumped once per rope
+    /// insert / remove. Not persisted or reset — callers compare a saved value
+    /// against [`edit_seq`](Buffer::edit_seq) to tell whether a command actually
+    /// changed the document (a pure motion leaves it unchanged), which is how
+    /// Vim's `.` (repeat) decides what to record as the last change.
+    edits: u64,
 }
 
 impl Buffer {
@@ -114,7 +120,16 @@ impl Buffer {
             word_count_cache: Cell::new(None),
             anchor_edits: Vec::new(),
             checkpointed: false,
+            edits: 0,
         }
+    }
+
+    /// A monotonic count of text-mutating edits (#1004): each rope insert /
+    /// remove bumps it by one, so a difference between two reads means the
+    /// document changed in between. Never reset — compare deltas, not the
+    /// absolute value. Vim's `.` uses this to record only commands that edited.
+    pub const fn edit_seq(&self) -> u64 {
+        self.edits
     }
 
     /// Load a file from disk, or start an empty buffer pointed at `path` if the
@@ -306,6 +321,7 @@ impl Buffer {
     /// the reparse can be incremental. Does not touch the cursor.
     fn edit_insert(&mut self, char_idx: usize, text: &str) {
         self.checkpoint();
+        self.edits = self.edits.wrapping_add(1);
         let start_byte = self.rope.char_to_byte(char_idx);
         let start_position = point_at_byte(&self.rope, start_byte);
 
@@ -342,6 +358,7 @@ impl Buffer {
     /// Does not touch the cursor.
     fn edit_remove(&mut self, start: usize, end: usize) {
         self.checkpoint();
+        self.edits = self.edits.wrapping_add(1);
         let start_byte = self.rope.char_to_byte(start);
         let old_end_byte = self.rope.char_to_byte(end);
         let start_position = point_at_byte(&self.rope, start_byte);

@@ -8,6 +8,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use crossterm::event::KeyEvent;
+
 use crate::buffer::FindKind;
 
 /// Transient Vim Normal-mode state (#202): a pending numeric count, a multi-key
@@ -51,6 +53,57 @@ pub struct VimState {
     /// `''` pops it to return to where a jump started. Bounded (older entries drop)
     /// so it can't grow without limit on the nav path.
     pub(crate) jumplist: VecDeque<JumpPos>,
+    /// Dot-repeat state (#1004): the keys of the change command currently being
+    /// composed, and the completed last change `.` replays. The foundation the
+    /// later mechanics tickets (#1005 join/reflow, #1006 transpose/case) reuse —
+    /// any command that edits is recorded here automatically, with no per-command
+    /// bookkeeping, because recording keys off whether the buffer changed.
+    pub(crate) dot: DotRepeat,
+}
+
+/// Vim `.` (repeat) state (#1004). The design records the raw key sequence of a
+/// change command and replays it, the way Vim itself does — so *every* change,
+/// including operators, text objects, insert-then-escape, and the change
+/// commands later tickets add, becomes repeatable without listing them here.
+///
+/// A command is "a change" if it mutated the buffer (checked via the buffer's
+/// edit counter); a pure motion or a mode switch that edited nothing never
+/// overwrites [`last`](DotRepeat::last), so `.` keeps repeating the previous real
+/// edit — exactly Vim's rule.
+#[derive(Default)]
+pub struct DotRepeat {
+    /// Keys of the change command being composed, accumulated across the
+    /// keystrokes that make it up (an operator and its motion, or the whole
+    /// Insert session from `i`/`a`/`c…` through `Esc`). Committed to `last` when
+    /// the command completes having changed the buffer; discarded otherwise.
+    pub(crate) pending: Vec<KeyEvent>,
+    /// True while a change command is mid-flight and its keys should be recorded:
+    /// set when a potentially-changing Normal-mode key starts, cleared when the
+    /// command resolves. Keeps stray keys (a bare motion, a `.` replay itself) out
+    /// of the pending buffer.
+    pub(crate) recording: bool,
+    /// The buffer's edit counter when the current recording began, so completing
+    /// the command can tell whether it actually edited (commit) or was a pure
+    /// motion / cancelled operator (discard). Meaningful only while `recording`.
+    pub(crate) start_seq: u64,
+    /// True while `.` is replaying, so the replayed keystrokes aren't themselves
+    /// re-recorded (which would rewrite `last` with an identical copy — harmless,
+    /// but the guard keeps the replay side-effect-free and the intent clear).
+    pub(crate) replaying: bool,
+    /// The last completed change, replayed by `.`. `None` until the first edit.
+    pub(crate) last: Option<LastChange>,
+}
+
+/// A completed change command (#1004), stored as the key sequence that produced
+/// it so `.` can replay it verbatim through the normal dispatch. Keeping the
+/// record as replayable keystrokes — rather than a parsed operator/motion —
+/// means the later mechanics tickets get repeat "for free": a new change command
+/// is recorded and replayed with no change here.
+#[derive(Clone)]
+pub struct LastChange {
+    /// The keys that made up the change (e.g. `d`,`w` for `dw`; `c`,`i`,`"`,…,
+    /// `Esc` for `ci"…<Esc>`), replayed in order at the cursor.
+    pub(crate) keys: Vec<KeyEvent>,
 }
 
 /// A recorded editor position for a Vim mark or the jump-back list (#825): which
