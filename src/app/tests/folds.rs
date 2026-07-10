@@ -4,6 +4,7 @@
 //! search reveals a match inside a folded section.
 
 use super::*;
+use crate::analysis::FlagCategory;
 use crate::buffer::Cursor;
 use crate::mode::{Action, Mode};
 
@@ -406,5 +407,161 @@ fn mark_restore_into_a_folded_section_reveals_it() {
     assert!(
         !app.folds.is_folded(one) && !cursor_is_hidden(&app),
         "the restore revealed the fold so the caret is visible"
+    );
+}
+
+/// A one-chapter project with a `##` heading over a body that carries an `-ly`
+/// adverb, so a style-flag sweep has a hit inside the section that a fold hides.
+fn folded_adverb_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("one.md"),
+        "## Scene one\n\nShe slowly walked away.\n",
+    )
+    .unwrap();
+    let app = open_test_app(&dir);
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn style_flag_step_into_a_folded_section_reveals_it() {
+    // BUG 2 (#1001/#975): a same-chapter `]r` step that lands on a hit inside a
+    // collapsed section must reveal the fold, so the cursor isn't stranded on a
+    // hidden (zero-row) line — mirroring the search jump.
+    let (mut app, _dir) = folded_adverb_app("fold-style-step");
+    let one = heading_start(&app, "Scene one");
+    app.folds.toggle(one); // hides "She slowly walked away."
+    assert!(app.folds.is_folded(one), "the section is folded");
+
+    // Turn the sweep on and park the cursor on the (visible) heading line, above
+    // the hidden hit, so the forward step has to cross into the folded body.
+    app.style_flag_category = Some(FlagCategory::Adverbs);
+    app.refresh_style_flags();
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(one);
+    assert!(!cursor_is_hidden(&app), "the heading line starts visible");
+
+    app.navigate_style_flag(1); // `]r`: step to "slowly", inside the fold
+
+    let cursor_byte = app.edit_buffer().cursor_byte();
+    assert!(
+        app.edit_buffer().text()[cursor_byte..].starts_with("slowly"),
+        "stepped onto the adverb inside the section"
+    );
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "the step revealed the fold so the caret is on a visible line"
+    );
+}
+
+#[test]
+fn turning_the_style_sweep_on_into_a_folded_section_reveals_it() {
+    // BUG 2 (#1001/#975): turning the sweep on jumps to the first hit; when that
+    // hit is inside a folded section the jump must reveal it.
+    let (mut app, _dir) = folded_adverb_app("fold-style-sweep-on");
+    let one = heading_start(&app, "Scene one");
+    app.folds.toggle(one);
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+
+    app.start_style_flag_sweep(FlagCategory::Adverbs);
+
+    let cursor_byte = app.edit_buffer().cursor_byte();
+    assert!(
+        app.edit_buffer().text()[cursor_byte..].starts_with("slowly"),
+        "the sweep jumped to the first hit"
+    );
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "turning the sweep on revealed the fold hiding its first hit"
+    );
+}
+
+#[test]
+fn ex_goto_line_into_a_folded_section_reveals_it() {
+    // BUG 3 (#1010/#975): `:{N}` to a line inside a collapsed section must reveal
+    // it, exactly as the Ctrl-G go-to-line prompt already did.
+    let (mut app, _dir) = folding_app("fold-ex-goto");
+    app.vim = true;
+    app.mode = Mode::Normal;
+    let one = heading_start(&app, "Scene one");
+    app.folds.toggle(one); // hides "The river ran cold." on line 2 (1-based line 3)
+    assert!(app.fold_view().is_hidden(2), "line 3 is hidden by the fold");
+
+    // `:3` — the body line inside the folded first scene.
+    type_str(&mut app, ":3");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(app.edit_buffer().cursor.line, 2, "landed on line 3");
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "`:3` revealed the fold so the cursor is on a visible line"
+    );
+}
+
+#[test]
+fn annotation_review_enter_into_a_folded_section_reveals_it() {
+    // BUG 4 (#302/#975): jumping to an annotation from the review list (Enter) must
+    // reveal a fold hiding the note's anchor, so the cursor lands visible.
+    let (mut app, _dir) = folding_app("fold-anno-enter");
+    let one = heading_start(&app, "Scene one");
+    // Anchor a note on "river", inside the first scene's body.
+    let river = app.edit_buffer().text().find("river").unwrap();
+    app.create_annotation(river, river + 5, "check this".into());
+    // Fold the scene the note lives in, and move the cursor away (to the top).
+    app.folds.toggle(one);
+    app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };
+    assert!(app.folds.is_folded(one), "the note's section is folded");
+
+    // Open the review list and Enter on the (only) note to jump to it.
+    app.open_annotation_review();
+    assert!(matches!(app.mode, Mode::Annotations { .. }), "review open");
+    app.on_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        app.edit_buffer().cursor_byte(),
+        river,
+        "jumped to the note's anchor"
+    );
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "Enter revealed the fold so the caret is visible"
+    );
+}
+
+#[test]
+fn spell_flag_step_into_a_folded_section_reveals_it() {
+    // BUG 5 (#359/#975): `]s` to a misspelling inside a collapsed section must
+    // reveal it, the same class of gap as the style-flag step.
+    let dir = app_scratch_dir("fold-spell-step");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    // A body with an obvious misspelling ("teh") inside the section.
+    fs::write(dir.join("one.md"), "## Scene one\n\nThe teh cat sat.\n").unwrap();
+    let mut app = open_test_app(&dir);
+    let _keep = TempProject::new(dir);
+
+    let one = heading_start(&app, "Scene one");
+    app.refresh_spell_flags();
+    assert!(!app.spell_flags.is_empty(), "the misspelling is flagged");
+    app.folds.toggle(one); // hides the body line with "teh"
+    app.edit_buffer_mut().cursor = app.edit_buffer().cursor_at_byte(one);
+
+    app.navigate_spell_flag(1); // `]s`: step to "teh", inside the fold
+
+    let cursor_byte = app.edit_buffer().cursor_byte();
+    assert!(
+        app.edit_buffer().text()[cursor_byte..].starts_with("teh"),
+        "stepped onto the misspelling inside the section"
+    );
+    assert!(
+        !app.folds.is_folded(one) && !cursor_is_hidden(&app),
+        "the spell step revealed the fold so the caret is visible"
     );
 }

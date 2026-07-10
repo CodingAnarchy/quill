@@ -53,6 +53,9 @@ impl App {
         };
         let buffer = self.edit_buffer_mut();
         buffer.cursor = buffer.cursor_at_byte(target);
+        // The flag can sit inside a collapsed section (#975); reveal it so the
+        // cursor lands on a visible line (mirrors the search / style-flag jumps).
+        self.reveal_fold_at_cursor();
     }
 
     /// Accept the flagged word at the cursor into the project's custom dictionary

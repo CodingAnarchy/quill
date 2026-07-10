@@ -413,6 +413,9 @@ impl App {
                     let buf = self.edit_buffer_mut();
                     let at = start.min(buf.len_bytes());
                     buf.cursor = buf.cursor_at_byte(at);
+                    // The note can anchor inside a collapsed section (#975); reveal
+                    // it so jumping to the note doesn't strand the cursor hidden.
+                    self.reveal_fold_at_cursor();
                 }
             }
             KeyCode::Char('a') if acts_on_selected => self.start_annotation_reply(selected),

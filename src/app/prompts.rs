@@ -152,6 +152,26 @@ impl App {
         };
         // Record where we left so `` `` `` returns, like any big jump (#825).
         self.push_jump();
+        self.goto_line_1based(n);
+    }
+
+    /// `:{N}` — move the cursor to 1-based line `n`, clamped to the buffer's last
+    /// content line, landing on its first non-blank column like Vim's `{count}G`.
+    fn ex_goto_line(&mut self, digits: &str) {
+        // Only reached with an all-digit `cmd`, but a value too large for a
+        // `usize` still means "past the end", so clamp to the last line.
+        let n: usize = digits.parse().unwrap_or(usize::MAX);
+        self.goto_line_1based(n);
+    }
+
+    /// Move the cursor to 1-based line `n`, clamped to the buffer's last content
+    /// line (skipping a trailing newline's empty line, like Vim's `{count}G`),
+    /// landing on its first non-blank column — then reveal any collapsed section
+    /// the landing sits inside so the cursor is never hidden (#975). The single
+    /// clamp+move+reveal both `:{N}` and the Ctrl-G prompt (#1010) funnel through,
+    /// so the reveal can't drift out of one of them again. Reports when `n` ran
+    /// past the end (both callers want the note).
+    fn goto_line_1based(&mut self, n: usize) {
         let target = n.saturating_sub(1); // 1-based → 0-based
         let last = self.edit_buffer().last_line_index();
         self.edit_buffer_mut().move_to_line(target.min(last));
@@ -161,20 +181,6 @@ impl App {
         if target > last {
             self.message = Some(format!("Past the end — moved to line {}.", last + 1));
         }
-    }
-
-    /// `:{N}` — move the cursor to 1-based line `n`, clamped to the buffer's last
-    /// content line, landing on its first non-blank column like Vim's `{count}G`.
-    fn ex_goto_line(&mut self, digits: &str) {
-        // Only reached with an all-digit `cmd`, but a value too large for a
-        // `usize` still means "past the end", so clamp to the last line.
-        let n: usize = digits.parse().unwrap_or(usize::MAX);
-        // 1-based line → 0-based index. Clamp to the last line with content
-        // (skipping a trailing newline's empty line), so `:999` lands where
-        // Vim's `G` would (#826).
-        let target = n.saturating_sub(1);
-        let last = self.edit_buffer().last_line_index();
-        self.edit_buffer_mut().move_to_line(target.min(last));
     }
 
     /// `:%s/pat/rep/[flags]` — substitute `pat` with `rep` across the whole
