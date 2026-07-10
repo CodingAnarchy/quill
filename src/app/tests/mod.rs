@@ -48,6 +48,7 @@ mod ai_accuracy;
 mod ai_characters;
 mod ai_continuity;
 mod ai_cost_routing;
+mod ai_factcheck;
 mod ai_foreshadow;
 mod ai_generation;
 mod ai_images;

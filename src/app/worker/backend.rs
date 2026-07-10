@@ -478,6 +478,7 @@ impl App {
             Outcome::Accuracy(r) => self.apply_accuracy(r),
             Outcome::Relationship(r) => self.apply_relationship(r),
             Outcome::Foreshadow(r) => self.apply_foreshadow(r),
+            Outcome::FactCheck(r) => self.apply_factcheck(r),
             Outcome::SemanticFind(r) => self.apply_semantic_find(r),
             Outcome::Echo(r) => self.apply_echo(r),
             Outcome::Recheck(r) => self.apply_recheck(r),

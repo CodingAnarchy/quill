@@ -23,6 +23,7 @@ pub mod cooccurrence;
 pub mod cost;
 pub mod editorial;
 pub mod embed;
+pub mod factcheck; // research-notebook fact-check (#1049)
 pub mod fal;
 pub mod foreshadow;
 mod http;
@@ -227,6 +228,10 @@ pub enum Outcome {
     /// off (#1047). Findings only; author-invoked; distinct from the plot pass's
     /// thematic-thread tracking.
     Foreshadow(Result<foreshadow::Foreshadow, AiError>),
+    /// Research-notebook fact-check — flags manuscript passages that contradict a
+    /// note the author wrote in `bible/research.md` (#1049). Findings only;
+    /// author-invoked; grounded only in the author's own notes, no external facts.
+    FactCheck(Result<factcheck::FactCheck, AiError>),
     /// Semantic "find similar scenes" (#924): the passages most similar to a
     /// selection / query, ranked with scores + jumpable citations. `None` when no
     /// embedding model is available (graceful degradation, not an error).
@@ -283,6 +288,7 @@ impl Outcome {
             Self::Accuracy(r) => r.as_ref().err(),
             Self::Relationship(r) => r.as_ref().err(),
             Self::Foreshadow(r) => r.as_ref().err(),
+            Self::FactCheck(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
             Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),

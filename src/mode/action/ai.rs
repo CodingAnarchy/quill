@@ -85,6 +85,13 @@ pub enum AiAction {
     /// Findings only; author-invoked. Narrower than — and distinct from — the plot
     /// pass's thematic-thread tracking; it never drafts the payoff.
     Foreshadow,
+    /// Research-notebook fact-check — author-invoked (#1049): flag manuscript
+    /// passages that CONTRADICT a note the author wrote in `bible/research.md`
+    /// (e.g. a date, name, or rule that disagrees with a note). Findings only;
+    /// grounded solely in the author's own notes (no external facts); NOT a
+    /// sensitivity review, and distinct from Accuracy (which checks a named
+    /// *external* concern — this checks the author's own ledger).
+    FactCheck,
 }
 
 /// What a network pass costs (#82/#372) — the *data* side of the cost estimate,
@@ -367,6 +374,13 @@ impl AiAction {
             weight: ModelWeight::Heavy,
             bible_key: None,
         },
+        AiActionSpec {
+            action: Self::FactCheck,
+            slug: "ai:factcheck",
+            cost: AiCost::Manuscript,
+            weight: ModelWeight::Heavy,
+            bible_key: None,
+        },
     ];
 
     /// This action's descriptor — its single source of slug / cost / bible key.
@@ -436,6 +450,7 @@ impl AiAction {
             Self::Accuracy => FindingKind::Accuracy,
             Self::Relationship => FindingKind::Relationship,
             Self::Foreshadow => FindingKind::Foreshadow,
+            Self::FactCheck => FindingKind::FactCheck,
             Self::Voice => FindingKind::Voice,
             Self::Echo => FindingKind::Echo,
             _ => FindingKind::Other,
