@@ -36,20 +36,60 @@ const JUMPLIST_CAP: usize = 100;
 const EDIT_RING_CAP: usize = 20;
 
 impl App {
-    /// The cursor's current position as a global [`JumpPos`] (#825): the active
-    /// chapter's manifest index plus the cursor's byte offset in the edit buffer.
-    /// O(1) — no rope serialization.
+    /// The cursor's current position as a global [`JumpPos`] (#825): the manifest
+    /// index of the chapter the cursor is in plus its byte offset *within that
+    /// chapter*. A [`JumpPos`] is chapter-local by contract — [`restore_jump`]
+    /// reopens `pos.chapter` and places the cursor at `pos.byte` in that single
+    /// chapter's buffer — so both fields must address the same chapter.
+    ///
+    /// In the single-chapter view that's just `active_index()` + the cursor byte.
+    /// In the **continuous view** the edit buffer concatenates several chapters,
+    /// so `active_index()` stays pinned to the chapter that was active when the
+    /// view opened while the cursor's byte is buffer-absolute (it can point into a
+    /// later chapter's segment). Recording that raw pair would store
+    /// `{wrong chapter, absolute byte}`, and restoring it would pin the cursor to
+    /// the end of the wrong chapter (#1010 edit-ring / marks / jumplist bug). So
+    /// here we resolve the *true* chapter from the cursor's segment
+    /// ([`Manuscript::current_chapter`]) and translate the absolute byte to a
+    /// chapter-local offset by subtracting that segment's base from
+    /// [`Manuscript::segment_spans`] — the same absolute↔local seam annotations
+    /// use — so the stored position round-trips through [`restore_jump`].
+    ///
+    /// O(number of loaded segments) in the continuous view (at most ~3), O(1)
+    /// otherwise — no rope serialization either way.
+    ///
+    /// [`restore_jump`]: Self::restore_jump
     pub(crate) fn current_position(&self) -> JumpPos {
+        let byte = self.edit_buffer().cursor_byte();
+        if let Some(m) = &self.manuscript {
+            let chapter = m.current_chapter();
+            // Subtract the cursor segment's base so the stored byte is chapter-local.
+            let base = m
+                .segment_spans()
+                .into_iter()
+                .find_map(|(idx, start, _end)| (idx == chapter).then_some(start))
+                .unwrap_or(0);
+            return JumpPos {
+                chapter,
+                byte: byte.saturating_sub(base),
+            };
+        }
         JumpPos {
             chapter: self.project.active_index(),
-            byte: self.edit_buffer().cursor_byte(),
+            byte,
         }
     }
 
     /// Record the current cursor position onto the jump-back list (#825): what a
-    /// big jump pushes so `` `` `` can return.
+    /// big jump pushes so `` `` `` can return. Goes through [`current_position`],
+    /// so it stores a chapter-local [`JumpPos`] in the continuous view too (the
+    /// same translation the edit-ring and marks get), not a raw absolute byte
+    /// against the wrong chapter.
+    ///
+    /// [`current_position`]: Self::current_position
     pub(crate) fn push_jump(&mut self) {
-        self.push_jump_from(self.edit_buffer().cursor_byte());
+        let pos = self.current_position();
+        self.push_jump_pos(pos);
     }
 
     /// Record a jump-back target at byte `byte` in the active chapter (#825), for
@@ -58,10 +98,15 @@ impl App {
     /// matches has since moved the cursor. Bounded: the oldest entry drops once the
     /// list is full, so pushing on the nav path can never grow unbounded.
     pub(crate) fn push_jump_from(&mut self, byte: usize) {
-        let pos = JumpPos {
+        self.push_jump_pos(JumpPos {
             chapter: self.project.active_index(),
             byte,
-        };
+        });
+    }
+
+    /// Push `pos` onto the bounded jumplist, dropping the oldest entry once it's
+    /// full — the one place the cap is enforced.
+    fn push_jump_pos(&mut self, pos: JumpPos) {
         let list = &mut self.vim_state.jumplist;
         if list.len() >= JUMPLIST_CAP {
             list.pop_front();
