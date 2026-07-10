@@ -3,6 +3,10 @@
 
 use super::*;
 
+use unicode_width::UnicodeWidthStr;
+
+use crate::export::is_thematic_break;
+
 impl App {
     // --- Continuous-manuscript view ---------------------------------------
 
@@ -169,6 +173,150 @@ impl App {
             }
         }
         changed
+    }
+
+    // --- Join and reflow (#1005) -------------------------------------------
+
+    /// Vim `J`: merge the current line with the next, normalizing the space
+    /// between them (#1005). With a count, joins that many lines (a count under 2
+    /// still joins one, as in Vim). Only whitespace changes — the current line's
+    /// trailing whitespace and the next line's leading whitespace collapse to a
+    /// single space (none when the current line ends blank), never adding,
+    /// removing, or reordering a word. One undoable edit through the range-edit
+    /// path, so it inherits the seam bookkeeping (#700) and is `.`-repeatable
+    /// (#1004). Respects prose boundaries: it won't merge a blank line or a scene
+    /// break (a thematic break, #908) into the line, so paragraphs and scenes stay
+    /// separate.
+    pub(super) fn join_lines(&mut self, count: usize) {
+        // Vim joins `count` lines, meaning `count - 1` newlines removed; a bare
+        // `J` (count 1) and `2J` both fold one following line into the current.
+        let joins = count.saturating_sub(1).max(1);
+        let start_line = self.edit_buffer().cursor.line;
+        // Build the merged text by folding each following line up in turn, stopping
+        // at a boundary. `end_line` is the last line consumed; the replaced range
+        // runs from the current line's start to just past `end_line`.
+        let (merged, end_line) = {
+            let buf = self.edit_buffer();
+            let last = buf.line_count().saturating_sub(1);
+            let mut merged = buf.line(start_line);
+            let mut end_line = start_line;
+            for _ in 0..joins {
+                let next = end_line + 1;
+                if next > last {
+                    break; // no line below to join — chapter/document end
+                }
+                let below = buf.line(next);
+                // A blank line is a paragraph boundary and a thematic break is a
+                // scene divider (#908): never fold either into the prose above it.
+                if below.trim().is_empty() || is_thematic_break(below.trim()) {
+                    break;
+                }
+                // Likewise never join out of a scene break itself.
+                if is_thematic_break(merged.trim()) {
+                    break;
+                }
+                merged = join_two(&merged, &below);
+                end_line = next;
+            }
+            (merged, end_line)
+        };
+        if end_line == start_line {
+            return; // nothing below to join — leave the buffer untouched
+        }
+        let (lo, hi) = {
+            let buf = self.edit_buffer();
+            (
+                buf.line_start_byte(start_line),
+                buf.next_line_byte(end_line),
+            )
+        };
+        // `next_line_byte` of a non-final line includes its trailing newline; put it
+        // back so the joined paragraph keeps its own line ending.
+        let has_newline = hi > self.edit_buffer().len_bytes()
+            || self.edit_buffer().byte_slice(hi.saturating_sub(1), hi) == "\n";
+        let replacement = if has_newline {
+            format!("{merged}\n")
+        } else {
+            merged
+        };
+        self.edit_replace_range(lo, hi, &replacement);
+        self.edit_move(|b| b.move_to_line(start_line));
+        self.cache_focus_words();
+    }
+
+    /// Vim `gq`-style reflow: re-wrap the paragraph around the cursor to the
+    /// editor's wrap column (#1005), collapsing the paragraph's internal hard line
+    /// breaks into flowed text and re-breaking at word boundaries. Only whitespace
+    /// and line breaks change — every word is preserved byte-for-byte in order. One
+    /// undoable edit through the range-edit path (#700), so it's `.`-repeatable
+    /// (#1004). A paragraph is a run of non-blank lines bounded by blank lines and
+    /// scene breaks (thematic breaks, #908), so reflow never pulls text across a
+    /// paragraph or scene boundary.
+    pub(super) fn reflow_paragraph(&mut self) {
+        let cur = self.edit_buffer().cursor.line;
+        let Some((first, last)) = self.paragraph_line_span(cur) else {
+            return; // the cursor is on a blank line or a scene break — nothing to reflow
+        };
+        // Gather the paragraph's words in order, flattening its hard breaks.
+        let words: Vec<String> = {
+            let buf = self.edit_buffer();
+            (first..=last)
+                .flat_map(|i| {
+                    buf.line(i)
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        if words.is_empty() {
+            return;
+        }
+        let wrapped = wrap_words(&words, self.wrap_w());
+        let (lo, hi) = {
+            let buf = self.edit_buffer();
+            (buf.line_start_byte(first), buf.next_line_byte(last))
+        };
+        // Preserve the paragraph's trailing newline if it had one (every line but a
+        // final unterminated document line does).
+        let has_newline = hi > self.edit_buffer().len_bytes()
+            || self.edit_buffer().byte_slice(hi.saturating_sub(1), hi) == "\n";
+        let replacement = if has_newline {
+            format!("{wrapped}\n")
+        } else {
+            wrapped
+        };
+        self.edit_replace_range(lo, hi, &replacement);
+        self.edit_move(|b| b.move_to_line(first));
+        self.cache_focus_words();
+    }
+
+    /// The inclusive line span `[first, last]` of the prose paragraph containing
+    /// `line` — the run of non-blank, non-scene-break lines around it (#1005).
+    /// Returns `None` when `line` is itself blank or a scene break, so join/reflow
+    /// stay off the boundaries. Walks outward line by line (windowed), stopping at a
+    /// blank line or a thematic break (#908) in either direction.
+    fn paragraph_line_span(&self, line: usize) -> Option<(usize, usize)> {
+        let buf = self.edit_buffer();
+        let last = buf.line_count().saturating_sub(1);
+        let cur = line.min(last);
+        let is_boundary = |i: usize| {
+            let t = buf.line(i);
+            let t = t.trim();
+            t.is_empty() || is_thematic_break(t)
+        };
+        if is_boundary(cur) {
+            return None;
+        }
+        let mut first = cur;
+        while first > 0 && !is_boundary(first - 1) {
+            first -= 1;
+        }
+        let mut end = cur;
+        while end < last && !is_boundary(end + 1) {
+            end += 1;
+        }
+        Some((first, end))
     }
 
     /// Move the cursor a screenful of visual rows up or down (#641) — PageUp /
@@ -364,4 +512,47 @@ impl App {
         // save still reopens where the author was working (#588).
         self.persist_position();
     }
+}
+
+/// Join two lines with a single normalized separator (#1005): the current line's
+/// trailing whitespace and the next line's leading whitespace collapse to one
+/// space. An empty (or all-blank) current line takes the next line's content with
+/// no leading space, so a run of joins doesn't accrete leading spaces. No word is
+/// added, removed, or reordered — only the whitespace between them changes.
+fn join_two(current: &str, next: &str) -> String {
+    let head = current.trim_end();
+    let tail = next.trim_start();
+    if head.is_empty() {
+        tail.to_owned()
+    } else if tail.is_empty() {
+        head.to_owned()
+    } else {
+        format!("{head} {tail}")
+    }
+}
+
+/// Greedy word-wrap `words` to `width` columns (#1005), one space between words.
+/// Words are placed verbatim in order — a word longer than `width` still gets its
+/// own line rather than being split, so no word is ever broken. A zero width falls
+/// back to one word per line (fully flowed onto separate lines is still only a
+/// whitespace change). Every word is preserved byte-for-byte.
+fn wrap_words(words: &[String], width: usize) -> String {
+    let mut out = String::new();
+    let mut col = 0usize; // display width of the current line so far
+    for word in words {
+        let w = UnicodeWidthStr::width(word.as_str());
+        if col == 0 {
+            out.push_str(word);
+            col = w;
+        } else if col + 1 + w <= width {
+            out.push(' ');
+            out.push_str(word);
+            col += 1 + w;
+        } else {
+            out.push('\n');
+            out.push_str(word);
+            col = w;
+        }
+    }
+    out
 }

@@ -32,6 +32,13 @@ impl App {
                         .take()
                         .map_or(0, |n| n.saturating_sub(1));
                     self.goto_line(target); // gg → first line (or {count}gg); operator-aware
+                } else if c == 'q' || c == 'w' {
+                    // `gq` / `gw` reflow the current paragraph to the wrap column
+                    // (#1005), collapsing its hard breaks. A single-edit change, so
+                    // `.` repeats it (#1004).
+                    self.vim_state.count = None;
+                    self.vim_state.op = None;
+                    self.reflow_paragraph();
                 } else {
                     self.vim_state.count = None; // an unknown `g_` aborts
                     self.vim_state.op = None;
@@ -220,6 +227,9 @@ impl App {
             'x' => self.delete_chars(count),
             'D' => self.delete_to_line_end(Op::Delete),
             'C' => self.delete_to_line_end(Op::Change),
+            // `J` joins the next line up; `{count}J` folds `count` lines (#1005).
+            // A single-edit change, so `.` repeats it (#1004).
+            'J' => self.join_lines(count),
             'u' => self.history_step(false),
 
             // Character motions (charwise: move, or an operator range).
