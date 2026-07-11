@@ -9,11 +9,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::atomic;
-use crate::frontmatter::{self, FrontMatter};
+use crate::frontmatter::{self, Band, FrontMatter};
 
-use super::{read_existing, ChapterEntry, Project};
+use super::{read_existing, shift_parts_for_delete, shift_parts_for_insert, ChapterEntry, Project};
 
 impl Project {
+    /// The 1-based **body position** a chapter at raw index `index` occupies —
+    /// the mapping the part ranges live in (#185): its offset past the front
+    /// matter, plus one. Only meaningful for a Body chapter (front/back matter
+    /// belongs to no part). Uses `saturating_sub` so a Body chapter that ever
+    /// sits before the front count doesn't underflow; callers gate on the band.
+    fn body_position(&self, index: usize) -> usize {
+        index.saturating_sub(self.manifest.front_chapter_count()) + 1
+    }
+
+    /// After inserting a Body chapter at raw index `at`, grow/shift the part
+    /// ranges so each part keeps grouping its own chapters (#316 — parts follow
+    /// structural edits). A non-body insert (front/back matter) leaves the body
+    /// positions unchanged, so parts are untouched. Call *after* the chapter is
+    /// in the manifest; `at` is its raw index.
+    fn shift_parts_after_insert(&mut self, at: usize) {
+        if Band::of(self.manifest.chapters.get(at).and_then(|c| c.role)) != Band::Body {
+            return;
+        }
+        let body_pos = self.body_position(at);
+        if let Some(parts) = self.manifest.parts.as_deref_mut() {
+            shift_parts_for_insert(parts, body_pos);
+        }
+    }
+
     /// Insert a new empty chapter titled `title` at position `at` (clamped to
     /// the end). Its file is created on disk.
     pub fn add_chapter(&mut self, at: usize, title: &str) -> std::io::Result<()> {
@@ -38,6 +62,7 @@ impl Project {
             .chapters
             .insert(at, ChapterEntry::new(title.to_string(), file));
         self.read_chapter_cache(at);
+        self.shift_parts_after_insert(at);
         self.save_manifest()
     }
 
@@ -55,6 +80,7 @@ impl Project {
             .chapters
             .insert(at, ChapterEntry::new(title.to_string(), file));
         self.read_chapter_cache(at);
+        self.shift_parts_after_insert(at);
         self.save_manifest()
     }
 
@@ -112,7 +138,17 @@ impl Project {
         self.words_total = self
             .words_total
             .saturating_sub(self.manifest.chapters[at].words);
+        // A removed Body chapter vacates a part position: shrink/shift/drop the
+        // affected parts so each keeps grouping its own chapters (#316 — parts
+        // follow structural edits). Compute the body position before the entry
+        // leaves the manifest; a front/back-matter removal leaves body positions
+        // (and so the parts) unchanged.
+        let removed_body_pos = (Band::of(self.manifest.chapters[at].role) == Band::Body)
+            .then(|| self.body_position(at));
         self.manifest.chapters.remove(at);
+        if let (Some(body_pos), Some(parts)) = (removed_body_pos, self.manifest.parts.as_mut()) {
+            shift_parts_for_delete(parts, body_pos);
+        }
         self.save_manifest()
     }
 
