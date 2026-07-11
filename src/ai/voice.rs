@@ -25,9 +25,17 @@ pub struct VoiceFinding {
     /// "dialogue" (a line out of character) or "narration" (POV voice drift / not
     /// distinct from another POV).
     pub kind: String,
-    /// The character whose voice the finding concerns.
+    /// The character whose voice the finding concerns (for a `dialogue` finding,
+    /// the speaker of the flagged line).
     #[serde(default)]
     pub character: String,
+    /// For a line-level `dialogue` finding (#1050), a SHORT verbatim quote of the
+    /// specific spoken line that reads out of character for its speaker given the
+    /// scene, so the author can land on the exact line. Empty for a holistic /
+    /// narration finding that isn't anchored to one line. This is the author's own
+    /// prose quoted back for locating — never a rewrite or replacement.
+    #[serde(default)]
+    pub line: String,
     pub detail: String,
     /// Chapters involved (titles).
     #[serde(default)]
@@ -37,15 +45,23 @@ pub struct VoiceFinding {
 const SYSTEM: &str = "You are a developmental editor doing character-VOICE \
 ANALYSIS — observations only, never rewrites or suggestions. You are given the \
 character voice profiles from the story bible and the manuscript. Judge the \
-manuscript against those profiles and flag two kinds of issue: `dialogue` — a line \
-of dialogue that reads out of character for its speaker, measured against that \
-speaker's voice profile; and `narration` — a POV character's narration whose voice \
-has drifted from their established narrative voice, or isn't distinct enough from \
-another POV character's. For each finding give the kind (dialogue / narration), \
-the character it concerns, the detail (what's off and why, referencing the voice \
-notes), and the chapters involved. Reference chapters by title. Do NOT rewrite, \
-draft, or suggest replacement dialogue or narration — surface the issue for the \
-author to fix.";
+manuscript against those profiles and flag two kinds of issue: `dialogue` — a \
+SPECIFIC line of dialogue that reads out of character for its speaker at the moment \
+it's spoken, measured against that speaker's voice profile and the scene it's in (a \
+formal character suddenly slangy, a terse character monologuing); and `narration` — \
+a POV character's narration whose voice has drifted from their established narrative \
+voice, or isn't distinct enough from another POV character's. For each finding give \
+the kind (dialogue / narration), the `character` it concerns (for a dialogue \
+finding, the speaker of the line), the `detail` (what's off and why, referencing the \
+voice notes), and the `chapters` involved (by title). For a `dialogue` finding, also \
+quote in `line` the SHORT verbatim spoken line that reads false, so the author can \
+find the exact line; leave `line` empty for narration. Attribute each dialogue line \
+to the character who speaks it. Flag only lines you are confident read out of \
+character given the speaker's profile and the scene — when a line could plausibly be \
+in character, leave it unflagged (bias toward precision, not recall). Do NOT rewrite, \
+draft, or suggest replacement dialogue or narration, and do NOT put any corrected or \
+alternative wording in `line` — `line` is the author's own text quoted back only so \
+they can locate it. Surface the issue for the author to fix.";
 
 /// The JSON Schema for a voice-analysis reply.
 pub fn schema() -> Value {
@@ -53,6 +69,9 @@ pub fn schema() -> Value {
         vec![
             ("kind", super::string_field()),
             ("character", super::string_field()),
+            // The verbatim spoken line for a line-level dialogue finding (#1050);
+            // optional so a holistic / narration finding can omit it.
+            ("line", super::string_field()),
             ("detail", super::string_field()),
             ("chapters", super::string_array()),
         ],
@@ -96,6 +115,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_reads_a_line_level_dialogue_finding() {
+        // A line-level dialogue finding (#1050) quotes the specific spoken line and
+        // names the speaker + chapter.
+        let json = r#"{"findings":[{"kind":"dialogue","character":"Mara","line":"Yeah, whatever, dude.","detail":"slangy — her profile is clipped and formal","chapters":["Two"]}]}"#;
+        let v = parse(json).unwrap();
+        assert_eq!(v.findings[0].character, "Mara");
+        assert_eq!(v.findings[0].line, "Yeah, whatever, dude.");
+        assert_eq!(v.findings[0].chapters, ["Two"]);
+    }
+
+    #[test]
+    fn line_defaults_to_empty_when_omitted() {
+        // A narration finding (or a pre-#1050 reply) omits `line`; it defaults to
+        // empty rather than failing to parse.
+        let json = r#"{"findings":[{"kind":"narration","character":"Ivo","detail":"POV voice drift","chapters":["One"]}]}"#;
+        let v = parse(json).unwrap();
+        assert!(v.findings[0].line.is_empty());
+    }
+
+    #[test]
     fn parse_rejects_bad_json() {
         assert!(matches!(parse("nope"), Err(AiError::ModelNonCompliance(_))));
     }
@@ -112,5 +151,49 @@ mod tests {
             "voice notes travel in the prompt"
         );
         assert!(req.json_schema.is_some());
+    }
+
+    #[test]
+    fn prompt_directs_line_level_speaker_attributed_flags_never_a_rewrite() {
+        // The deepened prompt (#1050) asks for a specific line, attributed to its
+        // speaker, and forbids putting any rewrite in `line`.
+        let req = build_request("m".into(), "Mara: clipped", "claude-opus-4-8");
+        let system = req.system.as_deref().unwrap_or("");
+        assert!(system.contains("SPECIFIC line"), "{system}");
+        assert!(system.contains("verbatim spoken line"), "{system}");
+        assert!(system.contains("bias toward precision"), "{system}");
+        assert!(system.contains("do NOT put any corrected"), "{system}");
+        assert!(system.contains("Do NOT rewrite"), "{system}");
+    }
+
+    #[test]
+    fn schema_offers_line_but_does_not_require_it() {
+        // `line` is an available field (so a dialogue finding can quote the line) but
+        // is optional (narration findings omit it).
+        let s = schema();
+        let item = &s["properties"]["findings"]["items"];
+        assert_eq!(
+            item["properties"]["line"],
+            serde_json::json!({ "type": "string" })
+        );
+        let required = item["required"].as_array().unwrap();
+        assert!(
+            !required.iter().any(|r| r == "line"),
+            "line stays optional: {required:?}"
+        );
+        // No field carries a replacement line — only observation fields.
+        let keys: std::collections::BTreeSet<&str> = item["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["chapters", "character", "detail", "kind", "line"]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            "only observation fields; none carries edited prose: {keys:?}"
+        );
     }
 }
