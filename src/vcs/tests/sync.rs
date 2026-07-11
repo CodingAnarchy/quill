@@ -1,6 +1,8 @@
 //! Two-way sync tests (#962) and its hand-resolved finalization (#963): disjoint
 //! chapter edits that merge cleanly, a same-chapter conflict that's detected without
 //! clobbering, the fast-forward and dirty-tree guards, nested-path reconciliation,
+//! the delete/add reconciliation arms (delete-vs-edit conflicts, delete-vs-unchanged
+//! applies the deletion either direction, both-delete converges, add/add conflicts),
 //! and the finalize paths (keep local / take remote / hand-merge / mixed / stale
 //! remote). A bare repo stands in for the remote, so nothing reaches the network.
 
@@ -483,6 +485,223 @@ fn finalize_sync_refuses_when_the_remote_changed_again_mid_resolution() {
         !summaries.iter().any(|s| s.contains("Sync remote")),
         "no partial merge commit landed: {summaries:?}"
     );
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+/// Seed a second shared chapter `two.md` on both clones (via the remote) so a delete
+/// test has an ancestor blob to diverge from. Returns the scratch dirs; both `a` and
+/// `b` hold `one.md` and `two.md` at the same commit afterwards.
+fn two_shared_chapters(name: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let (remote, a, b) = two_clones(name);
+    fs::write(a.join("two.md"), "# Two\n\nShared second chapter.\n").unwrap();
+    commit(&a, "seed-two").unwrap();
+    push(&a).unwrap();
+    let out = sync(&b).unwrap();
+    assert!(out.conflicts.is_empty() && b.join("two.md").exists());
+    (remote, a, b)
+}
+
+#[test]
+fn sync_conflicts_when_the_remote_deletes_a_chapter_the_local_edited() {
+    // delete-vs-edit: the remote (a) deletes two.md while local (b) edits it. The
+    // chapter-level three-way can't silently drop either side's intent — it's a
+    // conflict, with the deleted side surfaced as empty and the edited side preserved.
+    // On a conflict nothing is written and no commit lands (the tree stays byte-for-
+    // byte as it was), so the author resolves it with the full picture.
+    let (remote, a, b) = two_shared_chapters("sync-del-vs-edit");
+
+    fs::remove_file(a.join("two.md")).unwrap();
+    commit(&a, "a-deletes-two").unwrap();
+    push(&a).unwrap();
+    let b_content = "# Two\n\nB's revision of the second chapter.\n";
+    fs::write(b.join("two.md"), b_content).unwrap();
+    commit(&b, "b-edits-two").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert_eq!(out.conflicts.len(), 1, "delete-vs-edit is a conflict");
+    assert!(!out.reload, "nothing written on a conflict");
+    let c = &out.conflicts[0];
+    assert_eq!(c.path, "two.md");
+    // The edited (local) side is preserved; the deleted (remote) side reads as empty.
+    assert!(
+        c.local.contains("B's revision"),
+        "local edit kept: {:?}",
+        c.local
+    );
+    assert_eq!(c.remote, "", "the deleted side is represented as empty");
+    assert!(
+        c.base.contains("Shared second chapter"),
+        "ancestor carried: {:?}",
+        c.base
+    );
+
+    // The tree is byte-unchanged and no merge commit landed.
+    assert_eq!(fs::read_to_string(b.join("two.md")).unwrap(), b_content);
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+    let summaries = merge_summaries(&b);
+    assert!(
+        !summaries.iter().any(|s| s.contains("Sync remote")),
+        "no merge commit on a conflict: {summaries:?}"
+    );
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_applies_a_remote_deletion_of_an_unchanged_chapter() {
+    // delete-vs-unchanged (remote deletes, local unchanged): the remote (a) deletes
+    // two.md; local (b) never touched it. The deletion is a remote-only change, so it
+    // is ADOPTED — the file is gone from the merged tree and off disk, not silently
+    // kept — while b's disjoint edit to one.md is preserved.
+    let (remote, a, b) = two_shared_chapters("sync-del-remote");
+
+    fs::remove_file(a.join("two.md")).unwrap();
+    commit(&a, "a-deletes-two").unwrap();
+    push(&a).unwrap();
+    // b makes a disjoint edit so the branch diverges (not a fast-forward).
+    fs::write(b.join("one.md"), "# One\n\nB's disjoint edit.\n").unwrap();
+    commit(&b, "b-edits-one").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert!(
+        out.conflicts.is_empty(),
+        "an unchanged deletion is clean: {:?}",
+        out.conflicts
+    );
+    assert!(out.reload, "the tree changed on disk");
+    // The remote's deletion was applied: the file is gone from the merged tree and disk.
+    assert!(
+        !b.join("two.md").exists(),
+        "remote deletion applied on disk"
+    );
+    // b's disjoint edit survives.
+    assert!(fs::read_to_string(b.join("one.md"))
+        .unwrap()
+        .contains("B's disjoint edit"));
+    // A real, clean two-parent merge landed.
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+    let summaries = merge_summaries(&b);
+    assert!(
+        summaries.iter().any(|s| s.contains("Sync remote")),
+        "{summaries:?}"
+    );
+    push(&b).unwrap();
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_applies_a_local_deletion_of_a_chapter_the_remote_left_alone() {
+    // delete-vs-unchanged (local deletes, remote unchanged): local (b) deletes two.md;
+    // the remote (a) never touched it (it made a disjoint edit elsewhere). The local
+    // deletion is kept — the merged tree has the file gone, not resurrected by the
+    // remote's unchanged copy — while the remote's disjoint edit is adopted.
+    let (remote, a, b) = two_shared_chapters("sync-del-local");
+
+    // a makes a disjoint edit and pushes so the branch diverges.
+    fs::write(a.join("one.md"), "# One\n\nA's disjoint edit.\n").unwrap();
+    commit(&a, "a-edits-one").unwrap();
+    push(&a).unwrap();
+    // b deletes two.md.
+    fs::remove_file(b.join("two.md")).unwrap();
+    commit(&b, "b-deletes-two").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert!(
+        out.conflicts.is_empty(),
+        "a local-only deletion is clean: {:?}",
+        out.conflicts
+    );
+    // The local deletion is preserved (not resurrected by the remote's stale copy)…
+    assert!(!b.join("two.md").exists(), "local deletion preserved");
+    // …and the remote's disjoint edit is adopted.
+    assert!(fs::read_to_string(b.join("one.md"))
+        .unwrap()
+        .contains("A's disjoint edit"));
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_converges_cleanly_when_both_sides_delete_the_same_chapter() {
+    // both-sides-delete: a and b independently remove two.md. Since both agree the
+    // chapter is gone, the three-way needs nothing (o == t == None) — a clean
+    // convergence with the file absent and no conflict.
+    let (remote, a, b) = two_shared_chapters("sync-del-both");
+
+    fs::remove_file(a.join("two.md")).unwrap();
+    commit(&a, "a-deletes-two").unwrap();
+    push(&a).unwrap();
+    fs::remove_file(b.join("two.md")).unwrap();
+    commit(&b, "b-deletes-two").unwrap();
+    // A disjoint edit on b so the branch diverges rather than fast-forwarding.
+    fs::write(b.join("one.md"), "# One\n\nB's disjoint edit.\n").unwrap();
+    commit(&b, "b-edits-one").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert!(
+        out.conflicts.is_empty(),
+        "agreeing deletions don't conflict: {:?}",
+        out.conflicts
+    );
+    assert!(
+        !b.join("two.md").exists(),
+        "the file is gone after both delete it"
+    );
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
+fn sync_conflicts_when_both_sides_add_the_same_new_chapter_differently() {
+    // add/add: base has no three.md; a and b each add three.md with different content.
+    // With no shared ancestor the chapter reads as added on both sides, so it's a
+    // conflict (never a silent pick), with each side's text carried and an empty base.
+    let (remote, a, b) = two_clones("sync-add-add");
+
+    fs::write(a.join("three.md"), "# Three\n\nA's brand-new chapter.\n").unwrap();
+    commit(&a, "a-adds-three").unwrap();
+    push(&a).unwrap();
+    let b_content = "# Three\n\nB's brand-new chapter.\n";
+    fs::write(b.join("three.md"), b_content).unwrap();
+    commit(&b, "b-adds-three").unwrap();
+
+    let out = sync(&b).unwrap();
+    assert_eq!(
+        out.conflicts.len(),
+        1,
+        "add/add of the same path is a conflict"
+    );
+    assert!(!out.reload, "nothing written on a conflict");
+    let c = &out.conflicts[0];
+    assert_eq!(c.path, "three.md");
+    assert!(
+        c.local.contains("B's brand-new"),
+        "local add kept: {:?}",
+        c.local
+    );
+    assert!(
+        c.remote.contains("A's brand-new"),
+        "remote add kept: {:?}",
+        c.remote
+    );
+    assert_eq!(c.base, "", "no shared ancestor for an add/add");
+    // Byte-unchanged, no merge commit.
+    assert_eq!(fs::read_to_string(b.join("three.md")).unwrap(), b_content);
+    assert_eq!(commit(&b, "should-be-clean").unwrap(), None);
 
     fs::remove_dir_all(&a).ok();
     fs::remove_dir_all(&b).ok();
