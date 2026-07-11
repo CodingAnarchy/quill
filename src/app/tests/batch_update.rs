@@ -9,6 +9,7 @@ use super::*;
 use crate::ai::batch::{BatchUpdate, PendingBatch};
 use crate::ai::incremental::{Digests, State};
 use crate::app::batch_update::BatchTaskResult;
+use std::fs;
 
 /// Opt into the background update on a keyed Claude backend so the gate + plan run
 /// without touching the network. A dummy key is enough — the tests never submit.
@@ -303,4 +304,69 @@ fn the_action_is_gated_on_the_opt_in_and_a_cloud_backend() {
     // Opt in on a keyed Claude backend → ready.
     app.ai.backend = crate::ai::BackendKind::Claude;
     assert!(app.batch_update_status().is_ok(), "opt-in + cloud + key");
+}
+
+// --- Reconciled Characters batch is scoped to the batch's book (#950/#871) --
+
+/// A characters-pass JSON body naming one character, so a finished Characters batch's
+/// rebuild parses and `apply_characters` writes `bible/characters/<slug>.md`.
+fn characters_json(name: &str) -> String {
+    serde_json::json!({ "characters": [ { "name": name } ] }).to_string()
+}
+
+#[test]
+fn a_reconciled_characters_batch_enriches_mentions_from_its_own_book_not_the_active_one() {
+    // A background Characters batch for book 1 (non-active) is reconciled while book 0
+    // is active. The local mention enrichment must count book 1's prose — the batch's
+    // book — not the active book's, or the profile records the wrong "screen time".
+    let (mut app, dir) = series_app("batch-book-scope");
+    enable_batch_update(&mut app);
+    assert_eq!(app.project.active_book(), 0, "book 0 is active");
+
+    // Seed a character name that appears only in book 1 (b2/one.md = "Dusk"), never in
+    // book 0's chapters — so a book-0-scoped count is 0 and a book-1-scoped count is 3.
+    fs::write(
+        dir.join("b2/one.md"),
+        "Mordecai woke. Mordecai walked. Mordecai slept.\n",
+    )
+    .unwrap();
+
+    // The batch was built against book 1 as it is now (post-seed), so it isn't stale.
+    let digests = app.book_digests(1);
+    app.apply_batch_results_for_test(vec![BatchTaskResult::ready(
+        "ai:characters",
+        1,
+        digests,
+        &characters_json("Mordecai"),
+    )]);
+
+    let profile = fs::read_to_string(dir.join("bible/characters/mordecai.md"))
+        .expect("the book-1 characters batch wrote the profile");
+    // Mentions are counted from BOOK 1's prose (3), not book 0's (0). Fail-before: the
+    // old active-book-scoped enrichment counted book 0 and wrote `mentions: 0`.
+    assert!(
+        profile.contains("mentions: 3"),
+        "mentions come from book 1's chapters, not the active book: {profile}"
+    );
+    // And the "last seen" chapter is book 1's, never a book-0 title.
+    assert!(
+        profile.contains("last_chapter: Dusk"),
+        "last_chapter is book 1's chapter, not the active book's: {profile}"
+    );
+    assert!(
+        !profile.contains("last_chapter: Dawn") && !profile.contains("last_chapter: Noon"),
+        "no book-0 chapter title leaks into a book-1 profile: {profile}"
+    );
+
+    // The interactive (active-book) path is unchanged: enrich_mentions outside a run
+    // still scopes to the active book.
+    let mut c = crate::ai::character::Character {
+        name: "alpha".into(),
+        ..Default::default()
+    };
+    app.enrich_mentions(&mut c);
+    assert_eq!(
+        c.mentions, 2,
+        "active-book enrichment still counts book 0's 'alpha one' / 'alpha two'"
+    );
 }
