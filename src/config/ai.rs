@@ -42,6 +42,18 @@ const fn default_background_batch_update() -> bool {
     false
 }
 
+/// The "verify on idle" auto-recheck (#1053) is opt-in and off by default: when
+/// on, findings whose chapters changed since they were generated are re-checked
+/// on the idle tick and cleared if an edit resolved them, so triage stays honest
+/// during a revision pass without the author remembering to re-run. It re-runs
+/// only the existing analysis passes scoped to the changed chapters (content-digest
+/// keyed, like the bible cache), never the whole book, and never edits prose. A
+/// field default keeps an existing config (which never mentions the key) at the
+/// safe off state.
+const fn default_verify_on_idle() -> bool {
+    false
+}
+
 /// The fal.ai FLUX model used when no `[image] model` is configured — fast and
 /// inexpensive. It seeds [`ImageConfig::model`] (#809).
 fn default_image_model() -> String {
@@ -157,6 +169,18 @@ pub struct AiConfig {
     /// existing config that never mentions the key at the safe off state.
     #[serde(default = "default_background_batch_update")]
     pub background_batch_update: bool,
+    /// Opt-in for "verify on idle" auto-recheck (#1053). When true, findings whose
+    /// chapters changed since they were generated are re-checked on the idle tick
+    /// and cleared if the edit resolved them — the same reconcile a manual
+    /// re-check-all (#830) does, but automatic and scoped to only the changed
+    /// chapters (content-digest keyed, like the incremental bible cache #90). It
+    /// re-runs the existing analysis passes, writes no prose, never auto-dismisses a
+    /// finding the author is still working, and does no whole-manuscript
+    /// re-analysis. Off by default: an author enables it deliberately with `[ai]
+    /// verify-on-idle = true`. A field default keeps an existing config that never
+    /// mentions the key at the safe off state.
+    #[serde(default = "default_verify_on_idle")]
+    pub verify_on_idle: bool,
     /// The turn cap for the offline bible-grounded Q&A retrieval loop (#856) — how
     /// many read/search tool turns the on-device model may take before it must
     /// answer with what it gathered. Deliberately larger than the assistant pane's
@@ -192,6 +216,7 @@ impl Default for AiConfig {
             refresh_after_changes: 5,
             echo_detection: true,
             background_batch_update: false,
+            verify_on_idle: false,
             retrieval_max_turns: default_retrieval_max_turns(),
             keychain_cache: OnceCell::new(),
         }

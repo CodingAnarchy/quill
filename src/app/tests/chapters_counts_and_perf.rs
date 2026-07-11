@@ -257,6 +257,71 @@ fn tally_is_independent_of_project_size() {
     assert!(per.as_micros() < 30, "tally took {per:?}");
 }
 
+/// Performance guard (`cargo perf`). "Verify on idle" (#1053) re-checks findings
+/// whose chapters changed, and its planning runs on every idle tick when the opt-in
+/// is on. Its cost must not grow with the project: it digests only the *open
+/// findings'* chapters (a small bounded set), never the whole manuscript. With a
+/// handful of open findings in a huge project, planning stays flat — the guard the
+/// "no whole-manuscript re-analysis" contract rests on. See `docs/performance.md`.
+#[test]
+#[ignore = "release-only perf guard; run via cargo perf"]
+fn verify_on_idle_plan_is_independent_of_project_size() {
+    use std::time::Instant;
+
+    let n = 2000;
+    let dir = crate::testutil::scratch_dir("perf", "verify-idle");
+    let dir = TempProject::new(dir);
+    let mut manifest = String::from("title = \"Series\"\n\n");
+    for i in 0..n {
+        let file = format!("ch{i}.md");
+        write!(
+            manifest,
+            "[[chapters]]\ntitle = \"Ch{i}\"\nfile = \"{file}\"\n\n"
+        )
+        .unwrap();
+        fs::write(dir.join(&file), "Some prose in this chapter.\n").unwrap();
+    }
+    fs::write(Project::manifest_path(&dir), manifest).unwrap();
+
+    let project = Project::open(&dir).unwrap();
+    let buffer = Buffer::from_path(project.active_path()).unwrap();
+    let mut app = App::new(buffer, project);
+    app.ai.verify_on_idle = true;
+    // Two open findings, on the first and last chapters (the worst case for lookups),
+    // baselined at open. The plan should touch only these two chapters, never all n.
+    let findings = vec![
+        crate::mode::Finding {
+            summary: "object: a drift".into(),
+            kind: crate::mode::FindingKind::Continuity,
+            chapters: vec!["Ch0".into()],
+            book: None,
+            action: Some(crate::mode::AiAction::Continuity),
+            corroborators: Vec::new(),
+        },
+        crate::mode::Finding {
+            summary: "time: a gap".into(),
+            kind: crate::mode::FindingKind::Continuity,
+            chapters: vec![format!("Ch{}", n - 1)],
+            book: None,
+            action: Some(crate::mode::AiAction::Continuity),
+            corroborators: Vec::new(),
+        },
+    ];
+    app.accumulate_triage(&findings);
+
+    let iters = 200;
+    let t = Instant::now();
+    for _ in 0..iters {
+        let _ = app.verify_on_idle_targets(); // the planning cost the idle tick pays
+    }
+    let per = t.elapsed() / iters;
+
+    // A whole-manuscript digest sweep would be O(n) file reads (~ms at this size);
+    // digesting only the two open findings' chapters keeps it flat and cheap.
+    println!("verify-on-idle plan over a {n}-chapter project = {per:?}");
+    assert!(per.as_micros() < 500, "verify-on-idle plan took {per:?}");
+}
+
 /// Open an `n`-chapter project whose chapters each hold prose plus one `xxx`
 /// marker, ready for the save-path perf guard. Each chapter is deliberately
 /// non-trivial so that a regression to per-chapter disk reads/scans would show up

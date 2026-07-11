@@ -49,5 +49,9 @@ impl App {
         if wrote && self.under_vc {
             let _ = crate::vcs::commit_findings(&root, "Update findings");
         }
+        // Baseline the chapters these findings speak for (#1053), so "verify on idle"
+        // can tell later whether an edit has touched them since. A no-op unless the
+        // opt-in is on; bounded to just these findings' chapters, never the book.
+        self.record_verify_baselines(findings);
     }
 }

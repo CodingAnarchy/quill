@@ -113,6 +113,7 @@ mod style_flags;
 mod typography;
 mod vcs;
 mod vcs_concurrency;
+mod verify_idle;
 mod vim;
 mod vim_case;
 mod vim_dot;
