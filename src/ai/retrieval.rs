@@ -55,7 +55,7 @@ use crate::ai::embed::Chapter;
 use crate::ai::tool_loop::{
     self, build_body, tool_result_message, tool_use_message, Converse, ToolCall, Turn,
 };
-use crate::ai::{Answer, Response, Usage, QA_SYSTEM_RETRIEVAL};
+use crate::ai::{Answer, Coverage, Response, Usage, QA_SYSTEM_RETRIEVAL};
 
 /// The tool the model calls to read one chapter's full prose by title.
 pub const READ_CHAPTER: &str = "read:chapter";
@@ -387,6 +387,7 @@ pub fn run_retrieval<C: Converse + ?Sized, S: ManuscriptSearch>(
     let tools = Tools { search, bible };
     let tool_defs = retrieval_tools();
     let budget = excerpt_char_budget(window_tokens);
+    let total_chapters = search.chapters().len();
 
     // The opening context: the bible seed as a global index + the chapter list, then
     // the question — NEVER the whole manuscript (the #856 key difference from the
@@ -404,7 +405,7 @@ pub fn run_retrieval<C: Converse + ?Sized, S: ManuscriptSearch>(
             RETRIEVAL_MAX_OUTPUT_TOKENS,
         );
         match converse.respond(&body)? {
-            Turn::Final(text) => return Ok(finish(&text, &excerpts, bible, false)),
+            Turn::Final(text) => return Ok(finish(&text, &excerpts, bible, total_chapters, false)),
             Turn::ToolCalls(calls) if turn + 1 >= max_turns => {
                 // The next turn would exceed the cap: run this batch's reads so their
                 // signal isn't lost, then answer with what we gathered (#856: never
@@ -430,8 +431,8 @@ pub fn run_retrieval<C: Converse + ?Sized, S: ManuscriptSearch>(
         RETRIEVAL_MAX_OUTPUT_TOKENS,
     );
     match converse.respond(&body) {
-        Ok(Turn::Final(text)) => Ok(finish(&text, &excerpts, bible, hit_cap)),
-        _ => Ok(finish("", &excerpts, bible, true)),
+        Ok(Turn::Final(text)) => Ok(finish(&text, &excerpts, bible, total_chapters, hit_cap)),
+        _ => Ok(finish("", &excerpts, bible, total_chapters, true)),
     }
 }
 
@@ -520,12 +521,20 @@ fn compact(messages: &mut Vec<Value>, excerpts: &mut [Excerpt], budget: usize) {
 const COMPACT_NOTE_MAX: usize = 200;
 
 /// Assemble the final [`Answer`] from the model's reply and the accumulated excerpts
-/// (#856): the answer prose, the citations gathered across every chapter actually
-/// read/searched (deduped, in encounter order), and a disclosure that the answer was
-/// built from excerpts (and — when `incomplete` — that the turn cap was hit before the
-/// model could finish). Never emits manuscript prose: the answer is analysis, the
-/// citations are chapter titles.
-fn finish(text: &str, excerpts: &[Excerpt], bible: &BibleSeed, incomplete: bool) -> Answer {
+/// (#856, #1056): the answer prose, the citations gathered across every chapter
+/// actually read/searched (deduped, in encounter order), a structured [`Coverage`]
+/// record of the read-set and how complete it was, and a disclosure derived from that
+/// coverage so a holistic answer stays hedged. `total_chapters` is the size of the
+/// manuscript the loop read from, so coverage reads as a fraction ("6 of 40").
+/// `incomplete` is set when the turn cap was reached. Never emits manuscript prose:
+/// the answer is analysis, the citations and the read-set are chapter titles.
+fn finish(
+    text: &str,
+    excerpts: &[Excerpt],
+    bible: &BibleSeed,
+    total_chapters: usize,
+    incomplete: bool,
+) -> Answer {
     let text = text.trim();
     // Prefer the model's own {answer, citations} JSON when it produced one; otherwise
     // treat the reply as plain answer prose.
@@ -557,19 +566,58 @@ fn finish(text: &str, excerpts: &[Excerpt], bible: &BibleSeed, incomplete: bool)
     }
     answer.citations = citations;
 
-    // Disclose the retrieval nature so a holistic answer stays hedged (#856).
-    let mut disclosure = String::from(
-        "\n\n(Answered offline from targeted excerpts, not a full read of the manuscript",
+    // The coverage metadata (#1056): the read-set (exactly the merged citations — the
+    // chapters the loop touched), the corpus size, and the reasons coverage may be
+    // partial. This is metadata about the read, asserted separately from the prose.
+    let coverage = Coverage {
+        chapters_read: answer.citations.clone(),
+        chapters_total: total_chapters,
+        no_bible: bible.is_empty(),
+        cap_reached: incomplete,
+    };
+
+    // Disclose the retrieval nature so a holistic answer stays hedged (#856, #1056).
+    // The disclosure is DERIVED from the coverage metadata — a human-readable rendering
+    // of the same facts, appended so it reads in the answer overlay. It never adds or
+    // alters the answer prose above it; the metadata is the source of truth.
+    answer.answer = format!(
+        "{}{}",
+        answer.answer.trim_end(),
+        coverage_disclosure(&coverage)
     );
-    if bible.is_empty() {
-        disclosure.push_str("; no story bible was available, so coverage may be partial");
-    }
-    if incomplete {
-        disclosure.push_str("; the retrieval turn cap was reached, so coverage is incomplete");
-    }
-    disclosure.push_str(".)");
-    answer.answer = format!("{}{}", answer.answer.trim_end(), disclosure);
+    answer.coverage = Some(coverage);
     answer
+}
+
+/// Render the coverage metadata (#1056) as the human-readable disclosure appended to
+/// an offline answer: what fraction of the book the loop read and why coverage may be
+/// partial ("Answered offline from 6 of 40 chapters read…"). Purely derived from
+/// [`Coverage`] — the metadata is the source of truth, this is its rendering — so the
+/// disclosure and the structured coverage can never disagree. A well-covered answer
+/// (every chapter read, a bible present, no cap) gets a plain, unhedged note.
+fn coverage_disclosure(coverage: &Coverage) -> String {
+    let read = coverage.chapters_read.len();
+    let total = coverage.chapters_total;
+    let mut out = if !coverage.is_hedged() {
+        // Read the whole book, with a bible, uninterrupted: no hedge to make.
+        String::from("\n\n(Answered offline from a full read of the manuscript")
+    } else if total > 0 {
+        format!(
+            "\n\n(Answered offline from {read} of {total} chapters read, not the whole manuscript"
+        )
+    } else {
+        String::from(
+            "\n\n(Answered offline from targeted excerpts, not a full read of the manuscript",
+        )
+    };
+    if coverage.no_bible {
+        out.push_str("; no story bible was available, so coverage may be partial");
+    }
+    if coverage.cap_reached {
+        out.push_str("; the retrieval turn cap was reached, so coverage is incomplete");
+    }
+    out.push_str(".)");
+    out
 }
 
 /// Wrap a loop [`Answer`] as the [`Response`] the shared Q&A dispatch consumes
@@ -697,10 +745,12 @@ mod tests {
             "cites the chapter it actually read: {:?}",
             answer.citations
         );
-        // Read-only disclosure so a holistic answer stays hedged (#856).
+        // Read-only disclosure so a holistic answer stays hedged (#856): it read 1 of
+        // the 40 chapters, so the disclosure says so rather than reading as exhaustive.
         assert!(
-            answer.answer.contains("offline from targeted excerpts"),
-            "discloses it did not read the whole manuscript"
+            answer.answer.contains("1 of 40 chapters read"),
+            "discloses it did not read the whole manuscript: {}",
+            answer.answer
         );
     }
 
@@ -909,6 +959,203 @@ mod tests {
         assert!(!answer
             .answer
             .contains(&"Mara walked the quiet road. ".repeat(10)));
+    }
+
+    #[test]
+    fn coverage_metadata_records_the_read_set_and_a_coverage_sense() {
+        // #1056: the answer carries structured coverage — WHICH chapters it read and
+        // HOW COMPLETE that was — as metadata, asserted separately from the prose.
+        let search = LexicalSearch::new(oversized_corpus());
+        let bible = bible_with_sections();
+        let mock = MockConverse::new(vec![
+            call(READ_CHAPTER, "Chapter 7"),
+            call(READ_CHAPTER, "Chapter 12"),
+            Turn::Final(
+                r#"{"answer":"Both threads appear.","citations":["Chapter 7","Chapter 12"]}"#
+                    .to_string(),
+            ),
+        ]);
+        let answer = run_retrieval(
+            &mock,
+            &search,
+            &bible,
+            "Trace the locket and the father thread.",
+            RETRIEVAL_MAX_TURNS,
+            STANDARD_CONTEXT_TOKENS,
+        )
+        .unwrap();
+        let coverage = answer
+            .coverage
+            .as_ref()
+            .expect("offline answer has coverage");
+        // The read-set: exactly the two chapters it read, in order.
+        assert_eq!(
+            coverage.chapters_read,
+            vec!["Chapter 7".to_string(), "Chapter 12".to_string()],
+            "coverage records the chapters actually read"
+        );
+        // The coverage sense: 2 of 40, a bible was present, the cap wasn't hit.
+        assert_eq!(coverage.chapters_total, 40, "the whole corpus size");
+        assert!(!coverage.no_bible);
+        assert!(!coverage.cap_reached);
+        // Metadata, not prose: assert the coverage independently of the answer text.
+        assert!(coverage.is_hedged(), "2 of 40 is a partial read, so hedged");
+    }
+
+    #[test]
+    fn a_holistic_partial_read_is_hedged_in_metadata_and_disclosure() {
+        // A holistic question the loop can't fully cover (it read a handful of 40
+        // chapters) is hedged accordingly — both in the coverage metadata and in the
+        // derived, prose-independent disclosure (#1056).
+        let search = LexicalSearch::new(oversized_corpus());
+        let bible = bible_with_sections();
+        let mock = MockConverse::new(vec![
+            call(READ_CHAPTER, "Chapter 7"),
+            Turn::Final(
+                r#"{"answer":"The book is broadly about a journey.","citations":["Chapter 7"]}"#
+                    .to_string(),
+            ),
+        ]);
+        let answer = run_retrieval(
+            &mock,
+            &search,
+            &bible,
+            "What is the book about, overall?",
+            RETRIEVAL_MAX_TURNS,
+            STANDARD_CONTEXT_TOKENS,
+        )
+        .unwrap();
+        let coverage = answer.coverage.as_ref().unwrap();
+        assert!(
+            coverage.chapters_read.len() < coverage.chapters_total,
+            "read fewer than all chapters"
+        );
+        assert!(coverage.is_hedged(), "a partial read is hedged");
+        // The disclosure is derived metadata, appended after the prose — it discloses
+        // the fraction read and does NOT alter the answer prose itself.
+        assert!(
+            answer.answer.contains("1 of 40 chapters read"),
+            "discloses the coverage fraction: {}",
+            answer.answer
+        );
+        assert!(
+            answer.answer.contains("not the whole manuscript"),
+            "hedges a holistic answer: {}",
+            answer.answer
+        );
+    }
+
+    #[test]
+    fn disclosure_is_metadata_and_never_alters_the_answer_prose() {
+        // #1056: the coverage disclosure is metadata about the read — it's appended
+        // after the model's prose and never rewrites it. The answer prose the model
+        // produced survives verbatim ahead of the disclosure.
+        let search = LexicalSearch::new(oversized_corpus());
+        let bible = bible_with_sections();
+        let prose = "The locket is introduced in Chapter 7.";
+        let mock = MockConverse::new(vec![
+            call(READ_CHAPTER, "Chapter 7"),
+            Turn::Final(format!(
+                r#"{{"answer":"{prose}","citations":["Chapter 7"]}}"#
+            )),
+        ]);
+        let answer = run_retrieval(
+            &mock,
+            &search,
+            &bible,
+            "Where is the locket introduced?",
+            RETRIEVAL_MAX_TURNS,
+            STANDARD_CONTEXT_TOKENS,
+        )
+        .unwrap();
+        // The model's prose is intact and leads the answer; the disclosure follows it.
+        assert!(
+            answer.answer.starts_with(prose),
+            "the answer prose is unaltered: {}",
+            answer.answer
+        );
+        // The coverage read-set matches the disclosure fraction — one source of truth.
+        let coverage = answer.coverage.as_ref().unwrap();
+        assert_eq!(coverage.chapters_read, vec!["Chapter 7".to_string()]);
+        let (read, total) = (coverage.chapters_read.len(), coverage.chapters_total);
+        assert!(answer
+            .answer
+            .contains(&format!("{read} of {total} chapters read")));
+    }
+
+    #[test]
+    fn a_well_covered_answer_is_not_spuriously_hedged() {
+        // When the loop reads EVERY chapter of a small book, with a bible and no cap,
+        // coverage is complete — the answer is not hedged (#1056). Guards against a
+        // spurious "may be incomplete" on an answer that genuinely covered the book.
+        let small = vec![
+            chapter("One", "Mara found the locket by the shore."),
+            chapter("Two", "She spoke of her father at last."),
+        ];
+        let search = LexicalSearch::new(small);
+        let bible = bible_with_sections();
+        let mock = MockConverse::new(vec![
+            call(READ_CHAPTER, "One"),
+            call(READ_CHAPTER, "Two"),
+            Turn::Final(
+                r#"{"answer":"The locket and the father both appear.","citations":["One","Two"]}"#
+                    .to_string(),
+            ),
+        ]);
+        let answer = run_retrieval(
+            &mock,
+            &search,
+            &bible,
+            "Do the locket and the father both appear?",
+            RETRIEVAL_MAX_TURNS,
+            STANDARD_CONTEXT_TOKENS,
+        )
+        .unwrap();
+        let coverage = answer.coverage.as_ref().unwrap();
+        assert_eq!(
+            coverage.chapters_read.len(),
+            coverage.chapters_total,
+            "read all"
+        );
+        assert!(!coverage.is_hedged(), "a full read is not hedged");
+        assert!(
+            answer.answer.contains("full read of the manuscript"),
+            "an unhedged answer says so plainly: {}",
+            answer.answer
+        );
+        assert!(
+            !answer.answer.contains("may be partial") && !answer.answer.contains("incomplete"),
+            "not spuriously hedged: {}",
+            answer.answer
+        );
+    }
+
+    #[test]
+    fn coverage_survives_the_response_round_trip() {
+        // The offline answer is serialized to a Response and re-parsed by the shared
+        // Q&A dispatch (#856); the coverage metadata must survive that round-trip so
+        // the presenter can surface it (#1056).
+        let search = LexicalSearch::new(oversized_corpus());
+        let bible = bible_with_sections();
+        let mock = MockConverse::new(vec![
+            call(READ_CHAPTER, "Chapter 7"),
+            Turn::Final(r#"{"answer":"Chapter 7.","citations":["Chapter 7"]}"#.to_string()),
+        ]);
+        let answer = run_retrieval(
+            &mock,
+            &search,
+            &bible,
+            "Where is the locket?",
+            RETRIEVAL_MAX_TURNS,
+            STANDARD_CONTEXT_TOKENS,
+        )
+        .unwrap();
+        let response = answer_response(&answer);
+        let reparsed = crate::ai::parse_answer(&response.text);
+        assert_eq!(
+            reparsed.coverage, answer.coverage,
+            "coverage survives serialize → parse_answer"
+        );
     }
 
     #[test]

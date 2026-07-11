@@ -618,6 +618,54 @@ pub struct Answer {
     /// Chapter titles the answer draws from — jumpable citations. May be empty.
     #[serde(default)]
     pub citations: Vec<String>,
+    /// For an offline read-loop answer (#1056): metadata about *what the loop read*
+    /// and *how completely* it covered the book — the read-set and a coverage sense,
+    /// so a holistic answer stays hedged rather than presented as exhaustive. `None`
+    /// for the whole-book (cloud) path, which reads the entire manuscript. This is
+    /// metadata about the read; it never adds or alters the answer prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<Coverage>,
+}
+
+/// Coverage metadata for an offline read-loop Q&A answer (#1056): a structured,
+/// answer-prose-independent record of *what the loop read* and *how complete* that
+/// coverage was, so the disclosure ("answered from 6 of 40 chapters; may be
+/// incomplete") is testable on its own, separate from the answer text.
+///
+/// The loop answers from the chapters it *chose* to read, not the whole book — this
+/// captures that read-set and the reasons coverage may be partial (no story bible to
+/// seed from; the retrieval turn cap reached before finishing). It is metadata about
+/// the read: it never adds or alters manuscript prose.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Coverage {
+    /// The chapters the loop actually read or searched — the read-set, deduped and
+    /// in encounter order. These are the same chapter titles as [`Answer::citations`]:
+    /// the ground truth of what the answer could draw from.
+    #[serde(default)]
+    pub chapters_read: Vec<String>,
+    /// How many chapters the manuscript has in total, so `chapters_read.len()` of
+    /// `chapters_total` reads as a coverage fraction ("6 of 40").
+    #[serde(default)]
+    pub chapters_total: usize,
+    /// No story bible was available to seed the loop, so it ran search-only and the
+    /// diffuse global structure a bible carries was missing — coverage may be partial.
+    #[serde(default)]
+    pub no_bible: bool,
+    /// The retrieval turn cap was reached before the loop could finish gathering, so
+    /// the answer is from what it managed to read — coverage is incomplete.
+    #[serde(default)]
+    pub cap_reached: bool,
+}
+
+impl Coverage {
+    /// Whether this answer should be hedged: the loop did not read the whole book, or
+    /// it lacked a bible, or it hit the turn cap. True unless the read-set covered
+    /// every chapter with a full, uninterrupted read — the calibration the author
+    /// needs so a holistic answer isn't trusted as exhaustive (#1056).
+    #[must_use]
+    pub const fn is_hedged(&self) -> bool {
+        self.no_bible || self.cap_reached || self.chapters_read.len() < self.chapters_total
+    }
 }
 
 /// The JSON Schema for a grounded Q&A reply (#609): the answer prose plus the
@@ -689,6 +737,7 @@ pub fn parse_answer(text: &str) -> Answer {
     serde_json::from_str::<Answer>(text).unwrap_or_else(|_| Answer {
         answer: text.to_string(),
         citations: Vec::new(),
+        coverage: None,
     })
 }
 
@@ -920,6 +969,7 @@ mod tests {
         let answer = Answer {
             answer: "Chapter One introduces the locket.".into(),
             citations: vec!["One".into()],
+            ..Answer::default()
         };
         let usage = Usage {
             input_tokens: 1200,

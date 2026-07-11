@@ -52,6 +52,10 @@ impl Record {
             answer: Answer {
                 answer: self.answer.clone(),
                 citations: self.citations.clone(),
+                // Coverage (#1056) is ephemeral disclosure for the live answer; the
+                // prose disclosure is already baked into `answer`, so a reloaded past
+                // ask carries no separate coverage metadata.
+                coverage: None,
             },
         }
     }
@@ -124,6 +128,7 @@ mod tests {
                     .iter()
                     .map(std::string::ToString::to_string)
                     .collect(),
+                ..Answer::default()
             },
         }
     }
