@@ -2,6 +2,9 @@
 //! search and the manuscript-wide project search, their stages, matches, and the
 //! grouped / preview rows. Split out of `states.rs` (pure move).
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::text::MatchOpts;
 
 /// State for an open [`Mode::Search`] — find or find-and-replace (#144), scoped
@@ -83,6 +86,14 @@ pub struct ProjectSearch {
     pub(crate) replaced: usize,
     /// Case-sensitive / whole-word toggles (#570), same default as [`Search`].
     pub(crate) opts: MatchOpts,
+    /// The chapter grouping (#977) memoized against `matches.len()`, so the
+    /// Grouped/Preview overlays — which call [`grouped`](Self::grouped) (directly
+    /// and via `chapter_span`/`preview_rows`) several times per frame — rebuild the
+    /// groups and clone each chapter title only when the matches actually change,
+    /// not on every draw. `matches` is only ever replaced wholesale (a new search)
+    /// or shrunk one entry at a time (a step-replace), both of which change the
+    /// length, so it's a sound invalidation key.
+    groups: RefCell<Option<(usize, Rc<Vec<ChapterGroup>>)>>,
 }
 
 impl ProjectSearch {
@@ -96,6 +107,7 @@ impl ProjectSearch {
             group_selected: 0,
             replaced: 0,
             opts: MatchOpts::default(),
+            groups: RefCell::new(None),
         }
     }
 
@@ -112,14 +124,14 @@ impl ProjectSearch {
     /// collected, so the snippets are drawn from the same bytes the sweep sees.
     pub(crate) fn preview_rows(&self) -> Vec<PreviewRow> {
         self.grouped()
-            .into_iter()
+            .iter()
             .map(|g| PreviewRow {
                 context: self
                     .matches
                     .get(g.first_match)
                     .map(|m| m.context.clone())
                     .unwrap_or_default(),
-                title: g.title,
+                title: g.title.clone(),
                 count: g.count,
             })
             .collect()
@@ -129,7 +141,26 @@ impl ProjectSearch {
     /// with its per-chapter count and the index of its first match (the jump
     /// target). Matches are already collected in chapter-then-document order, so
     /// each chapter's matches are one contiguous run.
-    pub(crate) fn grouped(&self) -> Vec<ChapterGroup> {
+    ///
+    /// Memoized against `matches.len()` (#977): the Grouped/Preview overlays call
+    /// this several times per frame, so the groups are built (and each title
+    /// cloned) once per change to `matches`, then shared via `Rc` on later calls.
+    pub(crate) fn grouped(&self) -> Rc<Vec<ChapterGroup>> {
+        let key = self.matches.len();
+        let mut cache = self.groups.borrow_mut();
+        if let Some((cached_key, groups)) = cache.as_ref() {
+            if *cached_key == key {
+                return Rc::clone(groups);
+            }
+        }
+        let groups = Rc::new(self.build_groups());
+        *cache = Some((key, Rc::clone(&groups)));
+        groups
+    }
+
+    /// Build the chapter grouping from scratch — the allocating half of
+    /// [`grouped`](Self::grouped), run only when the memo misses.
+    fn build_groups(&self) -> Vec<ChapterGroup> {
         let mut groups: Vec<ChapterGroup> = Vec::new();
         for (i, m) in self.matches.iter().enumerate() {
             match groups.last_mut() {
@@ -212,4 +243,64 @@ pub enum SearchStage {
     Replacement,
     /// Replace: stepping through matches, choosing replace / skip / all.
     Step,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn m(chapter: usize, title: &str) -> ProjectMatch {
+        ProjectMatch {
+            chapter,
+            start: 0,
+            end: 1,
+            title: title.into(),
+            context: format!("ctx {title}"),
+        }
+    }
+
+    #[test]
+    fn grouped_is_memoized_and_invalidates_when_matches_change() {
+        // The grouping (#977) is built once per change to `matches` and shared via
+        // `Rc` — the Grouped/Preview overlays call it several times per frame, so it
+        // must not rebuild + re-clone titles on every draw. The value is identical
+        // to computing it fresh.
+        let mut ps = ProjectSearch::new();
+        ps.matches = vec![m(0, "One"), m(0, "One"), m(1, "Two")];
+
+        let a = ps.grouped();
+        let b = ps.grouped();
+        assert!(
+            Rc::ptr_eq(&a, &b),
+            "a second call reuses the memoized groups"
+        );
+
+        // The content matches a fresh (unmemoized) build exactly.
+        let fresh = ps.build_groups();
+        assert_eq!(a.len(), fresh.len());
+        for (g, f) in a.iter().zip(&fresh) {
+            assert_eq!(
+                (g.chapter, g.count, g.first_match),
+                (f.chapter, f.count, f.first_match)
+            );
+            assert_eq!(g.title, f.title);
+        }
+        // Two chapters, counts 2 and 1, first-match indices 0 and 2.
+        assert_eq!(
+            a.iter()
+                .map(|g| (g.chapter, g.count, g.first_match))
+                .collect::<Vec<_>>(),
+            vec![(0, 2, 0), (1, 1, 2)]
+        );
+
+        // Shrinking `matches` (a step-replace removes one) changes the length, so
+        // the memo misses and rebuilds against the new matches.
+        ps.matches.remove(2);
+        let c = ps.grouped();
+        assert!(
+            !Rc::ptr_eq(&b, &c),
+            "a changed match list rebuilds the groups"
+        );
+        assert_eq!(c.iter().map(|g| g.chapter).collect::<Vec<_>>(), vec![0]);
+    }
 }

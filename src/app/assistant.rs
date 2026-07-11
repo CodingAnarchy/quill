@@ -149,6 +149,11 @@ pub struct Assistant {
     ran: Vec<String>,
     /// Tool-use turns spent on the current request, capped at [`tool_loop::MAX_TURNS`].
     turns: usize,
+    /// The pre-wrapped transcript rows and the signature they were built for (#307),
+    /// so an open pane reuses them per frame rather than re-wrapping every entry.
+    /// Filled by the renderer; invalidated the moment an entry is appended (the
+    /// signature keys on the entry count), a resize, or a theme switch.
+    wrap_cache: std::cell::RefCell<crate::ui::AssistantWrapCache>,
 }
 
 impl Assistant {
@@ -169,6 +174,7 @@ impl Assistant {
             pending_continue: false,
             ran: Vec::new(),
             turns: 0,
+            wrap_cache: std::cell::RefCell::new(crate::ui::AssistantWrapCache::default()),
         };
         a.entries.push(Entry::sys(
             "Type a request and press Enter. Esc cancels a run; Ctrl-w c closes the pane.",
@@ -219,6 +225,12 @@ impl Assistant {
     /// The transcript lines, for the renderer.
     pub(crate) fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    /// The renderer's wrapped-transcript cache (#307), reused across frames while
+    /// the entry count, width, and theme are unchanged.
+    pub(crate) const fn wrap_cache(&self) -> &std::cell::RefCell<crate::ui::AssistantWrapCache> {
+        &self.wrap_cache
     }
 
     /// The request line being typed, for the renderer.
@@ -859,5 +871,36 @@ impl App {
     #[cfg(test)]
     pub(super) fn test_spawn_turn(&mut self) {
         self.spawn_assistant_turn();
+    }
+
+    /// Open the assistant pane with a couple of seeded transcript entries, for the
+    /// renderer's wrap-cache tests (#307) — no backend, no network turn.
+    #[cfg(test)]
+    pub(crate) fn test_open_assistant_with_entries(&mut self) {
+        self.open_assistant();
+        if let Some(a) = self.assistant_mut() {
+            a.entries
+                .push(Entry::you("a request that wraps across the pane"));
+            a.entries.push(Entry::assistant(
+                "a reply long enough to wrap onto several rows",
+            ));
+        }
+    }
+
+    /// Append one transcript entry to the open assistant pane, for the wrap-cache
+    /// invalidation test (#307).
+    #[cfg(test)]
+    pub(crate) fn test_assistant_append(&mut self, text: &str) {
+        if let Some(a) = self.assistant_mut() {
+            a.entries.push(Entry::assistant(text));
+        }
+    }
+
+    /// The identity of the open pane's cached wrapped rows (#307), for tests to
+    /// assert a frame reused them (same pointer) or rebuilt them (different).
+    #[cfg(test)]
+    pub(crate) fn test_assistant_wrap_identity(&self) -> *const Vec<ratatui::text::Line<'static>> {
+        self.assistant()
+            .map_or(std::ptr::null(), |a| a.wrap_cache().borrow().identity())
     }
 }

@@ -153,12 +153,13 @@ fn sprint_tag(app: &App) -> String {
 /// goal set. The goal is the value cached on the chapter entry at open — never a
 /// per-draw file read — and the count is the live active-chapter count (the
 /// buffer, so it moves as you type), so this stays O(1) per frame.
-fn chapter_goal_tag(app: &App) -> String {
-    let active = app.project.active_index();
+fn chapter_goal_tag(app: &App, active: usize) -> String {
     app.project
         .chapter_goal(active)
         .map_or_else(String::new, |goal| {
-            let words = app.chapter_word_count(active);
+            // `active` is resolved once by the caller (`active_index` is an O(n)
+            // scan), so the goal and the count share the one lookup.
+            let words = app.chapter_word_count_with_active(active, active);
             format!(
                 " · {}",
                 crate::app::sprint::chapter_goal_segment(words, goal)
@@ -287,6 +288,10 @@ pub(super) fn editor_status_bar(app: &App) -> (String, String) {
         },
         |m| format!("{m}  "),
     );
+    // Resolve the active chapter once (`active_index` is an O(chapters) scan) and
+    // thread it into the goal tag, which otherwise re-resolved it two more times
+    // per frame (once directly, once inside `chapter_word_count`).
+    let active = app.project.active_index();
     let left = format!(
         " {name}{dirty}{}{}{}{}{}{}{}{}",
         read_only_tag(app),
@@ -294,7 +299,7 @@ pub(super) fn editor_status_bar(app: &App) -> (String, String) {
         local_backup_tag(app),
         ai_tag(app),
         sprint_tag(app),
-        chapter_goal_tag(app),
+        chapter_goal_tag(app, active),
         session_target_tag(app),
         daily_nudge_tag(app)
     );

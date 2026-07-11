@@ -179,6 +179,39 @@ fn header_blocks_are_cached_across_frames_and_invalidate_on_change() {
 }
 
 #[test]
+fn header_and_scene_break_inserts_render_identically_across_frames() {
+    // A chapter with both an epigraph header (#518) and a scene break (#908): the
+    // merge of the cached header blocks with the scene-break rows must produce the
+    // exact same frame each draw, and it must not disturb the cached header `Rc`
+    // (which is reused by refcount, never deep-cloned per frame in `merge_inserts`).
+    let mut app = app_with("# Chapter\n\nBefore the break.\n\n---\n\nAfter the break.\n");
+    app.buffer.front_matter_mut().set_epigraph_text("A quote.");
+    app.buffer.front_matter_mut().set_epigraph_by("Author");
+
+    let first = render(&app, 80, 24);
+    let id1 = app.header_cache.borrow().identity();
+    let second = render(&app, 80, 24);
+    let id2 = app.header_cache.borrow().identity();
+
+    assert!(first.contains("A quote."), "epigraph shows:\n{first}");
+    assert!(first.contains("— Author"), "attribution shows:\n{first}");
+    assert!(first.contains("Before the break."), "body:\n{first}");
+    assert!(first.contains("After the break."), "body:\n{first}");
+    assert!(
+        first.contains("* * *"),
+        "the scene-break divider renders:\n{first}"
+    );
+    assert_eq!(
+        first, second,
+        "the header + scene-break render is byte-identical across frames"
+    );
+    assert_eq!(
+        id1, id2,
+        "the cached header blocks are reused across frames even with a scene break"
+    );
+}
+
+#[test]
 fn a_multiline_epigraph_renders_one_line_each() {
     let mut app = app_with("# Chapter\n\nBody.\n");
     let fm = app.buffer.front_matter_mut();

@@ -85,6 +85,12 @@ pub struct Syntax {
     conceal_all: Rc<[(usize, usize)]>,
     /// Headings in document order — the in-chapter outline (#11).
     headings: Vec<Heading>,
+    /// The buffer line each scene break (`---`, `* * *`, …) sits on, in document
+    /// order. Computed once per parse/reparse (breaks change only then) so the
+    /// scene-break divider renderer reads a ready slice instead of scanning every
+    /// highlight and allocating a line-lookup `String` per break each frame — the
+    /// same shape as the `conceal_all`/`highlights` caches.
+    scene_breaks: Vec<usize>,
 }
 
 impl Syntax {
@@ -101,6 +107,7 @@ impl Syntax {
             .expect("markdown parse should not fail without a timeout/cancellation");
         let (highlights, markers, headings) = collect(&tree, |s, e| text[s..e].to_string());
         let conceal_all = conceal_all_from(&markers);
+        let scene_breaks = scene_break_lines_from(&highlights, |b| byte_to_line_in_str(text, b));
         Self {
             parser,
             tree,
@@ -108,6 +115,7 @@ impl Syntax {
             markers,
             conceal_all,
             headings,
+            scene_breaks,
         }
     }
 
@@ -144,6 +152,8 @@ impl Syntax {
             self.tree = tree;
             let (highlights, markers, headings) =
                 collect(&self.tree, |s, e| rope.byte_slice(s..e).to_string());
+            self.scene_breaks =
+                scene_break_lines_from(&highlights, |b| rope.byte_to_line(b.min(len)));
             self.highlights = highlights;
             self.conceal_all = conceal_all_from(&markers);
             self.markers = markers;
@@ -195,6 +205,14 @@ impl Syntax {
     pub fn headings(&self) -> &[Heading] {
         &self.headings
     }
+
+    /// The buffer line each scene break sits on, in document order (#908). Cached
+    /// per parse/reparse so the scene-break divider renderer reads it directly
+    /// rather than scanning every highlight and doing a per-break line lookup each
+    /// frame.
+    pub fn scene_break_lines(&self) -> &[usize] {
+        &self.scene_breaks
+    }
 }
 
 /// The full conceal list (every marker's delimiter range) as a shared slice, in
@@ -204,6 +222,31 @@ fn conceal_all_from(markers: &[Marker]) -> Rc<[(usize, usize)]> {
         .iter()
         .map(|m| (m.delim_start, m.delim_end))
         .collect()
+}
+
+/// The buffer line each scene break sits on, in document order — cached on
+/// [`Syntax`] per parse/reparse (#908). Highlights are start-sorted, so the breaks
+/// come out in document order; `line_of` maps a break's start byte to its line.
+fn scene_break_lines_from(
+    highlights: &[Highlight],
+    mut line_of: impl FnMut(usize) -> usize,
+) -> Vec<usize> {
+    highlights
+        .iter()
+        .filter(|h| h.kind == HighlightKind::SceneBreak)
+        .map(|h| line_of(h.start))
+        .collect()
+}
+
+/// The 0-based line a byte offset falls on within `text` — the newline count
+/// before it. Matches `Rope::byte_to_line`, so the scene-break line cache is the
+/// same whether built from a `&str` (initial parse) or a `Rope` (reparse).
+fn byte_to_line_in_str(text: &str, byte: usize) -> usize {
+    let byte = byte.min(text.len());
+    text.as_bytes()[..byte]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
 }
 
 /// Walk the block tree (headings) and every inline tree (emphasis/strong) into a
@@ -575,6 +618,34 @@ mod tests {
                 "the break reveals under the cursor for {marker:?}"
             );
         }
+    }
+
+    #[test]
+    fn caches_scene_break_lines_on_parse_and_reparse() {
+        // The scene-break line cache (#908) records the buffer line each break sits
+        // on, computed once per parse — the renderer reads it instead of scanning
+        // every highlight and doing a per-break line lookup each frame.
+        let text = "Para one.\n\n---\n\nPara two.\n\n* * *\n\nPara three.\n";
+        let mut s = Syntax::new(text);
+        // `---` is on line 2, `* * *` on line 6 (both 0-based, newline-counted).
+        assert_eq!(s.scene_break_lines(), &[2, 6]);
+
+        // A reparse recomputes the cache off the rope (here the same document, since
+        // an incremental reparse needs its edits recorded to reconcile a change), so
+        // the cache is repopulated rather than left stale.
+        let rope = Rope::from_str(text);
+        s.reparse(&rope);
+        assert_eq!(s.scene_break_lines(), &[2, 6]);
+
+        // And the cached line matches the old per-break `byte_to_line` derivation
+        // exactly, for every break, on the initial parse.
+        let s2 = Syntax::new(text);
+        let derived: Vec<usize> = s2
+            .highlights_in(0, usize::MAX)
+            .filter(|h| h.kind == HighlightKind::SceneBreak)
+            .map(|h| Rope::from_str(text).byte_to_line(h.start))
+            .collect();
+        assert_eq!(s2.scene_break_lines(), derived.as_slice());
     }
 
     #[test]
