@@ -37,9 +37,11 @@ impl App {
         // (#563); this only supplies each row's palette label + blurb.
         let items = AiAction::SPECS
             .iter()
-            .map(|s| {
-                let (label, desc) = ai_palette_entry(s.action);
-                PaletteItem::new(label, desc, Command::Ai(s.action))
+            .filter_map(|s| {
+                // The palette label + blurb are a descriptor field (#563), so the AI
+                // palette is a pure projection of `SPECS` — no parallel match to drift.
+                let (label, desc) = s.action.palette_entry()?;
+                Some(PaletteItem::new(label, desc, Command::Ai(s.action)))
             })
             .collect();
         self.mode = Mode::Palette(Box::new(Palette {
@@ -834,138 +836,6 @@ impl App {
                 }
             }
         }
-    }
-}
-
-/// The AI palette's label + one-line blurb for an action. Presentation only —
-/// the action *set* and order come from [`AiAction::SPECS`] (#563), so this is an
-/// exhaustive `match` the compiler checks, not a hand-maintained list that can
-/// silently omit a variant.
-const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
-    match action {
-        AiAction::Ask => (
-            "Ask the manuscript",
-            "Answer a question grounded in the draft",
-        ),
-        AiAction::Characters => ("Character bible", "Profiles, arcs, and drift flags"),
-        AiAction::Continuity => (
-            "Timeline & continuity",
-            "Ordered timeline + contradiction findings",
-        ),
-        AiAction::Setting => (
-            "Setting & worldbuilding",
-            "Setting bible + rule-violation findings",
-        ),
-        AiAction::Plot => (
-            "Plot & arc tracker",
-            "Thread setup→payoff status + dangling-thread findings",
-        ),
-        AiAction::Theme => (
-            "Theme & motif tracker",
-            "Motif → where it recurs / status + dangling-motif findings",
-        ),
-        AiAction::Scaffold => ("Scaffold / outline", "Beat outline + structural gaps"),
-        AiAction::Naming => ("Name & term consistency", "Spelling variants (cheap pass)"),
-        AiAction::Style => (
-            "Prose & style",
-            "POV / tense / voice findings (analysis only)",
-        ),
-        AiAction::Brainstorm => (
-            "Brainstorm ideas",
-            "Premises, themes & conflicts from a spark (off-manuscript)",
-        ),
-        AiAction::DraftCharacters => (
-            "Draft characters",
-            "Starter cast from a concept (no manuscript needed)",
-        ),
-        AiAction::DraftSetting => (
-            "Draft setting",
-            "Starter worldbuilding bible from a concept",
-        ),
-        AiAction::Voice => (
-            "Character voice",
-            "Dialogue & POV voice vs. the character bible",
-        ),
-        AiAction::Submission => (
-            "Submission material",
-            "Synopsis, blurb & query letter (off-manuscript)",
-        ),
-        AiAction::Marketing => (
-            "Marketing copy",
-            "Blurb variants & taglines (off-manuscript)",
-        ),
-        AiAction::Social => (
-            "Social posts",
-            "X / Facebook / Instagram copy (off-manuscript)",
-        ),
-        AiAction::AdCreative => (
-            "Ad creative",
-            "Amazon / Meta / X ad copy & targeting (off-manuscript)",
-        ),
-        AiAction::Portrait => (
-            "Character portraits",
-            "Portrait images from the character bible (fal.ai)",
-        ),
-        AiAction::Scene => (
-            "Scene illustration",
-            "Illustrate the active chapter (fal.ai)",
-        ),
-        AiAction::Triage => (
-            "Revision triage",
-            "All findings so far, in one list (local)",
-        ),
-        AiAction::Dashboard => (
-            "Manuscript health",
-            "Open findings by kind & chapter, with counts (local)",
-        ),
-        AiAction::CoOccurrence => (
-            "Motif & character co-occurrence",
-            "Which entries cluster & which are conspicuously apart (local)",
-        ),
-        AiAction::AskHistory => (
-            "Ask history",
-            "Re-open a past Ask — answer + jumpable citations (local)",
-        ),
-        AiAction::SemanticFind => (
-            "Find similar scenes",
-            "Ranked, jumpable passages like a selection or a query (local, reads only)",
-        ),
-        AiAction::Echo => (
-            "Echo & near-duplicate detection",
-            "Flag repeated / echoed passage pairs with scores (local, reads only)",
-        ),
-        AiAction::Thesaurus => (
-            "Word search",
-            "In-context thesaurus for a word or phrase (reference only)",
-        ),
-        AiAction::NameGen => (
-            "Name generator",
-            "Candidate character / place / term names by constraints (you pick)",
-        ),
-        AiAction::Editorial => (
-            "Editorial read",
-            "Flag structural / continuity / line issues — no fixes",
-        ),
-        AiAction::Accuracy => (
-            "Cultural & historical accuracy",
-            "Flag inaccuracies for a concern you name — accuracy, not sensitivity",
-        ),
-        AiAction::Relationship => (
-            "Relationship trajectory",
-            "Track a pair's arc per chapter + flag inconsistencies (no fixes)",
-        ),
-        AiAction::Foreshadow => (
-            "Foreshadow & payoff",
-            "Flag concrete setups that never pay off — flags only, no drafted payoff",
-        ),
-        AiAction::FactCheck => (
-            "Fact-check vs. research notebook",
-            "Flag prose that contradicts your own research notes — no fixes",
-        ),
-        AiAction::Pacing => (
-            "Pacing & tension",
-            "Located observations of the scene-level rhythm — observation only, no changes",
-        ),
     }
 }
 

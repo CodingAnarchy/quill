@@ -87,6 +87,67 @@ fn dashboard_groups_by_kind_and_chapter_with_counts() {
     assert_eq!(finding_rows, 4);
 }
 
+/// Regression for the KIND_ORDER drift (#1069): before this refactor the dashboard's
+/// kind-order list was hand-maintained and had silently dropped Accuracy,
+/// Relationship, Foreshadow, FactCheck, and Pacing — so a finding of any of those
+/// kinds vanished from the dashboard, the health trend, and the revision plan even
+/// though it was in triage. Deriving the order from `FindingKind::ALL` fixes it.
+/// This asserts every finding kind that maps to a real pass surfaces in BOTH the
+/// dashboard rows and the revision plan, so the class of bug can't recur.
+#[test]
+fn every_pass_kind_reaches_the_dashboard_and_the_revision_plan() {
+    // One finding of each pass kind (skip `Other` — it's the non-pass catch-all, not
+    // a pass finding). The five that used to be dropped are the point of the test.
+    let pass_kinds: Vec<FindingKind> = FindingKind::ALL
+        .iter()
+        .copied()
+        .filter(|k| *k != FindingKind::Other)
+        .collect();
+    let findings: Vec<Finding> = pass_kinds
+        .iter()
+        .enumerate()
+        .map(|(i, &k)| finding(k, "One", &format!("{}: issue {i}", k.label())))
+        .collect();
+
+    // The dashboard renders a kind header for every pass kind — none dropped.
+    let rows = dashboard_rows(&findings);
+    let headers = kind_headers(&rows);
+    for &k in &pass_kinds {
+        assert!(
+            headers
+                .iter()
+                .any(|(label, count)| *label == k.label() && *count == 1),
+            "dashboard dropped {} — KIND_ORDER drift (#1069)",
+            k.label()
+        );
+    }
+    // Specifically the five the old hand-list omitted.
+    for k in [
+        FindingKind::Accuracy,
+        FindingKind::Relationship,
+        FindingKind::Foreshadow,
+        FindingKind::FactCheck,
+        FindingKind::Pacing,
+    ] {
+        assert!(
+            headers.iter().any(|(label, _)| *label == k.label()),
+            "previously-dropped kind missing from dashboard: {}",
+            k.label()
+        );
+    }
+
+    // The revision plan lists a checklist line labelled with every pass kind too — it
+    // reads from the same open findings, so a dropped kind would silently vanish there.
+    let plan = revision_plan_text(&findings);
+    for &k in &pass_kinds {
+        assert!(
+            plan.contains(&format!("[{}]", k.label())),
+            "revision plan dropped {} — KIND_ORDER drift (#1069)",
+            k.label()
+        );
+    }
+}
+
 #[test]
 fn cross_pass_dedup_uses_the_kind() {
     // Two passes flag the same span with coincidentally identical text: because

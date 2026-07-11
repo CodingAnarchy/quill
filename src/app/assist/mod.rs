@@ -82,6 +82,19 @@ pub(super) fn findings_from<T>(
 // so both produce byte-identical summaries — the finding's content key, which the
 // re-check depends on to recognize the finding it just re-ran.
 
+/// The quoted-locator suffix a finding appends so the author can land on the exact
+/// span (#973/#1047/#1049/#1050/#293): ` — “{quote}”` for a non-blank, trimmed
+/// quote, or `""` when there's nothing to quote. The single place this idiom lives —
+/// it was copy-pasted across five `describe_*` handlers.
+fn quoted_locator(quote: &str) -> String {
+    let quote = quote.trim();
+    if quote.is_empty() {
+        String::new()
+    } else {
+        format!(" \u{2014} \u{201c}{quote}\u{201d}")
+    }
+}
+
 pub(super) fn describe_continuity(f: &continuity::Finding) -> (String, Vec<String>) {
     (format!("{}: {}", f.kind, f.detail), f.chapters.clone())
 }
@@ -116,12 +129,7 @@ pub(super) fn describe_style(f: &style::StyleFinding) -> (String, Vec<String>) {
 }
 
 pub(super) fn describe_editorial(n: &ai::editorial::Note) -> (String, Vec<String>) {
-    let at = n
-        .location
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(|q| format!(" \u{2014} \u{201c}{q}\u{201d}"))
-        .unwrap_or_default();
+    let at = quoted_locator(n.location.as_deref().unwrap_or_default());
     (
         format!("{}: {}{at}", n.focus, n.concern),
         n.chapters.clone(),
@@ -131,13 +139,10 @@ pub(super) fn describe_editorial(n: &ai::editorial::Note) -> (String, Vec<String
 pub(super) fn describe_accuracy(f: &ai::accuracy::AccuracyFinding) -> (String, Vec<String>) {
     // The flagged passage (when quoted) then why it may be off for the named concern
     // — an observation the author acts on, never a fix.
-    let at = f
-        .passage
-        .trim()
-        .is_empty()
-        .then(String::new)
-        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.passage.trim()));
-    (format!("{}{at}", f.detail), f.chapters.clone())
+    (
+        format!("{}{}", f.detail, quoted_locator(&f.passage)),
+        f.chapters.clone(),
+    )
 }
 
 pub(super) fn describe_relationship(
@@ -151,24 +156,16 @@ pub(super) fn describe_relationship(
 pub(super) fn describe_foreshadow(f: &ai::foreshadow::UnpaidSetup) -> (String, Vec<String>) {
     // The what-was-planted-and-why-it's-unpaid note, then the setup passage (when
     // quoted) — an observation the author acts on, never a drafted payoff.
-    let at = f
-        .setup
-        .trim()
-        .is_empty()
-        .then(String::new)
-        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.setup.trim()));
-    (format!("{}{at}", f.detail), f.chapters.clone())
+    (
+        format!("{}{}", f.detail, quoted_locator(&f.setup)),
+        f.chapters.clone(),
+    )
 }
 
 pub(super) fn describe_factcheck(f: &ai::factcheck::FactCheckFinding) -> (String, Vec<String>) {
     // Cite the contradicted research note, the contradiction, then the flagged
     // passage (when quoted) — an observation the author acts on, never a fix.
-    let at = f
-        .passage
-        .trim()
-        .is_empty()
-        .then(String::new)
-        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.passage.trim()));
+    let at = quoted_locator(&f.passage);
     let note = f.note.trim();
     let summary = if note.is_empty() {
         format!("{}{at}", f.detail)
@@ -195,33 +192,44 @@ pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
     } else {
         format!("{} ({}): {}", f.kind, f.character, f.detail)
     };
-    let at = f
-        .line
-        .trim()
-        .is_empty()
-        .then(String::new)
-        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.line.trim()));
-    (format!("{head}{at}"), f.chapters.clone())
+    (
+        format!("{head}{}", quoted_locator(&f.line)),
+        f.chapters.clone(),
+    )
 }
+
+/// The single fn signature that turns a pass's raw JSON response into the UI
+/// findings it produces, attributed to an `action` + `book`. The one place a
+/// response becomes findings for the analysis-only passes: the interactive worker
+/// (#563), the single-finding re-check (#608), the re-check-all batch (#830), and
+/// the on-demand scoped pass (#1054) all run the *same* fn, so a re-run's findings
+/// share the original's content key by construction.
+pub(super) type FindingsParser = fn(&str, AiAction, Option<usize>) -> Vec<Finding>;
 
 /// Bundle a built re-check request with the parser that turns its response into
 /// the UI findings the pass now produces (#608), so both move into the worker
 /// closure together.
 pub(super) struct RecheckRequest {
     pub(super) request: ai::Request,
-    pub(super) to_findings: fn(&str, AiAction, Option<usize>) -> Vec<Finding>,
+    pub(super) to_findings: FindingsParser,
 }
 
-/// The parser for a re-check of `action` (#608): parse the response with the
-/// pass's own parser and map it to UI findings with the same `describe_*` the
-/// apply handler uses, so a re-run's findings share the original's content key. A
-/// parse error yields no findings — the re-check then treats the flagged finding
-/// as gone; that's acceptable (a later full pass re-surfaces it if it truly
-/// persists). Attributes each to `action` and `book`.
-pub(super) fn recheck_parser(
-    action: AiAction,
-) -> fn(&str, AiAction, Option<usize>) -> Vec<Finding> {
-    match action {
+/// The parser for `action`'s findings pass (#563): parse the response with the
+/// pass's own parser and map it to UI findings with the same `describe_*` the apply
+/// handler uses, so every path that surfaces this pass's findings — a full pass, a
+/// re-check (#608), a scoped run (#1054) — produces byte-identical summaries (the
+/// finding's content key the re-check depends on). A parse error yields no findings;
+/// for a re-check that reads as "the finding is gone" (a later full pass re-surfaces
+/// it if it truly persists). `None` for an action that surfaces no re-runnable
+/// findings — the local views, the generative helpers, and the two arg-taking
+/// passes (accuracy #973, relationship #1046) whose author-chosen argument isn't
+/// stored per finding, so a scoped re-run can't reconstruct it.
+///
+/// Kept a `match` (not a descriptor fn-pointer field) because each arm's parse +
+/// `describe_*` are the per-pass content, and threading those fn pointers up into
+/// the `crate::mode` descriptor would invert the crate's `mode → app` dependency.
+pub(super) fn findings_parser(action: AiAction) -> Option<FindingsParser> {
+    Some(match action {
         AiAction::Continuity => |text, a, book| {
             continuity::parse(text)
                 .map(|c| findings_from(&c.findings, book, a, describe_continuity))
@@ -268,6 +276,26 @@ pub(super) fn recheck_parser(
                 .map(|f| findings_from(&f.findings, book, a, describe_foreshadow))
                 .unwrap_or_default()
         },
+        AiAction::FactCheck => |text, a, book| {
+            ai::factcheck::parse(text)
+                .map(|f| findings_from(&f.findings, book, a, describe_factcheck))
+                .unwrap_or_default()
+        },
+        AiAction::Pacing => |text, a, book| {
+            ai::pacing::parse(text)
+                .map(|p| findings_from(&p.observations, book, a, describe_pacing))
+                .unwrap_or_default()
+        },
+        AiAction::Accuracy => |text, a, book| {
+            ai::accuracy::parse(text)
+                .map(|acc| findings_from(&acc.findings, book, a, describe_accuracy))
+                .unwrap_or_default()
+        },
+        AiAction::Relationship => |text, a, book| {
+            ai::relationship::parse(text)
+                .map(|t| findings_from(&t.findings, book, a, describe_relationship))
+                .unwrap_or_default()
+        },
         AiAction::Plot => |text, a, book| {
             plot::parse(text)
                 .map(|p| findings_from(&p.findings, book, a, describe_plot))
@@ -278,15 +306,55 @@ pub(super) fn recheck_parser(
                 .map(|t| findings_from(&t.findings, book, a, describe_theme))
                 .unwrap_or_default()
         },
-        // Non-finding actions never reach here (`recheck_request` returns `None`).
-        // Like the accuracy pass (#973), relationship (#1046) needs its author-chosen
-        // argument — the pair — which isn't stored per-finding, so `recheck_request`
-        // returns `None` and it never reaches this parser.
-        _ => |_, _, _| Vec::new(),
-    }
+        // No re-runnable findings: the local views, generative helpers, image/thesaurus
+        // passes, and off-manuscript copy generators.
+        _ => return None,
+    })
 }
 
 impl App {
+    /// Spawn an analysis-only findings pass (#563): `build` makes the request from
+    /// the manuscript + model (capturing any author-supplied argument — the accuracy
+    /// concern, the relationship pair, the fact-check notes, the voice profiles — so
+    /// the per-pass content stays in the closure), the response is mapped to UI
+    /// findings by the pass's shared [`findings_parser`], and the result is wrapped in
+    /// the one generic [`Outcome::Findings`] tagged with `action`. The single spawn
+    /// path every findings pass (scaffold, naming, style, editorial, voice, accuracy,
+    /// relationship, foreshadow, factcheck, pacing) shares — [`apply_findings`] then
+    /// surfaces them identically. A no-op with a status when AI isn't ready or a
+    /// request is in flight (like every spawn).
+    ///
+    /// [`apply_findings`]: App::apply_findings
+    pub(super) fn spawn_findings_pass(
+        &mut self,
+        action: AiAction,
+        message: &str,
+        build: impl FnOnce(String, &str) -> ai::Request + Send + 'static,
+    ) {
+        // The active-book analysis passes attribute to the active book (`None`), like
+        // every findings pass before this; only the series-bible refresh carries a book.
+        let to_findings = findings_parser(action);
+        self.spawn_ai(message, move |backend, manuscript, model| {
+            let findings = backend
+                .complete(&build(manuscript, &model))
+                .map(|r| to_findings.map_or_else(Vec::new, |parse| parse(&r.text, action, None)));
+            Outcome::Findings(findings)
+        });
+    }
+
+    /// Apply a completed analysis-only findings pass (#563): surface the findings the
+    /// worker already mapped from the pass's typed result. The one generic apply the
+    /// [`Outcome::Findings`] dispatch arm calls for every findings pass — the bespoke
+    /// per-pass `apply_*` handlers it replaced only differed in the typed result they
+    /// unwrapped (which the worker now does) and the `describe_*` they mapped through
+    /// (which [`findings_parser`] now holds, attributing each finding to its action).
+    pub(super) fn apply_findings(&mut self, result: Result<Vec<Finding>, ai::AiError>) {
+        let Some(findings) = self.ok_or_report(result) else {
+            return;
+        };
+        self.show_findings(findings);
+    }
+
     /// Run one persistent-bible pass (#339) for `action` scoped to `book` — the
     /// active-book passes call it with the active book; the series-bible refresh
     /// (#340) drives it per book. The tracker carries its own request builders and

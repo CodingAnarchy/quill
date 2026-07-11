@@ -13,24 +13,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::mode::{Dashboard, DashboardRow};
 
-/// The kinds shown in the dashboard, in header order — a stable, meaningful
-/// sequence (the continuity/structure passes first, prose/voice last), so the
-/// overview reads the same run to run. [`FindingKind::Other`] is intentionally
-/// last: it collects the non-pass findings (Q&A citations) that rarely reach
-/// triage but shouldn't be dropped if they do.
-const KIND_ORDER: &[FindingKind] = &[
-    FindingKind::Continuity,
-    FindingKind::Setting,
-    FindingKind::Plot,
-    FindingKind::Theme,
-    FindingKind::Scaffold,
-    FindingKind::Naming,
-    FindingKind::Style,
-    FindingKind::Editorial,
-    FindingKind::Voice,
-    FindingKind::Echo,
-    FindingKind::Other,
-];
+/// The kinds shown in the dashboard, in header order — the single, enum-derived
+/// [`FindingKind::ALL`] sequence (the continuity/structure passes first, prose/voice
+/// last, [`Other`](FindingKind::Other) last), so the overview reads the same run to
+/// run *and* every kind is represented. Deriving it from the enum (rather than a
+/// hand-maintained list) means a new finding kind can never be silently dropped from
+/// the dashboard, the health trend, or the revision-plan export (the #1069-class drift
+/// that omitted Accuracy/Relationship/Foreshadow/FactCheck/Pacing here before).
+const KIND_ORDER: &[FindingKind] = FindingKind::ALL;
 
 /// The chapter bucket a finding sorts under in the dashboard: its first (jump-
 /// target) chapter, or a placeholder for a finding with no chapter.
