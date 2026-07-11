@@ -554,6 +554,68 @@ fn range_delete_of_a_whole_seam_only_leaves_the_seam_intact() {
     fs::remove_dir_all(&dir).ok();
 }
 
+// --- Trailing orphan line (data-loss regression) -----------------------
+
+#[test]
+fn typing_on_the_trailing_line_reaches_the_last_chapters_file() {
+    // The concatenated buffer always ends in a single `\n`, so ropey reports one
+    // trailing empty line past every segment's `start + lines` span — a line the
+    // cursor can still reach (`G` / repeated Down past the last chapter's text).
+    // Prose typed there lands in the rope but grows no segment, so a `start +
+    // lines` save span excludes it and the text is silently dropped. The last
+    // segment must save through EOF to keep it.
+    let (mut project, dir) = project_with("trailing-loss", &["alpha\n", "beta\n"]);
+    let mut m = Manuscript::open(&project).unwrap();
+
+    // Buffer: "alpha\nbeta\n" → 3 lines (2 content + trailing empty). The last
+    // line (index 2) belongs to no segment's `start + lines` span, yet the
+    // cursor lands there just as `G` would.
+    let trailing = m.buffer.line_count() - 1;
+    assert_eq!(trailing, lines_sum(&m)); // the orphan line, past every segment
+    m.buffer.cursor = Cursor {
+        line: trailing,
+        col: 0,
+    };
+    assert_eq!(
+        m.current_chapter(),
+        1,
+        "the trailing line maps to the last chapter"
+    );
+    for c in "Trailing sentence.".chars() {
+        m.insert_char(c);
+    }
+
+    // The recovery snapshot captures the typed prose (it did not before the fix).
+    let dirty = m.dirty_segments();
+    assert!(
+        dirty
+            .iter()
+            .any(|(idx, body)| *idx == 1 && body.contains("Trailing sentence.")),
+        "recovery snapshot dropped the trailing-line prose: {dirty:?}"
+    );
+
+    // Saving must write the typed sentence into the last chapter's file. Before
+    // the fix this LOSES it (the save span stopped before the trailing line).
+    m.save(&mut project).unwrap();
+    let on_disk = fs::read_to_string(dir.join("ch1.md")).unwrap();
+    assert!(
+        on_disk.contains("Trailing sentence."),
+        "the trailing-line prose never reached disk: {on_disk:?}"
+    );
+    assert_eq!(on_disk, "beta\nTrailing sentence.\n");
+    // The other chapter is untouched.
+    assert_eq!(fs::read_to_string(dir.join("ch0.md")).unwrap(), "alpha\n");
+
+    // Reload the window from disk — the sentence survives the round-trip and is
+    // still in chapter 1's file (not lost on the next reslide/reopen).
+    let m2 = Manuscript::open(&project).unwrap();
+    let reloaded = fs::read_to_string(dir.join("ch1.md")).unwrap();
+    assert_eq!(reloaded, "beta\nTrailing sentence.\n");
+    assert_eq!(m2.segments[1].index, 1);
+
+    fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn undo_reverts_a_range_delete_and_restores_the_seams() {
     let (mut project, dir) = project_with("range-undo", &["a1\na2\n", "b1\n", "c1\n"]);

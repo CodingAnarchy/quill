@@ -505,8 +505,21 @@ impl Manuscript {
     /// chapters are not rewritten.
     pub fn save(&mut self, project: &mut Project) -> std::io::Result<()> {
         let mut start = 0;
-        for s in &mut self.segments {
-            let end = start + s.lines;
+        let last = self.segments.len().saturating_sub(1);
+        for (i, s) in self.segments.iter_mut().enumerate() {
+            // The concatenated buffer always ends in a single `\n`, so the rope
+            // reports one trailing empty line past the last segment's `lines`.
+            // That line belongs to no `start + lines` span, yet the cursor can
+            // reach it (`G`/repeated Down at the end) and text typed there lands
+            // in the rope without growing the last segment — so the last
+            // segment's span must run through EOF to capture it, or that prose
+            // is silently dropped on save. Mirrors `clamp_to_chapter`'s
+            // "last segment owns through EOF" for byte ranges.
+            let end = if i == last {
+                self.buffer.line_count()
+            } else {
+                start + s.lines
+            };
             if s.dirty {
                 let raw = self.buffer.line_range_text(start, end);
                 let body = normalize_trailing_newline(&raw);
@@ -545,8 +558,17 @@ impl Manuscript {
     pub fn dirty_segments(&self) -> Vec<(usize, String)> {
         let mut out = Vec::new();
         let mut start = 0;
-        for s in &self.segments {
-            let end = start + s.lines;
+        let last = self.segments.len().saturating_sub(1);
+        for (i, s) in self.segments.iter().enumerate() {
+            // The last segment runs through EOF (the buffer's trailing empty
+            // line), so prose typed on that orphan line is captured by the
+            // recovery snapshot too — matching `save` so recovery never misses
+            // what a save would keep (see `save`).
+            let end = if i == last {
+                self.buffer.line_count()
+            } else {
+                start + s.lines
+            };
             if s.dirty {
                 let raw = self.buffer.line_range_text(start, end);
                 out.push((s.index, normalize_trailing_newline(&raw)));
