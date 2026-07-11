@@ -65,9 +65,79 @@ impl LexicalSearch {
 /// [`READ_CHAPTER`](crate::ai::retrieval::READ_CHAPTER) is for).
 const EXCERPT_RADIUS: usize = 160;
 
+/// The byte offset in `haystack` of the first case-insensitive occurrence of
+/// `needle` (which the caller has already lowercased and trimmed), valid for slicing
+/// `haystack` itself.
+///
+/// Why not just `self.lowered[i].find(&needle)` and reuse that offset? Because
+/// [`str::to_lowercase`] is **not length-preserving** — `İ` (U+0130) lowercases to two
+/// chars / more bytes, `ẞ` and various Turkic/German forms shift byte lengths too — so
+/// an offset into the *lowercased* string is misaligned into the *original*: slicing
+/// the original with it can land mid-codepoint (a `char boundary` panic) or out of
+/// bounds. We instead scan char boundaries of `haystack` and, at each, lowercase just
+/// the following text far enough to test the prefix, returning an offset that indexes
+/// `haystack` correctly. Matching stays case-insensitive; ASCII text is unaffected.
+fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    // Fast path: pure-ASCII haystacks lowercase byte-for-byte, so the lowercased
+    // offset is already valid for the original — no per-position lowercasing needed.
+    if haystack.is_ascii() {
+        return haystack.to_ascii_lowercase().find(needle);
+    }
+    // A candidate matches at byte `i` when the lowercase of `haystack[i..]` begins with
+    // `needle`. `to_lowercase` can lengthen text (each char grows by at most a small
+    // constant factor), so at each position lowercase the tail lazily and compare
+    // prefixes on the fly — stopping as soon as it diverges — rather than pre-slicing a
+    // guessed length. This can never under-fold the tail and is O(needle) per position.
+    for (i, _) in haystack.char_indices() {
+        if starts_with_lowercased(&haystack[i..], needle) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// True when lowercasing `haystack` yields a string that starts with `needle` (which is
+/// already lowercased). Lowercases `haystack` character by character, comparing against
+/// `needle` as it goes and stopping at the first divergence — so it never allocates the
+/// whole tail and correctly handles non-length-preserving lowercase (a single source
+/// char can lowercase to several needle chars).
+fn starts_with_lowercased(haystack: &str, needle: &str) -> bool {
+    let mut rest = needle;
+    for lc in haystack.chars().flat_map(char::to_lowercase) {
+        match rest.strip_prefix(lc) {
+            Some(remainder) => rest = remainder,
+            None => return false,
+        }
+        if rest.is_empty() {
+            return true;
+        }
+    }
+    rest.is_empty()
+}
+
+/// The largest byte index `<= index` that is a char boundary of `s` (i.e. `index`
+/// floored to the nearest boundary at or below it). Lets a rough offset be snapped to
+/// a valid slice point so no slice ever lands mid-codepoint.
+const fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// A window of `body` around the byte offset `at`, clamped to char boundaries and
-/// trimmed, with ellipses where it was cut. Used to render a search excerpt.
+/// trimmed, with ellipses where it was cut. Used to render a search excerpt. `at` is
+/// snapped to a char boundary first, so even a rough offset can never slice
+/// mid-codepoint.
 pub(super) fn excerpt_around(body: &str, at: usize, radius: usize) -> String {
+    let at = floor_char_boundary(body, at);
     let start = body[..at]
         .char_indices()
         .rev()
@@ -98,13 +168,18 @@ impl ManuscriptSearch for LexicalSearch {
         if needle.is_empty() {
             return Vec::new();
         }
-        // (chapter index, match count, first-match byte offset). Match against the
-        // precomputed lowercased bodies so repeated searches don't re-lowercase.
+        // (chapter index, match count, first-match byte offset IN ch.body). Detection
+        // and the match count run against the precomputed lowercased bodies so repeated
+        // searches don't re-lowercase the corpus. The excerpt offset, however, must
+        // index `ch.body` — NOT `self.lowered[i]` — because `to_lowercase` is not
+        // length-preserving, so `find` on the lowercased string yields an offset that
+        // can be misaligned into the original (slicing it would panic). `find_ci`
+        // returns an offset valid for `ch.body` itself.
         let mut hits: Vec<(usize, usize, usize)> = Vec::new();
         for (i, hay) in self.lowered.iter().enumerate() {
             let count = hay.matches(&needle).count();
             if count > 0 {
-                let at = hay.find(&needle).unwrap_or(0);
+                let at = find_ci(&self.chapters[i].body, &needle).unwrap_or(0);
                 hits.push((i, count, at));
             }
         }
