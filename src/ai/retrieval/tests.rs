@@ -502,6 +502,77 @@ fn a_well_covered_answer_is_not_spuriously_hedged() {
 }
 
 #[test]
+fn hallucinated_citations_do_not_inflate_coverage_into_a_false_full_read() {
+    // #qa-citation-coverage (HIGH): the loop reads ONE chapter, but the model's final
+    // reply lists citations for chapters it never read (real Chapters 1..40) plus an
+    // invented title that isn't a chapter at all. Before the fix, `finish` chained the
+    // model's unvalidated citations into the read-set, so `chapters_read.len()` hit
+    // 40 ≥ 40 and `is_hedged()` went FALSE, emitting "a full read of the manuscript" — a
+    // false completeness claim — and the invented title became a phantom jumpable
+    // citation. The fix keeps a model citation only when the loop ACTUALLY read that
+    // chapter, so the read-set stays honest (just Chapter 7) and coverage stays hedged.
+    let search = LexicalSearch::new(oversized_corpus());
+    let bible = bible_with_sections();
+    // The model reads exactly one chapter, then hallucinates a full-book citation list
+    // (Chapter 1..40) plus an invented title that names no real chapter.
+    let mut cited: Vec<String> = (1..=40).map(|i| format!("Chapter {i}")).collect();
+    cited.push("The Secret Epilogue".to_string());
+    let citations_json = serde_json::to_string(&cited).unwrap();
+    let mock = MockConverse::new(vec![
+        call(READ_CHAPTER, "Chapter 7"),
+        Turn::Final(format!(
+            r#"{{"answer":"The whole book is about the locket.","citations":{citations_json}}}"#
+        )),
+    ]);
+    let answer = run_retrieval(
+        &mock,
+        &search,
+        &bible,
+        "What is the whole book about?",
+        RETRIEVAL_MAX_TURNS,
+        STANDARD_CONTEXT_TOKENS,
+    )
+    .unwrap();
+    let coverage = answer.coverage.as_ref().unwrap();
+    // The read-set is only the ONE chapter the loop actually read — not the 40 the
+    // model claimed. The invented title is dropped entirely (no phantom citation).
+    assert_eq!(
+        coverage.chapters_read,
+        vec!["Chapter 7".to_string()],
+        "only the real, actually-read chapter counts: {:?}",
+        coverage.chapters_read
+    );
+    assert_eq!(
+        answer.citations,
+        vec!["Chapter 7".to_string()],
+        "the invented title is not a jumpable citation: {:?}",
+        answer.citations
+    );
+    assert!(
+        !answer
+            .citations
+            .contains(&"The Secret Epilogue".to_string()),
+        "a phantom title never becomes a citation"
+    );
+    // Coverage stays HONEST: 1 of 40 is a partial read, so it's hedged, not a full read.
+    assert!(
+        coverage.is_hedged(),
+        "a one-chapter read stays hedged despite the hallucinated citations"
+    );
+    assert!(
+        answer.answer.contains("1 of 40 chapters read")
+            && answer.answer.contains("not the whole manuscript"),
+        "the disclosure reflects the true partial coverage, not a full read: {}",
+        answer.answer
+    );
+    assert!(
+        !answer.answer.contains("full read of the manuscript"),
+        "no false completeness claim: {}",
+        answer.answer
+    );
+}
+
+#[test]
 fn coverage_survives_the_response_round_trip() {
     // The offline answer is serialized to a Response and re-parsed by the shared
     // Q&A dispatch (#856); the coverage metadata must survive that round-trip so

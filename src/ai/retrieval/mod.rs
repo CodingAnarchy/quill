@@ -180,7 +180,10 @@ pub fn run_retrieval<C: Converse + ?Sized, S: ManuscriptSearch>(
     let tools = Tools { search, bible };
     let tool_defs = retrieval_tools();
     let budget = excerpt_char_budget(window_tokens);
-    let total_chapters = search.chapters().len();
+    // The real chapter set: its size is the coverage denominator. `finish` validates
+    // the model's citations against the chapters actually read so a hallucinated
+    // citation can't inflate coverage into a false "full read" (#qa-citation-coverage).
+    let chapters = search.chapters();
 
     // The opening context: the bible seed as a global index + the chapter list, then
     // the question — NEVER the whole manuscript (the #856 key difference from the
@@ -198,7 +201,7 @@ pub fn run_retrieval<C: Converse + ?Sized, S: ManuscriptSearch>(
             RETRIEVAL_MAX_OUTPUT_TOKENS,
         );
         match converse.respond(&body)? {
-            Turn::Final(text) => return Ok(finish(&text, &excerpts, bible, total_chapters, false)),
+            Turn::Final(text) => return Ok(finish(&text, &excerpts, bible, chapters, false)),
             Turn::ToolCalls(calls) if turn + 1 >= max_turns => {
                 // The next turn would exceed the cap: run this batch's reads so their
                 // signal isn't lost, then answer with what we gathered (#856: never
@@ -224,7 +227,7 @@ pub fn run_retrieval<C: Converse + ?Sized, S: ManuscriptSearch>(
         RETRIEVAL_MAX_OUTPUT_TOKENS,
     );
     match converse.respond(&body) {
-        Ok(Turn::Final(text)) => Ok(finish(&text, &excerpts, bible, total_chapters, hit_cap)),
-        _ => Ok(finish("", &excerpts, bible, total_chapters, true)),
+        Ok(Turn::Final(text)) => Ok(finish(&text, &excerpts, bible, chapters, hit_cap)),
+        _ => Ok(finish("", &excerpts, bible, chapters, true)),
     }
 }
