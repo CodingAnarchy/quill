@@ -82,6 +82,55 @@ fn names(bytes: &[u8]) -> Vec<String> {
     zip.file_names().map(str::to_string).collect()
 }
 
+/// A lightweight well-formedness assertion for a rendered XHTML string, without
+/// pulling in an XML-parser dependency. Inside each tag it checks every
+/// attribute value is delimited by a matching quote with no raw quote of the
+/// delimiting kind in between — the exact failure mode a raw `"` in an `alt`
+/// value causes (the attribute closes early, leaving stray text before `>`). A
+/// raw `<` inside an attribute value is also caught.
+fn assert_well_formed_xml(xhtml: &str) {
+    let bytes = xhtml.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        // Skip comments/CDATA/PI/doctype wholesale — they don't carry the
+        // attribute quoting we're validating.
+        if xhtml[i..].starts_with("<!") || xhtml[i..].starts_with("<?") {
+            let end = xhtml[i..].find('>').expect("markup declaration is closed");
+            i += end + 1;
+            continue;
+        }
+        // Inside a tag: scan attributes until the closing `>`.
+        i += 1;
+        while i < bytes.len() && bytes[i] != b'>' {
+            let c = bytes[i];
+            if c == b'"' || c == b'\'' {
+                let quote = c;
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    assert!(
+                        bytes[i] != b'<',
+                        "raw '<' inside an attribute value: {xhtml}"
+                    );
+                    i += 1;
+                }
+                assert!(
+                    i < bytes.len(),
+                    "unterminated attribute value (a raw quote closed it early): {xhtml}"
+                );
+                i += 1; // consume the closing quote
+            } else {
+                i += 1;
+            }
+        }
+        assert!(i < bytes.len(), "unclosed tag: {xhtml}");
+        i += 1; // consume '>'
+    }
+}
+
 /// Read one package entry as raw bytes (fonts and images aren't UTF-8).
 fn part_bytes(bytes: &[u8], name: &str) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).expect("valid zip");

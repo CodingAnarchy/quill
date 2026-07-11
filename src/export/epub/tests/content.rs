@@ -26,6 +26,47 @@ fn emphasis_and_scene_breaks_render_as_markup_not_literals() {
 }
 
 #[test]
+fn c0_control_chars_in_title_and_body_are_stripped_not_emitted_raw() {
+    // C0 control characters (here U+0000, U+0007, U+0001, U+0008) are illegal in
+    // XML 1.0 and can't be escaped — left raw, the whole document is corrupt and
+    // epubcheck / readers reject it. They must be stripped from every text that
+    // reaches the markup. Regression: fails before the sanitizer (raw bytes
+    // present), passes after.
+    let forbidden =
+        |c: char| matches!(c, '\u{0}'..='\u{8}' | '\u{B}' | '\u{C}' | '\u{E}'..='\u{1F}');
+    let mut d = doc();
+    d.title = "Red\u{0}State\u{7}Earth".into();
+    d.parts[0].chapters[0].title = "The\u{1}Find".into();
+    d.parts[0].chapters[0].body = "A body\u{8}with a control char.".into();
+    let bytes = to_epub(&d, MODIFIED, &ExportStyle::default()).unwrap();
+
+    // No content document may carry a raw forbidden control char.
+    for name in names(&bytes).into_iter().filter(|n| n.contains(".xhtml")) {
+        assert!(
+            !part(&bytes, &name).chars().any(forbidden),
+            "{name} carries a raw forbidden control char"
+        );
+    }
+
+    // The surrounding characters survive — only the control char is dropped. Find
+    // the chapter carrying the body (its file index shifts with layout).
+    let chap = names(&bytes)
+        .into_iter()
+        .filter(|n| n.starts_with("OEBPS/chap"))
+        .map(|n| part(&bytes, &n))
+        .find(|x| x.contains("control char"))
+        .expect("a chapter carries the body");
+    assert!(
+        chap.contains("TheFind"),
+        "chapter title minus the control char: {chap}"
+    );
+    assert!(
+        chap.contains("A bodywith a control char."),
+        "body minus the control char: {chap}"
+    );
+}
+
+#[test]
 fn title_page_shows_metadata_and_book_epigraph() {
     let title = part(
         &to_epub(&doc(), MODIFIED, &ExportStyle::default()).unwrap(),

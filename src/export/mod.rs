@@ -325,11 +325,43 @@ pub fn push_run(runs: &mut Vec<Run>, cur: &mut String, bold: bool, italic: bool)
     }
 }
 
-/// Escape `& < >` for embedding text in XML (the `.docx` and `.scrivx` markup).
+/// Escape a string for embedding in XML (the `.docx`, `.scrivx`, and EPUB
+/// markup), safe for both element text and attribute values.
+///
+/// Escapes the five XML predefined entities — `&`, `<`, `>`, `"`, `'`. The
+/// quote escapes matter because this function feeds attribute values too
+/// (e.g. the EPUB `<img … alt="{}"/>`, #297/#818): a title like
+/// `The "Real" Story` would otherwise close the `alt` attribute early and
+/// produce non-well-formed XHTML that epubcheck and conformant readers reject.
+/// Escaping quotes in element text is harmless, so one shared escaper covers
+/// every site.
+///
+/// First strips the C0 control characters that XML 1.0 forbids outright
+/// (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F) — these cannot be escaped
+/// and, left raw, corrupt the whole document (Word / epubcheck reject it).
+/// Tab, newline, and carriage return are legal and kept.
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            _ if is_forbidden_xml_char(c) => {}
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Whether a character is a C0 control disallowed by XML 1.0 and thus
+/// unrepresentable in any XML document — even escaped. Tab (`\t`), line feed
+/// (`\n`), and carriage return (`\r`) are the three C0 controls XML permits, so
+/// they're excluded here.
+const fn is_forbidden_xml_char(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{8}' | '\u{B}' | '\u{C}' | '\u{E}'..='\u{1F}')
 }
 
 /// The scene-break glyph the writers emit for a thematic break: a centered `#`,
@@ -727,6 +759,27 @@ mod tests {
     #[test]
     fn xml_escape_escapes_the_markup_chars() {
         assert_eq!(xml_escape("a & b < c > d"), "a &amp; b &lt; c &gt; d");
+    }
+
+    #[test]
+    fn xml_escape_escapes_quotes_for_attribute_safety() {
+        // Quotes must be escaped: `xml_escape` feeds attribute values (the EPUB
+        // `alt="{}"`, #818), where a raw `"` would close the attribute early and
+        // yield non-well-formed XHTML that epubcheck rejects.
+        assert_eq!(
+            xml_escape("The \"Real\" Story"),
+            "The &quot;Real&quot; Story"
+        );
+        assert_eq!(xml_escape("it's a 'trap'"), "it&#39;s a &#39;trap&#39;");
+    }
+
+    #[test]
+    fn xml_escape_strips_forbidden_control_chars_but_keeps_legal_whitespace() {
+        // C0 controls XML 1.0 forbids can't be escaped — left raw they corrupt
+        // the document — so they're stripped.
+        assert_eq!(xml_escape("a\u{0}b\u{7}c\u{1f}d"), "abcd");
+        // Tab, newline, and carriage return are legal XML whitespace — kept.
+        assert_eq!(xml_escape("a\tb\nc\rd"), "a\tb\nc\rd");
     }
 
     #[test]
