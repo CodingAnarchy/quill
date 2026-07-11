@@ -316,6 +316,72 @@ fn gq_in_continuous_view_stops_at_the_chapter_seam() {
 }
 
 #[test]
+fn gq_in_first_paragraph_of_second_chapter_does_not_walk_back_across_the_seam() {
+    // Mirror of `gq_in_continuous_view_stops_at_the_chapter_seam` (#1040): the
+    // cursor sits in the FIRST paragraph of the SECOND chapter. The forward walk
+    // was already clamped, but the backward walk was not — the seam is a bare `\n`
+    // (no blank line, not a heading), so before the fix reflow walked back across
+    // it and gathered chapter one's last line into chapter two's paragraph.
+    // Chapter two is a two-line paragraph; reflow flows it to one line and leaves
+    // chapter one and the seam untouched.
+    let (mut app, dir) = jr_continuous_app(
+        "jr-cont-reflow-back-seam",
+        "the lazy dog\n",
+        "the quick\nbrown fox\n",
+    );
+    assert_eq!(
+        app.edit_buffer().text(),
+        "the lazy dog\nthe quick\nbrown fox\n",
+        "the two chapters concatenate"
+    );
+    app.wrap_width.set(72);
+    app.on_key(key(KeyCode::Down)); // onto chapter two's first line (the paragraph)
+    app.on_key(key(KeyCode::Char('g')));
+    app.on_key(key(KeyCode::Char('q')));
+    assert_eq!(
+        app.edit_buffer().text(),
+        "the lazy dog\nthe quick brown fox\n",
+        "reflow stayed inside chapter two, never pulling chapter one back across the seam"
+    );
+    app.on_key(ctrl('l'));
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "the lazy dog\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "the quick brown fox\n"
+    );
+}
+
+#[test]
+fn j_in_first_paragraph_of_second_chapter_does_not_join_back_across_the_seam() {
+    // Companion guard to the `gq` backward-seam test: `J` on chapter two's first
+    // line must join within chapter two, never fold chapter one's last line up
+    // across the seam. Join is structurally forward-only (it always folds the line
+    // *below* the cursor up), so it can't walk backward across the seam — this test
+    // is green both before and after the reflow fix and locks that in. Chapter one
+    // is a single line; chapter two is two lines. Joining chapter two's two lines
+    // leaves chapter one and the seam untouched.
+    let (mut app, dir) = jr_continuous_app("jr-cont-join-back-seam", "foo\n", "bar\nbaz\n");
+    assert_eq!(
+        app.edit_buffer().text(),
+        "foo\nbar\nbaz\n",
+        "the two chapters concatenate"
+    );
+    app.on_key(key(KeyCode::Down)); // onto chapter two's first line (`bar`)
+    app.on_key(key(KeyCode::Char('J')));
+    assert_eq!(
+        app.edit_buffer().text(),
+        "foo\nbar baz\n",
+        "J joined within chapter two — chapter one and the seam are untouched"
+    );
+    app.on_key(ctrl('l'));
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), "foo\n");
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), "bar baz\n");
+}
+
+#[test]
 fn j_does_not_fold_a_heading_into_the_prose_below_it() {
     // `## Scene` sits directly above prose with no blank line. `J` on the heading
     // must treat it as a boundary and not fold the prose up into `## Scene Text`.
