@@ -179,6 +179,12 @@ pub(super) fn describe_factcheck(f: &ai::factcheck::FactCheckFinding) -> (String
     (summary, f.chapters.clone())
 }
 
+pub(super) fn describe_pacing(o: &ai::pacing::PacingObservation) -> (String, Vec<String>) {
+    // The plain-language rhythm reading, located to the chapters it spans — an
+    // observation the author acts on, never a suggested cut / addition / reorder / reword.
+    (o.observation.clone(), o.chapters.clone())
+}
+
 pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
     // Attribute to the speaker (kind + character), then quote the specific spoken
     // line for a line-level dialogue finding (#1050) so the author can land on the

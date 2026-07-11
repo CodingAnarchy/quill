@@ -390,6 +390,28 @@ The palette actions:
   the `pair` argument). Analysis only, grounded in the AI boundary: it *observes
   the drift and flags it*, never a rewrite, a proposed "better arc", or a suggestion
   for how to set up a missing beat — the author decides what to change.
+- **Pacing & tension** (#1048) — an **author-invoked**, opt-in reading of the
+  manuscript's scene-level tension/quiet **rhythm**. It reads the book as a
+  sequence of scenes and chapters and reports *where* the rhythm sits and shifts — a
+  sagging middle, a run of high-tension chapters with no quiet beat to breathe, a
+  flat low-tension stretch, an abrupt spike or drop — as **located, plain-language
+  observations**, each naming the stretch (chapters/scenes) it refers to, surfaced
+  in the shared revision triage / findings / health dashboard like every other
+  analysis pass. To keep the reading grounded, a deterministic per-chapter pacing
+  *signal* (word count, sentence cadence, dialogue share) computed **locally** from
+  the prose is fed alongside the manuscript as read-only context — measured data
+  that locates the observations, not a finding in itself. **Off by default, on the
+  author's request** (the palette action runs it directly; no argument).
+
+  **The boundary is the whole point — this pass sits closest to the co-writer
+  line.** It *only points out* rhythm; it **never** suggests a cut, an addition, a
+  reorder, a scene to move, a beat to insert, tightening, expansion, or any reworded
+  prose. Any output proposing a change to the text is out of scope. The boundary is
+  enforced three ways: (1) the pass reports observations only; (2) the schema carries
+  **no field** that could hold a suggested fix or prose — only the `observation` and
+  the `chapters` it locates; (3) the prompt forbids proposing changes and describes a
+  deliberate slow passage / quiet interlude **neutrally** as an observation, never as
+  a problem to fix — the author decides what, if anything, to change.
 - **Character voice** (#183) — checks the manuscript against the character
   bible's **voice profiles** (the character pass now captures speech patterns,
   vocabulary/register, verbal tics, and sentence rhythm per character, editable

@@ -39,6 +39,7 @@ pub mod marketing;
 pub mod model_select;
 pub mod namegen;
 pub mod naming;
+pub mod pacing;
 pub mod plot;
 pub mod relationship;
 pub mod retrieval;
@@ -232,6 +233,12 @@ pub enum Outcome {
     /// note the author wrote in `bible/research.md` (#1049). Findings only;
     /// author-invoked; grounded only in the author's own notes, no external facts.
     FactCheck(Result<factcheck::FactCheck, AiError>),
+    /// Pacing & tension reading (#1048): located, plain-language observations of the
+    /// manuscript's scene-level tension/quiet rhythm (a sagging middle, a run of
+    /// high-tension chapters with no breath, a flat stretch), each naming the
+    /// stretch it refers to. Findings only; author-invoked; observes rhythm, never
+    /// suggests a cut, an addition, a reorder, or reworded prose.
+    Pacing(Result<pacing::Pacing, AiError>),
     /// Semantic "find similar scenes" (#924): the passages most similar to a
     /// selection / query, ranked with scores + jumpable citations. `None` when no
     /// embedding model is available (graceful degradation, not an error).
@@ -289,6 +296,7 @@ impl Outcome {
             Self::Relationship(r) => r.as_ref().err(),
             Self::Foreshadow(r) => r.as_ref().err(),
             Self::FactCheck(r) => r.as_ref().err(),
+            Self::Pacing(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
             Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),

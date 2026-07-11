@@ -277,6 +277,7 @@ impl App {
                     | AiAction::Relationship
                     | AiAction::Foreshadow
                     | AiAction::FactCheck
+                    | AiAction::Pacing
             ) | Action::RefreshSeriesBible
                 | Action::RefreshBibles
                 | Action::QueuePasses
@@ -793,6 +794,10 @@ impl App {
             // Author-invoked research-notebook fact-check (#1049): no argument — it
             // checks against the author's own `bible/research.md`, so it runs directly.
             AiAction::FactCheck => self.analyze_factcheck(),
+            // Author-invoked pacing & tension reading (#1048): no argument — it reads
+            // the whole manuscript's rhythm and reports located observations, so it
+            // runs directly.
+            AiAction::Pacing => self.analyze_pacing(),
             // Author-invoked accuracy (#973): prompt for the named concern first,
             // then run. On the confirmed / cost-gated re-entry the concern is already
             // captured, so spawn the pass instead of re-prompting.
@@ -951,6 +956,10 @@ const fn ai_palette_entry(action: AiAction) -> (&'static str, &'static str) {
         AiAction::FactCheck => (
             "Fact-check vs. research notebook",
             "Flag prose that contradicts your own research notes — no fixes",
+        ),
+        AiAction::Pacing => (
+            "Pacing & tension",
+            "Located observations of the scene-level rhythm — observation only, no changes",
         ),
     }
 }

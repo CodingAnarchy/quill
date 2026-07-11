@@ -11,13 +11,15 @@ use super::super::*;
 use super::write_failure_message;
 use super::{
     describe_accuracy, describe_continuity, describe_editorial, describe_factcheck,
-    describe_foreshadow, describe_naming, describe_plot, describe_relationship, describe_scaffold,
-    describe_setting, describe_style, describe_theme, describe_voice, findings_from,
+    describe_foreshadow, describe_naming, describe_pacing, describe_plot, describe_relationship,
+    describe_scaffold, describe_setting, describe_style, describe_theme, describe_voice,
+    findings_from,
 };
 use crate::ai::accuracy::{self, Accuracy};
 use crate::ai::factcheck::{self, FactCheck};
 use crate::ai::foreshadow::{self, Foreshadow};
 use crate::ai::naming::{self, Naming};
+use crate::ai::pacing::{self, Pacing};
 use crate::ai::relationship::{self, Trajectory};
 use crate::ai::scaffold::{self, Scaffold};
 use crate::ai::style::{self, Style};
@@ -201,6 +203,45 @@ impl App {
             factcheck::parse,
             Outcome::FactCheck,
         );
+    }
+
+    /// Start a pacing & tension reading (#1048): read the manuscript's scene-level
+    /// tension/quiet RHYTHM and report it as located, plain-language observations —
+    /// applied by [`App::poll_ai`] into the revision-triage list. Findings only;
+    /// author-invoked; observation only — it names the rhythm and where it is, never
+    /// suggests a cut, an addition, a reorder, or reworded prose (it sits closest to
+    /// the co-writer line). A deterministic per-chapter pacing signal (word count,
+    /// sentence cadence, dialogue share) computed *locally* is fed alongside the prose
+    /// as read-only grounding so the located observations stay honest about where the
+    /// rhythm shifts; the reading itself is still observation-only.
+    pub(crate) fn analyze_pacing(&mut self) {
+        let signal = self.pacing_signal_context();
+        self.spawn_manuscript_pass(
+            "⟳ Reading pacing & tension…",
+            move |manuscript, model| pacing::build_request(manuscript, &signal, model),
+            pacing::parse,
+            Outcome::Pacing,
+        );
+    }
+
+    /// The deterministic per-chapter pacing signal for the active book (#1048),
+    /// rendered as the read-only grounding block [`analyze_pacing`](Self::analyze_pacing)
+    /// feeds the reading. Measured locally from each chapter's prose (word count,
+    /// sentence cadence, dialogue share) — a grounding input, not a finding, and it
+    /// never leaves the observation-only contract.
+    fn pacing_signal_context(&self) -> String {
+        let active = self.project.active_index();
+        let signals: Vec<pacing::ChapterSignal> = (0..self.chapter_count())
+            .map(|i| {
+                let title = self.project.chapter_title(i).unwrap_or("");
+                let prose = self.chapter_text_with_active(i, active);
+                let sig = pacing::chapter_signal(title, &prose);
+                // The signal is `Copy` and its title borrows the manifest (outlives
+                // this render), so the transient `prose` string is free to drop here.
+                sig
+            })
+            .collect();
+        pacing::signal_context(&signals)
     }
 
     /// Start a character-voice pass (#183): check the manuscript against the
@@ -495,6 +536,23 @@ impl App {
             None,
             AiAction::FactCheck,
             describe_factcheck,
+        );
+        self.show_findings(findings);
+    }
+
+    /// Apply a pacing & tension reading (#1048): surface each located rhythm
+    /// observation as a triage finding (what the stretch reads like + the chapters it
+    /// spans). Pure analysis — nothing is written, and no suggested change or prose is
+    /// produced; the finding names the rhythm and where it is, never a fix.
+    pub(crate) fn apply_pacing(&mut self, result: Result<Pacing, ai::AiError>) {
+        let Some(pacing) = self.ok_or_report(result) else {
+            return;
+        };
+        let findings = findings_from(
+            &pacing.observations,
+            None,
+            AiAction::Pacing,
+            describe_pacing,
         );
         self.show_findings(findings);
     }
