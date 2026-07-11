@@ -27,6 +27,7 @@ fn voice_findings_open_the_overlay_and_name_the_character() {
         findings: vec![ai::voice::VoiceFinding {
             kind: "dialogue".into(),
             character: "Mara".into(),
+            line: String::new(),
             detail: "too formal for her clipped register".into(),
             chapters: vec!["Two".into()],
         }],

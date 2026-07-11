@@ -180,12 +180,21 @@ pub(super) fn describe_factcheck(f: &ai::factcheck::FactCheckFinding) -> (String
 }
 
 pub(super) fn describe_voice(f: &voice::VoiceFinding) -> (String, Vec<String>) {
-    let summary = if f.character.is_empty() {
+    // Attribute to the speaker (kind + character), then quote the specific spoken
+    // line for a line-level dialogue finding (#1050) so the author can land on the
+    // exact line — the line is quoted for locating, never a rewrite.
+    let head = if f.character.is_empty() {
         format!("{}: {}", f.kind, f.detail)
     } else {
         format!("{} ({}): {}", f.kind, f.character, f.detail)
     };
-    (summary, f.chapters.clone())
+    let at = f
+        .line
+        .trim()
+        .is_empty()
+        .then(String::new)
+        .unwrap_or_else(|| format!(" \u{2014} \u{201c}{}\u{201d}", f.line.trim()));
+    (format!("{head}{at}"), f.chapters.clone())
 }
 
 /// Bundle a built re-check request with the parser that turns its response into
