@@ -103,3 +103,41 @@ fn no_record_leaves_the_open_at_the_top() {
     assert_eq!(app.project.active_index(), 0);
     assert_eq!(app.buffer.cursor_byte(), 0);
 }
+
+#[test]
+fn a_mid_codepoint_offset_does_not_panic_at_startup() {
+    // The persisted offset only clamps past-the-end, not mid-codepoint. If the
+    // chapter's bytes shifted since it was saved — an external edit, an older
+    // version, or smart typography rewriting "--" into a 3-byte em-dash — the
+    // saved offset can fall inside a multi-byte grapheme. Before the boundary
+    // snap in `cursor_at_byte`, restoring it panicked ("byte index N is not a
+    // char boundary") before the first draw, bricking reopen until the sidecar
+    // was cleared. It must now floor to a valid boundary instead.
+    let dir = app_scratch_dir("resume-mid-codepoint");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    // "He paused—then ran." — the em-dash is a 3-byte grapheme.
+    let body = "He paused\u{2014}then ran.\n";
+    fs::write(dir.join("one.md"), body).unwrap();
+    let dash = body.find('\u{2014}').unwrap();
+
+    lastpos::write(
+        &dir,
+        &lastpos::Position {
+            chapter_file: "one.md".into(),
+            cursor: dash + 1, // inside the em-dash, not on a boundary
+        },
+    )
+    .unwrap();
+
+    let mut app = open_test_app(&dir);
+    app.restore_position(); // panicked here before the fix
+    assert_eq!(app.project.active_index(), 0);
+    // Floored back onto the em-dash's boundary rather than crashing.
+    assert_eq!(app.buffer.cursor_byte(), dash);
+
+    fs::remove_dir_all(&dir).ok();
+}

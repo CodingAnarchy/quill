@@ -117,3 +117,40 @@ fn grapheme_after_delete_is_decoupled_from_document_size() {
         "grapheme_after delete scaled with document size (small={small_dt:?}, big={big_dt:?}, {ratio:.1}×)"
     );
 }
+
+#[test]
+fn cursor_at_byte_snaps_a_mid_emoji_offset_without_panicking() {
+    // A stale persisted position / mark / fold heading can name a byte offset that
+    // now lands inside a multi-byte grapheme (the bytes shifted since it was
+    // recorded). `cursor_at_byte` must floor to the previous char boundary instead
+    // of slicing mid-codepoint, which panicked before the fix — bricking reopen.
+    let buf = Buffer::from_text("a😀b\n"); // 'a'=1 byte, '😀'=4 bytes (bytes 1..5)
+    for byte in 2..=4 {
+        // Every interior byte of the emoji floors back to its start (byte 1),
+        // which is grapheme column 1 on line 0.
+        let cursor = buf.cursor_at_byte(byte);
+        assert_eq!(
+            cursor,
+            Cursor { line: 0, col: 1 },
+            "byte {byte} inside the emoji should floor to its boundary"
+        );
+    }
+    // Boundaries themselves are unchanged: 'a' start, emoji start, emoji end, 'b'.
+    assert_eq!(buf.cursor_at_byte(0), Cursor { line: 0, col: 0 });
+    assert_eq!(buf.cursor_at_byte(1), Cursor { line: 0, col: 1 });
+    assert_eq!(buf.cursor_at_byte(5), Cursor { line: 0, col: 2 });
+    assert_eq!(buf.cursor_at_byte(6), Cursor { line: 0, col: 3 });
+}
+
+#[test]
+fn cursor_at_byte_snaps_a_mid_em_dash_offset() {
+    // The realistic case: smart typography turns "--" into an em-dash ("—", 3
+    // bytes), so a position saved against the old ASCII text lands mid-codepoint.
+    let buf = Buffer::from_text("He paused—then ran.\n");
+    let dash_start = buf.text().find('—').unwrap(); // byte offset of the em-dash
+    for offset in 1..3 {
+        let cursor = buf.cursor_at_byte(dash_start + offset);
+        // Floors to the em-dash's own boundary rather than panicking.
+        assert_eq!(cursor, buf.cursor_at_byte(dash_start));
+    }
+}
