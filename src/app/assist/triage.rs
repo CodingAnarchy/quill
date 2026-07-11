@@ -25,16 +25,29 @@ impl App {
     /// and persist each new one to the durable store (#591). A finding the author
     /// already dismissed is skipped — a re-run that re-produces it must not
     /// re-surface it.
+    ///
+    /// When the pass wrote a new finding to the tracked store and the project is
+    /// under version control, the store is auto-committed on its own (#1060) so the
+    /// write doesn't leave the tree "dirty" and block Sync/Pull/switch-draft — and
+    /// so each pass's findings are captured in history for the findings diff (#1051).
     pub(in crate::app) fn accumulate_triage(&mut self, findings: &[Finding]) {
         let root = self.project.root.clone();
+        let mut wrote = false;
         for f in findings {
             if self.findings_store.is_dismissed(f) {
                 continue;
             }
-            self.findings_store.remember(&root, f);
+            wrote |= self.findings_store.remember(&root, f);
             if !self.triage.contains(f) {
                 self.triage.push(f.clone());
             }
+        }
+        // A dedicated, path-scoped commit of only `bible/findings.toml` — it never
+        // sweeps in the author's uncommitted prose. Best effort: a commit failure
+        // (or no repo) just leaves the store on disk as before, never blocking the
+        // pass. `commit_findings` is itself a no-op when the store didn't change.
+        if wrote && self.under_vc {
+            let _ = crate::vcs::commit_findings(&root, "Update findings");
         }
     }
 }

@@ -220,12 +220,15 @@ impl FindingsStore {
 
     /// Record a finding as seen (open) if it's new, persisting. A finding already
     /// on file — open or dismissed — keeps its state untouched, so this never
-    /// resurrects a dismissal.
-    pub(super) fn remember(&mut self, root: &Path, f: &Finding) {
+    /// resurrects a dismissal. Returns whether the store was actually written, so
+    /// the caller can auto-commit the store (#1060) only when a pass changed it.
+    pub(super) fn remember(&mut self, root: &Path, f: &Finding) -> bool {
         if self.position(f).is_none() {
             self.findings.push(Record::from(f, false));
             self.save(root);
+            return true;
         }
+        false
     }
 
     /// Mark a finding dismissed and persist. The record is kept (not removed) so a

@@ -427,3 +427,127 @@ fn init_is_idempotent_and_preserves_an_existing_gitignore() {
     );
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- The findings-store auto-commit guard (#1060) -----------------------------
+
+/// Stand in for an analysis pass rewriting the tracked findings store — write
+/// `bible/findings.toml` with one open finding. Mirrors what `FindingsStore::save`
+/// puts on disk, so `commit_findings` and `status` see exactly a real pass write.
+fn write_findings(root: &std::path::Path, summary: &str) {
+    let dir = root.join("bible");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("findings.toml"),
+        format!(
+            "[[findings]]\nsummary = \"{summary}\"\nkind = \"continuity\"\n\
+             chapters = [\"One\"]\ndismissed = false\n"
+        ),
+    )
+    .unwrap();
+}
+
+// The core of #1060: after a pass rewrites the tracked findings store, auto-committing
+// it leaves the working tree clean for the Sync/Pull/draft `is_dirty` guard — the
+// write no longer counts as an uncommitted change. And it's captured in history, so
+// the findings diff (#1051) can still read the store at that commit.
+#[test]
+fn commit_findings_clears_the_dirty_flag_and_captures_the_store() {
+    let dir = temp_dir("commit-findings-clean");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "# One\n\nThe night was dark.\n").unwrap();
+    commit(&dir, "manuscript").unwrap();
+
+    // A pass writes the store — that alone would dirty the tree and block a Sync.
+    write_findings(&dir, "the locket changes color");
+    assert_eq!(
+        status(&dir).unwrap().count(),
+        1,
+        "the pass write leaves the tree dirty until it's committed"
+    );
+
+    // Auto-commit it on its own; the tree is clean afterward (no Sync block).
+    assert!(commit_findings(&dir, "Update findings").unwrap().is_some());
+    assert_eq!(
+        status(&dir).unwrap().count(),
+        0,
+        "after the findings auto-commit the tree is clean for the Sync guard"
+    );
+    // The store is in history at the new commit, readable for the findings diff.
+    let at_head = show_file_at(&dir, "HEAD", "bible/findings.toml")
+        .unwrap()
+        .unwrap();
+    assert!(
+        at_head.contains("the locket changes color"),
+        "the committed store is readable out of history (#1051): {at_head}"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+// The auto-commit is path-scoped: it captures only `bible/findings.toml`, never the
+// author's in-progress prose. A pass firing mid-edit must not sweep an unsaved chapter
+// into the findings commit — that prose stays uncommitted in the working tree.
+#[test]
+fn commit_findings_leaves_uncommitted_prose_alone() {
+    let dir = temp_dir("commit-findings-scoped");
+    init(&dir).unwrap();
+    fs::write(dir.join("one.md"), "# One\n\nThe night was dark.\n").unwrap();
+    commit(&dir, "manuscript").unwrap();
+
+    // The author is mid-edit (unsaved-to-git prose) when a pass writes the store.
+    fs::write(
+        dir.join("one.md"),
+        "# One\n\nThe night was long and cold.\n",
+    )
+    .unwrap();
+    write_findings(&dir, "a dangling thread");
+    commit_findings(&dir, "Update findings").unwrap();
+
+    // HEAD carries the new findings but *not* the prose edit — the chapter is still
+    // uncommitted, so the author's manuscript work is neither lost nor auto-committed.
+    let chapter_at_head = show_file_at(&dir, "HEAD", "one.md").unwrap().unwrap();
+    assert!(
+        chapter_at_head.contains("dark") && !chapter_at_head.contains("long and cold"),
+        "the prose edit was not swept into the findings commit: {chapter_at_head}"
+    );
+    assert!(
+        show_file_at(&dir, "HEAD", "bible/findings.toml")
+            .unwrap()
+            .unwrap()
+            .contains("a dangling thread"),
+        "only the findings store was committed"
+    );
+    // The prose edit is still there to commit — the tree is dirty for that one file.
+    assert_eq!(
+        status(&dir).unwrap().changed,
+        vec![std::path::PathBuf::from("one.md")],
+        "the uncommitted prose survives as the only dirty path"
+    );
+    fs::remove_dir_all(&dir).ok();
+}
+
+// A re-run that re-produces the same findings rewrites an identical store; the
+// auto-commit is then a no-op (nothing changed), so a pass never spams empty commits.
+// And with no repository yet it's a harmless no-op, so the caller can fire it
+// unconditionally after every pass write.
+#[test]
+fn commit_findings_is_a_noop_when_unchanged_or_no_repo() {
+    let dir = temp_dir("commit-findings-noop");
+    // No repo yet → Ok(None), never an error.
+    write_findings(&dir, "same finding");
+    assert_eq!(
+        commit_findings(&dir, "Update findings").unwrap(),
+        None,
+        "no repository → a harmless no-op"
+    );
+
+    init(&dir).unwrap();
+    assert!(commit_findings(&dir, "Update findings").unwrap().is_some());
+    // A re-run writes a byte-identical store → nothing to commit.
+    write_findings(&dir, "same finding");
+    assert_eq!(
+        commit_findings(&dir, "Update findings").unwrap(),
+        None,
+        "an unchanged store makes no empty commit"
+    );
+    fs::remove_dir_all(&dir).ok();
+}

@@ -155,6 +155,67 @@ pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
     Ok(Some(oid.to_string().chars().take(7).collect()))
 }
 
+/// The tracked findings store (#1051), relative to the project root. An analysis
+/// pass rewrites this file, and [`commit_findings`] captures *only* it — so the
+/// pass's write never dirties the tree for the Sync/Pull/draft guards.
+const FINDINGS_REL: &str = "bible/findings.toml";
+
+/// Auto-commit *only* the tracked findings store after an analysis pass rewrote it
+/// (#1060), leaving any uncommitted manuscript prose untouched in the working tree.
+///
+/// Since #1051 `bible/findings.toml` is tracked so the findings diff can read it at
+/// a past commit, but a pass rewrites it every run — which made [`is_dirty`] count
+/// that write as an uncommitted change and blocked Sync/Pull/switch-draft/merge-draft
+/// ("commit first") even though no prose changed. This stages that one path and
+/// commits it on its own, so the working tree stays clean for those guards *and*
+/// each pass's findings land in history for the diff.
+///
+/// Scoped to a single path on purpose: it stages `bible/findings.toml` alone, never
+/// the author's in-progress prose, so an analysis pass can't sweep unsaved edits
+/// into a commit. Returns the new commit's short id, or `None` when the store didn't
+/// change (nothing to commit) or the project isn't yet a repository — both no-ops,
+/// so the caller can fire it unconditionally after every pass write.
+pub fn commit_findings(root: &Path, message: &str) -> Result<Option<String>, String> {
+    if !is_repo(root) {
+        return Ok(None);
+    }
+    let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
+    let sig = signature(&repo)?;
+
+    // Stage only the findings path — the rest of the index still mirrors HEAD, so
+    // the tree we build is HEAD's tree with just this file updated. Uncommitted
+    // prose edits, never staged here, stay in the working tree.
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    let rel = Path::new(FINDINGS_REL);
+    if root.join(rel).exists() {
+        index.add_path(rel).map_err(|e| e.to_string())?;
+    } else {
+        // The store was removed (e.g. the last finding resolved and the file
+        // cleaned up); stage that deletion so the commit reflects it.
+        let _ = index.remove_path(rel);
+    }
+    index.write().map_err(|e| e.to_string())?;
+    let tree_id = index.write_tree().map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
+
+    let parent = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit().map_err(|e| e.to_string())?),
+        Err(_) => None,
+    };
+    // The findings file is byte-identical to HEAD's — nothing to commit.
+    if let Some(p) = &parent {
+        if p.tree_id() == tree_id {
+            return Ok(None);
+        }
+    }
+
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    let oid = repo
+        .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+        .map_err(|e| format!("commit: {e}"))?;
+    Ok(Some(oid.to_string().chars().take(7).collect()))
+}
+
 /// The identity to record on a commit — the author's git config when set, else a
 /// generic Quill default, so someone who has never configured git can still commit
 /// (and merge). Shared by [`commit`] and the merge commit [`super::remote::pull`]

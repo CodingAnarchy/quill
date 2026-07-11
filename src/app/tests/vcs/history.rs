@@ -511,3 +511,44 @@ fn git_palette_restores_a_chapter() {
         app.message
     );
 }
+
+// #1060: running an analysis pass (which rewrites the tracked findings store) does not
+// leave the tree dirty in a way that blocks Sync/Pull/switch-draft. `accumulate_triage`
+// auto-commits the store on its own, so `vc_changes` — the very count those guards
+// read via `is_dirty` — stays 0. And the store is captured in history, so the findings
+// diff (#1051) can still read it at that commit. No AI request: we seed findings
+// directly and drive the local write path.
+#[test]
+fn an_analysis_pass_write_does_not_block_sync_and_is_captured() {
+    use crate::mode::{Finding, FindingKind};
+
+    let (mut app, _dir) = two_chapter_app("vc-findings-autocommit");
+    git_menu(&mut app, 0); // Initialize
+    commit_via_menu(&mut app, "manuscript"); // clean working tree
+    app.settle_vc_status();
+    assert_eq!(app.vc_changes, 0, "clean after the initial commit");
+
+    // A pass surfaces a finding → the durable store is rewritten *and* auto-committed.
+    app.accumulate_triage(&[Finding {
+        summary: "the locket changes color".into(),
+        kind: FindingKind::Continuity,
+        chapters: vec!["One".into()],
+        book: None,
+        action: None,
+        corroborators: Vec::new(),
+    }]);
+    app.settle_vc_status();
+    assert_eq!(
+        app.vc_changes, 0,
+        "the findings write is auto-committed, so Sync/Pull/switch-draft aren't blocked"
+    );
+
+    // The store landed in history for the findings diff (#1051).
+    let at_head = crate::vcs::show_file_at(&app.project.root, "HEAD", "bible/findings.toml")
+        .unwrap()
+        .unwrap();
+    assert!(
+        at_head.contains("the locket changes color"),
+        "the pass's findings are captured at HEAD: {at_head}"
+    );
+}
