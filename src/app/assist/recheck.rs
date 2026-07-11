@@ -125,7 +125,7 @@ impl App {
     /// carries a re-runnable pass and locatable chapters — a `None`-action or
     /// unlocatable finding is skipped (left in triage, never re-run). Split out so
     /// the spawn path and the test helper share the exact grouping.
-    fn recheck_all_plan(&self) -> (Vec<GroupedRecheck>, Vec<Finding>) {
+    pub(in crate::app) fn recheck_all_plan(&self) -> (Vec<GroupedRecheck>, Vec<Finding>) {
         let open: Vec<Finding> = match &self.mode {
             Mode::Findings(f) => f.items.clone(),
             _ => return (Vec::new(), Vec::new()),
@@ -199,7 +199,7 @@ impl App {
     /// The chapter *files* (project-relative) for a finding's chapter titles,
     /// within the finding's book (#608). Titles can repeat across books, so the
     /// lookup is scoped to the finding's own book. Unknown titles are dropped.
-    fn finding_chapter_files(&self, finding: &Finding) -> Vec<String> {
+    pub(in crate::app) fn finding_chapter_files(&self, finding: &Finding) -> Vec<String> {
         let book = self.finding_book(finding);
         let chapters = self.project.book_chapters(book);
         finding
@@ -216,7 +216,7 @@ impl App {
 
     /// The book index a finding belongs to — its own book, or the active book for a
     /// finding not attributed to one (#608).
-    fn finding_book(&self, finding: &Finding) -> usize {
+    pub(in crate::app) fn finding_book(&self, finding: &Finding) -> usize {
         finding.book.unwrap_or_else(|| self.project.active_book())
     }
 
@@ -225,7 +225,7 @@ impl App {
     /// now produces (#608). Bible passes revise from the existing bible + the
     /// changed chapters (the incremental path); findings-only passes analyze just
     /// those chapters. `None` for an action that produces no re-runnable findings.
-    fn recheck_request(
+    pub(in crate::app) fn recheck_request(
         &self,
         action: AiAction,
         book: Option<usize>,

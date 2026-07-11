@@ -492,7 +492,7 @@ impl App {
     /// One chapter's prose for book `b`, by file (#339): live from the buffer for
     /// the active book's active chapter, from disk otherwise — never holding more
     /// than the editing window in memory.
-    fn book_chapter_text(&self, b: usize, file: &str) -> String {
+    pub(in crate::app) fn book_chapter_text(&self, b: usize, file: &str) -> String {
         if b == self.project.active_book() {
             self.project
                 .index_of_file(file)

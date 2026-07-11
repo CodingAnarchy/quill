@@ -31,6 +31,7 @@ pub(in crate::app) mod retrieve;
 mod similar;
 mod trackers;
 mod triage;
+mod verify_idle;
 mod workflow;
 mod writers;
 
