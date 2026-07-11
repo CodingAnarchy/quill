@@ -28,6 +28,11 @@ impl App {
     /// Open the AI command palette — the single entry point for the AI features.
     /// (The caller gates on [`ai::Settings::check_ready`].)
     pub(crate) fn open_ai_palette(&mut self) {
+        // Capture the on-demand pass scope (#1054) from the live selection *before*
+        // the palette mode replaces Visual: opening the palette over a selection
+        // scopes the continuity/setting pass to the selected scene(s). No selection
+        // clears any stale scope, so the pass runs whole-book as before.
+        self.pass_scope = self.selection_pass_scope();
         // The action *set* and its order come from the single descriptor table
         // (#563); this only supplies each row's palette label + blurb.
         let items = AiAction::SPECS

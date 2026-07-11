@@ -483,6 +483,7 @@ impl App {
             Outcome::Echo(r) => self.apply_echo(r),
             Outcome::Recheck(r) => self.apply_recheck(r),
             Outcome::RecheckAll(r) => self.apply_recheck_all(r),
+            Outcome::ScopedPass(r) => self.apply_scoped_pass(r),
             Outcome::Error(e) => self.message = Some(format!("AI: {e}")),
         }
     }

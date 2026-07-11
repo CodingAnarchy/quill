@@ -251,6 +251,13 @@ pub enum Outcome {
     /// findings across all groups (so each rechecked finding is cleared if it's
     /// gone or kept if still flagged). Analysis-only — it writes no bible file.
     RecheckAll(Result<Vec<crate::mode::Finding>, AiError>),
+    /// On-demand scope-to-selection pass (#1054): a continuity/setting pass the
+    /// author invoked over an editor selection / chapter range, re-run scoped to
+    /// just those chapters and parsed to the same kind of findings the full pass
+    /// produces — surfaced fresh (not reconciled against one flagged finding like
+    /// [`Recheck`](Self::Recheck)). Analysis-only; narrows input, never the output
+    /// contract, and writes no bible file.
+    ScopedPass(Result<Vec<crate::mode::Finding>, AiError>),
     /// A failure that isn't tied to a specific feature — e.g. the backend
     /// couldn't be built (local model failed to load). Surfaced as a message.
     Error(AiError),
@@ -291,7 +298,7 @@ impl Outcome {
             Self::FactCheck(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
-            Self::Recheck(r) | Self::RecheckAll(r) => r.as_ref().err(),
+            Self::Recheck(r) | Self::RecheckAll(r) | Self::ScopedPass(r) => r.as_ref().err(),
             Self::Error(e) => Some(e),
         }
     }

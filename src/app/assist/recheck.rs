@@ -19,6 +19,116 @@ use crate::mode::AiAction;
 type GroupedRecheck = (RecheckRequest, AiAction, Option<usize>);
 
 impl App {
+    /// The on-demand pass scope from the current editor selection (#1054): the
+    /// chapter files the Visual selection covers, or the cursor's chapter when
+    /// nothing is highlighted (a caret in a scene means "this scene"). `None` when
+    /// there's nothing to scope to — no active book chapters, or a selection that
+    /// somehow lands outside every loaded chapter — so the pass falls back to the
+    /// whole book. Reads the *live* selection, so it must be called before a mode
+    /// change (e.g. opening the palette) clears it.
+    pub(crate) fn selection_pass_scope(&self) -> Option<Vec<String>> {
+        // The selection byte range in the buffer the author is editing: the Visual
+        // range when selecting, else the caret (a zero-width point).
+        let (start, end) = if let Mode::Visual { anchor, linewise } = self.mode {
+            self.selection_bytes(anchor, linewise)
+        } else {
+            let c = self.edit_buffer().cursor_byte();
+            (c, c)
+        };
+        // The loaded chapters' byte spans, in the same buffer coordinates the
+        // selection uses. In the continuous view that's every windowed chapter; in
+        // the single-chapter view it's the one active chapter spanning the buffer.
+        let spans: Vec<(String, usize, usize)> = self.manuscript.as_ref().map_or_else(
+            || {
+                vec![(
+                    self.project.active_file().to_string(),
+                    0,
+                    self.edit_buffer().len_bytes(),
+                )]
+            },
+            |m| {
+                m.segment_spans()
+                    .into_iter()
+                    .map(|(idx, s, e)| (self.project.chapter_file(idx).to_string(), s, e))
+                    .filter(|(f, _, _)| !f.is_empty())
+                    .collect()
+            },
+        );
+        let refs: Vec<ai::incremental::ChapterSpan> = spans
+            .iter()
+            .map(|(f, s, e)| ai::incremental::ChapterSpan {
+                file: f,
+                start: *s,
+                end: *e,
+            })
+            .collect();
+        let files = ai::incremental::chapters_in_span(&refs, start, end);
+        (!files.is_empty()).then_some(files)
+    }
+
+    /// Run a continuity/setting pass scoped on demand to the captured selection /
+    /// chapter range (#1054): re-verify just those chapters and surface the same
+    /// kind of findings the full pass produces. Narrows the input only — the output
+    /// contract is unchanged and nothing is written (no bible file, no prose). A
+    /// no-op with a status for an action that can't be scoped this way, or when
+    /// there's nothing scoped. The scope is *taken* here, so a later run without a
+    /// selection reverts to the whole book.
+    pub(crate) fn analyze_scoped(&mut self, action: AiAction) {
+        if self.ai_busy() {
+            self.message = Some("An AI request is already in flight…".into());
+            return;
+        }
+        let Some(files) = self.pass_scope.take() else {
+            return;
+        };
+        let book = Some(self.project.active_book());
+        let Some(req) = self.recheck_request(action, book, &files) else {
+            self.message = Some("This pass can't be scoped to a selection".into());
+            return;
+        };
+        self.spawn_outcome("⟳ Checking the selected scene…", move |backend| {
+            Outcome::ScopedPass(
+                backend
+                    .complete(&req.request)
+                    .map(|r| (req.to_findings)(&r.text, action, book)),
+            )
+        });
+    }
+
+    /// The scoped request the captured on-demand scope (#1054) would send for
+    /// `action`, plus the parser that turns its response into UI findings — for
+    /// tests to assert the request carries only the scoped chapters and to drive
+    /// `apply_scoped_pass` end-to-end through a mock backend, without a worker
+    /// thread or a live backend. `None` when no scope is captured or the action
+    /// can't be scoped this way. Returns the request and parser as a tuple (not the
+    /// crate-private `RecheckRequest`) so the test module outside `assist` can use it.
+    #[cfg(test)]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn scoped_pass_request(
+        &self,
+        action: AiAction,
+    ) -> Option<(
+        ai::Request,
+        fn(&str, AiAction, Option<usize>) -> Vec<Finding>,
+    )> {
+        let files = self.pass_scope.as_ref()?;
+        let book = Some(self.project.active_book());
+        self.recheck_request(action, book, files)
+            .map(|r| (r.request, r.to_findings))
+    }
+
+    /// Apply a completed on-demand scoped pass (#1054): surface the fresh findings
+    /// the scoped run produced through the shared triage / findings flow — the same
+    /// kind of findings a full pass yields, limited to the scoped input. Unlike a
+    /// re-check (#608) this isn't reconciled against one flagged finding; it's a
+    /// fresh, narrowed analysis, so its findings list like any pass's.
+    pub(crate) fn apply_scoped_pass(&mut self, result: Result<Vec<Finding>, ai::AiError>) {
+        let Some(findings) = self.ok_or_report(result) else {
+            return;
+        };
+        self.show_findings(findings);
+    }
+
     /// Re-check the finding at `index` in the open findings overlay (#608): re-run
     /// its originating pass scoped to just the finding's chapters, then clear it if
     /// it's gone or keep it if it's still flagged — so verifying one fix doesn't
