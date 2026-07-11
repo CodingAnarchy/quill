@@ -333,10 +333,14 @@ impl App {
         let buf = self.edit_buffer();
         let last = buf.line_count().saturating_sub(1);
         let cur = line.min(last);
-        // In the continuous view the paragraph stops at the chapter seam (#1005
-        // follow-up), so reflow never gathers the next chapter's first line across
-        // it — the concatenation seam is a single `\n` with no blank line, which the
-        // blank/thematic-break check alone would miss.
+        // In the continuous view the paragraph stops at the chapter seam in *both*
+        // directions (#1005 follow-up), so reflow never gathers an adjacent
+        // chapter's line across it — the concatenation seam is a single `\n` with no
+        // blank line, which the blank/thematic-break check alone would miss. The
+        // forward walk clamps to `scan_last` (the chapter's last line) and the
+        // backward walk to `scan_first` (its first line); without the latter, a
+        // reflow in the *first* paragraph of a non-first chapter would walk back
+        // across the seam into the previous chapter — the mirror of the forward bug.
         let scan_last = self.paragraph_scan_last(cur);
         let is_boundary = |i: usize| {
             let t = buf.line(i);
@@ -349,8 +353,9 @@ impl App {
         if is_boundary(cur) {
             return None;
         }
+        let scan_first = self.paragraph_scan_first(cur);
         let mut first = cur;
-        while first > 0 && !is_boundary(first - 1) {
+        while first > scan_first && !is_boundary(first - 1) {
             first -= 1;
         }
         let mut end = cur;
@@ -369,6 +374,29 @@ impl App {
         self.manuscript
             .as_ref()
             .map_or(buf_last, |m| m.segment_end_line(line).min(buf_last))
+    }
+
+    /// The first line a backward-scanning join/reflow may reach from `line`, the
+    /// mirror of [`paragraph_scan_last`](Self::paragraph_scan_last). In the
+    /// single-chapter view that's line 0; in the continuous view it's clamped to
+    /// the start of the chapter segment holding `line`, so the scan never crosses a
+    /// chapter seam backward into the previous chapter.
+    ///
+    /// `Manuscript::segment_start_line` is a private, segment-indexed helper, so
+    /// the segment start is derived here from the public, line-indexed
+    /// [`Manuscript::segment_end_line`]: it is constant across a segment, so
+    /// stepping back while the line above still belongs to the same segment (same
+    /// end line) lands on the segment's first line.
+    fn paragraph_scan_first(&self, line: usize) -> usize {
+        let Some(m) = self.manuscript.as_ref() else {
+            return 0;
+        };
+        let seg_end = m.segment_end_line(line);
+        let mut first = line.min(seg_end);
+        while first > 0 && m.segment_end_line(first - 1) == seg_end {
+            first -= 1;
+        }
+        first
     }
 
     /// The end byte `hi` of the replaced range for a join/reflow whose last line is
