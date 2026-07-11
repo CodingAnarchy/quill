@@ -155,19 +155,27 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
     // block as one table, resetting the flag when a plain paragraph (`\pard`) ends
     // the table's cells.
     let mut in_table = false;
-    let mut stack: Vec<(bool, bool, bool)> = Vec::new();
+    // `\ucN` sets how many substitution bytes follow each `\uN` Unicode escape
+    // (default 1) — the count of "ANSI equivalent" chars to skip after the glyph.
+    let mut uc: usize = 1;
+    // A `\f1` (monospace) run marks preformatted content the writer produced from
+    // a fenced block (#522); track it per-run and per-paragraph so the paragraph
+    // can be re-wrapped as a Markdown code fence on `\par`.
+    let mut mono = false;
+    let mut para_mono = false;
+    let mut stack: Vec<(bool, bool, bool, bool)> = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         match chars[i] {
             '{' => {
                 push_run(&mut runs, &mut cur, bold, italic);
-                stack.push((bold, italic, skipping));
+                stack.push((bold, italic, skipping, mono));
                 i += 1;
             }
             '}' => {
                 push_run(&mut runs, &mut cur, bold, italic);
-                if let Some((b, it, sk)) = stack.pop() {
-                    (bold, italic, skipping) = (b, it, sk);
+                if let Some((b, it, sk, mo)) = stack.pop() {
+                    (bold, italic, skipping, mono) = (b, it, sk, mo);
                 }
                 i += 1;
             }
@@ -207,11 +215,30 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                         }
                         "par" => {
                             push_run(&mut runs, &mut cur, bold, italic);
-                            paras.push(runs_to_markdown(&runs));
+                            let text = runs_to_markdown(&runs);
+                            // A monospace (`\f1`) paragraph is a fenced/preformatted
+                            // block (#522); re-wrap it as a Markdown code fence so
+                            // its interior line breaks and fence survive the import.
+                            paras.push(if para_mono { fence(&text) } else { text });
                             runs.clear();
+                            para_mono = false;
                         }
-                        // A plain paragraph reset ends any table we were inside.
-                        "pard" => in_table = false,
+                        // A plain paragraph reset ends any table we were inside, and
+                        // clears the monospace run (a new paragraph starts plain).
+                        "pard" => {
+                            in_table = false;
+                            mono = false;
+                        }
+                        // Font select: `\f1` is the writer's monospace fence font;
+                        // any other `\fN` (e.g. `\f0`) returns to prose.
+                        "f" => mono = param == Some(1),
+                        // Unicode substitution-char skip count for the `\uN` escapes
+                        // that follow (RTF default is 1).
+                        "uc" => {
+                            if let Some(n) = param.filter(|&n| n >= 0) {
+                                uc = n as usize;
+                            }
+                        }
                         // Table cells: count each contiguous run of table rows as
                         // one dropped table (the cell text isn't carried through).
                         "intbl" | "trowd" => {
@@ -233,9 +260,15 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                             dropped.images += 1;
                             skipping = true;
                         }
+                        // `\line` is a hard break: map it to a real newline so
+                        // multi-line preformatted content survives (#522) rather
+                        // than collapsing to one line; `\tab` stays a space.
                         "line" | "tab" => {
                             if !skipping {
-                                cur.push(' ');
+                                if mono {
+                                    para_mono = true;
+                                }
+                                cur.push(if word == "line" { '\n' } else { ' ' });
                             }
                         }
                         "u" => {
@@ -243,16 +276,19 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                                 param.and_then(|p| char::from_u32(p.rem_euclid(65536) as u32))
                             {
                                 if !skipping {
+                                    if mono {
+                                        para_mono = true;
+                                    }
                                     cur.push(ch);
                                 }
                             }
-                            // Skip the single substitution char that follows \uN.
-                            if chars
-                                .get(i)
-                                .is_some_and(|&c| c != '\\' && c != '{' && c != '}')
-                            {
-                                i += 1;
-                            }
+                            // Skip the `\uc`-count ANSI substitution chars that
+                            // follow `\uN`. Each substitution is a single literal
+                            // char OR a `\'XX` hex byte — the standard Word/Scrivener
+                            // form is `\uN\'XX` (e.g. em-dash `舒\'97`). The old
+                            // guard bailed on the leading `\`, leaving the `\'XX` to
+                            // be re-decoded and doubling every such glyph (#402).
+                            i = skip_substitution(&chars, i, uc);
                         }
                         w if is_skip_destination(w) => skipping = true,
                         _ => {} // unknown control word — no text
@@ -275,7 +311,7 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                             i += 3;
                             if !skipping {
                                 if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                                    cur.push(char::from(byte)); // ANSI byte (Latin-1)
+                                    cur.push(cp1252_byte(byte)); // ANSI byte (cp1252)
                                 }
                             }
                         }
@@ -286,6 +322,9 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
             '\n' | '\r' => i += 1, // raw newlines are not text in RTF
             c => {
                 if !skipping {
+                    if mono {
+                        para_mono = true;
+                    }
                     cur.push(c);
                 }
                 i += 1;
@@ -294,7 +333,8 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
     }
     push_run(&mut runs, &mut cur, bold, italic);
     if !runs.is_empty() {
-        paras.push(runs_to_markdown(&runs));
+        let text = runs_to_markdown(&runs);
+        paras.push(if para_mono { fence(&text) } else { text });
     }
     // The centered scene-break glyph round-trips back to a thematic break.
     for p in &mut paras {
@@ -310,6 +350,74 @@ fn runs_to_markdown(runs: &[Run]) -> String {
     runs.iter()
         .map(|r| wrap_emphasis(&r.text, r.bold, r.italic))
         .collect()
+}
+
+/// Advance past the `count` ANSI substitution "code points" that trail a `\uN`
+/// Unicode escape, starting at `i` in `chars`. Each substitution is either a
+/// literal char (`\uN?` — Quill's own export) or a `\'XX` hex-byte escape (the
+/// standard Word/Scrivener `\uN\'XX` form). Consuming the whole `\'XX` here is
+/// what stops the byte being re-decoded into a second, garbage glyph (#402).
+/// Stops early at a group boundary (`{`/`}`) or a non-substitution control word.
+fn skip_substitution(chars: &[char], mut i: usize, count: usize) -> usize {
+    for _ in 0..count {
+        match chars.get(i) {
+            // A `\'XX` byte: consume the `\`, `'`, and two hex digits together.
+            Some('\\') if chars.get(i + 1) == Some(&'\'') => i += 4,
+            // A single literal substitution char (a group boundary `{`/`}` or the
+            // start of any other control word `\` ends the substitution instead).
+            Some(c) if !matches!(c, '{' | '}' | '\\') => i += 1,
+            _ => break,
+        }
+    }
+    i.min(chars.len())
+}
+
+/// Wrap `text` as a Markdown fenced code block, mirroring the writer's monospace
+/// (`\f1`) paragraph (#522). Trailing whitespace on the block is trimmed so the
+/// fence sits flush; interior line breaks (from `\line`) are preserved.
+fn fence(text: &str) -> String {
+    format!("```\n{}\n```", text.trim_end_matches(['\n', ' ']))
+}
+
+/// Decode one `\'XX` ANSI byte to a `char`. Word/Scrivener write cp1252
+/// (`\ansicpg1252`), whose 0x80–0x9F range holds the typographic glyphs (smart
+/// quotes, dashes, ellipsis) rather than Latin-1's C1 control characters; the
+/// rest of the range coincides with Latin-1, so `char::from` covers it. Mapping
+/// this range through the cp1252 table fixes those glyphs on foreign import
+/// (#402). Undefined cp1252 slots (0x81/0x8D/0x8F/0x90/0x9D) fall back to the
+/// Latin-1 code point.
+fn cp1252_byte(byte: u8) -> char {
+    match byte {
+        0x80 => '\u{20AC}', // €
+        0x82 => '\u{201A}', // ‚
+        0x83 => '\u{0192}', // ƒ
+        0x84 => '\u{201E}', // „
+        0x85 => '\u{2026}', // …
+        0x86 => '\u{2020}', // †
+        0x87 => '\u{2021}', // ‡
+        0x88 => '\u{02C6}', // ˆ
+        0x89 => '\u{2030}', // ‰
+        0x8A => '\u{0160}', // Š
+        0x8B => '\u{2039}', // ‹
+        0x8C => '\u{0152}', // Œ
+        0x8E => '\u{017D}', // Ž
+        0x91 => '\u{2018}', // ‘
+        0x92 => '\u{2019}', // ’
+        0x93 => '\u{201C}', // “
+        0x94 => '\u{201D}', // ”
+        0x95 => '\u{2022}', // •
+        0x96 => '\u{2013}', // –
+        0x97 => '\u{2014}', // —
+        0x98 => '\u{02DC}', // ˜
+        0x99 => '\u{2122}', // ™
+        0x9A => '\u{0161}', // š
+        0x9B => '\u{203A}', // ›
+        0x9C => '\u{0153}', // œ
+        0x9E => '\u{017E}', // ž
+        0x9F => '\u{0178}', // Ÿ
+        // Latin-1 covers the rest (and the undefined cp1252 slots fall back here).
+        b => char::from(b),
+    }
 }
 
 /// RTF destination groups whose text isn't document content (font/colour/style
@@ -355,6 +463,52 @@ mod tests {
         let body = "The locket {\\i gleamed} and felt {\\b heavy}. caf\\u233 ?";
         let out = md(&rtf(body));
         assert_eq!(out, "The locket *gleamed* and felt **heavy**. café\n");
+    }
+
+    #[test]
+    fn rtf_uc_substitution_does_not_double_accented_and_smart_chars() {
+        // Foreign Scrivener/Word write each non-ASCII glyph as `\uN\'XX` (the
+        // Unicode escape plus a cp1252 substitution byte), with no space between.
+        // Before the fix the substitution `\'XX` was re-decoded as a second glyph,
+        // doubling every such char (#402). Em-dash (舒\'97), plus é and ñ.
+        let body = "caf\\u233\\'e9 se\\u241\\'f1or\\u8212\\'97done";
+        let out = md(&rtf(body));
+        assert_eq!(
+            out, "café señor—done\n",
+            "each \\uN\\'XX glyph decodes once, not doubled"
+        );
+    }
+
+    #[test]
+    fn rtf_cp1252_high_bytes_decode_to_typographic_glyphs() {
+        // 0x80–0x9F is cp1252 typography, not Latin-1 C1 controls: \'93/\'94 are
+        // curly double quotes, \'97 an em-dash, \'85 an ellipsis (#402).
+        let body = "\\'93Hello\\'94\\'97yes\\'85";
+        let out = md(&rtf(body));
+        assert_eq!(out, "\u{201C}Hello\u{201D}\u{2014}yes\u{2026}\n");
+        assert!(
+            !out.chars().any(|c| ('\u{80}'..='\u{9F}').contains(&c)),
+            "no C1 control chars leak through: {out:?}"
+        );
+    }
+
+    #[test]
+    fn rtf_line_breaks_are_preserved_as_newlines() {
+        // `\line`-joined content (the writer's preformatted form) must keep its
+        // breaks rather than collapsing into one line (#522). A monospace (`\f1`)
+        // run is re-wrapped as a Markdown fence.
+        let body = "\\pard\\sa180\\f1 LOG one\\line LOG two\\line LOG three\\f0\\par";
+        let out = md(&rtf(body));
+        assert_eq!(out, "```\nLOG one\nLOG two\nLOG three\n```\n");
+    }
+
+    #[test]
+    fn rtf_line_break_outside_mono_keeps_newline_without_a_fence() {
+        // Even without a monospace run, `\line` survives as a hard break (a plain
+        // multi-line paragraph), rather than collapsing to a single space.
+        let body = "Line one\\line Line two\\par";
+        let out = md(&rtf(body));
+        assert_eq!(out, "Line one\nLine two\n");
     }
 
     #[test]
