@@ -197,10 +197,17 @@ impl FindingsStore {
 
     /// The still-open (not dismissed) findings, as UI findings — the triage list
     /// to restore at startup.
+    ///
+    /// A record whose `chapters` is empty is skipped: `bible/findings.toml` is
+    /// hand-editable and the deserializer accepts any Vec, but the triage UI's
+    /// "first chapter is the jump target" logic presupposes a non-empty list. An
+    /// empty-chapters record has no jump target and can't be acted on, so we drop
+    /// it here rather than restore an un-jumpable (and potentially panic-inducing
+    /// on a `.first()`-less path) finding.
     pub(super) fn open(&self) -> Vec<Finding> {
         self.findings
             .iter()
-            .filter(|r| !r.dismissed)
+            .filter(|r| !r.dismissed && !r.chapters.is_empty())
             .map(Record::finding)
             .collect()
     }
@@ -464,6 +471,34 @@ mod tests {
         assert_eq!(diff.still_open.len(), 1, "the real finding carries through");
         assert!(diff.introduced.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // `bible/findings.toml` is hand-editable, and the deserializer accepts a record
+    // with an empty `chapters` list — but the triage UI presupposes a non-empty list
+    // (the first chapter is the jump target). Loading such a store must not panic, and
+    // `open()` skips the un-jumpable record while keeping the well-formed ones.
+    #[test]
+    fn empty_chapters_record_loads_without_panicking_and_is_skipped() {
+        let body = "\
+[[findings]]
+summary = \"a finding with no chapters\"
+kind = \"continuity\"
+chapters = []
+
+[[findings]]
+summary = \"a well-formed finding\"
+kind = \"continuity\"
+chapters = [\"One\"]
+";
+        let store = FindingsStore::from_toml(body);
+        let open = store.open();
+        assert_eq!(
+            open.len(),
+            1,
+            "the empty-chapters record is skipped; the well-formed one survives"
+        );
+        assert_eq!(open[0].summary, "a well-formed finding");
+        assert_eq!(open[0].chapters, vec!["One".to_string()]);
     }
 
     // from_toml is the store-at-a-ref reader (#1051): it parses a real store body and

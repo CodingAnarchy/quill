@@ -169,7 +169,21 @@ impl Project {
         // `toml::Value` so the single-book path is byte-for-byte unchanged. The
         // series shape lives in `series.rs` (#350).
         let value: toml::Value = toml::from_str(&text).map_err(invalid)?;
-        let (manifest, books, active_book) = Manifest::from_toml_value(value).map_err(invalid)?;
+        let (mut manifest, mut books, active_book) =
+            Manifest::from_toml_value(value).map_err(invalid)?;
+
+        // Repair any hand-broken part ranges (inverted or zero-based) to the
+        // `Part` invariant before any mapping code reads them — an inverted range
+        // would otherwise silently map to no part (#185). Applies to the active
+        // manifest and every series book, since both feed `part_at_body_position`.
+        if let Some(parts) = manifest.parts.as_mut() {
+            normalize_parts(parts);
+        }
+        for book in &mut books {
+            if let Some(parts) = book.parts.as_mut() {
+                normalize_parts(parts);
+            }
+        }
 
         // A chapter entry with an empty `file` is corruption (a half-written or
         // hand-broken manifest): the path would resolve to the project dir, so we

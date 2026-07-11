@@ -76,6 +76,18 @@ mod tests {
         let s = parse(json).unwrap();
         assert_eq!(s.findings.len(), 1);
         assert_eq!(s.findings[0].kind, "POV");
+        // Every field survives the parse, not just kind — detail and chapters too.
+        assert_eq!(s.findings[0].detail, "head-hop");
+        assert_eq!(s.findings[0].chapters, ["Two"]);
+    }
+
+    // A clean manuscript is an empty findings list, not an error — the model
+    // returned a valid, schema-conforming reply with nothing to flag (matching the
+    // foreshadow/factcheck passes).
+    #[test]
+    fn parse_reads_empty_findings() {
+        let s = parse(r#"{"findings":[]}"#).unwrap();
+        assert!(s.findings.is_empty());
     }
 
     #[test]

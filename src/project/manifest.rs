@@ -104,19 +104,61 @@ pub struct Analysis {
 }
 
 /// A named, inclusive range of chapters — a grouping layer between book and
-/// chapter (see [`docs/progress-reports.md`]). `chapters` is `[start, end]`,
-/// 1-based and inclusive. `name` is optional; the report auto-labels an unnamed
-/// part `"{label} {n}"` using [`Manifest::part_label`].
+/// chapter (see [`docs/progress-reports.md`]).
+///
+/// # Invariant
+///
+/// `chapters` is `[start, end]` where both endpoints are **1-based positions
+/// among the *body* chapters** (front/back-matter sections belong to no part,
+/// #185), the range is **inclusive**, and it is **well-formed**: both endpoints
+/// are `>= 1` and `start <= end`. Nothing in `serde` enforces this — a
+/// hand-edited `book.toml` can violate it — so [`normalize_parts`] repairs or
+/// drops a violating part at load ([`Project::open`]) before any mapping code
+/// (`part_at_body_position`, the progress report's `counts.rs`) reads it. An
+/// inverted range (`[end, start]`) would otherwise silently map to no part
+/// (`part_at_body_position` never matches `chapters[0] <= pos <= chapters[1]`).
+///
+/// `name` is optional; the report auto-labels an unnamed part `"{label} {n}"`
+/// using [`Manifest::part_label`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Part {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Inclusive 1-based chapter range `[start, end]`.
+    /// Inclusive, well-formed 1-based body-chapter range `[start, end]`
+    /// (`1 <= start <= end`). See the type's invariant.
     pub chapters: [usize; 2],
     /// Optional word-count goal for the part (#146), set in `book.toml`. When
     /// present, the progress report shows the part's words against it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<usize>,
+}
+
+/// Repair a hand-edited `parts` list to the [`Part`] invariant, in place, at
+/// load: an inverted range (`[end, start]`, e.g. `[3, 1]`) is swapped back to
+/// `[start, end]` rather than silently mapping to no part, and a part with a
+/// zero endpoint (a `0` is invalid for a 1-based range — the manifest is
+/// hand-broken) is dropped with a warning. Called by [`Project::open`] on the
+/// active manifest and every series book's parts, so no downstream mapping
+/// (`part_at_body_position`, the progress report's `counts.rs`) ever reads a
+/// malformed range.
+pub fn normalize_parts(parts: &mut Vec<Part>) {
+    parts.retain_mut(|p| {
+        if p.chapters[0] == 0 || p.chapters[1] == 0 {
+            eprintln!(
+                "quill: dropping malformed part range {:?} (a part range is 1-based; 0 is invalid)",
+                p.chapters
+            );
+            return false;
+        }
+        if p.chapters[0] > p.chapters[1] {
+            eprintln!(
+                "quill: normalizing inverted part range [{}, {}] to [{}, {}]",
+                p.chapters[0], p.chapters[1], p.chapters[1], p.chapters[0]
+            );
+            p.chapters.swap(0, 1);
+        }
+        true
+    });
 }
 
 /// The on-disk manifest (`book.toml`), deserialized.
@@ -264,4 +306,57 @@ pub fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
     parts
         .iter()
         .position(|p| p.chapters[0] <= body_pos && body_pos <= p.chapters[1])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_parts, part_at_body_position, Part};
+
+    fn part(range: [usize; 2]) -> Part {
+        Part {
+            name: None,
+            chapters: range,
+            goal: None,
+        }
+    }
+
+    // A hand-edited `book.toml` can invert a part range (`[3, 1]`). Left as-is it
+    // silently maps to no part — `part_at_body_position` never matches a position
+    // in the range. `normalize_parts` swaps it back so chapters 1–3 map correctly.
+    #[test]
+    fn inverted_part_range_is_normalized_on_load() {
+        let mut parts = vec![part([3, 1])];
+
+        // Before repair, the inverted range matches nothing in 1..=3.
+        assert_eq!(
+            part_at_body_position(&parts, 2),
+            None,
+            "an inverted range silently maps to no part"
+        );
+
+        normalize_parts(&mut parts);
+
+        assert_eq!(parts.len(), 1, "the part is repaired, not dropped");
+        assert_eq!(parts[0].chapters, [1, 3], "endpoints are swapped in order");
+        for pos in 1..=3 {
+            assert_eq!(
+                part_at_body_position(&parts, pos),
+                Some(0),
+                "chapter {pos} now maps into the repaired part"
+            );
+        }
+    }
+
+    // A zero endpoint is invalid for a 1-based range (a hand-broken manifest); the
+    // part is dropped rather than mismapping. Well-formed parts survive untouched.
+    #[test]
+    fn zero_based_part_range_is_dropped_and_valid_ones_kept() {
+        let mut parts = vec![part([0, 2]), part([1, 4]), part([5, 0])];
+        normalize_parts(&mut parts);
+        assert_eq!(
+            parts.iter().map(|p| p.chapters).collect::<Vec<_>>(),
+            vec![[1, 4]],
+            "both zero-endpoint parts drop; the well-formed one is kept as-is"
+        );
+    }
 }
