@@ -92,6 +92,13 @@ pub enum AiAction {
     /// sensitivity review, and distinct from Accuracy (which checks a named
     /// *external* concern — this checks the author's own ledger).
     FactCheck,
+    /// Pacing & tension reading — author-invoked (#1048): read the manuscript's
+    /// scene-level tension/quiet RHYTHM (a sagging middle, a run of high-tension
+    /// chapters with no breath, a flat stretch) and report it as located, plain-
+    /// language observations, each naming the stretch (chapters/scenes). Findings
+    /// only; author-invoked; observes rhythm, never suggests a cut, an addition, a
+    /// reorder, or reworded prose — it sits closest to the co-writer line.
+    Pacing,
 }
 
 /// What a network pass costs (#82/#372) — the *data* side of the cost estimate,
@@ -381,6 +388,13 @@ impl AiAction {
             weight: ModelWeight::Heavy,
             bible_key: None,
         },
+        AiActionSpec {
+            action: Self::Pacing,
+            slug: "ai:pacing",
+            cost: AiCost::Manuscript,
+            weight: ModelWeight::Heavy,
+            bible_key: None,
+        },
     ];
 
     /// This action's descriptor — its single source of slug / cost / bible key.
@@ -451,6 +465,7 @@ impl AiAction {
             Self::Relationship => FindingKind::Relationship,
             Self::Foreshadow => FindingKind::Foreshadow,
             Self::FactCheck => FindingKind::FactCheck,
+            Self::Pacing => FindingKind::Pacing,
             Self::Voice => FindingKind::Voice,
             Self::Echo => FindingKind::Echo,
             _ => FindingKind::Other,

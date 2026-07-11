@@ -52,6 +52,10 @@ pub enum FindingKind {
     /// Relationship-trajectory inconsistencies (#1046) — a chosen pair's arc
     /// contradicting itself or reversing off-page with no on-page setup.
     Relationship,
+    /// Pacing & tension observations (#1048) — located, plain-language readings of
+    /// the scene-level tension/quiet rhythm (a sagging middle, a run of high-tension
+    /// chapters with no breath, a flat stretch). Observation only; no suggested change.
+    Pacing,
     /// Not a re-runnable analysis pass (Q&A citations / answer rows), or an
     /// unrecognized persisted slug.
     Other,
@@ -76,6 +80,7 @@ impl FindingKind {
             Self::Voice => "voice",
             Self::Echo => "echo",
             Self::Relationship => "relationship",
+            Self::Pacing => "pacing",
             Self::Other => "other",
         }
     }
@@ -97,6 +102,7 @@ impl FindingKind {
             Self::Voice => "Character voice",
             Self::Echo => "Echoes & near-duplicates",
             Self::Relationship => "Relationship trajectory",
+            Self::Pacing => "Pacing & tension",
             Self::Other => "Other",
         }
     }
@@ -119,6 +125,7 @@ impl FindingKind {
             Self::Voice,
             Self::Echo,
             Self::Relationship,
+            Self::Pacing,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)

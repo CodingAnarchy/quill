@@ -52,6 +52,7 @@ mod ai_factcheck;
 mod ai_foreshadow;
 mod ai_generation;
 mod ai_images;
+mod ai_pacing;
 mod ai_plot;
 mod ai_prose;
 mod ai_qa;

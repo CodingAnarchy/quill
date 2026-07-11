@@ -331,6 +331,7 @@ impl Action {
         Self::Ai(AiAction::Relationship),
         Self::Ai(AiAction::Foreshadow),
         Self::Ai(AiAction::FactCheck),
+        Self::Ai(AiAction::Pacing),
         Self::RefreshBibles,
         Self::QueuePasses,
         Self::BackgroundBibleUpdate,
@@ -598,6 +599,9 @@ impl Action {
             Self::Ai(AiAction::FactCheck) => {
                 "AI · Fact-check vs. research notebook (flags, no fixes)"
             }
+            Self::Ai(AiAction::Pacing) => {
+                "AI · Pacing & tension reading (observations, no changes)"
+            }
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
             Self::QuickStart => "Quick-start (first-run card)",
@@ -748,6 +752,12 @@ impl Action {
                         // passes the two-layer prose guard. No argument (it reads
                         // `bible/research.md` directly).
                         | AiAction::FactCheck
+                        // Read-only pacing & tension reading (#1048): produces
+                        // located observations of the manuscript's rhythm — no prose,
+                        // and no suggested cut / addition / reorder / reword — so it
+                        // passes the two-layer prose guard. No argument (it reads the
+                        // whole manuscript directly).
+                        | AiAction::Pacing
                         | AiAction::Ask
                         | AiAction::Brainstorm
                         | AiAction::DraftCharacters
