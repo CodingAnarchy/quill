@@ -19,7 +19,7 @@ mod local;
 mod remote;
 
 pub use local::{
-    checkout_branch, commit, create_branch, create_tag, current_branch, diff,
+    checkout_branch, commit, commit_findings, create_branch, create_tag, current_branch, diff,
     diff_file_to_worktree, diff_tree_to_worktree, finalize_branch_merge, init, is_repo,
     list_branches, list_tags, log, merge_branch, restore, restore_all, set_tag_message,
     show_file_at, status, CommitMeta, MergeOutcome, TagMeta,
