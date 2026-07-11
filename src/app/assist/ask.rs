@@ -137,6 +137,43 @@ fn answer_context_rows(answer: &ai::Answer) -> Vec<Finding> {
     rows
 }
 
+/// A leading, non-jumpable coverage row for an offline read-loop answer (#1056):
+/// surfaces WHAT the loop read and HOW COMPLETE it was — "Coverage: 6 of 40 chapters
+/// read" plus the reasons it may be partial — as its own row, derived from the
+/// structured [`Coverage`](ai::Coverage) metadata rather than scraped from the answer
+/// prose. `None` for a whole-book (cloud) answer, which has no coverage metadata, and
+/// for a full, unhedged read (nothing to flag). This is metadata about the read; it
+/// never touches the answer prose.
+fn coverage_summary_row(answer: &ai::Answer) -> Option<Finding> {
+    let coverage = answer.coverage.as_ref()?;
+    if !coverage.is_hedged() {
+        return None;
+    }
+    let read = coverage.chapters_read.len();
+    let mut summary = if coverage.chapters_total > 0 {
+        format!(
+            "Coverage: {read} of {} chapters read",
+            coverage.chapters_total
+        )
+    } else {
+        format!("Coverage: {read} chapters read")
+    };
+    if coverage.no_bible {
+        summary.push_str("; no story bible (coverage may be partial)");
+    }
+    if coverage.cap_reached {
+        summary.push_str("; read cap reached (coverage incomplete)");
+    }
+    Some(Finding {
+        summary,
+        kind: FindingKind::Other,
+        chapters: Vec::new(), // a coverage note isn't a jump target
+        book: None,
+        action: None,
+        corroborators: Vec::new(),
+    })
+}
+
 /// Build the jumpable Q&A-history findings (#609): every logged ask, newest
 /// first, one row per cited chapter (`Q: … → <chapter>`, jumpable), plus a single
 /// non-jumpable row for an ask that cited nothing. Lets the whole session's
@@ -347,9 +384,12 @@ impl App {
             self.show_ai(ai::answer_to_lines(answer, usage));
             return;
         }
-        // Lead with the answer prose as context rows (empty `chapters` → not a jump
-        // target, a no-op on Enter), then the jumpable citations.
-        let mut items: Vec<Finding> = answer_context_rows(answer);
+        // Lead with the coverage note (#1056) — what the loop read and how completely,
+        // derived from the structured metadata so a holistic answer reads as hedged —
+        // then the answer prose as context rows (empty `chapters` → not a jump target,
+        // a no-op on Enter), then the jumpable citations.
+        let mut items: Vec<Finding> = coverage_summary_row(answer).into_iter().collect();
+        items.extend(answer_context_rows(answer));
         items.extend(citations);
         // Select the first jumpable citation so Enter jumps straight there.
         let selected = items
@@ -384,8 +424,18 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_breadth, retrieval_oversized, Breadth};
+    use super::{coverage_summary_row, parse_breadth, retrieval_oversized, Breadth};
     use crate::ai::model_select::STANDARD_CONTEXT_TOKENS;
+    use crate::ai::{Answer, Coverage};
+
+    /// An offline answer with the given coverage metadata, for the presentation tests.
+    fn answer_with_coverage(coverage: Coverage) -> Answer {
+        Answer {
+            answer: "The locket appears in Chapter 7.".to_string(),
+            citations: coverage.chapters_read.clone(),
+            coverage: Some(coverage),
+        }
+    }
 
     #[test]
     fn oversized_is_a_pure_window_check() {
@@ -436,5 +486,68 @@ mod tests {
         assert_eq!(q, "is the broad daylight scene consistent?");
         // A bare word without the `!` prefix isn't a marker either.
         assert_eq!(parse_breadth("broad q").0, Breadth::Normal);
+    }
+
+    #[test]
+    fn coverage_row_surfaces_the_read_set_and_fraction() {
+        // #1056: a partial offline read gets a leading coverage note derived from the
+        // structured metadata — the read fraction, surfaced independently of the prose.
+        let row = coverage_summary_row(&answer_with_coverage(Coverage {
+            chapters_read: vec!["Chapter 7".to_string()],
+            chapters_total: 40,
+            no_bible: false,
+            cap_reached: false,
+        }))
+        .expect("a hedged answer gets a coverage row");
+        assert_eq!(row.summary, "Coverage: 1 of 40 chapters read");
+        assert!(
+            row.chapters.is_empty(),
+            "a coverage note isn't a jump target"
+        );
+    }
+
+    #[test]
+    fn coverage_row_notes_missing_bible_and_reached_cap() {
+        // The partial-coverage reasons (no bible, cap reached) are surfaced too, so the
+        // author knows WHY a holistic answer is hedged (#1056).
+        let row = coverage_summary_row(&answer_with_coverage(Coverage {
+            chapters_read: vec!["Chapter 7".to_string(), "Chapter 12".to_string()],
+            chapters_total: 40,
+            no_bible: true,
+            cap_reached: true,
+        }))
+        .expect("a hedged answer gets a coverage row");
+        assert!(
+            row.summary.contains("2 of 40 chapters read"),
+            "{}",
+            row.summary
+        );
+        assert!(row.summary.contains("no story bible"), "{}", row.summary);
+        assert!(row.summary.contains("read cap reached"), "{}", row.summary);
+    }
+
+    #[test]
+    fn a_full_read_gets_no_coverage_row() {
+        // A well-covered answer (every chapter read, bible present, no cap) is not
+        // hedged, so no coverage note is surfaced — no spurious "may be incomplete".
+        let row = coverage_summary_row(&answer_with_coverage(Coverage {
+            chapters_read: vec!["One".to_string(), "Two".to_string()],
+            chapters_total: 2,
+            no_bible: false,
+            cap_reached: false,
+        }));
+        assert!(row.is_none(), "a full, unhedged read gets no coverage row");
+    }
+
+    #[test]
+    fn a_cloud_answer_has_no_coverage_row() {
+        // The whole-book (cloud) path reads the entire manuscript and carries no
+        // coverage metadata, so there's nothing to hedge and no coverage row (#1056).
+        let cloud = Answer {
+            answer: "Answered from the whole book.".to_string(),
+            citations: vec!["Chapter 3".to_string()],
+            coverage: None,
+        };
+        assert!(coverage_summary_row(&cloud).is_none());
     }
 }
