@@ -657,6 +657,13 @@ pub struct App {
     /// pass with the pair intact; taken when the pass spawns, `None` when no
     /// relationship pass is pending.
     pub(crate) relationship_pair: Option<String>,
+    /// The chapter files an on-demand continuity/setting pass is scoped to (#1054)
+    /// — captured from the editor selection (or the cursor's chapter) when the
+    /// author opens the AI palette from Visual mode, so the pass re-verifies just
+    /// the selected scene(s) instead of the whole book. `None` means no scope was
+    /// given, so the pass runs whole-book exactly as before. Taken when a scopeable
+    /// pass spawns; cleared when the palette opens without a selection.
+    pub(crate) pass_scope: Option<Vec<String>>,
     /// One-line transient message shown in the status bar.
     pub message: Option<String>,
     /// The system-clipboard seam (#811): a yank / delete / Visual copy writes the
@@ -852,6 +859,7 @@ impl App {
             pending_qa_question: None,
             accuracy_concern: None,
             relationship_pair: None,
+            pass_scope: None,
             message: None,
             clipboard: Box::new(crate::clipboard::Osc52Clipboard::new()),
             mouse_anchor: None,

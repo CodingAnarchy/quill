@@ -49,14 +49,26 @@ impl App {
     }
 
     /// Start a timeline & continuity pass (incremental when possible, #90); the
-    /// timeline + findings are applied by [`App::poll_ai`].
+    /// timeline + findings are applied by [`App::poll_ai`]. When the author invoked
+    /// it over an editor selection / chapter range (#1054), scope it to just those
+    /// chapters instead of the whole book — cheaper, focused, same finding kind.
     pub(crate) fn analyze_continuity(&mut self, force: bool) {
+        if self.pass_scope.is_some() {
+            self.analyze_scoped(AiAction::Continuity);
+            return;
+        }
         self.run_book_bible_pass(AiAction::Continuity, self.project.active_book(), force);
     }
 
     /// Start a setting & worldbuilding pass (incremental when possible, #90); the
-    /// setting bible + rule findings are applied by [`App::poll_ai`].
+    /// setting bible + rule findings are applied by [`App::poll_ai`]. When the
+    /// author invoked it over an editor selection / chapter range (#1054), scope it
+    /// to just those chapters instead of the whole book.
     pub(crate) fn analyze_setting(&mut self, force: bool) {
+        if self.pass_scope.is_some() {
+            self.analyze_scoped(AiAction::Setting);
+            return;
+        }
         self.run_book_bible_pass(AiAction::Setting, self.project.active_book(), force);
     }
 

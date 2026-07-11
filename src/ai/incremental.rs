@@ -194,6 +194,51 @@ pub fn next_fold_chunk(remaining: &[ChapterSize], window: u32, overhead: u32) ->
     }
 }
 
+// --- On-demand scope-to-selection (#1054) -----------------------------------
+
+/// One loaded chapter's byte span in the editor buffer, for [`chapters_in_span`]:
+/// its file (project-relative) and the `[start, end)` byte range it occupies in
+/// the concatenated continuous-view buffer. A single-chapter view has one entry
+/// spanning the whole buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChapterSpan<'a> {
+    pub file: &'a str,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// The chapter files an author's on-demand scope (#1054) covers: those whose byte
+/// span overlaps the `[sel_start, sel_end)` selection, in buffer order. A pure
+/// input-narrowing decision — same shape as [`decide`], but from an explicit
+/// editor selection rather than a content diff — so a continuity/setting pass can
+/// re-verify just the selected scene(s) with the identical output contract.
+///
+/// An empty or zero-width selection (`sel_start == sel_end`) that lands inside a
+/// chapter selects that one chapter (a caret in a scene means "this scene"); a
+/// selection spanning several loaded chapters selects each it touches. A chapter
+/// is covered when the ranges overlap at all, so a selection that grazes a seam
+/// still picks up the chapter it starts or ends in — never fewer than one when the
+/// selection falls within the loaded span. `spans` need not be contiguous or
+/// sorted; the result preserves their order.
+pub fn chapters_in_span(spans: &[ChapterSpan], sel_start: usize, sel_end: usize) -> Vec<String> {
+    // Normalize a caret (or an inverted range) to a point-inclusive test: a
+    // zero-width selection at byte `p` covers the chapter whose `[start, end)`
+    // contains `p`, so parking the cursor in a scene scopes to that scene.
+    let (lo, hi) = (sel_start.min(sel_end), sel_start.max(sel_end));
+    spans
+        .iter()
+        .filter(|s| {
+            if lo == hi {
+                (s.start..s.end).contains(&lo)
+            } else {
+                // Half-open overlap: the ranges share at least one byte.
+                lo < s.end && hi > s.start
+            }
+        })
+        .map(|s| s.file.to_string())
+        .collect()
+}
+
 // --- The per-project state file (bible/.state.toml) -------------------------
 
 /// What one tracker was last built from.
@@ -643,6 +688,62 @@ mod tests {
             backed.cached_context.contains(PRIOR_PASSAGES_HEADING),
             "the prior scene is labeled as reference, not changed material"
         );
+    }
+
+    fn spans<'a>(rows: &[(&'a str, usize, usize)]) -> Vec<ChapterSpan<'a>> {
+        rows.iter()
+            .map(|&(file, start, end)| ChapterSpan { file, start, end })
+            .collect()
+    }
+
+    #[test]
+    fn a_selection_within_one_chapter_scopes_to_that_chapter() {
+        // Three loaded chapters; a selection wholly inside the middle one (#1054)
+        // scopes to just it — the on-demand narrowing the author invokes.
+        let loaded = spans(&[
+            ("one.md", 0, 100),
+            ("two.md", 100, 200),
+            ("three.md", 200, 300),
+        ]);
+        assert_eq!(chapters_in_span(&loaded, 120, 150), vec!["two.md"]);
+    }
+
+    #[test]
+    fn a_selection_spanning_a_seam_scopes_to_both_chapters() {
+        // A selection that crosses the chapter boundary covers both — the same kind
+        // of finding, over the two scenes the range touches.
+        let loaded = spans(&[
+            ("one.md", 0, 100),
+            ("two.md", 100, 200),
+            ("three.md", 200, 300),
+        ]);
+        assert_eq!(chapters_in_span(&loaded, 80, 150), vec!["one.md", "two.md"]);
+    }
+
+    #[test]
+    fn a_caret_inside_a_chapter_scopes_to_it() {
+        // A zero-width selection (just the cursor, no highlighted range) still scopes
+        // to the scene it sits in — "check this scene" without selecting text.
+        let loaded = spans(&[("one.md", 0, 100), ("two.md", 100, 200)]);
+        assert_eq!(chapters_in_span(&loaded, 140, 140), vec!["two.md"]);
+        // At a seam byte the half-open span that contains it wins (`two.md` owns 100).
+        assert_eq!(chapters_in_span(&loaded, 100, 100), vec!["two.md"]);
+    }
+
+    #[test]
+    fn an_inverted_selection_is_normalized() {
+        // end < start (cursor before the anchor) covers the same chapters as the
+        // forward range — the scope is orientation-independent.
+        let loaded = spans(&[("one.md", 0, 100), ("two.md", 100, 200)]);
+        assert_eq!(chapters_in_span(&loaded, 150, 80), vec!["one.md", "two.md"]);
+    }
+
+    #[test]
+    fn a_single_chapter_view_selection_scopes_to_the_lone_chapter() {
+        // A single-chapter view is one span covering the whole buffer; any selection
+        // within it scopes to that chapter — cheaper input than the whole book.
+        let loaded = spans(&[("solo.md", 0, 500)]);
+        assert_eq!(chapters_in_span(&loaded, 10, 60), vec!["solo.md"]);
     }
 
     #[test]

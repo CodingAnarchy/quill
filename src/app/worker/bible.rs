@@ -547,8 +547,31 @@ impl App {
     /// cost estimate (#90). The whole manuscript for most passes, but only the
     /// bible + changed chapters for an incremental tracker pass, and zero when its
     /// bible is already current (so an up-to-date pass never prompts a confirm).
+    ///
+    /// An on-demand scope-to-selection pass (#1054) sends only its prior bible plus
+    /// the scoped chapters, so the estimate reflects the reduced scope — smaller
+    /// context, lower cost — matching exactly what `analyze_scoped` will send.
     pub(crate) fn pass_context_len(&self, action: AiAction, force: bool) -> usize {
+        if let Some(files) = self.scoped_pass_context(action) {
+            return files;
+        }
         self.book_pass_context_len(action, self.project.active_book(), force)
+    }
+
+    /// The context length a captured on-demand scoped pass (#1054) will send for
+    /// `action`, or `None` when no selection scope is active or the action isn't a
+    /// scopeable bible pass (so the caller falls back to the whole-book estimate).
+    /// Mirrors `recheck_request`'s scoped context — the prior bible plus the scoped
+    /// chapters — so the pre-flight estimate can't drift from the real request.
+    fn scoped_pass_context(&self, action: AiAction) -> Option<usize> {
+        let files = self.pass_scope.as_ref()?;
+        let t = bible_tracker(action)?;
+        let book = self.project.active_book();
+        let prior = match t.source {
+            BibleSource::Dir(dir) => bible::raw_dir(&self.project.root, dir),
+            BibleSource::File(file) => bible::raw_file(&self.project.root, file),
+        };
+        Some(prior.len() + self.book_render_files(book, files).len())
     }
 
     /// The byte length of the context a costed pass will send for a specific
