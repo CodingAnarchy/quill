@@ -95,6 +95,16 @@ mod tests {
         assert_eq!(n.findings.len(), 1);
         assert_eq!(n.findings[0].name, "Mara");
         assert_eq!(n.findings[0].variants, vec!["Marah"]);
+        // The chapters (the jump target for triage) survive the parse too.
+        assert_eq!(n.findings[0].chapters, ["Two"]);
+    }
+
+    // A clean manuscript — every name spelled consistently — is an empty findings
+    // list, not an error (matching the foreshadow/factcheck passes).
+    #[test]
+    fn parse_reads_empty_findings() {
+        let n = parse(r#"{"findings":[]}"#).unwrap();
+        assert!(n.findings.is_empty());
     }
 
     #[test]
