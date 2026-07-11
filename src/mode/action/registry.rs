@@ -547,7 +547,7 @@ impl Action {
     }
 
     /// Human label for the run-action menu.
-    pub(crate) const fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Save => "Save",
             Self::Export(ExportFormat::Markdown) => "Export → Markdown",
@@ -563,45 +563,8 @@ impl Action {
             Self::WritingHistory => "Writing history",
             Self::RevisionPlan => "Export revision plan (chapter-ordered, ranked)",
             Self::HealthTrend => "Export health trend (across drafts)",
-            Self::Ai(AiAction::Ask) => "AI · Ask the manuscript",
-            Self::Ai(AiAction::Characters) => "AI · Character bible",
-            Self::Ai(AiAction::Continuity) => "AI · Timeline & continuity",
-            Self::Ai(AiAction::Setting) => "AI · Setting & worldbuilding",
-            Self::Ai(AiAction::Plot) => "AI · Plot & arc tracker",
-            Self::Ai(AiAction::Theme) => "AI · Theme & motif tracker",
-            Self::Ai(AiAction::Scaffold) => "AI · Scaffold / outline",
-            Self::Ai(AiAction::Naming) => "AI · Name & term consistency",
-            Self::Ai(AiAction::Style) => "AI · Prose & style",
-            Self::Ai(AiAction::Brainstorm) => "AI · Brainstorm ideas",
-            Self::Ai(AiAction::DraftCharacters) => "AI · Draft characters",
-            Self::Ai(AiAction::DraftSetting) => "AI · Draft setting",
-            Self::Ai(AiAction::Voice) => "AI · Character voice",
-            Self::Ai(AiAction::Submission) => "AI · Submission material",
-            Self::Ai(AiAction::Marketing) => "AI · Marketing copy",
-            Self::Ai(AiAction::Social) => "AI · Social posts",
-            Self::Ai(AiAction::AdCreative) => "AI · Ad creative",
-            Self::Ai(AiAction::Portrait) => "AI · Character portraits",
-            Self::Ai(AiAction::Scene) => "AI · Scene illustration",
-            Self::Ai(AiAction::SemanticFind) => "AI · Find similar scenes",
-            Self::Ai(AiAction::Echo) => "AI · Echo & near-duplicate detection",
-            Self::Ai(AiAction::Triage) => "Revision triage",
-            Self::Ai(AiAction::Dashboard) => "Manuscript health dashboard",
-            Self::Ai(AiAction::CoOccurrence) => "Motif & character co-occurrence",
-            Self::Ai(AiAction::AskHistory) => "AI · Ask history",
-            Self::Ai(AiAction::Thesaurus) => "AI · Word search (thesaurus)",
-            Self::Ai(AiAction::NameGen) => "AI · Name generator",
-            Self::Ai(AiAction::Editorial) => "AI · Editorial read (flags, no fixes)",
-            Self::Ai(AiAction::Accuracy) => "AI · Cultural & historical accuracy (flags, no fixes)",
-            Self::Ai(AiAction::Relationship) => "AI · Relationship trajectory (flags, no fixes)",
-            Self::Ai(AiAction::Foreshadow) => {
-                "AI · Foreshadow & payoff (flags dangling setups, no fixes)"
-            }
-            Self::Ai(AiAction::FactCheck) => {
-                "AI · Fact-check vs. research notebook (flags, no fixes)"
-            }
-            Self::Ai(AiAction::Pacing) => {
-                "AI · Pacing & tension reading (observations, no changes)"
-            }
+            // The AI labels are the single source in `AiAction::SPECS` (#563).
+            Self::Ai(a) => a.label(),
             Self::EnableAi => "Enable AI assistance",
             Self::UserGuide => "User's guide",
             Self::QuickStart => "Quick-start (first-run card)",
@@ -701,7 +664,15 @@ impl Action {
     /// assistant has no way to give), local-only Triage, the modal pickers (book
     /// switch, tree, project find, annotate, model manager, the notes importers),
     /// and the off-manuscript copy generators, kept out of autonomous reach.
-    pub(crate) const fn assistant_runnable(self) -> bool {
+    pub(crate) fn assistant_runnable(self) -> bool {
+        // The AI passes' runnability is a descriptor field (#1069): the analysis
+        // passes that surface findings (no prose) and the arg-taking generative
+        // helpers are runnable, the image/thesaurus passes, local views, and
+        // off-manuscript copy generators are not — all decided once in `AiAction::SPECS`,
+        // never a hand-maintained allowlist here that could drift from the pass set.
+        if let Self::Ai(a) = self {
+            return a.assistant_runnable();
+        }
         matches!(
             self,
             Self::Save
@@ -723,46 +694,6 @@ impl Action {
                 | Self::ToggleFocus
                 | Self::ToggleParagraphIndent
                 | Self::SwitchBackend
-                | Self::Ai(
-                    AiAction::Characters
-                        | AiAction::Continuity
-                        | AiAction::Setting
-                        | AiAction::Plot
-                        | AiAction::Theme
-                        | AiAction::Scaffold
-                        | AiAction::Naming
-                        | AiAction::Style
-                        | AiAction::Voice
-                        | AiAction::Editorial
-                        // Read-only accuracy analysis (#973): produces findings, no
-                        // prose, so it passes the two-layer prose guard. The concern
-                        // is its free-text argument (see `text_arg`).
-                        | AiAction::Accuracy
-                        // Read-only relationship trajectory (#1046): tracks a pair's
-                        // arc and flags inconsistencies — findings, no prose — so it
-                        // passes the two-layer prose guard. The pair is its free-text
-                        // argument (see `text_arg`).
-                        | AiAction::Relationship
-                        // Read-only foreshadow / payoff scan (#1047): produces
-                        // findings (dangling concrete setups), no prose and no
-                        // drafted payoff, so it passes the two-layer prose guard.
-                        | AiAction::Foreshadow
-                        // Read-only research-notebook fact-check (#1049): produces
-                        // findings grounded in the author's own notes, no prose — it
-                        // passes the two-layer prose guard. No argument (it reads
-                        // `bible/research.md` directly).
-                        | AiAction::FactCheck
-                        // Read-only pacing & tension reading (#1048): produces
-                        // located observations of the manuscript's rhythm — no prose,
-                        // and no suggested cut / addition / reorder / reword — so it
-                        // passes the two-layer prose guard. No argument (it reads the
-                        // whole manuscript directly).
-                        | AiAction::Pacing
-                        | AiAction::Ask
-                        | AiAction::Brainstorm
-                        | AiAction::DraftCharacters
-                        | AiAction::DraftSetting
-                )
         )
     }
 
@@ -771,15 +702,13 @@ impl Action {
     /// Brainstorm, the concept for the bible drafts. `None` for argument-free
     /// actions. The single source the tool schema and the dispatch both read, so a
     /// tool input never drifts from what the action consumes.
-    pub(crate) const fn text_arg(self) -> Option<&'static str> {
+    pub(crate) fn text_arg(self) -> Option<&'static str> {
+        // The AI actions' free-text argument is a descriptor field (#563): the
+        // question for Ask, the premise for Brainstorm, the concept for the drafts,
+        // the concern for Accuracy (#973), the pair for Relationship (#1046) — all in
+        // `AiAction::SPECS`, so a tool input can't drift from what the action consumes.
         match self {
-            Self::Ai(AiAction::Ask) => Some("question"),
-            Self::Ai(AiAction::Brainstorm) => Some("premise"),
-            Self::Ai(AiAction::DraftCharacters | AiAction::DraftSetting) => Some("concept"),
-            // The named period / place / domain to check accuracy against (#973).
-            Self::Ai(AiAction::Accuracy) => Some("concern"),
-            // The character pair whose relationship trajectory to track (#1046).
-            Self::Ai(AiAction::Relationship) => Some("pair"),
+            Self::Ai(a) => a.text_arg(),
             _ => None,
         }
     }

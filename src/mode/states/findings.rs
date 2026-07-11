@@ -62,6 +62,33 @@ pub enum FindingKind {
 }
 
 impl FindingKind {
+    /// Every kind, in a stable, meaningful sequence: the continuity/structure passes
+    /// first, prose/voice next, and [`Other`](Self::Other) last (it collects the
+    /// non-pass findings — Q&A citations — that rarely reach triage but shouldn't be
+    /// dropped if they do). The single enumeration of the set: the dashboard's group
+    /// order (#827), the health trend (#1052), and the revision-plan tie-break (#1055)
+    /// all derive from it (`health.rs`), so a new kind joins them automatically rather
+    /// than being silently dropped by a hand-maintained order list. Its slug/label
+    /// resolvers also fold over it, so those can't drift from the enum either.
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::Continuity,
+        Self::Setting,
+        Self::Plot,
+        Self::Theme,
+        Self::Scaffold,
+        Self::Naming,
+        Self::Style,
+        Self::Editorial,
+        Self::Accuracy,
+        Self::Relationship,
+        Self::Foreshadow,
+        Self::FactCheck,
+        Self::Pacing,
+        Self::Voice,
+        Self::Echo,
+        Self::Other,
+    ];
+
     /// The stable slug persisted in the durable store and matched back on load —
     /// never change one without a migration. Also the dashboard's group key.
     pub(crate) const fn slug(self) -> &'static str {
@@ -109,27 +136,14 @@ impl FindingKind {
 
     /// Resolve a persisted slug back to a kind; an unknown slug (a future or
     /// corrupt value) falls back to [`Other`](Self::Other) rather than failing.
+    /// Folds over [`ALL`](Self::ALL), so a new kind is resolvable the moment it
+    /// joins the enum's ordering — no separate list to keep in sync.
     pub(crate) fn from_slug(slug: &str) -> Self {
-        [
-            Self::Continuity,
-            Self::Setting,
-            Self::Plot,
-            Self::Theme,
-            Self::Scaffold,
-            Self::Naming,
-            Self::Style,
-            Self::Editorial,
-            Self::Accuracy,
-            Self::Foreshadow,
-            Self::FactCheck,
-            Self::Voice,
-            Self::Echo,
-            Self::Relationship,
-            Self::Pacing,
-        ]
-        .into_iter()
-        .find(|k| k.slug() == slug)
-        .unwrap_or(Self::Other)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|k| k.slug() == slug)
+            .unwrap_or(Self::Other)
     }
 }
 

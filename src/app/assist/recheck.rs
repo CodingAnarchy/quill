@@ -6,7 +6,7 @@
 
 use super::super::*;
 
-use super::{recheck_parser, RecheckRequest};
+use super::{findings_parser, RecheckRequest};
 use crate::ai::naming;
 use crate::ai::scaffold;
 use crate::ai::style;
@@ -380,9 +380,11 @@ impl App {
             }
             _ => return None,
         };
+        // Every action reaching here surfaces re-runnable findings, so its parser is
+        // `Some`; `?` keeps the mapping total without an unwrap if that ever changes.
         Some(RecheckRequest {
             request,
-            to_findings: recheck_parser(action),
+            to_findings: findings_parser(action)?,
         })
     }
 
@@ -406,7 +408,7 @@ impl App {
         let Some(action) = finding.action else {
             return Vec::new();
         };
-        recheck_parser(action)(response, action, finding.book)
+        findings_parser(action).map_or_else(Vec::new, |parse| parse(response, action, finding.book))
     }
 
     /// Apply a completed single-finding re-check (#608). The response is the

@@ -60,7 +60,6 @@ pub mod workflow_gen;
 pub use character::Character;
 pub use claude::ClaudeBackend;
 pub use continuity::Continuity;
-pub use naming::Naming;
 pub use plot::Plot;
 pub use scaffold::Scaffold;
 pub use setting::Setting;
@@ -185,12 +184,21 @@ pub enum Outcome {
     Plot(Result<Plot, AiError>),
     /// Theme / motif tracking + dangling-motif findings (#828).
     Theme(Result<Theme, AiError>),
-    /// Scaffolding: beat outline + structural gaps (#76).
+    /// Scaffolding: beat outline + structural gaps (#76). Writes `bible/outline.md`
+    /// (a bible artifact) *and* surfaces the gaps as findings, so it keeps its own
+    /// variant + apply — it isn't analysis-only like the [`Findings`](Self::Findings)
+    /// passes, which write nothing.
     Scaffold(Result<Scaffold, AiError>),
-    /// Naming & term consistency (#78).
-    Naming(Result<Naming, AiError>),
-    /// Prose & style analysis (#79).
-    Style(Result<style::Style, AiError>),
+    /// A completed analysis-only findings pass (#563): the UI findings the pass
+    /// produced, already mapped from its typed result *and attributed to its
+    /// originating action* by the worker (each [`Finding`](crate::mode::Finding) carries
+    /// `action: Some(_)`), so one generic apply path (`show_findings`) serves every
+    /// analysis-only pass — naming, style, editorial, voice, accuracy, relationship,
+    /// foreshadow, factcheck, pacing. Collapses the per-pass `Outcome` variants + their
+    /// `error()` arms + `apply_outcome` dispatch arms into this one. The persistent-bible
+    /// passes (characters/continuity/setting/plot/theme) and scaffold keep their own
+    /// variants — they write a bible file, not just findings.
+    Findings(Result<Vec<crate::mode::Finding>, AiError>),
     /// Synopsis / blurb / query-letter generation (#81).
     Submission(Result<Submission, AiError>),
     /// Story brainstorming from a premise (#255).
@@ -201,8 +209,6 @@ pub enum Outcome {
     Marketing(Result<marketing::Marketing, AiError>),
     /// Social posts — per-platform promo copy (#237).
     Social(Result<social::Social, AiError>),
-    /// Character voice analysis — dialogue/narration consistency (#183).
-    Voice(Result<voice::Voice, AiError>),
     /// Generated images saved to disk — character portraits (#238).
     Image(Result<image::ImageReport, AiError>),
     /// A workflow generated from a plain-language description (#232).
@@ -215,30 +221,6 @@ pub enum Outcome {
     Thesaurus(Result<Vec<thesaurus::Word>, AiError>),
     /// Name-generator candidates — character / place / term (#610).
     NameGen(Result<Vec<namegen::Name>, AiError>),
-    /// Editorial read — fix-free flags (structural / continuity / line) (#293).
-    Editorial(Result<Vec<editorial::Note>, AiError>),
-    /// Cultural & historical accuracy — inaccuracy flags for an author-named
-    /// concern (#973). Findings only; author-invoked; accuracy, not sensitivity.
-    Accuracy(Result<accuracy::Accuracy, AiError>),
-    /// Relationship-trajectory tracking (#1046): a chosen pair's per-chapter state
-    /// (the arc) + inconsistency flags (contradictions / off-page reversals).
-    /// Findings only; author-invoked; observes drift, never rewrites the arc.
-    Relationship(Result<relationship::Trajectory, AiError>),
-    /// Foreshadow / payoff scan — concrete seeded details (an object, a named
-    /// threat, a promised meeting, a planted clue) that are set up then never paid
-    /// off (#1047). Findings only; author-invoked; distinct from the plot pass's
-    /// thematic-thread tracking.
-    Foreshadow(Result<foreshadow::Foreshadow, AiError>),
-    /// Research-notebook fact-check — flags manuscript passages that contradict a
-    /// note the author wrote in `bible/research.md` (#1049). Findings only;
-    /// author-invoked; grounded only in the author's own notes, no external facts.
-    FactCheck(Result<factcheck::FactCheck, AiError>),
-    /// Pacing & tension reading (#1048): located, plain-language observations of the
-    /// manuscript's scene-level tension/quiet rhythm (a sagging middle, a run of
-    /// high-tension chapters with no breath, a flat stretch), each naming the
-    /// stretch it refers to. Findings only; author-invoked; observes rhythm, never
-    /// suggests a cut, an addition, a reorder, or reworded prose.
-    Pacing(Result<pacing::Pacing, AiError>),
     /// Semantic "find similar scenes" (#924): the passages most similar to a
     /// selection / query, ranked with scores + jumpable citations. `None` when no
     /// embedding model is available (graceful degradation, not an error).
@@ -284,29 +266,24 @@ impl Outcome {
             Self::Plot(r) => r.as_ref().err(),
             Self::Theme(r) => r.as_ref().err(),
             Self::Scaffold(r) => r.as_ref().err(),
-            Self::Naming(r) => r.as_ref().err(),
-            Self::Style(r) => r.as_ref().err(),
             Self::Submission(r) => r.as_ref().err(),
             Self::Brainstorm(r) => r.as_ref().err(),
             Self::AdCreative(r) => r.as_ref().err(),
             Self::Marketing(r) => r.as_ref().err(),
             Self::Social(r) => r.as_ref().err(),
-            Self::Voice(r) => r.as_ref().err(),
             Self::Image(r) => r.as_ref().err(),
             Self::Workflow(r) => r.as_ref().err(),
             Self::Config(r) => r.as_ref().err(),
             Self::Import(r) => r.as_ref().err(),
             Self::Thesaurus(r) => r.as_ref().err(),
             Self::NameGen(r) => r.as_ref().err(),
-            Self::Editorial(r) => r.as_ref().err(),
-            Self::Accuracy(r) => r.as_ref().err(),
-            Self::Relationship(r) => r.as_ref().err(),
-            Self::Foreshadow(r) => r.as_ref().err(),
-            Self::FactCheck(r) => r.as_ref().err(),
-            Self::Pacing(r) => r.as_ref().err(),
             Self::SemanticFind(r) => r.as_ref().err(),
             Self::Echo(r) => r.as_ref().err(),
-            Self::Recheck(r) | Self::RecheckAll(r) | Self::ScopedPass(r) => r.as_ref().err(),
+            // Every analysis-only findings pass (#563) plus the re-check / scoped-pass
+            // variants all carry a `Result<Vec<Finding>, _>`, one arm.
+            Self::Findings(r) | Self::Recheck(r) | Self::RecheckAll(r) | Self::ScopedPass(r) => {
+                r.as_ref().err()
+            }
             Self::Error(e) => Some(e),
         }
     }

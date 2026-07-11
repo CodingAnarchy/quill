@@ -1,8 +1,11 @@
 //! The AI actions reachable from the AI palette: the [`AiAction`] enum, its cost
 //! profile ([`AiCost`]), and the [`AiActionSpec`] descriptor table (`SPECS`) that
-//! is the single source for each action's slug, cost, and story-bible key (#563).
-//! Split out of `action.rs` to keep each file under the ~1,000-line convention;
-//! re-exported from the module root, so callers are unaffected. Pure move.
+//! is the single source for each action's slug, cost, bible key, finding kind,
+//! labels, assistant-runnability, and free-text argument (#563/#1069). Split out of
+//! `action.rs` to keep each file under the ~1,000-line convention; re-exported from
+//! the module root, so callers are unaffected.
+
+use crate::mode::FindingKind;
 
 /// The AI actions reachable from the AI palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,12 +138,18 @@ pub enum ModelWeight {
     Light,
 }
 
-/// The single source of truth for an [`AiAction`]'s parallel data (#563): its
-/// stable slug, its cost profile, and — for the three persistent-bible passes —
-/// the on-disk bible key. The palette registry, [`Action::name`](super::Action::name),
-/// the cost gate, and the bible trackers all derive from this table rather than
-/// re-encoding the set, so a new or renamed action is described in exactly one
-/// place.
+/// The single source of truth for an [`AiAction`]'s parallel data (#563): the
+/// hand-listed facts that used to live in seven independent, drift-prone tables —
+/// the slug, cost profile, model weight, bible key, finding kind, run-action + palette
+/// labels, the assistant's runnability (#1069) and its free-text argument. Every
+/// derivable table ([`finding_kind`](AiAction::finding_kind),
+/// [`Action::label`](super::Action::label), the AI palette entry,
+/// [`Action::assistant_runnable`](super::Action::assistant_runnable),
+/// [`Action::text_arg`](super::Action::text_arg), the cost gate, the bible trackers)
+/// derives from this row rather than re-encoding the set, so a new or renamed action is
+/// described in exactly one place and can't silently omit a variant. The per-pass
+/// *content* — the system prompt and schema field names — deliberately stays in each
+/// `ai::<pass>` module; this table is the mechanism, not the analysis.
 pub struct AiActionSpec {
     pub(crate) action: AiAction,
     /// The stable token the run-action registry and workflows reference — the AI
@@ -158,246 +167,500 @@ pub struct AiActionSpec {
     /// The story-bible key this pass tracks (the incremental cache key and the
     /// series-rollup label), or `None` for the non-bible passes.
     pub(crate) bible_key: Option<&'static str>,
+    /// The [`FindingKind`](crate::mode::FindingKind) a pass's findings carry (#827),
+    /// or [`Other`](crate::mode::FindingKind::Other) for the actions that surface no
+    /// triage findings — the single place the pass→kind mapping is written, so it
+    /// can't drift from the health dashboard's grouping.
+    pub(crate) finding_kind: crate::mode::FindingKind,
+    /// The full run-action label shown in the unified menu (`"AI · Character bible"`),
+    /// the AI half of [`Action::label`](super::Action::label).
+    pub(crate) label: &'static str,
+    /// The AI palette's short label + one-line blurb (the compact entry the AI
+    /// palette lists), or `None` for the actions that never appear there directly.
+    /// Every current AI action carries one, so this is `Some` throughout today.
+    pub(crate) palette: Option<(&'static str, &'static str)>,
+    /// Whether the authorial assistant (#307/#392) may run this action as a tool —
+    /// the descriptor field that CLOSES the hand-maintained allowlist (#1069). The
+    /// analysis passes that surface findings (no prose) and the arg-taking generative
+    /// helpers are runnable; the thesaurus/image passes, the local views, and the
+    /// off-manuscript copy generators are not.
+    pub(crate) assistant_runnable: bool,
+    /// The JSON property name of this action's single free-text argument (#390) for
+    /// the actions that take one (the question for Ask, the concern for Accuracy, …),
+    /// or `None`. The single source the assistant's tool schema and its dispatch read.
+    pub(crate) text_arg: Option<&'static str>,
+}
+
+/// Shorthand for a finding-surfacing pass row: manuscript-costed, its finding kind,
+/// runnable by the assistant. Keeps the SPECS table readable — the analysis passes
+/// share every field except slug/weight/label/palette/kind/arg.
+const fn findings_spec(
+    action: AiAction,
+    slug: &'static str,
+    weight: ModelWeight,
+    finding_kind: FindingKind,
+    label: &'static str,
+    palette: (&'static str, &'static str),
+    text_arg: Option<&'static str>,
+) -> AiActionSpec {
+    AiActionSpec {
+        action,
+        slug,
+        cost: AiCost::Manuscript,
+        weight,
+        bible_key: None,
+        finding_kind,
+        label,
+        palette: Some(palette),
+        assistant_runnable: true,
+        text_arg,
+    }
+}
+
+/// A non-findings AI action row (Ask, the generative helpers, the local views, the
+/// off-manuscript copy) — no finding kind, not assistant-runnable and taking no
+/// argument by default. The handful that ARE runnable / arg-taking (Ask and the
+/// generative helpers) set `assistant_runnable`/`text_arg` with a struct update at the
+/// call site. Bible passes and findings passes have their own constructors.
+const fn plain_spec(
+    action: AiAction,
+    slug: &'static str,
+    cost: AiCost,
+    weight: ModelWeight,
+    label: &'static str,
+    palette: Option<(&'static str, &'static str)>,
+) -> AiActionSpec {
+    AiActionSpec {
+        action,
+        slug,
+        cost,
+        weight,
+        bible_key: None,
+        finding_kind: FindingKind::Other,
+        label,
+        palette,
+        assistant_runnable: false,
+        text_arg: None,
+    }
 }
 
 impl AiAction {
-    /// The descriptor table — every [`AiAction`] with its slug, cost profile, and
-    /// bible key, in palette order. The single place the action set is enumerated.
+    /// The descriptor table — every [`AiAction`] with its full row, in palette order.
+    /// The single place the action set is enumerated: slug, cost, weight, bible key,
+    /// finding kind, run-action + palette labels, assistant-runnability (#1069), and
+    /// the free-text argument. Everything derivable reads from here.
     pub(crate) const SPECS: &'static [AiActionSpec] = &[
         AiActionSpec {
-            action: Self::Ask,
-            slug: "ai:ask",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
+            assistant_runnable: true,
+            text_arg: Some("question"),
+            ..plain_spec(
+                Self::Ask,
+                "ai:ask",
+                AiCost::None,
+                ModelWeight::Heavy,
+                "AI · Ask the manuscript",
+                Some((
+                    "Ask the manuscript",
+                    "Answer a question grounded in the draft",
+                )),
+            )
         },
         AiActionSpec {
-            action: Self::Characters,
-            slug: "ai:characters",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
             bible_key: Some("characters"),
+            ..findings_spec(
+                Self::Characters,
+                "ai:characters",
+                ModelWeight::Heavy,
+                FindingKind::Other, // writes profiles, not triage findings
+                "AI · Character bible",
+                ("Character bible", "Profiles, arcs, and drift flags"),
+                None,
+            )
         },
         AiActionSpec {
-            action: Self::Continuity,
-            slug: "ai:continuity",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
             bible_key: Some("timeline"),
+            ..findings_spec(
+                Self::Continuity,
+                "ai:continuity",
+                ModelWeight::Heavy,
+                FindingKind::Continuity,
+                "AI · Timeline & continuity",
+                (
+                    "Timeline & continuity",
+                    "Ordered timeline + contradiction findings",
+                ),
+                None,
+            )
         },
         AiActionSpec {
-            action: Self::Setting,
-            slug: "ai:setting",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
             bible_key: Some("setting"),
+            ..findings_spec(
+                Self::Setting,
+                "ai:setting",
+                ModelWeight::Heavy,
+                FindingKind::Setting,
+                "AI · Setting & worldbuilding",
+                (
+                    "Setting & worldbuilding",
+                    "Setting bible + rule-violation findings",
+                ),
+                None,
+            )
         },
         AiActionSpec {
-            action: Self::Plot,
-            slug: "ai:plot",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
             bible_key: Some("plot"),
+            ..findings_spec(
+                Self::Plot,
+                "ai:plot",
+                ModelWeight::Heavy,
+                FindingKind::Plot,
+                "AI · Plot & arc tracker",
+                (
+                    "Plot & arc tracker",
+                    "Thread setup→payoff status + dangling-thread findings",
+                ),
+                None,
+            )
         },
         AiActionSpec {
-            action: Self::Theme,
-            slug: "ai:theme",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
             bible_key: Some("theme"),
+            ..findings_spec(
+                Self::Theme,
+                "ai:theme",
+                ModelWeight::Heavy,
+                FindingKind::Theme,
+                "AI · Theme & motif tracker",
+                (
+                    "Theme & motif tracker",
+                    "Motif → where it recurs / status + dangling-motif findings",
+                ),
+                None,
+            )
         },
+        findings_spec(
+            Self::Scaffold,
+            "ai:scaffold",
+            ModelWeight::Heavy,
+            FindingKind::Scaffold,
+            "AI · Scaffold / outline",
+            ("Scaffold / outline", "Beat outline + structural gaps"),
+            None,
+        ),
         AiActionSpec {
-            action: Self::Scaffold,
-            slug: "ai:scaffold",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Naming,
-            slug: "ai:naming",
             cost: AiCost::Naming,
-            weight: ModelWeight::Light,
-            bible_key: None,
+            ..findings_spec(
+                Self::Naming,
+                "ai:naming",
+                ModelWeight::Light,
+                FindingKind::Naming,
+                "AI · Name & term consistency",
+                ("Name & term consistency", "Spelling variants (cheap pass)"),
+                None,
+            )
+        },
+        findings_spec(
+            Self::Style,
+            "ai:style",
+            ModelWeight::Light,
+            FindingKind::Style,
+            "AI · Prose & style",
+            (
+                "Prose & style",
+                "POV / tense / voice findings (analysis only)",
+            ),
+            None,
+        ),
+        AiActionSpec {
+            assistant_runnable: true,
+            text_arg: Some("premise"),
+            ..plain_spec(
+                Self::Brainstorm,
+                "ai:brainstorm",
+                AiCost::None,
+                ModelWeight::Heavy,
+                "AI · Brainstorm ideas",
+                Some((
+                    "Brainstorm ideas",
+                    "Premises, themes & conflicts from a spark (off-manuscript)",
+                )),
+            )
         },
         AiActionSpec {
-            action: Self::Style,
-            slug: "ai:style",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Light,
-            bible_key: None,
+            assistant_runnable: true,
+            text_arg: Some("concept"),
+            ..plain_spec(
+                Self::DraftCharacters,
+                "ai:draft-characters",
+                AiCost::None,
+                ModelWeight::Heavy,
+                "AI · Draft characters",
+                Some((
+                    "Draft characters",
+                    "Starter cast from a concept (no manuscript needed)",
+                )),
+            )
         },
         AiActionSpec {
-            action: Self::Brainstorm,
-            slug: "ai:brainstorm",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
+            assistant_runnable: true,
+            text_arg: Some("concept"),
+            ..plain_spec(
+                Self::DraftSetting,
+                "ai:draft-setting",
+                AiCost::None,
+                ModelWeight::Heavy,
+                "AI · Draft setting",
+                Some((
+                    "Draft setting",
+                    "Starter worldbuilding bible from a concept",
+                )),
+            )
         },
+        findings_spec(
+            Self::Voice,
+            "ai:voice",
+            ModelWeight::Heavy,
+            FindingKind::Voice,
+            "AI · Character voice",
+            (
+                "Character voice",
+                "Dialogue & POV voice vs. the character bible",
+            ),
+            None,
+        ),
+        plain_spec(
+            Self::Submission,
+            "ai:submission",
+            AiCost::Manuscript,
+            ModelWeight::Heavy,
+            "AI · Submission material",
+            Some((
+                "Submission material",
+                "Synopsis, blurb & query letter (off-manuscript)",
+            )),
+        ),
+        plain_spec(
+            Self::Marketing,
+            "ai:marketing",
+            AiCost::Manuscript,
+            ModelWeight::Light,
+            "AI · Marketing copy",
+            Some((
+                "Marketing copy",
+                "Blurb variants & taglines (off-manuscript)",
+            )),
+        ),
+        plain_spec(
+            Self::Social,
+            "ai:social",
+            AiCost::Manuscript,
+            ModelWeight::Light,
+            "AI · Social posts",
+            Some((
+                "Social posts",
+                "X / Facebook / Instagram copy (off-manuscript)",
+            )),
+        ),
+        plain_spec(
+            Self::AdCreative,
+            "ai:ad-creative",
+            AiCost::Manuscript,
+            ModelWeight::Light,
+            "AI · Ad creative",
+            Some((
+                "Ad creative",
+                "Amazon / Meta / X ad copy & targeting (off-manuscript)",
+            )),
+        ),
+        plain_spec(
+            Self::Portrait,
+            "ai:portrait",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "AI · Character portraits",
+            Some((
+                "Character portraits",
+                "Portrait images from the character bible (fal.ai)",
+            )),
+        ),
+        plain_spec(
+            Self::Scene,
+            "ai:scene",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "AI · Scene illustration",
+            Some((
+                "Scene illustration",
+                "Illustrate the active chapter (fal.ai)",
+            )),
+        ),
+        plain_spec(
+            Self::Triage,
+            "triage",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "Revision triage",
+            Some((
+                "Revision triage",
+                "All findings so far, in one list (local)",
+            )),
+        ),
+        plain_spec(
+            Self::Dashboard,
+            "health",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "Manuscript health dashboard",
+            Some((
+                "Manuscript health",
+                "Open findings by kind & chapter, with counts (local)",
+            )),
+        ),
+        plain_spec(
+            Self::CoOccurrence,
+            "cooccurrence",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "Motif & character co-occurrence",
+            Some((
+                "Motif & character co-occurrence",
+                "Which entries cluster & which are conspicuously apart (local)",
+            )),
+        ),
+        plain_spec(
+            Self::AskHistory,
+            "ai:ask-history",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "AI · Ask history",
+            Some((
+                "Ask history",
+                "Re-open a past Ask — answer + jumpable citations (local)",
+            )),
+        ),
+        plain_spec(
+            Self::SemanticFind,
+            "ai:find-similar",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "AI · Find similar scenes",
+            Some((
+                "Find similar scenes",
+                "Ranked, jumpable passages like a selection or a query (local, reads only)",
+            )),
+        ),
         AiActionSpec {
-            action: Self::DraftCharacters,
-            slug: "ai:draft-characters",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
+            finding_kind: FindingKind::Echo,
+            ..plain_spec(
+                Self::Echo,
+                "ai:echo",
+                AiCost::None,
+                ModelWeight::Heavy,
+                "AI · Echo & near-duplicate detection",
+                Some((
+                    "Echo & near-duplicate detection",
+                    "Flag repeated / echoed passage pairs with scores (local, reads only)",
+                )),
+            )
         },
-        AiActionSpec {
-            action: Self::DraftSetting,
-            slug: "ai:draft-setting",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Voice,
-            slug: "ai:voice",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Submission,
-            slug: "ai:submission",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Marketing,
-            slug: "ai:marketing",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Light,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Social,
-            slug: "ai:social",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Light,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::AdCreative,
-            slug: "ai:ad-creative",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Light,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Portrait,
-            slug: "ai:portrait",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Scene,
-            slug: "ai:scene",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Triage,
-            slug: "triage",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Dashboard,
-            slug: "health",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::CoOccurrence,
-            slug: "cooccurrence",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::AskHistory,
-            slug: "ai:ask-history",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::SemanticFind,
-            slug: "ai:find-similar",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Echo,
-            slug: "ai:echo",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Thesaurus,
-            slug: "ai:thesaurus",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::NameGen,
-            slug: "ai:name",
-            cost: AiCost::None,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Editorial,
-            slug: "ai:editorial",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Accuracy,
-            slug: "ai:accuracy",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Relationship,
-            slug: "ai:relationship",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Foreshadow,
-            slug: "ai:foreshadow",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::FactCheck,
-            slug: "ai:factcheck",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
-        AiActionSpec {
-            action: Self::Pacing,
-            slug: "ai:pacing",
-            cost: AiCost::Manuscript,
-            weight: ModelWeight::Heavy,
-            bible_key: None,
-        },
+        plain_spec(
+            Self::Thesaurus,
+            "ai:thesaurus",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "AI · Word search (thesaurus)",
+            Some((
+                "Word search",
+                "In-context thesaurus for a word or phrase (reference only)",
+            )),
+        ),
+        plain_spec(
+            Self::NameGen,
+            "ai:name",
+            AiCost::None,
+            ModelWeight::Heavy,
+            "AI · Name generator",
+            Some((
+                "Name generator",
+                "Candidate character / place / term names by constraints (you pick)",
+            )),
+        ),
+        findings_spec(
+            Self::Editorial,
+            "ai:editorial",
+            ModelWeight::Heavy,
+            FindingKind::Editorial,
+            "AI · Editorial read (flags, no fixes)",
+            (
+                "Editorial read",
+                "Flag structural / continuity / line issues — no fixes",
+            ),
+            None,
+        ),
+        findings_spec(
+            Self::Accuracy,
+            "ai:accuracy",
+            ModelWeight::Heavy,
+            FindingKind::Accuracy,
+            "AI · Cultural & historical accuracy (flags, no fixes)",
+            (
+                "Cultural & historical accuracy",
+                "Flag inaccuracies for a concern you name — accuracy, not sensitivity",
+            ),
+            // The named period / place / domain to check accuracy against (#973).
+            Some("concern"),
+        ),
+        findings_spec(
+            Self::Relationship,
+            "ai:relationship",
+            ModelWeight::Heavy,
+            FindingKind::Relationship,
+            "AI · Relationship trajectory (flags, no fixes)",
+            (
+                "Relationship trajectory",
+                "Track a pair's arc per chapter + flag inconsistencies (no fixes)",
+            ),
+            // The character pair whose relationship trajectory to track (#1046).
+            Some("pair"),
+        ),
+        findings_spec(
+            Self::Foreshadow,
+            "ai:foreshadow",
+            ModelWeight::Heavy,
+            FindingKind::Foreshadow,
+            "AI · Foreshadow & payoff (flags dangling setups, no fixes)",
+            (
+                "Foreshadow & payoff",
+                "Flag concrete setups that never pay off — flags only, no drafted payoff",
+            ),
+            None,
+        ),
+        findings_spec(
+            Self::FactCheck,
+            "ai:factcheck",
+            ModelWeight::Heavy,
+            FindingKind::FactCheck,
+            "AI · Fact-check vs. research notebook (flags, no fixes)",
+            (
+                "Fact-check vs. research notebook",
+                "Flag prose that contradicts your own research notes — no fixes",
+            ),
+            None,
+        ),
+        findings_spec(
+            Self::Pacing,
+            "ai:pacing",
+            ModelWeight::Heavy,
+            FindingKind::Pacing,
+            "AI · Pacing & tension reading (observations, no changes)",
+            (
+                "Pacing & tension",
+                "Located observations of the scene-level rhythm — observation only, no changes",
+            ),
+            None,
+        ),
     ];
 
-    /// This action's descriptor — its single source of slug / cost / bible key.
+    /// This action's descriptor — its single source of every derivable fact.
     pub(crate) fn spec(self) -> &'static AiActionSpec {
         #[allow(
             clippy::expect_used,
@@ -413,6 +676,29 @@ impl AiAction {
     /// The stable run-action slug for this AI action.
     pub(crate) fn slug(self) -> &'static str {
         self.spec().slug
+    }
+
+    /// The full run-action label (`"AI · Character bible"`) — the AI half of
+    /// [`Action::label`](super::Action::label), a descriptor lookup (#563).
+    pub(crate) fn label(self) -> &'static str {
+        self.spec().label
+    }
+
+    /// The AI palette's short label + one-line blurb, or `None` for an action that
+    /// never lists in the AI palette directly (none today). Descriptor lookup.
+    pub(crate) fn palette_entry(self) -> Option<(&'static str, &'static str)> {
+        self.spec().palette
+    }
+
+    /// Whether the authorial assistant (#392) may run this action as a tool — the
+    /// descriptor field that CLOSES the hand-maintained allowlist (#1069).
+    pub(crate) fn assistant_runnable(self) -> bool {
+        self.spec().assistant_runnable
+    }
+
+    /// The JSON property name of this action's free-text argument (#390), or `None`.
+    pub(crate) fn text_arg(self) -> Option<&'static str> {
+        self.spec().text_arg
     }
 
     /// Resolve an AI action from its stable [`slug`](Self::slug) — the inverse used
@@ -447,28 +733,11 @@ impl AiAction {
 
     /// The [`FindingKind`](crate::mode::FindingKind) a pass's findings carry (#827)
     /// — the category that survives the map to a summary string and the durable
-    /// store, so the health dashboard can group by pass. Only the passes that
-    /// surface findings have a distinct kind; every other action maps to
-    /// [`Other`](crate::mode::FindingKind::Other) (they produce no triage findings).
-    pub(crate) const fn finding_kind(self) -> crate::mode::FindingKind {
-        use crate::mode::FindingKind;
-        match self {
-            Self::Continuity => FindingKind::Continuity,
-            Self::Setting => FindingKind::Setting,
-            Self::Plot => FindingKind::Plot,
-            Self::Theme => FindingKind::Theme,
-            Self::Scaffold => FindingKind::Scaffold,
-            Self::Naming => FindingKind::Naming,
-            Self::Style => FindingKind::Style,
-            Self::Editorial => FindingKind::Editorial,
-            Self::Accuracy => FindingKind::Accuracy,
-            Self::Relationship => FindingKind::Relationship,
-            Self::Foreshadow => FindingKind::Foreshadow,
-            Self::FactCheck => FindingKind::FactCheck,
-            Self::Pacing => FindingKind::Pacing,
-            Self::Voice => FindingKind::Voice,
-            Self::Echo => FindingKind::Echo,
-            _ => FindingKind::Other,
-        }
+    /// store, so the health dashboard can group by pass. A descriptor lookup, so the
+    /// pass→kind mapping is written exactly once (#563) and can't drift; the passes
+    /// that surface no triage findings carry [`Other`](crate::mode::FindingKind::Other)
+    /// in the table.
+    pub(crate) fn finding_kind(self) -> FindingKind {
+        self.spec().finding_kind
     }
 }
