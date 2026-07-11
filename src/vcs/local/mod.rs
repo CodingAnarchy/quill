@@ -123,7 +123,6 @@ pub(super) fn is_dirty(repo: &git2::Repository) -> Result<bool, String> {
 /// can still commit without configuring anything.
 pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
-    let sig = signature(&repo)?;
 
     let mut index = repo.index().map_err(|e| e.to_string())?;
     index
@@ -132,6 +131,24 @@ pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
     index
         .update_all(["*"].iter(), None)
         .map_err(|e| e.to_string())?; // stage deletions of tracked files
+
+    finalize_commit(&repo, &mut index, message)
+}
+
+/// Write the staged `index`, build its tree, and commit it against the current
+/// `HEAD` — the finalize sequence [`commit`] and [`commit_findings`] share once
+/// each has staged its own paths. Returns the new commit's short id, or `None`
+/// when the staged tree is byte-identical to `HEAD`'s (the empty-commit guard).
+///
+/// Everything from `write_tree` on lives here: identity, parent resolution, the
+/// empty-commit check, the commit itself, and short-oid formatting. Only the
+/// staging differs between the two callers, so only that stays with them.
+fn finalize_commit(
+    repo: &git2::Repository,
+    index: &mut git2::Index,
+    message: &str,
+) -> Result<Option<String>, String> {
+    let sig = signature(repo)?;
     index.write().map_err(|e| e.to_string())?;
     let tree_id = index.write_tree().map_err(|e| e.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
@@ -155,11 +172,6 @@ pub fn commit(root: &Path, message: &str) -> Result<Option<String>, String> {
     Ok(Some(oid.to_string().chars().take(7).collect()))
 }
 
-/// The tracked findings store (#1051), relative to the project root. An analysis
-/// pass rewrites this file, and [`commit_findings`] captures *only* it — so the
-/// pass's write never dirties the tree for the Sync/Pull/draft guards.
-const FINDINGS_REL: &str = "bible/findings.toml";
-
 /// Auto-commit *only* the tracked findings store after an analysis pass rewrote it
 /// (#1060), leaving any uncommitted manuscript prose untouched in the working tree.
 ///
@@ -170,23 +182,29 @@ const FINDINGS_REL: &str = "bible/findings.toml";
 /// commits it on its own, so the working tree stays clean for those guards *and*
 /// each pass's findings land in history for the diff.
 ///
-/// Scoped to a single path on purpose: it stages `bible/findings.toml` alone, never
-/// the author's in-progress prose, so an analysis pass can't sweep unsaved edits
-/// into a commit. Returns the new commit's short id, or `None` when the store didn't
-/// change (nothing to commit) or the project isn't yet a repository — both no-ops,
-/// so the caller can fire it unconditionally after every pass write.
-pub fn commit_findings(root: &Path, message: &str) -> Result<Option<String>, String> {
+/// Scoped to a single path on purpose: it stages `findings_rel` alone, never the
+/// author's in-progress prose, so an analysis pass can't sweep unsaved edits into a
+/// commit. The path is the caller's single source of truth for the tracked store
+/// (the app layer's `store_rel_path()`), passed in so a rename can't desync this
+/// auto-committer from the diff reader. Returns the new commit's short id, or `None`
+/// when the store didn't change (nothing to commit) or the project isn't yet a
+/// repository — both no-ops, so the caller can fire it unconditionally after every
+/// pass write.
+pub fn commit_findings(
+    root: &Path,
+    findings_rel: &str,
+    message: &str,
+) -> Result<Option<String>, String> {
     if !is_repo(root) {
         return Ok(None);
     }
     let repo = git2::Repository::open(root).map_err(|e| format!("open repo: {e}"))?;
-    let sig = signature(&repo)?;
 
     // Stage only the findings path — the rest of the index still mirrors HEAD, so
     // the tree we build is HEAD's tree with just this file updated. Uncommitted
     // prose edits, never staged here, stay in the working tree.
     let mut index = repo.index().map_err(|e| e.to_string())?;
-    let rel = Path::new(FINDINGS_REL);
+    let rel = Path::new(findings_rel);
     if root.join(rel).exists() {
         index.add_path(rel).map_err(|e| e.to_string())?;
     } else {
@@ -194,26 +212,8 @@ pub fn commit_findings(root: &Path, message: &str) -> Result<Option<String>, Str
         // cleaned up); stage that deletion so the commit reflects it.
         let _ = index.remove_path(rel);
     }
-    index.write().map_err(|e| e.to_string())?;
-    let tree_id = index.write_tree().map_err(|e| e.to_string())?;
-    let tree = repo.find_tree(tree_id).map_err(|e| e.to_string())?;
 
-    let parent = match repo.head() {
-        Ok(head) => Some(head.peel_to_commit().map_err(|e| e.to_string())?),
-        Err(_) => None,
-    };
-    // The findings file is byte-identical to HEAD's — nothing to commit.
-    if let Some(p) = &parent {
-        if p.tree_id() == tree_id {
-            return Ok(None);
-        }
-    }
-
-    let parents: Vec<&git2::Commit> = parent.iter().collect();
-    let oid = repo
-        .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
-        .map_err(|e| format!("commit: {e}"))?;
-    Ok(Some(oid.to_string().chars().take(7).collect()))
+    finalize_commit(&repo, &mut index, message)
 }
 
 /// The identity to record on a commit — the author's git config when set, else a

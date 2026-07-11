@@ -42,12 +42,19 @@ impl App {
                 self.triage.push(f.clone());
             }
         }
-        // A dedicated, path-scoped commit of only `bible/findings.toml` — it never
+        // A dedicated, path-scoped commit of only the findings store — it never
         // sweeps in the author's uncommitted prose. Best effort: a commit failure
         // (or no repo) just leaves the store on disk as before, never blocking the
         // pass. `commit_findings` is itself a no-op when the store didn't change.
         if wrote && self.under_vc {
-            let _ = crate::vcs::commit_findings(&root, "Update findings");
+            // Pass the store's project-relative path from its single source of truth
+            // (`store_rel_path`, #1051) so the auto-committer stages exactly the file
+            // the findings diff later reads out of history — a rename can't desync them.
+            let _ = crate::vcs::commit_findings(
+                &root,
+                findings_store::store_rel_path(),
+                "Update findings",
+            );
         }
         // Baseline the chapters these findings speak for (#1053), so "verify on idle"
         // can tell later whether an edit has touched them since. A no-op unless the
