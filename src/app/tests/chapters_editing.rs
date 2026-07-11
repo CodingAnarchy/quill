@@ -222,6 +222,38 @@ fn deleting_the_active_chapter_reloads_a_neighbor() {
     assert!(app.buffer.line(0).contains("second"));
 }
 
+/// Deleting the ACTIVE chapter persists its latest edits first so the copy moved
+/// to `unused/` is current. If that save FAILS, the moved copy would be stale and
+/// the unsaved edits silently lost while the flow reports success — so a save
+/// failure must ABORT the delete, leaving the chapter (and its edits) in place.
+#[test]
+fn deleting_the_active_chapter_aborts_when_the_pre_delete_save_fails() {
+    let (mut app, dir) = two_chapter_app("delete-active-save-fail");
+    // Make the active chapter dirty so the pre-delete save actually runs.
+    app.on_key(key(KeyCode::Char('X')));
+    assert!(app.buffer.dirty);
+
+    // Fail that save (the next atomic write, before its rename).
+    crate::atomic::fail_point::arm_pre_rename_failure();
+    app.on_key(ctrl('g')); // selection 0 == active 0 ("One")
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('y'))); // confirm
+
+    // The failure is reported, not swallowed as "Moved chapter to unused/".
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("Save failed"),
+        "the save failure aborts the delete: {:?}",
+        app.message
+    );
+    // The chapter is NOT moved — both survive and the active file is intact.
+    assert_eq!(titles(&app), vec!["One", "Two"]);
+    assert!(!dir.join("unused").join("one.md").exists());
+    assert!(dir.join("one.md").exists());
+}
+
 #[test]
 fn cannot_delete_the_only_chapter() {
     let (mut app, _dir) = two_chapter_app("last");
@@ -621,6 +653,77 @@ fn merge_the_first_chapter_is_refused() {
     app.on_key(key(KeyCode::Char('M')));
     assert!(matches!(app.mode, Mode::Nav { .. }), "no prompt opened");
     assert_eq!(titles(&app), vec!["One", "Two"]);
+}
+
+/// A merge whose SOURCE chapter can't be read must ABORT — never append nothing,
+/// retire the source to `unused/`, and report success, silently losing the
+/// source's real prose (#565/#871). The old swallowing `chapter_body` collapsed a
+/// hard read failure to `""`; a chmod-000 source is a regular file whose bytes
+/// `read_to_string` cannot read — the "unreadable but present" case. A genuinely
+/// empty source (`Ok("")`) still merges; only a read *error* aborts. Unix-only.
+#[cfg(unix)]
+#[test]
+fn merge_aborts_when_the_source_cannot_be_read() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (mut app, dir) = two_chapter_app("merge-source-read-fail");
+    let two_before = fs::read_to_string(dir.join("two.md")).unwrap();
+    let one_before = fs::read_to_string(dir.join("one.md")).unwrap();
+
+    // Make the SOURCE (chapter 1, "Two") unreadable: a regular file with no read
+    // permission — its path resolves but its bytes can't be read.
+    fs::set_permissions(dir.join("two.md"), fs::Permissions::from_mode(0o000)).unwrap();
+    // Under root the read bit is bypassed, so nothing to assert — skip rather than
+    // false-pass. Checked before the merge, since a buggy blanking merge would
+    // retire the file and leave a readable state behind.
+    if fs::read_to_string(dir.join("two.md")).is_ok() {
+        fs::set_permissions(dir.join("two.md"), fs::Permissions::from_mode(0o644)).unwrap();
+        return;
+    }
+
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1 ("Two")
+    app.on_key(key(KeyCode::Char('M')));
+    app.on_key(key(KeyCode::Char('y'))); // confirm
+
+    // Restore perms so the file reads back and the temp dir cleans up.
+    fs::set_permissions(dir.join("two.md"), fs::Permissions::from_mode(0o644)).unwrap();
+
+    // The failure is reported, not swallowed as "Merged chapters".
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("Merge failed"),
+        "the read failure aborts the merge: {:?}",
+        app.message
+    );
+    // Both chapters survive — the source is NOT retired, the target unchanged.
+    assert_eq!(titles(&app), vec!["One", "Two"]);
+    assert!(!dir.join("unused").join("two.md").exists());
+    assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), two_before);
+    assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), one_before);
+}
+
+/// A merge whose SOURCE is genuinely empty (`Ok("")`, not a read error) still
+/// merges as before: it appends nothing and retires the empty source — only a
+/// real read *failure* aborts.
+#[test]
+fn merge_with_an_empty_source_still_combines() {
+    let (mut app, dir) = two_chapter_app("merge-empty-source");
+    // Blank the source's body on disk (leave it readable).
+    fs::write(dir.join("two.md"), "").unwrap();
+
+    app.on_key(ctrl('g'));
+    app.on_key(key(KeyCode::Down)); // select chapter 1 ("Two")
+    app.on_key(key(KeyCode::Char('M')));
+    app.on_key(key(KeyCode::Char('y'))); // confirm
+
+    assert_eq!(app.message.as_deref(), Some("Merged chapters"));
+    assert_eq!(titles(&app), vec!["One"]);
+    assert!(dir.join("unused").join("two.md").exists());
+    let reopened = Project::open(&dir).unwrap();
+    assert!(reopened.chapter_body(0).contains("first chapter"));
 }
 
 /// Duplicating a chapter inserts a verbatim copy right after it, with the typed

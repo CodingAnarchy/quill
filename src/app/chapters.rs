@@ -156,7 +156,19 @@ impl App {
         }
         let active_involved =
             self.project.active_index() == at || self.project.active_index() == target;
-        let body = self.project.chapter_body(at);
+        // Read the SOURCE fallibly: the swallowing `chapter_body` collapses a hard
+        // read failure (permissions / transient I/O) to `""`, which would append
+        // nothing, retire the source to `unused/`, and report success — silently
+        // losing the source's real prose (#565/#871). A genuinely empty source
+        // (`Ok("")`) still merges (appends nothing) as before; only a read *error*
+        // aborts, before `remove_chapter` retires the file.
+        let body = match self.project.try_chapter_body(at) {
+            Ok(body) => body,
+            Err(e) => {
+                self.message = Some(format!("Merge failed: {e}"));
+                return at;
+            }
+        };
         if let Err(e) = self.project.append_to_chapter(target, &body) {
             self.message = Some(format!("Merge failed: {e}"));
             return at;
@@ -212,9 +224,13 @@ impl App {
         // buffer's content — every other op keeps the active file present, so its
         // index just re-derives.
         let deleting_active = at == self.project.active_index();
-        if deleting_active && self.buffer.dirty {
+        if deleting_active && self.flush_active().is_err() {
             // Persist the latest text first so the copy moved to unused/ is current.
-            let _ = self.buffer.save();
+            // A swallowed save failure would move a stale copy and silently drop the
+            // unsaved edits while reporting success — abort instead (flush_active
+            // has already set a "Save failed" message), mirroring the other
+            // structural ops that gate on it.
+            return at;
         }
         // The chapter's words leave the manuscript — booked as "moved to unused"
         // today, not as words deleted (that's prose editing).
