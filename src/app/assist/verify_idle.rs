@@ -45,12 +45,14 @@ impl App {
     }
 
     /// Digest each of a finding's chapters at its current text and store it under
-    /// the chapter file, so a subsequent edit is detectable as a digest change.
+    /// `(book, chapter file)`, so a subsequent edit is detectable as a digest
+    /// change. The book is part of the key so a series' same-named chapter files
+    /// (root-level, no subdir) don't clobber one another's baselines (#1053).
     fn baseline_finding_chapters(&mut self, finding: &Finding) {
         let book = self.finding_book(finding);
         for file in self.finding_chapter_files(finding) {
             let digest = ai::incremental::digest(&self.book_chapter_text(book, &file));
-            self.verify_baselines.insert(file, digest);
+            self.verify_baselines.insert((book, file), digest);
         }
     }
 
@@ -71,13 +73,6 @@ impl App {
         if requests.is_empty() || verifying.is_empty() {
             return;
         }
-        // Re-baseline the chapters we're about to verify *now* (at their current
-        // digest), so the next idle tick doesn't re-fire on the same edit while this
-        // request is still settling — the reconcile that lands later is the source of
-        // truth for whether the finding survives.
-        for finding in &verifying {
-            self.baseline_finding_chapters(finding);
-        }
         self.spawn_outcome("⟳ Verifying changed findings…", move |backend| {
             let mut fresh = Vec::new();
             for (req, action, book) in requests {
@@ -88,10 +83,29 @@ impl App {
             }
             Outcome::RecheckAll(Ok(fresh))
         });
-        // Reconcile exactly these on completion — the same apply path a manual
-        // re-check-all uses (#830). Set after the spawn so a not-ready gate (which
-        // returns early inside `spawn_outcome`) leaves no stale pending re-check.
+        // Everything below runs only if the spawn actually took — `spawn_outcome`
+        // returns early *without* spawning when a request is already in flight or the
+        // backend can't be built (unconfigured, offline pin with no local model, a
+        // transient error), in which case `ai_busy()` is still false. Gating on it is
+        // the source of truth for "the pass will run":
+        //
+        //  - Re-baseline the verifying chapters at their current digest ONLY on a
+        //    successful spawn. Doing it unconditionally (before the spawn, as it
+        //    used to) silently dropped the re-check when the backend gated out: the
+        //    baseline advanced to the current digest, so the next idle tick saw no
+        //    change and never re-verified the stale finding until the author edited
+        //    that chapter *again* — an edit that resolved a finding never cleared it.
+        //    Re-baselining here means a gated-out pass leaves the baseline untouched,
+        //    so the finding is re-checked once the backend is ready. On success it
+        //    re-baselines exactly once, so a second idle tick before the result lands
+        //    doesn't queue the same re-check (the reconcile that lands later is the
+        //    source of truth for whether the finding survives).
+        //  - Reconcile exactly these on completion — the same apply path a manual
+        //    re-check-all uses (#830) — leaving no stale pending re-check on a gate.
         if self.ai_busy() {
+            for finding in &verifying {
+                self.baseline_finding_chapters(finding);
+            }
             self.pending_recheck_all = Some(verifying);
         }
     }
@@ -148,7 +162,9 @@ impl App {
     /// verification never fires on a chapter we can't prove moved.
     fn finding_chapters_changed(&self, files: &[String], book: usize) -> bool {
         files.iter().any(|file| {
-            let Some(baseline) = self.verify_baselines.get(file) else {
+            // Look up the baseline under the *book-scoped* key, so a series' same-
+            // named files can't cross-contaminate (#1053).
+            let Some(baseline) = self.verify_baselines.get(&(book, file.clone())) else {
                 return false;
             };
             let current = ai::incremental::digest(&self.book_chapter_text(book, file));
@@ -174,5 +190,14 @@ impl App {
     #[cfg(test)]
     pub(crate) fn verify_on_idle_targets(&self) -> Vec<Finding> {
         self.verify_on_idle_plan().1
+    }
+
+    /// Re-baseline a finding's chapters at their current digest (#1053), exposing
+    /// exactly the step [`verify_findings_on_idle`](Self::verify_findings_on_idle)
+    /// performs on a *successful* spawn — for tests to assert the success-path
+    /// re-baseline contract without spawning a live worker (#531).
+    #[cfg(test)]
+    pub(crate) fn baseline_finding_chapters_for_test(&mut self, finding: &Finding) {
+        self.baseline_finding_chapters(finding);
     }
 }

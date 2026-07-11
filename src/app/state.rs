@@ -424,14 +424,18 @@ pub struct App {
     /// rest. `Some` only while a re-check-all is in flight; taken when it applies.
     pub(super) pending_recheck_all: Option<Vec<Finding>>,
     /// Per-chapter content digests the open findings were last generated (or
-    /// re-verified) against (#1053), keyed `chapter file → digest`, exactly the
-    /// content-addressed hash the incremental bible cache uses (#90). "Verify on
-    /// idle" (opt-in) compares each open finding's chapters' current digests
-    /// against this baseline on the idle tick; a chapter whose digest changed
-    /// marks its findings stale and triggers a scoped re-check of only those
-    /// chapters. Recorded when a pass accumulates findings and refreshed each time
-    /// a re-check reconciles them, so an unchanged chapter is never re-analyzed.
-    pub(super) verify_baselines: std::collections::BTreeMap<String, String>,
+    /// re-verified) against (#1053), keyed `(book, chapter file) → digest`,
+    /// exactly the content-addressed hash the incremental bible cache uses (#90).
+    /// "Verify on idle" (opt-in) compares each open finding's chapters' current
+    /// digests against this baseline on the idle tick; a chapter whose digest
+    /// changed marks its findings stale and triggers a scoped re-check of only
+    /// those chapters. Recorded when a pass accumulates findings and refreshed
+    /// each time a re-check reconciles them, so an unchanged chapter is never
+    /// re-analyzed. The key carries the book index, not just the file, because a
+    /// multi-book series can hold same-named chapter files at the project root
+    /// (subdirs are optional) — keying on the file alone would let one book's
+    /// baseline clobber another's and compare a finding against the wrong book.
+    pub(super) verify_baselines: std::collections::BTreeMap<(usize, String), String>,
     /// The bible pass in flight and the chapter digests it was built from (#90),
     /// recorded to the incremental-scoping state file once the pass applies
     /// cleanly. `(tracker, digests, merge)` — `merge` is `Some(preserve)` for one
