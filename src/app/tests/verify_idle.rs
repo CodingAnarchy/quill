@@ -182,13 +182,19 @@ fn a_finding_being_actively_edited_is_not_clobbered() {
 }
 
 #[test]
-fn verifying_re_baselines_so_it_does_not_re_fire_on_the_same_edit() {
-    // After the idle tick plans a verification for a changed chapter, that chapter is
-    // re-baselined at its current digest, so a second idle tick before the result
-    // lands doesn't queue the same re-check again (no busy-loop on one edit, #1053).
-    // AI is left disabled so the worker spawn is gated (no live thread / backend);
-    // the re-baseline runs first, ahead of the gated spawn, which is what we assert.
-    let (mut app, dir) = verify_app("verify-rebaseline");
+fn a_gated_out_spawn_does_not_advance_the_baseline_so_the_recheck_survives() {
+    // BUG 1 (#1053): the idle tick must NOT re-baseline a changed chapter when the
+    // spawn gates out (backend not ready — here AI is disabled, so `spawn_outcome`
+    // returns early without spawning). If it did, the baseline would advance to the
+    // current digest, the next tick would see no change, and the stale finding would
+    // never be re-verified until the author edited that chapter *again* — an edit
+    // that resolved a finding would silently never clear it.
+    //
+    // Fail-before / pass-after: before the fix the baseline advanced ahead of the
+    // gated spawn and this target went empty; after the fix the baseline is left
+    // alone, so the finding is still queued for re-check the moment a backend is
+    // ready.
+    let (mut app, dir) = verify_app("verify-gated-keeps-target");
     fs::write(dir.join("two.md"), "second chapter, changed once\n").unwrap();
     assert_eq!(
         app.verify_on_idle_targets(),
@@ -196,13 +202,143 @@ fn verifying_re_baselines_so_it_does_not_re_fire_on_the_same_edit() {
         "the changed chapter is targeted before the idle tick runs"
     );
 
-    app.verify_findings_on_idle(); // re-baselines Two, then the spawn no-ops (AI off)
+    // AI is off (the two-chapter fixture configures no backend), so the spawn is
+    // gated: `spawn_outcome` returns early and nothing goes in flight.
+    app.verify_findings_on_idle();
     assert!(
         !app.ai_busy(),
-        "the spawn is gated with AI disabled — this stays hermetic"
+        "the spawn is gated with the backend not ready — this stays hermetic"
     );
+    // The baseline was NOT advanced, so the finding is STILL marked for re-verify:
+    // once a backend is ready the re-check runs. (Pre-fix: this was empty — the
+    // re-check was permanently dropped.)
+    assert_eq!(
+        app.verify_on_idle_targets(),
+        vec![ui_finding("Two", "sunset happens twice")],
+        "a gated-out pass leaves the baseline untouched → the re-check is not lost"
+    );
+}
+
+#[test]
+fn a_successful_run_re_baselines_the_verified_chapters_exactly_once() {
+    // The success-path contract of the BUG 1 fix (#1053): when the pass *does* run,
+    // the verified chapters are re-baselined to their current digest exactly once, so
+    // a second idle tick before the result lands doesn't queue the same re-check
+    // again (no busy-loop on one edit; the reconcile that lands later is the source of
+    // truth). We can't spawn a live worker hermetically (#531), so we drive the
+    // re-baseline the fix performs on a successful spawn directly — exactly as the
+    // reconcile tests drive `apply_recheck_all` directly rather than through a worker.
+    let (mut app, dir) = verify_app("verify-success-rebaseline");
+    fs::write(dir.join("two.md"), "second chapter, changed once\n").unwrap();
+    let verifying = app.verify_on_idle_targets();
+    assert_eq!(
+        verifying,
+        vec![ui_finding("Two", "sunset happens twice")],
+        "the changed chapter is targeted"
+    );
+
+    // The successful-spawn branch re-baselines each verifying finding's chapters.
+    for finding in &verifying {
+        app.baseline_finding_chapters_for_test(finding);
+    }
     assert!(
         app.verify_on_idle_targets().is_empty(),
-        "the changed chapter was re-baselined, so it isn't re-verified again on the next tick"
+        "after a successful run re-baselines Two, a second tick doesn't re-fire on the same edit"
+    );
+
+    // Re-baselining is idempotent for an unchanged chapter — a third pass over the
+    // same content re-checks nothing, so there's no double re-check.
+    for finding in &verifying {
+        app.baseline_finding_chapters_for_test(finding);
+    }
+    assert!(
+        app.verify_on_idle_targets().is_empty(),
+        "re-baselining an unchanged chapter is a no-op (no double re-check)"
+    );
+
+    // A fresh edit after the re-baseline is still detected — the baseline tracks the
+    // live content, it isn't frozen.
+    fs::write(dir.join("two.md"), "second chapter, changed AGAIN\n").unwrap();
+    assert_eq!(
+        app.verify_on_idle_targets(),
+        vec![ui_finding("Two", "sunset happens twice")],
+        "a later edit past the new baseline is re-detected"
+    );
+}
+
+/// A series where books 0 and 1 each hold a chapter that resolves to the SAME
+/// root-level file string `shared.md` (subdirs are optional, so a series author can
+/// name files identically across books). A third book is the active one, so books 0
+/// and 1 both read `shared.md` from disk — the exact surface where a file-only
+/// baseline key (BUG 2) lets one book's baseline clobber the other's. The opt-in is
+/// on. Book 0's finding is on `shared.md` in book 0; book 1's is on `shared.md` in
+/// book 1; the active book has its own chapter, untouched by the test.
+fn shared_filename_series(name: &str) -> (App, TempProject) {
+    let dir = crate::testutil::scratch_dir("books", name);
+    fs::write(dir.join("shared.md"), "shared chapter, v1\n").unwrap();
+    fs::write(dir.join("active.md"), "the active book's chapter\n").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"The Saga\"\n\n\
+         [[books]]\ntitle = \"Active Book\"\n\n\
+         [[books.chapters]]\ntitle = \"Live\"\nfile = \"active.md\"\n\n\
+         [[books]]\ntitle = \"Book One\"\n\n\
+         [[books.chapters]]\ntitle = \"Alpha\"\nfile = \"shared.md\"\n\n\
+         [[books]]\ntitle = \"Book Two\"\n\n\
+         [[books.chapters]]\ntitle = \"Beta\"\nfile = \"shared.md\"\n",
+    )
+    .unwrap();
+
+    let mut app = open_test_app(&dir);
+    app.ai.verify_on_idle = true;
+    (app, TempProject::new(dir))
+}
+
+/// A finding on `chapter` attributed to `book` — so its baseline is keyed under the
+/// right book (#1053).
+fn book_finding(book: usize, chapter: &str, detail: &str) -> crate::mode::Finding {
+    crate::mode::Finding {
+        book: Some(book),
+        ..ui_finding(chapter, detail)
+    }
+}
+
+#[test]
+fn a_baseline_is_keyed_by_book_so_a_series_shared_filename_does_not_collide() {
+    // BUG 2 (#1053): `verify_baselines` is keyed by (book, file), not the file alone,
+    // so two books that hold a same-named root chapter file don't clobber each other's
+    // baselines. Books 1 and 2 (0-indexed) both point at `shared.md`. Book 1's finding
+    // is baselined while `shared.md` reads "v1"; then `shared.md` becomes "v2" and
+    // book 2's finding is baselined. Pre-fix (file-only key), book 2's "v2" baseline
+    // OVERWRITES book 1's "v1" under the same `shared.md` key — so book 1's finding,
+    // which should now read as changed (v1 → v2), is silently seen as unchanged and
+    // never re-checked. Post-fix each book keeps its own baseline.
+    let (mut app, dir) = shared_filename_series("verify-book-key-collision");
+    assert_eq!(app.project.active_book(), 0, "the active book is book 0");
+
+    let f1 = book_finding(1, "Alpha", "the sword is described twice");
+    let f2 = book_finding(2, "Beta", "the map is upside down");
+
+    // t0: `shared.md` is "v1". Baseline book 1's finding here → (1, shared.md) = v1.
+    app.accumulate_triage(std::slice::from_ref(&f1));
+
+    // t1: the shared file is revised on disk, then book 2's finding is baselined at
+    // the NEW content → (2, shared.md) = v2. Pre-fix this insert clobbers book 1's.
+    fs::write(dir.join("shared.md"), "shared chapter, v2\n").unwrap();
+    app.accumulate_triage(std::slice::from_ref(&f2));
+
+    let targets = app.verify_on_idle_targets();
+    // Book 1's finding was baselined at v1; the file is now v2 → it MUST be re-checked.
+    // Pre-fix it was dropped (its baseline was clobbered to v2 by book 2). This is the
+    // fail-before / pass-after assertion for the key collision.
+    assert!(
+        targets.contains(&f1),
+        "book 1's finding IS re-checked — its baseline (v1) differs from the file (v2), \
+         and book 2 did not clobber it: {targets:?}"
+    );
+    // Book 2's finding was baselined at v2 and the file is still v2 → not stale.
+    assert!(
+        !targets.contains(&f2),
+        "book 2's finding is unchanged against its own baseline: {targets:?}"
     );
 }
