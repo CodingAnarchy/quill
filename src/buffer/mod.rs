@@ -278,7 +278,14 @@ impl Buffer {
     /// The [`Cursor`] (line, grapheme-column) for an absolute byte offset — the
     /// inverse of [`cursor_byte`], used to jump to a search match (#144).
     pub fn cursor_at_byte(&self, byte: usize) -> Cursor {
-        let byte = byte.min(self.rope.len_bytes());
+        // Snap to a valid char boundary before slicing. A byte offset that lands
+        // inside a multibyte grapheme — a stale persisted position, mark, or fold
+        // heading recorded before smart-typography rewrote the bytes — would
+        // otherwise panic on the `&str` slice in `byte_to_col`, bricking reopen at
+        // startup. Flooring to the previous boundary leaves valid offsets untouched.
+        let byte = self
+            .rope
+            .char_to_byte(self.rope.byte_to_char(byte.min(self.rope.len_bytes())));
         let line = self.rope.byte_to_line(byte);
         let line_start_byte = self.rope.line_to_byte(line);
         let line_text = self.line(line);
