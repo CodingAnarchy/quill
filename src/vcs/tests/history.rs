@@ -430,6 +430,12 @@ fn init_is_idempotent_and_preserves_an_existing_gitignore() {
 
 // --- The findings-store auto-commit guard (#1060) -----------------------------
 
+/// The tracked findings store, project-relative — the app layer's `store_rel_path()`
+/// is the real single source; these vcs-layer tests can't reach across to it, so this
+/// local constant stands in for the caller-supplied path in the `commit_findings`
+/// arguments below.
+const FINDINGS_REL: &str = "bible/findings.toml";
+
 /// Stand in for an analysis pass rewriting the tracked findings store — write
 /// `bible/findings.toml` with one open finding. Mirrors what `FindingsStore::save`
 /// puts on disk, so `commit_findings` and `status` see exactly a real pass write.
@@ -466,7 +472,9 @@ fn commit_findings_clears_the_dirty_flag_and_captures_the_store() {
     );
 
     // Auto-commit it on its own; the tree is clean afterward (no Sync block).
-    assert!(commit_findings(&dir, "Update findings").unwrap().is_some());
+    assert!(commit_findings(&dir, FINDINGS_REL, "Update findings")
+        .unwrap()
+        .is_some());
     assert_eq!(
         status(&dir).unwrap().count(),
         0,
@@ -500,7 +508,7 @@ fn commit_findings_leaves_uncommitted_prose_alone() {
     )
     .unwrap();
     write_findings(&dir, "a dangling thread");
-    commit_findings(&dir, "Update findings").unwrap();
+    commit_findings(&dir, FINDINGS_REL, "Update findings").unwrap();
 
     // HEAD carries the new findings but *not* the prose edit — the chapter is still
     // uncommitted, so the author's manuscript work is neither lost nor auto-committed.
@@ -535,17 +543,19 @@ fn commit_findings_is_a_noop_when_unchanged_or_no_repo() {
     // No repo yet → Ok(None), never an error.
     write_findings(&dir, "same finding");
     assert_eq!(
-        commit_findings(&dir, "Update findings").unwrap(),
+        commit_findings(&dir, FINDINGS_REL, "Update findings").unwrap(),
         None,
         "no repository → a harmless no-op"
     );
 
     init(&dir).unwrap();
-    assert!(commit_findings(&dir, "Update findings").unwrap().is_some());
+    assert!(commit_findings(&dir, FINDINGS_REL, "Update findings")
+        .unwrap()
+        .is_some());
     // A re-run writes a byte-identical store → nothing to commit.
     write_findings(&dir, "same finding");
     assert_eq!(
-        commit_findings(&dir, "Update findings").unwrap(),
+        commit_findings(&dir, FINDINGS_REL, "Update findings").unwrap(),
         None,
         "an unchanged store makes no empty commit"
     );
