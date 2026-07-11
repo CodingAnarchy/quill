@@ -161,6 +161,60 @@ pub fn normalize_parts(parts: &mut Vec<Part>) {
     });
 }
 
+/// Adjust part ranges when a body chapter is **inserted** at 1-based body
+/// position `body_pos` (the new chapter takes that position; every body chapter
+/// formerly at position `q >= body_pos` is now at `q + 1`). Part ranges are
+/// inclusive 1-based body positions ([`Part`]), and none of the structural edits
+/// otherwise touch them (#316), so without this call a part would silently
+/// regroup the wrong chapters after an insert (#… — parts follow structural edits).
+///
+/// Boundary convention: inserting **exactly at a part's start edge**
+/// (`body_pos == start`) pushes the whole part down (`[start + 1, end + 1]`) —
+/// the new chapter lands *before* the part's first chapter rather than joining
+/// it. A chapter inserted strictly inside a part (`start < body_pos <= end`)
+/// grows it (`[start, end + 1]`). A part entirely after the insert
+/// (`body_pos <= start`) shifts up by one; a part entirely before it is untouched.
+pub fn shift_parts_for_insert(parts: &mut [Part], body_pos: usize) {
+    for p in parts.iter_mut() {
+        let [start, end] = p.chapters;
+        if body_pos <= start {
+            // Insert at or before the part's first chapter: the whole part slides
+            // down by one (start-edge inserts push the part, don't join it).
+            p.chapters = [start + 1, end + 1];
+        } else if body_pos <= end {
+            // Insert strictly inside the part: it grows to cover the new chapter.
+            p.chapters = [start, end + 1];
+        }
+        // body_pos > end: the insert is after the part — the part is untouched.
+    }
+}
+
+/// Adjust part ranges when the body chapter at 1-based body position `body_pos`
+/// is **deleted** (every body chapter formerly at `q > body_pos` is now at
+/// `q - 1`). A part containing `body_pos` shrinks by one; a part entirely after
+/// it shifts down by one; a part that shrinks to nothing (its only chapter was
+/// deleted) is **dropped**. The counterpart to [`shift_parts_for_insert`] — the
+/// two keep parts consistent with the chapter list across every structural edit.
+pub fn shift_parts_for_delete(parts: &mut Vec<Part>, body_pos: usize) {
+    parts.retain_mut(|p| {
+        let [start, end] = p.chapters;
+        if body_pos < start {
+            // Delete before the part: the whole part slides down by one.
+            p.chapters = [start - 1, end - 1];
+        } else if body_pos <= end {
+            // Delete inside (or at an edge of) the part: it shrinks by one. When
+            // the part held a single chapter (start == end == body_pos) it now
+            // spans nothing — drop it rather than leave a zero-length range.
+            if start == end {
+                return false;
+            }
+            p.chapters = [start, end - 1];
+        }
+        // body_pos > end: the delete is after the part — the part is untouched.
+        true
+    });
+}
+
 /// The on-disk manifest (`book.toml`), deserialized.
 ///
 /// `title` is the book title; `subtitle`, `author`, and `series` are optional
@@ -310,7 +364,10 @@ pub fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_parts, part_at_body_position, Part};
+    use super::{
+        normalize_parts, part_at_body_position, shift_parts_for_delete, shift_parts_for_insert,
+        Part,
+    };
 
     fn part(range: [usize; 2]) -> Part {
         Part {
@@ -318,6 +375,109 @@ mod tests {
             chapters: range,
             goal: None,
         }
+    }
+
+    fn ranges(parts: &[Part]) -> Vec<[usize; 2]> {
+        parts.iter().map(|p| p.chapters).collect()
+    }
+
+    // Inserting strictly inside a part grows it; a part after the insert shifts up
+    // by one so it keeps grouping the SAME chapters — not silently regrouping.
+    #[test]
+    fn insert_inside_grows_the_part_and_shifts_later_parts() {
+        let mut parts = vec![part([1, 3]), part([4, 6])];
+        shift_parts_for_insert(&mut parts, 2); // inside part 0
+        assert_eq!(
+            ranges(&parts),
+            vec![[1, 4], [5, 7]],
+            "part 0 grows to swallow the new chapter; part 1 shifts up intact"
+        );
+    }
+
+    // Boundary convention: inserting exactly at a part's start edge pushes the
+    // whole part down (the new chapter lands before it), rather than joining it.
+    #[test]
+    fn insert_at_start_edge_pushes_the_part_down() {
+        let mut parts = vec![part([2, 4])];
+        shift_parts_for_insert(&mut parts, 2); // == start
+        assert_eq!(
+            ranges(&parts),
+            vec![[3, 5]],
+            "start-edge insert pushes the part; it does not join it"
+        );
+    }
+
+    // Inserting after a part leaves it untouched; inserting at the end edge grows
+    // it (the end edge is inside the inclusive range).
+    #[test]
+    fn insert_after_is_a_noop_and_end_edge_grows() {
+        let mut after = vec![part([1, 2])];
+        shift_parts_for_insert(&mut after, 3); // strictly after end
+        assert_eq!(
+            ranges(&after),
+            vec![[1, 2]],
+            "insert after the part is a no-op"
+        );
+
+        let mut edge = vec![part([1, 3])];
+        shift_parts_for_insert(&mut edge, 3); // == end, still inside
+        assert_eq!(
+            ranges(&edge),
+            vec![[1, 4]],
+            "end-edge insert grows the part"
+        );
+    }
+
+    // Deleting inside a part shrinks it; a later part shifts down; a part whose
+    // only chapter is deleted is dropped rather than left zero-length.
+    #[test]
+    fn delete_shrinks_shifts_and_drops_emptied_parts() {
+        let mut parts = vec![part([1, 3]), part([4, 4]), part([5, 6])];
+        shift_parts_for_delete(&mut parts, 4); // the sole chapter of part 1
+        assert_eq!(
+            ranges(&parts),
+            vec![[1, 3], [4, 5]],
+            "the single-chapter part drops; the later part shifts down intact"
+        );
+
+        shift_parts_for_delete(&mut parts, 2); // inside part 0
+        assert_eq!(
+            ranges(&parts),
+            vec![[1, 2], [3, 4]],
+            "part 0 shrinks; the later part shifts down"
+        );
+    }
+
+    // Insert then delete at the same position is an identity on the ranges — the
+    // two helpers are inverses at a shared boundary (guards against drift).
+    #[test]
+    fn insert_then_delete_is_identity() {
+        let original = vec![part([1, 3]), part([4, 6])];
+        let mut parts = original.clone();
+        shift_parts_for_insert(&mut parts, 2);
+        shift_parts_for_delete(&mut parts, 2);
+        assert_eq!(
+            ranges(&parts),
+            ranges(&original),
+            "insert+delete cancels out"
+        );
+    }
+
+    // The mapping stays consistent: after growing a part, every original chapter
+    // still resolves into it via `part_at_body_position`.
+    #[test]
+    fn shift_keeps_the_position_mapping_consistent() {
+        let mut parts = vec![part([1, 2]), part([3, 4])];
+        // Insert a new chapter at body position 1 (before part 0). Every original
+        // chapter's position moves up by one; the parts must move with them.
+        shift_parts_for_insert(&mut parts, 1);
+        assert_eq!(ranges(&parts), vec![[2, 3], [4, 5]]);
+        // Original chapter 1 (now at position 2) is still in part 0; original
+        // chapter 3 (now at position 4) is still in part 1.
+        assert_eq!(part_at_body_position(&parts, 2), Some(0));
+        assert_eq!(part_at_body_position(&parts, 4), Some(1));
+        // The freshly inserted chapter at position 1 belongs to no part.
+        assert_eq!(part_at_body_position(&parts, 1), None);
     }
 
     // A hand-edited `book.toml` can invert a part range (`[3, 1]`). Left as-is it
