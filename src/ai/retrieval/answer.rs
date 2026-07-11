@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
+use crate::ai::embed::Chapter;
 use crate::ai::{Answer, Coverage, Response, Usage};
 
 use super::seed::{BibleSeed, Excerpt};
@@ -56,15 +57,24 @@ const COMPACT_NOTE_MAX: usize = 200;
 /// (#856, #1056): the answer prose, the citations gathered across every chapter
 /// actually read/searched (deduped, in encounter order), a structured [`Coverage`]
 /// record of the read-set and how complete it was, and a disclosure derived from that
-/// coverage so a holistic answer stays hedged. `total_chapters` is the size of the
-/// manuscript the loop read from, so coverage reads as a fraction ("6 of 40").
-/// `incomplete` is set when the turn cap was reached. Never emits manuscript prose:
-/// the answer is analysis, the citations and the read-set are chapter titles.
+/// coverage so a holistic answer stays hedged. `chapters` is the manuscript the loop
+/// read from, so its size is the coverage denominator ("6 of 40"). `incomplete` is set
+/// when the turn cap was reached. Never emits manuscript prose: the answer is analysis,
+/// the citations and the read-set are chapter titles.
+///
+/// `chapters` is passed so `finish` knows both the corpus size (the coverage
+/// denominator) and the real chapter titles — but the read-set that forms the coverage
+/// NUMERATOR is the chapters the loop **actually touched** (the excerpt-derived
+/// citations), NOT whatever the model claimed. The model's own cited titles are only
+/// kept when a real read backs them; a hallucinated citation — whether an invented
+/// title or a real chapter the loop never opened — is dropped
+/// (#qa-citation-coverage), so it cannot inflate the read-set into a false "full read"
+/// claim and no phantom citation points at a chapter that was never read.
 pub(super) fn finish(
     text: &str,
     excerpts: &[Excerpt],
     bible: &BibleSeed,
-    total_chapters: usize,
+    chapters: &[Chapter],
     incomplete: bool,
 ) -> Answer {
     let text = text.trim();
@@ -79,10 +89,25 @@ pub(super) fn finish(
         };
     }
 
-    // The citations are the chapters actually read/searched — the ground truth of what
-    // the answer could draw from. Merge the model's cited titles with the gathered
-    // ones, deduped in encounter order, so a citation always points at a chapter the
-    // loop really touched.
+    // The ground truth of what the answer could draw from is the chapters the loop
+    // ACTUALLY read/searched — the excerpt-derived citations (the tool executor records
+    // a citation only for a read it truly resolved). Those titles, lowercased, are the
+    // allowlist a citation must be on to count. The MODEL's own cited titles are
+    // unvalidated claims: after reading one chapter it can list "Chapter 1..40" or an
+    // invented title. So a model citation is kept only when it names a chapter that was
+    // really read; anything else is dropped, keeping the coverage numerator honest and
+    // every citation jumpable. `chapters` supplies the coverage denominator.
+    let touched: BTreeSet<String> = excerpts
+        .iter()
+        .flat_map(|e| e.citations.iter())
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let total_chapters = chapters.len();
+
+    // Merge the model's cited titles with the gathered ones, deduped in encounter
+    // order, dropping any the loop never actually read — so a citation always points at
+    // a chapter the loop really touched.
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut citations: Vec<String> = Vec::new();
     for title in answer
@@ -92,7 +117,8 @@ pub(super) fn finish(
         .chain(excerpts.iter().flat_map(|e| e.citations.iter().cloned()))
     {
         let title = title.trim().to_string();
-        if !title.is_empty() && seen.insert(title.to_lowercase()) {
+        let key = title.to_lowercase();
+        if !title.is_empty() && touched.contains(&key) && seen.insert(key) {
             citations.push(title);
         }
     }
