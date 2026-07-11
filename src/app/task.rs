@@ -62,7 +62,17 @@ impl<T: Send + 'static> Task<T> {
     /// guard with [`is_busy`](Task::is_busy) first when only one job should run.
     /// A panic in `work` is caught and its message carried back (#838), rather
     /// than silently dropping the sender.
+    ///
+    /// Overwriting a live receiver silently drops the in-flight worker's result, so
+    /// spawning while busy is a caller bug — a missing `is_busy` gate. Every current
+    /// caller gates; this `debug_assert` makes a regression fail fast in debug / tests
+    /// instead of a result vanishing silently in release.
     pub(crate) fn spawn(&mut self, work: impl FnOnce() -> T + Send + 'static) {
+        debug_assert!(
+            !self.is_busy(),
+            "Task::spawn while a job is in flight — the caller is missing an is_busy() \
+             gate and would silently drop the running worker's result"
+        );
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let outcome = match panic::catch_unwind(AssertUnwindSafe(work)) {
@@ -151,5 +161,29 @@ mod tests {
             _ => panic!("a panicking worker should report Died"),
         }
         assert!(!task.is_busy());
+    }
+
+    /// Spawning while a job is still in flight would silently drop the running
+    /// worker's result — a caller bug (a missing `is_busy` gate). The `debug_assert`
+    /// in `spawn` turns that into a fast failure in debug / tests. Gated on
+    /// `debug_assertions` because a release build compiles the assert out (this is a
+    /// debug-only safety net, not a runtime guarantee).
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "job is in flight")]
+    fn spawning_while_busy_trips_the_debug_assert() {
+        let mut task: Task<i32> = Task::idle();
+        // A job that never finishes for the duration of the test, so the task is
+        // still busy when the second spawn is attempted.
+        let (block_tx, block_rx) = mpsc::channel::<()>();
+        task.spawn(move || {
+            let _ = block_rx.recv(); // parks until the sender drops at scope end
+            0
+        });
+        assert!(task.is_busy(), "the first job is in flight");
+        // Missing gate: this second spawn would clobber the live receiver — the
+        // debug_assert fires instead of silently dropping the first worker's result.
+        task.spawn(|| 1);
+        drop(block_tx); // unreachable once the assert panics; keeps the sender alive
     }
 }

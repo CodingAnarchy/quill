@@ -80,7 +80,18 @@ impl App {
     /// is due and none is already running; a no-op when backup is disabled, there's
     /// no remote, or a push is in flight. Never blocks editing.
     pub(crate) fn tick_backup(&mut self) {
-        if !self.backup.enabled || self.backup_task.is_busy() {
+        // Don't start an auto-push while any repo op is in flight (#871): the manual
+        // push/pull/sync run on `vc_task`, and a pull/sync force-checks-out the working
+        // tree, so a concurrent auto-backup push would race it into a spurious-failure /
+        // inconsistent-ref window. Gate on both the backup task (one push at a time) and
+        // the shared VC task (no push while a manual op holds the repo).
+        if !self.backup.enabled || self.repo_busy() {
+            return;
+        }
+        // Read-only instance (#871): a secondary Quill holding the project read-only
+        // must not push on the owning instance's behalf — mirror the refusal every
+        // manual VC op (push/pull/sync/draft) carries rather than auto-pushing.
+        if self.project.is_read_only() {
             return;
         }
         if !self.backup_due(Instant::now()) {
@@ -97,6 +108,14 @@ impl App {
             return;
         }
         self.spawn_backup();
+    }
+
+    /// Whether any repository operation is currently in flight (#871): the shared
+    /// manual push/pull/sync task or the automatic-backup push. The auto-backup
+    /// cadence gates on this so it never starts a push while a manual VC op (whose
+    /// pull/sync force-checks-out the tree) holds the repo, nor doubles up its own push.
+    const fn repo_busy(&self) -> bool {
+        self.vc_task.is_busy() || self.backup_task.is_busy()
     }
 
     /// Whether an automatic backup is due as of `now` (#887): the on-save flag is

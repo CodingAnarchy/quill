@@ -392,6 +392,88 @@ fn a_read_only_instance_refuses_to_switch_drafts() {
     fs::remove_dir_all(&remote).ok();
 }
 
+// ---------------------------------------------------------------------------
+// Bug H (auto-backup): the automatic off-site push (#887) is a repo op too, so it
+// must carry the same guards every manual VC op does — it must not start while the
+// shared vc_task is busy (a manual push/pull/sync force-checks-out the tree, and a
+// concurrent auto-push would race it), and it must refuse under read-only.
+// ---------------------------------------------------------------------------
+
+/// An enabled on-save backup config, so `tick_backup` has something to fire; the
+/// local-archive knobs stay off (this exercises the remote push alone).
+fn enabled_backup() -> crate::config::BackupConfig {
+    crate::config::BackupConfig {
+        enabled: true,
+        on_save: true,
+        interval_mins: 0,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn auto_backup_does_not_push_while_a_vc_op_is_in_flight() {
+    // A manual sync is in flight (vc_task busy); an on-save auto-backup is due. The
+    // cadence must NOT start a background push — pushing concurrently with a sync that
+    // force-checks-out the tree opens a spurious-failure / inconsistent-ref window.
+    let (mut app, _dir) = committed_two_chapter("vc-conc-backup-busy");
+    app.under_vc = true;
+    app.backup = enabled_backup();
+    app.mark_backup_pending_for_test();
+
+    // Start a background sync (leaves vc_task busy), exactly as the drafts test does.
+    app.spawn_sync_conflicts_for_test(&["one.md"]);
+    assert!(app.vc_task.is_busy(), "the sync is in flight");
+    assert!(
+        app.backup_pending_for_test(),
+        "the on-save backup is still due"
+    );
+
+    app.tick_backup();
+    assert!(
+        !app.backup_in_flight_for_test(),
+        "no auto-push started while a manual VC op holds the repo"
+    );
+    assert!(
+        app.backup_pending_for_test(),
+        "the vc-busy guard returns before the pending flag is even considered — the \
+         backup is left queued (not consumed) so it isn't lost while the VC op runs"
+    );
+
+    // Prove it was the vc-busy guard that held it back: once the sync settles (vc_task
+    // idle again) the same tick passes the vc gate. This fixture has no remote set, so
+    // the cadence then hits the no-remote gate and clears the pending flag — which it
+    // could only reach by getting past the vc-busy guard.
+    app.settle_vc_for_test();
+    if matches!(app.mode, Mode::ConflictReview(_)) {
+        app.on_key(key(KeyCode::Esc));
+    }
+    app.tick_backup();
+    assert!(
+        !app.backup_pending_for_test(),
+        "with the VC op settled the cadence proceeds past the vc-busy guard (here to the \
+         no-remote gate, which clears the flag)"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn auto_backup_refuses_under_read_only() {
+    // A read-only secondary instance (another Quill holds the project) must not push
+    // on the owning instance's behalf — mirror the refusal the manual ops carry (#871).
+    let (mut app, _dir, remote) = read_only_remote_app("vc-ro-backup");
+    app.under_vc = true;
+    app.backup = enabled_backup();
+    app.mark_backup_pending_for_test();
+    assert!(app.project.is_read_only(), "the fixture is read-only");
+
+    app.tick_backup();
+    assert!(
+        !app.backup_in_flight_for_test(),
+        "no auto-push spawned while read-only"
+    );
+    fs::remove_dir_all(&remote).ok();
+}
+
 #[cfg(unix)]
 #[test]
 fn a_read_only_instance_refuses_to_merge_drafts() {

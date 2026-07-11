@@ -351,7 +351,16 @@ impl App {
 
     /// Count a character's name/alias mentions across the manuscript and record
     /// the last chapter it appears in — local "screen time" / "last seen", free.
+    ///
+    /// Scopes to the book the pass is applying to (#950): a sequenced or reconciled
+    /// background batch pass sets its book via [`current_pass_book`](Self::current_pass_book),
+    /// so a Book 2 pass reconciled while Book 1 is active still counts Book 2's prose,
+    /// not the active book's. Outside a run (`current_pass_book` is `None`) this is the
+    /// active book, exactly as before — the interactive character pass is unchanged.
     pub(crate) fn enrich_mentions(&self, c: &mut Character) {
+        let book = self
+            .current_pass_book()
+            .unwrap_or_else(|| self.project.active_book());
         let needles: Vec<&str> = std::iter::once(&c.name)
             .chain(&c.aliases)
             .map(String::as_str)
@@ -359,12 +368,12 @@ impl App {
             .collect();
         let mut total = 0;
         let mut last = None;
-        for i in 0..self.chapter_count() {
-            let text = self.chapter_text(i);
+        for entry in self.project.book_chapters(book) {
+            let text = self.book_chapter_text(book, &entry.file);
             let count: usize = needles.iter().map(|n| count_matches(&text, n)).sum();
             if count > 0 {
                 total += count;
-                last = self.project.chapter_title(i).map(str::to_string);
+                last = Some(entry.title.clone());
             }
         }
         c.mentions = total;
