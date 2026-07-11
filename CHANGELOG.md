@@ -5,6 +5,110 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-11
+
+The Standing Read. Where 0.6.0 taught the assistant to *see* the manuscript and
+0.8.0 made revision fast, this release turns its one-shot passes into a
+continuous, relational, offline-capable analytical read — deeper author-invoked
+checks, findings that move over time, and Q&A that works fully on-device. Ask a
+question and Quill answers it offline by reading only the chapters it needs, with
+citations and an honest note on how much it covered. New passes track a
+relationship's arc across the book, flag concrete setups that never pay off, read
+pacing and tension as located observations, check the manuscript against your own
+research notebook, and catch out-of-character dialogue line by line — every one an
+observation you asked for, never a rewrite. Findings gain a history: diff them
+between two points, watch the health trend across drafts, re-verify only what an
+edit touched, scope a check to a single scene, and export a chapter-ordered
+revision plan. Under the hood, the AI pass mechanism was collapsed behind a single
+descriptor and the codebase went through three technical-quality passes that fixed
+a reachable crash and several silent-failure edges before they could ship.
+
+### Added
+
+- **Offline agentic Q&A** — when a question exceeds the on-device model's context,
+  Quill answers it with a bible-seeded read-loop that reads chapters, searches the
+  manuscript, and consults the story bible as read-only tools, then answers with
+  chapter citations — fully offline, instead of refusing.
+- **Q&A coverage disclosure** — an offline answer says which chapters it read and
+  how completely, so a holistic answer is honestly hedged rather than presented as
+  exhaustive.
+- **Relationship trajectory** — an author-invoked pass that tracks a character
+  pair's relationship state chapter by chapter (allied → estranged → reconciled)
+  and flags inconsistencies — a bond that contradicts an earlier one, a reversal
+  with no on-page setup.
+- **Foreshadow & payoff** — flags concrete seeded details (an object, a named
+  threat, a promised meeting, a planted clue) introduced and then never paid off,
+  as findings you can resolve — distinct from the thematic-thread tracking, and it
+  never drafts the payoff.
+- **Pacing observations** — reads the manuscript's scene-level tension and quiet
+  rhythm and reports located, plain-language observations (a sagging middle, a run
+  of high-tension chapters with no breath) — observations only, never a suggested
+  cut or rewrite.
+- **Research-notebook fact-check** — checks the manuscript against the facts you
+  wrote in your own research notebook and flags contradictions, citing the note. It
+  checks only your notes; it is deliberately not a sensitivity or accuracy-of-the-
+  world review.
+- **In-character dialogue check** — deepens the voice pass to flag specific spoken
+  lines that read out of character for their speaker, naming the line and chapter.
+- **Findings diff between two points in history** — pick two milestones or drafts
+  and see which findings a revision resolved, introduced, or left open — a local
+  comparison bridging the version-control suite with the analysis surface.
+- **Manuscript-health trend** — the health dashboard now shows how finding counts
+  by kind have moved across recent runs, so you can tell whether revision is
+  actually converging.
+- **Verify findings on idle** — an opt-in that re-checks only the findings whose
+  chapters changed since they were generated, clearing the ones an edit resolved,
+  so the triage list stays honest without a full re-run.
+- **Scope a pass to a selection** — run a continuity or setting check on just a
+  selected scene or chapter range, for a fast, focused re-verify without analyzing
+  the whole book (and at a lower cost).
+- **Revision-plan export** — export the open findings as a chapter-ordered,
+  confidence-ranked revision plan you can work top to bottom.
+
+### Changed
+
+- **The findings store is versioned and auto-committed** — the durable findings
+  store is now tracked and committed as each pass writes it, so the findings diff
+  can read it at a past point in history and an analysis pass no longer leaves the
+  tree dirty enough to block a sync.
+- **Internal quality pass** — the AI analysis-pass mechanism (~15 passes) was
+  collapsed behind a single `FindingsPass` descriptor, so adding a pass is one
+  registration instead of edits across a dozen parallel tables, and the hand-
+  maintained lists that could silently drop a finding kind are now compiler- and
+  CI-enforced. Several oversized files were split into cohesive submodules, the
+  `cargo perf` gate's render guard was extended to cover previously-unexercised
+  allocation paths, and per-frame render allocations (epigraph headers, scene
+  breaks, the assistant transcript) were eliminated.
+
+### Fixed
+
+- **Version-control merge silently dropped some documented outcomes** — the
+  chapter-level three-way merge's delete/add branches are now covered on both the
+  sync and draft-merge paths (they were correct but untested); the finding-kind
+  ordering that had silently dropped five newer finding kinds from the health
+  dashboard, trend, and revision plan is now derived from the type so it can't
+  drift.
+- **A reachable crash in offline retrieval search** — a case-insensitive search
+  computed a match offset in a lowercased copy but sliced the original text; a
+  character that changes length when lowercased could slice mid-character and
+  panic. Fixed, and the excerpt renderer is hardened against non-character-boundary
+  slices.
+- **Reflow/join no longer reach across a chapter seam** — a paragraph reflow in the
+  first paragraph of a chapter (continuous view) walked backward across the seam
+  into the previous chapter; the paragraph scan is now clamped to the chapter on
+  both sides.
+- **Chapter merge/delete no longer report success on a real failure** — merging a
+  chapter whose source can't be read, or deleting an active chapter whose pre-delete
+  save fails, now aborts with an error instead of silently losing content and
+  reporting success.
+- **Background work no longer touches the wrong book or races the repo** — an
+  automatic backup push won't run while a manual sync/pull holds the repository (or
+  from a read-only instance), and a background character pass computes its mention
+  counts from its own book rather than whichever book happens to be active.
+- **Hand-edited project files degrade gracefully** — an inverted part range in
+  `book.toml` is normalized instead of silently mapping to no part, and a findings
+  record with no chapters is skipped on load instead of risking a panic.
+
 ## [0.8.0] - 2026-07-10
 
 The Revision Desk. Quill has always been a strong tool for *drafting*; this
@@ -272,6 +376,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[0.9.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.0
 [0.8.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.8.0
 [0.7.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.7.0
 [0.6.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.6.0
