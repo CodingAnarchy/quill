@@ -329,19 +329,20 @@ impl App {
         if q.is_empty() {
             return true;
         }
-        self.project
-            .chapter_title(index)
-            .unwrap_or_default()
-            .to_lowercase()
-            .contains(q)
+        // `q` is already lowercased by the caller; match case-insensitively without
+        // lowercasing each chapter's title/status/POV into a fresh `String` per
+        // chapter per frame (#410). `ci_contains` folds on the fly and falls back to
+        // the exact Unicode `to_lowercase` only for non-ASCII text, so the result is
+        // byte-for-byte what the old per-field allocation produced.
+        ci_contains(self.project.chapter_title(index).unwrap_or_default(), q)
             || self
                 .project
                 .chapter_status(index)
-                .is_some_and(|s| s.label().to_lowercase().contains(q))
+                .is_some_and(|s| ci_contains(s.label(), q))
             || self
                 .project
                 .chapter_pov(index)
-                .is_some_and(|p| p.to_lowercase().contains(q))
+                .is_some_and(|p| ci_contains(p, q))
     }
 
     /// The active quick-jump query, lowercased (empty when not browsing or with
@@ -519,6 +520,63 @@ impl App {
             KeyCode::Esc if bible_only => self.leave_browser(),
             KeyCode::Char('f') | KeyCode::Esc => self.select(self.project.active_index()),
             _ => {}
+        }
+    }
+}
+
+/// Whether `haystack` contains `needle_lower` case-insensitively, without
+/// allocating (#410). `needle_lower` is assumed already lowercased. When both
+/// strings are ASCII, this scans lowering each byte on the fly; otherwise it falls
+/// back to the exact Unicode `to_lowercase().contains(...)` the caller used before,
+/// so the result is byte-for-byte identical — only the ASCII path (the common case
+/// for chapter titles) skips the per-call allocation.
+fn ci_contains(haystack: &str, needle_lower: &str) -> bool {
+    if haystack.is_ascii() && needle_lower.is_ascii() {
+        let (hay, needle) = (haystack.as_bytes(), needle_lower.as_bytes());
+        if needle.is_empty() {
+            return true;
+        }
+        if needle.len() > hay.len() {
+            return false;
+        }
+        hay.windows(needle.len()).any(|w| {
+            w.iter()
+                .zip(needle)
+                .all(|(h, n)| h.to_ascii_lowercase() == *n)
+        })
+    } else {
+        haystack.to_lowercase().contains(needle_lower)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ci_contains;
+
+    /// The allocation-free `ci_contains` must agree byte-for-byte with the old
+    /// `haystack.to_lowercase().contains(needle_lower)` for every case — ASCII
+    /// (the fast path), non-ASCII (the Unicode fallback), and the edges.
+    #[test]
+    fn ci_contains_matches_the_lowercase_contains_baseline() {
+        let cases = [
+            ("Chapter One", "one"),
+            ("CHAPTER ONE", "chapter"),
+            ("Chapter One", "two"),
+            ("Chapter One", ""),
+            ("", "x"),
+            ("abc", "abcd"),
+            ("The Café", "café"),     // non-ASCII haystack
+            ("STRAßE", "straße"),     // ß has a two-char uppercase, so falls back
+            ("İstanbul", "istanbul"), // dotted-I lowercases to i̇ (length change)
+            ("MiXeD case Test", "case"),
+        ];
+        for (hay, needle_lower) in cases {
+            let baseline = hay.to_lowercase().contains(needle_lower);
+            assert_eq!(
+                ci_contains(hay, needle_lower),
+                baseline,
+                "ci_contains({hay:?}, {needle_lower:?}) must match the baseline"
+            );
         }
     }
 }

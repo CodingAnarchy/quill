@@ -23,6 +23,7 @@ mod editor;
 mod list_overlay;
 mod overlay;
 mod status;
+pub use assistant::AssistantWrapCache;
 use assistant::{draw_assistant_pane, too_cramped_to_split};
 pub use editor::HeaderCache;
 use status::{editor_status_bar, mode_chip, nav_status_bar, search_status};

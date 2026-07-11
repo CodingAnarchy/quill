@@ -34,10 +34,27 @@ fn render_stays_within_a_frame() {
         if i % 50 == 0 {
             let _ = writeln!(text, "## Scene {}", i / 50);
         }
+        // A `---` scene break every 100 lines (#908), set off by blank lines so the
+        // grammar reads it as a thematic break, not a setext underline. This gives
+        // the scene-break divider path real breaks to render — the corpus otherwise
+        // had none, so the per-frame break scan + line-lookup allocation went
+        // untimed. The cached scene-break lines and the `merge_inserts` fast path
+        // must keep the whole thing within the frame budget.
+        if i % 100 == 0 && i > 0 {
+            text.push_str("\n---\n\n");
+        }
         text.push_str("The night was dark and the road was very long indeed.\n");
     }
     let words = text.split_whitespace().count();
     let mut buffer = Buffer::from_text(&text);
+    // A chapter epigraph (#518) so the header-block build + the `merge_inserts`
+    // combine with the scene-break rows are both exercised under the frame budget;
+    // the corpus otherwise had no epigraph, so `merge_inserts` never actually
+    // merged and the header deep-clone it used to do went untimed.
+    buffer
+        .front_matter_mut()
+        .set_epigraph_text("Beware the fury of a patient man.");
+    buffer.front_matter_mut().set_epigraph_by("Dryden");
     buffer.refresh_syntax();
     let mut app = App::new(buffer, project);
     app.outline_visible = true;
@@ -127,5 +144,32 @@ fn render_stays_within_a_frame() {
     assert!(
         scrolled_dt.as_millis() < 16,
         "scrolled render took {scrolled_dt:?}"
+    );
+
+    // And with the assistant pane open beside the editor (#307), holding a long
+    // conversation. The pane used to re-wrap every transcript entry (a `format!` +
+    // `row_starts` + a per-row `to_string`) for the whole conversation on every
+    // frame, then discard the off-screen rows — untimed by the passes above, which
+    // never open the pane. The wrapped rows are now cached (rebuilt only on an
+    // append/resize/theme change), so an open pane over a long transcript must stay
+    // well within the frame budget too.
+    app.scroll_offset.set(0);
+    app.test_open_assistant_with_entries();
+    for i in 0..200 {
+        app.test_assistant_append(&format!(
+            "Turn {i}: a reply long enough to wrap across the assistant pane's interior \
+             width onto several rows, so the per-entry wrap work is real."
+        ));
+    }
+    terminal.draw(|f| draw(f, &app)).unwrap(); // warm (builds the wrap cache)
+    let t = Instant::now();
+    for _ in 0..30 {
+        terminal.draw(|f| draw(f, &app)).unwrap();
+    }
+    let assistant_dt = t.elapsed() / 30;
+    println!("render with the assistant pane open = {assistant_dt:?}");
+    assert!(
+        assistant_dt.as_millis() < 16,
+        "assistant-pane render took {assistant_dt:?}"
     );
 }

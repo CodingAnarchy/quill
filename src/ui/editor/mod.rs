@@ -16,7 +16,6 @@ use super::*;
 use crate::app::mouse::EditorLayout;
 use crate::app::FoldView;
 use crate::buffer::Buffer;
-use crate::syntax::HighlightKind;
 
 mod focus;
 mod galley;
@@ -79,10 +78,20 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Visual { anchor, linewise } => (&[], Some(app.selection_bytes(*anchor, *linewise))),
         _ => (&[], None),
     };
-    let inserts = merge_inserts(
-        header_inserts(app, column.width).as_ref(),
-        &scene_break_inserts(buffer),
-    );
+    // The display-only header blocks (cached, #869) and the scene-break breathing
+    // rows (#908). When there are no scene breaks — the common case — reuse the
+    // cached header `Rc` slice untouched rather than deep-cloning every header
+    // Line/Span into a merged Vec each frame; only build a fresh merged list when
+    // there's actually something to merge in.
+    let header = header_inserts(app, column.width);
+    let scene_breaks = scene_break_inserts(buffer);
+    let merged;
+    let inserts: &[(usize, Vec<Line<'static>>)] = if scene_breaks.is_empty() {
+        header.as_slice()
+    } else {
+        merged = merge_inserts(header.as_slice(), &scene_breaks);
+        &merged
+    };
     // Misspelled-word flags (#357), computed on idle; underlined under the prose.
     let spell = app.spell_flags.as_slice();
     // Inline author annotations (#302/#370): the anchored spans get a tinted
@@ -126,7 +135,7 @@ pub(super) fn render_focused_pane(frame: &mut Frame, area: Rect, app: &App) {
         frame,
         column,
         buffer,
-        &inserts,
+        inserts,
         &highlights,
         &folds,
         app.typewriter,
@@ -554,18 +563,21 @@ fn render_body(
 /// without ever touching the buffer. The break's raw `---` stays the real, editable
 /// line — these are only the surrounding whitespace.
 fn scene_break_inserts(buffer: &Buffer) -> Vec<(usize, Vec<Line<'static>>)> {
-    let syntax = buffer.syntax();
-    let mut inserts: Vec<(usize, Vec<Line<'static>>)> = Vec::new();
+    let breaks = buffer.syntax().scene_break_lines();
+    if breaks.is_empty() {
+        return Vec::new();
+    }
+    let line_count = buffer.line_count();
+    let mut inserts: Vec<(usize, Vec<Line<'static>>)> = Vec::with_capacity(breaks.len() * 2);
     let gap = || vec![Line::raw("")];
-    for h in syntax.highlights_in(0, usize::MAX) {
-        if h.kind != HighlightKind::SceneBreak {
-            continue;
-        }
-        let line = buffer.cursor_at_byte(h.start).line;
+    // The break line each divider sits on is read straight from the syntax cache
+    // (#908), so this no longer scans every highlight or allocates a line-lookup
+    // `String` per break every frame.
+    for &line in breaks {
         // One blank above the divider, and one before the line that resumes after
         // it — symmetric breathing room larger than a normal paragraph gap.
         inserts.push((line, gap()));
-        if line + 1 < buffer.line_count() {
+        if line + 1 < line_count {
             inserts.push((line + 1, gap()));
         }
     }
