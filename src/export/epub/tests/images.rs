@@ -165,3 +165,53 @@ fn a_cover_without_a_description_falls_back_to_the_book_title() {
         "cover never emits a bare empty alt: {cover}"
     );
 }
+
+#[test]
+fn a_quote_in_the_cover_alt_is_escaped_to_stay_well_formed() {
+    // A double quote in an `alt` value must become `&quot;`, or it closes the
+    // attribute early and yields non-well-formed XHTML that epubcheck and
+    // conformant readers reject (the whole book fails). Regression for the
+    // `xml_escape` quote gap: fails before the fix (raw `"` in the attribute),
+    // passes after.
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        cover_image_alt: Some("The \"Real\" Story".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+    let bytes = to_epub(&doc(), MODIFIED, &style).unwrap();
+
+    let cover = part(&bytes, "OEBPS/cover0001.xhtml");
+    assert!(
+        cover.contains("alt=\"The &quot;Real&quot; Story\""),
+        "the quote is escaped to &quot;: {cover}"
+    );
+    // The attribute must not carry a raw inner quote that closes it early.
+    assert!(
+        !cover.contains("alt=\"The \"Real\""),
+        "no raw quote left in the alt attribute: {cover}"
+    );
+    // And the XHTML round-trips through an XML parser as well-formed.
+    assert_well_formed_xml(&cover);
+}
+
+#[test]
+fn a_quote_in_the_title_cover_alt_fallback_is_escaped() {
+    // With no explicit cover_image_alt, the cover alt falls back to the book
+    // title; a `"` in the title must still be escaped in the attribute.
+    let mut d = doc();
+    d.title = "The \"Real\" Story".into();
+    let mut style = ExportStyle {
+        cover_image: Some("art/cover.png".into()),
+        ..Default::default()
+    };
+    style.resolve_images(|_| Ok(vec![0x89, b'P', b'N', b'G']));
+    let bytes = to_epub(&d, MODIFIED, &style).unwrap();
+
+    let cover = part(&bytes, "OEBPS/cover0001.xhtml");
+    assert!(
+        cover.contains("alt=\"The &quot;Real&quot; Story\""),
+        "title fallback alt escapes the quote: {cover}"
+    );
+    assert_well_formed_xml(&cover);
+}

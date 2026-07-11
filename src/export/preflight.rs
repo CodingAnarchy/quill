@@ -168,6 +168,55 @@ fn is_bcp47(tag: &str) -> bool {
     subtags.all(|s| (1..=8).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
+/// Whether an ISBN is structurally valid: a real ISBN-10 or ISBN-13 with a
+/// correct check digit, not merely non-empty. A malformed ISBN (`hello`, a
+/// wrong check digit) gets stamped into the EPUB `dc:identifier` and the
+/// copyright page and is rejected by KDP/IngramSpark, so preflight must catch it
+/// up front.
+///
+/// Hyphens and surrounding spaces are ignored (the conventional grouping). An
+/// ISBN-10's terminal check digit may be `X` (value 10); an ISBN-13 is all
+/// digits. Everything else fails.
+fn isbn_is_valid(isbn: &str) -> bool {
+    let digits: Vec<char> = isbn
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
+    match digits.len() {
+        10 => isbn10_check(&digits),
+        13 => isbn13_check(&digits),
+        _ => false,
+    }
+}
+
+/// ISBN-10 mod-11 checksum: `sum(d_i * (10 - i))` must be `0 mod 11`, where the
+/// last digit may be `X` for the value 10; the first nine are decimal digits.
+fn isbn10_check(digits: &[char]) -> bool {
+    let mut sum = 0u32;
+    for (i, c) in digits.iter().enumerate() {
+        let value = match (i, c) {
+            (9, 'X' | 'x') => 10,
+            (_, d) if d.is_ascii_digit() => d.to_digit(10).unwrap_or(0),
+            _ => return false,
+        };
+        sum += value * (10 - i as u32);
+    }
+    sum.is_multiple_of(11)
+}
+
+/// ISBN-13 mod-10 checksum: digits weighted 1,3,1,3,… must sum to `0 mod 10`.
+/// All thirteen characters must be decimal digits.
+fn isbn13_check(digits: &[char]) -> bool {
+    let mut sum = 0u32;
+    for (i, c) in digits.iter().enumerate() {
+        let Some(d) = c.to_digit(10) else {
+            return false;
+        };
+        sum += if i.is_multiple_of(2) { d } else { d * 3 };
+    }
+    sum.is_multiple_of(10)
+}
+
 /// Whether a chapter's prose has balanced Markdown emphasis (#815): an even count
 /// of `*` and `_` markers so no `*italic` or `**bold` span is left open — an
 /// unbalanced marker leaks a literal `*` into the exported text. A coarse count (it
@@ -199,7 +248,13 @@ pub fn preflight(
 
     // --- Store-facing metadata (what KDP/IngramSpark demand up front) ---
     checks.push(match &meta.isbn {
-        Some(isbn) if !isbn.trim().is_empty() => Check::pass(format!("ISBN set ({isbn})")),
+        Some(isbn) if !isbn.trim().is_empty() && isbn_is_valid(isbn) => {
+            Check::pass(format!("ISBN set ({isbn})"))
+        }
+        Some(isbn) if !isbn.trim().is_empty() => Check::fail(format!(
+            "ISBN '{isbn}' is invalid (bad check digit or length) — stores reject a \
+             malformed ISBN; use a real ISBN-10 or ISBN-13"
+        )),
         _ => Check::fail("no ISBN — print/ebook stores require one (set [book] isbn in book.toml)"),
     });
 
@@ -410,6 +465,82 @@ mod tests {
         assert!(!is_bcp47("e"));
         assert!(!is_bcp47(""));
         assert!(!is_bcp47("en US"));
+    }
+
+    /// The ISBN check-digit validator accepts real ISBN-10 / ISBN-13 values
+    /// (hyphenated or not, `X` check digit allowed) and rejects gibberish, a
+    /// wrong check digit, and a wrong length.
+    #[test]
+    fn isbn_check_digit_is_validated() {
+        // Valid ISBN-13 (the one used by the clean-book fixture).
+        assert!(isbn_is_valid("978-1-234-56789-7"));
+        assert!(isbn_is_valid("9781234567897"));
+        // Valid ISBN-10s, including an `X` check digit.
+        assert!(isbn_is_valid("0-306-40615-2"));
+        assert!(isbn_is_valid("0306406152"));
+        assert!(isbn_is_valid("097522980X"));
+        // Wrong check digit fails.
+        assert!(!isbn_is_valid("9781234567890"));
+        assert!(!isbn_is_valid("0-306-40615-3"));
+        // Not an ISBN at all / wrong length.
+        assert!(!isbn_is_valid("hello"));
+        assert!(!isbn_is_valid("12345"));
+        assert!(!isbn_is_valid(""));
+        // `X` is only legal as the ISBN-10 terminal digit.
+        assert!(!isbn_is_valid("97812345678X7"));
+    }
+
+    /// Preflight fails a set-but-invalid ISBN distinctly from an unset one, and
+    /// passes a structurally-valid ISBN.
+    #[test]
+    fn preflight_rejects_a_malformed_isbn() {
+        let style = ExportStyle::default();
+        let chapters = [chapter("One", 500, "prose")];
+
+        // A structurally-invalid ISBN fails with the "invalid" message.
+        let bad = PubMeta {
+            isbn: Some("hello".into()),
+            ..Default::default()
+        };
+        let report = preflight(&bad, &style, &chapters, None, false);
+        let text = report.to_markdown("t");
+        assert!(
+            text.contains("FAIL  ISBN 'hello' is invalid"),
+            "a malformed ISBN fails distinctly:\n{text}"
+        );
+
+        // A wrong check digit fails too.
+        let bad_check = PubMeta {
+            isbn: Some("9781234567890".into()),
+            ..Default::default()
+        };
+        assert!(
+            preflight(&bad_check, &style, &chapters, None, false)
+                .to_markdown("t")
+                .contains("is invalid"),
+            "a wrong check digit fails"
+        );
+
+        // A valid ISBN passes.
+        let good = PubMeta {
+            isbn: Some("978-1-234-56789-7".into()),
+            ..Default::default()
+        };
+        assert!(
+            preflight(&good, &style, &chapters, None, false)
+                .to_markdown("t")
+                .contains("PASS  ISBN set"),
+            "a valid ISBN passes"
+        );
+
+        // A blank/unset ISBN behaves as before: the "no ISBN" fail.
+        let blank = PubMeta::default();
+        assert!(
+            preflight(&blank, &style, &chapters, None, false)
+                .to_markdown("t")
+                .contains("FAIL  no ISBN"),
+            "a blank ISBN still reports 'no ISBN'"
+        );
     }
 
     /// Bleed set with no cover fails on the full-bleed check; the check is print-only.
