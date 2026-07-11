@@ -5,6 +5,45 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-11
+
+A reliability patch. A pre-1.0 bug hunt across the editor core, the export
+pipeline, the structural layer, and the AI subsystem turned up seven real bugs —
+including a crash on reopen and a silent prose-loss edge — all fixed here with
+regression tests. No feature or format changes.
+
+### Fixed
+
+- **Reopening a project could crash before the first draw** — a saved cursor
+  position whose byte offset fell inside a multibyte character (an em-dash, a
+  curly quote) after the file changed panicked on startup; the cursor byte is now
+  snapped to a character boundary, which also fixes the same class on mark/jump
+  restore and fold navigation.
+- **Text typed on the very last line in the continuous view could be lost on save**
+  — the trailing line of a multi-chapter window belonged to no chapter's save
+  span, so a final sentence typed there never reached disk (or the crash-recovery
+  snapshot); the last chapter now saves through the end of the buffer.
+- **A straight double-quote in the book title could corrupt the EPUB** — the XML
+  escaper didn't escape `"`, producing invalid XHTML in image alt-text attributes
+  that readers and epubcheck reject; quotes and forbidden control characters are
+  now escaped/stripped, and export preflight validates the ISBN check digit.
+- **Importing a foreign Scrivener/Word `.scriv` doubled accented and smart-
+  punctuation characters** — a Unicode-escape/byte-fallback pair was decoded twice;
+  fixed, along with correct Windows-1252 decoding of high bytes and preservation of
+  line breaks in preformatted blocks.
+- **Offline Q&A could falsely claim it read the whole manuscript** — the coverage
+  disclosure trusted the model's own citation list, so a hallucinated citation
+  inflated the reported coverage; citations are now validated against the chapters
+  the loop actually read, keeping the "read N of M chapters" disclosure honest.
+- **Parts didn't follow chapter reorganization** — adding, deleting, moving,
+  merging, or splitting a chapter left `[[parts]]` ranges pointing at the wrong
+  chapters (mis-grouping them and mis-counting per-part words); part ranges now
+  track their chapters through every structural edit.
+- **Verify-on-idle could permanently skip a re-check** — if the AI backend wasn't
+  ready when an idle re-verify was due, the change baseline advanced anyway and the
+  finding was never re-checked; the baseline now updates only after a pass actually
+  runs (and is keyed per book so a shared filename across books can't collide).
+
 ## [0.9.0] - 2026-07-11
 
 The Standing Read. Where 0.6.0 taught the assistant to *see* the manuscript and
@@ -376,6 +415,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[0.9.1]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.1
 [0.9.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.0
 [0.8.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.8.0
 [0.7.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.7.0
