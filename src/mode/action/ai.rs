@@ -741,3 +741,75 @@ impl AiAction {
         self.spec().finding_kind
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::AiAction;
+
+    /// Every `AiAction` variant, hand-listed. The completeness test below asserts
+    /// this list matches the enum (via `SPECS` coverage + count), so adding a
+    /// variant without extending this list — and `SPECS` — fails CI. When the enum
+    /// grows, add the variant here and give it a `SPECS` row.
+    const ALL_ACTIONS: &[AiAction] = &[
+        AiAction::Ask,
+        AiAction::Characters,
+        AiAction::Continuity,
+        AiAction::Setting,
+        AiAction::Plot,
+        AiAction::Theme,
+        AiAction::Scaffold,
+        AiAction::Naming,
+        AiAction::Style,
+        AiAction::Brainstorm,
+        AiAction::DraftCharacters,
+        AiAction::DraftSetting,
+        AiAction::Voice,
+        AiAction::Submission,
+        AiAction::Marketing,
+        AiAction::Social,
+        AiAction::AdCreative,
+        AiAction::Portrait,
+        AiAction::Scene,
+        AiAction::Triage,
+        AiAction::Dashboard,
+        AiAction::CoOccurrence,
+        AiAction::AskHistory,
+        AiAction::SemanticFind,
+        AiAction::Echo,
+        AiAction::Thesaurus,
+        AiAction::NameGen,
+        AiAction::Editorial,
+        AiAction::Accuracy,
+        AiAction::Relationship,
+        AiAction::Foreshadow,
+        AiAction::FactCheck,
+        AiAction::Pacing,
+    ];
+
+    /// Guards `AiAction::spec()`'s runtime `.expect()`: every variant must have a
+    /// `SPECS` row, so a new variant added without a descriptor fails CI instead of
+    /// panicking in production. `spec()` finds the row, and asserting the counts
+    /// match rules out a stale hand-list AND a `SPECS` row for a variant this test
+    /// forgot — the two lists and the enum stay in lockstep.
+    #[test]
+    fn every_ai_action_has_a_specs_row() {
+        // Each listed variant resolves to a descriptor (this is the `.expect()` path).
+        for action in ALL_ACTIONS {
+            let spec = action.spec();
+            assert_eq!(
+                spec.action, *action,
+                "SPECS row for {action:?} is misattributed",
+            );
+        }
+        // One row per variant, no more: a forgotten `SPECS` row (fewer rows than
+        // variants) or a duplicate/orphan row both fail here.
+        assert_eq!(
+            AiAction::SPECS.len(),
+            ALL_ACTIONS.len(),
+            "SPECS has {} rows but there are {} AiAction variants — every variant \
+             needs exactly one descriptor row",
+            AiAction::SPECS.len(),
+            ALL_ACTIONS.len(),
+        );
+    }
+}

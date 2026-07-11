@@ -220,10 +220,20 @@ pub(super) struct RecheckRequest {
 /// re-check (#608), a scoped run (#1054) — produces byte-identical summaries (the
 /// finding's content key the re-check depends on). A parse error yields no findings;
 /// for a re-check that reads as "the finding is gone" (a later full pass re-surfaces
-/// it if it truly persists). `None` for an action that surfaces no re-runnable
-/// findings — the local views, the generative helpers, and the two arg-taking
-/// passes (accuracy #973, relationship #1046) whose author-chosen argument isn't
-/// stored per finding, so a scoped re-run can't reconstruct it.
+/// it if it truly persists). `Some` for every action that surfaces re-runnable
+/// findings — including the arg-taking passes (accuracy #973, relationship #1046),
+/// which have their own parser arms here. `None` only for an action that surfaces no
+/// re-runnable findings at all: the local views, the generative helpers, and the
+/// off-manuscript copy generators.
+///
+/// Having a parser here does NOT mean a pass can be *scoped* and re-run: whether a
+/// scoped re-check exists is gated separately in [`recheck_request`], whose `match`
+/// returns `None` for the arg-taking passes (their author-chosen argument — the
+/// accuracy concern, the relationship pair — isn't stored per finding, so a scoped
+/// re-run can't reconstruct it). `findings_parser` still parses their responses on
+/// the full-pass path; it's `recheck_request` that withholds the scoped re-run.
+///
+/// [`recheck_request`]: App::recheck_request
 ///
 /// Kept a `match` (not a descriptor fn-pointer field) because each arm's parse +
 /// `describe_*` are the per-pass content, and threading those fn pointers up into

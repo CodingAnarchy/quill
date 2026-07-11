@@ -68,8 +68,10 @@ impl FindingKind {
     /// dropped if they do). The single enumeration of the set: the dashboard's group
     /// order (#827), the health trend (#1052), and the revision-plan tie-break (#1055)
     /// all derive from it (`health.rs`), so a new kind joins them automatically rather
-    /// than being silently dropped by a hand-maintained order list. Its slug/label
-    /// resolvers also fold over it, so those can't drift from the enum either.
+    /// than being silently dropped by a hand-maintained order list. [`from_slug`](Self::from_slug)
+    /// folds over it too, so slug resolution can't drift from this list; [`slug`](Self::slug)
+    /// and [`label`](Self::label) are independent exhaustive `match` arms (not folds
+    /// over `ALL`), so the compiler forces them to cover every variant directly.
     pub(crate) const ALL: &'static [Self] = &[
         Self::Continuity,
         Self::Setting,
@@ -349,5 +351,66 @@ impl CoOccurrence {
     /// The jump-target chapter at the given row index, if that row is jumpable.
     pub(crate) fn chapter_at(&self, row: usize) -> Option<&str> {
         self.rows.get(row).and_then(CoOccurrenceRow::chapter)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FindingKind;
+
+    /// Every `FindingKind` variant, hand-listed. The completeness test below asserts
+    /// this matches [`FindingKind::ALL`] (membership + count), so a variant missing
+    /// from `ALL` — which nothing else catches, since the dashboard/plan tests derive
+    /// their kinds FROM `ALL` — fails CI. When the enum grows, add the variant here
+    /// and to `ALL`.
+    const ALL_KINDS: &[FindingKind] = &[
+        FindingKind::Continuity,
+        FindingKind::Setting,
+        FindingKind::Plot,
+        FindingKind::Theme,
+        FindingKind::Scaffold,
+        FindingKind::Naming,
+        FindingKind::Style,
+        FindingKind::Editorial,
+        FindingKind::Accuracy,
+        FindingKind::Foreshadow,
+        FindingKind::FactCheck,
+        FindingKind::Voice,
+        FindingKind::Echo,
+        FindingKind::Relationship,
+        FindingKind::Pacing,
+        FindingKind::Other,
+    ];
+
+    /// Guards [`FindingKind::ALL`]'s completeness: every variant must appear in `ALL`,
+    /// so a kind added to the enum but forgotten in `ALL` (silently dropped from the
+    /// dashboard order, health trend, and revision-plan tie-break) fails CI. Existing
+    /// coverage can't catch this because it iterates `ALL` itself. The slug round-trip
+    /// also confirms `ALL` and `from_slug` agree.
+    #[test]
+    fn all_lists_every_finding_kind() {
+        for kind in ALL_KINDS {
+            assert!(
+                FindingKind::ALL.contains(kind),
+                "{kind:?} is missing from FindingKind::ALL — add it there",
+            );
+            // Round-trip through the persisted slug: `from_slug` folds over `ALL`, so
+            // this also proves the variant is reachable via `ALL`, not just present.
+            assert_eq!(
+                FindingKind::from_slug(kind.slug()),
+                *kind,
+                "{kind:?} does not round-trip through slug/from_slug (missing from ALL?)",
+            );
+        }
+        // One entry per variant: a forgotten `ALL` entry (fewer than the variants) or
+        // a stray/duplicate entry both fail here, keeping `ALL` and the enum in step.
+        assert_eq!(
+            FindingKind::ALL.len(),
+            ALL_KINDS.len(),
+            "FindingKind::ALL has {} entries but there are {} variants — ALL must list \
+             every variant exactly once",
+            FindingKind::ALL.len(),
+            ALL_KINDS.len(),
+        );
     }
 }
