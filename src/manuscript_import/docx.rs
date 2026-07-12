@@ -4,12 +4,12 @@
 //! module doc for the rules; the shared XML scanner lives in `mod.rs`.
 
 use std::fmt::Write;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 use super::{
     assemble, attr_value, count_elements, decode_entities, element_text, fallback_chapter,
-    finalize_titles, for_each_child, for_each_element, join_paragraphs, mine_preamble, tag_attrs,
-    wrap_emphasis, Dropped, Imported,
+    finalize_titles, for_each_child, for_each_element, join_paragraphs, mine_preamble,
+    read_zip_entry_bounded, tag_attrs, wrap_emphasis, Dropped, Imported,
 };
 
 /// Parse a Word `.docx` manuscript: read `word/document.xml` (and the core
@@ -178,15 +178,17 @@ fn comment_notes(comments: &str) -> std::collections::HashMap<String, CommentBod
     out
 }
 
-/// Read one entry of a `.docx` zip to a string, or `None` if it's absent.
+/// Read one entry of a `.docx` zip to a string, or `None` if it's absent. The
+/// read is bounded ([`read_zip_entry_bounded`]) so a crafted or oversized archive
+/// is rejected rather than allowed to OOM the process (#1098).
 fn zip_entry(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> std::io::Result<Option<String>> {
     match zip.by_name(name) {
         Ok(mut f) => {
-            let mut s = String::new();
-            f.read_to_string(&mut s)?;
+            let (compressed, declared) = (f.compressed_size(), f.size());
+            let s = read_zip_entry_bounded(&mut f, compressed, declared)?;
             Ok(Some(s))
         }
         Err(zip::result::ZipError::FileNotFound) => Ok(None),
@@ -378,10 +380,27 @@ fn run_toggle(run: &str, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use std::io::Write as _;
 
     /// Wrap paragraph XML in a `word/document.xml` shell.
     fn document(body: &str) -> String {
         format!("<w:document><w:body>{body}</w:body></w:document>")
+    }
+
+    /// Build a `.docx` zip in memory whose `word/document.xml` is `body` bytes,
+    /// deflated — so a highly repetitive payload lands with a bomb-like ratio.
+    fn docx_zip(body: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("word/document.xml", opts).unwrap();
+            zip.write_all(body).unwrap();
+            zip.finish().unwrap();
+        }
+        buf
     }
 
     /// A Heading 1 chapter-title paragraph.
@@ -545,6 +564,61 @@ mod tests {
     #[test]
     fn parse_docx_rejects_a_non_docx() {
         assert!(parse_docx(b"this is not a zip").is_err());
+    }
+
+    #[test]
+    fn parse_docx_rejects_a_zip_bomb_entry() {
+        // A `word/document.xml` of many megabytes of one repeated byte deflates
+        // thousandsfold — a decompression bomb. The bounded read must refuse it
+        // with an `InvalidData` error rather than expand it into memory (#1098).
+        let bomb = vec![b'A'; 64 * 1024 * 1024];
+        let bytes = docx_zip(&bomb);
+        // The compressed archive is tiny; the declared body is 64 MiB.
+        assert!(bytes.len() < 1024 * 1024, "the bomb compresses small");
+        let err = parse_docx(&bytes).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn parse_docx_accepts_a_normal_document_after_the_bound() {
+        // A valid, ordinary `.docx` well under the cap still parses — the guard
+        // rejects bombs, not honest documents.
+        let bytes = docx_zip(document(&heading("One")).as_bytes());
+        let out = parse_docx(&bytes).unwrap();
+        assert_eq!(out.chapters.len(), 1);
+        assert_eq!(out.chapters[0].title, "One");
+    }
+
+    proptest! {
+        /// Feeding arbitrary bytes to `parse_docx` never panics: a malformed or
+        /// truncated archive surfaces an `Err`, never a crash (#1098). Import
+        /// runs on untrusted input, so this is the no-panic bar on that surface.
+        #[test]
+        fn parse_docx_never_panics_on_arbitrary_bytes(
+            bytes in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            let _ = parse_docx(&bytes);
+        }
+
+        /// The comment extractor shares the same untrusted zip surface; arbitrary
+        /// bytes must never panic it either.
+        #[test]
+        fn extract_comments_never_panics_on_arbitrary_bytes(
+            bytes in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            let _ = extract_comments(&bytes);
+        }
+
+        /// A well-formed `.docx` zip carrying an arbitrary (possibly truncated or
+        /// non-UTF-8) `document.xml` body never panics — the zip layer is valid,
+        /// only its payload is hostile.
+        #[test]
+        fn parse_docx_never_panics_on_arbitrary_entry_body(
+            body in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            let bytes = docx_zip(&body);
+            let _ = parse_docx(&bytes);
+        }
     }
 
     #[test]

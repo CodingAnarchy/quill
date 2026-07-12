@@ -446,6 +446,7 @@ fn is_skip_destination(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     /// A minimal RTF document body (one paragraph) like `export::scriv` writes.
     fn rtf(body: &str) -> String {
@@ -715,6 +716,48 @@ mod tests {
         assert_eq!(out.chapters[1].body, "");
         // …and the drop is surfaced rather than swallowed.
         assert_eq!(out.unreadable_bodies, 1);
+    }
+
+    proptest! {
+        /// Feeding arbitrary bytes as the binder XML never panics: a garbage or
+        /// truncated `.scrivx` surfaces an empty/fallback result, never a crash
+        /// (#1098). Import runs on untrusted input, so this is the no-panic bar
+        /// for the binder parser's pure core.
+        #[test]
+        fn parse_binder_never_panics_on_arbitrary_scrivx(
+            scrivx in ".{0,4096}"
+        ) {
+            let _ = parse_binder(&scrivx, Some("X".into()), |_| None);
+        }
+
+        /// The RTF-to-Markdown converter shares the untrusted-body surface; an
+        /// arbitrary `content.rtf` body (garbage, truncated, unbalanced braces)
+        /// must never panic it.
+        #[test]
+        fn parse_binder_never_panics_on_arbitrary_rtf(
+            body in ".{0,4096}"
+        ) {
+            let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="u1" Type="Text"><Title>One</Title></BinderItem>
+</Children></BinderItem>
+</Binder></ScrivenerProject>"#;
+            let _ = parse_binder(scrivx, Some("X".into()), |_| Some(body.clone()));
+        }
+
+        /// A real `.scriv` bundle whose `.scrivx` is arbitrary bytes never panics
+        /// end to end — the filesystem path, not just the pure core.
+        #[test]
+        fn parse_scriv_never_panics_on_arbitrary_binder(
+            scrivx in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            use std::fs;
+            let dir = crate::testutil::scratch_dir("scriv-import", "fuzz-binder")
+                .join("Fuzz.scriv");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("Fuzz.scrivx"), &scrivx).unwrap();
+            let _ = parse_scriv(&dir);
+        }
     }
 
     #[test]
