@@ -1,7 +1,8 @@
 //! The no-path launch flow (#526). Run bare, `quill` used to jump straight to a
 //! stdin new-project-name prompt; now — when you're not already inside a project
-//! and you have projects to open — it offers a choice first: create a new book or
-//! open an existing one from your library.
+//! and you have projects to open — it offers a choice first: create a new book,
+//! start a new multi-book series (#1135), or open an existing one from your
+//! library.
 //!
 //! The *decision* (open this path in place, offer the chooser, or go straight to
 //! the new-project prompt) is factored into the pure [`decide`] so its branches —
@@ -92,8 +93,11 @@ pub fn decide(
 pub enum Choice {
     /// Open the existing project at this path.
     Open(PathBuf),
-    /// Create a new project (fall through to the name prompt).
+    /// Create a new standalone project (fall through to the name prompt).
     New,
+    /// Start a new multi-book series (#1135): fall through to the series-title /
+    /// first-book-title prompt and scaffold directly into the `[[books]]` shape.
+    NewSeries,
     /// Quit without doing either (Esc / Ctrl-C at the top level).
     Quit,
 }
@@ -161,12 +165,15 @@ fn list_move(selected: usize, len: usize, code: KeyCode) -> Option<usize> {
 fn step(screen: &mut Screen, key: KeyEvent, projects: &[RecentProject]) -> Option<Choice> {
     match screen {
         Screen::Menu(sel) => {
-            if let Some(s) = list_move(*sel, 2, key.code) {
+            // Three rows now (#1135): new standalone, new series, open existing.
+            if let Some(s) = list_move(*sel, 3, key.code) {
                 *sel = s;
                 return None;
             }
             match key.code {
                 KeyCode::Enter if *sel == 0 => Some(Choice::New),
+                // Start a new series (#1135) → the series-title prompt.
+                KeyCode::Enter if *sel == 1 => Some(Choice::NewSeries),
                 // Open existing → the picker (the projects list is never empty here:
                 // the chooser is only shown when there's something to open).
                 KeyCode::Enter => {
@@ -315,20 +322,33 @@ mod tests {
     }
 
     #[test]
-    fn menu_arrows_move_and_enter_picks_new_or_browser() {
+    fn menu_arrows_move_and_enter_picks_new_series_or_browser() {
         let projects = vec![rp("/a"), rp("/b")];
-        // Down to "open existing", Enter → the picker (not a final choice yet).
+        // Three rows now (#1135): new standalone, new series, open existing.
+        // Down twice to "open existing", Enter → the picker (not a final choice yet).
         let mut screen = Screen::Menu(0);
         assert!(step(&mut screen, KeyEvent::from(KeyCode::Down), &projects).is_none());
         assert!(matches!(screen, Screen::Menu(1)));
+        assert!(step(&mut screen, KeyEvent::from(KeyCode::Down), &projects).is_none());
+        assert!(matches!(screen, Screen::Menu(2)));
+        // The list clamps at the last row.
+        assert!(step(&mut screen, KeyEvent::from(KeyCode::Down), &projects).is_none());
+        assert!(matches!(screen, Screen::Menu(2)));
         assert!(step(&mut screen, KeyEvent::from(KeyCode::Enter), &projects).is_none());
         assert!(matches!(screen, Screen::Browser(0)));
 
-        // Top row Enter → create new.
+        // Top row Enter → create a new standalone.
         let mut screen = Screen::Menu(0);
         assert!(matches!(
             step(&mut screen, KeyEvent::from(KeyCode::Enter), &projects),
             Some(Choice::New)
+        ));
+
+        // Second row Enter → start a new series (#1135).
+        let mut screen = Screen::Menu(1);
+        assert!(matches!(
+            step(&mut screen, KeyEvent::from(KeyCode::Enter), &projects),
+            Some(Choice::NewSeries)
         ));
     }
 

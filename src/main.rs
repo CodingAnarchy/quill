@@ -86,6 +86,10 @@ enum Invocation {
     Help,
     /// `quill --version` / `quill -V`: print the version and exit (#516).
     Version,
+    /// `quill --series`: start a new multi-book series at launch (#1135) —
+    /// prompt for a series title and a first-book title, scaffold directly into
+    /// the `[[books]]` shape, and open it.
+    Series,
     /// `quill <path>`: open or create a project at this directory.
     Path(PathBuf),
     /// A bare `quill`: resolve a project via the startup chooser.
@@ -100,6 +104,7 @@ fn parse_arg(arg: Option<&str>) -> Invocation {
     match arg {
         Some("--help" | "-h") => Invocation::Help,
         Some("--version" | "-V") => Invocation::Version,
+        Some("--series") => Invocation::Series,
         Some(path) => Invocation::Path(PathBuf::from(path)),
         None => Invocation::NoArg,
     }
@@ -120,12 +125,14 @@ fn usage_text() -> String {
          [PATH]  Open or create a project at this directory\n\
          \n\
          Options:\n  \
+         --series       Start a new multi-book series (prompts for the series\n                 \
+         and first-book titles) and open it\n  \
          -h, --help     Print this help and exit\n  \
          -V, --version  Print version and exit\n\
          \n\
          With no PATH, Quill opens the current directory if it is a project,\n\
-         otherwise it offers to open a recent project or create a new one in\n\
-         your projects home."
+         otherwise it offers to open a recent project, start a new series, or\n\
+         create a new standalone book in your projects home."
     )
 }
 
@@ -143,6 +150,17 @@ fn main() -> io::Result<()> {
             println!("{VERSION_LINE}");
             return Ok(());
         }
+        // Start a new series at launch (#1135): prompt for the series and
+        // first-book titles on the plain terminal, scaffold directly into the
+        // `[[books]]` shape, and open it. A scaffold failure exits cleanly, like
+        // the no-path new-project path.
+        Invocation::Series => match start_new_series() {
+            Ok(dir) => dir,
+            Err(e) => {
+                eprintln!("quill: {e}");
+                std::process::exit(1);
+            }
+        },
         // An explicit path opens (or creates) a project there.
         Invocation::Path(path) => path,
         // A bare launch resolves to an existing project, one chosen from the
@@ -293,6 +311,9 @@ fn choose_startup_project(projects: &[recent::RecentProject]) -> io::Result<Opti
     match choice {
         startup::Choice::Open(path) => Ok(Some(path)),
         startup::Choice::New => Ok(Some(new_project_dir()?)),
+        // Start a new series (#1135): scaffold directly into the `[[books]]` shape,
+        // like `quill --series`, then open it.
+        startup::Choice::NewSeries => Ok(Some(start_new_series()?)),
         startup::Choice::Quit => Ok(None),
     }
 }
@@ -339,6 +360,62 @@ fn new_project_base(
         },
         |home| (home, false),
     )
+}
+
+/// Start a new multi-book series at launch (#1135), shared by `quill --series`
+/// and the chooser's "New series…". Prompts on the plain terminal (like
+/// [`prompt_project_name`]) for a series title and a first-book title, scaffolds a
+/// project *directly* in the `[[books]]` shape via [`Project::create_series`], and
+/// returns its directory so the usual open path loads it as a genuine series.
+///
+/// The project folder is derived from the series title (mirroring how the
+/// single-book path derives its folder from the book name), placed in the projects
+/// home with the same `~/Quill` fallback the single-book path uses.
+fn start_new_series() -> io::Result<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (base, fallback) = new_project_base(
+        config::ProjectsConfig::load().home_dir(),
+        std::env::var_os("HOME").map(PathBuf::from),
+        &cwd,
+    );
+    if fallback {
+        eprintln!(
+            "quill: no projects home configured — set [projects] home in your config \
+             to choose where new books live. Creating in {} for now.",
+            base.display()
+        );
+    }
+    let (series_title, first_book_title) = prompt_series_titles()?;
+    let folder = crate::project::sanitize_dir_name(&series_title);
+    let root = base.join(folder);
+    // Scaffold directly into the `[[books]]` series shape — the on-disk result is
+    // identical to a series built by converting a standalone in-app.
+    Project::create_series(&root, &series_title, &first_book_title)?;
+    Ok(root)
+}
+
+/// Prompt for a new series' title and its first book's title (#1135), on the plain
+/// terminal before the alternate screen opens — mirroring [`prompt_project_name`].
+/// Both are required; an empty entry for either is an error rather than a blank
+/// series or an untitled book.
+fn prompt_series_titles() -> io::Result<(String, String)> {
+    let read = |label: &str| -> io::Result<String> {
+        print!("{label}: ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let value = input.trim().to_string();
+        if value.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("no {label} entered"),
+            ));
+        }
+        Ok(value)
+    };
+    let series_title = read("Series title")?;
+    let first_book_title = read("First book title")?;
+    Ok((series_title, first_book_title))
 }
 
 /// Ask the author to name the new book (#423), on the plain terminal before the
@@ -517,6 +594,9 @@ mod tests {
         assert_eq!(parse_arg(Some("-h")), Invocation::Help);
         assert_eq!(parse_arg(Some("--version")), Invocation::Version);
         assert_eq!(parse_arg(Some("-V")), Invocation::Version);
+        // The new-series flag (#1135) is recognized and never treated as a path,
+        // so it starts the series flow rather than scaffolding a `--series` folder.
+        assert_eq!(parse_arg(Some("--series")), Invocation::Series);
         // Anything else is a project path; a bare launch is the no-arg case.
         assert_eq!(
             parse_arg(Some("/tmp/book")),
@@ -544,6 +624,8 @@ mod tests {
         assert!(usage.contains("[PATH]"));
         assert!(usage.contains("--help"));
         assert!(usage.contains("--version"));
+        // The new-series flag is documented (#1135).
+        assert!(usage.contains("--series"), "documents --series: {usage}");
         assert!(
             usage.contains("projects home"),
             "explains the no-path behavior: {usage}"

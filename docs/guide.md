@@ -136,12 +136,19 @@ STARTING UP WITHOUT A PATH
 
 A bare `quill` launch (no path) follows where you are. Inside an existing project,
 it opens that one straight away. From a folder that isn't a project — when you
-have books to return to — it shows a chooser: "Create a new project" or "Open an
-existing project". Choosing to open lists your recent projects together with every
-project under your projects home (the same library the Ctrl-B browser shows);
-arrow keys move, Enter opens the highlighted one, Esc steps back to the chooser.
-Choosing to create asks for a name and files the new project in your projects home
-rather than in the current directory.
+have books to return to — it shows a chooser: "Create a new project", "Start a new
+series", or "Open an existing project". Choosing to open lists your recent projects
+together with every project under your projects home (the same library the Ctrl-B
+browser shows); arrow keys move, Enter opens the highlighted one, Esc steps back to
+the chooser. Choosing to create asks for a name and files the new project in your
+projects home rather than in the current directory.
+
+Choosing "Start a new series" asks for a series title and a first-book title, then
+scaffolds the project directly in the multi-book form — a genuine series from the
+start, with the named first book active and the Switch book / Project tree
+navigators available right away (no in-app conversion step). The command line
+reaches the same flow: `quill --series` prompts for the two titles and opens the
+new series.
 
 When there's nothing to open yet — no recent projects and no projects home set —
 the chooser would be empty, so Quill skips it and goes straight to naming a new
