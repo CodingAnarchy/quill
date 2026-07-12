@@ -5,6 +5,70 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-07-12
+
+A second reliability patch on the road to 1.0. A six-front adversarial bug hunt —
+across storage, the editor core, export, import, the AI boundary, and
+config/startup — turned up a cluster of *silent-failure* bugs, each one then
+independently reproduced before it was fixed. The theme was data that vanished
+without a word: chapters lost on a malformed import, settings wiped by an in-app
+config edit, a manuscript emptied on series convert. All fixed here with
+regression tests; the AI-prose boundary was audited and confirmed intact.
+
+### Changed
+
+- **A project saved by a newer Quill is now refused instead of silently
+  downgraded** — opening a manuscript whose `format_version` is newer than the
+  running build fails with a clear message naming both versions, rather than
+  loading it and stripping the future fields on the next save. Series manifests
+  are now stamped with a format version too, closing the same gap for multi-book
+  projects.
+- **Converting a book to a series warns when per-book design can't carry over** —
+  series-level `[style]`/`[print]` remain managed per standalone (unchanged), but
+  the editor now says so on convert instead of dropping the settings silently.
+
+### Fixed
+
+- **A malformed or hostile manuscript import could silently swallow the whole
+  book** — a single unbalanced element (a Scrivener `<BinderItem>` or a Word
+  `<w:p>` missing its close tag) collapsed the entire import to one empty fallback
+  chapter while reporting success; import now recovers the well-formed chapters
+  and surfaces a count of anything it couldn't read, honoring the importer's
+  "surface it, never silently drop" contract.
+- **A hostile `.scriv` bundle could read files from outside itself** — a binder
+  entry whose `UUID` contained `..`, a path separator, or an absolute path was
+  joined and read directly, pulling unrelated files on disk into the manuscript;
+  such entries are now rejected before any read.
+- **Converting a standalone to a series silently lost its language and analysis
+  settings** — the EPUB language and the word-list/stopword overrides had no slot
+  in the series manifest, so they vanished the moment a book became a series; they
+  are now preserved across the conversion.
+- **One in-app settings or key-binding change could wipe a hand-maintained
+  config** — if `config.toml` wrote a section as an inline table
+  (`editor = { … }`) or with dotted keys (`keys.down = …`), the in-place editor
+  appended a duplicate table, producing invalid TOML that reset *every* setting to
+  defaults on the next launch; the splicer now keeps the file valid and preserves
+  the author's other values.
+- **Repeating a counted edit with `.` dropped the count** — `3x` then `.` deleted
+  one character instead of three, and `2dw` then `.` changed one word instead of
+  two; the count is now part of what `.` replays.
+- **`quill --series` with a punctuation-only title created the project in the
+  wrong place** — a title like `...` sanitized to an empty folder name and
+  scaffolded into the projects-home root (risking an existing `book.toml`); such a
+  title is now rejected, matching the single-book flow.
+- **A cited chapter wouldn't jump when the AI answer varied its capitalization** —
+  an offline Q&A citation of `chapter 7` for a chapter titled `Chapter 7` passed
+  validation but failed the exact-match jump; citations now carry the chapter's
+  canonical title.
+- **Malformed foreign documents could corrupt imported prose** — an unclosed ODT
+  `<text:span>` leaked its raw markup into the text, and an out-of-range RTF `\uc`
+  count could eat the rest of a sentence; both are now handled without losing or
+  garbling prose.
+- **Hardened two low-severity edges** — the style/print preview now writes a
+  unique temp file per preview (no collision between repeated or concurrent
+  previews), and a grapheme lookup snaps a non-boundary byte instead of risking a
+  panic.
+
 ## [0.9.1] - 2026-07-11
 
 A reliability patch. A pre-1.0 bug hunt across the editor core, the export
@@ -415,6 +479,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[0.9.2]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.2
 [0.9.1]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.1
 [0.9.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.0
 [0.8.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.8.0
