@@ -169,6 +169,67 @@ fn ex_substitute_reports_when_no_match() {
 }
 
 #[test]
+fn ex_substitute_current_line_only() {
+    let (mut app, _dir) = vim_app("vim-ex-subst-cur");
+    app.buffer.replace_text("a a\na a\n");
+    app.mode = Mode::Normal;
+    // Cursor on line 1 (index 0). A bare `:s` acts on the current line only.
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    type_str(&mut app, ":s/a/b/g");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        "b b\na a\n",
+        "':s' substituted only the current line"
+    );
+    assert_eq!(app.message.as_deref(), Some("Replaced 2 occurrences."));
+}
+
+#[test]
+fn ex_substitute_line_number_range() {
+    let (mut app, _dir) = vim_app("vim-ex-subst-range");
+    app.buffer.replace_text("a\na\na\na\n");
+    app.mode = Mode::Normal;
+    // `:2,3s/a/b/` substitutes only lines 2 and 3 (1-based).
+    type_str(&mut app, ":2,3s/a/b/");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        "a\nb\nb\na\n",
+        "':2,3s' touched only lines 2 and 3"
+    );
+    assert_eq!(app.message.as_deref(), Some("Replaced 2 occurrences."));
+}
+
+#[test]
+fn ex_substitute_dollar_end_range() {
+    let (mut app, _dir) = vim_app("vim-ex-subst-dollar");
+    app.buffer.replace_text("a\na\na\n");
+    app.mode = Mode::Normal;
+    // `.,$` from the current (first) line to the last — the whole buffer here.
+    app.buffer.cursor = app.buffer.cursor_at_byte(0);
+    type_str(&mut app, ":.,$s/a/b/");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.text(),
+        "b\nb\nb\n",
+        "'.,$' spanned to the last line"
+    );
+}
+
+#[test]
+fn ex_percent_substitute_still_works() {
+    // The whole-buffer `:%s` path must survive the range refactor (#826/#1106).
+    let (mut app, _dir) = vim_app("vim-ex-subst-percent-still");
+    app.buffer.replace_text("a a\naa\n");
+    app.mode = Mode::Normal;
+    type_str(&mut app, ":%s/a/b/g");
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.buffer.text(), "b b\nbb\n");
+    assert_eq!(app.message.as_deref(), Some("Replaced 4 occurrences."));
+}
+
+#[test]
 fn ex_unknown_command_reports_and_does_nothing() {
     let (mut app, _dir) = vim_app("vim-ex-unknown");
     type_str(&mut app, ":frobnicate");

@@ -123,6 +123,7 @@ mod vim_case;
 mod vim_dot;
 mod vim_ex;
 mod vim_marks;
+mod vim_staples;
 mod workflows;
 
 fn ctrl(c: char) -> KeyEvent {

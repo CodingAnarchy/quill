@@ -416,6 +416,82 @@ impl Buffer {
         })
     }
 
+    /// Vim's `%`: the byte offset of the bracket matching the one at or after the
+    /// cursor on the current line (#1106). Scans the current line from the cursor
+    /// for the first of `(`, `)`, `[`, `]`, `{`, `}`; from an opener it walks
+    /// forward to the matching closer (honoring nesting), from a closer it walks
+    /// back to the matching opener. `None` when there's no bracket on the rest of
+    /// the line, or its match is unbalanced — a no-op, as Vim's `%` is.
+    ///
+    /// The match search streams rope characters outward from the bracket rather
+    /// than copying the whole buffer (#660), stopping the moment the pair resolves.
+    pub fn match_pair_byte(&self) -> Option<usize> {
+        const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+        // Find the first bracket at or after the cursor, within the current line.
+        let line = self.line(self.cursor.line);
+        let base = self.line_start_byte(self.cursor.line);
+        let cur = col_to_byte(&line, self.cursor.col);
+        let (rel, bracket) = line[cur..]
+            .char_indices()
+            .find(|&(_, ch)| PAIRS.iter().any(|&(o, c)| ch == o || ch == c))?;
+        let bracket_b = base + cur + rel;
+        let (open, close, forward) = PAIRS.iter().find_map(|&(o, c)| {
+            if bracket == o {
+                Some((o, c, true))
+            } else if bracket == c {
+                Some((o, c, false))
+            } else {
+                None
+            }
+        })?;
+        if forward {
+            self.scan_pair_forward(bracket_b, open, close)
+        } else {
+            self.scan_pair_backward(bracket_b, open, close)
+        }
+    }
+
+    /// Walk forward from the opener at `open_b` to its matching `close`, honoring
+    /// nesting; the byte of the matching closer, or `None` when unbalanced.
+    fn scan_pair_forward(&self, open_b: usize, open: char, close: char) -> Option<usize> {
+        let mut b = open_b + open.len_utf8();
+        let chars = self.rope.chars_at(self.rope.byte_to_char(b));
+        let mut depth = 0usize;
+        for ch in chars {
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                if depth == 0 {
+                    return Some(b);
+                }
+                depth -= 1;
+            }
+            b += ch.len_utf8();
+        }
+        None
+    }
+
+    /// Walk backward from the closer at `close_b` to its matching `open`, honoring
+    /// nesting; the byte of the matching opener, or `None` when unbalanced.
+    fn scan_pair_backward(&self, close_b: usize, open: char, close: char) -> Option<usize> {
+        let start_char = self.rope.byte_to_char(close_b);
+        let mut chars = self.rope.chars_at(start_char);
+        let mut b = close_b;
+        let mut depth = 0usize;
+        while let Some(ch) = chars.prev() {
+            b -= ch.len_utf8();
+            if ch == close && b != close_b {
+                depth += 1;
+            } else if ch == open {
+                if depth == 0 {
+                    return Some(b);
+                }
+                depth -= 1;
+            }
+        }
+        None
+    }
+
     /// Whether line `idx` is a paragraph separator — empty or whitespace-only.
     /// Reads one line, never the whole rope; the paragraph motions/objects only
     /// walk outward line by line until they hit one of these boundaries, so they

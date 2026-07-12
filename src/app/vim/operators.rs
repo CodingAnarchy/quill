@@ -176,6 +176,108 @@ impl App {
         let hi = buf.line_start_byte(buf.cursor.line) + buf.line(buf.cursor.line).len();
         self.operate_charwise(op, lo, hi);
     }
+    /// `%` (#1106): jump to the bracket matching the one at or after the cursor on
+    /// the line — or, with an operator pending, delete/change/yank the whole pair.
+    /// The range is inclusive of both brackets (Vim's `d%`), so it covers from the
+    /// lower offset through the grapheme after the higher. A no-op when there's no
+    /// matching bracket, cancelling any pending operator (as a failed motion does).
+    pub(super) fn match_pair(&mut self) {
+        let Some(target) = self.edit_buffer().match_pair_byte() else {
+            self.vim_state.op = None;
+            return;
+        };
+        if let Some((op, _)) = self.take_op(1) {
+            let cur = self.edit_buffer().cursor_byte();
+            let lo = cur.min(target);
+            let hi = self.edit_buffer().grapheme_after(cur.max(target));
+            self.operate_charwise(op, lo, hi);
+        } else {
+            self.edit_move(move |b| b.cursor = b.cursor_at_byte(target));
+        }
+    }
+    /// `>>` / `<<` (#1106): indent (`dedent == false`) or dedent `count` logical
+    /// lines from the cursor by one level. A level is [`INDENT_UNIT`] spaces —
+    /// conservative for Markdown prose, below the four-space code-block threshold.
+    /// Indent inserts the unit at each line's start (blank lines untouched, as Vim
+    /// does); dedent removes up to that many leading spaces (or one leading tab).
+    /// One undoable edit per line through the range-edit path, so it composes with
+    /// dot-repeat (#1004); the cursor lands on the first line's first non-blank.
+    pub(super) fn indent_lines(&mut self, dedent: bool, count: usize) {
+        /// One indent level, in spaces. Two keeps prose readable without crossing
+        /// Markdown's four-space code-block threshold.
+        const INDENT_UNIT: usize = 2;
+        let first = self.edit_buffer().cursor.line;
+        let last = {
+            let buf = self.edit_buffer();
+            (first + count.saturating_sub(1)).min(buf.line_count().saturating_sub(1))
+        };
+        // Edit bottom-up so earlier line-start offsets stay valid as text shifts.
+        for line in (first..=last).rev() {
+            let (start, text) = {
+                let buf = self.edit_buffer();
+                (buf.line_start_byte(line), buf.line(line))
+            };
+            if dedent {
+                // Remove up to one level of leading whitespace: a leading tab, or
+                // up to INDENT_UNIT leading spaces.
+                let removed = if text.starts_with('\t') {
+                    1
+                } else {
+                    text.chars()
+                        .take(INDENT_UNIT)
+                        .take_while(|&c| c == ' ')
+                        .count()
+                };
+                if removed > 0 {
+                    self.edit_replace_range(start, start + removed, "");
+                }
+            } else if !text.trim().is_empty() {
+                // Vim leaves blank lines unindented.
+                self.edit_replace_range(start, start, &" ".repeat(INDENT_UNIT));
+            }
+        }
+        self.cache_focus_words();
+        self.edit_move(move |b| {
+            b.move_to_line(first);
+            b.move_first_non_blank();
+        });
+    }
+    /// `{count}r<char>` (#1106): replace the `count` characters under the cursor
+    /// (never past the line end) with `char`. Vim leaves the cursor on the last
+    /// replaced character. A no-op when the cursor sits past the line's content
+    /// (nothing to replace), so a bare `r` at a line end doesn't insert. Multibyte
+    /// safe: the span is taken by grapheme boundaries, not raw bytes.
+    pub(super) fn replace_chars(&mut self, count: usize, ch: char) {
+        let (lo, hi, n) = {
+            let buf = self.edit_buffer();
+            let lo = buf.cursor_byte();
+            let line_end = buf.line_start_byte(buf.cursor.line) + buf.line(buf.cursor.line).len();
+            let mut hi = lo;
+            let mut n = 0;
+            for _ in 0..count {
+                let next = buf.grapheme_after(hi).min(line_end);
+                if next == hi {
+                    break; // reached the line end — Vim replaces nothing past it
+                }
+                hi = next;
+                n += 1;
+            }
+            (lo, hi, n)
+        };
+        if n == 0 {
+            return; // nothing under the cursor to replace (empty line / line end)
+        }
+        let replacement: String = std::iter::repeat_n(ch, n).collect();
+        self.edit_replace_range(lo, hi, &replacement);
+        self.cache_focus_words();
+        // Vim leaves the cursor on the last replaced grapheme, not past it.
+        self.edit_move(move |b| {
+            b.cursor = b.cursor_at_byte(lo);
+            for _ in 0..n.saturating_sub(1) {
+                b.move_right();
+            }
+        });
+    }
     /// `x`: delete `count` graphemes from under the cursor, never past the line.
     pub(super) fn delete_chars(&mut self, count: usize) {
         let (lo, hi) = {

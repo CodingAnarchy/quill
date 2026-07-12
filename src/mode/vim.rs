@@ -195,6 +195,15 @@ pub enum VimPending {
     /// `m` form (record a mark); otherwise a jump — `` `` `` / `''` back-jumps
     /// through the jumplist, and a letter jumps to that mark.
     Mark { set: bool },
+    /// `r` (or `{count}r`) seen — awaiting the replacement character (#1106).
+    /// Replaces `count` graphemes under the cursor with that character; the pending
+    /// state keeps the dot-repeat recorder composing across the two keystrokes, so
+    /// `.` replays the whole `{count}r<char>` (#1004).
+    Replace { count: usize },
+    /// `>` / `<` seen — awaiting the doubled key for the linewise indent / dedent
+    /// (#1106): `>>` indents `count` lines a level, `<<` dedents them. `dedent` is
+    /// the `<` form. Any other second key cancels, as Vim's `>`+non-motion does.
+    Indent { dedent: bool, count: usize },
 }
 
 /// A Vim operator (#203): delete leaves Normal mode, change enters Insert, yank
