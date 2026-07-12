@@ -129,6 +129,23 @@ impl App {
                 }
                 return;
             }
+            // `{count}r<char>` (#1106): replace the `count` characters under the
+            // cursor with `char`. Resolved here as the pending second key so the
+            // dot-repeat recorder captures the whole command (`.` then repeats it).
+            VimPending::Replace { count } => {
+                self.vim_state.pending = VimPending::None;
+                self.replace_chars(count, c);
+                return;
+            }
+            // `>>` / `<<` (#1106): the doubled key resolves the linewise indent /
+            // dedent over `count` lines; any other second key cancels.
+            VimPending::Indent { dedent, count } => {
+                self.vim_state.pending = VimPending::None;
+                if c == if dedent { '<' } else { '>' } {
+                    self.indent_lines(dedent, count);
+                }
+                return;
+            }
             VimPending::None => {}
         }
 
@@ -254,6 +271,16 @@ impl App {
 
             // Single-key edits.
             'x' => self.delete_chars(count),
+            // `{count}r` (#1106): await the replacement char, then swap the `count`
+            // characters under the cursor for it. Awaiting a key, so the count (and
+            // the dot recording) stay pending until the char arrives.
+            'r' => self.vim_state.pending = VimPending::Replace { count },
+            // `S` (#1106): substitute the whole line — change it, like `cc`. Vim's
+            // standard binding (transpose stays on `gs`/`gS`, which never conflicted).
+            'S' => {
+                let cur = self.edit_buffer().cursor.line;
+                self.operate_linewise(Op::Change, cur, cur + count.saturating_sub(1));
+            }
             'D' => self.delete_to_line_end(Op::Delete),
             'C' => self.delete_to_line_end(Op::Change),
             // `J` joins the next line up; `{count}J` folds `count` lines (#1005).
@@ -279,6 +306,26 @@ impl App {
             // to the previous — exclusive charwise, so `d}` cuts to there.
             '}' => self.charwise(count, false, Buffer::move_paragraph_forward),
             '{' => self.charwise(count, false, Buffer::move_paragraph_backward),
+
+            // `%` (#1106): jump to the matching bracket. Operator-aware and
+            // inclusive, so `d%` / `c%` cut the whole pair, matching Vim.
+            '%' => self.match_pair(),
+
+            // `>>` / `<<` (#1106): await the doubled key, then indent / dedent
+            // `count` lines a level. Awaiting a key, so the dot recording keeps
+            // composing until the second `>` / `<` arrives — `.` repeats it.
+            '>' => {
+                self.vim_state.pending = VimPending::Indent {
+                    dedent: false,
+                    count,
+                }
+            }
+            '<' => {
+                self.vim_state.pending = VimPending::Indent {
+                    dedent: true,
+                    count,
+                }
+            }
 
             // Line motions.
             '0' => self.charwise(1, false, Buffer::move_line_start),
@@ -462,5 +509,6 @@ pub(in crate::app) const fn is_motion_key(c: char) -> bool {
                 | '"'
                 | '{'
                 | '}'
+                | '%'
         )
 }
