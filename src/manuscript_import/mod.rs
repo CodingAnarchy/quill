@@ -505,6 +505,82 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
+/// The most uncompressed bytes a single zip-entry read (`word/document.xml`,
+/// `content.xml`, and their siblings) will decompress before giving up. An
+/// import's payload is XML — a manuscript's prose plus markup — so even a large
+/// novel's `document.xml` is a few tens of megabytes; 512 MiB is orders of
+/// magnitude over any real document yet refuses an entry that would expand
+/// without bound and exhaust memory. Mirrors `archive.rs`'s whole-archive cap,
+/// scaled to a per-entry import: the caller reads only a handful of named
+/// entries, not a whole project tree.
+const MAX_ENTRY_UNCOMPRESSED: u64 = 512 * 1024 * 1024;
+
+/// The largest compression ratio (uncompressed ÷ compressed) any single entry is
+/// allowed, matching `archive.rs`'s bomb guard. Ordinary XML deflates a few-fold
+/// (tens at most for very repetitive markup); a classic zip bomb balloons a tiny
+/// entry thousandsfold. 1000 leaves honest markup ample room while catching the
+/// bomb; a floor on the compressed size keeps the ratio from tripping on
+/// tiny-but-innocent entries whose few bytes divide badly.
+const MAX_ENTRY_RATIO: u64 = 1000;
+
+/// Below this compressed size an entry's declared ratio isn't checked: a handful
+/// of compressed bytes can legitimately expand past the ratio without being a
+/// bomb, and the streamed size cap still bounds the total.
+const RATIO_CHECK_FLOOR: u64 = 4 * 1024;
+
+/// The error an import fails with when a zip entry would expand past the size or
+/// ratio caps — a likely decompression bomb. Mirrors `archive.rs`'s restore
+/// guard so a hostile `.docx`/`.odt` is rejected with a clear message, not an OOM.
+fn bomb_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "archive rejected: an entry expands too large (possible zip bomb)",
+    )
+}
+
+/// Read a zip entry to a `String` under a bounded, streaming decompression that
+/// can't OOM on a hostile archive (#1098). `compressed` and `declared` are the
+/// entry's stored/uncompressed sizes from its header (both untrusted); `reader`
+/// is the entry's decompressing stream.
+///
+/// Import runs on untrusted input — a `.docx`/`.odt` is a zip a stranger may have
+/// crafted — so the entry can't be slurped with `read_to_string`, which trusts
+/// the declared size and would allocate (or expand) without bound on a zip bomb.
+/// Instead this checks the declared ratio as a cheap first filter, then streams
+/// through a fixed buffer that errors the instant the real decompressed length
+/// crosses [`MAX_ENTRY_UNCOMPRESSED`] — the header size is never trusted as the
+/// ceiling. A valid document (well under the cap) reads through unchanged.
+fn read_zip_entry_bounded(
+    reader: &mut impl std::io::Read,
+    compressed: u64,
+    declared: u64,
+) -> std::io::Result<String> {
+    // Guard the declared ratio before decompressing a byte: a classic bomb is a
+    // tiny compressed entry that balloons thousandsfold. The declared size is
+    // untrusted, so this is only a cheap first filter; the streamed cap below is
+    // the real ceiling.
+    if compressed >= RATIO_CHECK_FLOOR && declared / compressed.max(1) > MAX_ENTRY_RATIO {
+        return Err(bomb_error());
+    }
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    let mut read: u64 = 0;
+    loop {
+        let n = reader.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        // Reading past the cap means the entry is larger than any real import —
+        // refuse it rather than keep expanding a possible bomb.
+        read += n as u64;
+        if read > MAX_ENTRY_UNCOMPRESSED {
+            return Err(bomb_error());
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    String::from_utf8(buf).map_err(std::io::Error::other)
+}
+
 fn decode_entity(entity: &str) -> Option<char> {
     match entity {
         "amp" => Some('&'),

@@ -15,12 +15,12 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 use super::{
     assemble, attr_value, count_elements, decode_entities, element_text, fallback_chapter,
     finalize_titles, find_open, for_each_child, join_paragraphs, matching_close, mine_preamble,
-    tag_attrs, wrap_emphasis, Dropped, Imported,
+    read_zip_entry_bounded, tag_attrs, wrap_emphasis, Dropped, Imported,
 };
 
 /// Automatic text styles indexed by name (`T1` → bold/italic), so a
@@ -39,15 +39,17 @@ pub fn parse_odt(bytes: &[u8]) -> std::io::Result<Imported> {
     Ok(parse_content_xml(&content, meta.as_deref()))
 }
 
-/// Read one entry of an `.odt` zip to a string, or `None` if it's absent.
+/// Read one entry of an `.odt` zip to a string, or `None` if it's absent. The
+/// read is bounded ([`read_zip_entry_bounded`]) so a crafted or oversized archive
+/// is rejected rather than allowed to OOM the process (#1098).
 fn zip_entry(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> std::io::Result<Option<String>> {
     match zip.by_name(name) {
         Ok(mut f) => {
-            let mut s = String::new();
-            f.read_to_string(&mut s)?;
+            let (compressed, declared) = (f.compressed_size(), f.size());
+            let s = read_zip_entry_bounded(&mut f, compressed, declared)?;
             Ok(Some(s))
         }
         Err(zip::result::ZipError::FileNotFound) => Ok(None),
@@ -454,6 +456,23 @@ fn space_count(attrs: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use std::io::Write as _;
+
+    /// Build an `.odt` zip in memory whose `content.xml` is `body` bytes,
+    /// deflated — so a highly repetitive payload lands with a bomb-like ratio.
+    fn odt_zip(body: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("content.xml", opts).unwrap();
+            zip.write_all(body).unwrap();
+            zip.finish().unwrap();
+        }
+        buf
+    }
 
     /// Wrap block XML in a minimal `content.xml` shell with an `<office:text>`
     /// body; `styles` is the `<office:automatic-styles>` block (may be empty).
@@ -660,6 +679,51 @@ mod tests {
     #[test]
     fn parse_odt_rejects_a_non_odt() {
         assert!(parse_odt(b"this is not a zip").is_err());
+    }
+
+    #[test]
+    fn parse_odt_rejects_a_zip_bomb_entry() {
+        // A `content.xml` of many megabytes of one repeated byte deflates
+        // thousandsfold — a decompression bomb. The bounded read must refuse it
+        // with an `InvalidData` error rather than expand it into memory (#1098).
+        let bomb = vec![b'A'; 64 * 1024 * 1024];
+        let bytes = odt_zip(&bomb);
+        assert!(bytes.len() < 1024 * 1024, "the bomb compresses small");
+        let err = parse_odt(&bytes).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn parse_odt_accepts_a_normal_document_after_the_bound() {
+        // A valid, ordinary `.odt` well under the cap still parses — the guard
+        // rejects bombs, not honest documents.
+        let bytes = odt_zip(content("", &heading("One")).as_bytes());
+        let out = parse_odt(&bytes).unwrap();
+        assert_eq!(out.chapters.len(), 1);
+        assert_eq!(out.chapters[0].title, "One");
+    }
+
+    proptest! {
+        /// Feeding arbitrary bytes to `parse_odt` never panics: a malformed or
+        /// truncated archive surfaces an `Err`, never a crash (#1098). Import
+        /// runs on untrusted input, so this is the no-panic bar on that surface.
+        #[test]
+        fn parse_odt_never_panics_on_arbitrary_bytes(
+            bytes in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            let _ = parse_odt(&bytes);
+        }
+
+        /// A well-formed `.odt` zip carrying an arbitrary (possibly truncated or
+        /// non-UTF-8) `content.xml` body never panics — the zip layer is valid,
+        /// only its payload is hostile.
+        #[test]
+        fn parse_odt_never_panics_on_arbitrary_entry_body(
+            body in prop::collection::vec(any::<u8>(), 0..4096)
+        ) {
+            let bytes = odt_zip(&body);
+            let _ = parse_odt(&bytes);
+        }
     }
 
     /// Build a real `.odt` zip in memory (as the `.docx` tests build a `.docx`) and
