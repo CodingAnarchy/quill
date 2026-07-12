@@ -236,7 +236,7 @@ fn apply_voice_maps_the_line_level_finding_shape() {
     let (mut app, _dir) = two_chapter_app("voice-line-typed");
     app.apply_voice(Ok(Voice {
         findings: vec![VoiceFinding {
-            kind: "dialogue".into(),
+            kind: crate::ai::voice::VoiceKind::Dialogue,
             character: "Ivo".into(),
             line: "I reckon we oughta skedaddle.".into(),
             detail: "his profile is precise and courtly, not folksy".into(),

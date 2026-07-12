@@ -5,10 +5,45 @@
 //! it leaves *frequency* metrics (crutch words, etc.) to the local-analysis
 //! style report (#70). See `docs/ai-features.md`.
 
+use std::fmt::{self, Display};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{AiError, Request};
+
+/// The closed set of prose-style categories the prompt asks for (#1082):
+/// POV / tense / voice / repetition. Deserialized straight from the model reply;
+/// an out-of-contract value degrades to [`Unknown`](Self::Unknown) rather than a
+/// silent raw string, and [`Display`] reproduces the exact label the model emits
+/// (note the model's `POV` is upper-case) so a rendered finding reads identically.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StyleKind {
+    #[serde(rename = "POV")]
+    Pov,
+    #[serde(rename = "tense")]
+    Tense,
+    #[serde(rename = "voice")]
+    Voice,
+    #[serde(rename = "repetition")]
+    Repetition,
+    /// Any value outside the prompt's closed set. Renders as `"unknown"`.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Display for StyleKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Pov => "POV",
+            Self::Tense => "tense",
+            Self::Voice => "voice",
+            Self::Repetition => "repetition",
+            Self::Unknown => "unknown",
+        })
+    }
+}
 
 /// The result of a prose/style pass: the style observations.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -20,8 +55,9 @@ pub struct Style {
 /// One style observation.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct StyleFinding {
-    /// A short category: "POV", "tense", "voice", or "repetition".
-    pub kind: String,
+    /// A short category: POV / tense / voice / repetition (#1082). A value outside
+    /// that set deserializes to [`StyleKind::Unknown`].
+    pub kind: StyleKind,
     pub detail: String,
     /// Chapters involved (titles).
     #[serde(default)]
@@ -75,7 +111,7 @@ mod tests {
         let json = r#"{"findings":[{"kind":"POV","detail":"head-hop","chapters":["Two"]}]}"#;
         let s = parse(json).unwrap();
         assert_eq!(s.findings.len(), 1);
-        assert_eq!(s.findings[0].kind, "POV");
+        assert_eq!(s.findings[0].kind, StyleKind::Pov);
         // Every field survives the parse, not just kind — detail and chapters too.
         assert_eq!(s.findings[0].detail, "head-hop");
         assert_eq!(s.findings[0].chapters, ["Two"]);
@@ -93,6 +129,32 @@ mod tests {
     #[test]
     fn parse_rejects_bad_json() {
         assert!(matches!(parse("nope"), Err(AiError::ModelNonCompliance(_))));
+    }
+
+    #[test]
+    fn kind_round_trips_valid_values_to_the_same_label() {
+        // Each valid category deserializes to its variant and renders back to the
+        // exact string the model emitted (POV stays upper-case) — output byte-identical.
+        for (raw, kind) in [
+            ("POV", StyleKind::Pov),
+            ("tense", StyleKind::Tense),
+            ("voice", StyleKind::Voice),
+            ("repetition", StyleKind::Repetition),
+        ] {
+            let json = format!(r#"{{"findings":[{{"kind":"{raw}","detail":"d","chapters":[]}}]}}"#);
+            let s = parse(&json).unwrap();
+            assert_eq!(s.findings[0].kind, kind);
+            assert_eq!(s.findings[0].kind.to_string(), raw);
+        }
+    }
+
+    #[test]
+    fn malformed_kind_degrades_to_unknown_not_a_raw_string() {
+        // A model typo doesn't error and doesn't leak the raw string into output.
+        let json = r#"{"findings":[{"kind":"tesne","detail":"d","chapters":[]}]}"#;
+        let s = parse(json).unwrap();
+        assert_eq!(s.findings[0].kind, StyleKind::Unknown);
+        assert_eq!(s.findings[0].kind.to_string(), "unknown");
     }
 
     #[test]

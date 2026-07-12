@@ -75,20 +75,20 @@ fn declining_an_expensive_pass_cancels_it() {
 fn triage_accumulates_findings_across_passes_deduped() {
     let (mut app, _dir) = two_chapter_app("triage-accum");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: "the locket changes color".into(),
         chapters: vec!["One".into()],
     }])));
     app.apply_style(Ok(ai::style::Style {
         findings: vec![ai::style::StyleFinding {
-            kind: "POV".into(),
+            kind: crate::ai::style::StyleKind::Pov,
             detail: "head-hop".into(),
             chapters: vec!["Two".into()],
         }],
     }));
     // A repeat of the continuity finding must not double-count.
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: "the locket changes color".into(),
         chapters: vec!["One".into()],
     }])));

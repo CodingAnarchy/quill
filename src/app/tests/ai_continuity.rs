@@ -11,7 +11,7 @@ use std::fs;
 fn continuity_writes_timeline_and_opens_findings() {
     let (mut app, dir) = two_chapter_app("cont-write");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: "the locket changes color".into(),
         chapters: vec!["One".into()],
     }])));
@@ -94,7 +94,7 @@ fn revise_with_findings_puts_the_delta_summary_in_the_message() {
             story_order: 1,
         }],
         findings: vec![continuity::Finding {
-            kind: "object".into(),
+            kind: continuity::FindingKind::Object,
             detail: "the locket changes color".into(),
             chapters: vec!["One".into()],
         }],
@@ -143,7 +143,7 @@ fn no_change_revise_shows_no_delta() {
 fn findings_dismiss_removes_and_closes_when_empty() {
     let (mut app, _dir) = two_chapter_app("cont-dismiss");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "age".into(),
+        kind: continuity::FindingKind::Age,
         detail: "Mara is 30 then 28".into(),
         chapters: vec!["One".into()],
     }])));
@@ -157,7 +157,7 @@ fn findings_dismiss_removes_and_closes_when_empty() {
 /// A continuity result carrying a single finding with the given detail.
 fn one_finding(detail: &str) -> Continuity {
     cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: detail.into(),
         chapters: vec!["One".into()],
     }])
@@ -252,7 +252,7 @@ fn marking_xxx_resolves_and_drops_the_finding() {
 fn findings_jump_activates_the_chapter() {
     let (mut app, _dir) = two_chapter_app("cont-jump");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "location".into(),
+        kind: continuity::FindingKind::Location,
         detail: "two places at once".into(),
         chapters: vec!["Two".into()],
     }])));
@@ -266,7 +266,7 @@ fn hand_edited_timeline_reviews_then_shows_findings() {
     let (mut app, dir) = two_chapter_app("cont-conflict");
     // First pass: clean timeline (with a finding so findings are pending later too).
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: "first".into(),
         chapters: vec!["One".into()],
     }])));
@@ -279,7 +279,7 @@ fn hand_edited_timeline_reviews_then_shows_findings() {
 
     // Second pass with findings → timeline conflict first.
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: "second".into(),
         chapters: vec!["One".into()],
     }])));

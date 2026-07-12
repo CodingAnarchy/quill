@@ -374,7 +374,7 @@ fn series_findings_are_attributed_to_their_book_and_accumulate_silently() {
     let mk = |chapter: &str| Continuity {
         events: vec![],
         findings: vec![Finding {
-            kind: "object".into(),
+            kind: continuity::FindingKind::Object,
             detail: "the locket changes color".into(),
             chapters: vec![chapter.into()],
         }],

@@ -136,7 +136,7 @@ fn foreshadow_findings_are_kept_distinct_from_plot_thread_findings() {
     app.apply_plot(Ok(plot::Plot {
         threads: vec![plot::Thread {
             name: "Trust vs. duty".into(),
-            status: "open".into(),
+            status: plot::ThreadStatus::Open,
             setup: "framed in ch. 1".into(),
             payoff: String::new(),
             last_seen: "One".into(),

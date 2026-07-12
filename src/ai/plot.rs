@@ -8,12 +8,44 @@
 //! shared [`bible`] format and the incremental-scoping machinery (#90); it tracks
 //! and flags only, never writing manuscript prose. See `docs/ai-features.md`.
 
-use std::fmt::Write;
+use std::fmt::{self, Display, Write};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
+
+/// The closed set of plot-thread statuses the prompt asks for (#1082): setup /
+/// open / developing / resolved / abandoned. Deserialized straight from the model
+/// reply; an out-of-contract value degrades to [`Unknown`](Self::Unknown) rather
+/// than a silent raw string, and [`Display`] reproduces the exact lowercase label
+/// the model emits so the rendered thread heading reads byte-identically.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ThreadStatus {
+    Setup,
+    Open,
+    Developing,
+    Resolved,
+    Abandoned,
+    /// Any value outside the prompt's closed set. Renders as `"unknown"`.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Display for ThreadStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Setup => "setup",
+            Self::Open => "open",
+            Self::Developing => "developing",
+            Self::Resolved => "resolved",
+            Self::Abandoned => "abandoned",
+            Self::Unknown => "unknown",
+        })
+    }
+}
 
 /// The result of a plot pass: the tracked threads and the dangling-thread
 /// findings.
@@ -32,8 +64,9 @@ pub struct Plot {
 pub struct Thread {
     /// A short name for the thread, e.g. "The stolen locket" or "Trust vs. duty".
     pub name: String,
-    /// Where the thread stands: e.g. "open", "resolved", "abandoned", "setup".
-    pub status: String,
+    /// Where the thread stands: setup / open / developing / resolved / abandoned
+    /// (#1082). A value outside that set deserializes to [`ThreadStatus::Unknown`].
+    pub status: ThreadStatus,
     /// How/where the thread is introduced (the setup).
     #[serde(default)]
     pub setup: String,
@@ -194,7 +227,7 @@ mod tests {
             threads: vec![
                 Thread {
                     name: "The stolen locket".into(),
-                    status: "resolved".into(),
+                    status: ThreadStatus::Resolved,
                     setup: "Mara pockets the locket in ch. 1".into(),
                     payoff: "returned to its owner in the finale".into(),
                     last_seen: "The Reckoning".into(),
@@ -202,7 +235,7 @@ mod tests {
                 },
                 Thread {
                     name: "Who burned the archive".into(),
-                    status: "open".into(),
+                    status: ThreadStatus::Open,
                     setup: "the fire opens ch. 3".into(),
                     payoff: String::new(),
                     last_seen: "Ashes".into(),
@@ -240,8 +273,37 @@ mod tests {
         let p = parse(json).unwrap();
         assert_eq!(p.threads.len(), 1);
         assert_eq!(p.threads[0].name, "Locket");
-        assert_eq!(p.threads[0].status, "open");
+        assert_eq!(p.threads[0].status, ThreadStatus::Open);
         assert!(p.findings.is_empty());
+    }
+
+    #[test]
+    fn status_round_trips_valid_values_to_the_same_label() {
+        // Each valid status deserializes to its variant and renders back to the exact
+        // lowercase string the model emitted — the rendered heading stays identical.
+        for (raw, status) in [
+            ("setup", ThreadStatus::Setup),
+            ("open", ThreadStatus::Open),
+            ("developing", ThreadStatus::Developing),
+            ("resolved", ThreadStatus::Resolved),
+            ("abandoned", ThreadStatus::Abandoned),
+        ] {
+            let json = format!(
+                r#"{{"threads":[{{"name":"T","status":"{raw}","setup":"","payoff":"","last_seen":"","notes":""}}],"findings":[]}}"#
+            );
+            let p = parse(&json).unwrap();
+            assert_eq!(p.threads[0].status, status);
+            assert_eq!(p.threads[0].status.to_string(), raw);
+        }
+    }
+
+    #[test]
+    fn malformed_status_degrades_to_unknown_not_a_raw_string() {
+        // A model typo doesn't error and doesn't leak the raw string into output.
+        let json = r#"{"threads":[{"name":"T","status":"reslved","setup":"","payoff":"","last_seen":"","notes":""}],"findings":[]}"#;
+        let p = parse(json).unwrap();
+        assert_eq!(p.threads[0].status, ThreadStatus::Unknown);
+        assert_eq!(p.threads[0].status.to_string(), "unknown");
     }
 
     #[test]
