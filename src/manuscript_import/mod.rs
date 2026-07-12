@@ -393,9 +393,29 @@ fn tag_attrs<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
 /// next sibling, rather than returning and silently dropping every remaining element
 /// — honoring the module's "surface it, never silently drop" contract (the caller's
 /// chapter/note stream keeps flowing past a malformed tag instead of stopping at it).
-fn for_each_child<'a>(xml: &'a str, name: &str, mut f: impl FnMut(&'a str, Option<&'a str>)) {
+fn for_each_child<'a>(xml: &'a str, name: &str, f: impl FnMut(&'a str, Option<&'a str>)) {
+    for_each_child_counted(xml, name, f);
+}
+
+/// [`for_each_child`], reporting how many `<name …>` opens it had to recover past
+/// because their balancing `</name>` was missing (unbalanced foreign XML). The
+/// count lets a caller surface the drop (e.g. `.scriv`'s `unreadable_bodies`)
+/// rather than let a malformed sibling vanish silently — the "surface it, never
+/// silently drop it" contract for the structural walk, not just per-body I/O.
+///
+/// Recovery is resilient to an *unbalanced descendant*: a well-formed container
+/// whose only defect is a malformed nested element is still bounded at its own
+/// close (via [`matching_close_recovering`]), so the container's siblings — and
+/// the well-formed children inside it — keep importing. Only the innermost
+/// element that genuinely never closes is dropped, and it's tallied here.
+fn for_each_child_counted<'a>(
+    xml: &'a str,
+    name: &str,
+    mut f: impl FnMut(&'a str, Option<&'a str>),
+) -> usize {
     let close = format!("</{name}>");
     let mut pos = 0;
+    let mut recovered = 0;
     while let Some((attrs_start, gt, self_closing)) = find_open(xml, pos, name) {
         let attrs = xml[attrs_start..gt].trim_end_matches('/').trim();
         if self_closing {
@@ -403,15 +423,24 @@ fn for_each_child<'a>(xml: &'a str, name: &str, mut f: impl FnMut(&'a str, Optio
             pos = gt + 1;
             continue;
         }
-        let Some(at) = matching_close(xml, name, gt + 1) else {
-            // Unbalanced open: don't emit a half-read element or bail on the rest —
-            // step past this open tag and recover to the next sibling.
+        let Some((at, clean)) = matching_close_recovering(xml, name, gt + 1) else {
+            // Genuinely unbalanced open with no usable close anywhere ahead: don't
+            // emit a half-read element or bail on the rest — step past this open
+            // tag, count the drop, and recover to the next sibling.
+            recovered += 1;
             pos = gt + 1;
             continue;
         };
+        // A recovered (best-effort) close means an *inner* same-named element was
+        // unbalanced; this element still imports, but the dropped descendant is
+        // surfaced. `f`'s own nested walk over the inner XML will re-count it.
         f(attrs, Some(&xml[gt + 1..at]));
+        if !clean {
+            recovered += 1;
+        }
         pos = at + close.len();
     }
+    recovered
 }
 
 /// Invoke `f` for each `<name>…</name>` element in `xml`, in order, with its
@@ -438,11 +467,28 @@ fn count_elements(xml: &str, name: &str) -> usize {
 
 /// The byte index of the `</name>` that closes the element whose content starts at
 /// `inner_start`, accounting for nested same-named elements. The depth bookkeeping
-/// at the heart of [`for_each_child`].
+/// at the heart of [`for_each_child`]. `None` when no balancing close exists — for
+/// callers ([`next_inline`]) that must not guess a bound.
 fn matching_close(xml: &str, name: &str, inner_start: usize) -> Option<usize> {
+    matching_close_recovering(xml, name, inner_start).and_then(|(at, clean)| clean.then_some(at))
+}
+
+/// Like [`matching_close`], but resilient to an *unbalanced nested* same-named
+/// element: `(close index, was the depth cleanly balanced?)`. When a nested open
+/// never closes, the depth can't reach zero, so the exact close is unknowable —
+/// but the *last* `</name>` seen is the best-effort bound for this element (the
+/// nested open contributed the surplus depth), so return it with `clean = false`.
+/// Only `None` when there's no `</name>` anywhere ahead at all.
+///
+/// This lets a well-formed container survive one malformed descendant: the
+/// container is still bounded at its own close (so its siblings and well-formed
+/// children keep importing), and the caller surfaces the recovered drop rather
+/// than silently dropping the whole subtree (#1139).
+fn matching_close_recovering(xml: &str, name: &str, inner_start: usize) -> Option<(usize, bool)> {
     let close = format!("</{name}>");
     let mut depth = 1usize;
     let mut pos = inner_start;
+    let mut last_close: Option<usize> = None;
     loop {
         let next_open = find_open(xml, pos, name);
         let next_close = xml[pos..].find(&close).map(|r| pos + r);
@@ -455,12 +501,16 @@ fn matching_close(xml: &str, name: &str, inner_start: usize) -> Option<usize> {
             }
             (_, Some(at)) => {
                 depth -= 1;
+                last_close = Some(at);
                 if depth == 0 {
-                    return Some(at);
+                    return Some((at, true));
                 }
                 pos = at + close.len();
             }
-            _ => return None,
+            // No more closes ahead. If depth never unwound (an unbalanced nested
+            // open), fall back to the last close seen — the container's own — and
+            // flag the recovery; if nothing closed at all, there's no bound.
+            _ => return last_close.map(|at| (at, false)),
         }
     }
 }
@@ -639,25 +689,43 @@ mod tests {
         );
     }
 
-    /// An unbalanced open tag (its `</g>` missing) doesn't truncate the scan: the
-    /// malformed element is skipped and the following well-formed sibling is still
-    /// yielded, honoring the "surface it, never silently drop" contract rather than
-    /// returning at the first unbalanced close (the #1118 regression).
+    /// A top-level unbalanced open tag (its `</g>` missing entirely) doesn't
+    /// truncate the scan: the well-formed sibling that follows is still yielded,
+    /// honoring the "surface it, never silently drop" contract rather than
+    /// returning at the first unbalanced close (the #1118 regression). The drop is
+    /// counted so the caller can surface it (#1139).
     #[test]
     fn for_each_child_recovers_past_unbalanced_open() {
-        // The first <g a="1"> never closes; a well-formed <g a="2">…</g> follows.
-        let xml = r#"<g a="1">orphan<g a="2">kept</g>"#;
+        // A truly unclosed <g a="1"> (no </g> anywhere), then a well-formed sibling.
+        let xml = r#"<g a="1"><g a="2">kept</g>"#;
         let mut seen: Vec<(String, Option<String>)> = Vec::new();
-        for_each_child(xml, "g", |attrs, inner| {
+        let recovered = for_each_child_counted(xml, "g", |attrs, inner| {
             seen.push((attrs.to_string(), inner.map(str::to_string)));
         });
-        // The trailing well-formed sibling survives — its close balances the second
-        // open — so the remaining chapters aren't silently dropped.
-        assert!(
-            seen.iter()
-                .any(|(a, inner)| a == "a=\"2\"" && inner.as_deref() == Some("kept")),
-            "the well-formed sibling after an unbalanced open is still yielded: {seen:?}"
+        // <g a="1"> is bounded at the last close (its best-effort bound), so it
+        // still imports — with <g a="2">kept as its inner XML — rather than being
+        // dropped and its child re-parented as a top-level sibling (#1139 defect 2).
+        assert_eq!(
+            seen,
+            vec![("a=\"1\"".to_string(), Some(r#"<g a="2">kept"#.to_string()),)],
+            "the parent imports and its nested child isn't re-parented: {seen:?}"
         );
+        assert_eq!(recovered, 1, "the recovered drop is surfaced, not silent");
+    }
+
+    /// When a same-named element is genuinely unbalanced with no close *anywhere*
+    /// ahead, the open is skipped, the drop counted, and the scan resumes at the
+    /// next sibling — the fully-malformed-tail case.
+    #[test]
+    fn for_each_child_counts_a_wholly_unclosed_tail() {
+        // <g a="1"> closes; <g a="2"> never does and has no </g> after it.
+        let xml = r#"<g a="1">ok</g><g a="2">orphan"#;
+        let mut seen: Vec<String> = Vec::new();
+        let recovered = for_each_child_counted(xml, "g", |attrs, _inner| {
+            seen.push(attrs.to_string());
+        });
+        assert_eq!(seen, vec!["a=\"1\"".to_string()], "the closed one imports");
+        assert_eq!(recovered, 1, "the unclosed tail is counted, not silent");
     }
 
     /// `matching_close` skips over nested same-named elements (and self-closing
