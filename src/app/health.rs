@@ -40,12 +40,33 @@ fn span_of(f: &Finding) -> (String, Vec<String>, Option<usize>) {
     (f.summary.clone(), f.chapters.clone(), f.book)
 }
 
+/// The rank of a kind in [`KIND_ORDER`] — its fixed precedence, lower is earlier.
+/// Used to pick a span's *primary* pass deterministically (#1119) so per-kind
+/// attribution can't drift with pass run order. Any recognized kind ranks before
+/// the fallback (`KIND_ORDER.len()`), and [`Other`](FindingKind::Other) sits last
+/// in `KIND_ORDER`, so it only ever wins a span no analysis pass claimed.
+fn kind_rank(k: FindingKind) -> usize {
+    KIND_ORDER
+        .iter()
+        .position(|&o| o == k)
+        .unwrap_or(KIND_ORDER.len())
+}
+
 /// Collapse cross-pass agreement into consensus findings (#921): findings that
-/// several passes raise for the same span become one, keeping the first pass's
-/// `kind` as the primary lens and folding every other pass into `corroborators`,
-/// so the view can weight the finding by agreement. First-seen order is preserved
-/// (the primary is whichever pass surfaced the span first). A lone finding passes
-/// through unchanged. Pure over the input, so it's directly testable.
+/// several passes raise for the same span become one, folding every other pass into
+/// `corroborators` so the view can weight the finding by agreement. A lone finding
+/// passes through unchanged. Pure over the input, so it's directly testable.
+///
+/// The primary `kind` of a merged span is the highest-precedence pass by
+/// [`KIND_ORDER`] (#1119), **not** whichever pass happened to surface the span
+/// first. `self.triage` is appended in pass run order, so a first-seen primary made
+/// the same cross-pass span tally under different kinds on different runs — the
+/// per-kind health-trend line jittered even though the totals were stable. Ranking
+/// the primary by the fixed `KIND_ORDER` precedence makes attribution deterministic:
+/// the same set of findings always attributes a span to the same kind, whatever
+/// order the passes ran. Span first-seen order (which drives the dashboard's row and
+/// chapter ordering) is preserved — only *which pass owns the merged span* is made
+/// order-independent.
 pub(super) fn consensus(findings: &[Finding]) -> Vec<Finding> {
     let mut merged: Vec<Finding> = Vec::new();
     for f in findings {
@@ -55,6 +76,15 @@ pub(super) fn consensus(findings: &[Finding]) -> Vec<Finding> {
         } else {
             merged.push(f.clone());
         }
+    }
+    // Normalize each merged span's agreement set (#1119, see the doc comment): the
+    // primary `kind` is the highest-precedence pass by `KIND_ORDER`, the corroborators
+    // the rest in that same fixed order — so attribution can't drift with pass order.
+    for f in &mut merged {
+        let mut passes = f.agreement();
+        passes.sort_by_key(|&k| kind_rank(k));
+        f.kind = passes[0];
+        f.corroborators = passes[1..].to_vec();
     }
     merged
 }
@@ -420,13 +450,6 @@ pub(super) fn revision_plan_text(findings: &[Finding]) -> String {
         ]
         .join("\n");
     }
-
-    let kind_rank = |k: FindingKind| {
-        KIND_ORDER
-            .iter()
-            .position(|&o| o == k)
-            .unwrap_or(KIND_ORDER.len())
-    };
 
     // Chapters in first-seen order — the top-to-bottom order the author reads.
     let mut chapters: Vec<String> = Vec::new();
