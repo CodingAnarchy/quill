@@ -154,3 +154,24 @@ fn cursor_at_byte_snaps_a_mid_em_dash_offset() {
         assert_eq!(cursor, buf.cursor_at_byte(dash_start));
     }
 }
+
+#[test]
+fn grapheme_after_snaps_a_non_boundary_byte_without_panicking() {
+    // Today every caller passes a cursor-derived boundary, but a future caller (a
+    // persisted position or mark whose byte offset now lands inside a multi-byte
+    // grapheme) must not panic on the interior `byte_slice` (#1146). `grapheme_after`
+    // floors to the previous char boundary, mirroring `cursor_at_byte`.
+    let buf = Buffer::from_text("a😀b\n"); // 'a'=1 byte, '😀'=4 bytes (bytes 1..5)
+                                           // Every interior byte of the emoji floors to its start (byte 1), so the byte
+                                           // just past that grapheme is the emoji's end (byte 5).
+    for byte in 1..=4 {
+        assert_eq!(
+            buf.grapheme_after(byte),
+            5,
+            "byte {byte} inside/at the emoji should floor to its start and return its end"
+        );
+    }
+    // Real boundaries are unchanged: past 'a' (0→1), past the emoji (5→6), past 'b'.
+    assert_eq!(buf.grapheme_after(0), 1);
+    assert_eq!(buf.grapheme_after(5), 6);
+}
