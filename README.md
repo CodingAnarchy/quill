@@ -860,7 +860,9 @@ The action names: `left` `down` `up` `right`; `word_forward` `word_backward`
 `search_prev` `search_word`; `ex_command`.
 
 In the chapter browser (Ctrl-G): **a** add a chapter, **r** rename, **d** delete
-(moved to `unused/`), **J / K** move the selection down / up, **s** cycle status
+(moved to `unused/`), **x** split the open chapter at the cursor into two, **M**
+merge the selected chapter into the one above it, **c** duplicate a chapter,
+**J / K** move the selection down / up, **s** cycle status
 (draft → revised → final), **m** edit the one-line summary, **v** set the POV
 character, **l** set a word-count goal, **S** set a section role (blank = body),
 **g** epigraph (quotation, then attribution). Book/series metadata

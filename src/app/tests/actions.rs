@@ -696,6 +696,93 @@ fn enable_ai_action_is_registered_and_gated() {
     assert!(app.action_status(Action::EnableAi).is_some());
 }
 
+/// Split is a named palette action (#1102): dispatching "chapter:split" opens the
+/// same title prompt the browser's `x` does, and completing it makes two chapters
+/// out of the active one — the discoverable twin of the bare-letter key.
+#[test]
+fn split_chapter_action_splits_the_active_chapter() {
+    let (mut app, _dir) = two_chapter_app("action-split"); // ch0 "first chapter\n"
+    assert!(
+        Action::from_name("chapter:split").is_some(),
+        "split is a named, resolvable action"
+    );
+    // Seam mid-body: after "first " (6 graphemes).
+    for _ in 0..6 {
+        app.on_key(key(KeyCode::Right));
+    }
+    app.run_action(Action::SplitChapter, false);
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the split title prompt opened"
+    );
+    type_str(&mut app, "Tail");
+    app.on_key(key(KeyCode::Enter));
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["One", "Tail", "Two"]);
+}
+
+/// Merge is a named palette action (#1102): with a later chapter active,
+/// dispatching "chapter:merge" opens the y/N confirm the browser's `M` does, and
+/// confirming folds the active chapter into the one above it.
+#[test]
+fn merge_chapter_action_merges_into_the_chapter_above() {
+    let (mut app, _dir) = two_chapter_app("action-merge");
+    // Make chapter 1 ("Two") the active chapter so there's one above to merge into.
+    app.on_key(ctrl('n'));
+    assert_eq!(app.project.active_index(), 1);
+    app.run_action(Action::MergeChapter, false);
+    assert!(
+        matches!(app.mode, Mode::Prompt(_)),
+        "the merge confirm opened"
+    );
+    app.on_key(key(KeyCode::Char('y')));
+    let titles: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["One"], "the two chapters merged into one");
+}
+
+/// Merging is refused when the active chapter is the first one — there's nothing
+/// above it, so the action reports why instead of opening a confirm (#1102).
+#[test]
+fn merge_chapter_action_unavailable_for_the_first_chapter() {
+    let (app, _dir) = two_chapter_app("action-merge-first");
+    assert_eq!(app.project.active_index(), 0);
+    assert!(
+        app.action_status(Action::MergeChapter).is_some(),
+        "merge is unavailable with the first chapter active"
+    );
+}
+
+/// Split/merge act on the single-chapter buffer, so they're unavailable in the
+/// continuous view — the action reports the leave-first guard (#1102).
+#[test]
+fn split_and_merge_actions_unavailable_in_the_continuous_view() {
+    let (mut app, _dir) = two_chapter_app("action-split-continuous");
+    app.toggle_continuous();
+    assert!(app.manuscript.is_some());
+    for action in [Action::SplitChapter, Action::MergeChapter] {
+        assert!(
+            app.action_status(action)
+                .as_deref()
+                .unwrap_or("")
+                .contains("continuous"),
+            "{action:?} explains the continuous-view guard, got: {:?}",
+            app.action_status(action)
+        );
+    }
+}
+
 /// Triage is local aggregation, so it stays available with the AI backend off —
 /// it just reports an empty list rather than blocking on AI readiness.
 #[test]
