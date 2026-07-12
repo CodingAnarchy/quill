@@ -194,6 +194,16 @@ impl App {
             Action::Assistant if self.manuscript.is_some() => {
                 Some("leave the continuous view (Ctrl-l) first".into())
             }
+            // Chapter split/merge act on the active single-chapter buffer (the
+            // cursor is the split seam); the continuous view holds a multi-chapter
+            // window, so leave it first.
+            Action::SplitChapter | Action::MergeChapter if self.manuscript.is_some() => {
+                Some("leave the continuous view (Ctrl-l) first".into())
+            }
+            // The first chapter has nothing above it to merge into.
+            Action::MergeChapter if self.project.active_index() == 0 => {
+                Some("no chapter above to merge into".into())
+            }
             // Sprint controls reflect whether one is running (#299).
             Action::StartSprint if self.sprint.is_some() => {
                 Some("a sprint is already running".into())
@@ -367,6 +377,8 @@ impl App {
             Action::ToggleGalley => self.toggle_galley(),
             Action::Corkboard => self.open_corkboard(),
             Action::ManuscriptCorkboard => self.open_manuscript_corkboard(),
+            Action::SplitChapter => self.start_split_chapter(),
+            Action::MergeChapter => self.start_merge_chapter(),
             Action::AddAnnotation => self.start_annotation(),
             Action::ReviewAnnotations => self.open_annotation_review(),
             Action::SwitchBackend => self.toggle_ai_backend(),
@@ -389,6 +401,43 @@ impl App {
             Action::ReviewCopy => self.run_review_copy_export(),
             Action::PdfWrapCover => self.run_wrap_cover_export(),
         }
+    }
+
+    /// Split the open chapter at the cursor into two (#585), from the Ctrl-K
+    /// palette — the named-action twin of the chapter browser's `x`. The live
+    /// cursor is the seam, so it operates on the active chapter and prompts for the
+    /// new chapter's title, returning to that chapter's row in the browser.
+    pub(crate) fn start_split_chapter(&mut self) {
+        let at = self.project.active_index();
+        self.open_prompt(
+            Pending::SplitChapter { at },
+            "Title for the new chapter after the cursor: ",
+            "",
+            Some(at),
+        );
+    }
+
+    /// Merge the active chapter into the one above it (#585), from the Ctrl-K
+    /// palette — the named-action twin of the chapter browser's `M`, behind the
+    /// same y/N confirm. The first chapter has nothing above it to merge into.
+    pub(crate) fn start_merge_chapter(&mut self) {
+        let at = self.project.active_index();
+        if at == 0 {
+            self.message = Some("No chapter above to merge into.".into());
+            return;
+        }
+        let title = self.project.manifest.chapters[at].title.clone();
+        let above = self
+            .project
+            .chapter_title(at - 1)
+            .unwrap_or("the chapter above")
+            .to_string();
+        self.open_prompt(
+            Pending::Merge { at },
+            format!("Merge '{title}' into '{above}'? (y/N)"),
+            "",
+            Some(at),
+        );
     }
 
     /// Open the snippet picker (#411): a palette listing each author-defined

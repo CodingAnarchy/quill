@@ -162,6 +162,14 @@ pub enum Action {
     /// (it leaves it first). Within-chapter reorder / synopsis / status work per
     /// card; cross-chapter reorder is a documented follow-up.
     ManuscriptCorkboard,
+    /// Split the open chapter at the cursor into two (#585) — the same as the
+    /// chapter browser's `x`. The live cursor is the seam, so it operates on the
+    /// active chapter and prompts for the new chapter's title.
+    SplitChapter,
+    /// Merge the active chapter into the one above it (#585) — the same as the
+    /// chapter browser's `M`, after a y/N confirm. No-op for the first chapter,
+    /// which has nothing above it to merge into.
+    MergeChapter,
     /// Annotate the selection (or word at the cursor) with a note (#302).
     AddAnnotation,
     /// Open the annotation review list for the active chapter (#302).
@@ -358,6 +366,8 @@ impl Action {
         Self::PrevMisspelling,
         Self::StyleFlagSweep,
         Self::ToggleProximityRepeats,
+        Self::SplitChapter,
+        Self::MergeChapter,
         Self::AddAnnotation,
         Self::ReviewAnnotations,
         Self::InsertSnippet,
@@ -443,6 +453,8 @@ impl Action {
             Self::ToggleGalley => "view:galley",
             Self::Corkboard => "view:corkboard",
             Self::ManuscriptCorkboard => "view:corkboard-all",
+            Self::SplitChapter => "chapter:split",
+            Self::MergeChapter => "chapter:merge",
             Self::AddAnnotation => "annotate",
             Self::ReviewAnnotations => "annotate:review",
             Self::SwitchBackend => "ai:backend",
@@ -528,6 +540,8 @@ impl Action {
             | Self::PrevMisspelling
             | Self::StyleFlagSweep
             | Self::ToggleProximityRepeats
+            | Self::SplitChapter
+            | Self::MergeChapter
             | Self::AddAnnotation
             | Self::ReviewAnnotations
             | Self::InsertSnippet
@@ -610,6 +624,8 @@ impl Action {
             Self::ToggleGalley => "Proofread — galley reading mode (toggle)",
             Self::Corkboard => "Corkboard (scene overview)",
             Self::ManuscriptCorkboard => "Corkboard — whole manuscript",
+            Self::SplitChapter => "Split chapter at cursor",
+            Self::MergeChapter => "Merge chapter into the one above",
             Self::AddAnnotation => "Annotate selection",
             Self::ReviewAnnotations => "Review annotations",
             Self::SwitchBackend => "Switch AI backend (Claude / local)",
