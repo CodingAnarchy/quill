@@ -26,9 +26,9 @@ use crate::date;
 use crate::frontmatter::{Epigraph, FrontMatter, Role, Status};
 use crate::manuscript::Manuscript;
 use crate::mode::{
-    BookField, Command, Finding, FindingKind, Findings, GitAction, History, HistoryRow,
-    ImportPreview, MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending, RefFiles,
-    VimState,
+    BookField, Command, Finding, FindingKind, Findings, GitAction, GuideNav, GuideSection, History,
+    HistoryRow, ImportPreview, MetaEdit, MetaField, Mode, Overlay, Palette, PaletteItem, Pending,
+    RefFiles, VimState,
 };
 use crate::project::{unique_dest, GoalField, Manifest, Project, DEFAULT_WORDS_PER_PAGE};
 use crate::report::{self, Momentum, PartDelta};

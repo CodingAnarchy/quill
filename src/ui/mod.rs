@@ -14,7 +14,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::App;
 use crate::app::{Assistant, Speaker, SplitContent, SplitDir};
 use crate::frontmatter::{Band, Role, Status};
-use crate::mode::{BibleReview, Mode, Overlay, OverlayKind, RefFiles, Tree};
+use crate::mode::{BibleReview, GuideNav, Mode, Overlay, OverlayKind, RefFiles, Tree};
 use crate::syntax::Heading;
 use crate::theme::{self, Theme};
 

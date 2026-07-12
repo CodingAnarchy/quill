@@ -29,6 +29,9 @@ impl App {
     }
 
     /// Open the built-in user's guide overlay (F1, and the run-action menu) (#281).
+    /// The guide is a long linear scroll; `/` over it opens a searchable
+    /// section-jump (#1108) built from [`guide_sections`] — so "how do I export?"
+    /// is a filter-and-Enter away rather than a scroll through 400+ lines.
     pub(crate) fn open_guide(&mut self) {
         let lines = crate::guide::TEXT
             .lines()
@@ -68,6 +71,79 @@ impl App {
             return;
         }
         self.open_onboarding();
+    }
+
+    /// Open the guide's searchable section-jump (#1108): parse the section
+    /// headers from the overlay's rendered lines and arm an empty filter with the
+    /// first section highlighted. A no-op unless a guide overlay is open (with a
+    /// section list to jump around). The jump reuses the chapter-browser / outline
+    /// type-to-filter shape (#410/#822): typing narrows, arrows move, Enter scrolls
+    /// to the section, Esc closes.
+    fn open_guide_nav(&mut self) {
+        let Some(overlay) = self.overlay.as_mut() else {
+            return;
+        };
+        if !overlay.is_guide() || overlay.nav.is_some() {
+            return;
+        }
+        let sections = guide_sections(&overlay.lines);
+        if sections.is_empty() {
+            return;
+        }
+        overlay.nav = Some(GuideNav {
+            sections,
+            filter: String::new(),
+            selected: 0,
+        });
+    }
+
+    /// Handle a key while the guide's section-jump is open (#1108): printable
+    /// characters extend the filter (live), Backspace edits it, the arrows move
+    /// the highlighted section, Enter scrolls the guide to it (and closes the
+    /// jump), and Esc closes the jump — keeping the current scroll. Only reached
+    /// while `overlay.nav` is `Some`, so the plain guide scroll is untouched.
+    fn on_key_guide_nav(&mut self, key: KeyEvent) {
+        let Some(nav) = self.overlay.as_mut().and_then(|o| o.nav.as_mut()) else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                if let Some(overlay) = self.overlay.as_mut() {
+                    overlay.nav = None;
+                }
+            }
+            KeyCode::Enter => {
+                // Scroll the guide to the highlighted section, then close the jump
+                // so the arrows scroll the prose again. A filter that matches
+                // nothing has no target, so it just closes.
+                let target = nav.selected_line();
+                if let Some(overlay) = self.overlay.as_mut() {
+                    if let Some(line) = target {
+                        let max = crate::ui::max_scroll(overlay.lines.len(), self.viewport_height);
+                        overlay.scroll = (line as u16).min(max);
+                    }
+                    overlay.nav = None;
+                }
+            }
+            KeyCode::Up => {
+                nav.selected = nav.selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                let last = nav.matches().len().saturating_sub(1);
+                nav.selected = (nav.selected + 1).min(last);
+            }
+            KeyCode::Backspace => {
+                nav.filter.pop();
+                nav.selected = 0;
+            }
+            KeyCode::Char(c) => {
+                nav.filter.push(c);
+                // Re-anchor to the first match so the selection stays valid as the
+                // filtered set shrinks under the new query.
+                nav.selected = 0;
+            }
+            _ => {}
+        }
     }
 
     /// The progress report's rows, computed once when it's opened.
@@ -121,6 +197,21 @@ impl App {
     /// it (so it stays "press a key to dismiss").
     pub(crate) fn on_key_overlay(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        // The guide's searchable section-jump (#1108): while it's open every key
+        // drives the filter/jump, not the scroll-or-dismiss below. `/` over a
+        // plain guide opens it; a guide overlay with no jump open falls through to
+        // the shared scroll handling, so its scroll/dismiss behavior is unchanged.
+        let guide = self.overlay.as_ref().is_some_and(Overlay::is_guide);
+        if guide {
+            if self.overlay.as_ref().is_some_and(|o| o.nav.is_some()) {
+                self.on_key_guide_nav(key);
+                return;
+            }
+            if !ctrl && key.code == KeyCode::Char('/') {
+                self.open_guide_nav();
+                return;
+            }
+        }
         // `s` on a report overlay saves the rendered report to `export/`, leaving
         // the overlay open so the author can keep reading — it's the one key the
         // report overlay handles beyond scrolling. (`s` is free: it isn't a scroll
@@ -345,4 +436,62 @@ impl App {
             })
             .sum()
     }
+}
+
+/// Parse the user's guide's section headers into a jump list (#1108). The guide
+/// (`docs/guide.md`) titles each section with an all-caps line on its own,
+/// surrounded by blank lines (e.g. `WRITING`, `CHAPTERS & NAVIGATION`, `EXPORT`).
+/// A header is a non-blank line with at least two letters, all uppercase (digits,
+/// spaces, and punctuation allowed), whose previous line is blank — enough to
+/// pick the section banners without matching an all-caps word mid-paragraph. The
+/// returned [`GuideSection::line`] is the header's index into `lines`, the row a
+/// jump scrolls the overlay to.
+pub fn guide_sections(lines: &[Line<'static>]) -> Vec<GuideSection> {
+    let mut sections = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let trimmed = text.trim();
+        if !is_guide_header(trimmed) {
+            continue;
+        }
+        // A banner stands on its own line with a blank line above it — the shape
+        // of a section header, not an emphatic all-caps phrase inside a paragraph.
+        let prev_blank = i == 0
+            || lines[i - 1]
+                .spans
+                .iter()
+                .all(|s| s.content.trim().is_empty());
+        if prev_blank {
+            sections.push(GuideSection {
+                label: trimmed.to_string(),
+                line: i,
+            });
+        }
+    }
+    sections
+}
+
+/// Whether `text` looks like a guide section banner (#1108): at least two ASCII
+/// letters, every letter uppercase, and only letters / digits / spaces / the
+/// header punctuation the guide uses (`& , ' / ( ) — -`). Rejects blank lines,
+/// lowercase prose, and single-letter noise.
+fn is_guide_header(text: &str) -> bool {
+    if text.len() < 2 {
+        return false;
+    }
+    let mut letters = 0;
+    for c in text.chars() {
+        if c.is_ascii_alphabetic() {
+            if c.is_ascii_lowercase() {
+                return false;
+            }
+            letters += 1;
+        } else if !matches!(
+            c,
+            ' ' | '0'..='9' | '&' | ',' | '\'' | '/' | '(' | ')' | '—' | '-'
+        ) {
+            return false;
+        }
+    }
+    letters >= 2
 }

@@ -92,6 +92,59 @@ impl AnnoSort {
     }
 }
 
+/// One jumpable section of the user's guide (#1108): the header's display label
+/// and the row it starts on, so selecting it can scroll the overlay straight to
+/// that section instead of hunting through the 400+-line scroll.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GuideSection {
+    /// The section header text, shown in the jump list (e.g. "EXPORT").
+    pub label: String,
+    /// The section header's row in the overlay's `lines` — where a jump scrolls to.
+    pub line: usize,
+}
+
+/// The searchable section-jump for the user's guide (#1108): the parsed section
+/// list plus a type-to-filter query and the highlighted row, mirroring the
+/// chapter browser / outline filter (#410/#822). Opened with `/` over the guide
+/// overlay; typing narrows the sections (case-insensitive substring on the
+/// header), the arrows move the selection, Enter scrolls the guide to the chosen
+/// section, and Esc closes the jump (keeping the scroll). `None` on the guide
+/// overlay means the plain press-any-key-to-dismiss scroll, unchanged.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct GuideNav {
+    /// Every section header, in document order — the full jump target list.
+    pub sections: Vec<GuideSection>,
+    /// The active type-to-filter query (empty shows every section).
+    pub filter: String,
+    /// The highlighted section, an index into [`Self::matches`](GuideNav::matches).
+    pub selected: usize,
+}
+
+impl GuideNav {
+    /// The sections that pass the current filter (case-insensitive substring on
+    /// the header), each paired with its index in `sections`. An empty filter
+    /// matches every section — the full list.
+    #[must_use]
+    pub fn matches(&self) -> Vec<(usize, &GuideSection)> {
+        let q = self.filter.to_lowercase();
+        self.sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| q.is_empty() || s.label.to_lowercase().contains(&q))
+            .collect()
+    }
+
+    /// The row the highlighted section starts on, or `None` when the filter
+    /// matches nothing — the target a jump (Enter) scrolls the guide to.
+    #[must_use]
+    pub fn selected_line(&self) -> Option<usize> {
+        let matches = self.matches();
+        matches
+            .get(self.selected.min(matches.len().saturating_sub(1)))
+            .map(|(_, s)| s.line)
+    }
+}
+
 /// A full-screen, read-only overlay drawn above any mode: the progress report,
 /// the analysis report, or an AI answer. Holds its pre-rendered lines, how to
 /// render itself, and the current scroll offset. `App` keeps a single
@@ -102,6 +155,10 @@ pub struct Overlay {
     pub kind: OverlayKind,
     /// First visible row; 0 when freshly opened.
     pub scroll: u16,
+    /// The searchable section-jump for the guide (#1108), `Some` and open only
+    /// while the author is filtering/jumping sections; `None` otherwise (and on
+    /// every non-guide overlay).
+    pub nav: Option<GuideNav>,
 }
 
 /// How an [`Overlay`] titles and renders itself.
@@ -132,6 +189,7 @@ impl Overlay {
             lines,
             kind: OverlayKind::Report(label),
             scroll: 0,
+            nav: None,
         }
     }
 
@@ -141,15 +199,18 @@ impl Overlay {
             lines,
             kind: OverlayKind::AiPanel,
             scroll: 0,
+            nav: None,
         }
     }
 
-    /// The user's-guide overlay (#281), scrolled to the top.
+    /// The user's-guide overlay (#281), scrolled to the top. The section-jump
+    /// (#1108) opens on demand with `/`, so it starts with no `nav`.
     pub const fn guide(lines: Vec<Line<'static>>) -> Self {
         Self {
             lines,
             kind: OverlayKind::Guide,
             scroll: 0,
+            nav: None,
         }
     }
 
@@ -159,6 +220,7 @@ impl Overlay {
             lines,
             kind: OverlayKind::CommitReview,
             scroll: 0,
+            nav: None,
         }
     }
 
@@ -168,6 +230,7 @@ impl Overlay {
             lines,
             kind: OverlayKind::Onboarding,
             scroll: 0,
+            nav: None,
         }
     }
 
@@ -175,6 +238,12 @@ impl Overlay {
     /// record the shown-once config flag before closing.
     pub const fn is_onboarding(&self) -> bool {
         matches!(self.kind, OverlayKind::Onboarding)
+    }
+
+    /// Whether this is the user's-guide overlay (#281/#1108), so the key handler
+    /// can offer its searchable section-jump.
+    pub const fn is_guide(&self) -> bool {
+        matches!(self.kind, OverlayKind::Guide)
     }
 
     /// Whether this overlay confirms an action (the pre-commit review, #704) rather

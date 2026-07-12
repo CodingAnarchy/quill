@@ -9,6 +9,13 @@ use super::*;
 /// book + a label; the AI panel word-wraps its prose answer. One renderer for all
 /// overlay kinds — a new overlay is a new [`OverlayKind`], not a new draw arm.
 pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &Overlay) {
+    // The guide's searchable section-jump (#1108): while it's open, the overlay
+    // shows the filterable section list instead of the prose scroll, so the author
+    // finds a topic without scrolling the whole guide.
+    if let Some(nav) = &overlay.nav {
+        draw_guide_nav(frame, area, nav);
+        return;
+    }
     let lines = &overlay.lines;
     let scroll = overlay.scroll.min(max_scroll(lines.len(), area.height));
     let hint = scroll_hint(lines.len(), area.height);
@@ -18,8 +25,10 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
         OverlayKind::Report(label) => (format!(" {book} — {label} (s save · {hint}) "), false),
         OverlayKind::AiPanel => (format!(" AI — Claude ({hint}) "), true),
         // The guide ships pre-wrapped to a readable width; keep it unwrapped so its
-        // key-reference columns stay aligned and the scroll bound stays exact.
-        OverlayKind::Guide => (format!(" Quill — user's guide ({hint}) "), false),
+        // key-reference columns stay aligned and the scroll bound stays exact. `/`
+        // opens the searchable section-jump (#1108) — surfaced in the hint so the
+        // author knows they needn't scroll the whole guide to find a topic.
+        OverlayKind::Guide => (format!(" Quill — user's guide (/ jump · {hint}) "), false),
         // The first-run quick-start card (#837): a short, dismissible tour. Wrapped
         // (trim off, so its leading indents survive) so the key rows stay readable
         // even on a narrow terminal.
@@ -47,6 +56,54 @@ pub(super) fn draw_overlay(frame: &mut Frame, area: Rect, book: &str, overlay: &
         paragraph = paragraph.wrap(Wrap { trim: false });
     }
     frame.render_widget(paragraph, area);
+}
+
+/// Render the guide's searchable section-jump (#1108): a filter line showing the
+/// live query, a blank, then the matching section headers with the highlighted
+/// one reversed. Mirrors the list-overlay row style (marker + reversed selection)
+/// so it reads like the chapter browser / palette the author already knows. Enter
+/// jumps the guide to the selected section; typing narrows; Esc closes.
+fn draw_guide_nav(frame: &mut Frame, area: Rect, nav: &GuideNav) {
+    let theme = theme::current();
+    let matches = nav.matches();
+    // Clamp the highlight to the (possibly shrunk) match set, so the marker lands
+    // on a real row as the filter narrows.
+    let selected = nav.selected.min(matches.len().saturating_sub(1));
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("Jump to section: {}", nav.filter),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+    ];
+    if matches.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (no section matches)",
+            Style::default().fg(theme.dim),
+        )));
+    }
+    for (row, (_, section)) in matches.iter().enumerate() {
+        let is_sel = row == selected;
+        let marker = if is_sel { "▸ " } else { "  " };
+        let style = if is_sel {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{marker}{}", section.label),
+            style,
+        )));
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Quill — user's guide · jump (enter go · esc back) ");
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 /// The largest valid scroll offset for `lines` of content in a bordered box of
