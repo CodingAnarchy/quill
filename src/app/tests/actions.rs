@@ -378,6 +378,110 @@ fn ctrl_k_opens_the_action_palette() {
     );
 }
 
+/// The run-action palette carries each action's shortcut on the item (#1103): an
+/// action with a binding gets its key, a palette-only action gets `None`. The item
+/// is the single carrier the render reads, so this pins what the cheat sheet shows.
+#[test]
+fn palette_items_carry_the_action_shortcut() {
+    let (mut app, _dir) = two_chapter_app("action-palette-shortcut");
+    app.open_action_palette();
+    let Mode::Palette(p) = &app.mode else {
+        panic!("the run-action palette opens");
+    };
+    let shortcut_of = |name: &str| {
+        p.items
+            .iter()
+            .find(|i| match i.command {
+                Command::Run(a) => a.name() == name,
+                _ => false,
+            })
+            .map(|i| i.shortcut)
+    };
+    // An action with a dedicated binding carries it; a palette-only one carries none.
+    assert_eq!(shortcut_of("save"), Some(Some("Ctrl-S")));
+    assert_eq!(shortcut_of("report:progress"), Some(Some("Ctrl-R")));
+    assert_eq!(shortcut_of("goals:set"), Some(None));
+    assert_eq!(shortcut_of("goto:line"), Some(None));
+}
+
+/// The shortcut the palette shows is the *real* dispatch binding (#1103): the
+/// `Ctrl-`_letter_ dispatch resolves through `Action::from_ctrl_key`, and every key
+/// it names round-trips back to that same key through `Action::shortcut` — so a
+/// shown shortcut can't drift from what actually runs. This is the single-source
+/// guarantee.
+#[test]
+fn shortcut_matches_the_dispatch_binding() {
+    for c in 'a'..='z' {
+        if let Some(action) = Action::from_ctrl_key(c) {
+            let want = format!("Ctrl-{}", c.to_ascii_uppercase());
+            assert_eq!(
+                action.shortcut(),
+                Some(want.as_str()),
+                "Ctrl-{c} dispatches {action:?}, so its shown shortcut must be {want}"
+            );
+        }
+    }
+    // The one non-letter Ctrl binding: Ctrl-\ toggles composition mode.
+    assert!(
+        matches!(Action::from_ctrl_key('\\'), Some(Action::ToggleComposition)),
+        "Ctrl-\\ resolves to the composition toggle"
+    );
+    assert_eq!(Action::ToggleComposition.shortcut(), Some("Ctrl-\\"));
+    // A key with no action resolves to nothing (Ctrl-B browses projects — no Action).
+    assert!(Action::from_ctrl_key('b').is_none());
+
+    // The other direction: every `Ctrl-`_letter_ shortcut a registry action *shows*
+    // must round-trip back to that key through `from_ctrl_key` (the dispatch table),
+    // so nothing advertises a Ctrl-letter binding that dispatch doesn't honor.
+    for &a in Action::ALL {
+        if let Some(sc) = a.shortcut() {
+            if let Some(letter) = sc.strip_prefix("Ctrl-").and_then(|s| {
+                let mut it = s.chars();
+                match (it.next(), it.next()) {
+                    (Some(c), None) if c.is_ascii_alphabetic() => Some(c.to_ascii_lowercase()),
+                    _ => None,
+                }
+            }) {
+                assert!(
+                    Action::from_ctrl_key(letter).is_some(),
+                    "{a:?} shows {sc}, but Ctrl-{letter} maps to no action in dispatch"
+                );
+            }
+        }
+    }
+}
+
+/// F1 is the shown shortcut for the user's guide (#1103) and really opens it — the
+/// one function-key binding, dispatched in `on_key` rather than `on_key_ctrl`.
+#[test]
+fn f1_shortcut_opens_the_user_guide() {
+    let (mut app, _dir) = two_chapter_app("action-f1-guide");
+    assert_eq!(Action::UserGuide.shortcut(), Some("F1"));
+    app.on_key(key(KeyCode::F(1)));
+    assert!(app.overlay.is_some(), "F1 opened the user's guide overlay");
+}
+
+/// Pressing an action's shown shortcut actually runs that action (#1103) — the
+/// live proof the cheat sheet doesn't lie. Ctrl-S saves; Ctrl-R opens the progress
+/// report. Driven through the real top-level key path, not `dispatch_action`.
+#[test]
+fn pressing_a_shown_shortcut_runs_the_action() {
+    let (mut app, _dir) = two_chapter_app("action-shortcut-live");
+    // Ctrl-S (Save.shortcut()) clears the dirty flag, exactly like the palette's Save.
+    app.on_key(key(KeyCode::Char('X')));
+    assert!(app.buffer.dirty);
+    assert_eq!(Action::Save.shortcut(), Some("Ctrl-S"));
+    app.on_key(ctrl('s'));
+    assert!(
+        !app.buffer.dirty,
+        "Ctrl-S saved, like the shown shortcut says"
+    );
+    // Ctrl-R (ProgressReport.shortcut()) opens the same overlay the action does.
+    assert_eq!(Action::ProgressReport.shortcut(), Some("Ctrl-R"));
+    app.on_key(ctrl('r'));
+    assert!(app.overlay.is_some(), "Ctrl-R opened the progress report");
+}
+
 #[test]
 fn run_save_action_writes_the_chapter() {
     let (mut app, dir) = two_chapter_app("action-save");

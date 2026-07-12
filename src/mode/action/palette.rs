@@ -20,8 +20,9 @@ pub struct Palette {
     pub(crate) collapsed: std::collections::HashSet<&'static str>,
 }
 
-/// One palette entry: a label, a one-line description, the command it runs, and an
-/// optional group it belongs to (for the collapsible run-action menu, #514).
+/// One palette entry: a label, a one-line description, the command it runs, an
+/// optional group it belongs to (for the collapsible run-action menu, #514), and
+/// the dedicated keyboard shortcut that also runs it, if any (#1103).
 pub struct PaletteItem {
     pub(crate) label: String,
     pub(crate) desc: String,
@@ -29,6 +30,11 @@ pub struct PaletteItem {
     /// The collapsible group this item sits under, or `None` for a flat (header-
     /// less) palette.
     pub(crate) group: Option<&'static str>,
+    /// The action's dedicated key binding shown alongside the label so the palette
+    /// doubles as a live cheat sheet (#1103), or `None` for the palette-only actions
+    /// (which then show no shortcut — no clutter). Set from [`Action::shortcut`], the
+    /// single source of truth shared with the key dispatch, so it can't drift.
+    pub(crate) shortcut: Option<&'static str>,
 }
 
 /// A rendered row of an open palette: a collapsible group header, or a runnable
@@ -50,12 +56,21 @@ impl PaletteItem {
             desc: desc.into(),
             command,
             group: None,
+            shortcut: None,
         }
     }
 
     /// Place this entry under a collapsible group heading (the run-action menu).
     pub(crate) const fn in_group(mut self, group: &'static str) -> Self {
         self.group = Some(group);
+        self
+    }
+
+    /// Show this entry's dedicated keyboard shortcut beside its label (#1103) — the
+    /// run-action menu sets it from [`Action::shortcut`](super::Action::shortcut) so
+    /// the palette teaches the real binding. `None` (the default) shows nothing.
+    pub(crate) const fn with_shortcut(mut self, shortcut: Option<&'static str>) -> Self {
+        self.shortcut = shortcut;
         self
     }
 }
