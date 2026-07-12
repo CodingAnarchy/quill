@@ -120,15 +120,16 @@ fn a_standalone_export_menu_lists_the_preview_then_each_format_once() {
     let Mode::Palette(p) = &app.mode else {
         panic!("export palette")
     };
-    // The style setter and preview lead (#569), then the seven whole-book formats
-    // once each (no series/book scope duplication for a standalone novel).
+    // The style setter and the two previews lead (#569/#1107), then the seven
+    // whole-book formats once each (no series/book scope duplication standalone).
     assert_eq!(p.items[0].label, "Set export style…");
     assert_eq!(p.items[1].label, "Preview style…");
-    assert_eq!(p.items[2].label, "Manuscript (Markdown)");
-    assert_eq!(p.items[8].label, "PDF (print interior)");
+    assert_eq!(p.items[2].label, "Preview print interior…");
+    assert_eq!(p.items[3].label, "Manuscript (Markdown)");
+    assert_eq!(p.items[9].label, "PDF (print interior)");
     // The sample-export entries (#584) follow under collapsed groups, so the
     // everyday whole-book formats still lead the menu unchanged.
-    assert_eq!(p.items[2].group, None, "whole-book formats are ungrouped");
+    assert_eq!(p.items[3].group, None, "whole-book formats are ungrouped");
 }
 
 // --- Scoped / sample export (#584) ------------------------------------------

@@ -573,6 +573,7 @@ impl App {
                     Some(Command::Git(g)) => self.start_git_action(g),
                     Some(Command::Export(f, scope)) => self.run_export(f, scope),
                     Some(Command::PreviewStyle) => self.preview_style(),
+                    Some(Command::PreviewPrintInterior) => self.preview_print_interior(),
                     Some(Command::Run(a)) => self.run_action(a, force),
                     Some(Command::RunWorkflow(i)) => self.run_workflow(i),
                     Some(Command::NewWorkflowFromPrompt) => self.start_describe_workflow(),

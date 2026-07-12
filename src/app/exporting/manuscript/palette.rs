@@ -76,6 +76,11 @@ impl App {
             "Open a styled sample of your [style] settings in your EPUB reader",
             Command::PreviewStyle,
         ));
+        items.push(PaletteItem::new(
+            "Preview print interior…",
+            "Open a sample page at your [print] trim/margins in your PDF viewer (#1107)",
+            Command::PreviewPrintInterior,
+        ));
         if self.project.book_count() > 1 {
             for (f, label, desc) in FORMATS {
                 items.push(item(
