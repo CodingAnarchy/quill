@@ -16,6 +16,7 @@ use super::math::{cosine, normalize};
 use super::{Breadth, Chapter, EchoPair, Embedder, Hit, IndexedPassage, Passage};
 use crate::ai::incremental::{digest, Digests};
 use crate::ai::AiError;
+use crate::atomic;
 
 /// The semantic retrieval index (#831): the manuscript's chapters chunked into
 /// passages, each with its embedding vector and the content digest of its chapter.
@@ -333,13 +334,15 @@ impl Index {
 
     /// Persist the index (creating `bible/`). Best effort — a write failure is
     /// returned for the caller to surface but never blocks the retrieval that
-    /// already succeeded in memory.
+    /// already succeeded in memory. Written atomically (temp → fsync → rename) so a
+    /// crash mid-write leaves the prior `.embed-index.json` intact rather than a
+    /// truncated one the next load would discard and rebuild from scratch.
     pub fn save(&self, root: &Path) -> std::io::Result<()> {
         let path = index_path(root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let body = serde_json::to_string(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, body)
+        atomic::write(&path, body.as_bytes())
     }
 }
