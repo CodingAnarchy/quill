@@ -111,9 +111,14 @@ pub(super) const fn store_rel_path() -> &'static str {
     "bible/findings.toml"
 }
 
-/// How a finding changed between two points in history (#1051). Each finding —
-/// keyed by its content, the same span/kind identity the store dedups on — lands
-/// in exactly one bucket relative to the two chosen points.
+/// How a finding changed between two points in history (#1051). Each *span* —
+/// keyed by summary + chapters + book, **ignoring the flagging pass's kind**
+/// (#1119) — lands in exactly one bucket relative to the two chosen points. The
+/// diff is deliberately span-keyed, not kind-keyed like the store's dedup: an
+/// author revising a manuscript cares whether *the issue at this span* was closed
+/// out, not which pass happened to flag it each run. A span flagged by continuity
+/// at the earlier point and by plot at the later one is one persisting issue —
+/// "still open" — not a resolution plus an introduction. (See [`diff_findings`].)
 #[derive(Default, Debug)]
 pub(super) struct FindingsDiff {
     /// Open at A, gone at B — the revision closed these out.
@@ -133,24 +138,49 @@ impl FindingsDiff {
 }
 
 /// Classify the open findings of two history points (#1051): purely local, over
-/// two already-generated stores — no AI request, no model call, no prose. A
-/// finding open at A but not B is **resolved**; open at B but not A is
-/// **introduced**; open at both is **still open**. Identity is the store's own
-/// content key (kind + span), so a re-produced finding matches across the two
-/// points exactly as a re-run matches a prior dismissal. Dismissed records don't
-/// count as open on either side, so they never appear in the diff.
+/// two already-generated stores — no AI request, no model call, no prose. A span
+/// open at A but not B is **resolved**; open at B but not A is **introduced**;
+/// open at both is **still open**.
+///
+/// Identity here is the *span* — summary + chapters + book, **without** the
+/// flagging pass's kind (#1119) — not the store's kind-inclusive content key. This
+/// is a deliberate divergence from the store's own dedup: the store keys on kind so
+/// two passes flagging one span stay distinct records, but the diff answers a
+/// different question — "did the issue at this span carry across the revision?" —
+/// which the flagging pass shouldn't change the answer to. Keying the diff on kind
+/// mis-reported a span that continuity flagged at the earlier point and plot flagged
+/// at the later one as both **resolved** *and* **introduced**, when it's one
+/// persisting issue that should read **still open**. Span-keying fixes that: the
+/// span carries through, so it lands in `still_open` once, attributed to whichever
+/// pass flagged it at the later point (the `after`-side finding).
+///
+/// The trade-off: two *genuinely distinct* findings that coincide on summary +
+/// chapters + book but differ only in kind collapse to one span in the diff. That
+/// collision is the same one [`span_key`]/`is_dismissed` already accept for
+/// dismissal-matching (a dismissal on one pass suppresses the same span on
+/// another), and it's the least-surprising author-facing outcome: the author reads
+/// the diff as "issues at spans", and a summary+chapters+book match is, in
+/// practice, the same underlying issue. Dismissed records don't count as open on
+/// either side, so they never appear in the diff.
 pub(super) fn diff_findings(before: &FindingsStore, after: &FindingsStore) -> FindingsDiff {
-    let a: std::collections::HashSet<String> = before.open().iter().map(key).collect();
-    let b: std::collections::HashSet<String> = after.open().iter().map(key).collect();
+    let a: std::collections::HashSet<String> = before.open().iter().map(span_key).collect();
+    let b: std::collections::HashSet<String> = after.open().iter().map(span_key).collect();
     let mut diff = FindingsDiff::default();
+    // Dedup by span so a span flagged by several passes at one point contributes a
+    // single diff entry, not one per pass — the diff is about issues, not flags.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for f in before.open() {
         // Resolved: open at the earlier point, gone by the later one.
-        if !b.contains(&key(&f)) {
+        if !b.contains(&span_key(&f)) && seen.insert(span_key(&f)) {
             diff.resolved.push(f);
         }
     }
+    seen.clear();
     for f in after.open() {
-        if a.contains(&key(&f)) {
+        if !seen.insert(span_key(&f)) {
+            continue;
+        }
+        if a.contains(&span_key(&f)) {
             diff.still_open.push(f);
         } else {
             diff.introduced.push(f);
@@ -431,6 +461,61 @@ mod tests {
             vec!["the locket keeps changing color".to_string()],
             "present at both → still open"
         );
+    }
+
+    // A span that persists across a revision but is flagged by a *different pass* at
+    // the two points reads as "still open", not resolved+introduced (#1119). The diff
+    // is span-keyed (summary + chapters + book, ignoring kind): continuity flags the
+    // dangling thread at the earlier point, plot flags the same span at the later one
+    // — one persisting issue, so it carries through the diff once rather than closing
+    // out and re-opening under a different name.
+    #[test]
+    fn a_span_flagged_by_a_different_pass_across_a_revision_is_still_open() {
+        let span = "a dangling thread in ch.1";
+        let before = store_with(&[finding_of(FindingKind::Continuity, span)]);
+        let after = store_with(&[finding_of(FindingKind::Plot, span)]);
+
+        let diff = diff_findings(&before, &after);
+
+        assert!(
+            diff.resolved.is_empty(),
+            "a span flagged by another pass didn't get resolved — it persisted"
+        );
+        assert!(
+            diff.introduced.is_empty(),
+            "the span was open at the earlier point too — it isn't newly introduced"
+        );
+        assert_eq!(
+            diff.still_open.len(),
+            1,
+            "the persisting span carries through the diff exactly once"
+        );
+        assert_eq!(diff.still_open[0].summary, span);
+        // Attributed to the pass that flagged it at the later (after) point.
+        assert_eq!(diff.still_open[0].kind, FindingKind::Plot);
+    }
+
+    // A span flagged by several passes at one point (the store holds one record per
+    // pass) contributes a single diff entry, not one per pass (#1119): the diff
+    // measures issues at spans, not the flags raised on them.
+    #[test]
+    fn a_multi_pass_span_diffs_as_one_entry() {
+        let span = "the locket keeps changing color";
+        let before = store_with(&[
+            finding_of(FindingKind::Continuity, span),
+            finding_of(FindingKind::Plot, span),
+        ]);
+        // The span is gone at the later point → one resolved entry, not two.
+        let after = store_with(&[finding("an unrelated new issue")]);
+        let diff = diff_findings(&before, &after);
+        assert_eq!(
+            diff.resolved.len(),
+            1,
+            "a span several passes flagged resolves as one issue, not one per pass"
+        );
+        assert_eq!(diff.resolved[0].summary, span);
+        assert_eq!(diff.introduced.len(), 1);
+        assert!(diff.still_open.is_empty());
     }
 
     // Two empty stores diff cleanly (#1051): no findings on either side means every

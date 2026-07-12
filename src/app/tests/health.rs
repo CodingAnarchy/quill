@@ -209,7 +209,8 @@ fn kind_persists_through_the_durable_store() {
 fn consensus_merges_a_span_two_passes_flag_and_weights_it_by_agreement() {
     // Continuity and plot independently flag the same dangling thread (identical
     // summary + chapter). Consensus collapses them to one finding weighted by the
-    // agreement, keeping the first pass as the primary lens (#921).
+    // agreement, with the primary lens the highest-precedence pass by KIND_ORDER
+    // (#921/#1119) — continuity outranks plot, so it's primary here.
     let same = "One — a dangling thread";
     let merged = consensus(&[
         finding(FindingKind::Continuity, "One", same),
@@ -219,7 +220,7 @@ fn consensus_merges_a_span_two_passes_flag_and_weights_it_by_agreement() {
     assert_eq!(
         merged[0].kind,
         FindingKind::Continuity,
-        "primary is first-seen"
+        "primary is the highest-precedence pass by KIND_ORDER (continuity < plot)"
     );
     assert_eq!(
         merged[0].agreement(),
@@ -248,6 +249,41 @@ fn consensus_keeps_distinct_spans_apart() {
     ]);
     assert_eq!(merged.len(), 2, "distinct spans don't merge");
     assert!(merged.iter().all(|f| f.agreement_signal().is_none()));
+}
+
+#[test]
+fn consensus_attribution_is_stable_regardless_of_pass_order() {
+    // Per-kind attribution must not depend on which pass ran first (#1119). The same
+    // cross-pass span is supplied to consensus in both pass orders; the primary kind
+    // (the one the health-trend tallies under) is identical either way — the
+    // highest-precedence pass by KIND_ORDER, not first-seen. Plot outranks Voice in
+    // KIND_ORDER, so plot is primary whichever order the passes were appended in.
+    let same = "One — a sagging middle";
+    let plot_then_voice = consensus(&[
+        finding(FindingKind::Voice, "One", same),
+        finding(FindingKind::Plot, "One", same),
+    ]);
+    let voice_then_plot = consensus(&[
+        finding(FindingKind::Plot, "One", same),
+        finding(FindingKind::Voice, "One", same),
+    ]);
+
+    assert_eq!(plot_then_voice.len(), 1);
+    assert_eq!(voice_then_plot.len(), 1);
+    assert_eq!(
+        plot_then_voice[0].kind, voice_then_plot[0].kind,
+        "the primary kind is the same whatever order the passes ran"
+    );
+    assert_eq!(
+        plot_then_voice[0].kind,
+        FindingKind::Plot,
+        "the primary is the highest-precedence pass by KIND_ORDER (plot < voice)"
+    );
+    // The full agreement set matches too, so the displayed consensus signal is stable.
+    assert_eq!(
+        plot_then_voice[0].agreement(),
+        voice_then_plot[0].agreement()
+    );
 }
 
 #[test]
