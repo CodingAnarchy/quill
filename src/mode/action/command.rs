@@ -19,6 +19,11 @@ pub enum Command {
     /// Open a styled sample EPUB of the current `[style]` settings in the system
     /// reader (#483), so an author can see a preset + overrides before exporting.
     PreviewStyle,
+    /// Open a sample print-interior PDF (#1107) — the sample chapter rendered through
+    /// the print PDF writer at the current `[print]` trim/bleed and `[style]` — in the
+    /// system PDF viewer, so an author can see the drop cap, heading alignment, trim,
+    /// and margins before running a full print export.
+    PreviewPrintInterior,
     /// Run a registry [`Action`] from the unified run-action menu (#225). This is
     /// the going-forward path; `Ai`/`Export` above remain as their own variants
     /// only because the AI and export palettes still emit them directly — folding

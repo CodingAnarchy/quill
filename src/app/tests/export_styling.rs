@@ -91,6 +91,68 @@ fn style_preview_does_not_touch_the_project() {
 }
 
 #[test]
+fn print_interior_preview_is_a_pdf_from_current_print_and_style_settings() {
+    let (mut app, _dir) = two_chapter_app("preview-print-classic");
+    // A concrete `[print]` trim and a `[style]` preset — the preview must honor both.
+    app.project.manifest.print = Some(crate::export::pdf::PrintConfig {
+        trim: Some("5x8".into()),
+        ..Default::default()
+    });
+    app.project.manifest.style = Some(ExportStyle {
+        preset: Some("classic".into()),
+        ..Default::default()
+    });
+
+    let (bytes, warnings) = app.print_interior_preview_pdf().expect("preview builds");
+    assert_eq!(&bytes[..4], b"%PDF", "a PDF artifact");
+    assert!(!bytes.is_empty(), "a non-empty PDF");
+    assert!(
+        warnings.is_empty(),
+        "clean print/style, no warnings: {warnings:?}"
+    );
+}
+
+#[test]
+fn print_interior_preview_surfaces_an_unknown_trim() {
+    let (mut app, _dir) = two_chapter_app("preview-print-warn");
+    app.project.manifest.print = Some(crate::export::pdf::PrintConfig {
+        trim: Some("9x12".into()),
+        ..Default::default()
+    });
+
+    let (bytes, warnings) = app
+        .print_interior_preview_pdf()
+        .expect("preview still builds");
+    assert_eq!(&bytes[..4], b"%PDF", "still a PDF at the fallback trim");
+    assert!(
+        warnings.iter().any(|w| w.contains("unknown trim")),
+        "an unknown trim is reported, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn print_interior_preview_does_not_touch_the_project() {
+    let (mut app, dir) = two_chapter_app("preview-print-readonly");
+    app.project.manifest.style = Some(ExportStyle {
+        preset: Some("classic".into()),
+        ..Default::default()
+    });
+    let before = fs::read_to_string(dir.join("one.md")).unwrap();
+
+    app.print_interior_preview_pdf().expect("preview builds");
+
+    assert!(
+        !dir.join("export").exists(),
+        "preview writes no export/ dir in the project"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "the manuscript is untouched"
+    );
+}
+
+#[test]
 fn the_export_menu_offers_the_style_setter_and_preview() {
     let (mut app, _dir) = two_chapter_app("preview-style-menu");
     app.open_export_palette();
@@ -111,5 +173,13 @@ fn the_export_menu_offers_the_style_setter_and_preview() {
             Some(Command::PreviewStyle)
         ),
         "the preview is the second export-menu entry"
+    );
+    // The print-interior preview (#1107) sits right after the EPUB style preview.
+    assert!(
+        matches!(
+            p.items.get(2).map(|it| &it.command),
+            Some(Command::PreviewPrintInterior)
+        ),
+        "the print-interior preview is the third export-menu entry"
     );
 }

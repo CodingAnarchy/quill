@@ -126,6 +126,56 @@ impl App {
         let bytes = export::epub::to_epub(&doc, &crate::date::utc_timestamp(), &style)?;
         Ok((bytes, warnings))
     }
+
+    /// Preview the *print interior* style (#1107): render the fixed sample chapter
+    /// through the **same** print PDF writer a real export uses — at the manifest's
+    /// current `[print]` trim/bleed and resolved `[style]` — so an author can see the
+    /// drop cap, heading alignment, trim size, and margins on a representative page
+    /// without running a full export. Writes only a temp PDF and opens it in the
+    /// system PDF viewer (the same `open_in_default_app` helper the EPUB preview uses);
+    /// the project is never modified.
+    pub(crate) fn preview_print_interior(&mut self) {
+        let (bytes, warnings) = match self.print_interior_preview_pdf() {
+            Ok(built) => built,
+            Err(e) => {
+                self.message = Some(format!("Print preview failed: {e}"));
+                return;
+            }
+        };
+        let path = std::env::temp_dir().join("quill-print-preview.pdf");
+        if let Err(e) = std::fs::write(&path, &bytes) {
+            self.message = Some(format!("Print preview failed: {e}"));
+            return;
+        }
+        match open_in_default_app(&path) {
+            Ok(()) => self.message = Some(format!("Print preview opened ({})", path.display())),
+            // The PDF is written; only the launch failed — point the author at it.
+            Err(e) => {
+                self.message = Some(format!(
+                    "Wrote {} but couldn't open it: {e}",
+                    path.display()
+                ));
+            }
+        }
+        self.note_export_warnings(&warnings);
+    }
+
+    /// Render the fixed sample chapter (#1107) through the resolved `[style]` and the
+    /// **print** PDF writer at the manifest's current `[print]` trim/bleed, returning
+    /// the PDF bytes and any styling/trim warnings — the pure, side-effect-free core
+    /// of [`preview_print_interior`] (no temp file, no viewer launch). Reuses the same
+    /// `to_pdf_print` entry point a real print export drives, so the preview is
+    /// faithful; only the sample [`Document`] differs.
+    pub(crate) fn print_interior_preview_pdf(&self) -> std::io::Result<(Vec<u8>, Vec<String>)> {
+        let (style, mut warnings) = self.export_style();
+        let ((w, h), trim_warning) = self.print_trim();
+        warnings.extend(trim_warning);
+        warnings.extend(export::pdf::pdf_style_warnings(&style));
+        let bleed = self.print_bleed();
+        let doc = style_preview_document();
+        let bytes = export::pdf::to_pdf_print(&doc, w, h, bleed, &style)?;
+        Ok((bytes, warnings))
+    }
 }
 
 /// A fixed sample book for the style preview (#483): generic title-page metadata, a
@@ -173,9 +223,10 @@ fn style_preview_document() -> Document {
     }
 }
 
-/// Open `path` in the operating system's default application (#483) — the EPUB
-/// reader, for the style preview. Spawns the platform launcher and returns without
-/// waiting, so the editor keeps running.
+/// Open `path` in the operating system's default application — the EPUB reader for
+/// the style preview (#483), the PDF viewer for the print-interior preview (#1107).
+/// Spawns the platform launcher and returns without waiting, so the editor keeps
+/// running.
 fn open_in_default_app(path: &std::path::Path) -> std::io::Result<()> {
     use std::process::Command as Proc;
     #[cfg(target_os = "macos")]
