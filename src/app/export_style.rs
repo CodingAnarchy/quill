@@ -10,9 +10,14 @@
 //! updated first, so the next export and "Preview style…" reflect the change with
 //! no restart; the existing hand-edit / file-path config keeps round-tripping.
 //!
-//! Standalone novels only — a multi-book series has no single top-level `[style]`
-//! to splice, so the setter degrades to a clear "set per book by hand" message,
-//! exactly as #494 / #550 did for the splice path.
+//! Standalone novels only (#1105): a multi-book series does not carry per-book
+//! `[style]` / `[print]` design — the on-disk `[[books]]` form has no style/print
+//! table, and a top-level one is dropped when a series manifest loads — so the
+//! in-app setter can't target the active book without new manifest fields. Rather
+//! than pretend the feature is merely "unfinished" and point at a hand-edit that
+//! wouldn't take effect, the series branch surfaces the path that actually works:
+//! design lives in a standalone novel's `book.toml`, so manage the book as its own
+//! project to set its style / print design.
 
 use super::App;
 use crate::config;
@@ -21,6 +26,23 @@ use crate::export::style::{preset_blurb, HEADING_ALIGNS, PRESET_NAMES};
 use crate::export::ExportStyle;
 use crate::mode::{Command, Mode, Palette, PaletteItem, Pending, StylePicker, StyleTextKnob};
 use crate::project::{read_existing, Project};
+
+/// Guidance shown when an author tries to set `[style]` design on a multi-book
+/// series (#1105). A series manifest carries no per-book `[style]` table, so the
+/// setter can't apply to the active book; this points at the path that does work
+/// (a standalone novel's own `book.toml`) instead of a hand-edit that wouldn't
+/// take effect.
+const SERIES_STYLE_GUIDANCE: &str =
+    "In-app style design applies to a standalone novel — a multi-book series \
+     doesn't carry per-book [style] yet. Manage the book as its own project to \
+     set its style.";
+
+/// Guidance shown when an author tries to set `[print]` trim on a multi-book
+/// series (#1105); the print counterpart to [`SERIES_STYLE_GUIDANCE`].
+const SERIES_PRINT_GUIDANCE: &str =
+    "In-app print design applies to a standalone novel — a multi-book series \
+     doesn't carry per-book [print] yet. Manage the book as its own project to \
+     set its trim.";
 
 impl App {
     /// Open the export-style setter menu (`style:set`, #569): one row per editable
@@ -330,8 +352,9 @@ impl App {
     }
 
     /// The shared `[style]` splicer (#569): standalone novels only — a multi-book
-    /// series has no single top-level `[style]` table, so it degrades to a clear
-    /// "set per book by hand" message. Updates the in-memory style via `set_field`,
+    /// series carries no per-book `[style]` table, so it degrades to a clear
+    /// [`SERIES_STYLE_GUIDANCE`] message (#1105). Updates the in-memory style via
+    /// `set_field`,
     /// then writes a targeted splice (or strip, for `None`) into `book.toml`,
     /// preserving the rest of the manifest (mirrors #494 / #550). `literal` is the
     /// already-formatted TOML value to write (a quoted string, or a bare `true` /
@@ -343,9 +366,7 @@ impl App {
         set_field: impl FnOnce(&mut ExportStyle),
     ) -> std::io::Result<()> {
         if self.project.book_count() > 1 {
-            return Err(std::io::Error::other(
-                "setting a series style isn't supported yet — set [style] per book by hand",
-            ));
+            return Err(std::io::Error::other(SERIES_STYLE_GUIDANCE));
         }
         let style = self
             .project
@@ -369,9 +390,7 @@ impl App {
     /// splice as [`Self::splice_style`], for the print table.
     fn splice_print_trim(&mut self, name: &str) -> std::io::Result<()> {
         if self.project.book_count() > 1 {
-            return Err(std::io::Error::other(
-                "setting a series trim isn't supported yet — set [print] per book by hand",
-            ));
+            return Err(std::io::Error::other(SERIES_PRINT_GUIDANCE));
         }
         self.project
             .manifest
@@ -725,17 +744,15 @@ mod tests {
         s
     }
 
-    #[test]
-    fn a_series_reports_set_per_book_instead_of_splicing() {
-        // A multi-book series has no single top-level [style]; the setter degrades
-        // to a clear message rather than corrupting the manifest.
-        let dir = app_scratch_dir("style-series");
+    /// Write a two-book series manifest (and its chapter files) to `dir`, for the
+    /// series-guidance tests.
+    fn write_series(dir: &std::path::Path) {
         std::fs::create_dir_all(dir.join("b1")).unwrap();
         std::fs::create_dir_all(dir.join("b2")).unwrap();
         std::fs::write(dir.join("b1/one.md"), "alpha\n").unwrap();
         std::fs::write(dir.join("b2/one.md"), "beta\n").unwrap();
         std::fs::write(
-            Project::manifest_path(&dir),
+            Project::manifest_path(dir),
             "title = \"The Saga\"\n\n\
              [[books]]\ntitle = \"Book One\"\n\n\
              [[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n\
@@ -743,14 +760,63 @@ mod tests {
              [[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_series_style_set_guides_to_a_standalone_and_leaves_the_manifest_untouched() {
+        // A multi-book series carries no per-book [style]; the setter degrades to a
+        // clear message rather than corrupting the manifest (#1105). The message
+        // must not read as merely "unfinished" — it names the path that works
+        // (standalone) and does NOT send the author to a hand-edit that wouldn't
+        // take effect.
+        let dir = app_scratch_dir("style-series");
+        write_series(&dir);
+        let before = manifest_text(&dir);
         let mut app = open_test_app(&dir);
         let _dir = TempProject::new(dir);
 
         app.set_style_preset(Some(0));
+        let msg = app.message.as_deref().unwrap_or("");
+        assert!(msg.contains("standalone"), "{msg:?}");
         assert!(
-            app.message.as_deref().unwrap_or("").contains("per book"),
-            "{:?}",
-            app.message
+            !msg.contains("isn't supported yet"),
+            "must not read as unfinished: {msg:?}"
         );
+        assert!(
+            !msg.contains("per book by hand"),
+            "must not point at a hand-edit that wouldn't take effect: {msg:?}"
+        );
+        // Nothing was written to the series manifest.
+        assert_eq!(manifest_text(&_dir), before, "series manifest untouched");
+    }
+
+    #[test]
+    fn a_series_trim_set_guides_to_a_standalone() {
+        // The [print] trim counterpart to the [style] guidance (#1105).
+        let dir = app_scratch_dir("style-series-trim");
+        write_series(&dir);
+        let before = manifest_text(&dir);
+        let mut app = open_test_app(&dir);
+        let _dir = TempProject::new(dir);
+
+        app.set_style_trim(0);
+        let msg = app.message.as_deref().unwrap_or("");
+        assert!(msg.contains("standalone"), "{msg:?}");
+        assert!(!msg.contains("isn't supported yet"), "{msg:?}");
+        assert_eq!(manifest_text(&_dir), before, "series manifest untouched");
+    }
+
+    /// A standalone novel is unchanged by the series guidance — its style still
+    /// splices in-app (#1105 guards single-book behavior).
+    #[test]
+    fn a_standalone_still_splices_style_after_the_series_reword() {
+        let (mut app, dir) = style_app("style-standalone-unchanged");
+        app.set_style_preset(Some(0));
+        assert_eq!(
+            app.message.as_deref(),
+            Some("Set preset to classic."),
+            "single-book behavior unchanged"
+        );
+        assert!(manifest_text(&dir).contains("preset = \"classic\""));
     }
 }
