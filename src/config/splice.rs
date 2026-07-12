@@ -93,7 +93,40 @@ pub fn set_values(changes: &[(String, String, String)]) -> io::Result<std::path:
 /// Pure (no I/O), so the same splice serves both the home config file and a
 /// project's `book.toml` (#550): the manifest's `[goals]` table is updated in
 /// place this way, leaving the rest of the manifest byte-for-byte.
+///
+/// The line splice only recognises a section written as a literal `[header]`
+/// line. A hand-maintained config may instead write the same section as an
+/// inline table (`editor = { vim = true }`) or with dotted keys (`keys.down =
+/// "j"` under `[editor]`); the splice can't see those, so it would append a
+/// duplicate `[section]` table and corrupt the file into invalid TOML — which the
+/// loader's best-effort parse then swallows, silently resetting every setting
+/// (#1140). So the spliced output is parse-validated before it's returned; if it
+/// no longer parses (the duplicate-table case), we fall back to
+/// [`rewrite_value`], which re-emits the whole document through the `toml`
+/// serializer with the one change applied. The fallback loses comment/formatting
+/// fidelity for that write, but it keeps every other value and stays valid TOML —
+/// the invariant that matters — rather than writing a document that reloads to
+/// defaults.
 pub fn set_value(existing: &str, section: &str, key: &str, value: &str) -> String {
+    let spliced = splice_line(existing, section, key, value);
+    // The common case: the splice produced valid TOML (a `[header]` section, or a
+    // fresh file). Return it verbatim so comments and formatting are preserved.
+    if toml::from_str::<toml::Table>(&spliced).is_ok() {
+        return spliced;
+    }
+    // The splice corrupted the file (an inline-table or dotted-key section form it
+    // couldn't match, now duplicated). Rewrite structurally instead, but only if
+    // the *original* was itself valid TOML — otherwise there's nothing better to
+    // fall back to and the spliced text is as good as any.
+    rewrite_value(existing, section, key, value).unwrap_or(spliced)
+}
+
+/// The original line splice: set `key = value` under a literal `[section]` header,
+/// replacing the key in place, inserting under the header, or appending a new
+/// section. Preserves every other line byte-for-byte. Split out from [`set_value`]
+/// so the fast path stays a pure text edit while [`set_value`] validates its
+/// result and falls back when the section is written in a form this can't see.
+fn splice_line(existing: &str, section: &str, key: &str, value: &str) -> String {
     let entry = format!("{key} = {value}");
     let header = format!("[{section}]");
     let mut lines: Vec<String> = existing.lines().map(String::from).collect();
@@ -127,6 +160,51 @@ pub fn set_value(existing: &str, section: &str, key: &str, value: &str) -> Strin
         out.push('\n');
     }
     out
+}
+
+/// The structured fallback for [`set_value`]: parse `existing` as a whole TOML
+/// document, set `key = value` in the `[section]` table (creating the nested path
+/// — `section` may be dotted, e.g. `editor.keys`), and re-serialize. Returns
+/// `None` if the original doesn't parse or the value literal can't be decoded, so
+/// [`set_value`] keeps its spliced text in that case.
+///
+/// This is what keeps an in-app change from clobbering a config whose sections are
+/// written as inline tables or dotted keys (#1140): the round-trip normalises
+/// those forms to standard `[header]` tables while preserving every value, so the
+/// result is valid TOML that reloads with the change applied and nothing lost.
+fn rewrite_value(existing: &str, section: &str, key: &str, value: &str) -> Option<String> {
+    let mut root: toml::Table = toml::from_str(existing).ok()?;
+    // Decode the pre-encoded scalar/array literal back into a value by parsing it
+    // as a one-key mini-document, so whatever `set_value`'s callers encoded (a
+    // bool, an int, a quoted string, an array) round-trips unchanged.
+    let decoded = toml::from_str::<toml::Table>(&format!("v = {value}"))
+        .ok()?
+        .remove("v")?;
+
+    // Walk (and create) the dotted section path, e.g. `editor.keys` → the `keys`
+    // table nested in `editor`. A path segment that exists but isn't a table would
+    // make the insert ambiguous, so bail to the spliced text instead.
+    let mut table = &mut root;
+    for segment in section.split('.') {
+        let next = table
+            .entry(segment.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        table = match next {
+            toml::Value::Table(t) => t,
+            _ => return None,
+        };
+    }
+    table.insert(key.to_string(), decoded);
+
+    let mut out = toml::to_string(&root).ok()?;
+    // Match the newline convention the splice uses: a trailing newline unless the
+    // original had none and wasn't empty. `toml::to_string` already ends in one.
+    if !(existing.is_empty() || existing.ends_with('\n')) {
+        while out.ends_with('\n') {
+            out.pop();
+        }
+    }
+    Some(out)
 }
 
 /// Remove `key` from `[section]` in the config file (#530), preserving everything
@@ -247,6 +325,108 @@ mod tests {
             "comments kept: {out}"
         );
         assert!(out.contains("vim = true"), "{out}");
+    }
+
+    /// Parse `text` and read the (possibly dotted) `section.key` back as a raw
+    /// value, asserting the whole document is valid TOML along the way. The core
+    /// #1140 invariant: after a splice the file still parses and the change is
+    /// there. Returns `None` if the key is absent (but a parse failure panics).
+    fn reload(text: &str, section: &str, key: &str) -> Option<toml::Value> {
+        let mut table: toml::Table = toml::from_str(text)
+            .unwrap_or_else(|e| panic!("result must be valid TOML: {e}\n{text}"));
+        for segment in section.split('.') {
+            table = match table.remove(segment) {
+                Some(toml::Value::Table(t)) => t,
+                _ => return None,
+            };
+        }
+        table.remove(key)
+    }
+
+    #[test]
+    fn set_value_edits_an_inline_table_section_without_corrupting_the_file() {
+        // A hand-maintained config may write a whole section as an inline table.
+        // The line splice can't see it and used to append a duplicate `[editor]`
+        // table → invalid TOML → every setting silently reset (#1140). The result
+        // must stay valid TOML, apply the change, and keep the sibling value.
+        let existing = "editor = { vim = true, column_width = 96 }\n[theme]\nname = \"dark\"\n";
+        let out = set_value(existing, "editor", "vim", "false");
+        assert_eq!(
+            reload(&out, "editor", "vim"),
+            Some(toml::Value::Boolean(false)),
+            "the change is applied and reloads: {out}"
+        );
+        assert_eq!(
+            reload(&out, "editor", "column_width"),
+            Some(toml::Value::Integer(96)),
+            "the sibling inline-table value is preserved: {out}"
+        );
+        assert_eq!(
+            reload(&out, "theme", "name"),
+            Some(toml::Value::String("dark".into())),
+            "an unrelated section is preserved: {out}"
+        );
+        assert_eq!(
+            out.matches("column_width").count(),
+            1,
+            "no duplicate editor table: {out}"
+        );
+    }
+
+    #[test]
+    fn key_remap_over_a_dotted_key_binding_stays_valid_toml() {
+        // A key binding written with dotted keys under `[editor]` (`keys.down =
+        // "j"`) is the dotted-key section form. An in-app remap targets section
+        // `editor.keys`; the splice can't match it and used to append a duplicate
+        // `[editor.keys]` table → invalid TOML → reset (#1140).
+        let existing = "[editor]\nvim = true\nkeys.down = \"j\"\nkeys.up = \"k\"\n";
+        let out = set_value(existing, "editor.keys", "down", "\"n\"");
+        assert_eq!(
+            reload(&out, "editor.keys", "down"),
+            Some(toml::Value::String("n".into())),
+            "the remap is applied and reloads: {out}"
+        );
+        assert_eq!(
+            reload(&out, "editor.keys", "up"),
+            Some(toml::Value::String("k".into())),
+            "the sibling binding is preserved: {out}"
+        );
+        assert_eq!(
+            reload(&out, "editor", "vim"),
+            Some(toml::Value::Boolean(true)),
+            "the sibling [editor] value is preserved: {out}"
+        );
+    }
+
+    #[test]
+    fn set_value_appends_a_new_binding_to_an_inline_editor_table() {
+        // Adding a brand-new key (a first key remap) to an inline-table `editor`
+        // section must also stay valid TOML and keep the existing values.
+        let existing = "editor = { vim = true }\n";
+        let out = set_value(existing, "editor.keys", "down", "\"n\"");
+        assert_eq!(
+            reload(&out, "editor.keys", "down"),
+            Some(toml::Value::String("n".into())),
+            "the new binding reloads: {out}"
+        );
+        assert_eq!(
+            reload(&out, "editor", "vim"),
+            Some(toml::Value::Boolean(true)),
+            "the inline-table value is preserved: {out}"
+        );
+    }
+
+    #[test]
+    fn set_value_leaves_the_valid_header_form_untouched() {
+        // The fast path is unchanged for the ordinary `[header]` form: the output
+        // is still the verbatim line splice (comments/formatting preserved), not a
+        // structural rewrite. A rewrite would drop the comment and reflow the file.
+        let existing = "# hand-maintained\n[editor]\nvim = false\ncolumn_width = 80\n";
+        let out = set_value(existing, "editor", "vim", "true");
+        assert_eq!(
+            out, "# hand-maintained\n[editor]\nvim = true\ncolumn_width = 80\n",
+            "the header form is a verbatim splice, no fallback rewrite: {out}"
+        );
     }
 
     #[test]
