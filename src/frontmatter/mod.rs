@@ -143,6 +143,33 @@ mod tests {
     }
 
     #[test]
+    fn unknown_future_front_matter_keys_are_preserved_across_a_round_trip() {
+        // COMPAT (#1097): a chapter written by a newer Quill carries front-matter
+        // keys this version doesn't model. The DECISION for front matter is
+        // PRESERVE (unlike the manifest, which drops): the block is held verbatim
+        // and edited surgically, so an unknown future key — and the author's hand
+        // formatting — survives a full open → edit → save round-trip untouched.
+        let text = "---\nstatus: draft\nfuture_key: from a newer version\nnested:\n  a: 1\n---\n# Chapter\n\nProse.\n";
+        let (front, body) = split(text);
+        let mut fm = FrontMatter::from_raw(front.expect("has front matter"));
+        // Edit a key Quill manages; the unknown key must not be disturbed.
+        fm.set_status(Status::Final);
+        let rejoined = join(Some(fm.as_str()), body);
+        assert!(
+            rejoined.contains("future_key: from a newer version"),
+            "an unknown future key is preserved verbatim: {rejoined}"
+        );
+        assert!(
+            rejoined.contains("nested:") && rejoined.contains("  a: 1"),
+            "a nested block this version doesn't interpret is preserved: {rejoined}"
+        );
+        assert!(
+            rejoined.contains("status: final"),
+            "the managed edit applied"
+        );
+    }
+
+    #[test]
     fn set_replaces_a_key_in_place_and_leaves_others_untouched() {
         let mut fm = FrontMatter::from_raw("status: draft\npov: Mara\ncustom: keep me\n");
         fm.set_status(Status::Final);

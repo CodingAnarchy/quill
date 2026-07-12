@@ -475,6 +475,7 @@ mod tests {
 
     fn manifest() -> Manifest {
         Manifest {
+            format_version: None,
             title: "Red State Earth".into(),
             subtitle: None,
             author: None,

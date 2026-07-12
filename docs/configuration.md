@@ -310,3 +310,39 @@ name = "light"
 The same three changes can be made without touching the file: open the Settings
 menu (`settings` in the Ctrl-K menu), pick **Autosave interval** and **Theme**,
 and set `[projects] home` by hand (the projects home has no in-app editor).
+
+---
+
+## On-disk format stability (across 1.x)
+
+Quill's on-disk formats — the `book.toml` project manifest, the home
+`config.toml`, and each chapter's YAML front matter — carry a compatibility
+promise: **a project written by any 1.x version opens in every other 1.x
+version.** A newer version can add fields without breaking an older one, and an
+older version won't corrupt a project a newer version has touched.
+
+**Unknown keys never fail a load.** Every config section and the manifest ignore
+keys they don't recognize, so a field a *newer* Quill added is silently skipped by
+an *older* one rather than erroring. (No struct uses `deny_unknown_fields`; this
+is a tested guarantee, not an accident.)
+
+**What happens to an unknown key on re-save** depends on the file:
+
+| Format | Unknown keys on re-save | Why |
+| --- | --- | --- |
+| Chapter front matter | **Preserved** verbatim | The `---` block is kept byte-for-byte and edited surgically — one key at a time — so an unknown key and your hand formatting survive untouched. |
+| `book.toml` manifest | **Dropped** | The manifest is a typed structure re-serialized whole on save, so a key this version doesn't model is not written back. |
+| `config.toml` | **Dropped** on rewrite | Config is typed like the manifest; Quill rarely rewrites the home config, but when it does an unmodeled key is not carried. |
+
+The practical consequence of the *drop* rows: if a newer Quill adds a manifest or
+config field and you then open and **save** that project in an older Quill, the
+newer field is lost (its default takes over). Reading alone never loses anything;
+only a save from the older version does. Front matter has no such caveat — its
+unknown keys always round-trip.
+
+**A version + migration escape valve.** For the rare change that genuinely *can't*
+be additive, `book.toml` may carry a `format_version` scalar. It's absent on every
+existing project (which reads as the current version, and stays byte-stable — Quill
+won't add the key to a project that never had it). A future breaking format change
+bumps the version and adds a migration step that upgrades an older file forward on
+open, so the format can evolve without a hard break.
