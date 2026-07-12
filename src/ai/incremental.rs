@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{bible, Request};
+use crate::atomic;
 
 /// A `chapter file → content digest` map: the manuscript state a pass was built
 /// from. `BTreeMap` so the serialized state file is stable (ordered).
@@ -327,13 +328,16 @@ impl State {
         Self::save(root, &state)
     }
 
+    /// Persist the state file atomically (temp → fsync → rename), so a crash
+    /// mid-write leaves the prior `.state.toml` intact rather than a torn record
+    /// the next pass would misread.
     fn save(root: &Path, state: &Self) -> std::io::Result<()> {
         let path = state_path(root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let body = toml::to_string(state).map_err(std::io::Error::other)?;
-        std::fs::write(path, body)
+        atomic::write(&path, body.as_bytes())
     }
 }
 
@@ -403,13 +407,16 @@ impl PassQueue {
 
     /// Persist the queue (creating `bible/`). Best effort — a write failure is
     /// returned for the caller to surface, but never blocks the run in progress.
+    /// Written atomically (temp → fsync → rename) so a crash mid-write can't leave
+    /// a torn `.queue.toml`, which would drop the resume cursor and lose the passes
+    /// already done — the prior queue survives instead.
     pub fn save(&self, root: &Path) -> std::io::Result<()> {
         let path = queue_path(root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let body = toml::to_string(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, body)
+        atomic::write(&path, body.as_bytes())
     }
 
     /// Mark the current pass done, bump the cursor, and persist so a crash after
@@ -892,5 +899,39 @@ mod tests {
         assert!(state.built_from("setting").is_none());
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    // #1099: the state file is written atomically, so a crash mid-record leaves the
+    // prior `.state.toml` intact rather than a torn file the next pass would misread.
+    // The atomic fail-point simulates a crash after the temp is staged but before the
+    // rename — the window a truncate-then-write would already have corrupted.
+    #[test]
+    fn a_failed_record_leaves_the_prior_state_intact() {
+        let dir = std::env::temp_dir().join(format!("quill-incr-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        State::record(&dir, "characters", "d", digests(&[("one.md", "a")])).unwrap();
+        let before = std::fs::read_to_string(state_path(&dir)).unwrap();
+
+        // Arm a crash before the next record's rename; it must fail without truncating
+        // the good state file.
+        crate::atomic::fail_point::arm_pre_rename_failure();
+        let err = State::record(&dir, "characters", "e", digests(&[("one.md", "b")]))
+            .expect_err("the armed record fails before its rename");
+        assert!(err.to_string().contains("injected"));
+
+        // The file is byte-for-byte the prior good state, and still loads the original
+        // digest — never truncated or half-written.
+        assert_eq!(
+            std::fs::read_to_string(state_path(&dir)).unwrap(),
+            before,
+            "the previous incremental state must survive a failed record"
+        );
+        assert_eq!(
+            State::load(&dir).built_from("characters"),
+            Some(&digests(&[("one.md", "a")]))
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

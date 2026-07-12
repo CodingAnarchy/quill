@@ -464,6 +464,61 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    // #1099: the index is written atomically, so a crash mid-write leaves the prior
+    // `.embed-index.json` intact rather than a truncated file the next load would
+    // discard and rebuild from scratch. The atomic fail-point simulates a crash after
+    // the temp is staged but before the rename — the window a truncate-then-write
+    // would already have corrupted.
+    #[test]
+    fn a_failed_save_leaves_the_prior_index_intact() {
+        let embedder = FakeEmbedder {
+            keywords: vec!["gold", "silver"],
+        };
+        let dir = std::env::temp_dir().join(format!("quill-embed-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let index_file = dir.join("bible").join(".embed-index.json");
+
+        // A first, good index on disk.
+        let mut index = Index::default();
+        index
+            .refresh(
+                &[chapter("Gold", "g.md", "The gold coin gleamed.")],
+                Breadth::Normal,
+                &embedder,
+            )
+            .unwrap();
+        index.save(&dir).unwrap();
+        let before = std::fs::read_to_string(&index_file).unwrap();
+
+        // Re-embed a changed manuscript, then arm a crash before the save's rename.
+        index
+            .refresh(
+                &[chapter("Silver", "s.md", "The silver coin gleamed.")],
+                Breadth::Normal,
+                &embedder,
+            )
+            .unwrap();
+        crate::atomic::fail_point::arm_pre_rename_failure();
+        let err = index
+            .save(&dir)
+            .expect_err("the armed save fails before its rename");
+        assert!(err.to_string().contains("injected"));
+
+        // The file on disk is byte-for-byte the prior good index — never truncated —
+        // and still loads and searches as the original.
+        assert_eq!(
+            std::fs::read_to_string(&index_file).unwrap(),
+            before,
+            "the previous embedding index must survive a failed save"
+        );
+        let loaded = Index::load(&dir);
+        assert_eq!(loaded.passage_count(), 1);
+        let hits = loaded.search("gold", 1, &embedder).unwrap();
+        assert_eq!(hits[0].passage.title, "Gold");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn similar_excludes_the_query_passage_and_ranks_the_echo_first() {
         // The find-similar primitive (#924): querying with a passage's own prose

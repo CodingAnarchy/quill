@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::incremental::Digests;
+use crate::atomic;
 
 /// One in-flight batch: the provider's batch id, the bible tracker + book it
 /// rebuilds, and the manuscript state (chapter `file → digest`) captured at submit
@@ -113,14 +114,16 @@ impl BatchUpdate {
     }
 
     /// Persist the record (creating `bible/`). Best effort — a write failure is
-    /// returned for the caller to surface, but never blocks the update.
+    /// returned for the caller to surface, but never blocks the update. Written
+    /// atomically (temp → fsync → rename) so a crash mid-write can't leave a torn
+    /// `.batch.toml` that orphans an in-flight batch — the prior record survives.
     pub fn save(&self, root: &Path) -> std::io::Result<()> {
         let path = batch_path(root);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let body = toml::to_string(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, body)
+        atomic::write(&path, body.as_bytes())
     }
 
     /// Remove the record file (nothing left to reconcile). Best effort.
@@ -224,6 +227,48 @@ mod tests {
         std::fs::create_dir_all(dir.join("bible")).unwrap();
         std::fs::write(batch_path(&dir), "not = valid = toml =").unwrap();
         assert!(BatchUpdate::load(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // #1099: the record is written atomically, so a crash mid-write leaves the prior
+    // `.batch.toml` intact rather than a torn file that orphans an in-flight batch.
+    // The atomic fail-point simulates a crash after the temp is staged but before the
+    // rename — the exact window a truncate-then-write would already have destroyed.
+    #[test]
+    fn a_failed_save_leaves_the_prior_record_intact() {
+        let dir = std::env::temp_dir().join(format!("quill-batch-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut rec = BatchUpdate::default();
+        rec.push(
+            &dir,
+            batch("id1", "ai:characters", 0, digests(&[("one.md", "a")])),
+        )
+        .unwrap();
+        let before = std::fs::read_to_string(batch_path(&dir)).unwrap();
+
+        // Arm a crash before the next save's rename; it must fail without truncating
+        // the good record.
+        crate::atomic::fail_point::arm_pre_rename_failure();
+        let err = rec
+            .push(
+                &dir,
+                batch("id2", "ai:continuity", 0, digests(&[("one.md", "a")])),
+            )
+            .expect_err("the armed save fails before its rename");
+        assert!(err.to_string().contains("injected"));
+
+        // The file on disk is byte-for-byte the prior good record — never truncated,
+        // never a half-written second batch — and still loads with the first batch.
+        assert_eq!(
+            std::fs::read_to_string(batch_path(&dir)).unwrap(),
+            before,
+            "the previous batch record must survive a failed save"
+        );
+        let loaded = BatchUpdate::load(&dir);
+        assert_eq!(loaded.batches.len(), 1);
+        assert_eq!(loaded.batches[0].batch_id, "id1");
+
         std::fs::remove_dir_all(&dir).ok();
     }
 }
