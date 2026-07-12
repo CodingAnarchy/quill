@@ -573,6 +573,55 @@ fn hallucinated_citations_do_not_inflate_coverage_into_a_false_full_read() {
 }
 
 #[test]
+fn a_mis_cased_but_valid_citation_stores_the_canonical_title_and_jumps() {
+    // #1145 (Bug): the loop genuinely reads "Chapter 7", but the model cites it as
+    // "chapter 7" (different casing). Case-insensitive validation accepted it, but the
+    // stored citation kept the MODEL's casing, so the exact-match jump ("chapter 7" vs
+    // the real "Chapter 7") failed "Chapter not found". The fix stores the CANONICAL
+    // read-side title, so a mis-cased-but-valid citation resolves to the real chapter
+    // and both the displayed citation and the coverage read-set use the canonical title.
+    let search = LexicalSearch::new(oversized_corpus());
+    let bible = bible_with_sections();
+    let mock = MockConverse::new(vec![
+        call(READ_CHAPTER, "Chapter 7"),
+        // The model cites the chapter it read, but with lowercase casing.
+        Turn::Final(
+            r#"{"answer":"The locket is introduced in chapter 7.","citations":["chapter 7"]}"#
+                .to_string(),
+        ),
+    ]);
+    let answer = run_retrieval(
+        &mock,
+        &search,
+        &bible,
+        "Where is the locket introduced?",
+        RETRIEVAL_MAX_TURNS,
+        STANDARD_CONTEXT_TOKENS,
+    )
+    .unwrap();
+    // The stored citation is the canonical read-side title, so an exact-match jump lands.
+    assert_eq!(
+        answer.citations,
+        vec!["Chapter 7".to_string()],
+        "a mis-cased citation is stored with the canonical read-side casing: {:?}",
+        answer.citations
+    );
+    assert!(
+        !answer.citations.contains(&"chapter 7".to_string()),
+        "the model's raw lowercase casing is not stored: {:?}",
+        answer.citations
+    );
+    // Coverage uses the canonical title too — one source of truth with the citations.
+    let coverage = answer.coverage.as_ref().unwrap();
+    assert_eq!(
+        coverage.chapters_read,
+        vec!["Chapter 7".to_string()],
+        "coverage read-set uses the canonical title: {:?}",
+        coverage.chapters_read
+    );
+}
+
+#[test]
 fn coverage_survives_the_response_round_trip() {
     // The offline answer is serialized to a Response and re-parsed by the shared
     // Q&A dispatch (#856); the coverage metadata must survive that round-trip so
