@@ -35,10 +35,41 @@ pub fn load_section<T: DeserializeOwned + Default>(section: &str) -> T {
         .map_or_else(T::default, |value| value.try_into().unwrap_or_default())
 }
 
+/// A warning if the global `config.toml` is present but malformed (#1100), naming
+/// the file and the TOML parse error so the author can fix it — rather than the
+/// per-section loaders silently swallowing the failure and falling back to
+/// defaults with no message (as [`read_section`]'s `.ok()` does). `None` when the
+/// file is absent (a fresh install has none) or parses cleanly; the defaults still
+/// apply either way, so the editor stays usable. The project manifest already
+/// surfaces its own parse error by name; this brings the global config to parity.
+///
+/// Read once at startup by the caller, which threads the warning into the same
+/// non-fatal startup notice as the theme / snippet / keymap warnings.
+pub fn global_config_warning() -> Option<String> {
+    let path = config_path()?;
+    // Only a genuine parse failure of a file that *is* there warrants a warning; a
+    // missing or unreadable file is the ordinary defaults-only case the loaders
+    // already handle silently.
+    let text = std::fs::read_to_string(&path).ok()?;
+    match toml::from_str::<toml::Table>(&text) {
+        Ok(_) => None,
+        // The full `Display` (like the manifest's `invalid <file>: {e}`) carries the
+        // line/column span, so the author can find the offending line — richer than
+        // the bare `.message()`. Framed as "using defaults" so it reads as a
+        // non-fatal notice, not the manifest's hard open failure.
+        Err(err) => Some(format!(
+            "Malformed config, using defaults: {} — {err}",
+            path.display()
+        )),
+    }
+}
+
 /// The `[section]` table of the TOML file at `path`, as a raw [`toml::Value`], or
 /// `None` when the path is absent, unreadable, unparseable, or lacks the section.
 /// Untyped so [`merge_sections`] can overlay two layers key by key before either
-/// is deserialized into the section's concrete type.
+/// is deserialized into the section's concrete type. A malformed file is swallowed
+/// here (defaults still load); [`global_config_warning`] surfaces that case to the
+/// author so the silent reset (#1100) at least announces itself.
 fn read_section(path: Option<&std::path::Path>, section: &str) -> Option<toml::Value> {
     path.and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| toml::from_str::<toml::Table>(&t).ok())
@@ -213,6 +244,43 @@ mod tests {
         let keys = merged.get("keys").unwrap().as_table().unwrap();
         assert_eq!(keys["down"].as_str(), Some("j"), "project key wins");
         assert_eq!(keys["up"].as_str(), Some("e"), "global sibling kept");
+    }
+
+    #[test]
+    fn a_malformed_global_config_warns_and_still_loads_defaults() {
+        // A broken global config.toml used to be swallowed silently, section by
+        // section, with defaults quietly substituted (#1100). Now it surfaces a
+        // warning naming the file and the parse error — while the defaults still
+        // apply, so the editor stays usable.
+        let _fx = LayerFixture::new(
+            "malformed-global",
+            "[editor]\ncolumn_width = ", // truncated value: not valid TOML
+            None,
+        );
+        let warning = global_config_warning().expect("a malformed config warns");
+        assert!(
+            warning.contains("config.toml"),
+            "the warning names the file: {warning}"
+        );
+        assert!(
+            warning.to_lowercase().contains("malformed")
+                || warning.to_lowercase().contains("default"),
+            "the warning explains defaults are used: {warning}"
+        );
+        // Defaults still load: the built-in column width, not a panic or reset error.
+        assert_eq!(
+            EditorConfig::load().column_width,
+            EditorConfig::default().column_width,
+            "defaults still apply so the editor stays usable"
+        );
+    }
+
+    #[test]
+    fn a_well_formed_global_config_does_not_warn() {
+        // The happy path stays quiet: a valid config yields no warning (and no false
+        // positive on a fresh install, whose config is simply absent).
+        let _fx = LayerFixture::new("valid-global", "[editor]\ncolumn_width = 72\n", None);
+        assert_eq!(global_config_warning(), None, "a valid config is silent");
     }
 
     #[test]
