@@ -62,6 +62,17 @@ macro_rules! theme_colors {
                 }
                 true
             }
+
+            /// The current color of the field named `key` (a [`COLOR_FIELDS`]
+            /// entry), for the in-app theme-color editor (#1109) to show a field's
+            /// effective value; falls back to the dark default's `heading` for an
+            /// unknown key (the editor only ever passes real fields).
+            pub(crate) fn field_color(&self, key: &str) -> Color {
+                match key {
+                    $(stringify!($name) => self.$name,)+
+                    _ => Self::dark().heading,
+                }
+            }
         }
 
         /// The overridable color-field keys (the `[theme]` keys other than

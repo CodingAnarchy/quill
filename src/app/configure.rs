@@ -155,6 +155,11 @@ impl App {
         self.focus_mode = editor.focus_mode;
         self.paragraph_indent = editor.paragraph_indent;
         self.autosave_interval_secs = editor.autosave_interval_secs;
+        // Rebuild the Vim keymap from `[editor.keys]` so an in-app remap (#1109)
+        // takes effect without a restart; bad entries are dropped (kept default)
+        // exactly as at startup.
+        let (vim_keys, _) = crate::app::dispatch::build_keymap(&editor.keys);
+        self.vim_keys = vim_keys;
         let (theme, _) = config::load_theme();
         self.theme = theme;
         theme::set_current(theme);
