@@ -88,6 +88,7 @@ mod editing;
 mod export_styling;
 mod folds;
 mod goals;
+mod guide_nav;
 mod health;
 mod imports;
 mod join_reflow;
