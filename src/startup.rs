@@ -34,37 +34,57 @@ pub enum StartupAction {
     NewProject,
 }
 
-/// Decide what a no-path launch does (#526), from whether the current directory is
-/// already a project (`in_project`), how many openable projects exist
-/// (`openable_count` — recents + library), and the opt-in reopen-last preference
-/// (#613): `open_last` set (`[projects] open_last = true`) together with the
-/// `most_recent` project's path, if any. Pure: no I/O, no terminal.
+/// The launch situation the [`decide`] flow reads (#1083) — the two opaque
+/// booleans (`in_project`, `open_last`) collapsed into their meaningful named
+/// cases, so a caller states *which* situation it is in rather than passing two
+/// bare flags. The reopen-last preference only matters off-project, so it lives on
+/// the [`OffProject`](StartupContext::OffProject) variant, not as a free-floating
+/// flag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartupContext {
+    /// The current directory is already a project — open it in place, no chooser.
+    InProject,
+    /// Not inside a project: the launch falls to the chooser / reopen-last /
+    /// new-project degrade, depending on the reopen-last preference and what is
+    /// openable.
+    OffProject {
+        /// The opt-in reopen-last preference (#613): `[projects] open_last = true`.
+        /// When set and a most-recent project exists, that project is reopened
+        /// directly instead of showing the chooser.
+        open_last: bool,
+    },
+}
+
+/// Decide what a no-path launch does (#526), from the launch `context` (whether the
+/// current directory is already a project, and — off-project — the opt-in
+/// reopen-last preference #613), how many openable projects exist (`openable_count`
+/// — recents + library), and the `most_recent` project's path, if any. Pure: no
+/// I/O, no terminal.
 ///
 /// - Inside a project → open it in place, no chooser.
-/// - Not inside a project, `open_last` set, a most-recent project → open that
-///   project directly, skipping the chooser (#613).
-/// - Not inside a project, something to open → the chooser.
-/// - Not inside a project, nothing to open → straight to the new-project prompt,
-///   rather than an empty picker.
+/// - Off-project, `open_last` set, a most-recent project → open that project
+///   directly, skipping the chooser (#613).
+/// - Off-project, something to open → the chooser.
+/// - Off-project, nothing to open → straight to the new-project prompt, rather
+///   than an empty picker.
 pub fn decide(
     cwd: &Path,
-    in_project: bool,
+    context: StartupContext,
     openable_count: usize,
-    open_last: bool,
     most_recent: Option<&Path>,
 ) -> StartupAction {
-    if in_project {
-        StartupAction::OpenInPlace(cwd.to_path_buf())
-    } else if let Some(recent) = most_recent.filter(|_| open_last) {
-        // The opt-in shortcut (#613): reopen the most-recent project straight
-        // away rather than showing the chooser. Only when there *is* one — with
-        // no recents this falls through to the usual chooser/degrade below, so
-        // the flag never turns into an empty picker or a dead end.
-        StartupAction::OpenInPlace(recent.to_path_buf())
-    } else if openable_count > 0 {
-        StartupAction::Choose
-    } else {
-        StartupAction::NewProject
+    let open_last = match context {
+        StartupContext::InProject => return StartupAction::OpenInPlace(cwd.to_path_buf()),
+        StartupContext::OffProject { open_last } => open_last,
+    };
+    // The opt-in shortcut (#613): reopen the most-recent project straight away
+    // rather than showing the chooser. Only when there *is* one — with no recents
+    // this falls through to the usual chooser/degrade below, so the flag never
+    // turns into an empty picker or a dead end.
+    match most_recent.filter(|_| open_last) {
+        Some(recent) => StartupAction::OpenInPlace(recent.to_path_buf()),
+        None if openable_count > 0 => StartupAction::Choose,
+        None => StartupAction::NewProject,
     }
 }
 
@@ -193,17 +213,23 @@ mod tests {
         // and regardless of the reopen-last preference (#613).
         let cwd = Path::new("/books/current");
         assert_eq!(
-            decide(cwd, true, 5, false, None),
+            decide(cwd, StartupContext::InProject, 5, None),
             StartupAction::OpenInPlace(cwd.to_path_buf())
         );
         assert_eq!(
-            decide(cwd, true, 0, false, None),
+            decide(cwd, StartupContext::InProject, 0, None),
             StartupAction::OpenInPlace(cwd.to_path_buf())
         );
         // Even with `open_last` set and a recent, an in-project launch opens the
-        // *current* directory, not the recent — in-project is unaffected.
+        // *current* directory, not the recent — in-project is unaffected. (The
+        // in-project context carries no reopen-last flag: it never reaches it.)
         assert_eq!(
-            decide(cwd, true, 5, true, Some(Path::new("/books/other"))),
+            decide(
+                cwd,
+                StartupContext::InProject,
+                5,
+                Some(Path::new("/books/other"))
+            ),
             StartupAction::OpenInPlace(cwd.to_path_buf())
         );
     }
@@ -213,15 +239,19 @@ mod tests {
         // Default (unset) behavior: the chooser, regardless of a most-recent
         // project being available.
         assert_eq!(
-            decide(Path::new("/tmp"), false, 1, false, None),
+            decide(
+                Path::new("/tmp"),
+                StartupContext::OffProject { open_last: false },
+                1,
+                None
+            ),
             StartupAction::Choose
         );
         assert_eq!(
             decide(
                 Path::new("/tmp"),
-                false,
+                StartupContext::OffProject { open_last: false },
                 20,
-                false,
                 Some(Path::new("/books/last"))
             ),
             StartupAction::Choose
@@ -233,7 +263,12 @@ mod tests {
         // The graceful-degradation case (#526): no recents, no library — straight
         // to the new-project prompt, never an empty picker.
         assert_eq!(
-            decide(Path::new("/tmp"), false, 0, false, None),
+            decide(
+                Path::new("/tmp"),
+                StartupContext::OffProject { open_last: false },
+                0,
+                None
+            ),
             StartupAction::NewProject
         );
     }
@@ -244,7 +279,12 @@ mod tests {
         // place, skipping the chooser even though there's plenty to choose from.
         let last = Path::new("/books/last");
         assert_eq!(
-            decide(Path::new("/tmp"), false, 5, true, Some(last)),
+            decide(
+                Path::new("/tmp"),
+                StartupContext::OffProject { open_last: true },
+                5,
+                Some(last)
+            ),
             StartupAction::OpenInPlace(last.to_path_buf())
         );
     }
@@ -255,11 +295,21 @@ mod tests {
         // falls through to the usual behavior — the chooser when there's a library
         // to browse, the new-project degrade when there's nothing at all.
         assert_eq!(
-            decide(Path::new("/tmp"), false, 3, true, None),
+            decide(
+                Path::new("/tmp"),
+                StartupContext::OffProject { open_last: true },
+                3,
+                None
+            ),
             StartupAction::Choose
         );
         assert_eq!(
-            decide(Path::new("/tmp"), false, 0, true, None),
+            decide(
+                Path::new("/tmp"),
+                StartupContext::OffProject { open_last: true },
+                0,
+                None
+            ),
             StartupAction::NewProject
         );
     }

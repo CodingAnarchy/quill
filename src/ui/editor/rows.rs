@@ -177,18 +177,34 @@ pub(super) fn row_starts_for(
     }
 }
 
+/// The three independent click-map traits of a recorded visual row (#1083) —
+/// named so a call site reads `RowFlags { editable, verbatim, indent }` instead of
+/// three bare, positional booleans. Each is orthogonal (a row can be any
+/// combination), so a struct of named fields fits better than an enum.
+#[derive(Clone, Copy)]
+pub(super) struct RowFlags {
+    /// Whether the row carries editable buffer text (a click maps per character),
+    /// as opposed to a display-only row like a header block or collapsed heading
+    /// (a click maps to the line's start).
+    pub(super) editable: bool,
+    /// Whether the row is verbatim preview code — whitespace preserved, not
+    /// reflowed — so the click map treats it as a single unwrapped row.
+    pub(super) verbatim: bool,
+    /// Whether the row carries the display-only first-line paragraph indent (#722),
+    /// so the click→byte math accounts for the leading indent that isn't in the
+    /// buffer.
+    pub(super) indent: bool,
+}
+
 /// Append one visual row to the click layout map (#757), if one is being recorded.
 /// `rs`/`re` are the row's byte span within its logical line.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn record_row(
     layout: &mut Option<&mut EditorLayout>,
     line: usize,
     buffer: &Buffer,
     rs: usize,
     re: usize,
-    editable: bool,
-    verbatim: bool,
-    indent: bool,
+    flags: RowFlags,
 ) {
     if let Some(map) = layout.as_deref_mut() {
         map.rows.push(VisualRow {
@@ -196,9 +212,9 @@ pub(super) fn record_row(
             line_start: buffer.line_start_byte(line),
             row_start: rs,
             row_end: re,
-            editable,
-            verbatim,
-            indent,
+            editable: flags.editable,
+            verbatim: flags.verbatim,
+            indent: flags.indent,
         });
     }
 }

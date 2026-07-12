@@ -31,7 +31,7 @@ use focus::{first_row_indent, focus_paragraph, starts_paragraph};
 use header::header_inserts;
 use rows::{
     fold_glyph_cells, folded_heading_line, record_row, row_count, row_kind, row_starts_for,
-    styled_line, visible_width_before, RowKind, SpanHighlights,
+    styled_line, visible_width_before, RowFlags, RowKind, SpanHighlights,
 };
 
 /// An absolute byte range `[start, end)` in the buffer — a search match (#144).
@@ -450,7 +450,18 @@ fn render_body(
                 } else if lines.len() < height {
                     // A header block precedes line `ll`; a click here maps to that
                     // line's start (it carries no editable text of its own).
-                    record_row(&mut layout, ll, buffer, 0, 0, false, false, false);
+                    record_row(
+                        &mut layout,
+                        ll,
+                        buffer,
+                        0,
+                        0,
+                        RowFlags {
+                            editable: false,
+                            verbatim: false,
+                            indent: false,
+                        },
+                    );
                     lines.push(line.clone());
                 } else {
                     break 'fill;
@@ -511,9 +522,11 @@ fn render_body(
                 buffer,
                 rs,
                 re,
-                !collapsed,
-                verbatim,
-                indent && sub == 0,
+                RowFlags {
+                    editable: !collapsed,
+                    verbatim,
+                    indent: indent && sub == 0,
+                },
             );
             lines.push(line);
         }

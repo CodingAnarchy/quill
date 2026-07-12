@@ -8,7 +8,8 @@
 use super::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg};
 use super::write::OutlineItem;
 use super::{
-    Document, FontStyle, Pdf, Run, BODY_LEADING, BODY_SIZE, HEADING_LEADING, HEADING_SIZE,
+    Document, FontStyle, Pdf, Run, TextStyle, BODY_LEADING, BODY_SIZE, HEADING_LEADING,
+    HEADING_SIZE,
 };
 
 // The printed table-of-contents page (#603): its heading, list rhythm, and the gutter
@@ -101,7 +102,7 @@ impl Pdf {
                     leading: f32,
                     width: f32,
                     entry: Option<usize>| {
-            let words = words_of(&[Run::new(text, bold, false)], false);
+            let words = words_of(&[Run::new(text, TextStyle::from_flags(bold, false))], false);
             let wrapped = wrap_lines(&self.layout, &words, size, Hyphenate::Off, |_| width);
             for (i, (line, _w)) in wrapped.into_iter().enumerate() {
                 if *y - leading < bottom {
