@@ -307,6 +307,14 @@ impl App {
                 "Read-only: this project is already open in {holder}. Saves are disabled."
             ));
         }
+        // A malformed global config.toml is otherwise swallowed section by section
+        // (the loaders fall back to defaults with no message, #1100). Surface it once,
+        // naming the file and parse error, so the author knows their settings didn't
+        // take rather than discovering it silently. Defaults still applied above, so
+        // the editor stays usable.
+        if let Some(config_warning) = crate::config::global_config_warning() {
+            warnings.push(config_warning);
+        }
         if vim && !key_errors.is_empty() {
             warnings.push(format!("Vim keymap ignored: {}", key_errors.join("; ")));
         }
