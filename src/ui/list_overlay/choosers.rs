@@ -74,11 +74,10 @@ pub(in crate::ui) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palet
     draw_list_overlay(frame, area, &title, &help, rows, Some(palette.selected));
 }
 
-/// Render the no-path startup chooser (#526): a two-row list — create a new
-/// project, or open an existing one — over the whole screen. Reuses the list
-/// overlay so it matches the in-editor browsers. `open_existing` is false when
-/// there are no openable projects (the row is then absent and the caller skips
-/// straight to new-project), but the chooser is only shown when it's true.
+/// Render the no-path startup chooser (#526): a three-row list — create a new
+/// standalone project, start a new multi-book series (#1135), or open an existing
+/// one — over the whole screen. Reuses the list overlay so it matches the
+/// in-editor browsers. The chooser is only shown when there's something to open.
 pub fn draw_startup_chooser(frame: &mut Frame, area: Rect, selected: usize) {
     let rows = vec![
         list_row(
@@ -88,6 +87,11 @@ pub fn draw_startup_chooser(frame: &mut Frame, area: Rect, selected: usize) {
         ),
         list_row(
             selected == 1,
+            "Start a new series",
+            Some("name the series and its first book (#1135)".to_string()),
+        ),
+        list_row(
+            selected == 2,
             "Open an existing project",
             Some("pick from your recent projects and library".to_string()),
         ),

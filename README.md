@@ -468,15 +468,23 @@ manifest plus a first chapter).
 
 With **no argument**, Quill doesn't scatter a project into the current folder. If
 you launch from inside an existing project it opens that one. Otherwise — when you
-have books to return to — it offers a **chooser**: create a new project, or open
-an existing one. *Open existing* lists your recently-opened projects together with
-every project under your **projects home** (`[projects] home`, see
+have books to return to — it offers a **chooser**: create a new standalone
+project, **start a new series**, or open an existing one. *Open existing* lists
+your recently-opened projects together with every project under your **projects
+home** (`[projects] home`, see
 [Projects](#projects-switch-without-relaunching)); pick one and it opens. *Create
 new* asks what to call the book and files it in your projects home — so `quill`
 from anywhere starts a tidily-filed book rather than one wherever the shell
 happens to be. With no projects home configured it falls back to a `Quill` folder
 in your home directory and tells you so (set `[projects] home` to choose where
 books live).
+
+*Start a new series* asks for a **series title** and a **first-book title**, then
+scaffolds the project directly in the multi-book `[[books]]` shape — a genuine
+series from creation, with the named first book active and the **Switch book** /
+**Project tree** navigators available immediately (no in-app conversion needed).
+You can also reach this flow straight from the command line with **`quill
+--series`**.
 
 When you have nothing to open yet — no recent projects and no projects home — the
 chooser would be empty, so Quill skips it and goes straight to naming a new book.

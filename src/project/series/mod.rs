@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use super::{ChapterEntry, Goals, Manifest, Part};
 
 mod books;
+mod create;
 
 /// One book within a multi-book series (#276/#328). Holds the same per-book
 /// structure a standalone novel carries — title, optional book metadata, the
