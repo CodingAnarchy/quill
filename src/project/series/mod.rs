@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ChapterEntry, Goals, Manifest, Part};
+use super::{Analysis, ChapterEntry, Goals, Manifest, Part};
 
 mod books;
 mod create;
@@ -84,14 +84,36 @@ pub struct BookPublishing {
 /// [`Project`] and written back here on save.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 struct SeriesFile {
+    /// On-disk format version (#1141), stamped on every series manifest exactly as
+    /// the standalone [`Manifest::format_version`] is — so a series carries the same
+    /// schema-version escape valve and never silently writes an unversioned file. A
+    /// scalar key, so it precedes the `[[books]]` tables. Absent on a pre-#1141
+    /// series file, in which case it reads as [`CURRENT_FORMAT_VERSION`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    format_version: Option<u32>,
     /// The series title (the top-level `title` of a multi-book `book.toml`).
     title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     author: Option<String>,
+    /// BCP-47 language tag for the series package (#1141). Language is a
+    /// package-level / EPUB concern (drives `dc:language`/`xml:lang`), shared across
+    /// every book, so it rides once at the series root rather than per `[[books]]`
+    /// entry — matching the standalone `Manifest::language`. Preserved through the
+    /// convert path so it's never lost when a standalone becomes a series.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     todo_marker: Option<String>,
+    /// Per-project analysis / stopword overrides (#1141): the `[analysis]` word-list
+    /// adjustments the report reads. A project-wide setting (not series design), so
+    /// it lives once at the series root and applies across every book — matching the
+    /// standalone `Manifest::analysis`. Preserved through the convert path so the
+    /// author's tuned word lists aren't lost when a standalone becomes a series. A
+    /// table, so it follows the scalar keys and precedes the `[[books]]` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    analysis: Option<Analysis>,
     books: Vec<Book>,
 }
 
@@ -130,10 +152,13 @@ impl Manifest {
         // Series-level fields come from the file root; the per-book fields are
         // filled in by `load_book`, and everything else is the manifest default.
         let mut manifest = Self {
+            format_version: series.format_version,
             author: series.author.clone(),
             series: Some(series.title.clone()),
+            language: series.language.clone(),
             start_date: series.start_date.clone(),
             todo_marker: series.todo_marker.clone(),
+            analysis: series.analysis.clone(),
             ..Default::default()
         };
         manifest.load_book(book);
@@ -193,10 +218,18 @@ pub(super) fn series_to_toml(
     let mut books = books.to_vec();
     books[active_book] = manifest.to_book();
     let series = SeriesFile {
+        // Stamp the current format version on every series write, exactly as the
+        // standalone path does (#1141) — a series manifest is never left unversioned.
+        format_version: Some(manifest.format_version()),
         title: manifest.series.clone().unwrap_or_default(),
         author: manifest.author.clone(),
+        // Series-root / project-wide fields preserved through the convert path so
+        // they round-trip rather than being dropped when a standalone becomes a
+        // series (#1141).
+        language: manifest.language.clone(),
         start_date: manifest.start_date.clone(),
         todo_marker: manifest.todo_marker.clone(),
+        analysis: manifest.analysis.clone(),
         books,
     };
     toml::to_string_pretty(&series)
@@ -209,8 +242,8 @@ pub(super) mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
-    use super::super::Project;
-    use super::{Book, ChapterEntry, Goals, Manifest, Part};
+    use super::super::{Project, CURRENT_FORMAT_VERSION};
+    use super::{Analysis, Book, ChapterEntry, Goals, Manifest, Part};
 
     pub(super) fn temp_dir(name: &str) -> PathBuf {
         crate::testutil::scratch_dir("series", name)
@@ -404,6 +437,71 @@ file = \"b2/one.md\"
         assert_eq!(p.book_title(0), Some("Book One"));
         assert_eq!(p.book_title(1), Some("Book Two"));
         assert_eq!(p.series_title(), Some("The Saga"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Converting a standalone that carries `language` and `analysis`/stopword
+    /// settings preserves them through the series path (#1141): they're not series
+    /// design, so losing them would be data loss. They round-trip across a save +
+    /// reopen at the series root, and the written manifest is stamped with a
+    /// `format_version` exactly as a standalone one is.
+    fn manifest_with_settings() -> Manifest {
+        Manifest {
+            title: "Book".into(),
+            language: Some("fr".into()),
+            analysis: Some(Analysis {
+                stopwords_add: vec!["whilst".into()],
+                stopwords_remove: vec!["the".into()],
+                filter_words_add: vec!["felt".into()],
+                filter_words_remove: vec!["saw".into()],
+            }),
+            chapters: vec![ChapterEntry::new("One".into(), "one.md".into())],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn convert_preserves_language_and_analysis_through_a_reload() {
+        let dir = temp_dir("series-fidelity");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("one.md"), "prose\n").unwrap();
+
+        // Build a standalone with language + analysis set, save it flat, then open,
+        // convert to a series, and save the `[[books]]` form.
+        let manifest = manifest_with_settings();
+        fs::write(
+            Project::manifest_path(&dir),
+            toml::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let mut project = Project::open(&dir).unwrap();
+        project.convert_to_series("The Saga").unwrap();
+
+        // The on-disk series manifest carries the preserved series-root fields and a
+        // stamped format_version.
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("[[books]]"), "series shape:\n{toml}");
+        assert!(toml.contains("format_version"), "stamped version:\n{toml}");
+        assert!(toml.contains("language = \"fr\""), "language kept:\n{toml}");
+        assert!(toml.contains("[analysis]"), "analysis kept:\n{toml}");
+
+        // Reopening restores them onto the active manifest — no data loss.
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.series_title(), Some("The Saga"));
+        assert_eq!(reopened.manifest.language.as_deref(), Some("fr"));
+        let analysis = reopened.manifest.analysis.as_ref().expect("analysis kept");
+        assert_eq!(analysis.stopwords_add, ["whilst"]);
+        assert_eq!(analysis.stopwords_remove, ["the"]);
+        assert_eq!(analysis.filter_words_add, ["felt"]);
+        assert_eq!(analysis.filter_words_remove, ["saw"]);
+        assert_eq!(
+            reopened.manifest.format_version,
+            Some(CURRENT_FORMAT_VERSION),
+            "series manifest is versioned like a standalone"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
