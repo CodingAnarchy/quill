@@ -185,6 +185,51 @@ fn convert_and_add_a_book_in_app() {
     assert!(p.items[1].label.contains("Book Two") && p.items[1].label.contains("current"));
 }
 
+/// Converting a standalone that had `[style]`/`[print]` design set surfaces a
+/// non-fatal warning (#1141): series-level design is intentionally managed
+/// per-standalone (#1105), so it isn't carried into the series — but the author
+/// is told rather than having it silently dropped. The convert still succeeds and
+/// chains to the add-a-book prompt.
+#[test]
+fn convert_warns_when_series_level_design_was_set() {
+    let (mut app, _dir) = two_chapter_app("convert-warns-design");
+    // The standalone carries a `[style]` table (series design).
+    app.project.manifest.style = Some(crate::export::ExportStyle::default());
+    assert_eq!(app.project.book_count(), 1);
+
+    app.start_convert_to_series();
+    app.convert_to_series("The Saga");
+
+    // Convert succeeded and chained on as usual…
+    assert_eq!(app.project.series_title(), Some("The Saga"));
+    assert!(
+        matches!(&app.mode, Mode::Prompt(s) if matches!(s.pending, Pending::AddBook)),
+        "convert still chains into the add-a-book prompt"
+    );
+    // …but the message warns the design won't ride into the series.
+    let msg = app.message.as_deref().unwrap_or_default();
+    assert!(
+        msg.contains("style/print") && msg.contains("per book"),
+        "convert warns about dropped series-level design, got: {msg:?}"
+    );
+}
+
+/// Converting a plain standalone (no `[style]`/`[print]`) gets the ordinary
+/// success message, never the design warning (#1141) — the warning is scoped to
+/// the case where design was actually set.
+#[test]
+fn convert_without_design_does_not_warn() {
+    let (mut app, _dir) = two_chapter_app("convert-no-warn");
+    app.start_convert_to_series();
+    app.convert_to_series("The Saga");
+
+    let msg = app.message.as_deref().unwrap_or_default();
+    assert!(
+        !msg.contains("style/print"),
+        "no design warning when none was set, got: {msg:?}"
+    );
+}
+
 /// The manage-books palette (#648) lists each book with remove / move / add
 /// entries; removing a book (confirmed) drops it from the switcher, and its
 /// chapters are retired to `unused/`.

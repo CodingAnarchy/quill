@@ -130,9 +130,22 @@ impl App {
         } else {
             title.to_string()
         };
+        // Series design (`[style]`/`[print]`) is intentionally managed per-standalone
+        // (#1105), so the series path doesn't persist it. If the standalone had either
+        // set, warn the author it won't ride into the series rather than silently
+        // dropping it — captured before the convert, surfaced after (#1141).
+        let dropped_design =
+            self.project.manifest.style.is_some() || self.project.manifest.print.is_some();
         match self.project.convert_to_series(&title) {
             Ok(()) => {
-                self.message = Some(format!("Started series \u{201c}{title}\u{201d}."));
+                if dropped_design {
+                    self.message = Some(format!(
+                        "Started series \u{201c}{title}\u{201d}. Note: series-level style/print \
+                         design isn\u{2019}t carried over \u{2014} it\u{2019}s managed per book."
+                    ));
+                } else {
+                    self.message = Some(format!("Started series \u{201c}{title}\u{201d}."));
+                }
                 // A one-book series is only useful with a second book; chain to it.
                 self.prompt_add_book();
             }
