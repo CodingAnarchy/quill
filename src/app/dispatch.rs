@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::buffer::Buffer;
-use crate::mode::{Mode, Pending};
+use crate::mode::{Action, Mode, Pending};
 
 use super::App;
 
@@ -313,8 +313,20 @@ impl App {
     /// mode, so handling is fire-and-forget — an unrecognized one is simply
     /// ignored.
     pub(super) fn on_key_ctrl(&mut self, code: KeyCode) {
+        // The `Ctrl-` combos that run a registry action resolve through the one
+        // binding table on `Action` (#1103), so the shortcut the run-action menu
+        // shows is exactly the key that runs the action — it can't drift. Ctrl-E
+        // (export) and Ctrl-A (AI) still branch below, as they open a menu / do a
+        // readiness check rather than dispatch a single concrete action.
+        if let KeyCode::Char(c) = code {
+            if let Some(action) = Action::from_ctrl_key(c) {
+                if !matches!(action, Action::Export(_) | Action::Ai(_)) {
+                    self.dispatch_action(action, false);
+                    return;
+                }
+            }
+        }
         match code {
-            KeyCode::Char('s') => self.save_edit(),
             // Ctrl-Q and Ctrl-C both quit through the same guard (#730). Under raw
             // mode Ctrl-C arrives as a key event, not SIGINT, and terminal users
             // reflexively press it to leave a program — so honor it, but via
@@ -344,11 +356,8 @@ impl App {
             // Open the version-control palette (#54) — init / commit / history /
             // changes / restore, in one menu. Ctrl-v: "version control".
             KeyCode::Char('v') => self.open_git_palette(),
-            // Open the progress report (scroll to read; any other key closes).
-            KeyCode::Char('r') => self.open_progress_report(),
-            // Open the local analysis report — editing metrics. Ctrl-t: "text"
-            // analysis. Scrollable (it can run past one screen); any other key closes.
-            KeyCode::Char('t') => self.open_analysis_report(),
+            // Ctrl-R (progress report) and Ctrl-T (analysis report) are dispatched
+            // above via `Action::from_ctrl_key`.
             // Open the AI command palette (opt-in). When AI is off, offer the in-app
             // on-ramp to enable it (#602) rather than a dead-end config instruction;
             // when it's on but unready (no key), explain rather than list dead actions.
@@ -405,9 +414,8 @@ impl App {
             // the "collapse this" key, free in the editor. Fold-all / expand-all and
             // the composition-mode toggle live in the run-action menu (Ctrl-k).
             KeyCode::Char(' ') => self.toggle_fold_at_cursor(),
-            // Toggle distraction-free composition mode (#975): hide the chrome so
-            // only the prose shows. Ctrl-\ — a free key; Esc also exits it.
-            KeyCode::Char('\\') => self.toggle_distraction_free(),
+            // Ctrl-\ (composition mode) is dispatched above via
+            // `Action::from_ctrl_key` (toggle distraction-free; Esc also exits it).
             // Window/split prefix (#163): the next key is a window command
             // (s/v split, w/h/j/k/l focus, c/q close). Vim's Ctrl-w.
             KeyCode::Char('w') => self.window_pending = true,

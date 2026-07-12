@@ -631,6 +631,58 @@ impl Action {
         }
     }
 
+    /// The dedicated key binding that runs this action outside the palette, for the
+    /// actions that have one — so the run-action menu (Ctrl-K) doubles as a live
+    /// cheat sheet (#1103). `None` for the palette-only actions, which then show no
+    /// shortcut (no clutter).
+    ///
+    /// This is the single source of truth for those bindings: [`on_key_ctrl`] and
+    /// the F1 handler dispatch *from* this table (see `Action::from_ctrl_key` /
+    /// `Action::from_key_event`), so a shown shortcut is exactly the key that runs
+    /// the action — it can't drift. Anything without a binding here also has no
+    /// dedicated key in dispatch.
+    ///
+    /// [`on_key_ctrl`]: crate::app::App::on_key_ctrl
+    pub(crate) const fn shortcut(self) -> Option<&'static str> {
+        match self {
+            Self::Save => Some("Ctrl-S"),
+            // Ctrl-E opens the export menu; the individual format is then chosen
+            // there, so every export target shares the one export-menu key.
+            Self::Export(_) => Some("Ctrl-E"),
+            Self::ProgressReport => Some("Ctrl-R"),
+            Self::AnalysisReport => Some("Ctrl-T"),
+            // Ctrl-A opens the AI palette when AI is ready, or offers to enable it
+            // when it's off — both reachable from the one key.
+            Self::Ai(_) | Self::EnableAi => Some("Ctrl-A"),
+            Self::ToggleComposition => Some("Ctrl-\\"),
+            Self::UserGuide => Some("F1"),
+            _ => None,
+        }
+    }
+
+    /// The `Ctrl-`_letter_ action a top-level editing keypress runs, or `None` for a
+    /// `Ctrl-` combo that isn't a registry action (outline, quit, undo, …). The one
+    /// place `Ctrl-` shortcuts resolve to an [`Action`]: [`on_key_ctrl`] dispatches
+    /// through this so the binding lives once, and [`shortcut`](Action::shortcut) —
+    /// which the palette shows — is verified against it (see the parity test), so the
+    /// displayed key can't drift from what actually runs.
+    ///
+    /// `Ctrl-A` resolves to [`Ai`](Self::Ai) (the palette) here; whether it opens the
+    /// palette or the enable-AI on-ramp is a readiness decision the caller keeps.
+    ///
+    /// [`on_key_ctrl`]: crate::app::App::on_key_ctrl
+    pub(crate) const fn from_ctrl_key(c: char) -> Option<Self> {
+        match c {
+            's' => Some(Self::Save),
+            'e' => Some(Self::Export(ExportFormat::Markdown)),
+            'r' => Some(Self::ProgressReport),
+            't' => Some(Self::AnalysisReport),
+            'a' => Some(Self::Ai(AiAction::Ask)),
+            '\\' => Some(Self::ToggleComposition),
+            _ => None,
+        }
+    }
+
     /// Look up an action by its stable [`name`](Action::name) — the resolver a
     /// workflow (#226) uses to turn a config step token into an action.
     pub(crate) fn from_name(name: &str) -> Option<Self> {

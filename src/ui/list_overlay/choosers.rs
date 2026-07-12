@@ -34,15 +34,22 @@ pub(in crate::ui) fn draw_palette(frame: &mut Frame, area: Rect, palette: &Palet
                     }
                     Line::from(Span::styled(format!("{arrow} {group}"), style))
                 }
-                // An item, indented under its group heading when it has one.
+                // An item, indented under its group heading when it has one. When the
+                // action has a dedicated key binding (#1103), its shortcut is shown
+                // after the label so the palette doubles as a live cheat sheet.
                 PaletteRow::Item(i) => {
                     let item = &palette.items[i];
                     let indent = if item.group.is_some() { "  " } else { "" };
-                    list_row(
+                    let mut line = list_row(
                         selected,
                         &format!("{indent}{}", item.label),
                         Some(item.desc.clone()),
-                    )
+                    );
+                    if let Some(sc) = item.shortcut {
+                        line.spans
+                            .push(Span::styled(format!("  [{sc}]"), crate::ui::active_style()));
+                    }
+                    line
                 }
             }
         })

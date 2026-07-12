@@ -73,7 +73,12 @@ impl App {
                 } else {
                     a.name().to_string()
                 };
-                PaletteItem::new(a.label(), desc, Command::Run(a)).in_group(a.group())
+                // The shortcut comes straight from the registry (#1103), which shares
+                // its binding table with the key dispatch, so the palette shows the
+                // real key that runs the action.
+                PaletteItem::new(a.label(), desc, Command::Run(a))
+                    .in_group(a.group())
+                    .with_shortcut(a.shortcut())
             })
             .collect();
         let collapsed = self.palette_collapsed_for("Run action", &items);

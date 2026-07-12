@@ -39,6 +39,35 @@ fn a_long_palette_scrolls_to_keep_the_selection_visible() {
 }
 
 #[test]
+fn the_action_palette_shows_a_shortcut_for_actions_that_have_one() {
+    // The run-action palette doubles as a live cheat sheet (#1103): an action with a
+    // dedicated key binding shows it beside the label, and a palette-only action
+    // shows none. Expand every group so the items render.
+    let mut app = app_with("text\n");
+    app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    let Mode::Palette(p) = &mut app.mode else {
+        panic!("Ctrl-K opens the run-action palette");
+    };
+    p.collapsed.clear();
+    let screen = render(&app, 120, 50);
+
+    // Save has a binding (Ctrl-S) — it renders as a bracketed key hint on that row.
+    assert!(
+        screen.contains("Save") && screen.contains("[Ctrl-S]"),
+        "the Save row shows its Ctrl-S shortcut:\n{screen}"
+    );
+    // A palette-only action (Rename project) has no binding, so no bracket follows it.
+    let rename_line = screen
+        .lines()
+        .find(|l| l.contains("Rename project"))
+        .unwrap_or_default();
+    assert!(
+        !rename_line.contains('['),
+        "a binding-less action shows no shortcut: {rename_line:?}"
+    );
+}
+
+#[test]
 fn the_model_manager_lists_the_catalog_with_characteristics() {
     let mut app = app_with("text\n");
     app.mode = Mode::ModelManager { selected: 0 };
