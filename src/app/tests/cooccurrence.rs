@@ -75,7 +75,7 @@ fn character_in(name: &str, chapters: &[&str]) -> Character {
 fn motif_in(name: &str, chapters: &[&str]) -> Motif {
     Motif {
         name: name.into(),
-        status: "recurring".into(),
+        status: crate::ai::theme::MotifStatus::Recurring,
         appearances: chapters.iter().map(|c| (*c).to_string()).collect(),
         ..Motif::default()
     }

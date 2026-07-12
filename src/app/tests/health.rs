@@ -37,7 +37,7 @@ fn a_pass_stamps_its_kind_onto_the_finding() {
     // that kind survives into the standing triage list.
     let (mut app, _dir) = two_chapter_app("health-kind");
     app.apply_continuity(Ok(cont_with(vec![continuity::Finding {
-        kind: "object".into(),
+        kind: continuity::FindingKind::Object,
         detail: "the locket changes color".into(),
         chapters: vec!["One".into()],
     }])));

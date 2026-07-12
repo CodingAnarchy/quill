@@ -10,7 +10,7 @@ fn style_findings_open_the_overlay() {
     let (mut app, _dir) = two_chapter_app("style");
     app.apply_style(Ok(ai::style::Style {
         findings: vec![ai::style::StyleFinding {
-            kind: "POV".into(),
+            kind: crate::ai::style::StyleKind::Pov,
             detail: "head-hop in the duel scene".into(),
             chapters: vec!["Two".into()],
         }],
@@ -25,7 +25,7 @@ fn voice_findings_open_the_overlay_and_name_the_character() {
     let (mut app, _dir) = two_chapter_app("voice");
     app.apply_voice(Ok(ai::voice::Voice {
         findings: vec![ai::voice::VoiceFinding {
-            kind: "dialogue".into(),
+            kind: crate::ai::voice::VoiceKind::Dialogue,
             character: "Mara".into(),
             line: String::new(),
             detail: "too formal for her clipped register".into(),

@@ -14,7 +14,7 @@ fn plot_with(findings: Vec<plot::ThreadFinding>) -> Plot {
     Plot {
         threads: vec![plot::Thread {
             name: "The stolen locket".into(),
-            status: "open".into(),
+            status: plot::ThreadStatus::Open,
             setup: "Mara pockets it in ch. 1".into(),
             payoff: String::new(),
             last_seen: "One".into(),

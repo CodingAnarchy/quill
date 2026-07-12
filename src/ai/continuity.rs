@@ -5,12 +5,44 @@
 //! `bible/timeline.md`; the contradictions are surfaced as a triageable findings
 //! list. See `docs/ai-features.md` §2.
 
-use std::fmt::Write;
+use std::fmt::{self, Display, Write};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
+
+/// The closed set of continuity-contradiction categories the prompt asks for
+/// (#1082). Deserialized straight from the model reply; an out-of-contract value
+/// (a typo, a category the prompt never named) degrades to
+/// [`Unknown`](Self::Unknown) rather than a silent raw string, and [`Display`]
+/// reproduces the exact lowercase label the model emits for the valid variants so
+/// the rendered finding reads byte-identically.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingKind {
+    Location,
+    Age,
+    Object,
+    Timeline,
+    /// Any value outside the prompt's closed set (a model typo, a category the
+    /// contract never named). Renders as `"unknown"`.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Display for FindingKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Location => "location",
+            Self::Age => "age",
+            Self::Object => "object",
+            Self::Timeline => "timeline",
+            Self::Unknown => "unknown",
+        })
+    }
+}
 
 /// The result of a continuity pass: the ordered events and the contradictions.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -36,8 +68,9 @@ pub struct Event {
 /// One continuity contradiction.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Finding {
-    /// A short category, e.g. "location", "age", "object", "timeline".
-    pub kind: String,
+    /// A short category: location / age / object / timeline (#1082). A value
+    /// outside that set deserializes to [`FindingKind::Unknown`].
+    pub kind: FindingKind,
     pub detail: String,
     /// Chapters involved (titles).
     #[serde(default)]
@@ -180,7 +213,7 @@ mod tests {
                 },
             ],
             findings: vec![Finding {
-                kind: "object".into(),
+                kind: FindingKind::Object,
                 detail: "the locket is described as silver in ch.1 and gold in ch.2".into(),
                 chapters: vec!["The Find".into(), "The Reckoning".into()],
             }],
@@ -200,6 +233,35 @@ mod tests {
     #[test]
     fn parse_rejects_bad_json() {
         assert!(matches!(parse("nope"), Err(AiError::ModelNonCompliance(_))));
+    }
+
+    #[test]
+    fn finding_kind_round_trips_valid_values_to_the_same_label() {
+        // Each valid category deserializes to its variant and renders back to the
+        // exact lowercase string the model emitted — valid output stays byte-identical.
+        for (raw, kind) in [
+            ("location", FindingKind::Location),
+            ("age", FindingKind::Age),
+            ("object", FindingKind::Object),
+            ("timeline", FindingKind::Timeline),
+        ] {
+            let json = format!(
+                r#"{{"events":[],"findings":[{{"kind":"{raw}","detail":"d","chapters":[]}}]}}"#
+            );
+            let c = parse(&json).unwrap();
+            assert_eq!(c.findings[0].kind, kind);
+            assert_eq!(c.findings[0].kind.to_string(), raw);
+        }
+    }
+
+    #[test]
+    fn malformed_kind_degrades_to_unknown_not_a_raw_string() {
+        // A model typo doesn't error and doesn't leak the raw string into output — it
+        // becomes the explicit catch-all, which renders as "unknown".
+        let json = r#"{"events":[],"findings":[{"kind":"objcet","detail":"d","chapters":[]}]}"#;
+        let c = parse(json).unwrap();
+        assert_eq!(c.findings[0].kind, FindingKind::Unknown);
+        assert_eq!(c.findings[0].kind.to_string(), "unknown");
     }
 
     #[test]

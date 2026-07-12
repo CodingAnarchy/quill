@@ -15,7 +15,7 @@ fn theme_with(findings: Vec<MotifFinding>) -> ThemeBible {
     ThemeBible {
         motifs: vec![Motif {
             name: "Mirrors".into(),
-            status: "recurring".into(),
+            status: crate::ai::theme::MotifStatus::Recurring,
             meaning: "self-deception".into(),
             appearances: vec!["One".into()],
             notes: String::new(),

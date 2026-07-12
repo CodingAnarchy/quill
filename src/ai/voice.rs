@@ -7,10 +7,39 @@
 //! or narration — it surfaces the issue for the author to fix. See
 //! `docs/ai-features.md`.
 
+use std::fmt::{self, Display};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{AiError, Request, MAX_OUTPUT_TOKENS};
+
+/// The closed set of voice-finding categories the prompt asks for (#1082):
+/// `dialogue` (a line out of character) or `narration` (POV voice drift / not
+/// distinct). Deserialized straight from the model reply; an out-of-contract value
+/// degrades to [`Unknown`](Self::Unknown) rather than a silent raw string, and
+/// [`Display`] reproduces the exact lowercase label so a rendered finding reads
+/// identically.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VoiceKind {
+    Dialogue,
+    Narration,
+    /// Any value outside the prompt's closed set. Renders as `"unknown"`.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Display for VoiceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Dialogue => "dialogue",
+            Self::Narration => "narration",
+            Self::Unknown => "unknown",
+        })
+    }
+}
 
 /// The result of a voice pass: the voice-consistency observations.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -22,9 +51,10 @@ pub struct Voice {
 /// One voice observation, grounded in a character's voice profile.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct VoiceFinding {
-    /// "dialogue" (a line out of character) or "narration" (POV voice drift / not
-    /// distinct from another POV).
-    pub kind: String,
+    /// `dialogue` (a line out of character) or `narration` (POV voice drift / not
+    /// distinct from another POV) (#1082). A value outside that set deserializes to
+    /// [`VoiceKind::Unknown`].
+    pub kind: VoiceKind,
     /// The character whose voice the finding concerns (for a `dialogue` finding,
     /// the speaker of the flagged line).
     #[serde(default)]
@@ -110,8 +140,35 @@ mod tests {
         let json = r#"{"findings":[{"kind":"dialogue","character":"Mara","detail":"too formal","chapters":["Two"]}]}"#;
         let v = parse(json).unwrap();
         assert_eq!(v.findings.len(), 1);
-        assert_eq!(v.findings[0].kind, "dialogue");
+        assert_eq!(v.findings[0].kind, VoiceKind::Dialogue);
         assert_eq!(v.findings[0].character, "Mara");
+    }
+
+    #[test]
+    fn kind_round_trips_valid_values_to_the_same_label() {
+        // Each valid category deserializes to its variant and renders back to the
+        // exact lowercase string the model emitted — output stays byte-identical.
+        for (raw, kind) in [
+            ("dialogue", VoiceKind::Dialogue),
+            ("narration", VoiceKind::Narration),
+        ] {
+            let json = format!(
+                r#"{{"findings":[{{"kind":"{raw}","character":"Mara","detail":"d","chapters":[]}}]}}"#
+            );
+            let v = parse(&json).unwrap();
+            assert_eq!(v.findings[0].kind, kind);
+            assert_eq!(v.findings[0].kind.to_string(), raw);
+        }
+    }
+
+    #[test]
+    fn malformed_kind_degrades_to_unknown_not_a_raw_string() {
+        // A model typo doesn't error and doesn't leak the raw string into output.
+        let json =
+            r#"{"findings":[{"kind":"dilaogue","character":"Mara","detail":"d","chapters":[]}]}"#;
+        let v = parse(json).unwrap();
+        assert_eq!(v.findings[0].kind, VoiceKind::Unknown);
+        assert_eq!(v.findings[0].kind.to_string(), "unknown");
     }
 
     #[test]

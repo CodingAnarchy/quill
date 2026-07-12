@@ -10,12 +10,44 @@
 //! flags only, never writing or suggesting manuscript prose. See
 //! `docs/ai-features.md`.
 
-use std::fmt::Write;
+use std::fmt::{self, Display, Write};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{bible, incremental, AiError, Request, MAX_OUTPUT_TOKENS};
+
+/// The closed set of motif statuses the prompt asks for (#1082): seeded /
+/// established / recurring / faded / resolved. Deserialized straight from the
+/// model reply; an out-of-contract value degrades to [`Unknown`](Self::Unknown)
+/// rather than a silent raw string, and [`Display`] reproduces the exact lowercase
+/// label the model emits so the rendered motif heading reads byte-identically.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MotifStatus {
+    Seeded,
+    Established,
+    Recurring,
+    Faded,
+    Resolved,
+    /// Any value outside the prompt's closed set. Renders as `"unknown"`.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Display for MotifStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Seeded => "seeded",
+            Self::Established => "established",
+            Self::Recurring => "recurring",
+            Self::Faded => "faded",
+            Self::Resolved => "resolved",
+            Self::Unknown => "unknown",
+        })
+    }
+}
 
 /// The result of a theme pass: the tracked motifs and the dangling-motif findings.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -33,8 +65,9 @@ pub struct Theme {
 pub struct Motif {
     /// A short name for the motif, e.g. "Mirrors" or "The recurring storm".
     pub name: String,
-    /// Where the motif stands: e.g. "recurring", "established", "faded", "resolved".
-    pub status: String,
+    /// Where the motif stands: seeded / established / recurring / faded / resolved
+    /// (#1082). A value outside that set deserializes to [`MotifStatus::Unknown`].
+    pub status: MotifStatus,
     /// The meaning / theme the motif carries, e.g. "self-deception".
     #[serde(default)]
     pub meaning: String,
@@ -186,14 +219,14 @@ mod tests {
             motifs: vec![
                 Motif {
                     name: "Mirrors".into(),
-                    status: "recurring".into(),
+                    status: MotifStatus::Recurring,
                     meaning: "self-deception".into(),
                     appearances: vec!["The Reckoning".into(), "Ashes".into()],
                     notes: "pairs with the locket".into(),
                 },
                 Motif {
                     name: "The recurring storm".into(),
-                    status: "faded".into(),
+                    status: MotifStatus::Faded,
                     meaning: "coming upheaval".into(),
                     appearances: vec!["Ashes".into()],
                     notes: String::new(),
@@ -230,7 +263,7 @@ mod tests {
         let t = parse(json).unwrap();
         assert_eq!(t.motifs.len(), 1);
         assert_eq!(t.motifs[0].name, "Mirrors");
-        assert_eq!(t.motifs[0].status, "recurring");
+        assert_eq!(t.motifs[0].status, MotifStatus::Recurring);
         assert_eq!(t.motifs[0].appearances, vec!["One".to_string()]);
         assert!(t.findings.is_empty());
     }
@@ -247,6 +280,35 @@ mod tests {
     #[test]
     fn parse_rejects_bad_json() {
         assert!(matches!(parse("nope"), Err(AiError::ModelNonCompliance(_))));
+    }
+
+    #[test]
+    fn status_round_trips_valid_values_to_the_same_label() {
+        // Each valid status deserializes to its variant and renders back to the exact
+        // lowercase string the model emitted — the rendered heading stays identical.
+        for (raw, status) in [
+            ("seeded", MotifStatus::Seeded),
+            ("established", MotifStatus::Established),
+            ("recurring", MotifStatus::Recurring),
+            ("faded", MotifStatus::Faded),
+            ("resolved", MotifStatus::Resolved),
+        ] {
+            let json = format!(
+                r#"{{"motifs":[{{"name":"M","status":"{raw}","meaning":"","appearances":[],"notes":""}}],"findings":[]}}"#
+            );
+            let t = parse(&json).unwrap();
+            assert_eq!(t.motifs[0].status, status);
+            assert_eq!(t.motifs[0].status.to_string(), raw);
+        }
+    }
+
+    #[test]
+    fn malformed_status_degrades_to_unknown_not_a_raw_string() {
+        // A model typo doesn't error and doesn't leak the raw string into output.
+        let json = r#"{"motifs":[{"name":"M","status":"recuring","meaning":"","appearances":[],"notes":""}],"findings":[]}"#;
+        let t = parse(json).unwrap();
+        assert_eq!(t.motifs[0].status, MotifStatus::Unknown);
+        assert_eq!(t.motifs[0].status.to_string(), "unknown");
     }
 
     #[test]
