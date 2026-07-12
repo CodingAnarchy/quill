@@ -125,6 +125,12 @@ pub enum SettingPicker {
     Theme,
     /// An on/off picker for one boolean `[editor]` knob.
     Bool(SettingBool),
+    /// The per-field `[theme]` color overrides (#1109): a row per color field,
+    /// each showing its current value and opening a text prompt to override it.
+    ThemeColors,
+    /// The Vim `[editor.keys]` key bindings (#1109): a row per remappable action
+    /// showing its current key, each opening a prompt to remap it.
+    KeyBindings,
 }
 
 /// A boolean `[editor]` knob the plain Settings menu toggles (#592). Each maps to a
@@ -184,6 +190,16 @@ pub enum SettingTextKnob {
     /// The words added to the analysis report's stopword list
     /// (`[analysis] stopwords_add` in `book.toml`).
     Stopwords,
+    /// One `[theme]` color field's override (#1109), keyed by its config field
+    /// name (a `theme::COLOR_FIELDS` entry, e.g. `"heading"`). Validated as a
+    /// color and spliced into `[theme]`; a blank entry clears the override back to
+    /// the base theme's value.
+    ThemeColor(&'static str),
+    /// One Vim `[editor.keys]` remap (#1109), keyed by the action name (a
+    /// `dispatch::VIM_ACTIONS` entry, e.g. `"down"`). Validated as a single key and
+    /// spliced into `[editor.keys]`; a blank entry clears the remap back to the
+    /// action's default key.
+    KeyRemap(&'static str),
 }
 
 impl SettingTextKnob {
@@ -193,6 +209,8 @@ impl SettingTextKnob {
             Self::ColumnWidth => "column width",
             Self::AutosaveSecs => "autosave interval (seconds)",
             Self::Stopwords => "analysis stopwords",
+            Self::ThemeColor(field) => field,
+            Self::KeyRemap(action) => action,
         }
     }
 }

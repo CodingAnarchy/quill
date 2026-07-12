@@ -264,6 +264,16 @@ pub fn theme_name() -> Option<String> {
     table.get("name").cloned()
 }
 
+/// The configured `[theme]` color overrides — the raw string value set for each
+/// color field, excluding `name` (#1109). Read by the plain Settings menu's
+/// theme-color editor to show which fields the author has overridden (and to
+/// what) alongside the base theme's colors. Empty when nothing is overridden.
+pub fn theme_color_overrides() -> HashMap<String, String> {
+    let mut table: HashMap<String, String> = load_section("theme");
+    table.remove("name");
+    table
+}
+
 /// An author-defined text snippet (#411): a `name` and the literal `text` it
 /// expands to. Configured in the `[snippets]` table and inserted verbatim from
 /// the snippet picker — no transformation, no templating, with one exception:

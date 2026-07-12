@@ -15,12 +15,13 @@
 
 use super::App;
 use crate::app::configure::validate_change;
+use crate::app::dispatch::vim_remap_actions;
 use crate::config;
 use crate::mode::{
     Command, Mode, Palette, PaletteItem, Pending, SettingBool, SettingPicker, SettingTextKnob,
 };
 use crate::project::{read_existing, Project};
-use crate::theme::THEME_NAMES;
+use crate::theme::{Theme, COLOR_FIELDS, THEME_NAMES};
 
 /// Guidance shown when an author tries to set analysis stopwords on a multi-book
 /// series (#1105). A series manifest carries no per-book `[analysis]`, so the
@@ -65,6 +66,16 @@ impl App {
                 format!("Currently: {}", self.stopwords_label()),
                 Command::EditSettingText(SettingTextKnob::Stopwords),
             ),
+            PaletteItem::new(
+                "Theme colors…",
+                "Override individual [theme] colors, applied live",
+                Command::OpenSettingPicker(SettingPicker::ThemeColors),
+            ),
+            PaletteItem::new(
+                "Key bindings…",
+                "View and remap the Vim [editor.keys] bindings",
+                Command::OpenSettingPicker(SettingPicker::KeyBindings),
+            ),
         ];
         self.mode = Mode::Palette(Box::new(Palette {
             title: "Settings",
@@ -79,6 +90,8 @@ impl App {
         match picker {
             SettingPicker::Theme => self.open_setting_theme_picker(),
             SettingPicker::Bool(knob) => self.open_setting_bool_picker(knob),
+            SettingPicker::ThemeColors => self.open_setting_theme_colors(),
+            SettingPicker::KeyBindings => self.open_setting_key_bindings(),
         }
     }
 
@@ -113,6 +126,64 @@ impl App {
         ];
         self.mode = Mode::Palette(Box::new(Palette {
             title: knob.label(),
+            items,
+            selected: 0,
+            collapsed: std::collections::HashSet::default(),
+        }));
+    }
+
+    /// Open the theme-color editor (#1109): one row per overridable `[theme]`
+    /// color field, each showing its current value (the author's override, or the
+    /// base theme's value) and opening a text prompt to set / clear it.
+    fn open_setting_theme_colors(&mut self) {
+        let overrides = config::theme_color_overrides();
+        let items = COLOR_FIELDS
+            .iter()
+            .map(|&field| {
+                PaletteItem::new(
+                    field,
+                    format!(
+                        "Currently: {} — {}",
+                        color_value_label(&overrides, field, &self.theme),
+                        crate::theme::color_role(field)
+                    ),
+                    Command::EditSettingText(SettingTextKnob::ThemeColor(field)),
+                )
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Theme colors",
+            items,
+            selected: 0,
+            collapsed: std::collections::HashSet::default(),
+        }));
+    }
+
+    /// Open the key-bindings editor (#1109): one row per remappable Vim action,
+    /// each showing its current key (the author's remap, or the built-in default)
+    /// and opening a prompt to remap it. Satisfies the "view the bindings"
+    /// acceptance directly, and each row is a live remap.
+    fn open_setting_key_bindings(&mut self) {
+        let remaps = config::EditorConfig::load().keys;
+        let items = vim_remap_actions()
+            .iter()
+            .map(|&(action, default_key)| {
+                let current = remaps.get(action).cloned();
+                let shown = current.clone().unwrap_or_else(|| default_key.to_string());
+                let origin = if current.is_some() {
+                    "remapped"
+                } else {
+                    "default"
+                };
+                PaletteItem::new(
+                    action,
+                    format!("Currently: {shown} ({origin})"),
+                    Command::EditSettingText(SettingTextKnob::KeyRemap(action)),
+                )
+            })
+            .collect();
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Key bindings",
             items,
             selected: 0,
             collapsed: std::collections::HashSet::default(),
@@ -164,14 +235,29 @@ impl App {
     /// with its current value. Enter validates + saves it.
     pub(crate) fn prompt_setting_text(&mut self, knob: SettingTextKnob) {
         let (current, hint) = match knob {
-            SettingTextKnob::ColumnWidth => (self.focus_width.to_string(), "32–160"),
+            SettingTextKnob::ColumnWidth => (self.focus_width.to_string(), "32–160".to_string()),
             SettingTextKnob::AutosaveSecs => (
                 self.autosave_interval_secs.to_string(),
-                "seconds; 0 turns it off",
+                "seconds; 0 turns it off".to_string(),
             ),
             SettingTextKnob::Stopwords => (
                 self.current_stopwords().join(" "),
-                "space-separated words; blank clears them",
+                "space-separated words; blank clears them".to_string(),
+            ),
+            SettingTextKnob::ThemeColor(field) => (
+                config::theme_color_overrides()
+                    .get(field)
+                    .cloned()
+                    .unwrap_or_default(),
+                "ANSI name, #hex, r,g,b, or 0–255; blank resets".to_string(),
+            ),
+            SettingTextKnob::KeyRemap(action) => (
+                config::EditorConfig::load()
+                    .keys
+                    .get(action)
+                    .cloned()
+                    .unwrap_or_default(),
+                "one key; blank resets to the default".to_string(),
             ),
         };
         let label = format!("{} ({hint}): ", knob.label());
@@ -194,6 +280,88 @@ impl App {
                 text,
             ),
             SettingTextKnob::Stopwords => self.apply_stopwords(text),
+            SettingTextKnob::ThemeColor(field) => self.apply_theme_color(field, text),
+            SettingTextKnob::KeyRemap(action) => self.apply_key_remap(action, text),
+        }
+    }
+
+    /// Apply a `[theme]` color override (#1109): a blank entry strips the field
+    /// (resetting it to the base theme's value), else the value is validated as a
+    /// color and spliced into `[theme]`. Applied live through the shared config
+    /// path (the theme reloads and repaints), then the color menu re-opens so
+    /// several can be tweaked in one sitting. A bad color re-reports and re-prompts.
+    fn apply_theme_color(&mut self, field: &'static str, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            match strip_config_field("theme", field) {
+                Ok(()) => {
+                    self.apply_config_live();
+                    self.message = Some(format!("Reset {field} to the theme default."));
+                    self.open_setting_theme_colors();
+                }
+                Err(e) => {
+                    self.message = Some(format!("Couldn't reset {field}: {e}"));
+                    self.mode = self.editing_mode();
+                }
+            }
+            return;
+        }
+        match validate_change(&format!("theme.{field}"), text) {
+            Ok(literal) => {
+                self.persist_config_setting(
+                    "theme",
+                    field,
+                    &literal,
+                    &format!("{field} set to {text}."),
+                );
+                // persist_config_setting re-opens the flat Settings menu; re-open the
+                // color submenu instead so the author stays in the color editor.
+                if matches!(&self.mode, Mode::Palette(_)) {
+                    self.open_setting_theme_colors();
+                }
+            }
+            Err(why) => {
+                self.message = Some(format!("Theme color {why}"));
+                self.prompt_setting_text(SettingTextKnob::ThemeColor(field));
+            }
+        }
+    }
+
+    /// Apply a `[editor.keys]` remap (#1109): a blank entry strips the remap
+    /// (resetting the action to its default key), else the value is validated as a
+    /// single key and spliced into `[editor.keys]`. Applied live (the keymap
+    /// rebuilds through `apply_config_live`), then the key-binding menu re-opens.
+    /// A bad key re-reports and re-prompts.
+    fn apply_key_remap(&mut self, action: &'static str, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            match strip_config_field("editor.keys", action) {
+                Ok(()) => {
+                    self.apply_config_live();
+                    self.message = Some(format!("Reset {action} to its default key."));
+                    self.open_setting_key_bindings();
+                }
+                Err(e) => {
+                    self.message = Some(format!("Couldn't reset {action}: {e}"));
+                    self.mode = self.editing_mode();
+                }
+            }
+            return;
+        }
+        if text.chars().count() != 1 {
+            self.message = Some(format!("{action}: bind to a single key, got '{text}'"));
+            self.prompt_setting_text(SettingTextKnob::KeyRemap(action));
+            return;
+        }
+        let literal = toml::Value::String(text.to_string()).to_string();
+        self.persist_config_setting(
+            "editor.keys",
+            action,
+            &literal,
+            &format!("Remapped {action} to '{text}'."),
+        );
+        if matches!(&self.mode, Mode::Palette(_)) {
+            self.open_setting_key_bindings();
         }
     }
 
@@ -327,6 +495,52 @@ impl App {
     }
 }
 
+/// The value to show for a `[theme]` color row (#1109): the author's raw override
+/// string if the field is overridden, else the base theme's color for that field
+/// (marked "(default)"), so the menu shows what's actually in effect.
+fn color_value_label(
+    overrides: &std::collections::HashMap<String, String>,
+    field: &str,
+    theme: &Theme,
+) -> String {
+    overrides.get(field).map_or_else(
+        || format!("{} (default)", describe_color(theme.field_color(field))),
+        String::clone,
+    )
+}
+
+/// Strip `section.field` from the home config, preserving the rest (#1109): the
+/// reset path for a theme-color override or a key remap. A missing file / section
+/// / key is a no-op success (nothing to reset). Follows the splice/atomic-write
+/// convention (`config::strip_value` + `atomic::write`) the other config edits use.
+fn strip_config_field(section: &str, field: &str) -> std::io::Result<()> {
+    let Some(path) = config::config_path() else {
+        return Ok(());
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let (updated, removed) = config::strip_value(&text, section, field);
+    if removed {
+        crate::atomic::write(&path, updated.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// A short, config-like description of a `Color` for the theme-color menu (#1109):
+/// `#rrggbb` for an RGB color, the palette index for an indexed one, else the
+/// ANSI name lowercased (`Cyan` → `cyan`) so it reads like a value you could type.
+fn describe_color(color: ratatui::style::Color) -> String {
+    use ratatui::style::Color;
+    match color {
+        Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+        Color::Indexed(i) => i.to_string(),
+        other => format!("{other:?}").to_ascii_lowercase(),
+    }
+}
+
 /// A menu row for a boolean `[editor]` knob, showing its current on/off state.
 fn bool_row(knob: SettingBool, on: bool) -> PaletteItem {
     PaletteItem::new(
@@ -415,8 +629,8 @@ mod tests {
             panic!("the setter opens a palette");
         };
         // Theme, width, smart typography, auto-pair, vim, autosave, typewriter,
-        // focus, paragraph indent, stopwords.
-        assert_eq!(p.items.len(), 10);
+        // focus, paragraph indent, stopwords, theme colors, key bindings.
+        assert_eq!(p.items.len(), 12);
         assert_eq!(p.title, "Settings");
     }
 
@@ -588,6 +802,188 @@ mod tests {
             "section kept: {toml}"
         );
         assert!(toml.contains("vim = true"), "new key landed: {toml}");
+    }
+
+    #[test]
+    fn overriding_a_theme_color_persists_applies_live_and_round_trips() {
+        // #1109: an individual [theme] color set from the Settings menu splices into
+        // the config, applies to the running palette live, and round-trips through
+        // the loader.
+        let (mut app, _dir) = settings_app("settings-theme-color");
+        assert_eq!(app.theme.heading, crate::theme::Theme::dark().heading);
+        app.apply_setting_text(SettingTextKnob::ThemeColor("heading"), "#ff8800");
+        // Persisted under [theme], quoted so it round-trips.
+        let toml = config_text();
+        assert!(toml.contains("[theme]"), "{toml}");
+        assert!(toml.contains("heading = \"#ff8800\""), "{toml}");
+        // Applied live to the running theme.
+        assert_eq!(
+            app.theme.heading,
+            ratatui::style::Color::Rgb(0xff, 0x88, 0x00),
+            "override applied live"
+        );
+        // And it round-trips: reloading the theme reflects the override.
+        let (reloaded, warnings) = config::load_theme();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            reloaded.heading,
+            ratatui::style::Color::Rgb(0xff, 0x88, 0x00)
+        );
+    }
+
+    #[test]
+    fn an_invalid_theme_color_is_rejected_and_re_prompts() {
+        let (mut app, _dir) = settings_app("settings-theme-color-bad");
+        app.apply_setting_text(SettingTextKnob::ThemeColor("heading"), "chartreuse");
+        // Nothing written and the theme is unchanged.
+        assert_eq!(app.theme.heading, crate::theme::Theme::dark().heading);
+        let cfg = config::config_path().and_then(|p| std::fs::read_to_string(p).ok());
+        assert!(
+            cfg.is_none_or(|t| !t.contains("heading")),
+            "nothing spliced"
+        );
+        // The prompt re-opens with the rejection reported.
+        assert!(matches!(&app.mode, Mode::Prompt(_)), "re-prompts");
+        assert!(
+            app.message.as_deref().unwrap_or("").contains("color"),
+            "{:?}",
+            app.message
+        );
+    }
+
+    #[test]
+    fn clearing_a_theme_color_override_strips_the_key_and_resets_live() {
+        let (mut app, _dir) = settings_app("settings-theme-color-clear");
+        app.apply_setting_text(SettingTextKnob::ThemeColor("heading"), "#ff8800");
+        assert!(config_text().contains("heading = \"#ff8800\""));
+        // A blank entry resets the field: the key is stripped and the live theme
+        // returns to the base value.
+        app.apply_setting_text(SettingTextKnob::ThemeColor("heading"), "");
+        let toml = config_text();
+        assert!(!toml.contains("heading ="), "override stripped: {toml}");
+        assert_eq!(
+            app.theme.heading,
+            crate::theme::Theme::dark().heading,
+            "reset to the base theme live"
+        );
+    }
+
+    #[test]
+    fn the_theme_color_menu_lists_every_field_with_its_value() {
+        let (mut app, _dir) = settings_app("settings-theme-color-menu");
+        app.open_setting_theme_colors();
+        let Mode::Palette(p) = &app.mode else {
+            panic!("the theme-color editor opens a palette");
+        };
+        assert_eq!(p.title, "Theme colors");
+        assert_eq!(
+            p.items.len(),
+            crate::theme::COLOR_FIELDS.len(),
+            "a row per overridable color field"
+        );
+        // Each row is labeled by its field and shows its current value.
+        assert!(p.items.iter().any(|i| i.label == "heading"));
+        assert!(
+            p.items.iter().all(|i| i.desc.contains("Currently:")),
+            "every row shows its current value"
+        );
+    }
+
+    #[test]
+    fn the_key_bindings_view_lists_the_current_bindings() {
+        // #1109 (the "at minimum, VIEW them" acceptance): the key-bindings menu
+        // lists every remappable action with its current key.
+        let (mut app, _dir) = settings_app("settings-keys-view");
+        app.open_setting_key_bindings();
+        let Mode::Palette(p) = &app.mode else {
+            panic!("the key-bindings editor opens a palette");
+        };
+        assert_eq!(p.title, "Key bindings");
+        assert!(!p.items.is_empty(), "the bindings are listed");
+        // The default 'j' → down binding is shown.
+        let down = p
+            .items
+            .iter()
+            .find(|i| i.label == "down")
+            .expect("the down action is listed");
+        assert!(
+            down.desc.contains('j'),
+            "shows the default key: {}",
+            down.desc
+        );
+        assert!(down.desc.contains("default"), "{}", down.desc);
+    }
+
+    #[test]
+    fn remapping_a_key_persists_applies_live_and_round_trips() {
+        // #1109 (full remap): binding an action to a new key splices into
+        // [editor.keys], rebuilds the running keymap live, and round-trips.
+        let (mut app, _dir) = settings_app("settings-keys-remap");
+        assert!(app.vim_keys.is_empty(), "no remaps by default");
+        app.apply_setting_text(SettingTextKnob::KeyRemap("down"), "n");
+        // Persisted under [editor.keys], quoted.
+        let toml = config_text();
+        assert!(toml.contains("[editor.keys]"), "{toml}");
+        assert!(toml.contains("down = \"n\""), "{toml}");
+        // Applied live: pressing 'n' now runs the action bound to the default 'j'.
+        assert_eq!(app.vim_keys.get(&'n'), Some(&'j'), "remap applied live");
+        // Round-trips through the loader.
+        assert_eq!(
+            config::EditorConfig::load()
+                .keys
+                .get("down")
+                .map(String::as_str),
+            Some("n")
+        );
+    }
+
+    #[test]
+    fn a_key_remap_coexists_with_scalar_editor_keys_and_round_trips() {
+        // A remap writes the `[editor.keys]` sub-table; it must not collide with a
+        // scalar `[editor]` key set earlier (e.g. Vim mode), and both must load.
+        let (mut app, _dir) = settings_app("settings-keys-coexist");
+        app.set_setting_bool(SettingBool::Vim, true);
+        app.apply_setting_text(SettingTextKnob::KeyRemap("down"), "n");
+        let toml = config_text();
+        assert!(
+            toml.contains("vim = true"),
+            "scalar editor key kept: {toml}"
+        );
+        assert!(toml.contains("[editor.keys]"), "{toml}");
+        // Both round-trip through the one loader.
+        let editor = config::EditorConfig::load();
+        assert!(editor.vim, "vim still loads");
+        assert_eq!(editor.keys.get("down").map(String::as_str), Some("n"));
+    }
+
+    #[test]
+    fn clearing_a_key_remap_strips_the_key_and_resets_live() {
+        let (mut app, _dir) = settings_app("settings-keys-reset");
+        app.apply_setting_text(SettingTextKnob::KeyRemap("down"), "n");
+        assert_eq!(app.vim_keys.get(&'n'), Some(&'j'));
+        // Blank resets to the default: the key is stripped and the live keymap clears.
+        app.apply_setting_text(SettingTextKnob::KeyRemap("down"), "");
+        let toml = config_text();
+        assert!(!toml.contains("down ="), "remap stripped: {toml}");
+        assert!(app.vim_keys.is_empty(), "keymap reset to defaults live");
+    }
+
+    #[test]
+    fn a_multi_character_key_remap_is_rejected_and_re_prompts() {
+        let (mut app, _dir) = settings_app("settings-keys-bad");
+        app.apply_setting_text(SettingTextKnob::KeyRemap("down"), "nn");
+        assert!(app.vim_keys.is_empty(), "nothing bound");
+        let cfg = config::config_path().and_then(|p| std::fs::read_to_string(p).ok());
+        assert!(
+            cfg.is_none_or(|t| !t.contains("[editor.keys]")),
+            "nothing spliced"
+        );
+        assert!(matches!(&app.mode, Mode::Prompt(_)), "re-prompts");
+        assert!(
+            app.message.as_deref().unwrap_or("").contains("single key"),
+            "{:?}",
+            app.message
+        );
     }
 
     /// A multi-book series project on disk, for the series-guidance test.

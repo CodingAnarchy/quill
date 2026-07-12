@@ -519,6 +519,14 @@ const VIM_ACTIONS: &[(&str, char)] = &[
     ("ex_command", ':'),
 ];
 
+/// The remappable Vim actions and their default keys, for the in-app key-binding
+/// view / remapper (#1109). Read-only accessor over [`VIM_ACTIONS`] so the
+/// Settings menu can list the bindings and offer a remap without duplicating the
+/// list (its single source of truth stays here, beside the dispatch that uses it).
+pub(super) const fn vim_remap_actions() -> &'static [(&'static str, char)] {
+    VIM_ACTIONS
+}
+
 /// Build the pressed-key → default-key remap from the `[editor.keys]` config
 /// (#208). Each entry is `action = key`; the result maps that key to the
 /// action's default key, so the existing dispatch runs unchanged. Returns any

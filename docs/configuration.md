@@ -25,24 +25,30 @@ with F1).
 
 1. **Hand-edit `config.toml`.** Open the file in any editor and add or change a
    key. This is the only way to reach everything below — some sections (`[ai]`,
-   `[image]`, `[snippets]`, `[workflows]`/`[triggers]`, `[editor.keys]`, the
-   `[theme]` color overrides) have no in-app editor and are configured here.
-   Quill re-reads the file on the next launch (or, for the everyday `[editor]`
-   and `[theme]` knobs, live when you use the two in-app paths below).
+   `[image]`, `[snippets]`, `[workflows]`/`[triggers]`) have no in-app editor and
+   are configured here. Quill re-reads the file on the next launch (or, for the
+   `[editor]`, `[theme]`, and `[editor.keys]` knobs, live when you use the Settings
+   menu below).
 2. **The in-app Settings menu** (`settings` in the Ctrl-K menu; #592). A plain,
    offline, value-showing picker for the everyday `[editor]` and `[theme]` knobs
    — theme, column width, smart typography, Vim mode, autosave interval,
    typewriter and focus defaults, paragraph indent — plus the per-project
-   `[analysis]` stopwords. Each change is spliced into `config.toml` (preserving
-   the rest of the file) and applied to the running editor with no restart.
+   `[analysis]` stopwords. It also carries two sub-menus (#1109): **Theme colors…**,
+   which overrides any individual `[theme]` color field (a color value entered in
+   the same syntax as the file; a blank entry resets the field to the base theme's
+   value), and **Key bindings…**, which lists the Vim `[editor.keys]` bindings and
+   remaps any of them (one key; a blank entry resets to the default). Each change is
+   spliced into `config.toml` (preserving the rest of the file) and applied to the
+   running editor with no restart.
 3. **`:set …`** — the same everyday knobs from the command line, plus, with AI
    on, **"Configure by description"**: you describe the change in plain language
    ("a warm dark theme", "narrow the column") and the AI maps it onto concrete
    `[editor]`/`[theme]` keys, which you confirm before anything is written.
 
 The Settings menu and describe-by-description paths only ever write the
-`[editor]` and `[theme]` sections (and, for describe-by-description, words to the
-project dictionary). Everything else is hand-edited.
+`[editor]` (including `[editor.keys]`) and `[theme]` sections (and, for
+describe-by-description, words to the project dictionary). Everything else is
+hand-edited.
 
 ## Global vs. per-project settings
 
@@ -159,6 +165,11 @@ should trigger it. The keymap is validated when the editor builds it — an unkn
 action is reported in the status line, not silently dropped. Absent by default
 (the standard Vim bindings apply).
 
+You can view and remap these bindings in-app from the Settings menu's **Key
+bindings…** sub-menu (#1109) — it lists every remappable action with its current
+key; picking one prompts for a single key (blank resets it to the default) and
+applies the change live.
+
 ```toml
 [editor.keys]
 down = "n"
@@ -208,6 +219,11 @@ dim = "gray"             # secondary text, hints, dividers
 status_bg = "16,16,20"   # the status bar background
 match_current = "yellow"
 ```
+
+Any of these color fields can also be overridden in-app from the Settings menu's
+**Theme colors…** sub-menu (#1109) — it lists every field with its current value;
+picking one prompts for a color in the same syntax as this file (blank resets it to
+the base theme's value) and repaints the editor live.
 
 An unknown theme name, an unknown field, or an unparseable color is reported in
 the status line at startup and falls back to the default for that piece, rather
