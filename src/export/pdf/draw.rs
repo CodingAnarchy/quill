@@ -127,13 +127,10 @@ impl Pdf {
         if n < 2 {
             return None; // a single line is never a widow/orphan
         }
-        // How many of this paragraph's lines fit on the current page from `self.y`.
-        let room = self.y - self.layout.text_bottom();
-        let fit = if room < 0.0 {
-            0
-        } else {
-            (room / leading).floor() as usize + 1
-        };
+        // How many of this paragraph's lines fit on the current page from `self.y`,
+        // derived from the same break threshold `need` uses (`Pdf::fits`, via
+        // `lines_that_fit`) — so this guard can't misfire by a line at a page boundary.
+        let fit = Self::lines_that_fit(self.y, leading, self.layout.text_bottom());
         if fit >= n {
             return None; // the whole paragraph fits — no break needed
         }

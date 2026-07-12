@@ -387,6 +387,12 @@ fn tag_attrs<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
 /// item. This is the one source of truth for the open/close/advance-with-depth
 /// bookkeeping every scan shares; [`for_each_element`] and the `.scrivx` binder
 /// walk are thin projections of it.
+///
+/// Malformed input is recovered, not truncated: an opening tag whose balancing
+/// close is missing (unbalanced foreign XML) is skipped and the scan resumes at the
+/// next sibling, rather than returning and silently dropping every remaining element
+/// — honoring the module's "surface it, never silently drop" contract (the caller's
+/// chapter/note stream keeps flowing past a malformed tag instead of stopping at it).
 fn for_each_child<'a>(xml: &'a str, name: &str, mut f: impl FnMut(&'a str, Option<&'a str>)) {
     let close = format!("</{name}>");
     let mut pos = 0;
@@ -398,7 +404,10 @@ fn for_each_child<'a>(xml: &'a str, name: &str, mut f: impl FnMut(&'a str, Optio
             continue;
         }
         let Some(at) = matching_close(xml, name, gt + 1) else {
-            return;
+            // Unbalanced open: don't emit a half-read element or bail on the rest —
+            // step past this open tag and recover to the next sibling.
+            pos = gt + 1;
+            continue;
         };
         f(attrs, Some(&xml[gt + 1..at]));
         pos = at + close.len();
@@ -627,6 +636,27 @@ mod tests {
                 ("a=\"2\"".to_string(), None),
             ],
             "only the two top-level <g> are yielded; nesting is bounded"
+        );
+    }
+
+    /// An unbalanced open tag (its `</g>` missing) doesn't truncate the scan: the
+    /// malformed element is skipped and the following well-formed sibling is still
+    /// yielded, honoring the "surface it, never silently drop" contract rather than
+    /// returning at the first unbalanced close (the #1118 regression).
+    #[test]
+    fn for_each_child_recovers_past_unbalanced_open() {
+        // The first <g a="1"> never closes; a well-formed <g a="2">…</g> follows.
+        let xml = r#"<g a="1">orphan<g a="2">kept</g>"#;
+        let mut seen: Vec<(String, Option<String>)> = Vec::new();
+        for_each_child(xml, "g", |attrs, inner| {
+            seen.push((attrs.to_string(), inner.map(str::to_string)));
+        });
+        // The trailing well-formed sibling survives — its close balances the second
+        // open — so the remaining chapters aren't silently dropped.
+        assert!(
+            seen.iter()
+                .any(|(a, inner)| a == "a=\"2\"" && inner.as_deref() == Some("kept")),
+            "the well-formed sibling after an unbalanced open is still yielded: {seen:?}"
         );
     }
 

@@ -218,9 +218,35 @@ impl Pdf {
         idx
     }
 
+    /// Whether a line of the given `leading` still fits above the bottom margin from
+    /// the current baseline `y` — the single break threshold. [`need`] drops to a new
+    /// page when it doesn't, and [`lines_that_fit`] (the widow/orphan fit count)
+    /// derives from this same rule so the two never disagree at a page boundary.
+    ///
+    /// [`need`]: Pdf::need
+    /// [`lines_that_fit`]: Pdf::lines_that_fit
+    pub(super) fn fits(y: f32, leading: f32, bottom: f32) -> bool {
+        y - leading >= bottom
+    }
+
+    /// How many successive `leading`-tall lines fit above `bottom` starting from
+    /// baseline `y`. The k-th line (0-based) lands at `y - k*leading` and counts only
+    /// while [`fits`] holds, so this and [`need`] share one threshold — the widow/orphan
+    /// guard's fit count can't be off by a line versus where the break actually lands.
+    ///
+    /// [`fits`]: Pdf::fits
+    /// [`need`]: Pdf::need
+    pub(super) fn lines_that_fit(y: f32, leading: f32, bottom: f32) -> usize {
+        let mut fit = 0usize;
+        while Self::fits((fit as f32).mul_add(-leading, y), leading, bottom) {
+            fit += 1;
+        }
+        fit
+    }
+
     /// Drop to a new page if the next `height` wouldn't fit above the bottom margin.
     pub(super) fn need(&mut self, height: f32) {
-        if self.y - height < self.layout.text_bottom() {
+        if !Self::fits(self.y, height, self.layout.text_bottom()) {
             self.start_page();
         }
     }
@@ -280,5 +306,62 @@ impl Pdf {
             size,
             std::iter::once((text, FontStyle::REGULAR, false)),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pdf;
+
+    const LEADING: f32 = 12.0;
+    const BOTTOM: f32 = 100.0;
+
+    /// The widow/orphan fit count and the actual break rule (`fits`, which drives
+    /// `need`) derive from ONE threshold, so they never disagree: for every baseline
+    /// `y`, the number of lines `lines_that_fit` reports is exactly the run of lines
+    /// that `fits`/`need` would actually place. This closes the #1118 off-by-one where
+    /// the fit count used `room >= 0` while `need` placed at `room >= leading`.
+    #[test]
+    fn fit_count_agrees_with_break_rule() {
+        // Sweep baselines from below the margin up past several lines' worth of room.
+        let mut y = BOTTOM - LEADING;
+        while y <= 5.0f32.mul_add(LEADING, BOTTOM) {
+            let counted = Pdf::lines_that_fit(y, LEADING, BOTTOM);
+            // Independently count how many lines `fits` (== the break rule) admits.
+            let mut placed = 0usize;
+            while Pdf::fits((placed as f32).mul_add(-LEADING, y), LEADING, BOTTOM) {
+                placed += 1;
+            }
+            assert_eq!(
+                counted, placed,
+                "fit count and break rule must agree at y={y}"
+            );
+            y += LEADING / 3.0; // step in thirds to probe the boundary from both sides
+        }
+    }
+
+    /// The boundary the old code got wrong: at exactly one leading of room
+    /// (`y == bottom + leading`) precisely one line fits — `need` would place it
+    /// (`y - leading == bottom`, and `>=` admits it) and no more. The former
+    /// `room >= 0` fit test claimed two.
+    #[test]
+    fn exact_boundary_fits_one_line() {
+        let y = BOTTOM + LEADING;
+        assert!(
+            Pdf::fits(y, LEADING, BOTTOM),
+            "the line at the margin is placed"
+        );
+        assert!(
+            !Pdf::fits(y - LEADING, LEADING, BOTTOM),
+            "the next line would fall below the margin"
+        );
+        assert_eq!(Pdf::lines_that_fit(y, LEADING, BOTTOM), 1);
+    }
+
+    /// A baseline that leaves no room for even one line reports zero (no underflow).
+    #[test]
+    fn no_room_fits_zero() {
+        assert_eq!(Pdf::lines_that_fit(BOTTOM, LEADING, BOTTOM), 0);
+        assert_eq!(Pdf::lines_that_fit(BOTTOM - LEADING, LEADING, BOTTOM), 0);
     }
 }

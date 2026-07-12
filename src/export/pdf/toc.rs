@@ -62,13 +62,15 @@ fn seg_refs(segs: &[Seg]) -> impl Iterator<Item = (&str, FontStyle, bool)> {
 
 /// Flatten the built outline into per-entry folios, depth-first so a part precedes the
 /// chapters nested beneath it — the printed reading order, matching [`doc_toc_titles`].
-/// A part heading groups its chapters and carries no folio (`None`); an entry's folio
-/// is its starting page index (the printed label is index + 1).
+/// A part heading (`is_part`) groups its chapters and carries no folio (`None`) — even
+/// with no chapters nested yet; an entry's folio is its starting page index (the
+/// printed label is index + 1).
 pub(super) fn toc_entries(items: &[OutlineItem]) -> Vec<Option<usize>> {
     let mut out = Vec::new();
     for item in items {
-        let part = !item.children.is_empty();
-        out.push(if part { None } else { Some(item.page) });
+        // Part-ness is explicit (`is_part`), not inferred from the children — an
+        // empty named part is still a divider that carries no folio.
+        out.push(if item.is_part { None } else { Some(item.page) });
         out.extend(toc_entries(&item.children));
     }
     out
@@ -200,5 +202,44 @@ impl Pdf {
             }
             self.pages[idx].push_str(&block);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toc_entries;
+    use crate::export::pdf::write::OutlineItem;
+
+    // `OutlineItem` is `pub(super)` in the sibling `write` module; from this test
+    // module the qualified path resolves it within the `pdf` module.
+
+    /// A part divider carries no folio even with no chapters nested beneath it: an
+    /// empty named part (`Part{name:Some, chapters:[]}`) becomes an `is_part`
+    /// [`OutlineItem`] with empty children, and [`toc_entries`] must still map it to
+    /// `None` (no folio on its Contents line) rather than treating the empty-children
+    /// item as a plain folio-bearing entry (the #1118 regression).
+    #[test]
+    fn empty_named_part_carries_no_folio() {
+        let items = vec![
+            OutlineItem::new("Front".into(), 3),
+            OutlineItem::part("Empty Part".into(), 7),
+            OutlineItem::new("Back".into(), 9),
+        ];
+        assert_eq!(
+            toc_entries(&items),
+            vec![Some(3), None, Some(9)],
+            "the empty named part gets no folio (None); plain entries keep theirs"
+        );
+    }
+
+    /// A part with chapters nested beneath it: the part itself is folio-less, and its
+    /// chapters follow in reading order with their own folios — confirming the
+    /// explicit `is_part` flag, not `children.is_empty()`, decides part-ness.
+    #[test]
+    fn populated_part_is_folioless_but_chapters_keep_folios() {
+        let mut part = OutlineItem::part("Part One".into(), 5);
+        part.children.push(OutlineItem::new("Ch 1".into(), 6));
+        part.children.push(OutlineItem::new("Ch 2".into(), 12));
+        assert_eq!(toc_entries(&[part]), vec![None, Some(6), Some(12)]);
     }
 }

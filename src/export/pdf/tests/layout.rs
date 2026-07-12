@@ -391,18 +391,22 @@ fn a_paragraph_does_not_widow_its_last_line_at_a_page_top() {
     );
     pdf.start_page();
     // Place y so that exactly four of the five lines fit here — the natural break would
-    // strand line five (a widow).
-    pdf.y = leading.mul_add(3.5, pdf.layout.text_bottom());
+    // strand line five (a widow). The fit count derives from the same threshold `need`
+    // uses (`Pdf::fits`), so a line is only counted as fitting when it truly clears the
+    // margin: at 4.5 leadings of room the 4th line (baseline 4.5→…→1.5 above bottom)
+    // still fits and the 5th (0.5 below) does not.
+    pdf.y = leading.mul_add(4.5, pdf.layout.text_bottom());
     let brk = pdf.widow_orphan_break(n, leading);
     assert_eq!(
         brk,
         Some(3),
         "break before the 4th line so lines 4 and 5 travel together"
     );
-    // Sanity: a paragraph that splits leaving two lines on each side needs no help.
-    pdf.y = leading.mul_add(1.5, pdf.layout.text_bottom()); // two lines fit
+    // Sanity: a paragraph that splits leaving two lines on each side needs no help —
+    // three of the five fit here (3.5 leadings of room), two carry over cleanly.
+    pdf.y = leading.mul_add(3.5, pdf.layout.text_bottom());
     assert_eq!(
-        pdf.widow_orphan_break(4, leading),
+        pdf.widow_orphan_break(n, leading),
         None,
         "≥2 lines each side"
     );
