@@ -22,6 +22,16 @@ use crate::mode::{
 use crate::project::{read_existing, Project};
 use crate::theme::THEME_NAMES;
 
+/// Guidance shown when an author tries to set analysis stopwords on a multi-book
+/// series (#1105). A series manifest carries no per-book `[analysis]`, so the
+/// stopwords can't apply to the active book; this points at the path that does
+/// work (a standalone novel's own project) instead of a hand-edit that wouldn't
+/// take effect.
+const SERIES_STOPWORDS_GUIDANCE: &str =
+    "In-app stopwords apply to a standalone novel — a multi-book series doesn't \
+     carry per-book [analysis] yet. Manage the book as its own project to set its \
+     stopwords.";
+
 impl App {
     /// Open the plain Settings menu (`settings`, #592): one row per editable knob,
     /// each showing its current value and opening a picker / prompt. Enter on a row
@@ -235,6 +245,13 @@ impl App {
     /// key), updating the in-memory manifest so the next analysis report reflects
     /// it. Standalone novels only, like the goals / style setters.
     fn apply_stopwords(&mut self, text: &str) {
+        // A multi-book series carries no per-book [analysis] (#1105): show the clean
+        // guidance up front rather than reporting the guard as a write failure.
+        if self.project.book_count() > 1 {
+            self.message = Some(SERIES_STOPWORDS_GUIDANCE.to_string());
+            self.mode = self.editing_mode();
+            return;
+        }
         let words: Vec<String> = text.split_whitespace().map(str::to_string).collect();
         match self.splice_stopwords(&words) {
             Ok(()) => {
@@ -255,12 +272,12 @@ impl App {
     /// Splice `[analysis] stopwords_add` into `book.toml` (#592): update the
     /// in-memory manifest, then write a targeted splice (or strip, for an empty
     /// list) preserving the rest of the manifest. Standalone novels only — a
-    /// multi-book series has no single top-level `[analysis]`.
+    /// multi-book series carries no per-book `[analysis]`, so `apply_stopwords`
+    /// guides the author to a standalone project before ever reaching here; this
+    /// guard is defense-in-depth (#1105).
     fn splice_stopwords(&mut self, words: &[String]) -> std::io::Result<()> {
         if self.project.book_count() > 1 {
-            return Err(std::io::Error::other(
-                "setting series stopwords isn't supported yet — set [analysis] per book by hand",
-            ));
+            return Err(std::io::Error::other(SERIES_STOPWORDS_GUIDANCE));
         }
         let analysis = self
             .project
@@ -571,5 +588,41 @@ mod tests {
             "section kept: {toml}"
         );
         assert!(toml.contains("vim = true"), "new key landed: {toml}");
+    }
+
+    /// A multi-book series project on disk, for the series-guidance test.
+    fn series_settings_app(name: &str) -> (App, TempProject) {
+        let dir = app_scratch_dir(name);
+        std::fs::create_dir_all(dir.join("b1")).unwrap();
+        std::fs::create_dir_all(dir.join("b2")).unwrap();
+        std::fs::write(dir.join("b1/one.md"), "alpha\n").unwrap();
+        std::fs::write(dir.join("b2/one.md"), "beta\n").unwrap();
+        std::fs::write(
+            Project::manifest_path(&dir),
+            "title = \"The Saga\"\n\n\
+             [[books]]\ntitle = \"Book One\"\n\n\
+             [[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n\
+             [[books]]\ntitle = \"Book Two\"\n\n\
+             [[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n",
+        )
+        .unwrap();
+        config::set_config_dir(Some(app_scratch_dir(&format!("{name}-cfg"))));
+        let app = open_test_app(&dir);
+        (app, TempProject::new(dir))
+    }
+
+    #[test]
+    fn series_stopwords_guide_to_a_standalone_and_leave_the_manifest_untouched() {
+        // A multi-book series carries no per-book [analysis] (#1105): setting
+        // stopwords must guide to a standalone project rather than reading as
+        // "unfinished" or corrupting the series manifest.
+        let (mut app, dir) = series_settings_app("settings-stopwords-series");
+        let before = manifest_text(&dir);
+        app.apply_setting_text(SettingTextKnob::Stopwords, "locket said");
+        let msg = app.message.as_deref().unwrap_or("");
+        assert!(msg.contains("standalone"), "{msg:?}");
+        assert!(!msg.contains("isn't supported yet"), "{msg:?}");
+        assert!(!msg.contains("per book by hand"), "{msg:?}");
+        assert_eq!(manifest_text(&dir), before, "series manifest untouched");
     }
 }

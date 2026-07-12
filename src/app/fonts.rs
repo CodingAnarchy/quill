@@ -27,6 +27,17 @@ use crate::project::{read_existing, Project};
 /// relative path stored in `[style]`, so the export resolver finds them.
 const FONTS_DIR: &str = "fonts";
 
+/// Guidance shown when an author tries to set a font on a multi-book series
+/// (#1105). A series manifest carries no per-book `[style]`, so the font can't
+/// apply to the active book; this points at the path that does work (a standalone
+/// novel's own project) instead of a hand-edit that wouldn't take effect. The
+/// font file the author downloaded stays in `fonts/`, so re-applying it in a
+/// standalone project is instant and offline.
+const SERIES_FONT_GUIDANCE: &str =
+    "In-app fonts apply to a standalone novel — a multi-book series doesn't carry \
+     per-book [style] fonts yet. Manage the book as its own project to set its \
+     font (the downloaded file stays in fonts/).";
+
 impl App {
     /// Open the curated font library (#494): a palette of every open-licensed
     /// family, each row showing its name, style, and a sample so the author can
@@ -86,6 +97,13 @@ impl App {
         let Some(family) = fonts::FAMILIES.get(index) else {
             return;
         };
+        // A multi-book series carries no per-book [style] (#1105): show the clean
+        // guidance up front rather than downloading a font we couldn't apply and
+        // then reporting it as a write failure.
+        if self.project.book_count() > 1 {
+            self.message = Some(SERIES_FONT_GUIDANCE.to_string());
+            return;
+        }
         let root = self.project.root.clone();
         let rel_path = match ensure_font_downloaded(&root, family) {
             Ok(p) => p,
@@ -114,14 +132,13 @@ impl App {
     /// Splice the `[style]` font path(s) for `target` into the project manifest and
     /// the in-memory style, so a re-open and the next export both see them (#494).
     /// Reuses the manifest splicer the goals setter uses (#550), leaving the rest of
-    /// `book.toml` byte-for-byte. Standalone novels only — a multi-book series'
-    /// `[style]` is follow-up, surfaced as a clear message rather than a silent
-    /// no-op.
+    /// `book.toml` byte-for-byte. Standalone novels only — a multi-book series
+    /// carries no per-book `[style]`, so the font setter degrades to a clear message
+    /// pointing at the path that works (a standalone novel's own project) rather
+    /// than a hand-edit that wouldn't take effect (#1105).
     fn set_style_font(&mut self, target: FontTarget, rel_path: &str) -> std::io::Result<()> {
         if self.project.book_count() > 1 {
-            return Err(std::io::Error::other(
-                "setting a series font isn't supported yet — set [style] per book by hand",
-            ));
+            return Err(std::io::Error::other(SERIES_FONT_GUIDANCE));
         }
         // Update the in-memory style first, so a preview reflects it immediately.
         let style = self
@@ -396,5 +413,47 @@ mod tests {
         let err = ensure_font_downloaded(&dir, &fonts::FAMILIES[0]).unwrap_err();
         assert!(err.to_string().contains("network is disabled"), "{err}");
         let _dir = TempProject::new(dir);
+    }
+
+    /// A one-book-per-`[[books]]` series project, for the series-guidance test.
+    fn series_app(name: &str) -> (App, TempProject) {
+        let dir = app_scratch_dir(name);
+        std::fs::create_dir_all(dir.join("b1")).unwrap();
+        std::fs::create_dir_all(dir.join("b2")).unwrap();
+        std::fs::write(dir.join("b1/one.md"), "alpha\n").unwrap();
+        std::fs::write(dir.join("b2/one.md"), "beta\n").unwrap();
+        std::fs::write(
+            Project::manifest_path(&dir),
+            "title = \"The Saga\"\n\n\
+             [[books]]\ntitle = \"Book One\"\n\n\
+             [[books.chapters]]\ntitle = \"Dawn\"\nfile = \"b1/one.md\"\n\n\
+             [[books]]\ntitle = \"Book Two\"\n\n\
+             [[books.chapters]]\ntitle = \"Dusk\"\nfile = \"b2/one.md\"\n",
+        )
+        .unwrap();
+        let app = open_test_app(&dir);
+        (app, TempProject::new(dir))
+    }
+
+    #[test]
+    fn a_series_font_set_guides_to_a_standalone_without_downloading() {
+        // A multi-book series carries no per-book [style] (#1105): applying a font
+        // must guide to a standalone project up front — not download (which the
+        // test-stubbed fetch would refuse) and not read as a write failure. The
+        // font is uncached, so if apply_font tried to fetch it, the network stub
+        // would surface a "network is disabled" error instead of the guidance.
+        let (mut app, dir) = series_app("fonts-series");
+        app.apply_font(0, FontTarget::Both);
+        let msg = app.message.as_deref().unwrap_or("");
+        assert!(msg.contains("standalone"), "{msg:?}");
+        assert!(!msg.contains("isn't supported yet"), "{msg:?}");
+        assert!(!msg.contains("per book by hand"), "{msg:?}");
+        assert!(!msg.contains("network is disabled"), "no download: {msg:?}");
+        // No [style] was written to the series manifest.
+        let toml = std::fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(
+            !toml.contains("[style]"),
+            "series manifest untouched:\n{toml}"
+        );
     }
 }
