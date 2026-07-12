@@ -14,6 +14,20 @@ use crate::frontmatter::{Band, Epigraph, FrontMatter, Role, Status};
 
 use super::Goals;
 
+/// The current on-disk `book.toml` format version (#1097). Bumped only for a
+/// *breaking* format change — one that an older Quill couldn't read correctly, so
+/// the migration hook ([`Manifest::migrate`]) must translate it forward on open.
+/// A manifest with no `format_version` is treated as this version (every
+/// pre-#1097 file omitted the key, and nothing about the shape changed when it was
+/// introduced), so existing projects load unchanged.
+///
+/// The compatibility promise: a `book.toml` written by any 1.x opens in every
+/// other 1.x. Additive fields don't bump this — unknown keys are ignored on load
+/// (a newer version's field is simply not seen by an older one, never an error).
+/// The version + migration hook is the escape valve for the rare change that
+/// *can't* be additive.
+pub const CURRENT_FORMAT_VERSION: u32 = 1;
+
 /// One chapter's entry in the manifest: its display title, the file that holds
 /// its prose (relative to the project root), and a cached word count.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -229,6 +243,17 @@ pub fn shift_parts_for_delete(parts: &mut Vec<Part>, body_pos: usize) {
 // Not `Eq`: the print config carries a float bleed allowance (#652).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Manifest {
+    /// On-disk format version (#1097): the schema-version escape valve for a future
+    /// breaking format change. Absent on every pre-#1097 file, so it reads as
+    /// [`CURRENT_FORMAT_VERSION`] and existing projects are unaffected. A scalar
+    /// key, so it must precede the `goals`/`parts`/`chapters` tables. `migrate` runs
+    /// it forward on open; `save_manifest` stamps the current version on write.
+    ///
+    /// Unknown *additive* fields never touch this — they're ignored on load, so a
+    /// newer 1.x's extra key opens cleanly in an older 1.x (the compat guarantee).
+    /// This is bumped only for a change an older reader would misread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_version: Option<u32>,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
@@ -308,6 +333,38 @@ impl Manifest {
         Epigraph::from_parts(self.epigraph.clone(), self.epigraph_by.clone())
     }
 
+    /// The on-disk format version this manifest was written at (#1097), defaulting
+    /// to [`CURRENT_FORMAT_VERSION`] when the key is absent (every pre-#1097 file).
+    pub fn format_version(&self) -> u32 {
+        self.format_version.unwrap_or(CURRENT_FORMAT_VERSION)
+    }
+
+    /// Migrate an older on-disk format forward to [`CURRENT_FORMAT_VERSION`] on open
+    /// (#1097). The escape valve for a genuinely-breaking future format change: each
+    /// version bump adds one arm here that translates `v` → `v + 1` in place, then
+    /// stamps the reached version. A manifest already at (or ahead of) the current
+    /// version — which includes every unversioned pre-#1097 file, since an absent
+    /// version reads as current — is left untouched, so an existing project that
+    /// only loads and re-saves stays byte-stable (it doesn't sprout a version key it
+    /// never had).
+    ///
+    /// Today there is exactly one version, so this is a no-op; the shape is the
+    /// real, tested seam a future breaking change hangs its upgrade step on (rather
+    /// than a hard break at load). Called by [`Project::open`].
+    pub fn migrate(&mut self) {
+        // Already at (or ahead of) the current version: nothing to translate, and
+        // no re-stamp — an unversioned pre-#1097 file reads as the current version,
+        // so it's left exactly as-is until the author's next save.
+        if self.format_version() >= CURRENT_FORMAT_VERSION {
+            return;
+        }
+        // Each future breaking bump inserts its translation here, walking the
+        // version forward one step at a time, e.g.:
+        //   if self.format_version() < 2 { /* v1 -> v2 rewrite */ }
+        // then stamp the reached version:
+        self.format_version = Some(CURRENT_FORMAT_VERSION);
+    }
+
     /// How many leading chapters are front matter (#185) — the offset of the
     /// contiguous body block after the band reorder. The single source for the
     /// front-to-body mapping the parts logic relies on.
@@ -366,7 +423,7 @@ pub fn part_at_body_position(parts: &[Part], body_pos: usize) -> Option<usize> {
 mod tests {
     use super::{
         normalize_parts, part_at_body_position, shift_parts_for_delete, shift_parts_for_insert,
-        Part,
+        Manifest, Part, CURRENT_FORMAT_VERSION,
     };
 
     fn part(range: [usize; 2]) -> Part {
@@ -517,6 +574,115 @@ mod tests {
             parts.iter().map(|p| p.chapters).collect::<Vec<_>>(),
             vec![[1, 4]],
             "both zero-endpoint parts drop; the well-formed one is kept as-is"
+        );
+    }
+
+    // COMPAT (#1097): a `book.toml` written by a *newer* Quill — carrying keys this
+    // version has never heard of, at the top level, inside `[goals]`, and inside a
+    // `[[parts]]` entry — must open cleanly with no error and no loss of the fields
+    // this version *does* understand. This is the core 1.x forward-compat promise:
+    // an additive future field is ignored, never a hard break.
+    #[test]
+    fn a_manifest_with_unknown_future_keys_opens_cleanly() {
+        let toml = "\
+title = \"My Book\"
+author = \"A. Writer\"
+future_scalar = \"from a newer version\"
+run_on_threshold = 30
+
+[goals]
+daily = 500
+future_goal_field = 42
+
+[[parts]]
+name = \"Act I\"
+chapters = [1, 3]
+future_part_field = true
+
+[[chapters]]
+title = \"One\"
+file = \"chapter-1.md\"
+future_chapter_field = \"ignored\"
+";
+        let manifest: Manifest =
+            toml::from_str(toml).expect("unknown future keys must not fail the load");
+        // The known fields survived intact — no data loss.
+        assert_eq!(manifest.title, "My Book");
+        assert_eq!(manifest.author.as_deref(), Some("A. Writer"));
+        assert_eq!(manifest.run_on_threshold(), 30);
+        assert_eq!(manifest.chapters.len(), 1);
+        assert_eq!(manifest.chapters[0].file, "chapter-1.md");
+        let parts = manifest.parts.expect("parts parsed");
+        assert_eq!(parts[0].chapters, [1, 3]);
+        assert_eq!(parts[0].name.as_deref(), Some("Act I"));
+        assert!(manifest.goals.is_some(), "the [goals] table still parsed");
+    }
+
+    // DECISION (#1097): unknown top-level keys are DROPPED on re-save, not
+    // preserved. The manifest is a typed struct re-serialized on every save, so a
+    // key this version doesn't model isn't round-tripped. Documented on `Manifest`
+    // and in the compatibility promise: a newer version's *additive* field is lost
+    // if an older version re-saves the project. (Front matter, by contrast, is kept
+    // verbatim — see `frontmatter`.) This test pins the drop so the choice is
+    // deliberate and can't silently flip.
+    #[test]
+    fn unknown_top_level_keys_are_dropped_on_resave() {
+        let toml = "title = \"Book\"\nfuture_scalar = \"newer version wrote this\"\n";
+        let manifest: Manifest = toml::from_str(toml).unwrap();
+        let reserialized = toml::to_string_pretty(&manifest).unwrap();
+        assert!(
+            !reserialized.contains("future_scalar"),
+            "unknown keys are dropped on re-save (documented behavior): {reserialized}"
+        );
+        assert!(
+            reserialized.contains("title = \"Book\""),
+            "known fields are preserved: {reserialized}"
+        );
+    }
+
+    // SCHEMA VERSION + MIGRATION (#1097). A pre-#1097 file has no `format_version`,
+    // so it *reads* as the current version — and migrate leaves it untouched, so an
+    // existing project that only loads and re-saves is byte-stable (its `book.toml`
+    // doesn't sprout a new key it never had). The version is the escape valve for a
+    // future breaking bump, not a churn on every open.
+    #[test]
+    fn a_versionless_manifest_reads_as_current_and_is_left_untouched() {
+        let mut manifest: Manifest = toml::from_str("title = \"Old Book\"").unwrap();
+        assert_eq!(
+            manifest.format_version(),
+            CURRENT_FORMAT_VERSION,
+            "an absent version reads as the current version"
+        );
+        manifest.migrate();
+        assert_eq!(
+            manifest.format_version, None,
+            "a versionless file is already current — migrate doesn't restamp it"
+        );
+        let out = toml::to_string_pretty(&manifest).unwrap();
+        assert!(
+            !out.contains("format_version"),
+            "an untouched existing project stays byte-stable on re-save: {out}"
+        );
+    }
+
+    // A manifest carrying an explicit version round-trips it, and migrating a
+    // current-version manifest is a no-op (idempotent) — the hook only does work
+    // for a genuinely older version, which is what a future breaking bump adds.
+    #[test]
+    fn format_version_round_trips_and_migration_is_idempotent() {
+        let toml = "format_version = 1\ntitle = \"Book\"\n";
+        let mut manifest: Manifest = toml::from_str(toml).unwrap();
+        assert_eq!(manifest.format_version, Some(1));
+        manifest.migrate();
+        assert_eq!(
+            manifest.format_version,
+            Some(CURRENT_FORMAT_VERSION),
+            "migrating a current-version manifest is a no-op"
+        );
+        let out = toml::to_string_pretty(&manifest).unwrap();
+        assert!(
+            out.contains("format_version = 1"),
+            "an explicit version round-trips: {out}"
         );
     }
 }

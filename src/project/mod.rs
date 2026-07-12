@@ -172,6 +172,13 @@ impl Project {
         let (mut manifest, mut books, active_book) =
             Manifest::from_toml_value(value).map_err(invalid)?;
 
+        // Migrate an older on-disk format forward to the current version (#1097)
+        // before anything reads the manifest. Today this only stamps the version
+        // field (there's been no breaking change), but it's the defined upgrade
+        // seam a future breaking format change hangs its translation on, so the
+        // format can evolve without a hard break at load.
+        manifest.migrate();
+
         // Repair any hand-broken part ranges (inverted or zero-based) to the
         // `Part` invariant before any mapping code reads them — an inverted range
         // would otherwise silently map to no part (#185). Applies to the active
@@ -336,6 +343,9 @@ impl Project {
             root,
             manifest: Manifest {
                 title,
+                // Stamp the current on-disk format version (#1097) so a freshly
+                // created project records the format it was written at.
+                format_version: Some(manifest::CURRENT_FORMAT_VERSION),
                 ..Default::default()
             },
             active: String::new(),

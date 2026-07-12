@@ -403,6 +403,35 @@ mod tests {
     }
 
     #[test]
+    fn a_config_section_with_unknown_future_keys_loads_cleanly() {
+        // COMPAT (#1097): a config section written by a newer Quill carries keys
+        // this version has never heard of. Every config struct is `#[serde(default)]`
+        // and none uses `deny_unknown_fields`, so an unknown key is ignored, not a
+        // parse failure — an older Quill opens a newer config with no error and no
+        // loss of the fields it understands. This test pins that promise so a future
+        // `deny_unknown_fields` can't silently break every existing config.
+        let editor: EditorConfig =
+            toml::from_str("vim = true\ncolumn_width = 90\nfuture_editor_feature = \"ignored\"\n")
+                .expect("unknown config keys must not fail the load");
+        assert!(editor.vim, "known key applied");
+        assert_eq!(editor.column_width, 90, "known key applied");
+        assert!(editor.smart_typography, "unset known key keeps its default");
+
+        // The behavior on re-save is DROP (config structs are typed and only
+        // deserialized here — Quill never rewrites the home config wholesale), and
+        // it holds across the other sections too.
+        let backup: BackupConfig =
+            toml::from_str("enabled = true\nfuture_backup_field = 7\n").unwrap();
+        assert!(
+            backup.enabled,
+            "unknown key alongside a known one is ignored"
+        );
+        let projects: ProjectsConfig =
+            toml::from_str("open_last = true\nfuture = \"x\"\n").unwrap();
+        assert!(projects.open_last_enabled());
+    }
+
+    #[test]
     fn snippets_parse_sorts_strings_and_reports_non_strings() {
         let table = toml::from_str("zeta = \"the end\"\nalpha = \"* * *\"\nbad = 42\n").unwrap();
         let (snippets, errors) = snippets_from_table(table);

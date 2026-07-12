@@ -971,6 +971,63 @@ fn open_repairs_a_chapterless_manifest() {
 }
 
 #[test]
+fn open_survives_unknown_future_keys_end_to_end_and_stamps_the_version() {
+    // COMPAT (#1097), end to end: a `book.toml` written by a *newer* Quill — with
+    // unknown keys at the top level and inside a chapter entry — must open through
+    // the real `Project::open` path with no error and no loss of the known fields.
+    // On save the manifest is re-serialized from the typed struct: the unknown keys
+    // are DROPPED (documented behavior), and the current `format_version` is stamped.
+    let dir = temp_dir("compat-unknown-keys");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "\
+title = \"Forward Compat\"
+author = \"A. Writer\"
+future_top_level = \"a newer version wrote this\"
+
+[[chapters]]
+title = \"One\"
+file = \"one.md\"
+future_chapter_key = 99
+",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "The prose.\n").unwrap();
+
+    let project = Project::open(&dir).expect("unknown future keys must not fail the open");
+    assert_eq!(project.manifest.title, "Forward Compat");
+    assert_eq!(project.manifest.author.as_deref(), Some("A. Writer"));
+    assert_eq!(project.manifest.chapters.len(), 1);
+    // A pre-#1097 file has no version key; it reads as the current version and is
+    // left untouched by migrate (byte-stable), so re-save doesn't add the key.
+    assert_eq!(
+        project.manifest.format_version(),
+        CURRENT_FORMAT_VERSION,
+        "an absent version reads as the current one"
+    );
+
+    // Re-save: unknown keys drop, known data survives, and an untouched existing
+    // project stays byte-stable (no new format_version key).
+    project.save_manifest().unwrap();
+    let written = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+    assert!(
+        !written.contains("future_top_level") && !written.contains("future_chapter_key"),
+        "unknown keys are dropped on re-save (documented): {written}"
+    );
+    assert!(
+        written.contains("title = \"Forward Compat\""),
+        "known data kept: {written}"
+    );
+    assert!(
+        !written.contains("format_version"),
+        "an untouched existing project doesn't sprout a version key: {written}"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn open_reports_a_malformed_manifest_without_panicking() {
     let dir = temp_dir("bad-manifest");
     fs::create_dir_all(&dir).unwrap();
