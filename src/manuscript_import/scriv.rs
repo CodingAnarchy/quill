@@ -9,9 +9,18 @@ use std::path::Path;
 use crate::export::{push_run, Run, TextStyle, SCENE_BREAK};
 
 use super::{
-    attr_value, element_text, fallback_chapter, finalize_titles, for_each_child, join_paragraphs,
-    wrap_emphasis, Dropped, Imported, ImportedChapter,
+    attr_value, element_text, fallback_chapter, finalize_titles, for_each_child,
+    for_each_child_counted, join_paragraphs, wrap_emphasis, Dropped, Imported, ImportedChapter,
 };
+
+/// The largest `\ucN` substitution count honored. RTF's `\uc` sets how many ANSI
+/// fallback chars trail each `\uN` Unicode escape; real documents use 0–2 (Word
+/// and Scrivener emit `\uc1`, one `\'XX` byte per glyph). An out-of-range value
+/// (hostile or corrupt, e.g. `즙999`) would make [`skip_substitution`] eat
+/// that many trailing chars, silently swallowing prose — so it's clamped to this
+/// sane ceiling, above any legitimate value yet far short of eating a paragraph
+/// (#1139).
+const MAX_UC: usize = 2;
 
 /// Parse a Scrivener `.scriv` bundle directory: read its `.scrivx` binder for the
 /// Manuscript draft folder's reading order and titles, and each text document's
@@ -101,11 +110,17 @@ fn collect_items(
     unreadable: &mut usize,
     dropped: &mut Dropped,
 ) {
-    for_each_child(children, "BinderItem", |attrs, inner| {
+    // A `BinderItem` recovered past because it was unbalanced (its `</BinderItem>`
+    // missing) is a listed document whose body can't be read — surface it in
+    // `unreadable` rather than let it vanish silently (#1139).
+    let recovered = for_each_child_counted(children, "BinderItem", |attrs, inner| {
         let Some(inner) = inner else { return };
         if attr_value(attrs, "Type").as_deref() == Some("Text") {
             let uuid = attr_value(attrs, "UUID").unwrap_or_default();
-            let body = read_rtf(&uuid).map_or_else(
+            // Reject a traversing/absolute UUID before it's ever joined onto the
+            // bundle path: a `read_rtf` keyed off it must never read outside the
+            // bundle. A rejected document still becomes a counted empty chapter.
+            let body = safe_uuid(&uuid).and_then(read_rtf).map_or_else(
                 || {
                     *unreadable += 1;
                     String::new()
@@ -122,6 +137,34 @@ fn collect_items(
             collect_items(grandchildren, read_rtf, out, unreadable, dropped);
         }
     });
+    *unreadable += recovered;
+}
+
+/// Accept a binder `UUID` only if it's a single, path-safe file-name component,
+/// so joining it onto `Files/Data/` can never escape the bundle (#1139 security).
+/// The binder is untrusted input: a hostile `UUID="../../../secret"` (or absolute
+/// `/etc/...`, or one with a `/`/`\` separator) would otherwise read a
+/// `content.rtf` *outside* the bundle into a chapter. Rejects an empty UUID, one
+/// with any path separator, `..`, or a leading `.`/root/prefix component; accepts
+/// exactly one normal component (a real Scrivener UUID is a hyphenated hex string).
+fn safe_uuid(uuid: &str) -> Option<&str> {
+    use std::path::Component;
+    if uuid.is_empty()
+        || uuid.contains('/')
+        || uuid.contains('\\')
+        || uuid.contains('\0')
+        || uuid == ".."
+        || uuid == "."
+    {
+        return None;
+    }
+    // A single normal path component and nothing else — no `..`, root, prefix, or
+    // current-dir component that `Path::join` would resolve outside the bundle.
+    let mut comps = Path::new(uuid).components();
+    match (comps.next(), comps.next()) {
+        (Some(Component::Normal(c)), None) if c == uuid => Some(uuid),
+        _ => None,
+    }
 }
 
 /// The inner XML of the first direct `<Children>` element, or `None`.
@@ -236,7 +279,9 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                         // that follow (RTF default is 1).
                         "uc" => {
                             if let Some(n) = param.filter(|&n| n >= 0) {
-                                uc = n as usize;
+                                // Clamp to `MAX_UC` so an out-of-range count can't
+                                // make `skip_substitution` swallow trailing prose.
+                                uc = (n as usize).min(MAX_UC);
                             }
                         }
                         // Table cells: count each contiguous run of table rows as
@@ -688,6 +733,109 @@ mod tests {
             out.chapters[1].body, "The locket **gleamed**.\n",
             "bold round-trips"
         );
+    }
+
+    #[test]
+    fn binder_unbalanced_item_still_imports_siblings_and_surfaces_the_drop() {
+        // A hostile/corrupt binder: the second document's `</BinderItem>` is
+        // missing, so the draft folder's own `</BinderItem>` looks like the item's
+        // close. Before #1139 this threw `matching_close` off, `draft_folder`
+        // returned None, and the WHOLE manuscript vanished into the empty fallback
+        // — reported as success with `unreadable_bodies == 0`. Now the well-formed
+        // siblings import and the dropped item is surfaced.
+        let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="u1" Type="Text"><Title>One</Title></BinderItem>
+<BinderItem UUID="u2" Type="Text"><Title>Two</Title>
+<BinderItem UUID="u3" Type="Text"><Title>Three</Title></BinderItem>
+</Children></BinderItem>
+</Binder></ScrivenerProject>"#;
+        let out = parse_binder(scrivx, Some("My Novel".into()), |uuid| {
+            Some(rtf(&format!("Body {uuid}.")))
+        });
+        let titles: Vec<&str> = out.chapters.iter().map(|c| c.title.as_str()).collect();
+        // The well-formed first chapter imports — the manuscript is NOT reduced to
+        // the empty fallback — and the unbalanced item is surfaced, not silent.
+        assert!(
+            titles.contains(&"One"),
+            "well-formed chapters still import: {titles:?}"
+        );
+        assert_ne!(
+            (titles.as_slice(), out.unreadable_bodies),
+            (["Manuscript"].as_slice(), 0),
+            "never only-fallback-as-success on an unbalanced element"
+        );
+        assert!(
+            out.unreadable_bodies > 0,
+            "the dropped/unbalanced item is surfaced via unreadable_bodies"
+        );
+    }
+
+    #[test]
+    fn safe_uuid_rejects_traversing_and_absolute_paths() {
+        // A path-safe Scrivener UUID is accepted…
+        assert_eq!(safe_uuid("1A2B-3C4D"), Some("1A2B-3C4D"));
+        // …but anything that could escape `Files/Data/` is rejected.
+        for hostile in [
+            "",
+            "..",
+            ".",
+            "../../../secret",
+            "/etc/passwd",
+            "a/b",
+            "a\\b",
+            "..\\..\\secret",
+            "sub/../../../secret",
+        ] {
+            assert_eq!(safe_uuid(hostile), None, "rejected: {hostile:?}");
+        }
+    }
+
+    #[test]
+    fn binder_traversing_uuid_never_reads_outside_the_bundle() {
+        // A hostile binder names a traversing UUID. The reader must never be asked
+        // to read it — the document comes in empty and is counted, not read from
+        // outside the bundle (#1139 security).
+        let scrivx = r#"<?xml version="1.0"?><ScrivenerProject><Binder>
+<BinderItem UUID="d" Type="DraftFolder"><Title>Manuscript</Title><Children>
+<BinderItem UUID="../../../secret" Type="Text"><Title>Evil</Title></BinderItem>
+<BinderItem UUID="u1" Type="Text"><Title>Good</Title></BinderItem>
+</Children></BinderItem>
+</Binder></ScrivenerProject>"#;
+        let requested = std::cell::RefCell::new(Vec::<String>::new());
+        let out = parse_binder(scrivx, Some("My Novel".into()), |uuid| {
+            requested.borrow_mut().push(uuid.to_string());
+            Some(rtf(&format!("Body {uuid}.")))
+        });
+        assert!(
+            !requested
+                .borrow()
+                .iter()
+                .any(|u| u.contains("..") || u.contains('/')),
+            "no traversing UUID is ever read: {:?}",
+            requested.borrow()
+        );
+        // The evil document is present but empty (its body was never read), and the
+        // benign sibling still imports normally.
+        let evil = out.chapters.iter().find(|c| c.title == "Evil").unwrap();
+        assert_eq!(evil.body, "", "the rejected document has no body");
+        assert!(out.unreadable_bodies >= 1, "the rejected read is surfaced");
+        assert!(out.chapters.iter().any(|c| c.title == "Good"));
+    }
+
+    #[test]
+    fn rtf_out_of_range_uc_does_not_eat_trailing_prose() {
+        // A hostile/corrupt `\ucN` with a huge count would, unclamped, make the
+        // substitution-skip consume the rest of the paragraph after a `\uN` escape,
+        // silently swallowing prose (#1139). Clamped, the glyph decodes and the
+        // trailing prose survives.
+        let body = "caf\\uc999999\\u233\\'e9 and the rest of the sentence survives.";
+        let out = md(&rtf(body));
+        assert!(
+            out.contains("rest of the sentence survives"),
+            "trailing prose isn't eaten by an out-of-range \\uc: {out:?}"
+        );
+        assert!(out.contains("café"), "the glyph still decodes: {out:?}");
     }
 
     #[test]

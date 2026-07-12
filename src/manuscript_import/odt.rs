@@ -437,13 +437,25 @@ fn next_inline(xml: &str, lt: usize) -> Option<InlineElem<'_>> {
             next: gt + 1,
         });
     }
-    let at = matching_close(xml, name, gt + 1)?;
-    Some(InlineElem {
-        kind,
-        attrs,
-        inner: Some(&xml[gt + 1..at]),
-        next: at + name.len() + 3, // past "</name>"
-    })
+    match matching_close(xml, name, gt + 1) {
+        Some(at) => Some(InlineElem {
+            kind,
+            attrs,
+            inner: Some(&xml[gt + 1..at]),
+            next: at + name.len() + 3, // past "</name>"
+        }),
+        // Unclosed known element (e.g. a `<text:span>` whose `</text:span>` is
+        // missing): don't leak its raw `<…>` opening tag into the prose. Recover
+        // by treating the rest of the block as this element's inner content, so its
+        // text still imports (with the element's emphasis) — the "surface it, never
+        // leak markup" contract for malformed input (#1139).
+        None => Some(InlineElem {
+            kind,
+            attrs,
+            inner: Some(&xml[gt + 1..]),
+            next: xml.len(),
+        }),
+    }
 }
 
 /// The number of spaces a `<text:s text:c="N"/>` stands for (default 1).
@@ -545,6 +557,31 @@ mod tests {
         let out = parse_content_xml(&content(&styles, &body), None);
         // Italic "a " / bold-italic "b" / italic " c", each run wrapped tightly.
         assert_eq!(out.chapters[0].body, "*a* ***b*** *c*\n");
+    }
+
+    #[test]
+    fn odt_unclosed_span_imports_text_without_leaking_markup() {
+        // A malformed/hostile `.odt`: the `<text:span>` is never closed. Before
+        // #1139, `next_inline`'s `matching_close?` returned None, the stray-`<` path
+        // emitted the literal `<`, and the raw `text:span text:style-name=…>` markup
+        // leaked into the prose. Now the span's text imports (with its emphasis) and
+        // no `<text:span` markup appears.
+        let styles = text_style("Emph", "fo:font-style=\"italic\"");
+        let body = format!(
+            "{}{}",
+            heading("One"),
+            "<text:p>before <text:span text:style-name=\"Emph\">unterminated span text</text:p>",
+        );
+        let out = parse_content_xml(&content(&styles, &body), None);
+        let ch = &out.chapters[0].body;
+        assert!(
+            !ch.contains("<text:span") && !ch.contains("style-name"),
+            "raw span markup must not leak into prose: {ch:?}"
+        );
+        assert!(
+            ch.contains("before") && ch.contains("unterminated span text"),
+            "the span's text still imports: {ch:?}"
+        );
     }
 
     #[test]
