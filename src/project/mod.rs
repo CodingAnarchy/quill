@@ -157,7 +157,19 @@ impl Project {
     /// always editable.
     pub fn open(dir: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = dir.as_ref().to_path_buf();
-        let text = fs::read_to_string(Self::manifest_path(&root))?;
+        // Name the manifest path in any read failure. A bare `io::Error` from
+        // `read_to_string` carries only "Permission denied"/"No such file" with no
+        // path, so an unreadable project directory (chmod 0) or a missing manifest
+        // would surface an error the author can't act on. Wrapping it keeps the
+        // original `ErrorKind` (callers switch on `NotFound` vs. the rest) while the
+        // message names the file — degrading gracefully, never a panic (#1101).
+        let manifest_path = Self::manifest_path(&root);
+        let text = fs::read_to_string(&manifest_path).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("could not read {}: {e}", manifest_path.display()),
+            )
+        })?;
         let invalid = |e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -793,3 +805,6 @@ mod tests;
 
 #[cfg(test)]
 mod hardening_tests;
+
+#[cfg(test)]
+mod adverse_fs_tests;
