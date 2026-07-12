@@ -4,7 +4,7 @@
 //! metadata as the human-readable hedge), and [`answer_response`] (wrap the answer
 //! as the shared Q&A [`Response`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
@@ -92,22 +92,33 @@ pub(super) fn finish(
     // The ground truth of what the answer could draw from is the chapters the loop
     // ACTUALLY read/searched — the excerpt-derived citations (the tool executor records
     // a citation only for a read it truly resolved). Those titles, lowercased, are the
-    // allowlist a citation must be on to count. The MODEL's own cited titles are
-    // unvalidated claims: after reading one chapter it can list "Chapter 1..40" or an
-    // invented title. So a model citation is kept only when it names a chapter that was
-    // really read; anything else is dropped, keeping the coverage numerator honest and
-    // every citation jumpable. `chapters` supplies the coverage denominator.
-    let touched: BTreeSet<String> = excerpts
-        .iter()
-        .flat_map(|e| e.citations.iter())
-        .map(|t| t.trim().to_lowercase())
-        .filter(|t| !t.is_empty())
-        .collect();
+    // allowlist a citation must be on to count, and each key maps to the CANONICAL
+    // read-side title — the exact casing the loop resolved. The MODEL's own cited titles
+    // are unvalidated claims: after reading one chapter it can list "Chapter 1..40", an
+    // invented title, or the right chapter with the wrong casing (`chapter 7` vs
+    // `Chapter 7`). So a model citation is kept only when it names a chapter that was
+    // really read; anything else is dropped. When it matches case-insensitively we store
+    // the canonical read-side title (not the model's raw casing), so the stored citation
+    // is exactly the chapter title and the exact-match jump resolves (#1145). This keeps
+    // the coverage numerator honest and every citation jumpable. `chapters` supplies the
+    // coverage denominator.
+    let mut touched: BTreeMap<String, String> = BTreeMap::new();
+    for title in excerpts.iter().flat_map(|e| e.citations.iter()) {
+        let canonical = title.trim();
+        if canonical.is_empty() {
+            continue;
+        }
+        // First read wins the canonical casing, matching the encounter-order dedup below.
+        touched
+            .entry(canonical.to_lowercase())
+            .or_insert_with(|| canonical.to_string());
+    }
     let total_chapters = chapters.len();
 
     // Merge the model's cited titles with the gathered ones, deduped in encounter
     // order, dropping any the loop never actually read — so a citation always points at
-    // a chapter the loop really touched.
+    // a chapter the loop really touched. A kept citation is stored as the canonical
+    // read-side title, so a mis-cased-but-valid model citation still jumps (#1145).
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut citations: Vec<String> = Vec::new();
     for title in answer
@@ -116,10 +127,14 @@ pub(super) fn finish(
         .cloned()
         .chain(excerpts.iter().flat_map(|e| e.citations.iter().cloned()))
     {
-        let title = title.trim().to_string();
-        let key = title.to_lowercase();
-        if !title.is_empty() && touched.contains(&key) && seen.insert(key) {
-            citations.push(title);
+        let key = title.trim().to_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(canonical) = touched.get(&key) {
+            if seen.insert(key) {
+                citations.push(canonical.clone());
+            }
         }
     }
     answer.citations = citations;
