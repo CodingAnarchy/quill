@@ -39,7 +39,7 @@ use self::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg};
 use self::write::OutlineItem;
 use super::{
     body_blocks, classify_block, copyright_lines, inline_runs, Chapter, Document, ExportStyle,
-    FontStyle, ImageRole, Prose, PubMeta, Run, SCENE_BREAK,
+    FontStyle, ImageRole, Prose, PubMeta, Run, TextStyle, SCENE_BREAK,
 };
 use crate::frontmatter::Epigraph;
 
@@ -491,7 +491,7 @@ impl Pdf {
     /// A bold heading line at `align` (chapter/part titles, sub-headings), drawn in
     /// the heading font (#638).
     fn heading_line(&mut self, text: &str, size: f32, leading: f32, align: Align) {
-        let words = words_of(&[Run::new(text, true, false)], true);
+        let words = words_of(&[Run::new(text, TextStyle::Bold)], true);
         self.flow(&words, self.layout.text_w(), 0.0, size, leading, align);
     }
 
@@ -556,7 +556,7 @@ impl Pdf {
     fn epigraph(&mut self, e: &Epigraph) {
         let width = 2.0f32.mul_add(-EPIGRAPH_INSET, self.layout.text_w());
         for line in e.text.lines() {
-            let words = words_of(&[Run::new(line, false, true)], false);
+            let words = words_of(&[Run::new(line, TextStyle::Italic)], false);
             self.flow(
                 &words,
                 width,
@@ -567,7 +567,7 @@ impl Pdf {
             );
         }
         if let Some(by) = &e.attribution {
-            let words = words_of(&[Run::new(format!("— {by}"), false, true)], false);
+            let words = words_of(&[Run::new(format!("— {by}"), TextStyle::Italic)], false);
             self.flow(
                 &words,
                 width,

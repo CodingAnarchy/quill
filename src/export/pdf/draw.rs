@@ -9,7 +9,7 @@ use std::fmt::Write;
 use super::font::{glyph_run, glyph_run_mono, OBLIQUE_SHEAR};
 use super::layout::Layout;
 use super::wrap::{segments, words_of, wrap_lines, Hyphenate, Seg, Word};
-use super::{Align, FontStyle, Pdf, Run, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
+use super::{Align, FontStyle, Pdf, Run, TextStyle, BODY_LEADING, BODY_SIZE, INDENT, MONO_SIZE};
 
 impl Pdf {
     /// A normal body paragraph: first-line indented, justified to both margins
@@ -38,7 +38,10 @@ impl Pdf {
         size: f32,
         leading: f32,
     ) {
-        let words = words_of(&[Run::new(text, bold, italic)], heading);
+        let words = words_of(
+            &[Run::new(text, TextStyle::from_flags(bold, italic))],
+            heading,
+        );
         self.flow(
             &words,
             self.layout.text_w(),

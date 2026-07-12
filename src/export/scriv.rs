@@ -15,7 +15,7 @@ use std::path::Path;
 
 use super::{
     inline_runs, prose_blocks, render_epigraph, xml_escape, Chapter, Document, Part, Prose, Run,
-    SCENE_BREAK,
+    TextStyle, SCENE_BREAK,
 };
 
 /// Write `doc` as a Scrivener `.scriv` bundle at `bundle` (the `<name>.scriv`
@@ -158,8 +158,8 @@ fn to_rtf(chapter: &Chapter) -> String {
     if let Some(epigraph) = &chapter.epigraph {
         body.push_str(&render_epigraph(
             epigraph,
-            |line| rtf_paragraph(&[Run::new(line, false, true)]),
-            |by| rtf_paragraph(&[Run::new(format!("— {by}"), false, true)]),
+            |line| rtf_paragraph(&[Run::new(line, TextStyle::Italic)]),
+            |by| rtf_paragraph(&[Run::new(format!("— {by}"), TextStyle::Italic)]),
         ));
     }
     for prose in prose_blocks(&chapter.body) {
@@ -169,7 +169,7 @@ fn to_rtf(chapter: &Chapter) -> String {
                 let _ = writeln!(body, "\\pard\\qc\\sa180 {SCENE_BREAK}\\par");
             }
             Prose::Heading(heading) => {
-                body.push_str(&rtf_paragraph(&[Run::new(heading, true, false)]));
+                body.push_str(&rtf_paragraph(&[Run::new(heading, TextStyle::Bold)]));
             }
             Prose::Paragraph(text) => body.push_str(&rtf_paragraph(&inline_runs(&text))),
             // Verbatim, monospaced (`\f1`), line breaks kept as `\line` (#522).

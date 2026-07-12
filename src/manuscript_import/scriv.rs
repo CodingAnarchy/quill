@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::export::{push_run, Run, SCENE_BREAK};
+use crate::export::{push_run, Run, TextStyle, SCENE_BREAK};
 
 use super::{
     attr_value, element_text, fallback_chapter, finalize_titles, for_each_child, join_paragraphs,
@@ -251,7 +251,10 @@ fn rtf_to_markdown(rtf: &str, dropped: &mut Dropped) -> String {
                         "footnote" => {
                             push_run(&mut runs, &mut cur, bold, italic);
                             dropped.footnotes += 1;
-                            runs.push(Run::new(format!("[^{}]", dropped.footnotes), false, false));
+                            runs.push(Run::new(
+                                format!("[^{}]", dropped.footnotes),
+                                TextStyle::Plain,
+                            ));
                             skipping = true;
                         }
                         // An embedded image/object is dropped; count it, then skip

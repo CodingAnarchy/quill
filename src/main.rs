@@ -265,13 +265,14 @@ fn startup_dir() -> io::Result<Option<PathBuf>> {
     // the head of the recents list, not a library-only project — so it never
     // "reopens" a book the author has yet to open.
     let most_recent = recent::list().into_iter().next().map(|p| p.path);
-    match startup::decide(
-        &cwd,
-        in_project,
-        projects.len(),
-        cfg.open_last_enabled(),
-        most_recent.as_deref(),
-    ) {
+    let context = if in_project {
+        startup::StartupContext::InProject
+    } else {
+        startup::StartupContext::OffProject {
+            open_last: cfg.open_last_enabled(),
+        }
+    };
+    match startup::decide(&cwd, context, projects.len(), most_recent.as_deref()) {
         startup::StartupAction::OpenInPlace(dir) => Ok(Some(dir)),
         startup::StartupAction::NewProject => Ok(Some(new_project_dir()?)),
         startup::StartupAction::Choose => choose_startup_project(&projects),

@@ -7,6 +7,7 @@
 
 use super::super::wrap::{words_of, wrap_lines, Hyphenate, Word};
 use super::*;
+use crate::export::TextStyle;
 
 #[test]
 fn is_a_well_formed_pdf() {
@@ -278,8 +279,7 @@ fn body_lines_are_justified_flush_to_the_right_margin() {
             "The quick brown fox jumps over the lazy dog again and again and yet again to \
              fill the line with plenty of words so that it wraps to several lines within \
              the narrower print column and can be justified across both margins cleanly",
-            false,
-            false,
+            TextStyle::Plain,
         )],
         false,
     );
@@ -340,7 +340,7 @@ fn the_last_line_of_a_paragraph_is_not_justified() {
     let left = pdf.left();
     let start_y = pdf.y;
     // A short two-word paragraph: one line, drawn flush-left.
-    pdf.paragraph(&[Run::new("Two words.", false, false)]);
+    pdf.paragraph(&[Run::new("Two words.", TextStyle::Plain)]);
     let content = pdf.cur().clone();
     let xs = tm_xs(&content);
     // One run for the whole (single, last) line — flush-left, indented, not per-word.
@@ -369,8 +369,7 @@ fn a_paragraph_does_not_orphan_its_first_line_at_a_page_bottom() {
     pdf.paragraph(&[Run::new(
         "This is a paragraph long enough to wrap across at least two full lines of body \
          text so that an orphan would form if it began here at the very bottom.",
-        false,
-        false,
+        TextStyle::Plain,
     )]);
     assert!(
         pdf.pages.len() > pages_before,
@@ -428,8 +427,7 @@ fn a_long_word_hyphenates_at_a_justified_line_break() {
     let words = words_of(
         &[Run::new(
             "The complicated extraordinary machinery",
-            false,
-            false,
+            TextStyle::Plain,
         )],
         false,
     );
@@ -472,7 +470,10 @@ fn hyphenation_is_off_for_non_justified_flows() {
     // Headings/epigraphs pass `Hyphenate::Off`, so even a long word that overflows a
     // narrow width is never broken — it moves whole to the next line (#678).
     let layout = Layout::screen(&plain());
-    let words = words_of(&[Run::new("The extraordinary heading", true, false)], true);
+    let words = words_of(
+        &[Run::new("The extraordinary heading", TextStyle::Bold)],
+        true,
+    );
     let width = layout.measure("The extra", HEADING_SIZE, FontStyle::REGULAR, true);
     let lines = wrap_lines(&layout, &words, HEADING_SIZE, Hyphenate::Off, |_| width);
     let texts = wrapped_texts(&lines);
@@ -493,7 +494,7 @@ fn short_words_and_stub_fragments_are_never_hyphenated() {
     // "rivers" has no en-US pattern break; "cat" is too short. Neither breaks.
     for word in ["cat", "rivers", "the"] {
         let words = words_of(
-            &[Run::new(format!("A {word} here now"), false, false)],
+            &[Run::new(format!("A {word} here now"), TextStyle::Plain)],
             false,
         );
         // A width so tight each word wraps to its own line, forcing the break attempt.

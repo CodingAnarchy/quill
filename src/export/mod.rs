@@ -259,6 +259,48 @@ pub fn strip_repeated_title(body: &str, title: &str) -> String {
     }
 }
 
+/// The emphasis a [`Run`] (or word) carries — the four meaningful combinations of
+/// bold and italic, named so a call site reads `TextStyle::Bold` instead of the
+/// opaque `(false, true)` pair the run-splitter and RTF collector used to pass
+/// around (#1083). Extends the same "don't model this as an untyped tuple" intent
+/// [`Run`] already carries (#506). The [`is_bold`](TextStyle::is_bold) /
+/// [`is_italic`](TextStyle::is_italic) accessors let downstream logic keep reading
+/// the two flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextStyle {
+    /// Neither bold nor italic — plain body text.
+    Plain,
+    /// Bold only.
+    Bold,
+    /// Italic only.
+    Italic,
+    /// Both bold and italic (nested `***x***`).
+    BoldItalic,
+}
+
+impl TextStyle {
+    /// The style for the given `(bold, italic)` emphasis flags — the bridge from the
+    /// run-splitter's two accumulating booleans to the named style.
+    pub(crate) const fn from_flags(bold: bool, italic: bool) -> Self {
+        match (bold, italic) {
+            (false, false) => Self::Plain,
+            (true, false) => Self::Bold,
+            (false, true) => Self::Italic,
+            (true, true) => Self::BoldItalic,
+        }
+    }
+
+    /// Whether the style is bold.
+    pub(crate) const fn is_bold(self) -> bool {
+        matches!(self, Self::Bold | Self::BoldItalic)
+    }
+
+    /// Whether the style is italic.
+    pub(crate) const fn is_italic(self) -> bool {
+        matches!(self, Self::Italic | Self::BoldItalic)
+    }
+}
+
 /// A styled span of text — Quill's bold/italic "run", the unit both export's
 /// run-splitter ([`inline_runs`]) and import's RTF run-collector produce. It
 /// round-trips Quill's own export, so the type is shared rather than modeled as
@@ -271,12 +313,12 @@ pub struct Run {
 }
 
 impl Run {
-    /// A run carrying `text` with the given emphasis.
-    pub(crate) fn new(text: impl Into<String>, bold: bool, italic: bool) -> Self {
+    /// A run carrying `text` with the given [`TextStyle`] emphasis (#1083).
+    pub(crate) fn new(text: impl Into<String>, style: TextStyle) -> Self {
         Self {
             text: text.into(),
-            bold,
-            italic,
+            bold: style.is_bold(),
+            italic: style.is_italic(),
         }
     }
 }
@@ -311,7 +353,7 @@ fn inline_runs(text: &str) -> Vec<Run> {
     // Unbalanced markers mean the `*`s weren't emphasis (a stray `*` in prose,
     // e.g. "5 * 3"). Don't drop them and over-italicize — emit the line verbatim.
     if bold || italic {
-        return vec![Run::new(text, false, false)];
+        return vec![Run::new(text, TextStyle::Plain)];
     }
     runs
 }
@@ -321,7 +363,10 @@ fn inline_runs(text: &str) -> Vec<Run> {
 /// the import RTF run-collector (#506).
 pub fn push_run(runs: &mut Vec<Run>, cur: &mut String, bold: bool, italic: bool) {
     if !cur.is_empty() {
-        runs.push(Run::new(std::mem::take(cur), bold, italic));
+        runs.push(Run::new(
+            std::mem::take(cur),
+            TextStyle::from_flags(bold, italic),
+        ));
     }
 }
 
@@ -734,25 +779,31 @@ mod tests {
 
     #[test]
     fn parses_nested_and_plain_emphasis() {
-        assert_eq!(inline_runs("plain"), vec![Run::new("plain", false, false)]);
+        assert_eq!(
+            inline_runs("plain"),
+            vec![Run::new("plain", TextStyle::Plain)]
+        );
         assert_eq!(
             inline_runs("a *b* c"),
             vec![
-                Run::new("a ", false, false),
-                Run::new("b", false, true),
-                Run::new(" c", false, false)
+                Run::new("a ", TextStyle::Plain),
+                Run::new("b", TextStyle::Italic),
+                Run::new(" c", TextStyle::Plain)
             ]
         );
-        assert_eq!(inline_runs("**bold**"), vec![Run::new("bold", true, false)]);
+        assert_eq!(
+            inline_runs("**bold**"),
+            vec![Run::new("bold", TextStyle::Bold)]
+        );
         // Underscores are literal (not emphasis), so snake_case survives.
         assert_eq!(
             inline_runs("snake_case"),
-            vec![Run::new("snake_case", false, false)]
+            vec![Run::new("snake_case", TextStyle::Plain)]
         );
         // A stray/unbalanced `*` is kept literal, not turned into runaway italics.
         assert_eq!(
             inline_runs("5 * 3 = 15"),
-            vec![Run::new("5 * 3 = 15", false, false)]
+            vec![Run::new("5 * 3 = 15", TextStyle::Plain)]
         );
     }
 
