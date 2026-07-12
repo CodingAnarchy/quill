@@ -349,7 +349,7 @@ fn book_outline(pdf: &mut Pdf, doc: &Document) -> Vec<OutlineItem> {
                 let ornament = pdf.bits.part_ornament.clone();
                 let align = pdf.bits.heading_align;
                 let page = pdf.divider_page(name, PART_SIZE, ornament.as_deref(), align);
-                let mut item = OutlineItem::new(name.clone(), page);
+                let mut item = OutlineItem::part(name.clone(), page);
                 for ch in &part.chapters {
                     item.children
                         .push(OutlineItem::new(ch.title.clone(), pdf.chapter(ch)));

@@ -69,19 +69,36 @@ pub(super) fn remap_glyph_ids(content: &str, maps: &[(&str, &GidMap)]) -> String
     out
 }
 
-/// A bookmark: a title, the page it jumps to, and any nested entries.
+/// A bookmark: a title, the page it jumps to, and any nested entries. `is_part`
+/// marks a part-divider heading (which groups chapters and carries no Contents
+/// folio) explicitly, rather than inferring part-ness from a non-empty
+/// `children` — an empty named part is still a divider, not a folio-bearing entry.
 pub(super) struct OutlineItem {
     pub(super) title: String,
     pub(super) page: usize,
+    pub(super) is_part: bool,
     pub(super) children: Vec<Self>,
 }
 
 impl OutlineItem {
-    /// A bookmark to `page`; nest entries by pushing onto `children` afterward.
+    /// A bookmark to `page` for a plain entry (front/back/chapter); nest entries by
+    /// pushing onto `children` afterward.
     pub(super) const fn new(title: String, page: usize) -> Self {
         Self {
             title,
             page,
+            is_part: false,
+            children: Vec::new(),
+        }
+    }
+
+    /// A bookmark for a part divider: it groups its chapters and carries no folio,
+    /// even when no chapters are nested beneath it yet.
+    pub(super) const fn part(title: String, page: usize) -> Self {
+        Self {
+            title,
+            page,
+            is_part: true,
             children: Vec::new(),
         }
     }
