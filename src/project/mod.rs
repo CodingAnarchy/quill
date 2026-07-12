@@ -184,6 +184,26 @@ impl Project {
         let (mut manifest, mut books, active_book) =
             Manifest::from_toml_value(value).map_err(invalid)?;
 
+        // Refuse a manifest written by a *newer* build (#1144): a future
+        // `format_version` may carry fields this build can't represent, and
+        // `migrate` is a no-op at or above the current version — so opening would
+        // load a lossy view and the next save would silently strip the future
+        // fields. Fail with a clear, version-naming message instead. This uses
+        // `InvalidData` (not `NotFound`), so the `NotFound` re-create path callers
+        // switch on stays intact; current-and-older versions fall through to
+        // `migrate` and open exactly as before.
+        let found = manifest.format_version();
+        if found > manifest::CURRENT_FORMAT_VERSION {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{MANIFEST_NAME} format version {found} is newer than this build supports \
+                     (version {}); upgrade Quill to open this project",
+                    manifest::CURRENT_FORMAT_VERSION
+                ),
+            ));
+        }
+
         // Migrate an older on-disk format forward to the current version (#1097)
         // before anything reads the manifest. Today this only stamps the version
         // field (there's been no breaking change), but it's the defined upgrade

@@ -398,13 +398,24 @@ fn start_new_series() -> io::Result<PathBuf> {
 /// terminal before the alternate screen opens — mirroring [`prompt_project_name`].
 /// Both are required; an empty entry for either is an error rather than a blank
 /// series or an untitled book.
+///
+/// The series title becomes the on-disk folder, so it's sanitized *before* the
+/// empty check (like [`prompt_project_name`]): a punctuation-only title such as
+/// `.` or `...` sanitizes to `""` and must be rejected, or it would scaffold into
+/// the projects-home root and could overwrite an existing `book.toml` there
+/// (#1143). The first book's title is a book title, not a folder, so it keeps its
+/// own raw-trimmed validation.
 fn prompt_series_titles() -> io::Result<(String, String)> {
-    let read = |label: &str| -> io::Result<String> {
+    let read = |label: &str, sanitize: bool| -> io::Result<String> {
         print!("{label}: ");
         io::stdout().flush()?;
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        let value = input.trim().to_string();
+        let value = if sanitize {
+            crate::project::sanitize_dir_name(&input)
+        } else {
+            input.trim().to_string()
+        };
         if value.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -413,8 +424,8 @@ fn prompt_series_titles() -> io::Result<(String, String)> {
         }
         Ok(value)
     };
-    let series_title = read("Series title")?;
-    let first_book_title = read("First book title")?;
+    let series_title = read("Series title", true)?;
+    let first_book_title = read("First book title", false)?;
     Ok((series_title, first_book_title))
 }
 
@@ -584,6 +595,35 @@ mod tests {
             "the message should name the manifest: {err}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn punctuation_only_series_title_would_scaffold_into_the_projects_home_root() {
+        // #1143 regression: a punctuation-only series title (`.`, `...`, or only
+        // whitespace/punctuation) sanitizes to `""`, and `base.join("")` is the
+        // projects-home root itself — so scaffolding there would overwrite an
+        // existing `book.toml`. `prompt_series_titles` now sanitizes the series
+        // title *before* the empty check and rejects it, mirroring the single-book
+        // `prompt_project_name`. This pins the trap the guard exists to prevent.
+        let base = PathBuf::from("/tmp/projects-home");
+        for title in ["", ".", "...", "   ", " .. ", "\t...\n", ".....  "] {
+            let folder = crate::project::sanitize_dir_name(title);
+            assert!(
+                folder.is_empty(),
+                "punctuation/whitespace-only {title:?} should sanitize to empty, got {folder:?}"
+            );
+            // The empty folder collapses `base.join(folder)` onto the root: the
+            // exact overwrite the pre-empty-check sanitize now prevents.
+            assert_eq!(
+                base.join(&folder),
+                base,
+                "an empty folder scaffolds into the projects-home root"
+            );
+        }
+        // A valid title still yields a correctly-named folder under the home.
+        let folder = crate::project::sanitize_dir_name("The Chronicles");
+        assert_eq!(folder, "The Chronicles");
+        assert_eq!(base.join(&folder), base.join("The Chronicles"));
     }
 
     #[test]

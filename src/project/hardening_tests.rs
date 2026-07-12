@@ -458,3 +458,70 @@ fn write_chapters_atomic_writes_through_a_symlinked_chapter() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+// --- #1144: refuse a manifest from a newer build ----------------------------
+
+// A manifest whose `format_version` is *newer* than this build must fail to open
+// rather than load a lossy view (whose next save would strip the future fields).
+// The error is `InvalidData` — not `NotFound` — so the re-create path callers
+// switch on stays intact, and the message names both versions.
+#[test]
+fn opening_a_future_format_version_is_refused() {
+    let dir = temp_dir("future-format-version");
+    fs::create_dir_all(&dir).unwrap();
+    let future = manifest::CURRENT_FORMAT_VERSION + 1;
+    fs::write(
+        Project::manifest_path(&dir),
+        format!(
+            "format_version = {future}\ntitle = \"From The Future\"\n\n\
+             [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n"
+        ),
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "# One\n\nProse from a newer Quill.\n").unwrap();
+
+    let err = Project::open(&dir)
+        .err()
+        .expect("a newer format version must not open");
+    assert_eq!(
+        err.kind(),
+        std::io::ErrorKind::InvalidData,
+        "the ceiling check reports InvalidData, not NotFound — the re-create path is preserved"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains(&future.to_string())
+            && msg.contains(&manifest::CURRENT_FORMAT_VERSION.to_string()),
+        "the message names both the found and supported versions: {msg}"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+// The current version — and an older/versionless one — still opens and migrates
+// exactly as before: the ceiling guard only trips strictly *above* the current
+// version.
+#[test]
+fn opening_the_current_format_version_still_succeeds() {
+    let dir = temp_dir("current-format-version");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        format!(
+            "format_version = {}\ntitle = \"Current\"\n\n\
+             [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+            manifest::CURRENT_FORMAT_VERSION
+        ),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("one.md"),
+        "# One\n\nProse at the current version.\n",
+    )
+    .unwrap();
+
+    let project = Project::open(&dir).expect("the current version opens");
+    assert_eq!(project.manifest.title, "Current");
+
+    fs::remove_dir_all(&dir).ok();
+}
