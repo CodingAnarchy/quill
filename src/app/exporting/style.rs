@@ -5,6 +5,8 @@
 
 use super::super::*;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::export::{self, Chapter, Document, ExportStyle, Part};
 use crate::frontmatter::Epigraph;
 
@@ -99,7 +101,7 @@ impl App {
                 return;
             }
         };
-        let path = std::env::temp_dir().join("quill-style-preview.epub");
+        let path = unique_preview_path("quill-style-preview", "epub");
         if let Err(e) = std::fs::write(&path, &bytes) {
             self.message = Some(format!("Style preview failed: {e}"));
             return;
@@ -142,7 +144,7 @@ impl App {
                 return;
             }
         };
-        let path = std::env::temp_dir().join("quill-print-preview.pdf");
+        let path = unique_preview_path("quill-print-preview", "pdf");
         if let Err(e) = std::fs::write(&path, &bytes) {
             self.message = Some(format!("Print preview failed: {e}"));
             return;
@@ -223,6 +225,23 @@ fn style_preview_document() -> Document {
     }
 }
 
+/// A monotonic per-process counter making each preview path unique even when the
+/// same process previews repeatedly (a fresh temp file every keystroke), so we never
+/// truncate a still-open reader's file.
+static PREVIEW_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A unique temp path for a style/print preview (#1146): `<stem>-<pid>-<seq>.<ext>`
+/// in the system temp dir. Keyed by process id — mirroring the atomic-save temp
+/// naming ([`crate::atomic`]) — so concurrent processes (e.g. parallel tests) never
+/// collide, plus a monotonic counter so repeated previews within one process each get
+/// their own file. Because the name is unique per call, a pre-existing fixed path
+/// (stale or planted) is never clobbered and two previews never race on one file.
+fn unique_preview_path(stem: &str, ext: &str) -> std::path::PathBuf {
+    let pid = std::process::id();
+    let seq = PREVIEW_SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("{stem}-{pid}-{seq}.{ext}"))
+}
+
 /// Open `path` in the operating system's default application — the EPUB reader for
 /// the style preview (#483), the PDF viewer for the print-interior preview (#1107).
 /// Spawns the platform launcher and returns without waiting, so the editor keeps
@@ -240,4 +259,40 @@ fn open_in_default_app(path: &std::path::Path) -> std::io::Result<()> {
         c
     };
     cmd.arg(path).spawn().map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_preview_path;
+    use std::collections::HashSet;
+
+    #[test]
+    fn preview_paths_are_unique_and_never_a_fixed_name() {
+        // Repeated previews must each get a distinct path (#1146): concurrent or
+        // back-to-back previews never race on one file, and the old fixed name
+        // (`quill-style-preview.epub`) — which a stale or planted file could sit at —
+        // is never reused, so it is never clobbered.
+        let a = unique_preview_path("quill-style-preview", "epub");
+        let b = unique_preview_path("quill-style-preview", "epub");
+        assert_ne!(a, b, "repeated previews must not collide");
+        for p in [&a, &b] {
+            let name = p.file_name().unwrap().to_string_lossy();
+            assert_ne!(
+                name, "quill-style-preview.epub",
+                "must not use the fixed name"
+            );
+            assert!(name.starts_with("quill-style-preview-"));
+            assert!(name.ends_with(".epub"));
+            assert!(
+                name.contains(&std::process::id().to_string()),
+                "path is keyed by pid so concurrent processes don't collide"
+            );
+            assert_eq!(p.parent(), Some(std::env::temp_dir().as_path()));
+        }
+        // A burst of previews yields all-distinct paths (the monotonic counter).
+        let paths: HashSet<_> = (0..64)
+            .map(|_| unique_preview_path("quill-print-preview", "pdf"))
+            .collect();
+        assert_eq!(paths.len(), 64, "every preview in a burst is a fresh path");
+    }
 }

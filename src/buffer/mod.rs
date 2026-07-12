@@ -755,7 +755,14 @@ impl Buffer {
     /// to a full-document scan even for a grapheme straddling the window edge.
     pub fn grapheme_after(&self, byte: usize) -> usize {
         let len = self.rope.len_bytes();
-        let byte = byte.min(len);
+        // Snap to a valid char boundary before slicing, mirroring `cursor_at_byte`:
+        // a future caller (a stale persisted position, mark, or fold heading whose
+        // byte offset now lands inside a multi-byte grapheme) must not panic on the
+        // `byte_slice(byte..hi)` below. Flooring to the previous boundary leaves the
+        // cursor-derived offsets today's callers pass untouched.
+        let byte = self
+            .rope
+            .char_to_byte(self.rope.byte_to_char(byte.min(len)));
         let mut radius = GRAPHEME_WINDOW;
         loop {
             let hi = (byte + radius).min(len);
