@@ -66,6 +66,13 @@ impl App {
             || self.vim_state.op.is_some()
             || self.case_op.is_some() // a `g~`/`gu`/`gU` awaiting its motion (#1006)
             || self.vim_state.pending != VimPending::None
+            // A pending count prefix (`3` of `3x`, `2` of `2dw`) is still composing
+            // the command (#1142): its digit keys edit nothing, so without this the
+            // recorder would settle and discard them, then start a fresh recording
+            // at the operator key — capturing `x`/`dw`/`r` without the count, so `.`
+            // replayed a count of 1. Keeping the count "composing" folds the digits
+            // into the same recording, so `.` replays the counted command.
+            || self.vim_state.count.is_some()
     }
     /// A composed command has settled back into resting Normal mode: commit its
     /// keys as the last change if it edited the buffer, else drop them.

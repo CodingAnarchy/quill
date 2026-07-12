@@ -36,6 +36,86 @@ fn dot_repeats_delete_word() {
 }
 
 #[test]
+fn dot_repeats_a_counted_delete_char() {
+    // #1142: `3x` deletes three chars; `.` must repeat with the count, deleting
+    // three more — not one (the bug dropped the count prefix from the recording).
+    let (mut app, _dir) = dot_app("dot-count-x", "abcdefgh\n");
+    type_str(&mut app, "3x");
+    assert_eq!(app.buffer.text(), "defgh\n", "3x deleted three chars");
+    dot(&mut app);
+    assert_eq!(
+        app.buffer.text(),
+        "gh\n",
+        ". repeated the counted delete (three)"
+    );
+}
+
+#[test]
+fn dot_repeats_a_counted_operator_motion() {
+    // #1142: `2dw` deletes two words; `.` must repeat with the count.
+    let (mut app, _dir) = dot_app("dot-count-dw", "one two three four five\n");
+    type_str(&mut app, "2dw");
+    assert_eq!(
+        app.buffer.text(),
+        "three four five\n",
+        "2dw deleted two words"
+    );
+    dot(&mut app);
+    assert_eq!(
+        app.buffer.text(),
+        "five\n",
+        ". repeated the two-word delete"
+    );
+}
+
+#[test]
+fn dot_repeats_a_counted_replace() {
+    // #1142: `3rX` replaces three chars; `.` must repeat with the count.
+    let (mut app, _dir) = dot_app("dot-count-r", "aaaaaaaa\n");
+    type_str(&mut app, "3rX");
+    assert_eq!(app.buffer.text(), "XXXaaaaa\n", "3rX replaced three chars");
+    // Move onto the first untouched 'a' and repeat the counted replace.
+    app.buffer.cursor = app.buffer.cursor_at_byte(3);
+    dot(&mut app);
+    assert_eq!(
+        app.buffer.text(),
+        "XXXXXXaa\n",
+        ". repeated the three-char replace"
+    );
+}
+
+#[test]
+fn dot_of_an_uncounted_change_is_unchanged() {
+    // #1142 regression: an uncounted change still repeats exactly once, so the
+    // count-composing fix hasn't leaked a stale count into a bare `.`.
+    let (mut app, _dir) = dot_app("dot-uncounted", "aaaa\n");
+    type_str(&mut app, "x"); // delete one 'a'
+    assert_eq!(app.buffer.text(), "aaa\n", "x deleted one char");
+    dot(&mut app);
+    assert_eq!(
+        app.buffer.text(),
+        "aa\n",
+        ". repeated the single delete once"
+    );
+}
+
+#[test]
+fn outer_count_multiplies_a_counted_repeat() {
+    // #1142: `{count}.` (the outer count consumed in dispatch) replays the whole
+    // recorded command — count included — that many times. `2x` then `2.` deletes
+    // the two-char change twice (four total), never double-applying the inner count.
+    let (mut app, _dir) = dot_app("dot-outer-count", "abcdefgh\n");
+    type_str(&mut app, "2x"); // -> "cdefgh\n"
+    assert_eq!(app.buffer.text(), "cdefgh\n", "2x deleted two chars");
+    type_str(&mut app, "2."); // repeat the 2-char delete twice -> deletes four
+    assert_eq!(
+        app.buffer.text(),
+        "gh\n",
+        "2. repeated the two-char delete twice (four chars)"
+    );
+}
+
+#[test]
 fn dot_repeats_change_inside_quotes() {
     let (mut app, _dir) = dot_app("dot-ciq", "say \"foo\" and \"bar\" now\n");
     // Move onto the first quoted span, then `ci"` + type replacement + Esc.
