@@ -58,8 +58,7 @@ fn backup_when(modified: std::time::SystemTime, now: std::time::SystemTime) -> S
         .map(|d| format!(" ({} ago)", backup_age(d)))
         .unwrap_or_default();
     let offset = time::OffsetDateTime::now_local()
-        .map(time::OffsetDateTime::offset)
-        .unwrap_or(time::UtcOffset::UTC);
+        .map_or(time::UtcOffset::UTC, time::OffsetDateTime::offset);
     let local = time::OffsetDateTime::from(modified).to_offset(offset);
     let fmt = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
     match local.format(&fmt) {

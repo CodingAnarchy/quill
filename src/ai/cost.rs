@@ -74,7 +74,7 @@ pub fn estimate(input_chars: usize, max_tokens: u32, model: &str, batch: bool) -
     let (in_rate, out_rate) = rate(model);
     let discount = if batch { BATCH_DISCOUNT } else { 1.0 };
     let dollars =
-        (f64::from(tokens) * in_rate + f64::from(max_tokens) * out_rate) * discount / 1_000_000.0;
+        f64::from(max_tokens).mul_add(out_rate, f64::from(tokens) * in_rate) * discount / 1_000_000.0;
     Estimate { tokens, dollars }
 }
 

@@ -4,6 +4,8 @@
 //! [`excerpt_around`] excerpt renderer. A future embedding-backed impl slots
 //! behind [`ManuscriptSearch`] with no change to the loop.
 
+use std::cmp::Reverse;
+
 use crate::ai::embed::Chapter;
 
 /// One location a [`ManuscriptSearch`] turned up: the chapter it's in (a jumpable
@@ -184,7 +186,7 @@ impl ManuscriptSearch for LexicalSearch {
             }
         }
         // Most matches first; ties keep manuscript order (stable sort on index).
-        hits.sort_by(|a, b| b.1.cmp(&a.1));
+        hits.sort_by_key(|h| Reverse(h.1));
         hits.truncate(limit);
         hits.into_iter()
             .map(|(i, _, at)| {

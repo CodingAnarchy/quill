@@ -283,12 +283,11 @@ fn body_face(
 /// be instanced to a genuine bold (#638).
 fn has_wght_axis(program: &[u8]) -> bool {
     Face::parse(program, 0)
-        .map(|f| {
+        .is_ok_and(|f| {
             f.variation_axes()
                 .into_iter()
                 .any(|a| a.tag == ttf_parser::Tag::from_bytes(b"wght"))
         })
-        .unwrap_or(false)
 }
 
 /// One font embedded as a Type0/Identity-H composite over a TrueType program: the

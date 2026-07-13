@@ -346,7 +346,7 @@ fn archive_names(dir: &Path) -> Vec<String> {
     };
     let mut names: Vec<String> = read
         .flatten()
-        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| n.ends_with(ZIP_SUFFIX))
         .collect();

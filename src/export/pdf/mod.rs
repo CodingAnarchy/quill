@@ -397,7 +397,7 @@ impl Pdf {
     /// styled. Returns the page it starts on (for its bookmark).
     fn chapter(&mut self, ch: &Chapter) -> usize {
         let page = self.open_section();
-        self.y -= HEADING_LEADING * 2.0;
+        self.y = HEADING_LEADING.mul_add(-2.0, self.y);
         // A chapter-heading image sits above the title (#490).
         self.place_image(
             ImageRole::ChapterHeading,
@@ -440,7 +440,7 @@ impl Pdf {
     /// runs off the page edge.
     fn preformatted(&mut self, code: &str) {
         self.need(MONO_LEADING * 1.5);
-        self.y -= BODY_LEADING * 0.5;
+        self.y = BODY_LEADING.mul_add(-0.5, self.y);
         let col = self.layout.text_w();
         for line in code.lines() {
             for piece in mono_wrap(&self.layout, line, col) {
@@ -452,7 +452,7 @@ impl Pdf {
                 self.y -= MONO_LEADING;
             }
         }
-        self.y -= BODY_LEADING * 0.5;
+        self.y = BODY_LEADING.mul_add(-0.5, self.y);
     }
 
     /// The scene-break divider — the configured glyph, centered. A glyph the PDF
@@ -461,7 +461,7 @@ impl Pdf {
     /// [`pdf_style_warnings`]).
     fn scene_break_line(&mut self) {
         self.need(BODY_LEADING * 2.0);
-        self.y -= BODY_LEADING * 0.5;
+        self.y = BODY_LEADING.mul_add(-0.5, self.y);
         if self.image(ImageRole::SceneBreak).is_some() {
             // An image divider replaces the glyph (#490).
             self.place_image(
@@ -483,7 +483,7 @@ impl Pdf {
     /// A body sub-heading (`##` …), bold, honoring the heading alignment.
     fn sub_heading(&mut self, h: &str) {
         self.need(BODY_LEADING * 2.0);
-        self.y -= BODY_LEADING * 0.5;
+        self.y = BODY_LEADING.mul_add(-0.5, self.y);
         let align = self.bits.heading_align;
         self.heading_line(h, BODY_SIZE, BODY_LEADING, align);
     }

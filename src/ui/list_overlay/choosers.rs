@@ -160,7 +160,7 @@ pub(in crate::ui) fn draw_project_browser(
     let rows = visible
         .iter()
         .map(|(i, p)| {
-            let here = current.as_ref().map(|c| c == &p.path).unwrap_or(false);
+            let here = current.as_ref().is_ok_and(|c| c == &p.path);
             let tag = if here { "  (open)" } else { "" };
             list_row(
                 *i == browser.selected,
