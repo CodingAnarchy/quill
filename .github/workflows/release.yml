@@ -1,12 +1,15 @@
 name: release
 
 # Ship prebuilt per-OS/arch binaries so installing Quill doesn't require a Rust
-# toolchain (#1111). Triggered by pushing a version tag (e.g. `v0.9.2`); builds
+# toolchain (#1111). Triggered by pushing a version tag (e.g. `v1.0.0`); builds
 # the DEFAULT feature set for each target, packages a tarball + sha256 sidecar,
 # and attaches everything to the GitHub Release for that tag.
 #
-# ASSET SCHEME (must match Cargo.toml's [package.metadata.binstall] and the
-# Homebrew formula in #1112):
+# Also runnable manually (workflow_dispatch) against an existing tag — used to
+# (re)build assets for a tag after a workflow fix, without moving the tag.
+#
+# ASSET SCHEME (must match Cargo.toml's [package.metadata.binstall] and any
+# Homebrew formula, #1112):
 #   tarball : quill-{version}-{target}.tar.gz   (the `quill` binary at the root)
 #   checksum: quill-{version}-{target}.tar.gz.sha256
 # where {version} is the tag without its leading `v` and {target} is the Rust
@@ -17,6 +20,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and upload assets for, e.g. v1.0.0"
+        required: true
 
 permissions:
   contents: write
@@ -44,6 +52,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -54,6 +64,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+
+      # keyring's Linux secret-service backend links libdbus. Native Linux
+      # builds get it from the runner; the cross (aarch64) build installs the
+      # arm64 dev package inside the cross container via Cross.toml's pre-build.
+      - name: Install libdbus (native Linux)
+        if: ${{ runner.os == 'Linux' && !matrix.cross }}
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Install cross
         if: matrix.cross
@@ -74,7 +91,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          ref_name="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${ref_name#v}"
           target="${{ matrix.target }}"
           name="quill-${version}-${target}"
           staging="$(mktemp -d)"
@@ -91,6 +109,7 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             ${{ steps.package.outputs.tarball }}
             ${{ steps.package.outputs.tarball }}.sha256
