@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Quill is behaving incorrectly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Clear steps to reproduce are
+        the single most useful thing you can give us.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps — including the keys pressed and, if it matters, what the project looked like.
+      placeholder: |
+        1. Open a project with `cargo run --release -- path/to/book`
+        2. Press Ctrl-L to enter the continuous view
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and terminal, the Quill version or commit, and whether you built with `--features local`.
+      placeholder: |
+        - OS / terminal: macOS 14 / kitty
+        - Quill version or commit: 0.9.2
+        - Features: default (no --features local)
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, a `capture-pane` dump, or other context.
+    validations:
+      required: false
