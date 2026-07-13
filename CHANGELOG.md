@@ -5,6 +5,47 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-07-12
+
+**Quill 1.0.** A novelist can trust it with a manuscript: the on-disk format is
+stable, the reliability work of the 0.8/0.9 series is in, and the project is now
+packaged like a tool you can depend on. Under Semantic Versioning, 1.0 is a
+promise — the project directory (`book.toml`, the series manifest, `bible/`,
+chapter front matter) and the configuration keys stay compatible across every
+1.x release, and a future breaking format change is migrated on open rather than
+silently downgraded. See [COMPATIBILITY.md](COMPATIBILITY.md) for the full
+commitment.
+
+This release is the distribution-and-maturity milestone on top of that
+foundation; the editing, analysis, and export features shipped across the 0.7
+through 0.9 releases.
+
+### Added
+
+- **Prebuilt binaries** — every release now attaches ready-to-run binaries for
+  macOS (Intel and Apple Silicon) and Linux (x86_64 and aarch64), each with a
+  `.sha256` sidecar, so installing no longer requires a Rust toolchain. A
+  release workflow builds and publishes them automatically on each version tag.
+- **Continuous integration** — a GitHub Actions workflow gates every change on
+  the full check suite (formatting, clippy, and the test suite on Linux and
+  macOS, plus the performance guards on merge to master).
+- **A documented compatibility commitment** — `COMPATIBILITY.md` spells out what
+  1.0 guarantees about the on-disk format and config across 1.x, and how a
+  breaking change would be migrated.
+- **Contributor onboarding** — `CONTRIBUTING.md`, a `CODE_OF_CONDUCT.md`
+  (Contributor Covenant), and issue and pull-request templates.
+- **A dedicated export & publishing guide** — `docs/export.md` gathers the
+  formats, the `[style]`/`[print]` design system, preflight, and the
+  KDP/IngramSpark bundle in one place, and the docs index now separates the user
+  guides from the internal design notes.
+- **An `LICENSE` file** — the project's MIT license is now spelled out in full.
+
+### Changed
+
+- **The install docs lead with the prebuilt binary** — download and run, no
+  toolchain needed; building from source (`./install.sh`, or `cargo install
+  --git`) remains the path for the offline-AI `local` feature.
+
 ## [0.9.2] - 2026-07-12
 
 A second reliability patch on the road to 1.0. A six-front adversarial bug hunt —
@@ -479,6 +520,7 @@ backups in-app.
 - **Pass-queue resume under `--features local`** — resuming the multi-pass queue
   no longer fails when built with the `local` feature.
 
+[1.0.0]: https://github.com/CodingAnarchy/quill/releases/tag/v1.0.0
 [0.9.2]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.2
 [0.9.1]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.1
 [0.9.0]: https://github.com/CodingAnarchy/quill/releases/tag/v0.9.0
