@@ -103,7 +103,7 @@ impl Syntax {
                       cancellation, neither of which this call configures"
         )]
         let tree = parser
-            .parse(text.as_bytes(), None)
+            .parse(&ascii_fold(text.as_bytes()), None)
             .expect("markdown parse should not fail without a timeout/cancellation");
         let (highlights, markers, headings) = collect(&tree, |s, e| text[s..e].to_string());
         let conceal_all = conceal_all_from(&markers);
@@ -137,12 +137,12 @@ impl Syntax {
         let len = rope.len_bytes();
         // Feed tree-sitter rope chunks: it asks for the bytes starting at an
         // offset and we hand back the rest of that chunk (empty past the end).
-        let mut read = |byte: usize, _: Point| -> &[u8] {
+        let mut read = |byte: usize, _: Point| -> Vec<u8> {
             if byte >= len {
-                return &[];
+                return Vec::new();
             }
             let (chunk, chunk_start, _, _) = rope.chunk_at_byte(byte);
-            &chunk.as_bytes()[byte - chunk_start..]
+            ascii_fold(&chunk.as_bytes()[byte - chunk_start..])
         };
         if let Some(tree) = self.parser.parse_with_options(
             &mut read,
@@ -241,6 +241,28 @@ fn scene_break_lines_from(
 /// The 0-based line a byte offset falls on within `text` — the newline count
 /// before it. Matches `Rope::byte_to_line`, so the scene-break line cache is the
 /// same whether built from a `&str` (initial parse) or a `Rope` (reparse).
+/// Fold every non-ASCII byte to an ASCII letter for the tree-sitter parse view.
+///
+/// The tree-sitter-markdown C scanner's ordered-list-marker rule calls
+/// `isdigit(lexer->lookahead)` on the raw Unicode codepoint (#1164,
+/// `scanner.c:740`). `isdigit` is only defined for `unsigned char`/EOF, so a
+/// codepoint ≥ 256 (CJK, emoji) indexes out of bounds in glibc's ctype table and
+/// segfaults — a real crash on Linux, reachable from opening a file with such
+/// text (macOS's libc doesn't fault, which is why it hid).
+///
+/// Folding is length-preserving (one byte in, one byte out), so every byte offset
+/// the parse produces still lands on the same char boundary in the real text, and
+/// every ASCII markdown marker (`#`, `*`, `-`, digits, `.`, …) is untouched.
+/// Non-ASCII prose carries no markdown syntax, so folding it to a letter can't
+/// change the parse structure — only the parse *view* is folded; the rope and all
+/// rendered/collected text keep the real bytes.
+fn ascii_fold(bytes: &[u8]) -> Vec<u8> {
+    bytes
+        .iter()
+        .map(|&b| if b < 0x80 { b } else { b'a' })
+        .collect()
+}
+
 fn byte_to_line_in_str(text: &str, byte: usize) -> usize {
     let byte = byte.min(text.len());
     text.as_bytes()[..byte]
@@ -452,6 +474,46 @@ fn walk<'a>(node: Node<'a>, f: &mut impl FnMut(Node<'a>)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_ascii_input_parses_without_crashing_and_keeps_char_boundaries() {
+        // #1164: tree-sitter-md's ordered-list scanner calls isdigit() on the raw
+        // codepoint (scanner.c:740); a non-ASCII char where a list marker could
+        // begin read out of bounds in glibc's ctype table and segfaulted on Linux
+        // (macOS's libc didn't fault, which hid it). These lines place emoji/CJK at
+        // exactly those scan positions. The ASCII-fold of the parse view fixes it,
+        // and collect() still slices the real UTF-8 bytes.
+        let doc = "😀 opening line\n\
+                   中文段落 mixing 漢字 with prose\n\
+                   1. a real ordered item\n\
+                   😀. not actually a marker\n\
+                   - café 🎉 list item\n\
+                   ## 标题 heading\n";
+
+        // Full parse: if any node offset had fallen mid-UTF-8-char, collect()'s
+        // text[s..e] would already have panicked; assert the invariant explicitly.
+        let s = Syntax::new(doc);
+        for h in &s.highlights {
+            assert!(
+                doc.is_char_boundary(h.start) && doc.is_char_boundary(h.end),
+                "highlight range must land on real char boundaries"
+            );
+        }
+        // The ASCII `##` marker survived the fold, so the CJK heading still parses.
+        assert!(
+            !s.headings().is_empty(),
+            "the `## 标题` heading is recognized"
+        );
+
+        // The incremental reparse path folds each rope chunk too: it must not crash
+        // and must keep char-boundary offsets.
+        let rope = Rope::from_str(doc);
+        let mut s2 = Syntax::new(doc);
+        s2.reparse(&rope);
+        for h in &s2.highlights {
+            assert!(doc.is_char_boundary(h.start) && doc.is_char_boundary(h.end));
+        }
+    }
 
     fn all(s: &Syntax) -> Vec<Highlight> {
         s.highlights_in(0, usize::MAX).copied().collect()
