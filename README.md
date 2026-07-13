@@ -445,16 +445,18 @@ Prebuilt binaries for macOS (Intel and Apple Silicon) and Linux (x86_64 and
 aarch64) are attached to every [release](https://github.com/CodingAnarchy/quill/releases/latest).
 Download the `quill-<version>-<target>.tar.gz` for your platform (each ships a
 `.sha256` sidecar you can verify against), unpack the `quill` binary, and put it
-on your `PATH`. Or, with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+on your `PATH` — no Rust toolchain required.
+
+Prefer to build with Cargo? Install straight from the repository:
 
 ```sh
-cargo binstall quill
+cargo install --git https://github.com/CodingAnarchy/quill quill
 ```
 
 The offline AI backend (`local` — candle, GPU-accelerated via Metal on macOS)
-can't ship as a universal binary, so it stays a from-source opt-in: `cargo
-install quill --features local`. The default prebuilt binary covers the hosted
-AI backend and no-AI use alike.
+can't ship as a universal binary, so it stays a from-source opt-in: add
+`--features local` to that command. The default prebuilt binary covers the
+hosted AI backend and no-AI use alike.
 
 ### From source
 
