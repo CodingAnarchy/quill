@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement or a new capability for Quill.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Quill's tickets are written problem-first. Lead with what you're trying
+        to do and why it's hard today — the solution can be designed from there.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does Quill get in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+      description: Who hits this, how often, and what it costs them.
+    validations:
+      required: true
+  - type: textarea
+    id: ideas
+    attributes:
+      label: Ideas (optional)
+      description: Any direction you have in mind — kept separate from the problem, so the design stays open.
+    validations:
+      required: false
+  - type: checkboxes
+    id: ai-boundary
+    attributes:
+      label: AI-assistance boundary
+      description: If this is an AI feature, confirm it holds Quill's line.
+      options:
+        - label: This request does not ask Quill's AI to draft, rewrite, or suggest manuscript prose (or it isn't an AI feature).
+          required: false
