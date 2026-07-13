@@ -151,7 +151,7 @@ impl Pdf {
             self.centered(&o, false, false, false, HEADING_SIZE, BODY_LEADING);
         }
         if let Some(e) = epigraph {
-            self.y -= BODY_LEADING * 3.0;
+            self.y = BODY_LEADING.mul_add(-3.0, self.y);
             self.epigraph(e);
         }
     }

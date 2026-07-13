@@ -389,7 +389,7 @@ fn metal_working_set_gb(dev: &Device) -> Option<f64> {
 /// Off macOS candle's Metal backend can't exist, so `Device::new_metal` never
 /// succeeds and this is never reached; provided so the call site compiles.
 #[cfg(not(target_os = "macos"))]
-fn metal_working_set_gb(_dev: &Device) -> Option<f64> {
+const fn metal_working_set_gb(_dev: &Device) -> Option<f64> {
     None
 }
 

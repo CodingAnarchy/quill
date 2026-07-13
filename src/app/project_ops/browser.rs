@@ -277,7 +277,7 @@ impl App {
         }
         let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir)?
             .flatten()
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
             .map(|e| e.path())
             .filter(|p| {
                 !p.file_name()

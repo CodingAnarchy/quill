@@ -134,7 +134,7 @@ impl Pdf {
         );
         for (idx, (title, part)) in titles.iter().enumerate() {
             if *part {
-                y -= TOC_LEADING * 0.5; // set a part heading apart from prior chapters
+                y = TOC_LEADING.mul_add(-0.5, y); // set a part heading apart from prior chapters
             }
             let size = if *part { BODY_SIZE + 1.0 } else { BODY_SIZE };
             emit(

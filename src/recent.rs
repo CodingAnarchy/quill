@@ -93,7 +93,7 @@ pub fn scan(dir: &Path) -> Vec<RecentProject> {
             Some(RecentProject { path, title })
         })
         .collect();
-    found.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    found.sort_by_key(|a| a.title.to_lowercase());
     found
 }
 
