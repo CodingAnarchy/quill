@@ -4,6 +4,23 @@ version = "0.9.2"
 edition = "2021"
 description = "A terminal editor optimized for writing novels"
 license = "MIT"
+repository = "https://github.com/CodingAnarchy/quill"
+homepage = "https://github.com/CodingAnarchy/quill"
+keywords = ["editor", "tui", "writing", "novel", "markdown"]
+categories = ["command-line-utilities", "text-editors"]
+
+# Prebuilt-binary install via `cargo binstall quill` (#1111). The asset scheme
+# below MUST stay in lockstep with `.github/workflows/release.yml`, which builds
+# the same `quill-{version}-{target}.tar.gz` tarballs (the `quill` binary at the
+# tarball root) and attaches them to the GitHub Release for tag `v{version}`.
+# A Homebrew formula (#1112) points at these same assets, so the scheme is stable.
+# These are the DEFAULT feature set — the offline `local` (candle/Metal) backend
+# can't be a universal prebuilt binary and stays a from-source `--features local`
+# opt-in.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/quill-{ version }-{ target }.{ archive-format }"
+pkg-fmt = "tgz"
+bin-dir = "quill{ binary-ext }"
 
 [dependencies]
 ratatui = "0.30.2"
