@@ -1,0 +1,97 @@
+name: CI
+
+# Gates PRs on the project's standard checks (see CLAUDE.md "Standard checks"
+# and "Performance guards"). Branch protection should require this workflow to
+# be green before a PR can merge to master.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Cancel superseded runs for the same ref (e.g. force-push to a PR branch).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # rustfmt: cheap and OS-independent, so run it once on ubuntu.
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+  # Default build: clippy (gated at 0 warnings) + tests on ubuntu and macos.
+  # Plain `cargo test` does not run #[ignore]d tests, so the network catalog
+  # checks and the perf guards stay excluded here.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test
+
+  # `local` feature = on-device inference. On ubuntu candle is the CPU backend,
+  # so we can build AND test it. macOS pulls candle's Metal backend, which we
+  # only compile-check (no GPU on CI, and to keep the job fast).
+  local-feature:
+    name: local-feature (ubuntu, CPU candle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy --all-targets --features local
+        run: cargo clippy --all-targets --features local -- -D warnings
+      - name: cargo test --features local
+        run: cargo test --features local
+
+  # Compile-check only for the macOS Metal path: proves `--features local`
+  # builds against candle's Metal backend without needing a GPU runner.
+  local-feature-metal-check:
+    name: local-feature (macos, Metal compile-check)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check --features local (Metal)
+        run: cargo check --features local
+
+  # Performance guards (`cargo perf` = release build, #[ignore]d timing tests,
+  # single-threaded). Timing thresholds are tuned for a real machine; CI runners
+  # are noisier, so this runs on push to master rather than on every PR to keep
+  # PRs fast. If it proves flaky it may need to move to a scheduled job or get a
+  # tolerance bump. The catalog network checks no-op here (QUILL_CATALOG_CHECK
+  # is unset), so the sweep stays offline.
+  perf:
+    name: perf (push to master)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo perf
+        run: cargo perf
