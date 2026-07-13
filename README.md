@@ -2,6 +2,9 @@
 
 A terminal editor optimized for writing novels.
 
+[![CI](https://github.com/CodingAnarchy/quill/actions/workflows/ci.yml/badge.svg)](https://github.com/CodingAnarchy/quill/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Quill keeps you in the prose. Instead of a full IDE, it gives you a centered,
 fixed-width column on a quiet page, a live word count, and a small set of
 keystrokes that stay out of the way.
@@ -245,7 +248,9 @@ keystrokes that stay out of the way.
   (title page, a chapter opening, a scene break, a part divider) through your
   current `[style]` and opens it in your system EPUB reader — the same output a
   real export produces, so fonts, images, drop caps, and ornaments all show. It
-  writes only a temp file and never touches your manuscript.
+  writes only a temp file and never touches your manuscript. For the full export
+  and publishing guide — formats, the `[style]`/`[print]` design system,
+  preflight, and the KDP / IngramSpark bundle — see [`docs/export.md`](docs/export.md).
 
 - **AI assistance (opt-in)** — off by default; a draft only leaves the machine
   when you enable AI and supply a key. Turning it on is **in-app** (#602): press
@@ -434,7 +439,26 @@ keystrokes that stay out of the way.
 
 ## Install
 
-The quickest way to get a `quill` command on your `PATH`:
+### Prebuilt binary (no Rust toolchain)
+
+Prebuilt binaries for macOS (Intel and Apple Silicon) and Linux (x86_64 and
+aarch64) are attached to every [release](https://github.com/CodingAnarchy/quill/releases/latest).
+Download the `quill-<version>-<target>.tar.gz` for your platform (each ships a
+`.sha256` sidecar you can verify against), unpack the `quill` binary, and put it
+on your `PATH`. Or, with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+```sh
+cargo binstall quill
+```
+
+The offline AI backend (`local` — candle, GPU-accelerated via Metal on macOS)
+can't ship as a universal binary, so it stays a from-source opt-in: `cargo
+install quill --features local`. The default prebuilt binary covers the hosted
+AI backend and no-AI use alike.
+
+### From source
+
+The quickest way to get a `quill` command on your `PATH` from a checkout:
 
 ```sh
 ./install.sh
@@ -500,7 +524,8 @@ to reopen it falls back to the usual chooser (or new-book prompt).
 A project is a directory: a root `book.toml` manifest records the chapter order
 and titles, and each chapter's prose lives in its own UTF-8 **Markdown** file.
 Both are portable plain text that opens in any editor, so a manuscript stays
-yours and travels well in git.
+yours and travels well in git. Quill commits to keeping this on-disk format
+stable across every 1.x release — see [Compatibility & stability](COMPATIBILITY.md).
 
 A project usually holds one book — the manifest's `title`, optional `[[parts]]`,
 and `[[chapters]]` describe it directly. A project can also hold a **series of
@@ -1039,6 +1064,12 @@ assistant" idea was retired on exactly this principle; off-manuscript artifacts
 like a synopsis or query letter are the only prose the AI produces.) The full
 design and privacy model live in [`docs/ai-features.md`](docs/ai-features.md).
 
+## Contributing
+
+Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to
+build Quill, run the checks, and the conventions to follow. Participation is
+governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Matt Tanous
