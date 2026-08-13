@@ -104,6 +104,17 @@ impl App {
             self.message = Some("Open a chapter before splitting it.".into());
             return at;
         }
+        // The split reads `self.buffer` as the active chapter's live body. When a
+        // non-chapter reference pane (a story-bible entry / loose note opened in a
+        // split, #165) is focused, `self.buffer` is *that* file even though
+        // `active_index()` still points at a chapter — splitting here would truncate
+        // the reference file to its head and forge a bogus chapter from its tail
+        // (data loss). Splitting needs the active chapter's own focused buffer, which
+        // only exists when it's the focused pane, so refuse otherwise.
+        if !self.focus_shows_active_chapter() {
+            self.message = Some("Focus a chapter to split it.".into());
+            return at;
+        }
         // Split the live body at the cursor; the tail becomes the new chapter.
         let text = self.buffer.text();
         let cut = self.buffer.cursor_byte().min(text.len());
