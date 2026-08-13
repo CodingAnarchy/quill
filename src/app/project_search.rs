@@ -428,17 +428,26 @@ impl App {
     }
 
     /// Apply `ranges` (byte ranges into the chapter's body) to chapter
-    /// `chapter`, replacing each with `replacement`. The active chapter goes
-    /// through its live buffer (so its change stays undoable); others are
-    /// rewritten on disk via [`Project::replace_chapter_body`], which preserves
-    /// front matter and refreshes the cached word count.
+    /// `chapter`, replacing each with `replacement`. When the active chapter is
+    /// the *focused* editor it goes through its live buffer (so its change stays
+    /// undoable); every other case — a non-active chapter, or the active chapter
+    /// while a reference pane holds focus — is rewritten on disk via
+    /// [`Project::replace_chapter_body`], which preserves front matter and
+    /// refreshes the cached word count.
     fn apply_body_replacements(
         &mut self,
         chapter: usize,
         ranges: &[(usize, usize)],
         replacement: &str,
     ) -> std::io::Result<()> {
-        if chapter == self.project.active_index() {
+        // Only route through the live buffer when it actually shows the active
+        // chapter. If a reference pane (a story-bible entry / note opened in a
+        // split, #165) is focused, `self.buffer` is that reference file, not the
+        // active chapter — editing it here would rewrite the wrong file and leave
+        // the chapter untouched. The active chapter was flushed to disk when focus
+        // moved to the reference pane, so rewrite it on disk like any other
+        // chapter (the `else` branch below), which reads the current file.
+        if chapter == self.project.active_index() && self.focus_shows_active_chapter() {
             let mut ranges = ranges.to_vec();
             ranges.sort_by_key(|&(s, _)| s);
             for &(start, end) in ranges.iter().rev() {
