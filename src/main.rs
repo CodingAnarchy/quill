@@ -251,6 +251,12 @@ fn main() -> io::Result<()> {
 /// unreadable chapter, a directory that can't be created or written) comes back
 /// as an `Err` carrying a clear message, never a panic (#264).
 fn load_project(dir: &Path) -> io::Result<(Project, Buffer)> {
+    // Recover from a crash mid backup-restore swap (#1179) before deciding
+    // open-vs-create: if a previous restore was interrupted between its two renames,
+    // the real project is stranded in a hidden sibling and `dir` is gone — move it
+    // back, or the missing `dir` below would scaffold a fresh empty project over the
+    // author's book. A cheap no-op on every normal launch.
+    App::reconcile_interrupted_restore(dir);
     let project = if Project::manifest_path(dir).exists() {
         Project::open(dir)?
     } else {
