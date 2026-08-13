@@ -314,6 +314,26 @@ fn sync_diverged(
 /// merge checkout can't overwrite an uncommitted edit. `resolutions` must cover
 /// every still-conflicting chapter; a chapter not in the map keeps its local
 /// version. Returns the author-facing summary.
+/// The blobs of the `origin/<branch>` tracking ref, keyed by path — the remote as the
+/// last fetch left it. [`finalize_sync`] reads this before re-fetching to recover the
+/// per-path "theirs" the detecting [`sync`] saw, so it can tell whether a resolved
+/// chapter's remote moved again in the meantime. `None` when the ref is missing or
+/// unreadable (there was no prior fetch), so the caller can fall back rather than
+/// treat "no baseline" as "everything changed".
+fn tracking_blobs(repo: &git2::Repository, branch: &str) -> Option<BTreeMap<String, git2::Oid>> {
+    let refname = format!("refs/remotes/origin/{branch}");
+    let tree = repo
+        .find_reference(&refname)
+        .ok()?
+        .peel_to_commit()
+        .ok()?
+        .tree()
+        .ok()?;
+    let mut blobs = BTreeMap::new();
+    collect_blobs(&tree, &mut blobs);
+    Some(blobs)
+}
+
 pub fn finalize_sync(
     root: &Path,
     resolutions: &BTreeMap<String, String>,
@@ -324,6 +344,17 @@ pub fn finalize_sync(
     }
 
     let branch = current_branch(&repo)?;
+
+    // Capture the remote exactly as it stood when the conflict was detected. The
+    // detecting [`sync`]'s fetch left that state in the `origin` tracking ref, and we
+    // read it *before* the re-fetch below overwrites it. This is the per-path "theirs"
+    // baseline the resolution was made against; a resolved chapter whose remote blob
+    // has moved since means a third push landed on the very chapter being resolved
+    // (see the guard in the reconcile loop). `None` when the tracking ref is
+    // unreadable (never after a conflict-detecting sync), in which case we can't tell
+    // and fall back to the prior behavior rather than refuse spuriously.
+    let prior_theirs = tracking_blobs(&repo, &branch);
+
     let mut remote = repo
         .find_remote("origin")
         .map_err(|_| NO_REMOTE.to_string())?;
@@ -390,7 +421,23 @@ pub fn finalize_sync(
         let t = theirs_blobs.get(&path).copied();
 
         if let Some(chosen) = resolutions.get(&path) {
-            // A resolved conflict: write the author's final text verbatim.
+            // A resolved conflict — but only if the remote for this chapter hasn't
+            // moved since detection. If a third push landed on the very chapter the
+            // author resolved (its re-fetched blob differs from the baseline the
+            // resolution was made against), writing the resolution here would silently
+            // drop that newer remote edit: the merge commit's second parent is the
+            // fresh `theirs`, so git would treat the path as resolved and it would
+            // never resurface. Refuse instead, the same way an unresolved fresh
+            // conflict does below. When we have no baseline (`None`) we can't compare,
+            // so fall back to applying the resolution as before.
+            let remote_moved = prior_theirs
+                .as_ref()
+                .is_some_and(|prior| prior.get(&path).copied() != t);
+            if remote_moved {
+                fresh_conflicts.push(path);
+                continue;
+            }
+            // Write the author's final text verbatim.
             let oid = repo
                 .blob(chosen.as_bytes())
                 .map_err(|e| format!("write resolution: {e}"))?;

@@ -491,6 +491,62 @@ fn finalize_sync_refuses_when_the_remote_changed_again_mid_resolution() {
     fs::remove_dir_all(&remote).ok();
 }
 
+#[test]
+fn finalize_sync_refuses_when_the_resolved_chapter_changed_again_mid_resolution() {
+    // Regression for the silent-drop bug on the *same* chapter the author resolved
+    // (the sibling test above covers a *different* chapter). The author resolves
+    // one.md's conflict, but before finalizing, a third push lands another edit to
+    // one.md itself. The old code applied the captured resolution verbatim — a resolved
+    // path `continue`d before any staleness check — so that newer remote edit vanished
+    // under a two-parent merge whose second parent was the re-fetched remote; git then
+    // treated one.md as resolved and it never resurfaced. finalize_sync must instead
+    // refuse and tell the author to sync again.
+    let (remote, a, b) = two_clones("finalize-stale-same");
+
+    // a and b diverge on one.md → the conflict the author will resolve.
+    fs::write(a.join("one.md"), "# One\n\nA's rewrite.\n").unwrap();
+    commit(&a, "a-edit-one").unwrap();
+    push(&a).unwrap();
+    fs::write(b.join("one.md"), "# One\n\nB's rewrite.\n").unwrap();
+    commit(&b, "b-edit-one").unwrap();
+
+    // b syncs and sees the one.md conflict; its remote leg is a's first rewrite.
+    let out = sync(&b).unwrap();
+    let conflict = out
+        .conflicts
+        .into_iter()
+        .find(|c| c.path == "one.md")
+        .expect("one.md conflicts");
+    assert_eq!(conflict.remote, "# One\n\nA's rewrite.\n");
+
+    // Now a THIRD push lands after detection, on the SAME chapter: a edits one.md
+    // again, so the remote leg the resolution was made against is now stale.
+    fs::write(a.join("one.md"), "# One\n\nA's second, later rewrite.\n").unwrap();
+    commit(&a, "a-edit-one-again").unwrap();
+    push(&a).unwrap();
+
+    // The author finalizes with a resolution captured against the *first* remote.
+    let mut resolutions = BTreeMap::new();
+    resolutions.insert(conflict.path, "# One\n\nHand-merged blend.\n".to_string());
+    let err = finalize_sync(&b, &resolutions).unwrap_err();
+    assert!(
+        err.contains("changed again") && err.contains("one.md"),
+        "refuses and names the resolved chapter whose remote moved: {err}"
+    );
+
+    // Nothing landed: no merge commit, so a's newer edit was NOT silently dropped —
+    // re-running Sync re-detects one.md against the live remote and neither side is lost.
+    let summaries = merge_summaries(&b);
+    assert!(
+        !summaries.iter().any(|s| s.contains("Sync remote")),
+        "no partial merge commit landed: {summaries:?}"
+    );
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&b).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
 /// Seed a second shared chapter `two.md` on both clones (via the remote) so a delete
 /// test has an ancestor blob to diverge from. Returns the scratch dirs; both `a` and
 /// `b` hold `one.md` and `two.md` at the same commit afterwards.
