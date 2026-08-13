@@ -470,3 +470,88 @@ fn filetime_set(path: &Path, when: std::time::SystemTime) {
     let f = fs::OpenOptions::new().write(true).open(path).unwrap();
     f.set_modified(when).unwrap();
 }
+
+// --- Crash mid restore-swap: startup reconciliation (#1179) ----------------
+
+#[test]
+fn a_crash_mid_restore_swap_recovers_the_project_on_open() {
+    // Simulate a crash inside the restore swap's rename window: the first rename
+    // (root -> <name>.quill-restore-old) ran, but the process died before the second
+    // (staging -> root). `root` is now gone and the real project is stranded in the
+    // hidden sibling. Without reconciliation the missing `root` reads as a brand-new
+    // directory and startup scaffolds a fresh *empty* project over the book; with it,
+    // the original is moved back and the author's prose is intact (#1179).
+    let (app, temp) = two_chapter_app("restore-crash-reconcile");
+    let root = app.project.root.clone();
+    let chapter = root.join("one.md");
+    assert_eq!(fs::read_to_string(&chapter).unwrap(), "first chapter\n");
+    // Release the open buffer/handles before moving the directory out from under it.
+    drop(app);
+
+    // The swap's first rename, then the crash — `root` is missing, the project sits
+    // in `<name>.quill-restore-old` (the hidden sibling `restore_over` moves it to).
+    let name = root.file_name().unwrap().to_string_lossy().into_owned();
+    let old = root
+        .parent()
+        .unwrap()
+        .join(format!("{name}.quill-restore-old"));
+    fs::rename(&root, &old).unwrap();
+    assert!(!root.exists(), "mid-swap: root is gone (the crash window)");
+    assert!(
+        !Project::manifest_path(&root).exists(),
+        "so a naive open-vs-create would scaffold a fresh empty project here"
+    );
+
+    // Startup reconciliation completes/undoes the interrupted swap ...
+    App::reconcile_interrupted_restore(&root);
+
+    // ... putting the *original* project back at `root`, prose and all — not empty.
+    assert!(
+        Project::manifest_path(&root).exists(),
+        "the manifest is restored to root"
+    );
+    assert_eq!(
+        fs::read_to_string(&chapter).unwrap(),
+        "first chapter\n",
+        "the author's chapter prose is back, not a fresh empty project"
+    );
+    assert!(
+        !old.exists(),
+        "the leftover .quill-restore-old temp dir is cleaned up"
+    );
+
+    // And the actual startup decision now opens the recovered project rather than
+    // creating a new one: reopening reads the real manifest and both chapters.
+    let reopened = open_app(&root);
+    assert_eq!(
+        reopened.project.manifest.title, "Book",
+        "the recovered project opens (title intact), not a fresh scaffold"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("two.md")).unwrap(),
+        "second chapter\n",
+        "the second chapter survived too"
+    );
+
+    drop(temp);
+}
+
+#[test]
+fn reconciliation_is_a_no_op_without_leftovers() {
+    // The normal launch: `root` holds a manifest and there are no restore temp dirs.
+    // Reconciliation must not touch anything (#1179).
+    let (app, _temp) = two_chapter_app("restore-noop");
+    let root = app.project.root.clone();
+    drop(app);
+
+    App::reconcile_interrupted_restore(&root);
+    assert!(
+        Project::manifest_path(&root).exists(),
+        "an intact project is left exactly as it was"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("one.md")).unwrap(),
+        "first chapter\n",
+        "no prose disturbed"
+    );
+}

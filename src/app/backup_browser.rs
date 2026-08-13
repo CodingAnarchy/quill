@@ -19,6 +19,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::archive;
 use crate::config;
 use crate::mode::{BackupBrowser, Mode, Pending};
+use crate::project::Project;
 
 use super::App;
 
@@ -115,6 +116,54 @@ impl App {
                 self.mode = self.editing_mode();
                 self.message = Some(format!("Restore failed: {e}"));
             }
+        }
+    }
+
+    /// Recover a project stranded by a crash mid restore-swap (#1179), run at
+    /// startup *before* the open-vs-create decision. [`restore_over`] swaps the
+    /// restored copy into place with two renames — move `root` aside to
+    /// `<name>.quill-restore-old`, then move the staged copy from
+    /// `<name>.quill-restore-staging` in — and its rollback only runs on an `Err`,
+    /// not on a crash or power loss *between* the renames. Interrupted there, `root`
+    /// is gone and the real project is left in a hidden sibling; nothing else
+    /// notices, because a missing `root` reads as a brand-new directory and startup
+    /// would scaffold a fresh empty project over the author's book (which then
+    /// "appears gone"). This finishes the interrupted swap by moving the stranded
+    /// project back to `root`.
+    ///
+    /// It acts only when `root` has no manifest *and* a leftover sibling holds one,
+    /// so it's a cheap no-op on every normal launch (a clean run leaves no temp
+    /// dirs; a successful restore removes both). A manifest that is present but
+    /// unreadable is left alone — that's the damaged-project case
+    /// (`offer_backup_restore_on_damage`), not an interrupted swap. When both
+    /// leftovers exist (the crash landed squarely between the two renames), the
+    /// `.quill-restore-old` copy wins: it's the author's original that the first
+    /// rename moved away, so undoing the swap is the safe recovery. Only if just
+    /// `.quill-restore-staging` remains is the interrupted new content recovered
+    /// instead. Either way the leftover temp dirs are cleaned up.
+    pub(crate) fn reconcile_interrupted_restore(root: &Path) {
+        // A present manifest means the swap completed (or never ran): leave any stale
+        // temp dirs for the restore path itself to clear, and don't touch `root`.
+        if Project::manifest_path(root).exists() {
+            return;
+        }
+        // No manifest at `root`. Recover from a leftover sibling if one holds a real
+        // project, preferring the original that was renamed away over staged content.
+        let old = old_dir(root);
+        let staging = staging_dir(root);
+        let source = if Project::manifest_path(&old).exists() {
+            old.clone()
+        } else if Project::manifest_path(&staging).exists() {
+            staging.clone()
+        } else {
+            return; // nothing stranded — an ordinary launch into a missing/empty root
+        };
+        // Clear a stray (manifest-less, hence not-a-project) `root` so the rename can
+        // land, then move the stranded project home and drop the leftover temp dirs.
+        let _ = fs::remove_dir_all(root);
+        if fs::rename(&source, root).is_ok() {
+            let _ = fs::remove_dir_all(&old);
+            let _ = fs::remove_dir_all(&staging);
         }
     }
 }
