@@ -679,3 +679,30 @@ fn current_section_is_the_last_heading_at_or_before_the_cursor() {
     assert_eq!(current_section(&later, 5), None);
     assert_eq!(current_section(&[], 0), None);
 }
+
+#[test]
+fn a_wheel_scroll_does_not_overshoot_past_the_end() {
+    // #5: when the top visible logical line is a wrapped paragraph whose first rows
+    // are scrolled above the viewport (so `header_rows(top) == 0` but `to_skip > 0`),
+    // the read-ahead scroll clamp must count the top line's *remaining* visible
+    // height, not its whole body. A short intro line owns the chapter-title header
+    // (line 0), so the long paragraph below it has no header insert of its own.
+    let long = "lorem ".repeat(200); // wraps to far more rows than the page height
+    let app = app_with(&format!("Intro\n\n{long}")); // typed in — cursor rests at the end
+
+    // The cursor sits on the final line and the view already shows the last
+    // screenful, so there is genuinely no room to scroll further: the applied
+    // offset must clamp to zero rather than advancing into blank space past the end.
+    assert_eq!(
+        app.buffer.cursor.line,
+        app.buffer.line_count() - 1,
+        "the cursor rests on the last logical line"
+    );
+    app.scroll_offset.set(30); // a wheel-down while already at the bottom
+    render(&app, 60, 14);
+    assert_eq!(
+        app.scroll_offset.get(),
+        0,
+        "a wheel-down at the true bottom stays put — no overshoot into blank rows"
+    );
+}
