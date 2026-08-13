@@ -260,6 +260,10 @@ pub(super) fn quote_scalar(value: &str) -> String {
     let needs_quoting = value.is_empty()
         || value.starts_with(char::is_whitespace)
         || value.ends_with(char::is_whitespace)
+        // A value opening with a `|`/`>` block-scalar indicator would be read
+        // back by `get` as a literal/folded block header, not the inline text;
+        // quoting keeps it a plain scalar that round-trips verbatim.
+        || value.starts_with(['|', '>'])
         || value.contains(['"', '\'', ':', '#', '\n', '\r', '\t']);
     if !needs_quoting {
         return value.to_string();
@@ -274,4 +278,26 @@ pub(super) fn quote_scalar(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FrontMatter;
+
+    #[test]
+    fn block_scalar_indicator_start_round_trips() {
+        // A value opening with a YAML block-scalar indicator (`>` folded, `|`
+        // literal) must be quoted so `get` reads it back as inline text, not as a
+        // block header that swallows following lines. Model: the colon-quoting
+        // round-trip test in `mod.rs`.
+        for value in ["> as she said", "| pipe first"] {
+            let mut fm = FrontMatter::default();
+            fm.set("summary", value);
+            assert_eq!(
+                fm.get("summary").as_deref(),
+                Some(value),
+                "value starting with a block-scalar indicator must round-trip verbatim",
+            );
+        }
+    }
 }
