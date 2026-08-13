@@ -331,6 +331,61 @@ fn single_chapter_recovery_is_unchanged() {
     assert_eq!(rec.chapters().count(), 1);
 }
 
+// #165 follow-up: a focused reference pane (a story-bible entry / loose note
+// opened beside the prose) is also `App::buffer`, but its text is NOT the active
+// chapter's. The idle recovery snapshot must never label that text with the
+// active chapter's filename — on restore the crash-recovery offer would overwrite
+// the active chapter with the reference file's content (data corruption).
+#[test]
+fn a_focused_reference_pane_is_not_captured_as_the_active_chapter() {
+    let (mut app, dir) = two_chapter_app("rec-ref-focus"); // active = "One" / one.md
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        dir.join("bible").join("mara.md"),
+        "# Mara\n\n## Physical\n\ntall\n",
+    )
+    .unwrap();
+
+    // Open the bible entry in a reference pane and focus it (Ctrl-w w).
+    app.on_key(ctrl('g')); // chapter browser (reveals the reference-files menu)
+    app.on_key(key(KeyCode::Char('f'))); // reference files
+    app.on_key(key(KeyCode::Enter)); // open the (only) entry in a pane
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char('w'))); // focus the bible pane
+    assert!(
+        !app.focus_shows_active_chapter(),
+        "the focused buffer should be the reference pane, not the active chapter"
+    );
+
+    // Edit the focused bible pane, then run the idle cadence that captures recovery.
+    type_str(&mut app, "unsaved bible note");
+    app.on_idle();
+
+    // The core safety property: nothing captured may pair the active chapter's
+    // file with the reference pane's text.
+    let rec = recovery::read(&dir);
+    if let Some(rec) = &rec {
+        for c in rec.chapters() {
+            assert_ne!(
+                c.chapter_file, "one.md",
+                "recovery mis-labeled the bible's text as the active chapter: {c:?}"
+            );
+        }
+    }
+    // This fix skips the snapshot entirely while a reference pane is focused
+    // (the restore path can only resolve manifest chapters, not a bible file).
+    assert!(
+        rec.is_none(),
+        "no sidecar is written for a focused reference pane: {rec:?}"
+    );
+
+    // And the active chapter's file on disk is untouched by any of this.
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "first chapter\n"
+    );
+}
+
 #[test]
 fn quitting_despite_unsaved_changes_discards_the_sidecar() {
     let (mut app, dir) = two_chapter_app("rec-quit");

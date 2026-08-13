@@ -158,8 +158,21 @@ impl App {
                     .collect();
                 recovery::Recovery::from_chapters(chapters)
             }
-            // Single-chapter view: the active chapter's buffer, 1:1 to its file.
-            None => self.buffer.dirty.then(|| {
+            // Single-chapter view: the active chapter's buffer, 1:1 to its file —
+            // but only when the focused editor actually *is* the active chapter.
+            // A focused reference pane (a story-bible entry / loose note opened
+            // beside the prose, #165) is also `self.buffer`, yet its text is NOT
+            // the active chapter's. Tagging it with `active_file()` would make
+            // crash recovery offer to overwrite the active chapter with the
+            // reference file's content — data corruption. We can't instead tag it
+            // with the reference file's own name either: the restore path resolves
+            // a captured file through the manifest (`index_of_file` in
+            // `restore_single_recovery` / `offer_recovery`), and a non-chapter
+            // reference file has no manifest entry, so such a record could never be
+            // restored anyway. So skip the snapshot while a reference pane is
+            // focused; the active chapter's file on disk is left untouched
+            // (#165 follow-up).
+            None => (self.buffer.dirty && self.focus_shows_active_chapter()).then(|| {
                 recovery::Recovery::single(
                     self.project.active_file().to_string(),
                     self.buffer.text(),
