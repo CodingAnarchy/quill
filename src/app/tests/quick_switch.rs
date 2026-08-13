@@ -230,6 +230,73 @@ fn the_lightweight_heading_scan_matches_the_full_parse() {
     }
 }
 
+#[test]
+fn active_chapter_scenes_come_from_disk_when_a_reference_pane_is_focused() {
+    // With a story-bible entry opened in a pane and focused (#165), the focused
+    // `edit_buffer()` is the bible, not the active chapter — so the switcher must
+    // read the active chapter's scene headings from disk, not lift the bible's
+    // headings into the chapter's jump-targets.
+    let dir = app_scratch_dir("qs-ref-pane-focus");
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"Chapter One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Chapter Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("one.md"),
+        "# Chapter One\n\n## The Arrival\n\nRain.\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("two.md"),
+        "# Chapter Two\n\n## The Departure\n\nSmoke.\n",
+    )
+    .unwrap();
+    // A bible entry whose own headings must NOT leak into a chapter's targets.
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        dir.join("bible").join("mara.md"),
+        "# Mara\n\n## Physical\n\ntall\n\n## Voice\n\nlow\n",
+    )
+    .unwrap();
+    let dir = TempProject::new(dir);
+    let mut app = open_test_app(&dir);
+
+    // Open the bible entry in a pane and focus it (Ctrl-w w), the state where
+    // `edit_buffer()` is the bible while chapter one stays active.
+    app.on_key(ctrl('g')); // chapter browser
+    app.on_key(key(KeyCode::Char('f'))); // reference files
+    app.on_key(key(KeyCode::Enter)); // open the (only) bible entry in a pane
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char('w'))); // focus the bible pane
+    assert!(
+        !app.focus_shows_active_chapter(),
+        "the focused pane is the bible, not the active chapter"
+    );
+    assert_eq!(app.project.active_index(), 0, "chapter one stays active");
+
+    app.on_key(ctrl('d')); // open the quick-switcher
+
+    // The active chapter's scene target is its own heading (read from disk), and
+    // the focused bible's headings never appear as scene targets.
+    let titles = visible_titles(&app);
+    assert!(
+        titles.contains(&"The Arrival".to_string()),
+        "the active chapter's own scene is listed: {titles:?}"
+    );
+    assert!(
+        !titles.iter().any(|t| t == "Physical" || t == "Voice"),
+        "the focused bible's headings must not appear as scene targets: {titles:?}"
+    );
+    assert_eq!(
+        visible_titles(&app),
+        vec!["Chapter One", "The Arrival", "Chapter Two", "The Departure",],
+        "targets are the chapters and their own scenes only"
+    );
+}
+
 /// Performance guard (`cargo perf`). The per-keystroke work is filtering the
 /// pre-built index, which must not grow with the project: the index is captured
 /// once when the switcher opens, so a keystroke only re-scans it in memory — no
