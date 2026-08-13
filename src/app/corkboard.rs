@@ -53,6 +53,16 @@ impl App {
             self.message = Some("Leave the continuous view (Ctrl-l) to use the corkboard.".into());
             return;
         }
+        // The per-chapter board reads and edits scenes through the focused editor
+        // buffer, so it must be the active chapter. With a reference pane focused (a
+        // bible entry / note, #165) `edit_buffer()` is that file — carding up its
+        // `##` sections as the chapter's scenes, and an edit would write them back
+        // into the reference file. Refuse until a chapter is focused, like the
+        // outline (#165), whose buffer this board also edits into.
+        if !self.focus_shows_active_chapter() {
+            self.message = Some("Focus a chapter to use the corkboard.".into());
+            return;
+        }
         let cards = self.corkboard_cards();
         if cards.is_empty() {
             self.message =
@@ -123,8 +133,13 @@ impl App {
             .flat_map(|ch| {
                 let title = self.project.chapter_title(ch).unwrap_or("").to_string();
                 // The active chapter is already parsed in the buffer; reuse it
-                // rather than re-reading the file.
-                if ch == active {
+                // rather than re-reading the file — but only when the focused buffer
+                // actually shows it. With a reference pane focused (a bible entry /
+                // note, #165) `edit_buffer()` is that file, so its `##` sections
+                // would be carded up as this chapter's scenes; fall back to the
+                // on-disk read like the other chapters (focusing away flushed the
+                // chapter, so disk is current), matching `chapter_text_with_active`.
+                if ch == active && self.focus_shows_active_chapter() {
                     let buffer = self.edit_buffer();
                     let text = buffer.text();
                     let meta = buffer
@@ -235,6 +250,11 @@ impl App {
         let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
             return;
         };
+        if self.edit_hits_a_reference_pane(chapter) {
+            self.message = Some("Focus a chapter to edit its scenes.".into());
+            self.reopen_board_for(manuscript, chapter, scene);
+            return;
+        }
         self.focus_chapter(chapter);
         let buffer = self.edit_buffer();
         let text = buffer.text();
@@ -460,6 +480,11 @@ impl App {
         let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
             return;
         };
+        if self.edit_hits_a_reference_pane(chapter) {
+            self.message = Some("Focus a chapter to edit its scenes.".into());
+            self.reopen_board_for(manuscript, chapter, scene);
+            return;
+        }
         self.focus_chapter(chapter);
         let count = self.scene_count();
         if scene >= count {
@@ -481,6 +506,19 @@ impl App {
         }
     }
 
+    /// Whether a manuscript-wide board edit of the card at `chapter` would land on
+    /// the active chapter while a reference pane holds focus (#165): the target *is*
+    /// the active chapter, but the focused editor buffer is a bible entry / note, not
+    /// that chapter. `focus_chapter` can't switch to it — its index already is the
+    /// active one, so `activate_chapter` is a no-op — so the edit helpers below would
+    /// flow through the reference buffer and rewrite that file as if it were the
+    /// chapter. Such an edit is refused instead (the caller reports it and reopens the
+    /// board), mirroring the per-chapter board, which refuses to open at all when a
+    /// reference pane is focused.
+    fn edit_hits_a_reference_pane(&self, chapter: Option<usize>) -> bool {
+        chapter == Some(self.project.active_index()) && !self.focus_shows_active_chapter()
+    }
+
     /// Open a text prompt to edit the selected scene's one-line synopsis (#636),
     /// prefilled with the current value. Enter persists it; Esc leaves it. The
     /// target (chapter + within-chapter scene index) is resolved now and carried on
@@ -490,6 +528,11 @@ impl App {
         let Some((chapter, scene, manuscript)) = self.card_edit_target(index) else {
             return;
         };
+        if self.edit_hits_a_reference_pane(chapter) {
+            self.message = Some("Focus a chapter to edit its scenes.".into());
+            self.reopen_board_for(manuscript, chapter, scene);
+            return;
+        }
         let Mode::Corkboard(board) = &self.mode else {
             return;
         };

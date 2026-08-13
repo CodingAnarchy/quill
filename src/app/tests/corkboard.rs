@@ -816,3 +816,116 @@ fn cross_chapter_move_is_a_noop_at_the_manuscript_ends() {
     assert_eq!(fs::read_to_string(dir.join("one.md")).unwrap(), one_before);
     assert_eq!(fs::read_to_string(dir.join("two.md")).unwrap(), two_before);
 }
+
+// --- A focused reference pane is not the active chapter (#165 / #1167 follow-up)
+
+/// A two-chapter scene project with one bible entry, opened with that bible entry
+/// focused in a reference pane (#165) — the state where `edit_buffer()` is the
+/// bible, not the active chapter. The active chapter stays chapter one, whose scene
+/// is "The Arrival"; the bible's own `##` sections are "Physical" / "Voice", so a
+/// board that mistook the pane for the chapter would card *those* up.
+fn bible_focused_scene_app(name: &str) -> (App, TempProject) {
+    let dir = app_scratch_dir(name);
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("one.md"),
+        "# Chapter One\n\n## The Arrival\n\nRain.\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("two.md"),
+        "# Chapter Two\n\n## The Departure\n\nSmoke.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        dir.join("bible").join("mara.md"),
+        "# Mara\n\n## Physical\n\ntall\n\n## Voice\n\nlow\n",
+    )
+    .unwrap();
+    let mut app = open_test_app(&dir);
+    app.on_key(ctrl('g')); // chapter browser (reveals the reference-file switch)
+    app.on_key(key(KeyCode::Char('f'))); // reference files
+    app.on_key(key(KeyCode::Enter)); // open the (only) bible entry in a pane
+    app.on_key(ctrl('w')); // Ctrl-w window prefix …
+    app.on_key(key(KeyCode::Char('w'))); // … focus the bible pane
+    (app, TempProject::new(dir))
+}
+
+#[test]
+fn per_chapter_corkboard_refuses_a_focused_reference_pane() {
+    let (mut app, _dir) = bible_focused_scene_app("corkboard-ref-per-chapter");
+    assert!(
+        !app.focus_shows_active_chapter(),
+        "the bible reference pane is focused, not the active chapter"
+    );
+    app.open_corkboard();
+    // The board must not open on the focused bible's `##` sections; a message points
+    // the author back to a chapter (the board edits scenes into the live buffer).
+    assert!(
+        !matches!(app.mode, Mode::Corkboard(_)),
+        "the per-chapter board must not open on a reference pane"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Focus a chapter"),
+        "message: {:?}",
+        app.message
+    );
+}
+
+#[test]
+fn manuscript_board_reads_the_active_chapter_from_disk_not_a_focused_reference_pane() {
+    let (mut app, _dir) = bible_focused_scene_app("corkboard-ref-ms-read");
+    app.open_manuscript_corkboard();
+    let Mode::Corkboard(board) = &app.mode else {
+        panic!("the manuscript board opens even with a reference pane focused");
+    };
+    // The active chapter (chapter one) is carded from its file on disk, not the
+    // focused bible — its scene "The Arrival", never the bible's "Physical"/"Voice".
+    let titles: Vec<&str> = board.cards.iter().map(|c| c.title.as_str()).collect();
+    assert_eq!(titles, vec!["The Arrival", "The Departure"]);
+    assert!(
+        !titles.iter().any(|t| *t == "Physical" || *t == "Voice"),
+        "the focused bible's sections must not be carded as chapter scenes: {titles:?}"
+    );
+    assert_eq!(board.cards[0].chapter, Some(0));
+}
+
+#[test]
+fn manuscript_board_edit_wont_mutate_a_focused_reference_pane() {
+    let (mut app, dir) = bible_focused_scene_app("corkboard-ref-ms-edit");
+    let mara_path = dir.join("bible").join("mara.md");
+    let mara_before = fs::read_to_string(&mara_path).unwrap();
+    app.open_manuscript_corkboard();
+    // The first card is the active chapter's scene ("The Arrival"). Cycling its
+    // status must be refused, not written as `scenes:` metadata into the focused
+    // bible file (which `edit_buffer()`/`self.buffer` currently holds).
+    assert_eq!(card_titles(&app)[0], "The Arrival");
+    app.on_key(key(KeyCode::Char('s')));
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Focus a chapter"),
+        "the edit is refused: {:?}",
+        app.message
+    );
+    assert_eq!(
+        fs::read_to_string(&mara_path).unwrap(),
+        mara_before,
+        "the bible file must be untouched — no scene metadata written into it"
+    );
+    assert!(
+        !mara_before.contains("scenes:"),
+        "sanity: the bible had no scene metadata to begin with"
+    );
+}
