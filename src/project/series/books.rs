@@ -55,13 +55,21 @@ impl Project {
         // The old book's pending count changes no longer apply.
         self.words_changed.clear();
         if cache {
-            // The running word total (#867) tracks the active book; reset it so the
-            // per-chapter delta path rebuilds it from the newly hoisted book.
-            self.words_total = 0;
-            for i in 0..self.manifest.chapters.len() {
-                self.read_chapter_cache(i);
+            // Re-cache the newly hoisted book's chapters (word count + front
+            // matter) once, band-order them, then recompute the running word total
+            // (#867) from the freshly cached per-chapter counts. Caching goes
+            // through `cache_chapter` (not the `read_chapter_cache` delta path) and
+            // syncs after: the delta path is keyed off each chapter's
+            // already-cached count, so on unchanged files every delta is zero and
+            // the total would be left at 0, and a file that shrank on disk since
+            // open would underflow it. A single `sync_words_total` rebuilds it
+            // cleanly — exactly what `add_book` does for its starter chapter.
+            let marker = self.manifest.todo_marker().to_string();
+            for chapter in &mut self.manifest.chapters {
+                cache_chapter(&self.root, chapter, &marker);
             }
             self.reorder_by_band();
+            self.sync_words_total();
         }
         self.active = self
             .manifest
@@ -393,10 +401,122 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
     use std::time::Instant;
+
+    use crate::buffer::count_words;
 
     use super::super::tests::{temp_dir, write_series, write_series_project};
     use super::Project;
+
+    // A two-book series with real prose in every chapter, so each book has a
+    // nonzero word total — the fixture for the word-total-on-switch guards below.
+    const B1: [(&str, &str); 2] = [
+        ("b1/one.md", "The old house stood alone on the windy hill."),
+        (
+            "b1/two.md",
+            "She walked home slowly through the cold grey rain.",
+        ),
+    ];
+    const B2: [(&str, &str); 2] = [
+        (
+            "b2/one.md",
+            "Rain fell across the quiet valley for many long days.",
+        ),
+        (
+            "b2/two.md",
+            "Wind carried the scent of pine over the far ridge.",
+        ),
+    ];
+    const WORDS_MANIFEST: &str = "\
+title = \"The Saga\"
+
+[[books]]
+title = \"Book One\"
+
+[[books.chapters]]
+title = \"Dawn\"
+file = \"b1/one.md\"
+
+[[books.chapters]]
+title = \"Noon\"
+file = \"b1/two.md\"
+
+[[books]]
+title = \"Book Two\"
+
+[[books.chapters]]
+title = \"Dusk\"
+file = \"b2/one.md\"
+
+[[books.chapters]]
+title = \"Night\"
+file = \"b2/two.md\"
+";
+
+    /// Write the two-book prose series ([`B1`]/[`B2`]) and its manifest to `dir`.
+    fn write_words_series(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
+        for sub in ["b1", "b2"] {
+            fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        for (file, body) in B1.iter().chain(B2.iter()) {
+            fs::write(dir.join(file), format!("{body}\n")).unwrap();
+        }
+        fs::write(Project::manifest_path(dir), WORDS_MANIFEST).unwrap();
+    }
+
+    /// Switching the active book must rebuild the running word total (#867) from
+    /// the freshly hoisted book's chapters. Regression guard: the old code reset
+    /// the total to 0 and rebuilt it via the per-chapter *delta* path, but each
+    /// chapter's "before" was its already-cached count, so on unchanged files
+    /// every delta netted to zero and the total was left at 0 — making the status
+    /// bar, the progress report, and the persisted daily snapshot read ~0 words
+    /// after a book switch.
+    #[test]
+    fn set_active_book_rebuilds_the_word_total() {
+        let dir = temp_dir("series-switch-words");
+        write_words_series(&dir);
+        let mut p = Project::open(&dir).unwrap();
+
+        let book_two_words: usize = B2.iter().map(|(_, body)| count_words(body)).sum();
+        assert!(book_two_words > 0, "the fixture must have real prose");
+
+        p.set_active_book(1);
+        assert_eq!(p.active_book(), 1);
+        assert_eq!(
+            p.words_total(),
+            book_two_words,
+            "a book switch must rebuild the word total, not zero it"
+        );
+        // The maintained total agrees with a fresh sum of the hoisted chapters.
+        assert_eq!(
+            p.manifest.chapters.iter().map(|c| c.words).sum::<usize>(),
+            book_two_words
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A chapter file that shrank on disk since open must not underflow the word
+    /// total when its book is activated (debug panic / release wrap). The rebuild
+    /// re-reads each chapter and re-sums, so a smaller file just yields a smaller,
+    /// correct total.
+    #[test]
+    fn set_active_book_survives_a_shrunk_chapter_file() {
+        let dir = temp_dir("series-switch-shrunk");
+        write_words_series(&dir);
+        let mut p = Project::open(&dir).unwrap();
+
+        // Book two's first chapter loses most of its words on disk after open.
+        fs::write(dir.join("b2/one.md"), "One.\n").unwrap();
+
+        p.set_active_book(1); // must not panic / underflow
+        let expected = count_words("One.") + count_words(B2[1].1);
+        assert_eq!(p.words_total(), expected);
+
+        fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn set_active_book_hoists_the_target_and_round_trips() {
