@@ -109,6 +109,16 @@ impl App {
     /// Confirm restoring the current chapter to its last committed version (#135).
     /// Restore is destructive to that file, so it always asks first.
     pub(super) fn start_restore(&mut self) {
+        // Read-only instance (#871): restore force-checks-out the file via libgit2,
+        // bypassing the save-path write guards (bug H) — refuse rather than race the
+        // instance that holds the project and clobber its chapter file, exactly as a
+        // pull / sync / draft switch does.
+        if self.project.is_read_only() {
+            self.message = Some(
+                "Read-only: this project is open in another Quill instance; not restored.".into(),
+            );
+            return;
+        }
         self.leave_continuous(); // restore operates on the single active chapter
         let title = self
             .project
@@ -128,7 +138,10 @@ impl App {
         let rel = self.active_chapter_rel();
         match crate::vcs::restore(&self.project.root, &rel) {
             Ok(true) => {
-                self.message = Some(match self.reload_active_chapter() {
+                // Reload the whole project, not just the buffer: the disk is now
+                // authoritative for this chapter, and going through the shared helper
+                // keeps the manifest/caches consistent with the other landing paths.
+                self.message = Some(match self.reload_project_after_vcs() {
                     Ok(()) => "Restored to last commit.".into(),
                     Err(e) => format!("Restored, but reload failed: {e}"),
                 });
@@ -148,6 +161,15 @@ impl App {
     pub(crate) fn start_restore_project(&mut self, rev: Option<String>) {
         if !self.under_vc {
             self.message = Some("Not under version control — Ctrl-v to initialize.".into());
+            return;
+        }
+        // Read-only instance (#871): restore_all force-checks-out the whole tree via
+        // libgit2, bypassing the save-path write guards (bug H) — refuse rather than
+        // race the owning instance and clobber its chapter files, like a pull / sync.
+        if self.project.is_read_only() {
+            self.message = Some(
+                "Read-only: this project is open in another Quill instance; not restored.".into(),
+            );
             return;
         }
         self.leave_continuous(); // the post-restore reload targets the active chapter
@@ -179,7 +201,10 @@ impl App {
         };
         match crate::vcs::restore_all(&self.project.root, &rev) {
             Ok(()) => {
-                self.message = Some(match self.reload_active_chapter() {
+                // A whole-tree restore can change the chapter set/order in
+                // `book.toml`; reload the whole project so the manifest and per-chapter
+                // caches follow and the active buffer never points at a deleted file.
+                self.message = Some(match self.reload_project_after_vcs() {
                     Ok(()) => "Restored the project.".into(),
                     Err(e) => format!("Restored, but reload failed: {e}"),
                 });

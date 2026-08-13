@@ -500,3 +500,131 @@ fn a_read_only_instance_refuses_to_merge_drafts() {
     );
     fs::remove_dir_all(&remote).ok();
 }
+
+// ---------------------------------------------------------------------------
+// Manifest reload after a landing VCS op (bug A): an op that rewrites the tracked
+// `book.toml` (here a draft switch) must reload the whole project — the in-memory
+// manifest and per-chapter caches — not just the active buffer, so navigation never
+// points at chapters that no longer exist and the active buffer is never an orphan.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn switching_to_a_draft_that_dropped_a_chapter_reloads_the_manifest() {
+    let dir = app_scratch_dir("vc-conc-switch-manifest");
+    // Mainline: two chapters.
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n\
+         [[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n\n\
+         [[chapters]]\ntitle = \"Two\"\nfile = \"two.md\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("one.md"), "first chapter\n").unwrap();
+    fs::write(dir.join("two.md"), "second chapter\n").unwrap();
+    crate::vcs::init(&dir).unwrap();
+    crate::vcs::commit(&dir, "first").unwrap();
+
+    // A draft that drops the second chapter from `book.toml` and removes its file.
+    let main = crate::vcs::current_branch(&dir).unwrap();
+    crate::vcs::create_branch(&dir, "trim").unwrap();
+    crate::vcs::checkout_branch(&dir, "trim").unwrap();
+    fs::write(
+        Project::manifest_path(&dir),
+        "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n",
+    )
+    .unwrap();
+    fs::remove_file(dir.join("two.md")).unwrap();
+    crate::vcs::commit(&dir, "trim-two").unwrap();
+    crate::vcs::checkout_branch(&dir, &main).unwrap();
+
+    // Open on the mainline and navigate onto the chapter the draft will remove.
+    let mut app = open_test_app(&dir);
+    app.on_key(ctrl('n')); // active chapter → two.md
+    assert_eq!(app.project.active_file(), "two.md", "on the second chapter");
+    assert!(app.buffer.text().contains("second chapter"));
+
+    // Switch to the draft that dropped two.md.
+    app.open_drafts();
+    if let Mode::Drafts(menu) = &mut app.mode {
+        menu.selected = menu.drafts.iter().position(|d| d == "trim").unwrap();
+    }
+    app.on_key(key(KeyCode::Enter)); // switch_selected_draft
+    assert_eq!(crate::vcs::current_branch(&dir).unwrap(), "trim");
+
+    // The in-memory manifest now reflects the draft's chapter list — two.md is gone,
+    // not a stale entry navigation could still land on.
+    let files: Vec<&str> = app
+        .project
+        .manifest
+        .chapters
+        .iter()
+        .map(|c| c.file.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        ["one.md"],
+        "the manifest reflects the draft's chapters: {files:?}"
+    );
+    // The active chapter fell back to a surviving one, and the buffer shows real
+    // chapter text — never the orphaned two.md whose file the checkout deleted (which
+    // a later Ctrl-S would otherwise write back as a file not in the new manifest).
+    assert_eq!(
+        app.project.active_file(),
+        "one.md",
+        "the active chapter fell back to a surviving one"
+    );
+    assert!(
+        app.buffer.text().contains("first chapter"),
+        "the buffer is a valid chapter, not stale/orphaned text: {:?}",
+        app.buffer.text()
+    );
+    assert!(matches!(app.mode, Mode::Insert), "back in the editor");
+}
+
+// ---------------------------------------------------------------------------
+// Bug B: a read-only instance refuses restore. Restore force-checks-out the tree via
+// libgit2, bypassing the save-path write guards — so, like its siblings (pull, sync,
+// draft switch/merge), it must refuse when the project is open read-only (#871).
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_instance_refuses_to_restore() {
+    let (mut app, dir, remote) = read_only_remote_app("vc-ro-restore");
+    // A stray edit on disk a restore would clobber if it were allowed to run.
+    fs::write(dir.join("one.md"), "an uncommitted stray edit\n").unwrap();
+    let before = fs::read_to_string(dir.join("one.md")).unwrap();
+
+    // Restore chapter (start_restore) refuses: no confirm prompt opens, a message
+    // explains why.
+    git_menu_label(&mut app, "Restore chapter");
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no restore-confirm prompt opened while read-only"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Read-only"),
+        "the author is told the project is read-only: {:?}",
+        app.message
+    );
+
+    // Restore project (start_restore_project) refuses the same way.
+    git_menu_label(&mut app, "Restore project");
+    assert!(
+        !matches!(app.mode, Mode::Prompt(_)),
+        "no restore-project-confirm prompt opened while read-only"
+    );
+    assert!(
+        app.message.as_deref().unwrap_or("").contains("Read-only"),
+        "the author is told the project is read-only: {:?}",
+        app.message
+    );
+
+    // The working tree was never force-checked-out by either refusal.
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        before,
+        "the tree was not restored"
+    );
+    fs::remove_dir_all(&remote).ok();
+}

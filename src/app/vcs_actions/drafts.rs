@@ -160,7 +160,10 @@ impl App {
         }
         match crate::vcs::checkout_branch(&self.project.root, &name) {
             Ok(()) => {
-                let note = match self.reload_active_chapter() {
+                // The checkout can rewrite `book.toml` (the draft may have a
+                // different chapter set/order), so reload the whole project — not
+                // just the active buffer — to keep the manifest and caches in step.
+                let note = match self.reload_project_after_vcs() {
                     Ok(()) => String::new(),
                     Err(e) => format!(" (reload failed: {e})"),
                 };
@@ -224,7 +227,10 @@ impl App {
         }
         match crate::vcs::merge_branch(&self.project.root, &into, &from) {
             Ok(MergeOutcome::Clean { merged }) => {
-                let note = match self.reload_active_chapter() {
+                // A clean merge can fold in the other draft's chapter set, rewriting
+                // `book.toml`; reload the whole project so the manifest and caches
+                // reflect it, not just the active buffer.
+                let note = match self.reload_project_after_vcs() {
                     Ok(()) => String::new(),
                     Err(e) => format!(" (reload failed: {e})"),
                 };
@@ -310,7 +316,10 @@ impl App {
     ) {
         match crate::vcs::finalize_branch_merge(&self.project.root, into, from, resolved) {
             Ok(n) => {
-                let note = match self.reload_active_chapter() {
+                // The finalized merge can change the chapter set in `book.toml`;
+                // reload the whole project so the manifest and caches follow, not
+                // just the active buffer.
+                let note = match self.reload_project_after_vcs() {
                     Ok(()) => String::new(),
                     Err(e) => format!(" (reload failed: {e})"),
                 };

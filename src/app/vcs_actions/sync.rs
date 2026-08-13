@@ -161,7 +161,9 @@ impl App {
         match crate::vcs::finalize_sync(&self.project.root, &resolved) {
             Ok(summary) => {
                 self.sync_conflicts.clear();
-                let _ = self.reload_active_chapter();
+                // The sync merge can change the chapter set in `book.toml`; reload the
+                // whole project so the manifest and caches follow, not just the buffer.
+                let _ = self.reload_project_after_vcs();
                 self.refresh_vc_status();
                 self.mode = self.editing_mode();
                 self.message = Some(summary);
