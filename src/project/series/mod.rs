@@ -11,6 +11,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::export::pdf::PrintConfig;
+use crate::export::ExportStyle;
+
 use super::{Analysis, ChapterEntry, Goals, Manifest, Part};
 
 mod books;
@@ -82,7 +85,10 @@ pub struct BookPublishing {
 /// In memory the *active* book is hoisted into [`Project::manifest`] (so every
 /// existing per-chapter path keeps working on it); the other books are held on
 /// [`Project`] and written back here on save.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+///
+/// Not `Eq` (only `PartialEq`), matching the standalone [`Manifest`]: the
+/// series-root `print` table carries floating-point trim/bleed values.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 struct SeriesFile {
     /// On-disk format version (#1141), stamped on every series manifest exactly as
     /// the standalone [`Manifest::format_version`] is — so a series carries the same
@@ -114,6 +120,21 @@ struct SeriesFile {
     /// table, so it follows the scalar keys and precedes the `[[books]]` tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     analysis: Option<Analysis>,
+    /// Opt-in designed-export styling (#468): the `[style]` table shared across
+    /// every book. Project-wide (an export/package concern, not series design), so
+    /// it rides once at the series root rather than per `[[books]]` entry — matching
+    /// the standalone `Manifest::style`. Preserved through the convert path so it's
+    /// never lost when a standalone becomes a series. A table, so it follows the
+    /// scalar keys and precedes the `[[books]]` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style: Option<ExportStyle>,
+    /// Opt-in print-interior settings (#464): the `[print]` table (trim size, …)
+    /// shared across every book. Project-wide, so it lives once at the series root —
+    /// matching the standalone `Manifest::print`. Preserved through the convert path
+    /// so it's never lost when a standalone becomes a series. A table, so it follows
+    /// the scalar keys and precedes the `[[books]]` tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    print: Option<PrintConfig>,
     books: Vec<Book>,
 }
 
@@ -159,6 +180,8 @@ impl Manifest {
             start_date: series.start_date.clone(),
             todo_marker: series.todo_marker.clone(),
             analysis: series.analysis.clone(),
+            style: series.style.clone(),
+            print: series.print.clone(),
             ..Default::default()
         };
         manifest.load_book(book);
@@ -230,6 +253,8 @@ pub(super) fn series_to_toml(
         start_date: manifest.start_date.clone(),
         todo_marker: manifest.todo_marker.clone(),
         analysis: manifest.analysis.clone(),
+        style: manifest.style.clone(),
+        print: manifest.print.clone(),
         books,
     };
     toml::to_string_pretty(&series)
@@ -243,7 +268,7 @@ pub(super) mod tests {
     use std::time::Instant;
 
     use super::super::{Project, CURRENT_FORMAT_VERSION};
-    use super::{Analysis, Book, ChapterEntry, Goals, Manifest, Part};
+    use super::{Analysis, Book, ChapterEntry, ExportStyle, Goals, Manifest, Part, PrintConfig};
 
     pub(super) fn temp_dir(name: &str) -> PathBuf {
         crate::testutil::scratch_dir("series", name)
@@ -501,6 +526,73 @@ file = \"b2/one.md\"
             reopened.manifest.format_version,
             Some(CURRENT_FORMAT_VERSION),
             "series manifest is versioned like a standalone"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Converting a standalone that carries a `[style]` (#468) and `[print]`
+    /// (#464) table preserves them through the series path (#8): both are
+    /// project-wide export/print settings, not series design, so losing them on
+    /// conversion is data loss. They round-trip across a save + reopen at the
+    /// series root, exactly as `language`/`analysis` do.
+    #[test]
+    fn convert_preserves_style_and_print_through_a_reload() {
+        let dir = temp_dir("series-style-print");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("one.md"), "prose\n").unwrap();
+
+        // Build a standalone with [style] + [print] set, save it flat, then open,
+        // convert to a series, and save the `[[books]]` form.
+        let manifest = Manifest {
+            title: "Book".into(),
+            style: Some(ExportStyle {
+                scene_break: Some("***".into()),
+                ..Default::default()
+            }),
+            print: Some(PrintConfig {
+                trim: Some("5x8".into()),
+                ..Default::default()
+            }),
+            chapters: vec![ChapterEntry::new("One".into(), "one.md".into())],
+            ..Default::default()
+        };
+        fs::write(
+            Project::manifest_path(&dir),
+            toml::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let mut project = Project::open(&dir).unwrap();
+        project.convert_to_series("The Saga").unwrap();
+
+        // The on-disk series manifest carries the preserved series-root tables.
+        let toml = fs::read_to_string(Project::manifest_path(&dir)).unwrap();
+        assert!(toml.contains("[[books]]"), "series shape:\n{toml}");
+        assert!(toml.contains("[style]"), "style kept:\n{toml}");
+        assert!(
+            toml.contains("scene_break = \"***\""),
+            "scene_break kept:\n{toml}"
+        );
+        assert!(toml.contains("[print]"), "print kept:\n{toml}");
+        assert!(toml.contains("trim = \"5x8\""), "trim kept:\n{toml}");
+
+        // Reopening restores them onto the active manifest — no data loss.
+        let reopened = Project::open(&dir).unwrap();
+        assert_eq!(reopened.series_title(), Some("The Saga"));
+        assert_eq!(
+            reopened
+                .manifest
+                .style
+                .as_ref()
+                .expect("style kept")
+                .scene_break,
+            Some("***".into())
+        );
+        assert_eq!(
+            reopened.manifest.print.as_ref().expect("print kept").trim,
+            Some("5x8".into())
         );
 
         fs::remove_dir_all(&dir).ok();
