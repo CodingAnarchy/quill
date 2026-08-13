@@ -265,6 +265,65 @@ fn composition_mode_composes_with_folding() {
     assert!(screen.contains("Scene two"), "unfolded sections still show");
 }
 
+/// A tall chapter with a foldable `## Alpha` subsection whose middle lines are
+/// filled by `middle` (given a blank line above and below so a `---` parses as a
+/// thematic break, not a setext underline). A deep pre-section forces scrolling so
+/// the centering walk climbs through the folded region.
+fn folded_middle_doc(middle: &str) -> String {
+    let mut s = String::from("# Title\n\n");
+    for i in 1..=30 {
+        let _ = write!(s, "Pre line {i}.\n\n");
+    }
+    s.push_str("## Alpha\n\na-one\n\n");
+    let _ = write!(s, "{middle}\n\n");
+    s.push_str("a-two\n\n");
+    let _ = write!(s, "{middle}\n\n");
+    s.push_str("a-three\n\n## Beta\n\nb-one\n\nb-two\n\nb-three");
+    s
+}
+
+#[test]
+fn a_folded_scene_break_does_not_shift_the_viewport() {
+    // #12: a `---` scene break inside a collapsed section keys a display-only insert
+    // on a hidden line. The fill loop skips the hidden line before ever reaching that
+    // insert, so it draws nothing — but the scroll/centering walks used to still
+    // count its rows (unlike the body rows, which fold to zero), mis-anchoring the
+    // viewport by those phantom rows. With the `folds.is_hidden` guard on the header
+    // closure, a folded section renders identically whether its hidden middle holds
+    // scene breaks or plain lines.
+    let fold_alpha_and_render = |middle: &str| -> String {
+        let mut app = app_with(&folded_middle_doc(middle));
+        let start = app
+            .edit_buffer()
+            .syntax()
+            .headings()
+            .iter()
+            .find(|h| h.title == "Alpha")
+            .expect("the Alpha heading is parsed")
+            .start;
+        app.folds.toggle(start);
+        // Cursor on the last line (in Beta, just past the fold), so the centering
+        // walk climbs up through the collapsed Alpha section.
+        let last = app.edit_buffer().line_count() - 1;
+        app.edit_buffer_mut().cursor = Cursor { line: last, col: 0 };
+        // The prose region only — the last row is the status bar, whose live word
+        // count legitimately differs between the `---` and `plain` documents.
+        let screen = render(&app, 60, 15);
+        screen
+            .lines()
+            .take(screen.lines().count() - 1)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let with_breaks = fold_alpha_and_render("---");
+    let with_plain = fold_alpha_and_render("plain");
+    assert_eq!(
+        with_breaks, with_plain,
+        "a folded section's hidden scene breaks add no phantom rows to the scroll math"
+    );
+}
+
 /// A many-paragraph chapter whose lines are individually identifiable, so a render test
 /// can tell which page is on screen. Each paragraph is one numbered line.
 fn galley_chapter() -> String {

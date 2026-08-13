@@ -257,6 +257,13 @@ fn render_body(
     let height = column.height as usize;
     let wrap = column.width as usize;
     let header_rows = |line: usize| {
+        // Inserts keyed on a line hidden inside a collapsed fold (#975) are never
+        // drawn — the fill loop skips a hidden line before reaching its inserts — so
+        // they must contribute no rows to the scroll math either, in lockstep with
+        // `line_rows` returning 0 for the same line.
+        if folds.is_hidden(line) {
+            return 0;
+        }
         inserts
             .iter()
             .find(|(at, _)| *at == line)
@@ -360,15 +367,16 @@ fn render_body(
         // (#778). The clamp result is identical: `room` is consumed only via
         // `want.min(room)`, so any excess past `height + want` never changes it.
         let enough = height + want;
-        let mut rows_below = header_rows(top).saturating_sub(to_skip);
-        for l in top..total {
+        // `to_skip` is the visual rows of the top logical line scrolled above the
+        // viewport, spanning both its header inserts and wrapped body rows, so it
+        // subtracts from the top line's *whole* visible height once; the loop then
+        // starts at `top + 1` to avoid double-counting the top line's body.
+        let mut rows_below = (header_rows(top) + body_rows(top)).saturating_sub(to_skip);
+        for l in (top + 1)..total {
             if rows_below >= enough {
                 break;
             }
-            if l > top {
-                rows_below += header_rows(l);
-            }
-            rows_below += body_rows(l);
+            rows_below += header_rows(l) + body_rows(l);
         }
         // The most we can advance and still fill the screen from the bottom up.
         let room = rows_below.saturating_sub(height);
