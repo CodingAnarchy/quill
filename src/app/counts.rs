@@ -18,6 +18,42 @@ impl App {
         self.seed_baselines();
     }
 
+    /// Rebase the daily word tally when the calendar day has turned (#1170). The
+    /// counters (`added`/`removed`/`moved_to_unused` and the per-part vectors) are
+    /// seeded from today's history at load and only ever grow within a session — they
+    /// are never rebased mid-run. A session left open across midnight would otherwise
+    /// keep the previous day's totals and write them into a snapshot dated the *new*
+    /// day, doubling the count when the next open resumes from that inflated record.
+    ///
+    /// Given the current local day (passed in so the check stays hermetic and a test
+    /// can drive a rollover without touching the wall clock), this resets the day's
+    /// counters and re-baselines the per-chapter word counts so subsequent deltas
+    /// measure only the new day's writing. It also resets the session-record baseline
+    /// (#835) and the last-persisted snapshot (#869) so the new day starts clean and
+    /// its first snapshot — dated the new day — is written rather than skipped. The
+    /// previous day's final snapshot was already appended under its own date on prior
+    /// saves, and the log is keyed per date, so it is left untouched. A no-op on the
+    /// common path where the day hasn't changed.
+    pub(super) fn roll_day_if_needed(&mut self, today: &str) {
+        if self.tally_day == today {
+            return;
+        }
+        self.added = 0;
+        self.removed = 0;
+        self.moved_to_unused = 0;
+        // Zero the per-part counters and re-baseline every chapter to its current
+        // count, so the first post-midnight tally books only the new day's delta.
+        self.reset_tally_for_active_book();
+        // The new day is a fresh session baseline too, so a session spanning midnight
+        // records the new day's output from zero rather than from yesterday's total.
+        self.session_base_added = 0;
+        self.session_base_removed = 0;
+        // Forget the last snapshot (dated the old day) so the new day's first, zeroed
+        // snapshot isn't mistaken for a duplicate and skipped (#869).
+        *self.last_history_snapshot.borrow_mut() = None;
+        self.tally_day = today.to_string();
+    }
+
     /// Attribute each chapter's word change since the last idle tick to today's
     /// global and per-part added / removed counters. Walking per chapter (rather
     /// than the project total) lets a delta be booked to the part of the chapter

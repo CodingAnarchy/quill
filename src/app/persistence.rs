@@ -34,6 +34,9 @@ impl App {
         // Coalesce any within-session duplicate lines a prior run appended (#439),
         // so the file stays one line per day. Best-effort, off the save path.
         let _ = history::compact(&self.project.root);
+        // The counters seeded below are today's; anchor the rollover watcher to the
+        // same day so the first cross-midnight idle tick rebases them (#1170).
+        self.tally_day = date::iso(date::today());
         if let Some(snap) = history::for_date(&self.project.root, &date::iso(date::today())) {
             self.added = snap.added;
             self.removed = snap.removed;

@@ -294,6 +294,12 @@ pub struct App {
     /// per-session log accumulates bursts the coalesced day snapshot can't show.
     pub(super) session_base_added: usize,
     pub(super) session_base_removed: usize,
+    /// The calendar day (ISO `YYYY-MM-DD`) the daily counters above are currently
+    /// booked to. Set at load and rolled over on the idle tick when the local date
+    /// changes ([`roll_day_if_needed`](Self::roll_day_if_needed)), so a session left
+    /// open across midnight starts the new day's tally fresh instead of carrying the
+    /// previous day's `added`/`removed` into a record dated the new day.
+    pub(super) tally_day: String,
     /// The last snapshot [`persist_snapshot`](Self::persist_snapshot) actually wrote
     /// to the history log, so an autosave whose totals are unchanged skips appending
     /// a duplicate day line (#869). A `RefCell` because the best-effort persist runs

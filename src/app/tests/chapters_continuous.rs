@@ -389,6 +389,65 @@ fn momentum_persists_and_resumes_across_a_reopen() {
 }
 
 #[test]
+fn a_session_open_across_midnight_starts_the_new_days_tally_fresh() {
+    // A session left running past midnight must not carry the previous day's
+    // added/removed into a record dated the new day (#1170): that would double the
+    // count once the next open resumes from the inflated figure. The rollover is
+    // driven with injected date strings, so the test never reads the wall clock.
+    let (mut app, dir) = two_chapter_app("midnight-rollover");
+    let day_x = "2026-01-01";
+    let day_y = "2026-01-02";
+
+    // Day X: the author has written 100 words (net), and day X's snapshot is already
+    // on disk under its own date (as a prior save would have appended it).
+    app.tally_day = day_x.to_string();
+    app.added = 100;
+    app.removed = 5;
+    app.moved_to_unused = 3;
+    crate::history::persist(
+        &dir,
+        &crate::history::Snapshot {
+            date: day_x.to_string(),
+            words: app.project_word_count(),
+            added: 100,
+            removed: 5,
+            moved_to_unused: 3,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Midnight turns the calendar over to day Y: the counters rebase to zero.
+    app.roll_day_if_needed(day_y);
+    assert_eq!(app.added, 0, "the new day's tally starts fresh");
+    assert_eq!(app.removed, 0);
+    assert_eq!(app.moved_to_unused, 0);
+    assert_eq!(app.tally_day, day_y);
+    assert_eq!(
+        app.session_base_added, 0,
+        "the session baseline rebases to the new day"
+    );
+    assert_eq!(app.session_base_removed, 0);
+
+    // Now the author writes three words on day Y; the tally books only that delta —
+    // never day X's 100. (Before the fix the counters were never rebased, so this
+    // would read 103.)
+    type_str(&mut app, "one two three ");
+    app.tally_words();
+    assert_eq!(
+        app.added, 3,
+        "day Y counts only the post-midnight writing, not day X's total"
+    );
+
+    // Day X's snapshot is untouched — the log is keyed per date, so the new day's
+    // record can't clobber the previous day's final figure.
+    let x = crate::history::for_date(&dir, day_x).unwrap();
+    assert_eq!(x.added, 100);
+    assert_eq!(x.removed, 5);
+    assert_eq!(x.moved_to_unused, 3);
+}
+
+#[test]
 fn an_unchanged_autosave_appends_no_duplicate_history_line() {
     // `persist` appends and the loader coalesces per day, so a run of autosaves
     // with unchanged totals would stack identical lines. The unchanged one is

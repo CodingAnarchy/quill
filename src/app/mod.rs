@@ -223,6 +223,7 @@ impl App {
             part_removed: Vec::new(),
             session_base_added: 0,
             session_base_removed: 0,
+            tally_day: crate::date::iso(crate::date::today()),
             last_history_snapshot: std::cell::RefCell::new(None),
             baselines: HashMap::new(),
             ai: ai::Settings::load(),
@@ -437,6 +438,9 @@ impl App {
         self.refresh_style_flags();
         self.refresh_proximity_repeats();
         self.sync_annotations();
+        // Turn the day over before booking any words, so the first post-midnight
+        // tally lands on the new day rather than compounding yesterday's total (#1170).
+        self.roll_day_if_needed(&crate::date::iso(crate::date::today()));
         self.tally_words();
         self.refresh_vc_status_on_idle();
         self.recheck_instance_lock();
