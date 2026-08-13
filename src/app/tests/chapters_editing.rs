@@ -598,6 +598,55 @@ fn split_a_non_active_chapter_is_refused() {
     assert_eq!(titles(&app), vec!["One", "Two"]);
 }
 
+/// Splitting the active chapter while a reference pane (a story-bible entry, #165)
+/// is focused must be a no-op: the split reads `self.buffer`, which is the bible
+/// file — not the active chapter — so going ahead would truncate the bible to its
+/// head and forge a bogus chapter from its tail (data loss). The bible file stays
+/// byte-for-byte intact, no chapter is inserted, and a message explains why.
+#[test]
+fn split_with_a_focused_reference_pane_is_a_no_op() {
+    let (mut app, dir) = two_chapter_app("split-ref-focus"); // active = "One"
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    let mara = dir.join("bible").join("mara.md");
+    let bible_before = "# Mara\n\n## Physical\n\ntall\n\n## Voice\n\nlow\n";
+    fs::write(&mara, bible_before).unwrap();
+
+    // Open the bible entry in a reference pane and focus it (Ctrl-w w). `active`
+    // stays on chapter One, but the focused buffer is now the bible file.
+    app.on_key(ctrl('g')); // chapter browser
+    app.on_key(key(KeyCode::Char('f'))); // reference files
+    app.on_key(key(KeyCode::Enter)); // open the (only) entry in a pane
+    app.on_key(ctrl('w')); // Ctrl-w w focuses the other pane
+    app.on_key(key(KeyCode::Char('w')));
+    assert!(
+        !app.focus_shows_active_chapter(),
+        "the focused pane is the bible entry, not the active chapter"
+    );
+
+    // Drive the split path for the active chapter (the reachable Ctrl-K action).
+    app.start_split_chapter();
+    if matches!(app.mode, Mode::Prompt(_)) {
+        type_str(&mut app, "Tail");
+        app.on_key(key(KeyCode::Enter));
+    }
+
+    // No chapter was forged, and the bible file is untouched on disk.
+    assert_eq!(titles(&app), vec!["One", "Two"], "no chapter was added");
+    assert_eq!(
+        fs::read_to_string(&mara).unwrap(),
+        bible_before,
+        "the focused bible file was not truncated"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Focus a chapter"),
+        "the split explains it needs a focused chapter: {:?}",
+        app.message
+    );
+}
+
 /// Merging chapter 1 into chapter 0 combines their bodies into the first file,
 /// retires the merged file to `unused/`, and leaves the manuscript's words intact
 /// (nothing booked as removed — the prose only moved).
