@@ -206,6 +206,32 @@ impl App {
         Ok(())
     }
 
+    /// Reload the whole project from disk after a VCS *landing* op that can rewrite
+    /// the tracked `book.toml` — a pull, a two-way sync, a draft switch/merge, or a
+    /// restore. Unlike [`reload_active_chapter`](App::reload_active_chapter), which
+    /// only re-reads a single buffer from the *current* `active_path`, this re-opens
+    /// the project so the in-memory manifest, the per-chapter caches (word / TODO
+    /// counts, front-matter metadata), and the book/series structure all reflect the
+    /// new on-disk state: the op may have added, removed, renamed, or reordered
+    /// chapters, and after a force-checkout the disk is authoritative.
+    ///
+    /// The previously-active chapter is kept active when it still exists in the new
+    /// manifest; otherwise [`Project::open`] has already selected the first chapter,
+    /// so the reloaded buffer is always a real chapter — never an orphan pointing at
+    /// a now-deleted file. Returns the error so callers can report it; on failure the
+    /// current project and buffer are left in place, exactly as before.
+    fn reload_project_after_vcs(&mut self) -> Result<(), String> {
+        let prev_active = self.project.active_file().to_string();
+        let mut project = Project::open(&self.project.root).map_err(|e| e.to_string())?;
+        // Stay on the same chapter when the op left it in place; otherwise `open`
+        // already made the first chapter active, so the active buffer stays valid.
+        if let Some(index) = project.index_of_file(&prev_active) {
+            project.set_active(index);
+        }
+        self.project = project;
+        self.reload_active_chapter()
+    }
+
     /// The active chapter's path relative to the repo root — the file name, since
     /// chapters live at the project root. The handle the per-file version-control
     /// operations (restore, diff/restore-from-a-commit) address.

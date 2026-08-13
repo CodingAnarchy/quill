@@ -255,7 +255,10 @@ impl App {
         if self.edit_dirty() {
             return Some("Kept your unsaved edits — save or commit, then pull again.".into());
         }
-        let _ = self.reload_active_chapter();
+        // A pull can rewrite `book.toml` (the remote may have added/removed/reordered
+        // chapters), so reload the whole project — manifest + per-chapter caches —
+        // not just the active buffer, so navigation never points at a stale chapter.
+        let _ = self.reload_project_after_vcs();
         None
     }
 }
