@@ -165,6 +165,64 @@ fn replacing_one_match_leaves_the_others() {
 }
 
 #[test]
+fn replace_all_updates_the_active_chapter_on_disk_with_a_reference_pane_focused() {
+    // Data-integrity guard (#1167 follow-up): a story-bible entry opened in a
+    // split and focused makes `self.buffer` the bible, not the active chapter. A
+    // project-wide replace touching the active chapter must still rewrite the
+    // chapter's *file* (through the on-disk path), never the focused bible
+    // buffer/file.
+    let (mut app, dir) = two_chapter_app("psearch-replace-ref-pane");
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    let bible = dir.join("bible").join("mara.md");
+    fs::write(&bible, "# Mara\n\na sailor\n").unwrap();
+
+    // Open the bible entry in a pane and focus it (`Ctrl-w w`).
+    app.on_key(ctrl('g')); // chapter browser
+    app.on_key(key(KeyCode::Char('f'))); // reference files
+    app.on_key(key(KeyCode::Enter)); // open the (only) entry in a pane
+    app.on_key(ctrl('w'));
+    app.on_key(key(KeyCode::Char('w'))); // focus the bible pane
+    assert!(
+        !app.focus_shows_active_chapter(),
+        "the focused pane is the bible, not the active chapter"
+    );
+
+    // Replace "chapter" → "section" across the whole manuscript.
+    app.open_project_find();
+    type_str(&mut app, "chapter");
+    app.on_key(key(KeyCode::Enter)); // Results
+    app.on_key(key(KeyCode::Char('r'))); // → Replacement
+    type_str(&mut app, "section");
+    app.on_key(key(KeyCode::Enter)); // → Step
+    app.on_key(key(KeyCode::Char('a'))); // → Confirm/Preview
+    app.on_key(key(KeyCode::Char('y'))); // replace all
+
+    // The active chapter's file was rewritten on disk, via the disk path — not
+    // misrouted into the focused bible buffer.
+    assert_eq!(
+        fs::read_to_string(dir.join("one.md")).unwrap(),
+        "first section\n",
+        "the active chapter's file updated on disk"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("two.md")).unwrap(),
+        "second section\n",
+    );
+
+    // The focused bible is untouched — buffer and file both unchanged.
+    let focused = app.buffer.text();
+    assert!(
+        focused.contains("a sailor") && !focused.contains("section"),
+        "the focused bible buffer is unchanged: {focused:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&bible).unwrap(),
+        "# Mara\n\na sailor\n",
+        "the bible file on disk is untouched"
+    );
+}
+
+#[test]
 fn replace_refreshes_cached_word_counts() {
     let (mut app, _dir) = two_chapter_app("psearch-recount");
     // two.md (non-active) is "second chapter" — two words.
