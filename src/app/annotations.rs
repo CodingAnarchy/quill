@@ -28,21 +28,29 @@ impl App {
     /// annotations are snapshotted alongside the buffer's undo stack and restored,
     /// rather than re-mapped here.
     pub(crate) fn sync_annotations(&mut self) {
+        // A layout change (different chapter / window / view) means the buffer was
+        // rebuilt: reload from disk and re-translate. Otherwise fold the burst's
+        // edits into the live offsets so every note stays on its phrase.
+        if self.annotation_context() != self.annotations_context {
+            self.reload_annotations_for_view();
+        } else {
+            self.reanchor_annotations();
+        }
+    }
+
+    /// Fold the buffer's pending anchor-edit deltas into the live annotation
+    /// offsets, so they're current with the buffer as it stands right now — the
+    /// delta half of [`sync_annotations`](Self::sync_annotations), split out so a
+    /// keystroke-path persist can re-anchor *before* writing and never store a
+    /// stale offset (#302/#370). It maps offsets forward through the edits without
+    /// reloading, so the caller must still be on the same window/chapter the notes
+    /// were anchored against — a layout change goes through
+    /// [`reload_annotations_for_view`](Self::reload_annotations_for_view) instead.
+    pub(crate) fn reanchor_annotations(&mut self) {
         // Snapshot annotations for any edit group that opened, before the deltas
         // below move them — keeps the undo history aligned with the buffer's (#370).
         self.note_annotation_undo_point();
-
         let edits = self.edit_buffer_mut().drain_anchor_edits();
-
-        // A layout change (different chapter / window / view) means the buffer was
-        // rebuilt: reload from disk and re-translate, discarding the stale deltas.
-        let context = self.annotation_context();
-        if context != self.annotations_context {
-            self.annotations = self.load_annotations_for_view();
-            self.annotations_context = context;
-            self.clear_annotation_history(); // a fresh buffer has no undo history
-            return;
-        }
         if edits.is_empty() {
             return;
         }
@@ -63,6 +71,21 @@ impl App {
                 None => false,
             });
         self.annotations.sort_by_key(|a| (a.start, a.end));
+    }
+
+    /// Reload the loaded chapters' annotations from disk, re-translated to the
+    /// current window's segment bases, and adopt the new layout signature — the
+    /// layout-change half of [`sync_annotations`](Self::sync_annotations), split
+    /// out so a reslide can re-anchor to the new window immediately (the
+    /// reconciliation otherwise deferred to the idle tick) before a later
+    /// same-burst persist reads the offsets (#302/#370). The buffer was rebuilt
+    /// around the new layout, so any pending edit deltas are stale — drain and
+    /// discard them — and the fresh buffer has no annotation undo history.
+    pub(crate) fn reload_annotations_for_view(&mut self) {
+        self.edit_buffer_mut().drain_anchor_edits();
+        self.annotations = self.load_annotations_for_view();
+        self.annotations_context = self.annotation_context();
+        self.clear_annotation_history();
     }
 
     /// A signature of the current view's chapter layout (#370): the active file in

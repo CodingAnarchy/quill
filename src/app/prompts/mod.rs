@@ -45,6 +45,15 @@ impl App {
         }
         // The chapter is now on disk; refresh its cached count.
         self.cache_focus_words();
+        // Persist annotations in lockstep with the prose, like the real save path
+        // `write_active` does (#302/#370) — but re-anchored first, so a flush on the
+        // keystroke path (a chapter switch, or entering the continuous view) never
+        // writes the pre-edit offset an idle re-anchor would later correct in memory
+        // only, leaving the reload to overwrite it with the stale disk value (#11).
+        // `reanchor_annotations` is a no-op when the idle tick already folded the
+        // burst's edits in, so this never double-counts.
+        self.reanchor_annotations();
+        self.persist_annotations();
         Ok(())
     }
 
