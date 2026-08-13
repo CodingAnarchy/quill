@@ -471,6 +471,7 @@ impl Buffer {
 
     pub fn insert_char(&mut self, c: char) {
         let idx = self.cursor_char_idx();
+        let start_byte = self.rope.char_to_byte(idx);
         let mut buf = [0u8; 4];
         self.edit_insert(idx, c.encode_utf8(&mut buf));
         self.dirty = true;
@@ -478,7 +479,17 @@ impl Buffer {
             self.cursor.line += 1;
             self.cursor.col = 0;
         } else {
-            self.cursor.col += 1;
+            // `col` is a grapheme column, so it can't blindly `+= 1`: the inserted
+            // scalar may *merge* into the preceding grapheme rather than start a
+            // new one — a combining mark (U+0301), a ZWJ, a variation selector
+            // (U+FE0F), or a regional indicator that completes a flag — leaving the
+            // line's grapheme count unchanged. Derive the column from the inserted
+            // char's end byte via the grapheme-aware byte→col mapping (as
+            // `replace_byte_range` does): a normal char advances one column, a
+            // merge stays on the (unchanged) boundary, so `col` never runs off the
+            // end of the line (#16). Reads only the current line, so it stays
+            // O(line) — decoupled from document size like the `+= 1` it replaces.
+            self.cursor = self.cursor_at_byte(start_byte + c.len_utf8());
         }
         self.goal_x = None;
     }

@@ -119,6 +119,97 @@ fn grapheme_after_delete_is_decoupled_from_document_size() {
 }
 
 #[test]
+fn insert_char_keeps_col_on_boundary_when_a_combining_mark_merges() {
+    // `col` is a grapheme column. Typing a combining acute (U+0301) after "e"
+    // composes "é" — one grapheme, not two — so the grapheme count must not grow
+    // and the cursor must stay on column 1, not run off the end of the line (#16).
+    let mut buf = Buffer::from_text("e\n");
+    buf.cursor = Cursor { line: 0, col: 1 };
+    buf.insert_char('\u{0301}'); // combining acute accent
+    assert_eq!(buf.line_graphemes(0), 1, "e + U+0301 is a single grapheme");
+    assert_eq!(
+        buf.cursor.col, 1,
+        "col must stay on the merged grapheme's boundary, not advance to 2"
+    );
+}
+
+#[test]
+fn insert_char_keeps_col_on_boundary_when_a_variation_selector_merges() {
+    // VS16 (U+FE0F) after the heart (U+2764) yields the emoji-presentation "❤️" —
+    // still one grapheme, so `col` must stay on column 1.
+    let mut buf = Buffer::from_text("\u{2764}\n"); // heavy black heart
+    buf.cursor = Cursor { line: 0, col: 1 };
+    buf.insert_char('\u{FE0F}'); // emoji variation selector
+    assert_eq!(
+        buf.line_graphemes(0),
+        1,
+        "heart + VS16 is a single grapheme"
+    );
+    assert_eq!(buf.cursor.col, 1, "col must stay on the merged boundary");
+}
+
+#[test]
+fn insert_char_keeps_col_on_boundary_when_regional_indicators_form_a_flag() {
+    // Two regional indicators combine into one flag grapheme (🇺🇸). After typing
+    // the second one the line still holds a single grapheme, so `col` stays at 1.
+    let mut buf = Buffer::from_text("\u{1F1FA}\n"); // regional indicator U
+    buf.cursor = Cursor { line: 0, col: 1 };
+    buf.insert_char('\u{1F1F8}'); // regional indicator S -> 🇺🇸
+    assert_eq!(
+        buf.line_graphemes(0),
+        1,
+        "US regional pair is one flag grapheme"
+    );
+    assert_eq!(
+        buf.cursor.col, 1,
+        "col must stay on the flag's single boundary"
+    );
+}
+
+#[test]
+fn insert_char_advances_col_for_an_ordinary_char() {
+    // The common case is unchanged: a normal char starts its own grapheme, so the
+    // grapheme count grows and `col` advances by one.
+    let mut buf = Buffer::from_text("ab\n");
+    buf.cursor = Cursor { line: 0, col: 2 };
+    buf.insert_char('c');
+    assert_eq!(buf.line_graphemes(0), 3);
+    assert_eq!(buf.cursor.col, 3, "an ordinary char advances col by one");
+}
+
+#[test]
+fn backspace_after_a_merged_insert_deletes_the_grapheme_not_a_dead_keystroke() {
+    // Before the fix, the merged insert left `col` one past the line's grapheme
+    // count; the next Backspace then resolved `col - 1` to no grapheme, removed an
+    // empty range (a dead keystroke), yet still marked the buffer dirty and pushed
+    // a spurious undo entry. With `col` on the real boundary, one Backspace now
+    // deletes the whole "é" grapheme and there is nothing spurious to undo.
+    let mut buf = Buffer::from_text("e\n");
+    buf.cursor = Cursor { line: 0, col: 1 };
+    buf.insert_char('\u{0301}');
+    buf.seal_undo_group(); // typing goes idle: the next edit is its own undo group
+    buf.dirty = false; // isolate the Backspace's effect from the insert's
+
+    buf.backspace();
+    assert_eq!(
+        buf.line(0),
+        "",
+        "Backspace deletes the merged grapheme whole"
+    );
+    assert_eq!(buf.cursor.col, 0);
+    assert!(buf.dirty, "a real deletion marks the buffer dirty");
+
+    // The Backspace was a real edit, so undo restores the composed grapheme
+    // rather than replaying an empty no-op.
+    buf.undo();
+    assert_eq!(
+        buf.line(0),
+        "e\u{0301}",
+        "undo restores the deleted grapheme"
+    );
+}
+
+#[test]
 fn cursor_at_byte_snaps_a_mid_emoji_offset_without_panicking() {
     // A stale persisted position / mark / fold heading can name a byte offset that
     // now lands inside a multi-byte grapheme (the bytes shifted since it was
