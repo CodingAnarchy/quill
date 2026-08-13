@@ -511,6 +511,35 @@ fn slash_search_jumps_and_n_repeats() {
 }
 
 #[test]
+fn slash_search_tab_steps_forward_between_matches() {
+    let (mut app, _dir) = vim_app("vim-search-tab"); // "first chapter": 'r' at col 2 and 12
+    type_str(&mut app, "/r"); // live preview lands on the first match (col 2)
+    app.on_key(key(KeyCode::Tab)); // step to the next match, staying in the prompt
+    assert!(
+        matches!(app.mode, Mode::Search(_)),
+        "Tab keeps the search prompt open"
+    );
+    app.on_key(key(KeyCode::Enter));
+    assert!(matches!(app.mode, Mode::Normal), "Enter commits to Normal");
+    assert_eq!(
+        app.buffer.cursor.col, 12,
+        "Tab moved to the next match, and Enter landed there"
+    );
+}
+
+#[test]
+fn slash_search_shift_tab_steps_backward_wrapping() {
+    let (mut app, _dir) = vim_app("vim-search-shift-tab"); // origin col 0 → preview on col 2
+    type_str(&mut app, "/r");
+    app.on_key(key(KeyCode::BackTab)); // wrap back from the first match to the last
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.buffer.cursor.col, 12,
+        "Shift-Tab wrapped to the last match"
+    );
+}
+
+#[test]
 fn search_wraps_with_a_notice() {
     let (mut app, _dir) = vim_app("vim-search-wrap");
     type_str(&mut app, "/r");

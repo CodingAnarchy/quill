@@ -469,6 +469,34 @@ impl App {
         self.project.index_of_file(file)
     }
 
+    /// Whether the focused editor (`App::buffer`) represents the active chapter —
+    /// so the chapter pane's nested outline (its headings) actually belongs under
+    /// the active chapter row. True in the ordinary single-chapter view and
+    /// whenever a split's focused pane shows the active chapter (focusing a
+    /// *chapter* pane re-points `active` to it via
+    /// [`sync_active_to_focus`](Self::sync_active_to_focus)). False only when the
+    /// focused pane holds a *backed non-chapter file* — a story-bible entry or note
+    /// opened beside the prose (#165) — which leaves `active` on the previous
+    /// chapter; nesting that file's headings under a chapter is the bug this guards.
+    ///
+    /// A backed buffer must be the active chapter's own file; a buffer with no file
+    /// yet (the in-memory scratch/new buffer, never a reference pane — those are
+    /// always loaded from disk) is the active buffer by definition.
+    ///
+    /// Cheap (O(1)): a filename comparison against the active chapter's file, not a
+    /// manifest scan, so whole-manuscript read loops can call it per chapter without
+    /// turning O(chapters) into O(chapters²).
+    pub(crate) fn focus_shows_active_chapter(&self) -> bool {
+        // A backed buffer must be the active chapter's file; a pathless buffer is
+        // the in-memory active/scratch buffer (never a reference pane).
+        self.buffer
+            .path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .is_none_or(|file| file == self.project.active_file())
+    }
+
     /// The title bar for a reference pane (#163/#165): the chapter title if the
     /// pane shows a chapter, otherwise the file's stem (e.g. a bible entry's name),
     /// falling back to "reference" for an unnamed buffer.

@@ -461,6 +461,22 @@ fn f1_shortcut_opens_the_user_guide() {
     assert!(app.overlay.is_some(), "F1 opened the user's guide overlay");
 }
 
+/// F2 is the shown shortcut for the story-bible browser (#590) and really opens it,
+/// the second function-key binding dispatched in `on_key`. With a bible present it
+/// enters the bible-only reference browser.
+#[test]
+fn f2_shortcut_opens_the_story_bible_browser() {
+    let (mut app, dir) = two_chapter_app("action-f2-bible");
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(dir.join("bible").join("mara.md"), "# Mara\n").unwrap();
+    assert_eq!(Action::BrowseBible.shortcut(), Some("F2"));
+    app.on_key(key(KeyCode::F(2)));
+    assert!(
+        matches!(&app.mode, Mode::RefFiles(s) if s.bible_only),
+        "F2 opened the bible-only browser"
+    );
+}
+
 /// Pressing an action's shown shortcut actually runs that action (#1103) — the
 /// live proof the cheat sheet doesn't lie. Ctrl-S saves; Ctrl-R opens the progress
 /// report. Driven through the real top-level key path, not `dispatch_action`.

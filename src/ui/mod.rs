@@ -9,6 +9,8 @@ use ratatui::{
     Frame,
 };
 
+use std::path::Path;
+
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
@@ -437,14 +439,59 @@ fn ref_file_lines(app: &App, state: &RefFiles) -> Vec<Line<'static>> {
         )),
         Line::raw(""),
     ];
+    // Group by folder rather than list bare paths (#165/#590): the files arrive
+    // sorted by path, so each folder's files are contiguous — emit a dim header
+    // when the folder changes, then each file by its clean stem, indented under it.
+    // Files sitting directly in the root show flush with no header. `selected` stays
+    // a file index (headers are render-only), so the arrows step file-to-file and
+    // skip the headers.
+    let mut current: Option<String> = None;
     for (i, path) in state.files.iter().enumerate() {
-        let label = path
-            .strip_prefix(&app.project.root)
-            .unwrap_or(path)
-            .to_string_lossy();
+        let group = ref_group(app, path, state.bible_only);
+        if group != current {
+            if let Some(g) = &group {
+                lines.push(Line::from(Span::styled(
+                    g.clone(),
+                    Style::default().fg(theme::current().dim),
+                )));
+            }
+            current.clone_from(&group);
+        }
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("untitled");
+        let label = if group.is_some() {
+            format!("  {name}")
+        } else {
+            name.to_string()
+        };
         lines.push(list_row(i == state.selected, &label, None));
     }
     lines
+}
+
+/// The folder a reference file is grouped under in the browser (#165/#590): its
+/// parent directory relative to the project root, `None` for a file sitting
+/// directly in the root (shown flush, no header). In the bible-only view the
+/// leading `bible/` is stripped so headers read "characters", not
+/// "bible/characters", and a file directly under `bible/` groups flush like a root
+/// file.
+fn ref_group(app: &App, path: &Path, bible_only: bool) -> Option<String> {
+    let rel = path.strip_prefix(&app.project.root).unwrap_or(path);
+    let group = rel.parent()?.to_string_lossy().replace('\\', "/");
+    if group.is_empty() {
+        return None;
+    }
+    if !bible_only {
+        return Some(group);
+    }
+    // Bible-only view: strip the leading `bible/` so headers read "characters", not
+    // "bible/characters"; a file sitting directly in `bible/` groups flush (None).
+    if let Some(rest) = group.strip_prefix("bible/") {
+        return Some(rest.to_string());
+    }
+    (group != "bible").then_some(group)
 }
 
 /// The active chapter's heading outline, indented by level, current section
@@ -558,7 +605,16 @@ impl Pane for NavPane<'_> {
 
         let mut lines: Vec<Line> = project_header(&app.project.manifest);
 
-        let headings = app.buffer.syntax().headings();
+        // The outline nested under the active chapter is *that chapter's* structure.
+        // When a non-chapter reference pane is focused (a bible entry / note, #165),
+        // `app.buffer` holds that file, not the active chapter — so its headings must
+        // not be nested under a chapter row. Treat the outline as empty then, leaving
+        // the chapter list flat rather than mis-nesting the bible's sections.
+        let headings = if app.focus_shows_active_chapter() {
+            app.buffer.syntax().headings()
+        } else {
+            &[]
+        };
         let current_heading = current_section(headings, app.buffer.cursor_byte());
         // When the outline is focused (#657), draw its selection cursor reversed.
         let outline_selected = match &app.mode {

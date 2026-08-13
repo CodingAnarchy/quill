@@ -15,6 +15,9 @@ formula behind every line of the report.
 |           652 / 600  pages
 |           56 / 60 chapters ( 93.33 % )
 |
+| revised:  102,300 / 163,204  words ( 62.68 % )
+| final:    48,900 / 163,204  words ( 29.96 % )
+|
 |           expansion ratio: 1.17
 |           words at this ratio: 174,861
 |           pages at this ratio: 699
@@ -142,6 +145,16 @@ than being inflated by a long introduction or appendix. Their combined word coun
 is shown on its own line (`(+N words in front/back matter, not counted)`) so
 nothing is hidden. An all-body project is unaffected (the line is omitted).
 
+**Revision status:** below the story block, a `revised` and a `final` line report
+how much of the manuscript has advanced along the chapter `status:` cycle
+(`draft → revised → final`; set per chapter from the pane). Both count words in
+**body chapters** against `W` (the same body-word total the story line reports),
+not against the goal. The count is **cumulative**: a chapter marked `final` was
+revised too, so it counts toward *both* lines — `final ≤ revised` always. Each
+line appears only when it has words, so a project that never sets a status shows
+no status block at all (and `draft` — the default — is never given its own line;
+it's whatever hasn't advanced yet).
+
 | Report line | Formula |
 | --- | --- |
 | `words ( % )` | `W / Wt`, percent = `W / Wt * 100` |
@@ -153,6 +166,8 @@ nothing is hidden. An all-body project is unaffected (the line is omitted).
 | `words at this ratio` | `Wp` (rounded) |
 | `pages at this ratio` | `floor(Wp / wpp)` |
 | `W / Wp words at this ratio ( % )` | `W / Wp * 100` (equals `f` by construction) |
+| `revised` (when > 0) | words in body chapters at `status: revised` **or** `final` (cumulative), against `W`; percent = `words / W * 100` |
+| `final` (when > 0) | words in body chapters at `status: final`, against `W`; percent = `words / W * 100` |
 | `xxx` | count of the configured TODO marker |
 | `moved to unused` | today's `moved_to_unused` |
 | `today's word delta` | net `added - removed`, with `(+added -removed)` shown |

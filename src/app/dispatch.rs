@@ -108,6 +108,19 @@ impl App {
             return;
         }
 
+        // F2 opens the story-bible browser (#590) directly — the dedicated key the
+        // Ctrl-K "Browse story bible" action advertises. Same guard as F1: only from
+        // an editing mode with no overlay up, so it never pre-empts a prompt / menu /
+        // overlay key. `open_bible_files` leaves the continuous view and reports an
+        // empty bible itself, so the key is safe from any editing state.
+        if key.code == KeyCode::F(2)
+            && self.overlay.is_none()
+            && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
+        {
+            self.open_bible_files();
+            return;
+        }
+
         // While a sequenced run is in progress (a workflow #227, a series-bible
         // refresh #340, or a durable pass queue #923) suspended on an async step,
         // Esc cancels it — cleanly, after the current step finishes (#344). Only in

@@ -75,10 +75,16 @@ records a jump-back point, so backtick-backtick returns to where you were, and i
 stays instant on large or series projects (the list is indexed once when it
 opens, then filtered in memory). Esc closes without moving.
 
-From the browser you can also create, rename, reorder, and delete
-chapters, split the open chapter at the cursor into two ("x"), merge a chapter
-into the one above it ("M"), duplicate a chapter ("c"), and set each chapter's
-status, summary, and section.
+From the browser you can also create ("a"), rename ("r"), reorder ("K"/"J"), and
+delete ("d") chapters, split the open chapter at the cursor into two ("x"), merge
+a chapter into the one above it ("M"), and duplicate a chapter ("c"). The same
+pane sets each chapter's metadata — press "s" to cycle its status (draft →
+revised → final), "m" for a one-line summary, "v" for the POV, "g" for a chapter
+epigraph, "l" for a word-count goal, and "S" for a section role (prologue,
+epilogue, appendix, …). Book-level details live here too: "t" title, "b"
+subtitle, "w" author, "e" series, and "G" a book epigraph. All of it is kept in
+front matter or the manifest, out of the prose, and shown as a badge beside the
+chapter (the status badge is D / R / F).
 
 Ctrl-L toggles the continuous-manuscript view, which flows across chapter
 boundaries and writes edits back to the right files, while never holding more
@@ -517,6 +523,12 @@ finding in one pass. A finding corroborated across passes is marked as
 consensus, and dismissing one persists against its anchored span, so it stays
 dismissed when you re-run.
 
+The story bible lives as editable Markdown under the project's bible/ folder, and
+you own every word of it. Press F2 (or "Browse story bible" in the Ctrl-K menu) to
+open the browser: entries are grouped by folder (characters, timeline, setting, …)
+so a large bible stays easy to scan. Enter opens the selected entry in a side pane
+to read or edit, and Ctrl-S saves it back.
+
 "Ask the manuscript" retrieves the most relevant chapters for your question
 through an on-device semantic index, so its grounded, citable answer points at
 the right passages without a cloud round-trip. The same index powers more than
@@ -601,17 +613,32 @@ cursor between the quotes. Only the first $0 counts; write $$0 for a literal $0.
 KEY REFERENCE
 
   F1              this guide
+  F2              story bible (browse it; entries grouped by folder)
   Mouse           click to position the cursor; drag to select; scroll-wheel to scroll
   Paste           terminal paste inserts the system clipboard (one undoable edit)
   Ctrl-S          save
   Ctrl-Q / Ctrl-C quit (prompts if unsaved)
   Ctrl-Z / Ctrl-Y undo / redo
-  Ctrl-F          find (then "r" to replace)
+  Ctrl-F          find (then "r" to replace; Tab / Shift-Tab step matches)
   Ctrl-O          toggle the chapter / outline pane (press again to focus it,
                   then Enter jumps to the selected heading)
   Ctrl-L          toggle the continuous manuscript
   Ctrl-N / Ctrl-P next / previous chapter
-  Ctrl-G          browse chapters
+  Ctrl-G          browse chapters. In the browser:
+                    up/down (k j) move the selection
+                    Enter        open the selected chapter
+                    o            open it in a side pane
+                    f            list reference files (bible & notes)
+                    /            filter by title, status, or POV
+                    #            go to a chapter by number or title
+                    a  r  d      add / rename / delete a chapter
+                    K  J         move the chapter up / down
+                    x  M  c      split at cursor / merge into the one above / duplicate
+                    s            cycle status (draft → revised → final)
+                    m  v  g      summary / POV / chapter epigraph
+                    l  S         word-count goal / section role (prologue, epilogue, …)
+                    t b w e G    book title / subtitle / author / series / epigraph
+                    Esc          clear the filter, then leave the browser
   Ctrl-D          quick switch: fuzzy-jump to any chapter or scene heading
   Ctrl-B          browse / switch projects
   Ctrl-V          version control (commit, sync, drafts, milestones, history)
@@ -637,7 +664,10 @@ In Vim mode, marks and a jump-back list keep your place across the big jumps. In
 Normal mode, "m" then a letter sets a mark at the cursor (mx); a backtick or a
 single-quote then that letter jumps to it (`x or 'x). Marks are global — a mark
 carries its chapter, so it returns you to the right chapter even after you've
-moved to another. The jumps that used to strand you — the outline, the corkboard,
+moved to another. While the "/" or "?" search prompt is open, Tab and Shift-Tab
+step forward and back through the matches (wrapping) before you commit with Enter;
+after committing, "n" and "N" repeat the search as usual. The jumps that used to
+strand you — the outline, the corkboard,
 find and search (/, ?, n, N, *), and go-to-chapter — now record where you left,
 and a double backtick (``) or double quote ('') jumps back to it, popping one
 step each press. (Vim's usual Ctrl-O back-jump is taken by the outline pane, so

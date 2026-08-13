@@ -4,6 +4,7 @@
 
 use super::*;
 
+use crate::frontmatter::Band;
 use crate::text::count_matches;
 
 impl App {
@@ -165,6 +166,7 @@ impl App {
             self.section_word_count(), // front/back matter, shown but not counted
             self.project.body_chapter_count(), // front/back matter aren't chapters (#180)
             self.count_todo(),
+            &self.status_words(),
             &momentum,
             &self.part_deltas(),
             date::today(),
@@ -411,7 +413,13 @@ impl App {
     /// here, keeping the loop O(chapters) rather than an accidental O(chapters²)
     /// (#865, #867).
     pub(crate) fn chapter_text_with_active(&self, index: usize, active: usize) -> String {
-        if index == active {
+        // The live buffer is the active chapter's prose only when it's focused on
+        // that chapter. With a reference pane focused (a bible entry / note, #165)
+        // `self.buffer` holds that file — reading it here would feed the AI request,
+        // the synopsis, and exports the reference file's text in place of the
+        // chapter's prose — so read the active chapter from disk instead. Focusing
+        // away from a chapter flushes it first, so disk is current.
+        if index == active && self.focus_shows_active_chapter() {
             self.buffer.text()
         } else {
             self.project.chapter_body(index)
@@ -425,16 +433,50 @@ impl App {
     /// since its cache lags the in-flight edits until the next save.
     pub(crate) fn count_todo(&self) -> usize {
         let active = self.project.active_index();
+        // Count the active chapter live only when its buffer is focused; with a
+        // reference pane focused (#165) the buffer is a bible entry / note, so use
+        // its cached count instead of counting markers in the reference file.
+        let live_active = self.focus_shows_active_chapter();
         let marker = self.project.manifest.todo_marker();
         (0..self.chapter_count())
             .map(|i| {
-                if i == active {
+                if i == active && live_active {
                     count_matches(&self.buffer.text(), marker)
                 } else {
                     self.project.chapter_todo(i)
                 }
             })
             .sum()
+    }
+
+    /// Words at each revision stage for the progress report's status breakdown.
+    /// Cumulative through the draft → revised → final cycle: `revised` sums every
+    /// body chapter at Revised *or* Final, `final_words` the Final ones — so a
+    /// finalized chapter counts toward both. Reads the cached per-chapter status
+    /// and word counts (the active chapter live), never the filesystem, over body
+    /// chapters only, so it matches the body-word total the story line reports.
+    pub(crate) fn status_words(&self) -> report::StatusWords {
+        let active = self.project.active_index();
+        let mut revised = 0;
+        let mut final_words = 0;
+        for i in 0..self.chapter_count() {
+            if self.project.chapter_band(i) != Band::Body {
+                continue;
+            }
+            let words = self.chapter_word_count_with_active(i, active);
+            match self.project.chapter_status(i) {
+                Some(Status::Final) => {
+                    final_words += words;
+                    revised += words;
+                }
+                Some(Status::Revised) => revised += words,
+                _ => {}
+            }
+        }
+        report::StatusWords {
+            revised,
+            final_words,
+        }
     }
 }
 

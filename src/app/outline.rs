@@ -47,6 +47,14 @@ impl App {
                 Some("Leave the continuous view (Ctrl-l) to restructure headings.".into());
             return;
         }
+        // The outline pane shows the active chapter's structure. When a non-chapter
+        // reference pane is focused (a bible entry / note, #165) the pane lists the
+        // chapters flat, so there's no outline to focus — point the author back to
+        // the manuscript rather than navigate the invisible reference file.
+        if !self.focus_shows_active_chapter() {
+            self.message = Some("Focus a chapter (Ctrl-w w) to navigate its outline.".into());
+            return;
+        }
         let headings = self.buffer.syntax().headings();
         if headings.is_empty() {
             self.message =
