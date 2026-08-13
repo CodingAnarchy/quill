@@ -157,8 +157,13 @@ impl App {
                 is_scene: false,
             });
             // Its scene headings. The active chapter is already parsed in the live
-            // buffer; other chapters read + parse their body once here.
-            let headings = if ch == active {
+            // buffer; other chapters read + parse their body once here. But only take
+            // the live buffer when it actually shows the active chapter — with a
+            // reference pane focused (a story-bible entry / note opened beside the
+            // prose, #165) `edit_buffer()` is that pane, not the chapter, so fall back
+            // to the on-disk read for the active chapter too. Focusing away from a
+            // chapter flushes it, so disk is current.
+            let headings = if ch == active && self.focus_shows_active_chapter() {
                 self.edit_buffer().syntax().headings().to_vec()
             } else {
                 // Extract the off-buffer chapter's headings without the full parse on
