@@ -203,9 +203,12 @@ A whole-project restore rewrites the working tree, so it always asks first.
 
 ## Automatic backup
 
-Beyond manual pushes, an opt-in `[backup]` table can push a project that points at
-a remote on a cadence in the background — an always-current off-site copy without a
-manual step — and, independently, keep scheduled local `.zip` archives. Both are
+Beyond manual pushes, an opt-in `[backup]` table can commit and push a project that
+points at a remote on a cadence in the background — an always-current off-site copy
+without a manual step. Each backup makes an automatic commit of any uncommitted work
+and then pushes (a clean tree makes no commit), so prose you haven't committed by
+hand still reaches the remote. Independently, it can keep scheduled local `.zip`
+archives. Both are
 off by default; the keys and the `Ctrl-V → Set remote` setup are covered under
 "Archive & backup" in the [user guide](guide.md) and in the
 [configuration reference](configuration.md).
