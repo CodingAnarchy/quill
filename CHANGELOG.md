@@ -5,6 +5,72 @@ All notable changes to Quill are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-08-13
+
+A feature-and-reliability release. It adds a few small conveniences and closes
+two whole classes of latent bug — one around editing beside a reference pane, and
+a batch of correctness fixes found in a systematic sweep. No project or config
+format changes; every 1.0 project opens unchanged.
+
+### Added
+
+- **Story-bible browser is navigable and has a shortcut.** Press **F2** to open
+  it from anywhere (also shown on the Ctrl-K "Browse story bible" row), and its
+  entries are now grouped by folder (characters, timeline, setting, …) with clean
+  names instead of a flat list of paths.
+- **Progress report shows revision status.** Below the story line, a `revised`
+  and a `final` line report how much of the manuscript has reached each stage of
+  the draft → revised → final cycle (cumulative, against the body-word total).
+- **Vim search steps through matches from the prompt.** While the `/` or `?`
+  search prompt is open, Tab and Shift-Tab move forward and back through the
+  matches (wrapping) before you commit with Enter.
+
+### Changed
+
+- **Automatic backup now commits, then pushes.** Previously the opt-in `[backup]`
+  push only sent already-committed work, so prose you hadn't committed by hand
+  never left the machine even though the status bar said "backed up." Each backup
+  now makes an automatic commit of any uncommitted changes and then pushes (a
+  clean tree makes no commit), so the off-site copy is genuinely current.
+
+### Fixed
+
+- **Editing beside a story-bible entry or note no longer misreads it as the
+  active chapter.** When a reference pane was focused, Quill could treat that
+  file as the open chapter: the AI plot summary / synopsis and word/marker counts
+  read the bible's text, the outline pane nested its headings under a chapter, the
+  corkboard and quick-switcher showed its sections as the chapter's scenes, a
+  project-wide replace targeted it, splitting the chapter corrupted it, and the
+  crash-recovery snapshot mislabeled it. All of these now operate on the real
+  active chapter (or refuse cleanly when a chapter isn't focused).
+- **Sync no longer silently drops a co-author's edit.** If the remote changed a
+  chapter again while you were resolving a conflict on it, finalizing the sync
+  could discard that newer remote edit; it now refuses and asks you to sync again.
+- **Version-control operations keep the manuscript consistent.** After a pull,
+  sync, draft switch/merge, or restore that changed `book.toml`, Quill now reloads
+  the manifest (not just the open chapter), so navigation and saves can't land on
+  a stale or orphaned file; and "Restore" is refused in a read-only second
+  instance, like the other checkout operations.
+- **Project word total is correct after switching books in a series** (it could
+  read ~0 after a book switch, and underflow if a file had shrunk on disk).
+- **Front-matter values that start with `|` or `>` round-trip** instead of being
+  misread as YAML block scalars and lost.
+- **The daily writing tally no longer double-counts across midnight** for a
+  session left open past the date boundary.
+- **`[style]` and `[print]` settings survive converting a book to a series**
+  (they were dropped from the series manifest).
+- **Find-and-replace in the continuous view no longer corrupts prose across a
+  chapter break.** A match spanning a chapter seam is skipped with a notice
+  rather than truncated, and no-op replacements are no longer counted.
+- **Annotation positions no longer drift in the continuous view** when the window
+  re-centers mid-keystroke or when entering/leaving the continuous view.
+- **Scrolling and folds render correctly.** Wheel-scrolling no longer overshoots
+  the bottom of a chapter into blank rows, and a scene break inside a collapsed
+  section no longer throws off the viewport's centering.
+- **Typing a combining mark, emoji variation selector, or flag no longer
+  desyncs the cursor** (which had made the next Backspace do nothing and left a
+  spurious unsaved-changes marker).
+
 ## [1.0.1] - 2026-07-13
 
 A patch release fixing a crash on non-ASCII input.

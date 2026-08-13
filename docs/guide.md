@@ -334,12 +334,14 @@ empty folder — so a stray path can never clobber work in progress.
 
 If the project is under version control and points at a remote (Ctrl-V →
 "Set remote"), Quill can keep that remote as an always-current off-site backup so
-you never have to remember to push. It's opt-in per project: add a [backup]
-section with enabled = true. (This is just the automatic-push half of the remote;
-the remote is two-way — sync its edits back down, keep drafts, resolve conflicts —
-covered under VERSION CONTROL above.) By default it then pushes after each save; set
-interval_mins = N to also push at least every N minutes during a long session
-(and on_save = false to rely on the timer alone). The push runs in the background
+you never have to remember to commit or push. It's opt-in per project: add a [backup]
+section with enabled = true. (The remote is two-way — sync its edits back down, keep
+drafts, resolve conflicts — covered under VERSION CONTROL above.) On each backup Quill
+commits any uncommitted changes (an automatic "backup" commit) and then pushes, so
+even prose you haven't committed by hand reaches the remote; a clean tree makes no
+commit. By default it backs up after each save; set interval_mins = N to also back up
+at least every N minutes during a long session (and on_save = false to rely on the
+timer alone). The push runs in the background
 and never blocks editing; when it can't reach the remote — offline, a login
 problem, or the remote is ahead — the status bar says so and Quill retries on the
 next cadence rather than losing the attempt. Once a backup succeeds, the status
