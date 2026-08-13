@@ -50,6 +50,14 @@ impl App {
     /// chapter the cursor was in. Stays in continuous view if the save fails, so
     /// no edits are lost.
     pub(super) fn leave_continuous(&mut self) {
+        // Fold the burst's pending edits into the live annotation offsets before we
+        // persist them below (#302/#370): leaving the view is a keystroke-path save,
+        // and the deltas since the last idle tick aren't in `self.annotations` yet —
+        // without this the flush would write the pre-edit offsets, drifting each
+        // note by the burst's net delta (#15). Re-anchoring while the manuscript is
+        // still loaded keeps the offsets buffer-absolute against the same window the
+        // bases below are taken from.
+        self.reanchor_annotations();
         let Some(mut m) = self.manuscript.take() else {
             return;
         };
@@ -500,14 +508,18 @@ impl App {
         // (#892).
         let before = self.edit_buffer().cursor;
         mv(self.edit_buffer_mut());
-        // A reslide rebuilds the buffer, resetting every offset, so flush the
-        // current annotation offsets to disk first — the next idle reloads and
-        // re-translates them for the paged window (#370).
-        if self
+        // A reslide rebuilds the buffer, resetting every offset. Re-anchor the live
+        // annotations to the buffer as it stands (folding in the burst's pending
+        // edits, #893) and flush them to disk *before* the rebuild, so we never
+        // persist a stale offset (#302/#370). `would_reslide` is checked once and
+        // reused below so the after-rebuild reload runs on exactly the moves that
+        // paged the window.
+        let will_reslide = self
             .manuscript
             .as_ref()
-            .is_some_and(|m| m.would_reslide(&self.project))
-        {
+            .is_some_and(|m| m.would_reslide(&self.project));
+        if will_reslide {
+            self.reanchor_annotations();
             self.persist_annotations();
         }
         if let Some(mut m) = self.manuscript.take() {
@@ -523,8 +535,17 @@ impl App {
             if let Err(e) = m.reslide(&mut self.project) {
                 m.buffer_mut().cursor = before;
                 self.message = Some(format!("Continuous view: {e}"));
+                self.manuscript = Some(m);
+            } else {
+                self.manuscript = Some(m);
+                // The window paged: re-anchor the notes to the new segment bases
+                // now — the reconciliation otherwise deferred to the idle tick — so
+                // a *second* reslide in the same input burst persists against the
+                // current offsets rather than the previous window's (#302/#370).
+                if will_reslide {
+                    self.reload_annotations_for_view();
+                }
             }
-            self.manuscript = Some(m);
         }
         // A motion can carry the cursor into a collapsed section of the current
         // chapter (e.g. Down from a folded heading into its hidden body). Reveal the
