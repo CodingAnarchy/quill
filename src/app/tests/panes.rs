@@ -250,6 +250,78 @@ fn opening_a_reference_file_puts_it_in_a_pane() {
     );
 }
 
+/// Open a bible entry (with its own headings) in a pane and focus it — the state
+/// where the app used to mistake the reference file for the active chapter.
+fn app_focused_on_a_bible_entry(name: &str) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name); // active = "One" ("first chapter")
+    fs::create_dir_all(dir.join("bible")).unwrap();
+    fs::write(
+        dir.join("bible").join("mara.md"),
+        "# Mara\n\n## Physical\n\ntall\n\n## Voice\n\nlow\n",
+    )
+    .unwrap();
+    app.on_key(ctrl('g')); // chapter browser (reveals the outline pane)
+    app.on_key(key(KeyCode::Char('f'))); // reference files
+    app.on_key(key(KeyCode::Enter)); // open the (only) entry in a pane
+    window_cmd(&mut app, 'w'); // focus the bible pane
+    (app, dir)
+}
+
+#[test]
+fn a_focused_reference_pane_is_not_read_as_the_active_chapter() {
+    let (app, _dir) = app_focused_on_a_bible_entry("focus-ref-reads");
+    // The focused buffer is the bible entry, not the active chapter.
+    assert!(!app.focus_shows_active_chapter());
+
+    // The active chapter (index 0, "One") still reads its own prose from disk, not
+    // the focused bible's character sheet — the AI plot-summary / synopsis bug.
+    let text = app.chapter_text(0);
+    assert!(text.contains("first chapter"), "chapter prose: {text:?}");
+    assert!(
+        !text.contains("Physical"),
+        "must not be the bible's text: {text:?}"
+    );
+
+    // Word counts count the chapters, not the focused bible entry.
+    assert_eq!(
+        app.body_word_count(),
+        4, // "first chapter" + "second chapter"
+        "the bible entry's words must not be attributed to a chapter"
+    );
+}
+
+#[test]
+fn a_focused_reference_pane_headings_do_not_nest_under_a_chapter() {
+    let (app, _dir) = app_focused_on_a_bible_entry("focus-ref-outline");
+    // With the bible focused and the outline pane visible, the bible's heading
+    // appears once — in the bible pane — not also nested under a chapter in the
+    // outline (which is what made the side menu "wonky").
+    let screen = screen(&app, 100, 20);
+    assert_eq!(
+        screen.matches("Physical").count(),
+        1,
+        "the bible's heading is mis-nested under a chapter:\n{screen}"
+    );
+}
+
+#[test]
+fn ctrl_o_on_a_focused_reference_pane_points_back_to_a_chapter() {
+    let (mut app, _dir) = app_focused_on_a_bible_entry("focus-ref-ctrl-o");
+    app.on_key(ctrl('o')); // try to focus the outline while on the bible
+    assert!(
+        !matches!(app.mode, Mode::Outline { .. }),
+        "no outline focus on a reference pane"
+    );
+    assert!(
+        app.message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Focus a chapter"),
+        "message: {:?}",
+        app.message
+    );
+}
+
 #[test]
 fn o_in_the_browser_opens_the_selected_chapter_in_a_pane() {
     let (mut app, _dir) = two_chapter_app("ref-chapter-pane"); // active = "One"
@@ -289,6 +361,30 @@ use crate::mode::Action;
 /// Run the "Browse story bible" run-action, as if chosen from the Ctrl-K palette.
 fn browse_bible(app: &mut App) {
     app.run_action(Action::BrowseBible, false);
+}
+
+#[test]
+fn the_bible_browser_groups_files_by_folder() {
+    let (mut app, dir) = two_chapter_app("bible-grouped");
+    let chars = dir.join("bible").join("characters");
+    fs::create_dir_all(&chars).unwrap();
+    fs::write(chars.join("mara.md"), "# Mara\n").unwrap();
+    fs::write(chars.join("rourke.md"), "# Rourke\n").unwrap();
+    fs::write(dir.join("bible").join("setting.md"), "# Setting\n").unwrap();
+    browse_bible(&mut app);
+    let out = screen(&app, 90, 20);
+    // A folder header (bible/ stripped), its files by clean stem indented under it,
+    // and a top-level bible file shown flush with no header. Full paths are gone.
+    assert!(out.contains("characters"), "folder header:\n{out}");
+    assert!(
+        out.contains("  mara"),
+        "file indented under its folder:\n{out}"
+    );
+    assert!(out.contains("  rourke"), "{out}");
+    assert!(
+        !out.contains("bible/characters/mara.md"),
+        "no bare relative paths any more:\n{out}"
+    );
 }
 
 #[test]

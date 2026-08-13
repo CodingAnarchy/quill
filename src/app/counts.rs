@@ -121,7 +121,12 @@ impl App {
     /// chapter (e.g. the per-frame outline render) resolve it once and pass it
     /// in here to avoid an accidental O(chapters²) per frame.
     pub fn chapter_word_count_with_active(&self, index: usize, active: usize) -> usize {
-        if index == active {
+        // The live buffer stands in for the active chapter only when it *is* the
+        // active chapter. When a non-chapter reference pane is focused (a bible
+        // entry / note, #165) `self.buffer` holds that file, so fall back to the
+        // active chapter's cached count rather than attribute the reference file's
+        // length to it.
+        if index == active && self.focus_shows_active_chapter() {
             self.buffer.word_count()
         } else {
             self.project.chapter_words(index)
@@ -137,6 +142,13 @@ impl App {
     /// active chapter from its *cache*, so swap in the live buffer count to reflect
     /// unsaved edits (the buffer's word count updates as you type).
     pub fn project_word_count(&self) -> usize {
+        // Swap the active chapter's cached count for the live buffer only when the
+        // buffer actually holds it. With a reference pane focused (#165) the buffer
+        // is a bible entry / note, so keep the all-cached total rather than let the
+        // reference file's length distort the project word count.
+        if !self.focus_shows_active_chapter() {
+            return self.project.words_total();
+        }
         let active = self.project.active_index();
         let cached_active = self.project.chapter_words(active);
         (self.project.words_total() + self.buffer.word_count()).saturating_sub(cached_active)

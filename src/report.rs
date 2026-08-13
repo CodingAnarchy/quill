@@ -40,6 +40,19 @@ pub struct SeriesSummary {
     pub books: usize,
 }
 
+/// Words by revision status for the report's status breakdown: how much of the
+/// manuscript has reached each stage of the draft → revised → final cycle.
+/// Cumulative — `revised` counts every body chapter at Revised *or* Final (a
+/// final chapter was revised too), so `final_words` ≤ `revised` by construction.
+/// Both are measured over body chapters, against the same body-word total the
+/// story line reports. A stage with zero words is omitted from the report.
+pub struct StatusWords {
+    /// Words in chapters at Revised or Final (cumulative through the cycle).
+    pub revised: usize,
+    /// Words in chapters at Final.
+    pub final_words: usize,
+}
+
 /// Build the report's rows for a project with `words` body words, `section_words`
 /// in front/back matter (counted toward neither the goal nor the projection,
 /// #182), `chapters` body chapters, `todo` TODO markers, and today's `momentum`,
@@ -56,6 +69,7 @@ pub fn lines(
     section_words: usize,
     chapters: usize,
     todo: usize,
+    status: &StatusWords,
     momentum: &Momentum,
     parts: &[PartDelta],
     today: Date,
@@ -111,6 +125,12 @@ pub fn lines(
             thousands(section_words as i64),
         )));
     }
+
+    // --- Revision status: how much of the manuscript has been revised / finalized.
+    // Cumulative through the draft → revised → final cycle, against the same body-
+    // word total the story line reports. Each line appears only when it has words,
+    // so a project that never touches statuses sees this block not at all.
+    out.extend(status_lines(status, words));
 
     // --- Projection: extrapolate current chapter pace to the whole book ----
     // f = chapter completion; projected words Wp = W / f. Computed once.
@@ -296,6 +316,33 @@ fn part_lines(parts: &[PartDelta], label: &str) -> Vec<Line<'static>> {
         ))];
         spans.extend(signed_delta_spans(p.added, p.removed));
         out.push(Line::from(spans));
+    }
+    out
+}
+
+/// The revision-status block: cumulative words at Revised and at Final against
+/// the body-word `total`, one row each (only when it has words), led by a blank
+/// separator. Empty — no rows, no separator — when nothing has advanced past
+/// draft, so a project that never sets statuses shows no status block at all.
+fn status_lines(status: &StatusWords, total: usize) -> Vec<Line<'static>> {
+    // Label column padded to align the counts under the story line's numbers.
+    let row = |label: &str, words: usize| {
+        Line::raw(format!(
+            "{label:<8}  {} / {}  words ( {} )",
+            thousands(words as i64),
+            thousands(total as i64),
+            percent(words, total),
+        ))
+    };
+    let mut out = Vec::new();
+    if status.revised > 0 {
+        out.push(row("revised:", status.revised));
+    }
+    if status.final_words > 0 {
+        out.push(row("final:", status.final_words));
+    }
+    if !out.is_empty() {
+        out.insert(0, Line::raw(""));
     }
     out
 }
@@ -527,6 +574,14 @@ mod tests {
         }
     }
 
+    /// No revision progress — the default for tests not exercising the status block.
+    fn no_status() -> StatusWords {
+        StatusWords {
+            revised: 0,
+            final_words: 0,
+        }
+    }
+
     #[test]
     fn reproduces_the_worked_example() {
         // The spec's sample, as of report date 2026-06-16 (156 days in).
@@ -537,6 +592,7 @@ mod tests {
             0,
             56,
             12,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -583,7 +639,18 @@ mod tests {
         let today = date::parse("2026-06-16").unwrap();
         let mut m = manifest();
         m.goals.as_mut().unwrap().daily = Some(1_000); // net today is +2,860
-        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today, None));
+        let report = text(&lines(
+            &m,
+            163_204,
+            0,
+            56,
+            0,
+            &no_status(),
+            &momentum(),
+            &[],
+            today,
+            None,
+        ));
         assert!(
             report.contains("daily goal:         +2,860 / 1,000 words  ( met \u{2713} )"),
             "{report}"
@@ -595,7 +662,18 @@ mod tests {
         let today = date::parse("2026-06-16").unwrap();
         let mut m = manifest();
         m.goals.as_mut().unwrap().daily = Some(5_000); // net +2,860 of 5,000
-        let report = text(&lines(&m, 163_204, 0, 56, 0, &momentum(), &[], today, None));
+        let report = text(&lines(
+            &m,
+            163_204,
+            0,
+            56,
+            0,
+            &no_status(),
+            &momentum(),
+            &[],
+            today,
+            None,
+        ));
         assert!(
             report.contains("daily goal:         +2,860 / 5,000 words  ( 57% \u{b7} 2,140 to go )"),
             "{report}"
@@ -611,6 +689,7 @@ mod tests {
             0,
             56,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -632,6 +711,7 @@ mod tests {
             8_000,
             56,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -663,6 +743,7 @@ mod tests {
             0,
             56,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -678,7 +759,18 @@ mod tests {
     fn word_delta_is_colored_by_sign() {
         let today = date::parse("2026-06-16").unwrap();
 
-        let gain = lines(&manifest(), 1000, 0, 2, 0, &momentum(), &[], today, None);
+        let gain = lines(
+            &manifest(),
+            1000,
+            0,
+            2,
+            0,
+            &no_status(),
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
         let row = gain
             .iter()
             .find(|l| text(std::slice::from_ref(l)).contains("today's word delta"))
@@ -691,7 +783,18 @@ mod tests {
             removed: 300,
             moved_to_unused: 0,
         };
-        let rows = lines(&manifest(), 1000, 0, 2, 0, &loss, &[], today, None);
+        let rows = lines(
+            &manifest(),
+            1000,
+            0,
+            2,
+            0,
+            &no_status(),
+            &loss,
+            &[],
+            today,
+            None,
+        );
         let row = rows
             .iter()
             .find(|l| text(std::slice::from_ref(l)).contains("today's word delta"))
@@ -721,7 +824,18 @@ mod tests {
                 removed: 16,
             },
         ];
-        let rows = lines(&m, 163_204, 0, 56, 12, &momentum(), &parts, today, None);
+        let rows = lines(
+            &m,
+            163_204,
+            0,
+            56,
+            12,
+            &no_status(),
+            &momentum(),
+            &parts,
+            today,
+            None,
+        );
         let report = text(&rows);
 
         assert!(report.contains("act deltas:"), "{report}");
@@ -769,6 +883,7 @@ mod tests {
             0,
             56,
             12,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -792,6 +907,7 @@ mod tests {
             0,
             2,
             0,
+            &no_status(),
             &momentum(),
             &[],
             date::parse("2026-06-16").unwrap(),
@@ -802,6 +918,88 @@ mod tests {
             "{}",
             text(&rows)
         );
+    }
+
+    #[test]
+    fn revision_status_block_shows_revised_and_final_against_the_body_total() {
+        let today = date::parse("2026-06-16").unwrap();
+        // 100k body words: 70k has reached at least Revised (cumulative), 40k of
+        // which is Final — so final ≤ revised, both measured against the 100k total.
+        let status = StatusWords {
+            revised: 70_000,
+            final_words: 40_000,
+        };
+        let rows = lines(
+            &manifest(),
+            100_000,
+            0,
+            56,
+            0,
+            &status,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        assert!(
+            report.contains("revised:  70,000 / 100,000  words ( 70.00 % )"),
+            "{report}"
+        );
+        assert!(
+            report.contains("final:    40,000 / 100,000  words ( 40.00 % )"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn revision_status_lines_are_omitted_when_empty() {
+        let today = date::parse("2026-06-16").unwrap();
+        // Nothing past draft → no revised line, no final line, and the report is
+        // otherwise unchanged (only the story/momentum blocks show).
+        let rows = lines(
+            &manifest(),
+            100_000,
+            0,
+            56,
+            0,
+            &no_status(),
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        assert!(!report.contains("revised:"), "{report}");
+        assert!(!report.contains("final:"), "{report}");
+    }
+
+    #[test]
+    fn revision_status_shows_only_the_stage_with_words() {
+        let today = date::parse("2026-06-16").unwrap();
+        // Some revised, none final yet → the revised line appears alone.
+        let status = StatusWords {
+            revised: 25_000,
+            final_words: 0,
+        };
+        let rows = lines(
+            &manifest(),
+            100_000,
+            0,
+            56,
+            0,
+            &status,
+            &momentum(),
+            &[],
+            today,
+            None,
+        );
+        let report = text(&rows);
+        assert!(
+            report.contains("revised:  25,000 / 100,000  words ( 25.00 % )"),
+            "{report}"
+        );
+        assert!(!report.contains("final:"), "{report}");
     }
 
     #[test]
@@ -837,6 +1035,7 @@ mod tests {
             0,
             24,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -865,6 +1064,7 @@ mod tests {
             0,
             24,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -891,6 +1091,7 @@ mod tests {
             0,
             24,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -917,6 +1118,7 @@ mod tests {
             0,
             24,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,
@@ -939,6 +1141,7 @@ mod tests {
             0,
             24,
             0,
+            &no_status(),
             &momentum(),
             &[],
             today,

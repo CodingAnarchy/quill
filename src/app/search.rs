@@ -155,11 +155,22 @@ impl App {
             }
             (SearchStage::Query, KeyCode::Enter) => self.search_query_done(),
 
-            // --- Navigating matches (find) ---------------------------------
-            (SearchStage::Navigate, KeyCode::Char('n') | KeyCode::Enter | KeyCode::Down) => {
+            // --- Navigating matches ----------------------------------------
+            // `n`/Enter/Down step forward at the Navigate stage; Tab steps forward
+            // from the query line too, so a Vim `/`/`?` — which commits on Enter and
+            // never reaches Navigate — can still cycle matches before landing. `N`/
+            // Up/Shift-Tab step back. Both wrap.
+            (SearchStage::Query, KeyCode::Tab)
+            | (
+                SearchStage::Navigate,
+                KeyCode::Char('n') | KeyCode::Enter | KeyCode::Down | KeyCode::Tab,
+            ) => {
                 self.search_advance(1);
             }
-            (SearchStage::Navigate, KeyCode::Char('N') | KeyCode::Up) => self.search_advance(-1),
+            (SearchStage::Query, KeyCode::BackTab)
+            | (SearchStage::Navigate, KeyCode::Char('N') | KeyCode::Up | KeyCode::BackTab) => {
+                self.search_advance(-1);
+            }
             // Promote a find into a replace using the same query.
             (SearchStage::Navigate, KeyCode::Char('r')) => {
                 self.search_mut().stage = SearchStage::Replacement;

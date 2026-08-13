@@ -672,6 +672,10 @@ impl Action {
             Self::Ai(_) | Self::EnableAi => Some("Ctrl-A"),
             Self::ToggleComposition => Some("Ctrl-\\"),
             Self::UserGuide => Some("F1"),
+            // The story-bible browser has a dedicated function key (like the guide),
+            // dispatched in `on_key` rather than `on_key_ctrl` (the Ctrl-letter space
+            // is full), so the Ctrl-K "Browse story bible" row shows it.
+            Self::BrowseBible => Some("F2"),
             _ => None,
         }
     }
