@@ -270,6 +270,61 @@ fn pull_reports_conflicts_without_losing_work() {
 }
 
 #[test]
+fn commit_then_push_lands_uncommitted_work_on_the_remote() {
+    // The durability contract the automatic backup (#887) leans on: `commit` stages
+    // the whole tree and commits when it's dirty, is a no-op (`Ok(None)`) when it's
+    // clean, and `commit` + `push` actually deposits the author's saved-but-never-
+    // committed prose on the remote. A bare repo stands in for the remote — no network.
+    //
+    // This guards against a regression to the push-only backup, where an author who
+    // saved for hours without ever committing saw "Backed up …" while the remote held
+    // nothing since their last manual commit.
+    let remote = temp_dir("commit-push-bare");
+    git2::Repository::init_bare(&remote).unwrap();
+    let url = remote.to_str().unwrap();
+
+    let a = temp_dir("commit-push-a");
+    init(&a).unwrap();
+    fs::write(a.join("one.md"), "# One\n\nFirst draft.\n").unwrap();
+    commit(&a, "first").unwrap();
+    set_remote(&a, url).unwrap();
+    push(&a).unwrap();
+
+    // The author saves more prose but never runs a manual commit — a dirty tree.
+    let saved = "# One\n\nHours of new, uncommitted prose.\n";
+    fs::write(a.join("one.md"), saved).unwrap();
+
+    // The backup's commit step: a dirty tree yields a real commit (Some id)…
+    let made = commit(&a, "Automatic backup").unwrap();
+    assert!(made.is_some(), "a dirty tree produces a commit: {made:?}");
+    // …and the push then carries it off-machine.
+    push(&a).unwrap();
+
+    // A fresh clone of the remote proves the prose actually reached it.
+    let c = temp_dir("commit-push-c");
+    fs::remove_dir_all(&c).ok();
+    git2::Repository::clone(url, &c).unwrap();
+    assert_eq!(
+        fs::read_to_string(c.join("one.md")).unwrap(),
+        saved,
+        "the uncommitted prose is now on the remote"
+    );
+
+    // A second backup on a now-clean tree is a no-op commit (never an empty commit),
+    // and the push is harmless — nothing new to ship.
+    assert_eq!(
+        commit(&a, "Automatic backup").unwrap(),
+        None,
+        "a clean tree makes no empty commit"
+    );
+    push(&a).unwrap();
+
+    fs::remove_dir_all(&a).ok();
+    fs::remove_dir_all(&c).ok();
+    fs::remove_dir_all(&remote).ok();
+}
+
+#[test]
 fn push_without_a_remote_explains() {
     let dir = temp_dir("remote-none");
     init(&dir).unwrap();

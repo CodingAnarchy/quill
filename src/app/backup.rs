@@ -1,16 +1,21 @@
 //! Automatic off-site backup to the configured Git remote (#887): an opt-in,
-//! per-project cadence that transparently pushes to `origin` so the remote is an
-//! always-current backup, rather than a manual `git push` the author has to
-//! remember.
+//! per-project cadence that transparently commits the working tree and pushes it to
+//! `origin` so the remote is an always-current backup, rather than a manual
+//! `git commit` + `git push` the author has to remember.
 //!
 //! Two independent triggers drive it, both configured under `[backup]`
-//! ([`BackupConfig`](crate::config::BackupConfig)): a push after a save reaches
+//! ([`BackupConfig`](crate::config::BackupConfig)): a backup after a save reaches
 //! disk (`on_save`), and a timed interval (`interval_mins`) that catches a long
 //! session with few saves. Both are gated behind `enabled` (off by default) and,
 //! at run time, behind the project being under version control with a remote set
 //! — with nothing to push *to*, the hook is a no-op.
 //!
-//! The push runs off the UI thread on its own [`Task`](super::task::Task) (never
+//! The job commits then pushes (see [`spawn_backup`](App::spawn_backup)): a push
+//! alone would only ever ship the last *manual* commit, so an author who saves but
+//! never commits would see "Backed up …" while the remote fell further behind. The
+//! commit is skipped when the tree is clean, so no empty commits pile up.
+//!
+//! The job runs off the UI thread on its own [`Task`](super::task::Task) (never
 //! the shared push/pull `vc_task`, so an automatic backup never collides with an
 //! author's manual push or steals its result), and [`poll_backup`](App::poll_backup)
 //! lands the outcome each loop tick. A failure — offline, auth, a rejected
@@ -44,6 +49,12 @@ pub type LocalBackupOutcome = Result<PathBuf, String>;
 /// on our own output ([`archive::default_name`]), so an author-named `.ZIP` in the
 /// backups dir is left alone.
 const ZIP_SUFFIX: &str = ".zip";
+
+/// The commit message the automatic backup stamps on the commit it makes before
+/// pushing (#887). The commit records its own author time, so *when* is captured
+/// without embedding a wall clock in the message — the description stays simple and
+/// stable, and nothing here depends on a clock a test would have to fake.
+const AUTO_BACKUP_MESSAGE: &str = "Automatic backup";
 
 /// One local archive backup, as listed by the backup browser (#934): its file
 /// name, full path, byte size, and last-modified time. A returned list is ordered
@@ -131,15 +142,29 @@ impl App {
             .is_some_and(|interval| now.duration_since(self.last_backup_attempt) >= interval)
     }
 
-    /// Spawn the off-thread backup push (#887): clear the pending flag, advance the
+    /// Spawn the off-thread backup job (#887): clear the pending flag, advance the
     /// attempt clock (so a failure waits out a full interval before retrying, and a
-    /// success times the next interval from now), and run [`crate::vcs::push`] on
-    /// the dedicated backup task. The result lands via [`poll_backup`](Self::poll_backup).
+    /// success times the next interval from now), then, on the dedicated backup task,
+    /// **commit the working tree and push it** to the remote.
+    ///
+    /// The commit is what makes the "Backed up …" message honest: an author who
+    /// enables `[backup] on_save` and (auto)saves for hours but never manually
+    /// commits would otherwise see a "success" after every save while the remote
+    /// held nothing since their last manual commit — a push alone only ships
+    /// already-committed history. [`crate::vcs::commit`] stages everything and commits
+    /// when the tree is dirty, and is a no-op (`Ok(None)`) when it's clean, so this
+    /// never manufactures an empty commit; the push then ships whatever landed (a
+    /// no-op when already up to date). It commits on the current branch, exactly like
+    /// a manual commit, so draft/branch state is unaffected. The result lands via
+    /// [`poll_backup`](Self::poll_backup).
     fn spawn_backup(&mut self) {
         self.backup_pending = false;
         self.last_backup_attempt = Instant::now();
         let root = self.project.root.clone();
-        self.backup_task.spawn(move || crate::vcs::push(&root));
+        self.backup_task.spawn(move || {
+            crate::vcs::commit(&root, AUTO_BACKUP_MESSAGE)?;
+            crate::vcs::push(&root)
+        });
     }
 
     /// Land a finished automatic backup (#887), called each loop tick. On success
