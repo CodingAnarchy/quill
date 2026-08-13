@@ -411,3 +411,92 @@ fn ctrl_q_quits_immediately_with_no_task_and_no_edits() {
     assert!(app.should_quit, "a clean, idle editor quits at once");
     assert!(!matches!(app.mode, Mode::Prompt(_)), "no prompt in the way");
 }
+
+// --- #6 / #17: replace across a chapter seam in the continuous view -----------
+
+/// Drive a regex find-and-replace in the continuous view up to (but not into) the
+/// stepping stage: enter the continuous view, open find, flip on regex, type the
+/// pattern, promote to replace, and type the replacement. Leaves the search in
+/// `Step` mode at the first match, ready for `y` / `a`.
+fn begin_regex_replace(app: &mut App, pattern: &str, replacement: &str) {
+    app.on_key(ctrl('l')); // continuous-manuscript view
+    assert!(app.manuscript.is_some(), "continuous view is active");
+    app.on_key(ctrl('f'));
+    app.on_key(ctrl('r')); // regex mode
+    type_str(app, pattern);
+    app.on_key(key(KeyCode::Enter)); // query -> navigate
+    app.on_key(key(KeyCode::Char('r'))); // promote to replace
+    type_str(app, replacement);
+    app.on_key(key(KeyCode::Enter)); // replacement -> begin stepping
+}
+
+#[test]
+fn replace_y_skips_a_match_spanning_a_chapter_seam() {
+    // #6: a regex match that straddles a chapter seam (here `alpha\s+beta`, which
+    // spans the c0/c1 boundary of "alpha\nbeta\ngamma\n") must NOT be replaced —
+    // the edit path clamps the range to the first chapter, so applying it would
+    // drop the replacement over "alpha" alone and strand "beta" in the next
+    // chapter. Stepping past it with `y` leaves every chapter intact, counts
+    // nothing, and tells the author the match was skipped.
+    let (mut app, _dir) = three_chapter_app("seam-replace-y");
+    begin_regex_replace(&mut app, "alpha\\s+beta", "MERGED");
+    app.on_key(key(KeyCode::Char('y')));
+
+    assert_eq!(
+        app.edit_buffer().text(),
+        "alpha\nbeta\ngamma\n",
+        "the cross-seam match is left untouched, not partially replaced"
+    );
+    let msg = app.message.as_deref().unwrap_or("");
+    assert!(
+        msg.contains("chapter break") && !msg.contains("Replaced"),
+        "the skip is surfaced and nothing is reported replaced: {msg:?}"
+    );
+}
+
+#[test]
+fn replace_all_skips_a_match_spanning_a_chapter_seam() {
+    // #6 via the `a` (replace-all) path: the same cross-seam match must be skipped,
+    // not applied over only its head. `replace_all_remaining` counts genuine edits
+    // only, so a skipped seam match never shows up as "Replaced".
+    let (mut app, _dir) = three_chapter_app("seam-replace-all");
+    begin_regex_replace(&mut app, "alpha\\s+beta", "MERGED");
+    app.on_key(key(KeyCode::Char('a')));
+
+    assert_eq!(
+        app.edit_buffer().text(),
+        "alpha\nbeta\ngamma\n",
+        "replace-all leaves the cross-seam match intact"
+    );
+    let msg = app.message.as_deref().unwrap_or("");
+    assert!(
+        msg.contains("chapter break") && msg.contains("No matches replaced"),
+        "replace-all reports zero replaced and the skipped seam match: {msg:?}"
+    );
+}
+
+#[test]
+fn replace_y_does_not_count_or_loop_on_seam_newlines() {
+    // #17: a regex `\n` -> "" replace clamps each chapter-seam newline to an empty
+    // span (the seam is never editable), so nothing changes. The buggy handler
+    // still counted each `y` and re-anchored on the same seam, so pressing `y`
+    // reported phantom replacements for zero change. A window holds up to three
+    // chapters, so "alpha\nbeta\ngamma\n" has two seam newlines; stepping past
+    // both with `y` must change nothing and finish reporting none replaced.
+    let (mut app, _dir) = three_chapter_app("seam-newline-noop");
+    begin_regex_replace(&mut app, "\\n", "");
+    app.on_key(key(KeyCode::Char('y'))); // first seam newline (c0/c1)
+    app.on_key(key(KeyCode::Char('y'))); // second seam newline (c1/c2)
+    app.on_key(key(KeyCode::Enter)); // finish
+
+    assert_eq!(
+        app.edit_buffer().text(),
+        "alpha\nbeta\ngamma\n",
+        "the seam newlines are unremovable, so the buffer is unchanged"
+    );
+    assert_eq!(
+        app.message.as_deref(),
+        Some("No matches replaced."),
+        "no phantom count: pressing y on unremovable seams replaces nothing"
+    );
+}
