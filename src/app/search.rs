@@ -258,13 +258,42 @@ impl App {
             self.finish_replace();
             return;
         };
+        // In the continuous view a match can straddle a fixed chapter seam (#700).
+        // The range-edit path clamps such a range back to the starting chapter, so
+        // applying the replacement would land it over only the match's head and
+        // strand the tail in the next chapter (corruption, #6). Skip it cleanly:
+        // step past it without counting, and tell the author it was passed over.
+        if self.range_crosses_seam(start, end) {
+            self.step_past_unapplied(end);
+            self.message = Some(seam_skip_note(1));
+            return;
+        }
         let replacement = self.search().replacement.clone();
-        self.edit_replace_range(start, end, &replacement);
+        // A fully-clamped seam no-op reports `false` (nothing changed): don't count
+        // it, and step past it rather than re-anchoring on the same spot — otherwise
+        // an unremovable seam match re-offers itself forever (#17).
+        if !self.edit_replace_range(start, end, &replacement) {
+            self.step_past_unapplied(end);
+            return;
+        }
         self.search_mut().replaced += 1;
 
         // The edit shifted later offsets — recompute and resume past the
         // replacement (so replacing "a" with "aa" doesn't re-match itself).
         self.recompute_matches_from(start + replacement.len());
+        if self.search().current_match().is_none() {
+            self.finish_replace();
+        } else {
+            self.jump_to_current();
+        }
+    }
+
+    /// Step past a match at `[_, end)` that was *not* applied (a cross-seam skip or
+    /// a fully-clamped no-op): re-anchor on the first match after it and jump there,
+    /// finishing when none remain. Leaves `replaced` untouched, so an unapplied
+    /// match is never counted and stepping can't loop on it.
+    fn step_past_unapplied(&mut self, end: usize) {
+        self.recompute_matches_from(end);
         if self.search().current_match().is_none() {
             self.finish_replace();
         } else {
@@ -278,11 +307,58 @@ impl App {
         let s = self.search();
         let ranges = s.matches[s.current.min(s.matches.len())..].to_vec();
         let replacement = s.replacement.clone();
+        let mut skipped = 0;
         for &(start, end) in ranges.iter().rev() {
-            self.edit_replace_range(start, end, &replacement);
+            // Skip a match that reaches across a chapter seam (#700) — the edit
+            // would clamp to the starting chapter and corrupt the match's tail
+            // (#6). Count only replacements that genuinely changed text, so a
+            // fully-clamped no-op never inflates the tally (#17).
+            if self.range_crosses_seam(start, end) {
+                skipped += 1;
+                continue;
+            }
+            if self.edit_replace_range(start, end, &replacement) {
+                self.search_mut().replaced += 1;
+            }
         }
-        self.search_mut().replaced += ranges.len();
         self.finish_replace();
+        if skipped > 0 {
+            let note = seam_skip_note(skipped);
+            self.message = Some(match self.message.take() {
+                Some(m) if !m.is_empty() => format!("{m} {note}"),
+                _ => note,
+            });
+        }
+    }
+
+    /// Whether the buffer byte range `[start, end)` reaches across a fixed chapter
+    /// seam in the continuous view (#700): it begins in one loaded chapter but
+    /// extends past that chapter's editable span — the seam newline that keeps the
+    /// chapters apart is never editable, so [`Manuscript::replace_byte_range`]
+    /// clamps such a range back to the starting chapter. Mirrors that clamp's
+    /// bound so find/replace can detect the case up front and skip it rather than
+    /// corrupt the match's tail. Always `false` in the single-chapter view (no
+    /// seams there, so an ordinary replace is never a partial one).
+    fn range_crosses_seam(&self, start: usize, end: usize) -> bool {
+        let Some(m) = &self.manuscript else {
+            return false;
+        };
+        let spans = m.segment_spans();
+        let Some((i, &(_, _, seg_end))) = spans
+            .iter()
+            .enumerate()
+            .find(|(_, &(_, seg_start, seg_end))| start >= seg_start && start < seg_end)
+        else {
+            return false;
+        };
+        // A middle chapter keeps its terminating seam newline (not editable); the
+        // last loaded chapter's whole span is editable.
+        let max_end = if i + 1 == spans.len() {
+            seg_end
+        } else {
+            seg_end - 1
+        };
+        end > max_end
     }
 
     /// End the replace flow, report the count, and return to editing.
@@ -371,5 +447,16 @@ impl App {
             Mode::Search(s) => s,
             _ => unreachable!("search helper called outside Mode::Search"),
         }
+    }
+}
+
+/// The notice shown when `n` cross-seam match(es) were passed over during a
+/// replace (#6): they can't be replaced in the continuous view without corrupting
+/// the text either side of the seam, so the author is told rather than surprised.
+fn seam_skip_note(n: usize) -> String {
+    if n == 1 {
+        "1 match spanning a chapter break was skipped.".into()
+    } else {
+        format!("{n} matches spanning a chapter break were skipped.")
     }
 }
