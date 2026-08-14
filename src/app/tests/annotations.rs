@@ -576,6 +576,8 @@ fn batched_remap_matches_the_per_edit_walk_on_many_annotations_and_edits() {
 fn batched_remap_is_not_quadratic_in_annotations_times_edits() {
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     // The defect (#893) was the per-annotation cost: the old code walked *every*
     // annotation once per edit, so re-anchoring N notes through E edits cost N·E.
     // The Remapper builds the composed edit map once, then answers each annotation
@@ -616,7 +618,10 @@ fn batched_remap_is_not_quadratic_in_annotations_times_edits() {
     // old N·E walk, holding E fixed, 4× N is 4× work; the guard is that 20k stays a
     // small multiple of 5k (linear), and both are well within a frame. A quadratic
     // regression (re-introducing the per-edit walk) would make `big` blow past this.
-    assert!(big.as_millis() < 16, "remap pass took {big:?}");
+    assert!(
+        big.as_millis() < perf_budget_ms(16),
+        "remap pass took {big:?}"
+    );
     assert!(
         big < small * 8,
         "remap should scale ~linearly with annotations: 5k={small:?}, 20k={big:?}"

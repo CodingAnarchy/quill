@@ -308,6 +308,8 @@ fn filtering_is_independent_of_project_size() {
     use crate::mode::QuickTarget;
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     // Build a series-sized index directly (the same shape the switcher captures on
     // open), so the guard times the per-keystroke filter, not the one-time build.
     let n_chapters = 2000;
@@ -353,7 +355,10 @@ fn filtering_is_independent_of_project_size() {
     assert!(hits > 0, "the query should match the seeded scenes");
     // A pure in-memory substring scan of a series-sized index is sub-millisecond;
     // a regression to per-keystroke file reads would blow far past this.
-    assert!(per.as_millis() < 5, "quick-switch filter took {per:?}");
+    assert!(
+        per.as_millis() < perf_budget_ms(5),
+        "quick-switch filter took {per:?}"
+    );
 }
 
 /// Performance guard (`cargo perf`). Opening the switcher builds its index over the
@@ -368,6 +373,8 @@ fn filtering_is_independent_of_project_size() {
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn opening_the_switcher_is_fast_in_a_series_sized_project() {
     use std::time::Instant;
+
+    use crate::testutil::perf_budget_ms;
 
     // A series' worth of chapters, each with a handful of ATX scene headings and a
     // realistic body — the switcher reads and scans every one on open.
@@ -422,7 +429,7 @@ fn opening_the_switcher_is_fast_in_a_series_sized_project() {
     // Reading + lightweight-scanning 600 chapters stays comfortably interactive; a
     // regression to a full tree-sitter parse per chapter blows well past this.
     assert!(
-        per.as_millis() < 60,
+        per.as_millis() < perf_budget_ms(60),
         "opening the switcher took {per:?} over {n} chapters"
     );
 }
