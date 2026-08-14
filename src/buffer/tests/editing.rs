@@ -7,6 +7,8 @@ use super::*;
 use std::fmt::Write;
 use std::time::{Duration, Instant};
 
+use crate::testutil::perf_budget_ms;
+
 // The syntax highlights must stay correct through incremental edits — this
 // exercises the InputEdit bookkeeping in edit_insert/edit_remove.
 use crate::syntax::HighlightKind;
@@ -64,7 +66,7 @@ fn keystroke_is_decoupled_from_document_size() {
     let dt = t.elapsed();
 
     println!("keystroke(record-only) on {words} words = {dt:?}");
-    assert!(dt.as_millis() < 4, "keystroke took {dt:?}");
+    assert!(dt.as_millis() < perf_budget_ms(4), "keystroke took {dt:?}");
 
     // The live word count is maintained incrementally (#868), so reading it
     // after a keystroke must also stay decoupled from document size — no
@@ -78,7 +80,10 @@ fn keystroke_is_decoupled_from_document_size() {
     let dt = t.elapsed();
 
     println!("keystroke + live word count on {words} words = {dt:?}");
-    assert!(dt.as_millis() < 4, "keystroke + count took {dt:?}");
+    assert!(
+        dt.as_millis() < perf_budget_ms(4),
+        "keystroke + count took {dt:?}"
+    );
     // And the incrementally-maintained count is byte-for-byte the same the
     // old whole-document recount would have produced.
     assert_eq!(live, count_words(&buf.text()), "incremental count diverged");
@@ -122,7 +127,10 @@ fn reparse_is_fast_at_window_size() {
     }
 
     println!("reparse on {words} words = {best:?} (best of 5)");
-    assert!(best.as_millis() < 16, "reparse took {best:?}");
+    assert!(
+        best.as_millis() < perf_budget_ms(16),
+        "reparse took {best:?}"
+    );
     fs::remove_file(&path).ok();
 }
 

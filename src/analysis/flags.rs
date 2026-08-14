@@ -209,6 +209,8 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     fn spans_text<'a>(text: &'a str, ranges: &[(usize, usize)]) -> Vec<&'a str> {
         ranges.iter().map(|&(s, e)| &text[s..e]).collect()
     }
@@ -336,7 +338,10 @@ mod tests {
                 text.split_whitespace().count(),
                 ranges.len()
             );
-            assert!(dt.as_millis() < 16, "{cat:?} flag pass took {dt:?}");
+            assert!(
+                dt.as_millis() < perf_budget_ms(16),
+                "{cat:?} flag pass took {dt:?}"
+            );
         }
     }
 }

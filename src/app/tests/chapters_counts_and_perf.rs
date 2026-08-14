@@ -174,6 +174,8 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
 fn navigation_is_fast_in_a_series_sized_project() {
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     // Far past a single novel: a multi-book series' worth of chapter files.
     let n = 600;
     let dir = crate::testutil::scratch_dir("perf", "nav");
@@ -209,7 +211,10 @@ fn navigation_is_fast_in_a_series_sized_project() {
     let per = t.elapsed() / switches; // average over many switches smooths noise
 
     println!("chapter switch in a {n}-chapter project = {per:?}");
-    assert!(per.as_millis() < 10, "chapter switch took {per:?}");
+    assert!(
+        per.as_millis() < perf_budget_ms(10),
+        "chapter switch took {per:?}"
+    );
 }
 
 /// Performance guard (`cargo perf`). The daily word tally runs on every idle
@@ -220,6 +225,8 @@ fn navigation_is_fast_in_a_series_sized_project() {
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn tally_is_independent_of_project_size() {
     use std::time::Instant;
+
+    use crate::testutil::perf_budget_us;
 
     let n = 2000;
     let dir = crate::testutil::scratch_dir("perf", "tally");
@@ -254,7 +261,7 @@ fn tally_is_independent_of_project_size() {
     // A full per-chapter walk (the old behavior) would be ~50–100µs at this size;
     // touching only the changed chapter keeps it an order of magnitude cheaper.
     println!("tally over a {n}-chapter project = {per:?}");
-    assert!(per.as_micros() < 30, "tally took {per:?}");
+    assert!(per.as_micros() < perf_budget_us(30), "tally took {per:?}");
 }
 
 /// Performance guard (`cargo perf`). "Verify on idle" (#1053) re-checks findings
@@ -267,6 +274,8 @@ fn tally_is_independent_of_project_size() {
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn verify_on_idle_plan_is_independent_of_project_size() {
     use std::time::Instant;
+
+    use crate::testutil::perf_budget_us;
 
     let n = 2000;
     let dir = crate::testutil::scratch_dir("perf", "verify-idle");
@@ -319,7 +328,10 @@ fn verify_on_idle_plan_is_independent_of_project_size() {
     // A whole-manuscript digest sweep would be O(n) file reads (~ms at this size);
     // digesting only the two open findings' chapters keeps it flat and cheap.
     println!("verify-on-idle plan over a {n}-chapter project = {per:?}");
-    assert!(per.as_micros() < 500, "verify-on-idle plan took {per:?}");
+    assert!(
+        per.as_micros() < perf_budget_us(500),
+        "verify-on-idle plan took {per:?}"
+    );
 }
 
 /// Open an `n`-chapter project whose chapters each hold prose plus one `xxx`
@@ -374,6 +386,8 @@ fn save_rollup_cost(app: &App) -> (usize, usize) {
 fn save_is_independent_of_project_size() {
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_us;
+
     // Time the save roll-up at a novel and a series scale, averaging many calls to
     // smooth filesystem/CPU noise. If the fix holds, neither reads any chapter file.
     let measure = |app: &App, iters: u32| {
@@ -396,7 +410,7 @@ fn save_is_independent_of_project_size() {
     // Absolute ceiling: the roll-up is a couple of cache sums plus one live scan of
     // the active chapter — well under a frame even at series scale.
     assert!(
-        large_per.as_micros() < 500,
+        large_per.as_micros() < perf_budget_us(500),
         "save roll-up at 1500 chapters took {large_per:?} — should be flat"
     );
     // Flatness: 10× the chapters must not cost ~10× the time. A generous 4× ceiling

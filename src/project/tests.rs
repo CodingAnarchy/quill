@@ -6,6 +6,8 @@ use crate::buffer::Buffer;
 use std::fmt::Write;
 use std::time::Instant;
 
+use crate::testutil::perf_budget_ms;
+
 fn temp_dir(name: &str) -> PathBuf {
     crate::testutil::scratch_dir("proj", name)
 }
@@ -1317,7 +1319,7 @@ fn open_is_fast_for_a_large_novel() {
 
     println!("open 150 chapters (front matter + word counts) = {dt:?}");
     assert_eq!(project.manifest.chapters.len(), 150);
-    assert!(dt.as_millis() < 250, "open took {dt:?}");
+    assert!(dt.as_millis() < perf_budget_ms(250), "open took {dt:?}");
 
     fs::remove_dir_all(&dir).ok();
 }
@@ -1342,7 +1344,7 @@ fn open_is_fast_for_a_series_sized_project() {
 
     println!("open {n} chapters (series-sized) = {dt:?}");
     assert_eq!(project.manifest.chapters.len(), n);
-    assert!(dt.as_millis() < 500, "open took {dt:?}");
+    assert!(dt.as_millis() < perf_budget_ms(500), "open took {dt:?}");
 
     fs::remove_dir_all(&dir).ok();
 }

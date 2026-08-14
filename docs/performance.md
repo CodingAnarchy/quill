@@ -31,6 +31,21 @@ never have to re-run to shake off a contention flake. And the `--ignored` sweep
 no longer picks up the network catalog checks: it runs offline without a
 `--skip` flag.
 
+### Thresholds widen on CI (shared-runner headroom)
+
+The budgets are tuned for a real machine. A GitHub-hosted runner is a shared
+2-vCPU VM that runs this CPU-bound work ~2.5–3× slower (the continuous-view
+window reparse measured ~7 ms locally vs ~20 ms on CI), so a threshold that's
+honest on a dev box false-fails there. Every wall-clock guard therefore compares
+against `perf_budget_ms` / `perf_budget_us` (in `src/testutil.rs`), which triple
+the budget when the `CI` env var is set — GitHub Actions sets it automatically.
+So the informational `perf` CI job (`.github/workflows/ci.yml`) only reddens on a
+gross (>3×) regression, while **`cargo perf` on real hardware, where `CI` is
+unset, keeps the exact tuned budgets** and remains the strict, authoritative
+pre-release gate. Scale-independence guards (a ratio of a large run to a small
+one, e.g. `word_motion_is_decoupled_from_document_size`) already cancel the
+hardware factor and deliberately don't use the slack.
+
 ### The catalog check is separate (network, run deliberately)
 
 Two `#[ignore]`d tests — `catalog_gguf_files_exist_on_huggingface` and

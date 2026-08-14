@@ -107,6 +107,8 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     /// Nothing is accepted beyond the dictionary.
     fn nothing(_: &str) -> bool {
         false
@@ -219,6 +221,9 @@ mod tests {
             text.split_whitespace().count()
         );
         assert!(flags.is_empty(), "all real words");
-        assert!(dt.as_millis() < 16, "spell pass took {dt:?}");
+        assert!(
+            dt.as_millis() < perf_budget_ms(16),
+            "spell pass took {dt:?}"
+        );
     }
 }

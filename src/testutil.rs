@@ -18,3 +18,34 @@ pub fn scratch_dir(prefix: &str, name: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
+
+/// The CI slack factor for the wall-clock perf guards (see the budget helpers
+/// below). The timing thresholds are tuned for real hardware. A GitHub-hosted
+/// runner is a shared 2-vCPU VM that runs this CPU-bound work ~2.5–3x slower than
+/// a dev machine (the continuous-view window reparse measured ~7ms locally vs
+/// ~20ms on CI), so a budget honest on a real box false-fails there. When the
+/// `CI` env var is set — GitHub Actions sets it — the budget is tripled, so the
+/// informational `cargo perf` job only reddens on a gross (>3×) regression. Off
+/// CI the factor is 1, keeping `cargo perf` on real hardware the strict,
+/// authoritative pre-release gate (see `docs/performance.md`). Scale-independence
+/// guards (a ratio of a large run to a small one) already cancel the hardware
+/// factor and deliberately don't use this.
+fn perf_slack() -> u128 {
+    if std::env::var_os("CI").is_some() {
+        3
+    } else {
+        1
+    }
+}
+
+/// A perf-guard budget in milliseconds, widened on CI ([`perf_slack`]). Compare a
+/// measured `Duration` against it via `.as_millis()`.
+pub fn perf_budget_ms(base_ms: u128) -> u128 {
+    base_ms * perf_slack()
+}
+
+/// A perf-guard budget in microseconds, widened on CI ([`perf_slack`]). Compare a
+/// measured `Duration` against it via `.as_micros()`.
+pub fn perf_budget_us(base_us: u128) -> u128 {
+    base_us * perf_slack()
+}

@@ -267,6 +267,8 @@ pub(super) mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     use super::super::{Project, CURRENT_FORMAT_VERSION};
     use super::{Analysis, Book, ChapterEntry, ExportStyle, Goals, Manifest, Part, PrintConfig};
 
@@ -371,7 +373,7 @@ pub(super) mod tests {
             per_book,
             "active book is hoisted"
         );
-        assert!(dt.as_millis() < 500, "open took {dt:?}");
+        assert!(dt.as_millis() < perf_budget_ms(500), "open took {dt:?}");
 
         fs::remove_dir_all(&dir).ok();
     }

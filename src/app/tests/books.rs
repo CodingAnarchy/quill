@@ -149,6 +149,8 @@ fn tree_rows_are_fast_for_a_series() {
     use std::fmt::Write;
     use std::time::Instant;
 
+    use crate::testutil::perf_budget_ms;
+
     let (books, per_book) = (4, 200);
     let dir = crate::testutil::scratch_dir("tree", "perf");
     let mut manifest = String::from("title = \"Series\"\n\n");
@@ -179,7 +181,10 @@ fn tree_rows_are_fast_for_a_series() {
         books * per_book
     );
     assert!(rows.len() >= books * per_book);
-    assert!(dt.as_millis() < 16, "tree build took {dt:?}");
+    assert!(
+        dt.as_millis() < perf_budget_ms(16),
+        "tree build took {dt:?}"
+    );
 
     fs::remove_dir_all(&dir).ok();
 }

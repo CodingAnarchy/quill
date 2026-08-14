@@ -7,6 +7,8 @@ use ratatui::{backend::TestBackend, Terminal};
 use std::fmt::Write;
 use std::time::Instant;
 
+use crate::testutil::perf_budget_ms;
+
 /// Performance guard (run with `cargo test --release -- --ignored
 /// --nocapture`). A full frame must render well within one 16ms frame, even
 /// for a large chapter shown alongside a many-chapter outline pane — the
@@ -103,7 +105,7 @@ fn render_stays_within_a_frame() {
     let dt = t.elapsed() / 30;
 
     println!("render {words}w + 150-chapter outline = {dt:?}");
-    assert!(dt.as_millis() < 16, "render took {dt:?}");
+    assert!(dt.as_millis() < perf_budget_ms(16), "render took {dt:?}");
 
     // And again with a modal overlay open (#349): the same editor plus the
     // O(screen) backdrop dim and the shadowed box. Confirms the depth pass
@@ -117,7 +119,10 @@ fn render_stays_within_a_frame() {
     }
     let modal_dt = t.elapsed() / 30;
     println!("render with a modal overlay = {modal_dt:?}");
-    assert!(modal_dt.as_millis() < 16, "modal render took {modal_dt:?}");
+    assert!(
+        modal_dt.as_millis() < perf_budget_ms(16),
+        "modal render took {modal_dt:?}"
+    );
 
     // And with a read-ahead wheel-scroll offset active (#764): the cursor sits at
     // the top of a long chapter while the view is scrolled a screenful down. This
@@ -142,7 +147,7 @@ fn render_stays_within_a_frame() {
     let scrolled_dt = t.elapsed() / 30;
     println!("render with a wheel-scroll offset = {scrolled_dt:?}");
     assert!(
-        scrolled_dt.as_millis() < 16,
+        scrolled_dt.as_millis() < perf_budget_ms(16),
         "scrolled render took {scrolled_dt:?}"
     );
 
@@ -169,7 +174,7 @@ fn render_stays_within_a_frame() {
     let assistant_dt = t.elapsed() / 30;
     println!("render with the assistant pane open = {assistant_dt:?}");
     assert!(
-        assistant_dt.as_millis() < 16,
+        assistant_dt.as_millis() < perf_budget_ms(16),
         "assistant-pane render took {assistant_dt:?}"
     );
 }

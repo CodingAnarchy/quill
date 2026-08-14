@@ -87,14 +87,15 @@ jobs:
         run: cargo check --features local
 
   # Performance guards (`cargo perf` = release build, #[ignore]d timing tests,
-  # single-threaded). Timing thresholds are tuned for a real machine; shared CI
-  # runners can't reliably hold a 16ms frame budget (e.g. reparse measured ~20ms
-  # here vs. well under locally), so this job is INFORMATIONAL: it runs on push to
-  # master and logs the numbers for a gross-regression eyeball, but
-  # `continue-on-error` keeps a runner-noise false-fail from turning master red.
-  # `cargo perf` on real hardware remains the authoritative pre-release gate
-  # (see CLAUDE.md "Performance guards"). The catalog network checks no-op here
-  # (QUILL_CATALOG_CHECK is unset), so the sweep stays offline.
+  # single-threaded). Timing thresholds are tuned for a real machine; a shared CI
+  # runner is a 2-vCPU VM that runs this CPU-bound work ~2.5–3x slower (e.g. the
+  # window reparse measured ~7ms locally vs ~20ms here). The guards widen their
+  # budget 3x when the `CI` env var is set (GitHub Actions sets it; see
+  # `perf_budget_ms`/`perf_budget_us` in `src/testutil.rs`), so a real machine's
+  # `cargo perf` stays the strict, authoritative gate while this job only reddens
+  # on a gross (>3x) regression. It stays INFORMATIONAL (`continue-on-error`) so a
+  # rare noisy run still can't turn master red. The catalog network checks no-op
+  # here (QUILL_CATALOG_CHECK is unset), so the sweep stays offline.
   perf:
     name: perf (informational, push to master)
     if: github.event_name == 'push'

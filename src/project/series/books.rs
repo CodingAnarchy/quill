@@ -405,6 +405,7 @@ mod tests {
     use std::time::Instant;
 
     use crate::buffer::count_words;
+    use crate::testutil::perf_budget_ms;
 
     use super::super::tests::{temp_dir, write_series, write_series_project};
     use super::Project;
@@ -577,7 +578,10 @@ file = \"b2/two.md\"
         println!("switch to a {per_book}-chapter book = {dt:?}");
         assert_eq!(project.active_book(), 1);
         assert_eq!(project.manifest.chapters.len(), per_book);
-        assert!(dt.as_millis() < 500, "book switch took {dt:?}");
+        assert!(
+            dt.as_millis() < perf_budget_ms(500),
+            "book switch took {dt:?}"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
