@@ -379,7 +379,10 @@ fn run_toggle(run: &str, name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::parse_markdown;
     use super::*;
+    use crate::export::docx::{to_docx, to_docx_review, ChapterNotes, Profile, ReviewNote};
+    use crate::export::{Chapter, Document, Part, PubMeta};
     use proptest::prelude::*;
     use std::io::Write as _;
 
@@ -480,8 +483,6 @@ mod tests {
     /// title from the body — the heading-less doc stays "Manuscript".
     #[test]
     fn heading_less_preamble_mining_matches_across_formats() {
-        use super::super::parse_markdown;
-
         // The same title page, no chapter heading, expressed in each format.
         let md = "by A. Writer\n\nThe night was long.\n";
         let docx_body = format!(
@@ -518,8 +519,6 @@ mod tests {
 
     #[test]
     fn round_trips_a_quill_docx_export() {
-        use crate::export::docx::{to_docx, Profile};
-        use crate::export::{Chapter, Document, Part, PubMeta};
         let doc = Document {
             title: "Round Trip".into(),
             subtitle: None,
@@ -763,8 +762,6 @@ mod tests {
     fn extract_comments_recovers_the_review_writers_output() {
         // The inverse of the #834 review-copy writer: build a review `.docx` whose
         // annotations become Word comments, then recover them.
-        use crate::export::docx::{to_docx_review, ChapterNotes, ReviewNote};
-        use crate::export::{Chapter, Document, Part, PubMeta};
         let doc = Document {
             title: "Round Trip".into(),
             subtitle: None,

@@ -5,7 +5,7 @@
 //! emitting a terminal escape (#531).
 
 use super::*;
-use crate::mode::Mode;
+use crate::mode::{Finding, Findings, Mode};
 use crossterm::event::Event;
 
 /// A one-chapter app with Vim mode on, resting in Normal, so the yank / delete /
@@ -153,7 +153,6 @@ fn a_paste_replaces_a_visual_selection() {
 fn a_paste_in_a_non_editing_mode_is_ignored() {
     // Bracketed paste only inserts in an editing mode; a modal list owns its input,
     // so a stray paste there doesn't corrupt the prose buffer.
-    use crate::mode::{Finding, Findings};
     let dir = make_project("clip-nonediting", "Book", "text\n");
     let mut app = open_app(&dir);
     let _keep = TempProject::new(dir);

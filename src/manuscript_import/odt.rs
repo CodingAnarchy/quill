@@ -470,6 +470,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
 
     /// Build an `.odt` zip in memory whose `content.xml` is `body` bytes,
     /// deflated — so a highly repetitive payload lands with a bomb-like ratio.
@@ -769,9 +770,6 @@ mod tests {
     /// just the pure core.
     #[test]
     fn parse_odt_reads_a_real_zip() {
-        use std::io::Write as _;
-        use zip::write::SimpleFileOptions;
-
         let styles = text_style("T1", "fo:font-style=\"italic\"");
         let body = format!(
             "{}{}",

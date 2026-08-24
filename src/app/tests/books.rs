@@ -4,6 +4,10 @@
 
 use super::*;
 use crate::project::Project;
+use crate::testutil::perf_budget_ms;
+use std::collections::HashSet;
+use std::fmt::Write;
+use std::time::Instant;
 
 // --- Tree navigator (#330) --------------------------------------------------
 
@@ -145,12 +149,6 @@ fn the_tree_rolls_up_word_counts() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn tree_rows_are_fast_for_a_series() {
-    use std::collections::HashSet;
-    use std::fmt::Write;
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_ms;
-
     let (books, per_book) = (4, 200);
     let dir = crate::testutil::scratch_dir("tree", "perf");
     let mut manifest = String::from("title = \"Series\"\n\n");

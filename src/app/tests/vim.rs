@@ -3,6 +3,7 @@
 //! shared `Ctrl-` shortcuts are unaffected.
 
 use super::*;
+use std::collections::HashMap;
 
 fn vim_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
@@ -623,7 +624,6 @@ fn a_remapped_operator_composes_with_motions() {
 
 #[test]
 fn keymap_builds_valid_entries_and_reports_bad_ones() {
-    use std::collections::HashMap;
     let cfg = HashMap::from([
         ("down".to_string(), "n".to_string()),       // valid: 'n' → 'j'
         ("frobnicate".to_string(), "z".to_string()), // unknown action
@@ -641,7 +641,6 @@ fn keymap_builds_valid_entries_and_reports_bad_ones() {
 
 #[test]
 fn keymap_reports_a_key_bound_twice() {
-    use std::collections::HashMap;
     let cfg = HashMap::from([
         ("down".to_string(), "j".to_string()),
         ("delete".to_string(), "j".to_string()), // both want the 'j' key

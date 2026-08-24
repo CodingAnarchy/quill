@@ -8,6 +8,7 @@ use super::super::*;
 
 use super::download::LOCAL_UNAVAILABLE;
 use crate::mode::AiAction;
+use ai::BackendKind;
 
 /// A resolved backend choice, ready to build on the worker thread. Built here
 /// (not in `spawn_ai`) so loading the local model can't block the UI.
@@ -253,7 +254,6 @@ impl App {
     /// the `[ai] backend` in config. `offline = true` stays authoritative: it pins
     /// local, so the toggle reports the pin rather than silently contradicting it.
     pub(crate) fn toggle_ai_backend(&mut self) {
-        use ai::BackendKind;
         if self.ai.offline {
             self.message = Some(
                 "Offline mode pins the local backend — unset `offline` under [ai] to switch."

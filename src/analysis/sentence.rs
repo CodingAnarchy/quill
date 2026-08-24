@@ -164,6 +164,7 @@ fn preceding_is_abbreviation(chars: &[(usize, char)], dot: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::prose;
 
     #[test]
     fn count_sentences_handles_terminators() {
@@ -225,8 +226,6 @@ mod tests {
 
     #[test]
     fn scene_break_and_paragraph_break_end_a_sentence() {
-        use crate::analysis::prose;
-
         // The reported case: dialogue ending `relax."`, a `***` scene break, then a
         // new paragraph that opens lowercase. After `prose()` blanks the break these
         // are two sentences, and the closing quote stays with the first.

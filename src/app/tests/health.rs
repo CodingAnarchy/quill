@@ -7,6 +7,7 @@ use super::*;
 
 use crate::app::health::{consensus, dashboard_rows, revision_plan_text};
 use crate::mode::{DashboardRow, Finding, FindingKind};
+use std::time::{Duration, Instant};
 
 /// A UI finding of `kind` on `chapter` with the given summary — the shape a pass
 /// maps its typed findings into.
@@ -585,8 +586,6 @@ fn revision_plan_with_no_open_findings_exports_the_clean_state() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn health_trend_render_is_independent_of_project_size() {
-    use std::time::{Duration, Instant};
-
     // A project of `n` chapters, with a fixed four-finding triage set spread across
     // the first few chapters — the tally and trend fold over these, never the
     // chapters — timed over repeated dashboard opens (each records + renders).

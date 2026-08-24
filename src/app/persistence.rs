@@ -9,6 +9,7 @@ use crate::mode::Pending;
 use crate::recovery;
 
 use super::App;
+use crate::project::Project;
 
 impl App {
     /// Reset the per-chapter word baselines to the current counts, so the next
@@ -306,7 +307,6 @@ impl App {
     /// of the prose, so it stays proportional to the chapter *count*, not the
     /// novel's size.
     fn project_looks_intact(&self) -> bool {
-        use crate::project::Project;
         // The manifest must still parse — a corrupt `book.toml` is damage even when
         // the in-memory project (opened earlier) is fine.
         if Project::open(&self.project.root).is_err() {

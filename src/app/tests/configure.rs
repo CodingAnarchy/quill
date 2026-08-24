@@ -4,6 +4,7 @@
 use super::*;
 use crate::ai::config_gen::{ConfigChange, GeneratedConfig};
 use crate::mode::Pending;
+use crossterm::event::KeyCode;
 
 fn change(key: &str, value: &str) -> ConfigChange {
     ConfigChange {
@@ -87,7 +88,6 @@ fn nothing_mappable_reports_and_stages_nothing() {
 
 #[test]
 fn dictionary_additions_go_to_the_project_dictionary() {
-    use crossterm::event::KeyCode;
     let (mut app, dir) = two_chapter_app("cfg-dict");
     app.apply_generated_config(Ok(GeneratedConfig {
         changes: vec![
@@ -179,7 +179,6 @@ fn a_project_override_applies_when_the_editor_opens_the_project() {
 
 #[test]
 fn declining_the_confirm_changes_nothing() {
-    use crossterm::event::KeyCode;
     let (mut app, _dir) = two_chapter_app("cfg-decline");
     app.apply_generated_config(Ok(GeneratedConfig {
         changes: vec![change("editor.column_width", "64")],

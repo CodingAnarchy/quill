@@ -65,7 +65,10 @@ it never licenses editing the surrounding prose.
 - **`use` imports go at the top of the module**, after the module doc comment —
   not inside functions or partway down the file. Test modules follow the same
   rule: put the test `use`s at the top of the `#[cfg(test)] mod tests` block,
-  not inside individual `#[test]` fns.
+  not inside individual `#[test]` fns. The only imports that stay inside a fn
+  are the ones a module-level import would break or leave unused — a
+  `#[cfg(unix)]` or feature-gated item, or a `#[cfg(test)]` test seam in an
+  otherwise non-test module — and each carries a comment saying why (#1189).
 - **Prefer a `use` import over spelling out a full module path** at the call
   site. Write `use std::fs;` then `fs::write(...)`, or `use crate::buffer::count_words;`
   then `count_words(...)` — not `std::fs::write(...)` / `crate::buffer::count_words(...)`

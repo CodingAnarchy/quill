@@ -2,6 +2,8 @@
 //! #1013): the history view, per-chapter diff/restore, the pre-commit review, and
 //! the changes/restore actions. Pure move from `vcs.rs`.
 use super::*;
+use crate::mode::{Finding, FindingKind};
+use ratatui::style::Modifier;
 
 #[test]
 fn git_palette_shows_commit_history() {
@@ -90,8 +92,6 @@ fn history_diff_highlights_only_the_changed_word_within_a_line() {
     // (#1013): the shared words render dim, the swapped word bold in the
     // added / removed color. Line-level context (the `+`/`-` markers, the
     // unchanged surrounding text) is preserved.
-    use ratatui::style::Modifier;
-
     let (mut app, _dir) = two_chapter_app("vc-word-diff");
     git_menu(&mut app, 0); // Initialize
 
@@ -519,8 +519,6 @@ fn git_palette_restores_a_chapter() {
 // directly and drive the local write path.
 #[test]
 fn an_analysis_pass_write_does_not_block_sync_and_is_captured() {
-    use crate::mode::{Finding, FindingKind};
-
     let (mut app, _dir) = two_chapter_app("vc-findings-autocommit");
     git_menu(&mut app, 0); // Initialize
     commit_via_menu(&mut app, "manuscript"); // clean working tree

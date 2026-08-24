@@ -7,6 +7,7 @@ use super::*;
 use crate::ai;
 use crate::ai::keychain::Key;
 use crate::mode::{Action, AiAction, Command, ExportFormat, PaletteRow, Pending};
+use std::io::{Cursor, Read};
 
 /// Every registry action has a distinct stable name — workflows (#89) reference
 /// these, so a collision would make one unaddressable.
@@ -575,8 +576,6 @@ fn export_action_unavailable_in_the_continuous_view() {
 /// author's annotation as an anchored Word comment (with a `comments.xml` part).
 #[test]
 fn review_copy_action_writes_a_numbered_docx_with_annotation_comments() {
-    use std::io::{Cursor, Read};
-
     assert!(matches!(
         Action::from_name("export:review"),
         Some(Action::ReviewCopy)

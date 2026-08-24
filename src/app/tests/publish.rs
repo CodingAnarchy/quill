@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::ai;
+use crate::ai::bible::render;
 use crate::mode::Action;
 
 // --- Exporting the story bible (#708) --------------------------------------
@@ -30,8 +31,6 @@ fn export_bible_action_is_registered_and_always_available() {
 /// stripped.
 #[test]
 fn export_bible_action_writes_a_clean_document() {
-    use crate::ai::bible::render;
-
     let (mut app, dir) = two_chapter_app("action-export-bible-run");
     let bible = dir.join("bible");
     fs::create_dir_all(bible.join("characters")).unwrap();

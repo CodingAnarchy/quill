@@ -1,7 +1,9 @@
 //! Chapter navigation, structure editing (create / rename / reorder / delete), and chapter & book metadata.
 
 use super::*;
+use crate::frontmatter::Role;
 use crate::project::Project;
+use crate::ui::render_to_string as screen;
 use std::fs;
 
 fn nav_sel(app: &App) -> usize {
@@ -82,7 +84,6 @@ fn nav_mode_selects_and_opens_a_chapter() {
 /// same keystroke: the outline is gone and focus is back in the editor.
 #[test]
 fn esc_from_browser_hides_the_pane_ctrl_g_opened() {
-    use crate::ui::render_to_string as screen;
     let (mut app, _dir) = two_chapter_app("esc-hides-pane");
     assert!(!app.outline_visible, "pane starts hidden");
 
@@ -469,7 +470,6 @@ fn setting_a_chapter_word_goal_persists_and_clears() {
 
 #[test]
 fn setting_a_section_role_persists_clears_and_survives_reopen() {
-    use crate::frontmatter::Role;
     let (mut app, dir) = two_chapter_app("role-set"); // "One" (active), "Two"
     app.on_key(ctrl('g'));
     app.on_key(key(KeyCode::Down)); // select chapter "Two"
@@ -713,6 +713,7 @@ fn merge_the_first_chapter_is_refused() {
 #[cfg(unix)]
 #[test]
 fn merge_aborts_when_the_source_cannot_be_read() {
+    // Scoped to this `#[cfg(unix)]` test: the trait doesn't exist on other platforms.
     use std::os::unix::fs::PermissionsExt;
 
     let (mut app, dir) = two_chapter_app("merge-source-read-fail");

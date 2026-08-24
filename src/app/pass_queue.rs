@@ -473,6 +473,8 @@ impl App {
 
     /// Backdate the in-flight pass so the per-step timeout has elapsed (test seam).
     pub(crate) fn expire_pass_queue_step(&mut self) {
+        // Scoped to the fn: this seam lives in a `#[cfg(test)] impl` block, so a
+        // module-level import would be unused in a non-test build.
         use super::sequenced::STEP_TIMEOUT;
         use std::time::Instant;
         if let Some(run) = self.pass_queue_run.as_mut() {

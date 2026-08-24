@@ -298,6 +298,8 @@ impl App {
 
     /// Test seam: backdate the in-flight pass so the per-step timeout has elapsed.
     pub(crate) fn expire_series_bible_step(&mut self) {
+        // Scoped to the fn: this seam lives in a `#[cfg(test)] impl` block, so a
+        // module-level import would be unused in a non-test build.
         use super::sequenced::STEP_TIMEOUT;
         use std::time::Instant;
         if let Some(run) = self.series_bible_run.as_mut() {

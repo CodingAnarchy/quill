@@ -3,6 +3,8 @@
 //! samples, the export menu's scopes, and the series word-count line.
 
 use super::*;
+use crate::frontmatter::SERIES_LIST_HEADING;
+use crate::mode::{ExportFormat, ExportScope};
 use crate::project::Project;
 use std::fmt::Write;
 use std::io::{Cursor, Read};
@@ -11,7 +13,6 @@ use std::io::{Cursor, Read};
 
 #[test]
 fn exporting_the_series_compiles_every_book_in_order() {
-    use crate::mode::{ExportFormat, ExportScope};
     let (mut app, dir) = series_app("export-series");
     app.run_export(ExportFormat::Markdown, ExportScope::Series);
 
@@ -31,7 +32,6 @@ fn exporting_the_series_compiles_every_book_in_order() {
 
 #[test]
 fn exporting_just_the_active_book_is_scoped_to_it() {
-    use crate::mode::{ExportFormat, ExportScope};
     let (mut app, dir) = series_app("export-book");
     app.run_export(ExportFormat::Markdown, ExportScope::ActiveBook);
     // Named for the active book; carries its prose, not the other book's.
@@ -47,10 +47,6 @@ fn exporting_a_series_book_generates_the_also_in_this_series_page() {
     // #820: exporting one book of a series compiles an "also in this series" page
     // from the `[[books]]` list — it names the *other* book, not itself. Assert on
     // the emitted `.docx` XML (hermetic, #531).
-    use crate::frontmatter::SERIES_LIST_HEADING;
-    use crate::mode::{ExportFormat, ExportScope};
-    use std::io::{Cursor, Read};
-
     let (mut app, dir) = series_app("export-series-page");
     app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
 
@@ -82,10 +78,6 @@ fn exporting_a_series_book_generates_the_also_in_this_series_page() {
 fn a_standalone_book_omits_the_series_page() {
     // #820: a standalone project (one book) has no other titles, so no "also in
     // this series" page is generated — the export is unchanged.
-    use crate::frontmatter::SERIES_LIST_HEADING;
-    use crate::mode::{ExportFormat, ExportScope};
-    use std::io::{Cursor, Read};
-
     let (mut app, dir) = two_chapter_app("export-standalone-no-series");
     app.run_export(ExportFormat::Docx, ExportScope::ActiveBook);
 
@@ -160,7 +152,6 @@ fn parted_app(name: &str) -> (App, TempProject) {
 
 #[test]
 fn exporting_a_single_chapter_writes_only_that_chapter() {
-    use crate::mode::{ExportFormat, ExportScope};
     let (mut app, dir) = parted_app("export-one-chapter");
     app.run_export(ExportFormat::Markdown, ExportScope::Chapter(2));
     // Named for the chapter, distinct from the whole-book export's `book.md`.
@@ -174,7 +165,6 @@ fn exporting_a_single_chapter_writes_only_that_chapter() {
 
 #[test]
 fn exporting_a_range_writes_only_those_chapters_to_a_distinct_file() {
-    use crate::mode::{ExportFormat, ExportScope};
     let (mut app, dir) = parted_app("export-range");
     app.run_export(
         ExportFormat::Markdown,
@@ -195,7 +185,6 @@ fn exporting_a_range_writes_only_those_chapters_to_a_distinct_file() {
 
 #[test]
 fn exporting_a_part_writes_only_its_chapters() {
-    use crate::mode::{ExportFormat, ExportScope};
     let (mut app, dir) = parted_app("export-part");
     app.run_export(
         ExportFormat::Markdown,
@@ -316,7 +305,6 @@ fn series_pub_app(name: &str, book_meta: [&str; 2]) -> (App, TempProject) {
 
 #[test]
 fn series_export_stamps_each_book_its_own_copyright() {
-    use crate::mode::{ExportFormat, ExportScope};
     // Two books, each with its own distinct ISBN and rights line in `[[books]]`.
     let (mut app, dir) = series_pub_app(
         "export-per-book-copyright",
@@ -350,7 +338,6 @@ fn series_export_stamps_each_book_its_own_copyright() {
 
 #[test]
 fn a_book_with_no_metadata_falls_back_to_the_series_metadata() {
-    use crate::mode::{ExportFormat, ExportScope};
     // Book one (the active book) carries the metadata; book two carries none, so
     // its divider copyright falls back to the series/active-book metadata.
     let (mut app, dir) = series_pub_app(
@@ -388,7 +375,6 @@ fn a_book_with_no_metadata_falls_back_to_the_series_metadata() {
 
 #[test]
 fn a_standalone_export_copyright_is_unchanged() {
-    use crate::mode::{ExportFormat, ExportScope};
     // A standalone novel (no `[[books]]`) with publishing metadata renders exactly
     // one copyright block, stamped with its single manifest's metadata — the
     // per-book series plumbing leaves the single-book path untouched.

@@ -424,6 +424,10 @@ fn opt_label(value: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::app::tests::{app_scratch_dir, open_test_app, TempProject};
+    use crate::export::epub::to_epub;
+    use crate::export::ImageRole;
+    use crate::mode::Action;
+    use std::io::Read;
 
     /// A one-chapter standalone project on disk whose manifest a style test inspects.
     fn style_app(name: &str) -> (App, TempProject) {
@@ -444,7 +448,6 @@ mod tests {
 
     #[test]
     fn the_set_style_action_is_registered() {
-        use crate::mode::Action;
         assert!(
             Action::ALL.iter().any(|a| a.name() == "style:set"),
             "style:set is in the registry"
@@ -636,9 +639,6 @@ mod tests {
         // Setting the cover via the in-app style flow (#582) splices `cover_image`
         // into `[style]` and the resolved cover embeds in the EPUB. Hermetic: a
         // scratch project plus a tiny PNG written to disk.
-        use crate::export::epub::to_epub;
-        use crate::export::ImageRole;
-
         let (mut app, dir) = style_app("style-cover");
         // A small real PNG the export pipeline reads from the project root.
         let png = image::RgbaImage::from_pixel(4, 6, image::Rgba([10, 20, 30, 255]));
@@ -736,7 +736,6 @@ mod tests {
     /// Read one zip entry's text by name — for inspecting the EPUB the cover test
     /// builds.
     fn read_zip_entry(bytes: &[u8], name: &str) -> String {
-        use std::io::Read;
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
         let mut file = zip.by_name(name).unwrap();
         let mut s = String::new();

@@ -2,6 +2,7 @@
 //! palette gating, per-chapter conflict stashing, the resolution flow (keep local /
 //! take remote / merge / cancel), and dead-worker cause reporting. Pure move.
 use super::*;
+use crate::vcs::{commit, push, set_remote};
 
 #[test]
 fn git_palette_configures_a_remote_then_offers_sync() {
@@ -127,8 +128,6 @@ fn a_clean_sync_clears_any_prior_conflicts() {
 /// `one.md` holds "B's rewrite"; the remote holds "A's rewrite" — a real conflict
 /// a live sync will detect.
 fn conflicted_sync_app(name: &str) -> (App, TempProject, PathBuf, PathBuf) {
-    use crate::vcs::{commit, push, set_remote};
-
     let manifest = "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n";
 
     let remote = app_scratch_dir(&format!("{name}-bare"));
