@@ -6,8 +6,10 @@
 use super::*;
 use crate::ai::router::Policy;
 use crate::ai::tool_loop::{ToolCall, Turn};
-use crate::ai::{AiError, BackendKind};
+use crate::ai::tools::assistant_tools;
+use crate::ai::{AiError, BackendKind, Outcome, Response, Usage};
 use crate::app::{Assistant, Speaker, SplitContent};
+use crate::mode::Action;
 
 /// Send a Vim window command: the `Ctrl-w` prefix then `c`.
 fn window_cmd(app: &mut App, c: char) {
@@ -205,9 +207,6 @@ fn submitting_with_ai_off_explains_rather_than_failing() {
 
 #[test]
 fn the_catalog_is_the_runnable_subset_of_the_registry() {
-    use crate::ai::tools::assistant_tools;
-    use crate::mode::Action;
-
     let tools = assistant_tools();
     let runnable = Action::ALL
         .iter()
@@ -294,7 +293,6 @@ fn canceling_a_pending_confirm_clears_it() {
 
 #[test]
 fn text_argument_tools_declare_a_typed_input_schema() {
-    use crate::ai::tools::assistant_tools;
     let tools = assistant_tools();
     let by = |name: &str| tools.iter().find(|t| t["name"] == name).cloned().unwrap();
     // Ask takes a required "question"; an argument-free action keeps the empty schema.
@@ -327,7 +325,6 @@ fn a_text_action_without_its_argument_is_refused() {
 
 #[test]
 fn a_question_answer_comes_back_in_the_conversation() {
-    use crate::ai::{Outcome, Response, Usage};
     let (mut app, _dir) = assistant_app("assistant-ask-answer");
     // A Q&A (ai:ask) is in flight; its answer should be the tool result, in full.
     app.test_install_pass(
@@ -355,7 +352,6 @@ fn a_question_answer_comes_back_in_the_conversation() {
 
 #[test]
 fn the_assistant_is_a_registry_action_that_opens_the_pane() {
-    use crate::mode::Action;
     let (mut app, _dir) = two_chapter_app("assistant-action-open");
     assert!(
         Action::from_name("assistant").is_some(),
@@ -371,8 +367,6 @@ fn the_assistant_is_a_registry_action_that_opens_the_pane() {
 
 #[test]
 fn the_assistant_action_is_not_offered_to_the_assistant() {
-    use crate::ai::tools::assistant_tools;
-    use crate::mode::Action;
     // The recursion guard: opening the pane is a registry action, but the model is
     // never given it as a tool, so it can't open panes recursively.
     assert!(
@@ -389,7 +383,6 @@ fn the_assistant_action_is_not_offered_to_the_assistant() {
 
 #[test]
 fn the_assistant_action_is_unavailable_in_the_continuous_view() {
-    use crate::mode::Action;
     let (mut app, _dir) = three_chapter_app("assistant-action-continuous");
     assert!(
         app.action_status(Action::Assistant).is_none(),
@@ -462,7 +455,6 @@ fn declining_the_budget_confirm_stops_the_run() {
 
 #[test]
 fn the_allowlist_is_exactly_the_vetted_safe_set() {
-    use crate::mode::Action;
     // An allowlist, not a denylist: a new action is excluded until it's explicitly
     // added here, so nothing — least of all a prose-writing action — joins by
     // accident. None of these writes or edits chapter prose.
@@ -565,7 +557,6 @@ fn an_off_list_tool_is_blocked_in_code() {
 
 #[test]
 fn no_allowlisted_tool_edits_chapter_prose() {
-    use crate::mode::Action;
     let (mut app, _dir) = assistant_app("assistant-guard-noedit");
     let before = app.buffer.text();
     // Run every synchronous allowlisted tool in one batch (the AI passes are async

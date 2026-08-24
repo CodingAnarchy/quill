@@ -21,7 +21,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::buffer::{count_words, normalize_trailing_newline, Buffer};
-use crate::frontmatter::split;
+use crate::frontmatter::{split, Status};
 use crate::project::{Manifest, Project};
 
 /// A scratch path for `file` under a fresh per-process, per-tag directory (#428).
@@ -339,7 +339,6 @@ fn an_interrupted_manifest_save_preserves_the_previous_version() {
 /// while the broken lines are simply ignored — never a panic.
 #[test]
 fn malformed_front_matter_preserves_body_and_good_keys() {
-    use crate::frontmatter::Status;
     let path = scratch("bad-fm", "ch.md");
     let original = "---\nstatus: draft\nsummary: : not : valid : yaml\n[ not yaml at all\n---\nThe prose survives.\n";
     fs::write(&path, original).unwrap();

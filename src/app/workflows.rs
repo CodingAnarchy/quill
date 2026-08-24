@@ -345,6 +345,8 @@ impl App {
     /// Test seam: backdate the in-flight step so the per-step timeout has elapsed.
     #[cfg(test)]
     pub(crate) fn expire_workflow_step(&mut self) {
+        // Scoped to the fn: this seam is `#[cfg(test)]`, so module-level imports
+        // would be unused in a non-test build.
         use super::sequenced::STEP_TIMEOUT;
         use std::time::Instant;
         if let Some(run) = self.workflow_run.as_mut() {

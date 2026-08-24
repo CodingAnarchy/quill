@@ -5,6 +5,7 @@
 //! work and the durable `bible/.queue.toml` is inspected directly.
 
 use super::*;
+use crate::ai;
 use crate::ai::incremental::PassQueue;
 use crate::mode::AiAction;
 
@@ -100,7 +101,6 @@ fn one_confirm_gates_the_whole_queue() {
 
 #[test]
 fn the_status_shows_per_pass_chapter_progress() {
-    use crate::ai;
     let (mut app, _dir) = series_app("queue-progress");
     // A spawned-but-unpolled task keeps a pass "in flight" so the run parks and the
     // progress line renders — no backend needed.
@@ -156,7 +156,6 @@ fn a_pass_error_stops_the_queue() {
 
 #[test]
 fn a_stuck_queue_pass_times_out() {
-    use crate::ai;
     let (mut app, _dir) = series_app("queue-timeout");
     app.ai_task.spawn(|| {
         ai::Outcome::Error(ai::AiError::Network {

@@ -4,6 +4,7 @@
 //! — convert / add / remove / reorder (#648).
 
 use super::*;
+use crate::ai;
 
 fn chapter_titles(app: &App) -> Vec<String> {
     app.project
@@ -103,7 +104,6 @@ fn the_book_switcher_lists_every_book_with_the_active_one_marked() {
 /// mis-scope the next incremental pass. The switch is refused, not queued.
 #[test]
 fn switching_book_is_refused_while_an_ai_pass_runs() {
-    use crate::ai;
     let (mut app, _dir) = series_app("switch-mid-pass");
     // A spawned-but-unpolled task keeps `ai_task` busy — a request in flight.
     app.ai_task.spawn(|| {

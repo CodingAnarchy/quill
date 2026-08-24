@@ -3,7 +3,12 @@
 //! cross-book findings attribution and jumping (#341).
 
 use super::*;
+use crate::ai;
+use crate::ai::continuity::{Continuity, Finding as ContinuityFinding}; // aliased: `mode::Finding` is a different type, and both are used here
+use crate::ai::incremental::{Scope, State};
+use crate::mode::{Action, AiAction, Finding};
 use crate::project::Project;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 // --- Series bible: book-scoped passes (#339) --------------------------------
 
@@ -18,7 +23,6 @@ fn book_digests_are_scoped_to_one_book() {
 
 #[test]
 fn folding_a_book_into_the_bible_keeps_the_other_books_state() {
-    use crate::ai::incremental::State;
     let (mut app, dir) = series_app("fold-keeps");
     // Book one's character pass already recorded what it was built from.
     State::record(&dir, "characters", "2026-06-24", app.book_digests(0)).unwrap();
@@ -44,7 +48,6 @@ fn folding_a_book_into_the_bible_keeps_the_other_books_state() {
 /// of leaving it stale until a full rebuild (#645) — while book one is untouched.
 #[test]
 fn deleting_a_series_book_chapter_prunes_its_stale_bible_state() {
-    use crate::ai::incremental::{Scope, State};
     let dir = crate::testutil::scratch_dir("books", "prune-deleted");
     for sub in ["b1", "b2"] {
         fs::create_dir_all(dir.join(sub)).unwrap();
@@ -132,7 +135,6 @@ fn deleting_a_series_book_chapter_prunes_its_stale_bible_state() {
 
 #[test]
 fn the_series_bible_refresh_is_gated_off_for_one_book() {
-    use crate::mode::Action;
     let (app, _dir) = two_chapter_app("bible-gate");
     assert!(
         app.action_status(Action::RefreshSeriesBible).is_some(),
@@ -150,7 +152,6 @@ fn starting_the_refresh_with_one_book_is_a_no_op() {
 
 #[test]
 fn a_pass_error_stops_the_refresh() {
-    use crate::mode::AiAction;
     let (mut app, _dir) = series_app("bible-error");
     app.seed_series_bible_run(vec![(AiAction::Characters, 0), (AiAction::Characters, 1)]);
     app.advance_run(Some("boom".into()));
@@ -164,7 +165,6 @@ fn a_pass_error_stops_the_refresh() {
 
 #[test]
 fn cancelling_stops_the_refresh_after_the_current_pass() {
-    use crate::mode::AiAction;
     let (mut app, _dir) = series_app("bible-cancel");
     app.seed_series_bible_run(vec![(AiAction::Characters, 0), (AiAction::Characters, 1)]);
     app.cancel_run();
@@ -184,8 +184,6 @@ fn cancelling_stops_the_refresh_after_the_current_pass() {
 
 #[test]
 fn a_stuck_series_bible_pass_times_out() {
-    use crate::ai;
-    use crate::mode::AiAction;
     let (mut app, _dir) = series_app("bible-timeout");
     // A spawned-but-unpolled task keeps `ai_task` busy (a request in flight); the
     // run is backdated past the per-step timeout, so the shared guard (#344) drops it.
@@ -218,7 +216,6 @@ fn enable_local_ai(app: &mut App) {
 
 #[test]
 fn refresh_all_bibles_plans_the_five_trackers_over_every_book() {
-    use crate::mode::AiAction;
     let (app, _dir) = series_app("bible-all-plan");
     let queue = app.bible_refresh_queue_for_test();
     // Five trackers × two books = ten passes, each tracker walking the books in
@@ -242,7 +239,6 @@ fn refresh_all_bibles_plans_the_five_trackers_over_every_book() {
 
 #[test]
 fn refresh_all_bibles_works_for_a_standalone_novel() {
-    use crate::mode::AiAction;
     let (app, _dir) = two_chapter_app("bible-all-standalone");
     // A standalone novel refreshes its one book's five trackers under the one
     // command — unlike the series refresh, it isn't gated off for a single book.
@@ -368,12 +364,10 @@ fn refresh_all_bibles_needs_a_ready_backend() {
 
 #[test]
 fn series_findings_are_attributed_to_their_book_and_accumulate_silently() {
-    use crate::ai::continuity::{Continuity, Finding};
-    use crate::mode::AiAction;
     let (mut app, _dir) = series_app("bible-cross");
     let mk = |chapter: &str| Continuity {
         events: vec![],
-        findings: vec![Finding {
+        findings: vec![ContinuityFinding {
             kind: continuity::FindingKind::Object,
             detail: "the locket changes color".into(),
             chapters: vec![chapter.into()],
@@ -403,8 +397,6 @@ fn series_findings_are_attributed_to_their_book_and_accumulate_silently() {
 
 #[test]
 fn jumping_to_a_cross_book_finding_switches_books() {
-    use crate::mode::Finding;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let (mut app, _dir) = series_app("bible-jump");
     assert_eq!(app.project.active_book(), 0, "opens on book one");
     // A finding in book two, surfaced in the (session-wide) triage list.

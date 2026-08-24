@@ -8,7 +8,7 @@
 use super::*;
 use crate::export::docx::{to_docx_review, ChapterNotes, ReviewNote};
 use crate::export::{Chapter, Document, Part, PubMeta};
-use crate::mode::{Mode, Pending};
+use crate::mode::{Mode, Pending, ReviewImport};
 use crate::project::Project;
 
 /// Build a review-copy `.docx` with one chapter carrying `notes` as Word comments
@@ -181,8 +181,6 @@ fn an_imported_comment_carries_its_reviewer_onto_the_annotation() {
     // through to the created annotation and persists. Driven from the review-import
     // preview with a reviewer on the matched span (what `extract_comments` fills in
     // from `w:author`, covered end-to-end in the docx unit tests).
-    use crate::mode::ReviewImport;
-
     isolate("review-import-reviewer");
     let dir = make_project(
         "review-import-reviewer-p",

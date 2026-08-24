@@ -2,8 +2,10 @@
 
 use super::*;
 use crate::project::Project;
+use crate::testutil::{perf_budget_ms, perf_budget_us};
 use std::fmt::Write;
 use std::fs;
+use std::time::Instant;
 
 #[test]
 fn report_counts_todo_markers_across_chapters() {
@@ -172,10 +174,6 @@ fn continuous_view_refuses_to_open_with_an_unreadable_chapter() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn navigation_is_fast_in_a_series_sized_project() {
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_ms;
-
     // Far past a single novel: a multi-book series' worth of chapter files.
     let n = 600;
     let dir = crate::testutil::scratch_dir("perf", "nav");
@@ -224,10 +222,6 @@ fn navigation_is_fast_in_a_series_sized_project() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn tally_is_independent_of_project_size() {
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_us;
-
     let n = 2000;
     let dir = crate::testutil::scratch_dir("perf", "tally");
     let dir = TempProject::new(dir);
@@ -273,10 +267,6 @@ fn tally_is_independent_of_project_size() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn verify_on_idle_plan_is_independent_of_project_size() {
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_us;
-
     let n = 2000;
     let dir = crate::testutil::scratch_dir("perf", "verify-idle");
     let dir = TempProject::new(dir);
@@ -384,10 +374,6 @@ fn save_rollup_cost(app: &App) -> (usize, usize) {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn save_is_independent_of_project_size() {
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_us;
-
     // Time the save roll-up at a novel and a series scale, averaging many calls to
     // smooth filesystem/CPU noise. If the fix holds, neither reads any chapter file.
     let measure = |app: &App, iters: u32| {

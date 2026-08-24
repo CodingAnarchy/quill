@@ -12,6 +12,7 @@ use super::{
     attr_value, element_text, fallback_chapter, finalize_titles, for_each_child,
     for_each_child_counted, join_paragraphs, wrap_emphasis, Dropped, Imported, ImportedChapter,
 };
+use std::path::Component;
 
 /// The largest `\ucN` substitution count honored. RTF's `\uc` sets how many ANSI
 /// fallback chars trail each `\uN` Unicode escape; real documents use 0–2 (Word
@@ -148,7 +149,6 @@ fn collect_items(
 /// with any path separator, `..`, or a leading `.`/root/prefix component; accepts
 /// exactly one normal component (a real Scrivener UUID is a hyphenated hex string).
 fn safe_uuid(uuid: &str) -> Option<&str> {
-    use std::path::Component;
     if uuid.is_empty()
         || uuid.contains('/')
         || uuid.contains('\\')
@@ -494,7 +494,10 @@ fn is_skip_destination(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::export::scriv::write_scriv;
+    use crate::export::{Chapter, Document, Part, PubMeta};
     use proptest::prelude::*;
+    use std::fs;
 
     /// A minimal RTF document body (one paragraph) like `export::scriv` writes.
     fn rtf(body: &str) -> String {
@@ -679,8 +682,6 @@ mod tests {
 
     #[test]
     fn round_trips_a_quill_scriv_export() {
-        use crate::export::scriv::write_scriv;
-        use crate::export::{Chapter, Document, Part, PubMeta};
         let doc = Document {
             title: "Round Trip".into(),
             subtitle: None,
@@ -915,8 +916,6 @@ mod tests {
     fn parse_scriv_reports_a_missing_binder_document() {
         // Build a minimal `.scriv` bundle, then remove one document's content so
         // it's listed in the binder but unreadable on disk (#511).
-        use std::fs;
-
         let dir = crate::testutil::scratch_dir("scriv-import", "missing-doc").join("Gap.scriv");
         let data = dir.join("Files").join("Data");
         fs::create_dir_all(data.join("u1")).unwrap();

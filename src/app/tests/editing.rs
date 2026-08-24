@@ -1,6 +1,7 @@
 //! Tests for undo/redo and find/replace over the active chapter.
 
 use super::*;
+use crate::ai;
 use std::fmt::Write;
 
 #[test]
@@ -364,7 +365,6 @@ fn ctrl_c_prompts_before_quitting_with_unsaved_changes() {
 /// running work; confirming still quits.
 #[test]
 fn ctrl_q_warns_before_dropping_an_in_flight_task() {
-    use crate::ai;
     let (mut app, _dir) = one_chapter_app("ctrl-q-busy", "settled prose\n");
     assert!(!app.edit_dirty(), "the fixture opens clean");
     // A spawned-but-unpolled task keeps `ai_task` busy — a request in flight.

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::export::{self, Chapter, Document, ExportStyle, Part};
 use crate::frontmatter::Epigraph;
+use std::process::Command as Proc;
 
 impl App {
     /// The print bleed allowance in points (#652) from the manifest `[print] bleed`,
@@ -247,7 +248,6 @@ fn unique_preview_path(stem: &str, ext: &str) -> std::path::PathBuf {
 /// Spawns the platform launcher and returns without waiting, so the editor keeps
 /// running.
 fn open_in_default_app(path: &std::path::Path) -> std::io::Result<()> {
-    use std::process::Command as Proc;
     #[cfg(target_os = "macos")]
     let mut cmd = Proc::new("open");
     #[cfg(target_os = "linux")]

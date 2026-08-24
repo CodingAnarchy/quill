@@ -253,6 +253,7 @@ const fn target_label(target: FontTarget) -> &'static str {
 mod tests {
     use super::*;
     use crate::app::tests::{app_scratch_dir, open_test_app, TempProject};
+    use crate::mode::Action;
 
     /// A one-chapter project on disk whose manifest a font test inspects.
     fn font_app(name: &str) -> (App, TempProject) {
@@ -280,7 +281,6 @@ mod tests {
 
     #[test]
     fn the_browse_fonts_action_is_registered() {
-        use crate::mode::Action;
         assert!(
             Action::ALL.iter().any(|a| a.name() == "fonts:browse"),
             "fonts:browse is in the registry"

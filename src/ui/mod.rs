@@ -236,6 +236,8 @@ fn dim_backdrop(frame: &mut Frame, screen: Rect) {
 /// test helper for both the `ui` and `app` test suites.
 #[cfg(test)]
 pub fn render_to_string(app: &App, w: u16, h: u16) -> String {
+    // Scoped to the fn: this helper is `#[cfg(test)]`, so a module-level import
+    // would be unused in a non-test build.
     use ratatui::{backend::TestBackend, Terminal};
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
     terminal.draw(|f| draw(f, app)).unwrap();

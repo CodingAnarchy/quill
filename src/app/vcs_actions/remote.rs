@@ -127,6 +127,8 @@ impl App {
     /// fast instead of hanging.
     #[cfg(test)]
     pub(crate) fn settle_vc_for_test(&mut self) {
+        // Scoped to the fn: this seam is `#[cfg(test)]`, so a module-level import
+        // would be unused in a non-test build.
         use std::panic;
         let prior = panic::take_hook();
         panic::set_hook(Box::new(|_| {}));

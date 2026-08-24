@@ -700,6 +700,7 @@ fn cross_chapter_move_is_atomic_on_a_write_failure() {
 #[cfg(unix)]
 #[test]
 fn cross_chapter_move_aborts_when_the_destination_cannot_be_read() {
+    // Scoped to this `#[cfg(unix)]` test: the trait doesn't exist on other platforms.
     use std::os::unix::fs::PermissionsExt;
 
     let dir = app_scratch_dir("corkboard-ms-cross-dest-read-fail");

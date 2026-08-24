@@ -3,8 +3,15 @@
 //! shadow, and the import preview. Pure move (#792).
 
 use super::*;
+use crate::annotation::{Live, Reply};
+use crate::app::BackupEntry;
+use crate::mode::{
+    AnnoShow, AnnoSort, BackupBrowser, ImportPreview, Mode, ProjectMatch, ProjectSearch,
+    ProjectSearchStage, QuickSwitch, QuickTarget, ReviewImport,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
+use std::time::{Duration, SystemTime};
 
 #[test]
 fn a_long_palette_scrolls_to_keep_the_selection_visible() {
@@ -136,8 +143,6 @@ fn an_open_modal_dims_the_editor_and_casts_a_shadow() {
 fn import_preview_lists_the_chapters_count_and_level() {
     // The import preview (#702) shows the split before writing: the chapter
     // count, the guessed heading level, the book title, and the chapter titles.
-    use crate::mode::ImportPreview;
-
     let mut app = app_with("body\n");
     app.mode = Mode::ImportPreview(Box::new(ImportPreview {
         source: std::path::PathBuf::from("/tmp/book.md"),
@@ -186,8 +191,6 @@ fn review_import_lists_matches_and_dropped_comments() {
     // The review-import preview (#886) shows what the reviewer's comments resolved
     // to: the matches that will become annotations and the unmatched ones (the
     // prose drifted), reported rather than silently dropped.
-    use crate::mode::ReviewImport;
-
     let mut app = app_with("The sea was grey.\n");
     app.mode = Mode::ReviewImport(Box::new(ReviewImport {
         source: std::path::PathBuf::from("/tmp/book-review.docx"),
@@ -224,9 +227,6 @@ fn review_import_lists_matches_and_dropped_comments() {
 fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
     // The review list (#302/#889) renders a resolved note distinctly (a ✓ + a reply
     // count), and its help line advertises the reply / resolve / filter keys.
-    use crate::annotation::{Live, Reply};
-    use crate::mode::{AnnoShow, AnnoSort, Mode};
-
     let mut app = app_with("The night was long.\n");
     app.annotations = vec![
         Live {
@@ -290,10 +290,6 @@ fn the_annotation_list_shows_threads_and_the_reply_resolve_keys() {
 fn the_backup_browser_lists_dates_sizes_and_the_restore_key() {
     // The backup browser (#934) lists each archive's date-ish label over its size
     // and name, with the restore/close keys in the help line.
-    use crate::app::BackupEntry;
-    use crate::mode::BackupBrowser;
-    use std::time::{Duration, SystemTime};
-
     let mut app = app_with("body\n");
     let entry = |name: &str, size: u64, ago_secs: u64| BackupEntry {
         name: name.into(),
@@ -333,8 +329,6 @@ fn the_quick_switcher_lists_chapters_and_scenes_with_the_query_and_count() {
     // The fuzzy quick-switcher (#976) lists chapter and scene rows, marking scenes
     // with the ¶ tag and the chapter as dimmed context; the help line echoes the
     // typed query and the match count.
-    use crate::mode::{QuickSwitch, QuickTarget};
-
     let target = |title: &str, chapter_title: &str, is_scene: bool| QuickTarget {
         chapter: 0,
         byte: 0,
@@ -377,8 +371,6 @@ fn the_quick_switcher_lists_chapters_and_scenes_with_the_query_and_count() {
 fn the_grouped_results_pane_shows_per_chapter_counts_and_a_total() {
     // The grouped project-find pane (#977): one row per chapter with its match
     // count, over a total ("N matches across M chapters").
-    use crate::mode::{ProjectMatch, ProjectSearch, ProjectSearchStage};
-
     let mut app = app_with_chapters(&["Alpha", "Beta"], "body\n");
     let mut ps = ProjectSearch::new();
     ps.query = "mist".into();
@@ -418,8 +410,6 @@ fn the_replace_all_preview_shows_a_per_chapter_breakdown_with_context() {
     // The replace-all preview (#1014): before the sweep, one row per affected
     // chapter with its match count and a context snippet, over the total and the
     // confirm/cancel keys.
-    use crate::mode::{ProjectMatch, ProjectSearch, ProjectSearchStage};
-
     let mut app = app_with_chapters(&["Alpha", "Beta"], "body\n");
     let mut ps = ProjectSearch::new();
     ps.query = "Kate".into();

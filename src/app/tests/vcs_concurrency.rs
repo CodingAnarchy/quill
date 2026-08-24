@@ -16,6 +16,7 @@
 //! All hermetic (#531) — local scratch repos, no network.
 
 use super::*;
+use crate::vcs::{commit, push, set_remote};
 
 /// A two-chapter project already under version control with a first commit, so the
 /// drafts/sync flows have something to work with. Not read-only.
@@ -239,8 +240,6 @@ fn a_real_sync_resolution_finalizes_against_the_remote_despite_a_stale_draft_mer
 /// rewrite"; the remote holds "A's rewrite" — a real conflict a live sync detects.
 /// (A local copy of the vcs-test helper so this module is self-contained.)
 fn conflicted_sync_app_local(name: &str) -> (App, TempProject, PathBuf, PathBuf) {
-    use crate::vcs::{commit, push, set_remote};
-
     let manifest = "title = \"Book\"\n\n[[chapters]]\ntitle = \"One\"\nfile = \"one.md\"\n";
 
     let remote = app_scratch_dir(&format!("{name}-bare"));

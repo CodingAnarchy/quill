@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::buffer::Cursor;
-use crate::mode::{Mode, Overlay};
+use crate::mode::{Finding, FindingKind, Findings, Mode, Overlay};
 use crate::ui::render_to_string;
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
 use std::fmt::Write;
@@ -388,7 +388,6 @@ fn a_drag_works_in_the_continuous_view() {
 
 #[test]
 fn a_click_selects_a_findings_row() {
-    use crate::mode::{Finding, FindingKind, Findings};
     let (mut app, _dir) = rendered_app("click-findings", "hi\n", 20);
     let items: Vec<Finding> = (0..5)
         .map(|i| Finding {

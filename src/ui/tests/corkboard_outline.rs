@@ -2,7 +2,9 @@
 //! render tests. Pure move (#792).
 
 use super::*;
+use crate::frontmatter::SceneStatus;
 use crate::manuscript::Manuscript;
+use crate::mode::{Card, Corkboard};
 use crate::syntax::Heading;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
@@ -391,9 +393,6 @@ fn continuous_view_shows_part_headers_at_boundaries() {
 fn manuscript_corkboard_renders_chapter_group_headers() {
     // The manuscript-wide board (#701) prefixes each chapter's first card with a
     // chapter-title header, so its cards read grouped by chapter.
-    use crate::frontmatter::SceneStatus;
-    use crate::mode::{Card, Corkboard};
-
     let card = |title: &str, chapter: usize, chapter_title: &str| Card {
         title: title.into(),
         level: 2,

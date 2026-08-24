@@ -1,6 +1,7 @@
 //! Section roles and bands, parts, and export.
 
 use super::*;
+use crate::frontmatter::Role;
 use crate::project::Project;
 use std::fs;
 
@@ -25,7 +26,6 @@ fn sectioned_project(name: &str) -> TempProject {
 
 #[test]
 fn front_and_back_matter_sort_around_the_body_on_load() {
-    use crate::frontmatter::Role;
     let dir = sectioned_project("order");
     let p = Project::open(&dir).unwrap();
     // Reading order: prologue (front), body, appendix (back) — not manifest order.

@@ -5,7 +5,12 @@
 //! chaptered project.
 
 use super::*;
+use crate::export::docx::{to_docx, Profile};
+use crate::export::scriv::write_scriv;
+use crate::export::{Chapter, Document, Part, PubMeta};
 use crate::mode::WizardStep;
+use std::io::Write as _;
+use zip::write::SimpleFileOptions;
 
 // --- Setup wizard (#282) ---------------------------------------------------
 
@@ -447,8 +452,6 @@ fn importing_a_markdown_manuscript_creates_a_chaptered_project() {
 
 #[test]
 fn importing_a_docx_manuscript_creates_a_chaptered_project() {
-    use crate::export::docx::{to_docx, Profile};
-    use crate::export::{Chapter, Document, Part, PubMeta};
     isolate("import-docx");
     let cur = make_project("import-docx-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -527,8 +530,6 @@ fn importing_a_docx_manuscript_creates_a_chaptered_project() {
 
 #[test]
 fn importing_an_odt_manuscript_creates_a_chaptered_project() {
-    use std::io::Write as _;
-    use zip::write::SimpleFileOptions;
     isolate("import-odt");
     let cur = make_project("import-odt-cur", "Current", "c\n");
     let mut app = open_app(&cur);
@@ -607,8 +608,6 @@ fn importing_an_odt_manuscript_creates_a_chaptered_project() {
 
 #[test]
 fn importing_a_scriv_bundle_creates_a_chaptered_project() {
-    use crate::export::scriv::write_scriv;
-    use crate::export::{Chapter, Document, Part, PubMeta};
     isolate("import-scriv");
     let cur = make_project("import-scriv-cur", "Current", "c\n");
     let mut app = open_app(&cur);

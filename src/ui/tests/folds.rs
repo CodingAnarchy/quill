@@ -9,6 +9,7 @@ use std::fmt::Write;
 use super::*;
 use crate::buffer::Cursor;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{backend::TestBackend, Terminal};
 
 /// A plain (no-modifier) key event — the galley paging tests press Space, `n`, etc.
 fn key(code: KeyCode) -> KeyEvent {
@@ -162,7 +163,6 @@ fn the_cursor_maps_correctly_across_a_fold() {
 
 #[test]
 fn revealing_a_fold_at_the_cursor_places_the_terminal_caret() {
-    use ratatui::{backend::TestBackend, Terminal};
     // Bug E: a jump lands the cursor inside a collapsed section. Before the reveal
     // the caret's line is a zero-row hidden line, so the render never calls
     // `set_cursor_position` and the terminal caret sticks stale. After the reveal the
@@ -458,7 +458,6 @@ fn a_collapsed_heading_row_maps_a_click_to_its_start_byte() {
 
 #[test]
 fn the_caret_on_a_collapsed_heading_renders_past_the_fold_glyph() {
-    use ratatui::{backend::TestBackend, Terminal};
     // Bug I: the display-only fold glyph shifts the heading text right on screen, so
     // the caret placed on a collapsed heading must shift with it — otherwise it
     // renders a couple of cells left of the text, over the glyph instead of the `#`.

@@ -351,6 +351,7 @@ fn human(iso: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history;
     use ratatui::style::Color;
 
     fn snap(date: &str, added: usize, removed: usize) -> Snapshot {
@@ -511,7 +512,6 @@ mod tests {
         // Hermetic (#531): persist a few days to a scratch project's log, then
         // load and render exactly the way the overlay does — end to end through
         // `history::load`, no project on disk needed beyond the scratch dir.
-        use crate::history;
         let dir = crate::testutil::scratch_dir("histview", "load");
         history::persist(&dir, &snap("2026-06-16", 400, 0)).unwrap();
         history::persist(&dir, &snap("2026-06-17", 250, 50)).unwrap();

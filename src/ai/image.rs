@@ -4,7 +4,7 @@
 //! opt-in and key-gated, the generated images saved as off-manuscript files the
 //! author owns. See `docs/ai-features.md`.
 
-use super::AiError;
+use super::{keychain, AiError};
 
 /// One image to generate: a text prompt and the provider's model id.
 pub struct ImageRequest {
@@ -74,7 +74,6 @@ impl ImageSettings {
     /// plaintext `api_key` in config (#530). Mirrors the text key's precedence.
     /// Test builds read neither the env var nor the keychain (#528/#531).
     pub fn resolved_key(&self) -> Option<String> {
-        use super::keychain;
         // As with the Claude key, test builds never read the env key, so the suite
         // can't authenticate or reach the image provider by accident (#528).
         #[cfg(test)]

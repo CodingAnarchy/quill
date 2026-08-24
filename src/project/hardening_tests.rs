@@ -412,6 +412,7 @@ fn write_chapters_atomic_rolls_back_a_partial_swap() {
 #[cfg(unix)]
 #[test]
 fn write_chapters_atomic_writes_through_a_symlinked_chapter() {
+    // Scoped to this `#[cfg(unix)]` test: the fn doesn't exist on other platforms.
     use std::os::unix::fs::symlink;
 
     let dir = temp_dir("chapters-atomic-symlink");

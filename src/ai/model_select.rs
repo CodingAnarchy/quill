@@ -22,6 +22,8 @@
 /// two local backends (text #124 and image #240) share this probe.
 #[cfg(feature = "local")]
 pub fn best_device() -> candle_core::Device {
+    // Scoped to the fn: `candle_core` is an optional dependency behind the `local`
+    // feature, so a module-level import wouldn't compile without it.
     use candle_core::Device;
     Device::new_metal(0)
         .or_else(|_| Device::new_cuda(0))

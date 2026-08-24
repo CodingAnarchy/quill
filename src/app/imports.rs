@@ -13,6 +13,7 @@ use super::bible_review::{Staged, StagedTally};
 use super::*;
 use crate::ai::scaffold;
 use crate::annotation::Live;
+use crate::manuscript_import as import;
 use crate::mode::ReviewImport;
 
 /// The source stashed between an import wizard's two prompts (#508): the folder
@@ -342,7 +343,6 @@ impl App {
         // For a Markdown source, record which heading level the split used and the
         // levels the manuscript actually uses, so the preview can re-split on them.
         let (level, levels) = markdown.as_ref().map_or((None, Vec::new()), |text| {
-            use crate::manuscript_import as import;
             let (_, body) = crate::frontmatter::split(text);
             let level = import::chapter_level(body);
             let levels: Vec<usize> = (1..=6)
@@ -667,7 +667,6 @@ fn find_phrase(prose: &str, phrase: &str) -> Option<(usize, usize)> {
 /// plain text, anything else (a `.md`) as Markdown. The source is read only —
 /// never altered.
 fn read_manuscript(path: &std::path::Path) -> std::io::Result<crate::manuscript_import::Imported> {
-    use crate::manuscript_import as import;
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext.eq_ignore_ascii_case("docx") {
         import::parse_docx(&std::fs::read(path)?)

@@ -493,7 +493,6 @@ fn paragraph_indent_skips_the_paragraph_after_a_code_block() {
 
 #[test]
 fn paragraph_indent_keeps_the_cursor_on_the_indented_line() {
-    use ratatui::{backend::TestBackend, Terminal};
     // Cursor at the very start of an indented paragraph's first line.
     let mut app = app_with("Alpha beta gamma.\n");
     app.edit_buffer_mut().cursor = Cursor { line: 0, col: 0 };

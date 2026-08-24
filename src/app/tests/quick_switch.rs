@@ -5,10 +5,12 @@
 
 use super::*;
 use crate::app::quick_switch::scene_headings;
-use crate::mode::{Mode, QuickSwitch};
+use crate::mode::{Mode, QuickSwitch, QuickTarget};
 use crate::project::Project;
 use crate::syntax::Syntax;
+use crate::testutil::perf_budget_ms;
 use std::fs;
+use std::time::Instant;
 
 /// A two-chapter project whose chapters each carry scene headings, opened and
 /// pinned like the other fixtures. Chapter one (`one.md`) starts active.
@@ -305,11 +307,6 @@ fn active_chapter_scenes_come_from_disk_when_a_reference_pane_is_focused() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn filtering_is_independent_of_project_size() {
-    use crate::mode::QuickTarget;
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_ms;
-
     // Build a series-sized index directly (the same shape the switcher captures on
     // open), so the guard times the per-keystroke filter, not the one-time build.
     let n_chapters = 2000;
@@ -372,10 +369,6 @@ fn filtering_is_independent_of_project_size() {
 #[test]
 #[ignore = "release-only perf guard; run via cargo perf"]
 fn opening_the_switcher_is_fast_in_a_series_sized_project() {
-    use std::time::Instant;
-
-    use crate::testutil::perf_budget_ms;
-
     // A series' worth of chapters, each with a handful of ATX scene headings and a
     // realistic body — the switcher reads and scans every one on open.
     let n = 600;
