@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 /// stays on one filesystem and is therefore atomic), `sync_all`s it so the
 /// bytes are durable before the swap, then renames it over `path`. On any
 /// failure before the rename, the temp file is removed and `path` is left
-/// untouched, so the previous good version always survives a failed write.
+/// untouched, so the previous good version always survives a failed write. The
+/// parent directory must already exist.
 ///
 /// When `path` is a symlink (a chapter symlinked into a synced/shared folder),
 /// the write follows it: the temp is staged beside — and the rename lands on —
@@ -27,6 +28,25 @@ use std::path::{Path, PathBuf};
 /// itself is preserved. A plain rename onto the link path would instead replace
 /// the link with a regular file and orphan the target, silently stale (#871).
 pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_with(path, |f| f.write_all(bytes))
+}
+
+/// Atomically produce `path`'s contents by *streaming* into it, for a payload
+/// too large to want buffered in memory first (e.g. a project archive zip,
+/// #658).
+///
+/// Same guarantee as [`write`] — a sibling temp file in the same directory,
+/// `sync_all`ed and renamed over `path`, so a failure anywhere leaves the
+/// previous good version untouched — but instead of taking a `&[u8]`, it hands
+/// `fill` the open temp [`File`] (which is `Write + Seek`, as a zip writer
+/// wants) to write directly. The parent directory must already exist.
+///
+/// This is the single implementation of the staging / fsync / rename sequence;
+/// [`write`] is a thin `&[u8]` front for it.
+pub fn write_with<F>(path: &Path, fill: F) -> io::Result<()>
+where
+    F: FnOnce(&mut File) -> io::Result<()>,
+{
     let path = &resolve_symlink(path)?;
     let tmp = temp_path(path);
 
@@ -35,12 +55,14 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     // inner scope drops (closes) the file before the rename.
     let staged = (|| {
         let mut f = File::create(&tmp)?;
-        f.write_all(bytes)?;
+        fill(&mut f)?;
         f.sync_all()?;
         // Test-only seam (#265): simulate a crash *after* the temp is fully
         // written but *before* the rename — the case that distinguishes an
         // atomic save (target untouched) from a truncate-then-write (target
         // already destroyed). Production builds compile this out entirely.
+        // Both entry points reach it here, so a `write` and a `write_with`
+        // each count as exactly one armed step of the fail-point countdown.
         #[cfg(test)]
         if fail_point::should_fail_before_rename() {
             return Err(io::Error::other("injected pre-rename failure"));
@@ -61,49 +83,6 @@ pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Atomically produce `path`'s contents by *streaming* into it, for a payload
-/// too large to want buffered in memory first (e.g. a project archive zip,
-/// #658).
-///
-/// Same guarantee as [`write`] — a sibling temp file in the same directory,
-/// `sync_all`ed and renamed over `path`, so a failure anywhere leaves the
-/// previous good version untouched — but instead of taking a `&[u8]`, it hands
-/// `fill` the open temp [`File`] (which is `Write + Seek`, as a zip writer
-/// wants) to write directly. The parent directory must already exist.
-pub fn write_with<F>(path: &Path, fill: F) -> io::Result<()>
-where
-    F: FnOnce(&mut File) -> io::Result<()>,
-{
-    let path = &resolve_symlink(path)?;
-    let tmp = temp_path(path);
-
-    // Stage into the temp file, flush it durable, then swap it in — all in one
-    // fallible step so a failure anywhere leaves a single cleanup path. The
-    // inner scope drops (closes) the file before the rename.
-    let staged = (|| {
-        let mut f = File::create(&tmp)?;
-        fill(&mut f)?;
-        f.sync_all()?;
-        // Test-only seam (#265): simulate a crash after the temp is fully
-        // written but before the rename — see [`write`].
-        #[cfg(test)]
-        if fail_point::should_fail_before_rename() {
-            return Err(io::Error::other("injected pre-rename failure"));
-        }
-        fs::rename(&tmp, path)
-    })();
-    if let Err(e) = staged {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-
-    // Best-effort: fsync the directory so the rename itself is durable.
-    if let Ok(dir) = File::open(parent(path)) {
-        let _ = dir.sync_all();
-    }
-    Ok(())
-}
-
 /// Resolve `path` to the real file the write should land on: if `path` is a
 /// symlink, follow it to its target so the temp is staged beside — and the
 /// rename replaces — the target rather than the link (#871). A non-symlink (or a
@@ -115,24 +94,10 @@ where
 /// should. A dangling link (target's directory is gone) surfaces as the write's
 /// own error at `File::create`, never a silent replacement of the link.
 pub fn resolve_symlink(path: &Path) -> io::Result<PathBuf> {
-    // `symlink_metadata` does not follow the link, so this distinguishes a
-    // symlink from a regular file; a `NotFound` (nothing there yet) is the
-    // ordinary create case and leaves the path unchanged.
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            let target = fs::read_link(path)?;
-            let resolved = if target.is_absolute() {
-                target
-            } else {
-                parent(path).join(target)
-            };
-            // Follow a chain of links to the real file (each hop staged+renamed on
-            // the final target's filesystem). Bounded so a self-referential link
-            // cycle errors out instead of looping forever.
-            resolve_symlink_depth(resolved, 32)
-        }
-        _ => Ok(path.to_path_buf()),
-    }
+    // Follow a chain of links to the real file (each hop staged+renamed on the
+    // final target's filesystem). Bounded so a self-referential link cycle
+    // errors out instead of looping forever.
+    resolve_symlink_depth(path.to_path_buf(), 32)
 }
 
 /// [`resolve_symlink`] with a remaining-hops budget, so a link cycle terminates
@@ -144,6 +109,9 @@ fn resolve_symlink_depth(path: PathBuf, hops: u32) -> io::Result<PathBuf> {
             "too many levels of symbolic links",
         ));
     }
+    // `symlink_metadata` does not follow the link, so this distinguishes a
+    // symlink from a regular file; a `NotFound` (nothing there yet) is the
+    // ordinary create case and leaves the path unchanged.
     match fs::symlink_metadata(&path) {
         Ok(meta) if meta.file_type().is_symlink() => {
             let target = fs::read_link(&path)?;
