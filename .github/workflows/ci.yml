@@ -3,6 +3,14 @@ name: CI
 # Gates PRs on the project's standard checks (see CLAUDE.md "Standard checks"
 # and "Performance guards"). Branch protection should require this workflow to
 # be green before a PR can merge to master.
+#
+# There is deliberately no toolchain-installing step in any job. The runners
+# ship rustup, which reads `rust-toolchain.toml` at the repo root and installs
+# the pinned version on the first cargo call — so CI and a contributor's machine
+# resolve Rust from the same file. Installing it here (e.g. an action pinned to
+# `@stable`) would reintroduce the split that broke master in #1198: `stable`
+# meant "released today" on CI and "whatever I last updated to" locally.
+# To change the Rust version, edit `rust-toolchain.toml` — not this file.
 on:
   push:
     branches: [master]
@@ -23,9 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
       - name: cargo fmt --check
         run: cargo fmt --check
 
@@ -41,9 +46,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@v2
       # keyring's Linux secret-service backend links libdbus (macOS uses the
       # native keychain, so this is Linux-only).
@@ -63,9 +65,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install libdbus (Linux keyring backend)
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
@@ -81,7 +80,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo check --features local (Metal)
         run: cargo check --features local
@@ -103,7 +101,6 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install libdbus (Linux keyring backend)
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config

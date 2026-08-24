@@ -12,6 +12,13 @@ truth.
 Quill is a from-source Rust tool. You'll need a Rust toolchain — install one via
 [rustup](https://rustup.rs) if you don't have it.
 
+You don't need to pick a version. `rust-toolchain.toml` at the repo root pins
+the one Quill builds with, and rustup installs it automatically the first time
+you run a cargo command here (so the first build may pause to download it). CI
+resolves the same file, which means a green check on your machine means a green
+check on the runners. If you want to move Rust forward, change `channel` there
+and open a PR — nothing upgrades it on its own.
+
 To build and run the editor directly from a checkout:
 
 ```sh

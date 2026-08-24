@@ -95,6 +95,15 @@ clippy (`-D warnings`) and tests on both ubuntu and macos, plus a
 `--features local` job and an informational `cargo perf` run on pushes to
 master.)
 
+**The Rust version is pinned in `rust-toolchain.toml`** and that file is the
+only place it's written down. rustup reads it for every cargo command here, and
+CI installs no toolchain of its own, so the checks above run on the same
+compiler locally and on the runners. Don't chase `stable` in either place: it
+resolves to "released today" on CI and "whatever you last `rustup update`d to"
+locally, and that gap turned a Rust release into red CI on master (#1198).
+Upgrading is a deliberate PR — edit `channel`, run the checks, and fix whatever
+new lints the release brings.
+
 ## Performance guards (ignored tests)
 
 Some tests are `#[ignore]`d because they measure timing and only make sense in

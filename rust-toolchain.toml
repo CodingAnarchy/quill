@@ -1,0 +1,18 @@
+# The one place Quill's Rust version is written down (#1200).
+#
+# rustup reads this for every cargo invocation in this directory, and CI has no
+# toolchain-installing step, so the runners resolve the same version from this
+# same file. That is the point: `stable` used to mean "whatever shipped today"
+# on CI and "whatever I last ran `rustup update` for" locally, which silently
+# diverged and turned a Rust release into red CI on master (#1198). A version
+# number means the same thing in both places.
+#
+# Bumping is deliberate: edit `channel`, run the standard checks, open a PR.
+# Nothing upgrades Rust on its own now, so this pin will go stale until someone
+# moves it — that is the trade for reproducible builds.
+[toolchain]
+channel = "1.98.0"
+# `minimal` keeps the CI install small; clippy and rustfmt are what the checks
+# in CLAUDE.md ("Standard checks") actually run.
+profile = "minimal"
+components = ["clippy", "rustfmt"]
