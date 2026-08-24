@@ -87,8 +87,10 @@ cargo test            # unit + render tests (must be green)
 cargo clippy --all-targets   # must be clean
 ```
 
-(No CI runs yet; when it lands, gate PRs on `cargo fmt --check` so the tree
-stays formatted.)
+(CI enforces these on every PR — see `.github/workflows/ci.yml`: fmt on ubuntu,
+clippy (`-D warnings`) and tests on both ubuntu and macos, plus a
+`--features local` job and an informational `cargo perf` run on pushes to
+master.)
 
 ## Performance guards (ignored tests)
 

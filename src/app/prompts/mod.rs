@@ -30,9 +30,6 @@ impl App {
         }
     }
 
-    /// Save the current chapter (if dirty), then load `index` as the active
-    /// chapter. The active index and the live buffer always move together here,
-    /// so the two never drift. A no-op if `index` is already active or invalid.
     /// Save the active chapter if it has unsaved edits and refresh its cached
     /// word count. Returns `Err(())` (and sets a status message) if the save
     /// failed, so callers can abort before switching away from it.

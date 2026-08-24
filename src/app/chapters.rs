@@ -7,6 +7,9 @@ use super::App;
 use super::ONLY_CHAPTER_MSG;
 
 impl App {
+    /// Save the current chapter (if dirty), then load `index` as the active
+    /// chapter. The active index and the live buffer always move together here,
+    /// so the two never drift. A no-op if `index` is already active or invalid.
     pub(super) fn activate_chapter(&mut self, index: usize) {
         if index >= self.project.manifest.chapters.len() || index == self.project.active_index() {
             return;
