@@ -55,10 +55,14 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # No toolchain-installing step: rustup reads `rust-toolchain.toml` and
+      # fetches the pinned compiler, so release binaries are built with the same
+      # Rust the CI checks ran against (#1200). Pinning a version here instead
+      # would put it in two places and let the shipped artifact drift from the
+      # tested one. Only the cross-compilation target is per-matrix, so that is
+      # all this step adds.
+      - name: Add the cross-compilation target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
