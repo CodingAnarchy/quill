@@ -710,7 +710,7 @@ fn a_half_title_page_precedes_the_title_page_when_enabled() {
     let before_first = &xml[..first];
     assert!(
         before_first.rfind("<w:pageBreakBefore/>").unwrap()
-            > before_first.rfind("<w:body>").map_or(0, |i| i),
+            > before_first.rfind("<w:body>").unwrap_or(0),
         "the half-title opens a fresh page"
     );
 }

@@ -1,6 +1,5 @@
 //! The history view's type-to-filter (#822): `/` narrows commits by summary and
 //! the diff/restore actions target the filtered selection. Pure move from `vcs.rs`.
-use super::super::*;
 use super::*;
 
 // --- History view: type-to-filter (#822) -----------------------------------

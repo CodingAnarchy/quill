@@ -1,6 +1,5 @@
 //! Git-palette init and the working-tree status: uncommitted counts, the idle
 //! debounce (#779), and the interval-fallback backoff (#869). Pure move from `vcs.rs`.
-use super::super::*;
 use super::*;
 
 #[test]

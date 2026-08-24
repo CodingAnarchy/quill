@@ -1,7 +1,6 @@
 //! Remote configuration and two-way sync (#962/#963): the remote/push/pull/sync
 //! palette gating, per-chapter conflict stashing, the resolution flow (keep local /
 //! take remote / merge / cancel), and dead-worker cause reporting. Pure move.
-use super::super::*;
 use super::*;
 
 #[test]
