@@ -1,7 +1,6 @@
 //! Milestones and whole-project restore/diff (#833/#966): naming a milestone (with
 //! an optional note), listing it in history, editing the note in place, and the
 //! project-wide restore/diff against a commit or milestone. Pure move from `vcs.rs`.
-use super::super::*;
 use super::*;
 
 // --- Milestones + whole-project restore/diff (#833) -------------------------

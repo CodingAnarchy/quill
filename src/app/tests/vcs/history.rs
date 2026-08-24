@@ -1,7 +1,6 @@
 //! Commit history, diff, and restore through the Git palette (#587/#704/#833/#964/
 //! #1013): the history view, per-chapter diff/restore, the pre-commit review, and
 //! the changes/restore actions. Pure move from `vcs.rs`.
-use super::super::*;
 use super::*;
 
 #[test]

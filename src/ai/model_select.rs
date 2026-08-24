@@ -297,7 +297,7 @@ pub const EMBED_MODELS: &[EmbedModel] = &[EmbedModel {
 
 impl EmbedModel {
     /// The default embedding model — the first (and smallest) catalog row.
-    pub fn default_model() -> &'static Self {
+    pub const fn default_model() -> &'static Self {
         &EMBED_MODELS[0]
     }
 
