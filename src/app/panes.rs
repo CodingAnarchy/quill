@@ -142,7 +142,11 @@ impl App {
         }
         match Buffer::from_path(path) {
             Ok(other) => {
-                self.close_split_if_any(); // two panes max — replace any existing split
+                // Two panes max — replace any existing split. Abort if the pane being
+                // replaced wouldn't save (#1188); it keeps its edits and stays open.
+                if self.close_split_if_any().is_err() {
+                    return;
+                }
                 self.split = Some(Split {
                     other: OtherPane::Editor(other),
                     dir,
@@ -166,7 +170,12 @@ impl App {
             self.message = Some("Leave the continuous view (Ctrl-l) to dock a report.".into());
             return;
         }
-        self.close_split_if_any(); // two panes max — replace any existing split
+        // Two panes max — replace any existing split; keep the overlay if the pane
+        // being replaced wouldn't save (#1188), so nothing is dropped on the way.
+        if self.close_split_if_any().is_err() {
+            self.overlay = Some(overlay);
+            return;
+        }
         self.split = Some(Split {
             other: OtherPane::Surface {
                 overlay,
@@ -200,7 +209,10 @@ impl App {
         if self.flush_active().is_err() {
             return;
         }
-        self.close_split_if_any(); // two panes max — replace any existing split
+        // Two panes max — replace any existing split (#1188: not if it wouldn't save).
+        if self.close_split_if_any().is_err() {
+            return;
+        }
         let mut conv = Assistant::new();
         // Open even with AI off so the pane can explain why it's unavailable (#307)
         // rather than failing obscurely; the first request reports the same.
@@ -246,8 +258,15 @@ impl App {
     /// Swap which editor is focused (#163). Flush the leaving pane first, then —
     /// if the now-focused pane shows the same chapter — reload it from disk so two
     /// panes on one chapter accumulate edits rather than clobbering.
+    ///
+    /// A failed flush aborts the swap (#1188): with both panes on one chapter the
+    /// reload below would overwrite the surviving copy with the stale disk text,
+    /// losing the edits the save didn't get out. Staying put keeps them in the
+    /// focused buffer (undo history included) so the author can retry.
     fn swap_editor_panes(&mut self) {
-        let _ = self.flush_active();
+        if self.flush_active().is_err() {
+            return;
+        }
         let other_path = {
             let Some(split) = self.split.as_mut() else {
                 return;
@@ -294,10 +313,11 @@ impl App {
     /// Close the split, keeping the focused editor (an editor pane is flushed
     /// first so its edits aren't lost; a surface is read-only).
     fn close_split(&mut self) {
-        if self.split.is_some() {
-            self.close_focused_pane(false);
+        if self.split.is_some() && self.close_focused_pane(false).is_ok() {
             self.message = Some("Closed the pane.".into());
         }
+        // A failed close left the pane open and reported why (#1188) — don't
+        // overwrite that with a success message.
     }
 
     /// Close the currently focused pane, keeping the other — Vim's `:q`/`Ctrl-w c`
@@ -305,28 +325,34 @@ impl App {
     /// (the focused pane is flushed first, unless `discard`, so its edits persist);
     /// a read-only surface / the assistant can't be a sole view, so closing with one
     /// of those focused just drops it and keeps the editor. A no-op when not split.
-    pub(super) fn close_focused_pane(&mut self, discard: bool) {
+    ///
+    /// Returns `Err(())` (message already set) when a save failed and the close was
+    /// abandoned, so callers don't report success — the pane stays open with its
+    /// edits, like Vim's `E37` on `:q` (#1188). `discard` (`:q!`) still throws the
+    /// focused pane's edits away without attempting a save.
+    pub(super) fn close_focused_pane(&mut self, discard: bool) -> Result<(), ()> {
         let Some(split) = self.split.as_ref() else {
-            return;
+            return Ok(());
         };
         // A docked surface / assistant is never `App::buffer`, so "keep the other"
         // would mean keeping a non-editor as the sole view — instead keep the editor
         // and drop the surface/assistant, exactly as replacing a pane does.
         if !matches!(split.other, OtherPane::Editor(_)) {
-            self.close_split_if_any();
-            return;
+            return self.close_split_if_any();
         }
         // Two editors: discard the focused buffer (flushed so edits persist unless
-        // `discard`) and promote the other editor to the sole focused pane.
-        if !discard {
-            let _ = self.flush_active();
+        // `discard`) and promote the other editor to the sole focused pane. A failed
+        // flush aborts *before* anything is dropped — the buffer we're about to
+        // replace holds the only copy of those edits, undo history and all (#1188).
+        if !discard && self.flush_active().is_err() {
+            return Err(());
         }
         let closed_path = self.buffer.path.clone();
         let Some(split) = self.split.take() else {
-            return;
+            return Ok(());
         };
         let OtherPane::Editor(other) = split.other else {
-            return;
+            return Ok(());
         };
         self.buffer = other;
         // If the closed pane was the project dictionary's edit pane (#935), re-read it
@@ -336,16 +362,33 @@ impl App {
             self.refresh_spell_flags();
         }
         self.sync_active_to_focus();
+        Ok(())
     }
 
-    /// Drop the split, flushing an editor pane. Quiet (no message) — for callers
-    /// that take over the editor region, like the continuous view.
-    pub(super) fn close_split_if_any(&mut self) {
+    /// Drop the split, flushing an editor pane. Quiet on success (no message) — for
+    /// callers that take over the editor region, like the continuous view.
+    ///
+    /// The pane is saved *before* the split is dropped, so a failed save can return
+    /// `Err(())` with the split — and the unsaved edits — still there (#1188). It
+    /// used to be a silent best-effort `let _ = other.save()`, which threw the other
+    /// pane's words away with nothing on screen to say so. Callers abort and report;
+    /// the message is set here.
+    pub(super) fn close_split_if_any(&mut self) -> Result<(), ()> {
+        // Borrow the pane just long enough to save it, so the error message below
+        // isn't fighting the borrow of `self.split`.
+        let save_err = match self.split.as_mut() {
+            Some(Split {
+                other: OtherPane::Editor(other),
+                ..
+            }) if other.dirty => other.save().err(),
+            _ => None,
+        };
+        if let Some(e) = save_err {
+            self.message = Some(format!("Save failed: {e}"));
+            return Err(());
+        }
         if let Some(split) = self.split.take() {
-            if let OtherPane::Editor(mut other) = split.other {
-                if other.dirty {
-                    let _ = other.save(); // best effort; the focused pane is unaffected
-                }
+            if let OtherPane::Editor(other) = split.other {
                 // If this was the project dictionary's own edit pane (#935), re-read
                 // it into the checker so an edit made here — a removed or fixed word —
                 // takes effect right away. Off the idle path: only on this close.
@@ -357,6 +400,7 @@ impl App {
             // A surface is read-only and the assistant's conversation lives in the
             // variant, so both drop with the split — nothing else to clean up.
         }
+        Ok(())
     }
 
     /// Resize the split (#166): move the boundary so the focused pane grows or

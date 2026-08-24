@@ -25,7 +25,11 @@ impl App {
         if self.flush_active().is_err() {
             return;
         }
-        self.close_split_if_any(); // the continuous view and a split can't share the editor (#163)
+        // The continuous view and a split can't share the editor (#163); stay in the
+        // single-chapter view if the other pane wouldn't save (#1188).
+        if self.close_split_if_any().is_err() {
+            return;
+        }
         match Manuscript::open(&self.project) {
             Ok(m) => {
                 self.manuscript = Some(m);

@@ -2,6 +2,7 @@
 //! resize, and narrow-terminal collapse.
 
 use super::*;
+use crate::atomic::fail_point;
 use crate::ui::render_to_string as screen;
 use std::fs;
 
@@ -678,4 +679,191 @@ fn editing_a_reference_pane_does_not_corrupt_the_chapter_word_cache() {
         one_words,
         "chapter One's cached count is untouched"
     );
+}
+
+// --- A failed save never discards the author's edits (#1188) ---------------
+
+/// The words each failing-save test types into the focused pane. They live only
+/// in that buffer, so anything that drops it loses them from disk *and* memory.
+const PRECIOUS: &str = "PRECIOUS-WORDS";
+
+/// A split with the panes on different chapters — "One" focused with an unsaved
+/// edit, "Two" beside it.
+fn split_with_an_unsaved_edit(name: &str) -> (App, TempProject) {
+    let (mut app, dir) = two_chapter_app(name); // both panes start on "One"
+    window_cmd(&mut app, 'v');
+    window_cmd(&mut app, 'w'); // focus the other pane
+    app.on_key(ctrl('n')); // other pane → "Two"
+    window_cmd(&mut app, 'w'); // back to the first pane ("One")
+    type_str(&mut app, PRECIOUS);
+    assert_eq!(other_pane_title(&app), "Two", "panes on different chapters");
+    (app, dir)
+}
+
+/// The status message, or "" when there is none.
+fn message(app: &App) -> &str {
+    app.message.as_deref().unwrap_or("")
+}
+
+#[test]
+fn ctrl_w_c_keeps_the_pane_and_the_edits_when_the_save_fails() {
+    let (mut app, dir) = split_with_an_unsaved_edit("close-fail");
+    fail_point::arm_pre_rename_failure();
+    window_cmd(&mut app, 'c'); // Ctrl-w c
+
+    assert!(app.split_view().is_some(), "the pane stayed open");
+    assert!(
+        app.buffer.text().contains(PRECIOUS),
+        "the edit is still in the buffer: {:?}",
+        app.buffer.text()
+    );
+    assert!(app.buffer.dirty, "and still unsaved");
+    assert!(
+        message(&app).contains("Save failed"),
+        "the failure reached the author, not a success message: {:?}",
+        app.message
+    );
+
+    // …and the author can retry: the second close saves and closes for real.
+    window_cmd(&mut app, 'c');
+    assert!(app.split_view().is_none(), "the retry closed the pane");
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(one.contains(PRECIOUS), "the retry wrote the edit: {one:?}");
+}
+
+#[test]
+fn colon_q_keeps_the_pane_and_the_edits_when_the_save_fails() {
+    let (mut app, dir) = split_with_an_unsaved_edit("q-fail");
+    fail_point::arm_pre_rename_failure();
+    ex(&mut app, "q");
+
+    assert!(app.split_view().is_some(), "the pane stayed open");
+    assert!(
+        app.buffer.text().contains(PRECIOUS),
+        "the edit is still in the buffer: {:?}",
+        app.buffer.text()
+    );
+    assert!(!app.should_quit, ":q in a split never quits the app");
+    assert!(
+        message(&app).contains("Save failed"),
+        "message: {:?}",
+        app.message
+    );
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(!one.contains(PRECIOUS), "nothing was written: {one:?}");
+}
+
+#[test]
+fn colon_q_bang_still_discards_the_pane_after_a_failed_save() {
+    let (mut app, dir) = split_with_an_unsaved_edit("q-bang-discard");
+    fail_point::arm_pre_rename_failure();
+    ex(&mut app, "q"); // refused — the save failed
+    assert!(app.split_view().is_some());
+
+    ex(&mut app, "q!"); // deliberate discard
+    assert!(app.split_view().is_none(), ":q! closed the pane");
+    assert!(
+        !app.should_quit,
+        ":q! in a split closes the pane, not the app"
+    );
+    assert_eq!(
+        app.buffer.path.as_deref(),
+        Some(dir.join("two.md").as_path()),
+        "the surviving pane is the sibling chapter"
+    );
+    assert!(
+        !app.buffer.text().contains(PRECIOUS),
+        "the discarded edit is gone, as asked"
+    );
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(!one.contains(PRECIOUS), "and was never written: {one:?}");
+}
+
+#[test]
+fn colon_q_bang_does_not_attempt_a_save() {
+    let (mut app, _dir) = split_with_an_unsaved_edit("q-bang-no-save");
+    fail_point::arm_pre_rename_failure();
+    ex(&mut app, "q!");
+    assert!(app.split_view().is_none(), ":q! closed the pane");
+    // The one-shot arming is only consumed by a write, so it still standing proves
+    // `:q!` discarded without attempting a save — a bad disk can't foil a discard.
+    assert!(
+        fail_point::should_fail_before_rename(),
+        ":q! discarded without attempting a save"
+    );
+}
+
+#[test]
+fn swapping_panes_on_one_chapter_keeps_the_edits_when_the_save_fails() {
+    // Both panes on "One": the swap reloads the now-focused pane from disk, which
+    // is what used to overwrite the only copy of the edit with the stale file.
+    let (mut app, dir) = two_chapter_app("swap-fail");
+    window_cmd(&mut app, 'v');
+    type_str(&mut app, PRECIOUS);
+    fail_point::arm_pre_rename_failure();
+    window_cmd(&mut app, 'w'); // Ctrl-w w
+
+    assert!(app.split_view().is_some(), "still split");
+    assert!(
+        app.buffer.text().contains(PRECIOUS),
+        "the edit survived the aborted swap: {:?}",
+        app.buffer.text()
+    );
+    assert!(
+        message(&app).contains("Save failed"),
+        "message: {:?}",
+        app.message
+    );
+
+    // The retry flushes and swaps, so the words reach disk and both panes see them.
+    window_cmd(&mut app, 'w');
+    let one = fs::read_to_string(dir.join("one.md")).unwrap();
+    assert!(one.contains(PRECIOUS), "the retry wrote the edit: {one:?}");
+    assert!(
+        app.buffer.text().contains(PRECIOUS),
+        "the swapped-in pane reloaded the saved text: {:?}",
+        app.buffer.text()
+    );
+}
+
+#[test]
+fn entering_the_continuous_view_reports_a_failed_save_of_the_other_pane() {
+    let (mut app, dir) = split_with_an_unsaved_edit("cont-other-fail");
+    app.on_key(ctrl('s')); // the focused pane is clean; only the sibling is at risk
+
+    // Dirty the *non-focused* pane. Every app flow that leaves a pane now aborts on
+    // a failed save, so typing can't reach this state any more — but dropping the
+    // split is the last net under the other pane's words, so it's tested.
+    let Some(Split {
+        other: OtherPane::Editor(other),
+        ..
+    }) = app.split.as_mut()
+    else {
+        panic!("expected two editor panes");
+    };
+    other.insert_char('Z');
+    fail_point::arm_pre_rename_failure();
+
+    app.on_key(ctrl('l')); // enter the continuous view — it drops the split
+    assert!(
+        app.manuscript.is_none(),
+        "stayed in the single-chapter view rather than dropping the pane"
+    );
+    assert!(
+        app.split_view().is_some(),
+        "the pane (and its edit) is intact"
+    );
+    assert!(
+        message(&app).contains("Save failed"),
+        "the failure is reported, not swallowed: {:?}",
+        app.message
+    );
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(!two.contains('Z'), "nothing was written: {two:?}");
+
+    // Retry: the pane saves and the continuous view opens.
+    app.on_key(ctrl('l'));
+    assert!(app.manuscript.is_some(), "the retry entered the view");
+    let two = fs::read_to_string(dir.join("two.md")).unwrap();
+    assert!(two.contains('Z'), "the pane's edit reached disk: {two:?}");
 }
