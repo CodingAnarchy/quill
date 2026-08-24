@@ -29,7 +29,9 @@ impl App {
             // no split does it quit — prompting on unsaved changes, like Ctrl-Q.
             "q" => {
                 if self.split.is_some() {
-                    self.close_focused_pane(false);
+                    // A failed save leaves the pane open with its edits and reports
+                    // why (#1188), like Vim's E37 — `:q!` is how you discard.
+                    let _ = self.close_focused_pane(false);
                 } else {
                     self.request_quit();
                 }
@@ -40,7 +42,7 @@ impl App {
                 self.save_edit();
                 if !self.edit_dirty() {
                     if self.split.is_some() {
-                        self.close_focused_pane(false);
+                        let _ = self.close_focused_pane(false); // already saved above
                     } else {
                         self.should_quit = true;
                     }
@@ -48,7 +50,7 @@ impl App {
             }
             "q!" => {
                 if self.split.is_some() {
-                    self.close_focused_pane(true); // discard the focused pane's edits
+                    let _ = self.close_focused_pane(true); // discard the focused pane's edits
                 } else {
                     self.clear_recovery(); // explicit discard — don't re-offer next launch (#263)
                     self.should_quit = true;
