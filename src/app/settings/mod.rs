@@ -22,6 +22,7 @@ use crate::mode::{
 };
 use crate::project::{read_existing, Project};
 use crate::theme::{Theme, COLOR_FIELDS, THEME_NAMES};
+use ratatui::style::Color;
 
 /// Guidance shown when an author tries to set analysis stopwords on a multi-book
 /// series (#1105). A series manifest carries no per-book `[analysis]`, so the
@@ -532,8 +533,7 @@ fn strip_config_field(section: &str, field: &str) -> std::io::Result<()> {
 /// A short, config-like description of a `Color` for the theme-color menu (#1109):
 /// `#rrggbb` for an RGB color, the palette index for an indexed one, else the
 /// ANSI name lowercased (`Cyan` → `cyan`) so it reads like a value you could type.
-fn describe_color(color: ratatui::style::Color) -> String {
-    use ratatui::style::Color;
+fn describe_color(color: Color) -> String {
     match color {
         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
         Color::Indexed(i) => i.to_string(),
