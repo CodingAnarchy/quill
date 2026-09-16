@@ -80,9 +80,10 @@ pub enum Action {
     SetGoals,
     /// Refresh the whole series' story bible, book by book (#340).
     RefreshSeriesBible,
-    /// Refresh all four story bibles (characters, continuity, setting, plot) in one
-    /// batch — one combined cost estimate/confirm and combined progress, over every
-    /// book of a series (#655).
+    /// Refresh the story bible (characters, continuity, setting, plot, theme) —
+    /// the one visible suite action. Opens a picker for run-now vs queue
+    /// (resumable, optional background batch). Workflows that invoke this slug skip
+    /// the picker and run now.
     RefreshBibles,
     /// Queue the whole bible suite as a durable, resumable run (#923): the five
     /// trackers over every book, one aggregate cost confirm, per-pass progress, and
@@ -341,9 +342,6 @@ impl Action {
         Self::Ai(AiAction::FactCheck),
         Self::Ai(AiAction::Pacing),
         Self::RefreshBibles,
-        Self::QueuePasses,
-        Self::BackgroundBibleUpdate,
-        Self::RefreshSeriesBible,
         Self::DescribeConfig,
         Self::SwitchBackend,
         Self::ManageModels,
@@ -599,7 +597,7 @@ impl Action {
             Self::BookDetails => "Book details…",
             Self::SetGoals => "Set writing goals",
             Self::RefreshSeriesBible => "Refresh series bible",
-            Self::RefreshBibles => "Refresh all bibles",
+            Self::RefreshBibles => "Refresh story bible",
             Self::QueuePasses => "Queue bible passes (resumable)",
             Self::BackgroundBibleUpdate => "Queue a background bible update (batch, ~24h)",
             Self::ProjectFind => "Find across manuscript",
@@ -704,26 +702,48 @@ impl Action {
     }
 
     /// Look up an action by its stable [`name`](Action::name) — the resolver a
-    /// workflow (#226) uses to turn a config step token into an action.
+    /// workflow (#226) uses to turn a config step token into an action. The
+    /// bible-suite aliases (`bible:series`, `bible:queue`,
+    /// `bible:background-update`) stay resolvable after those actions left the
+    /// visible registry, so existing workflows keep working.
     pub(crate) fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|a| a.name() == name)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|a| a.name() == name)
+            .or(match name {
+                "bible:series" => Some(Self::RefreshSeriesBible),
+                "bible:queue" => Some(Self::QueuePasses),
+                "bible:background-update" => Some(Self::BackgroundBibleUpdate),
+                _ => None,
+            })
     }
 
     /// Whether this action completes synchronously, so a workflow (#226) can run
-    /// it and move straight to the next step. The network AI passes are async
-    /// (workflow support is #227) and "Ask" waits for typed input; `triage` is
-    /// local aggregation, so it counts as synchronous.
+    /// it and move straight to the next step. AI passes that hit a backend (or
+    /// wait for typed input) are async; local aggregation views
+    /// ([`AiAction::is_local_view`]) finish in the call, so they count as
+    /// synchronous. Derived from SPECS' local-view set rather than a parallel list.
     pub(crate) const fn is_sync(self) -> bool {
         match self {
-            // Local, no network request — like Triage, these run synchronously.
-            Self::Ai(
-                AiAction::Triage
-                | AiAction::Dashboard
-                | AiAction::CoOccurrence
-                | AiAction::AskHistory,
-            ) => true,
-            Self::Ai(_) => false,
+            Self::Ai(a) => a.is_local_view(),
             _ => true,
+        }
+    }
+
+    /// Whether this action needs the text-AI backend — and so the in-app enable
+    /// on-ramp when AI is off (#602). AI passes derive this from
+    /// [`AiAction::needs_backend`]; the bible-suite / describe-config actions are
+    /// the non-`Ai` ones that still spawn a backend request.
+    pub(crate) const fn needs_ai_backend(self) -> bool {
+        match self {
+            Self::Ai(a) => a.needs_backend(),
+            Self::RefreshSeriesBible
+            | Self::RefreshBibles
+            | Self::QueuePasses
+            | Self::BackgroundBibleUpdate
+            | Self::DescribeConfig => true,
+            _ => false,
         }
     }
 

@@ -253,13 +253,7 @@ fn a_full_rebuild_estimates_the_standard_rate_not_the_batch_discount() {
     // async with no latency SLA, is reserved for a future opt-in background update),
     // so the confirm estimate quotes the full standard rate with no discount.
     // `two_chapter_app` defaults to the Claude backend.
-    const TRACKERS: [AiAction; 5] = [
-        AiAction::Characters,
-        AiAction::Continuity,
-        AiAction::Setting,
-        AiAction::Plot,
-        AiAction::Theme,
-    ];
+    const TRACKERS: [AiAction; 5] = AiAction::BIBLE_TRACKERS;
     let (app, _dir) = two_chapter_app("full-rebuild-standard-rate");
     assert_eq!(app.ai.backend(), ai::BackendKind::Claude);
 

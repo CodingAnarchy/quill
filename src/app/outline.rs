@@ -23,7 +23,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::folds::section_end_byte;
 use super::App;
-use crate::mode::Mode;
+use crate::mode::{on_filter_key, FilterInput, Mode};
 use crate::syntax::Heading;
 
 impl App {
@@ -162,19 +162,15 @@ impl App {
     /// matches, Enter/Esc leave input — keeping the filter so the pane's commands
     /// act on the narrowed set (a second Esc, in command mode, clears it).
     fn on_key_outline_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_outline_typing(false),
-            KeyCode::Up => {
-                let s = self.outline_step(false);
+        match on_filter_key(key, true) {
+            Some(FilterInput::Leave) => self.set_outline_typing(false),
+            Some(FilterInput::Step(down)) => {
+                let s = self.outline_step(down);
                 self.set_outline_selected(s);
             }
-            KeyCode::Down => {
-                let s = self.outline_step(true);
-                self.set_outline_selected(s);
-            }
-            KeyCode::Backspace => self.outline_filter_pop(),
-            KeyCode::Char(c) => self.outline_filter_push(c),
-            _ => {}
+            Some(FilterInput::Pop) => self.outline_filter_pop(),
+            Some(FilterInput::Push(c)) => self.outline_filter_push(c),
+            Some(FilterInput::Enter) | None => {}
         }
     }
 

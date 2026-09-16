@@ -13,17 +13,6 @@ use super::*;
 use crate::ai::cost::{self, Estimate};
 use crate::mode::AiAction;
 
-/// The bible trackers a series refresh runs, each accumulated across the books in
-/// reading order. The bibles are independent, so the order between trackers is
-/// free; within a tracker the books must go in order so each builds on the last.
-const TRACKERS: [AiAction; 5] = [
-    AiAction::Characters,
-    AiAction::Continuity,
-    AiAction::Setting,
-    AiAction::Plot,
-    AiAction::Theme,
-];
-
 /// A series-bible refresh in progress (#340): the queue of `(tracker, book)`
 /// passes in order, plus the shared sequenced-run bookkeeping (#344). Lives in
 /// `App::series_bible_run` for the run's lifetime.
@@ -85,6 +74,46 @@ impl Sequenced for SeriesBibleDriver {
 }
 
 impl App {
+    /// Open the now / queue / batch picker for the one "Refresh story bible"
+    /// action. Batch is listed only when the background-batch opt-in is on and
+    /// Claude is ready. `force` rebuilds every bible from the whole manuscript.
+    pub(crate) fn open_bible_refresh_picker(&mut self, force: bool) {
+        let mut items = vec![
+            PaletteItem::new(
+                "Run now",
+                "Interactive: progress in the status bar; Esc cancels after this pass",
+                Command::BibleRefresh {
+                    mode: BibleRefreshMode::Now,
+                    force,
+                },
+            ),
+            PaletteItem::new(
+                "Queue (resumable)",
+                "Crash-safe: writes bible/.queue.toml and resumes on the next launch",
+                Command::BibleRefresh {
+                    mode: BibleRefreshMode::Queue,
+                    force,
+                },
+            ),
+        ];
+        if self.batch_update_status().is_ok() {
+            items.push(PaletteItem::new(
+                "Queue as background batch",
+                "Half price via Claude's Batch API; results land later (up to ~24h)",
+                Command::BibleRefresh {
+                    mode: BibleRefreshMode::Batch,
+                    force,
+                },
+            ));
+        }
+        self.mode = Mode::Palette(Box::new(Palette {
+            title: "Refresh story bible: pick how to run",
+            items,
+            selected: 0,
+            collapsed: std::collections::HashSet::default(),
+        }));
+    }
+
     /// Start a series-bible refresh (#340): enqueue each tracker × book in reading
     /// order and run the first. A no-op (with a message) for a standalone novel or
     /// when a run is already going. (Availability is also gated by `action_status`.)
@@ -114,7 +143,7 @@ impl App {
     /// book.
     fn bible_refresh_queue(&self) -> Vec<(AiAction, usize)> {
         let books = self.project.book_count();
-        TRACKERS
+        AiAction::BIBLE_TRACKERS
             .iter()
             .flat_map(|&t| (0..books).map(move |b| (t, b)))
             .collect()
@@ -146,7 +175,7 @@ impl App {
         // exceeds the author's threshold, mirroring the single-pass cost policy.
         if est.dollars > self.ai.cost_threshold {
             let label = format!(
-                "Refresh all bibles — {} — run? (y/N)",
+                "Refresh story bible — {} — run? (y/N)",
                 cost::label(&est, &self.ai.model)
             );
             self.open_prompt(Pending::ConfirmRefreshBibles { force }, label, "", None);

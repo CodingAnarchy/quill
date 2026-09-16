@@ -19,8 +19,8 @@ mod registry;
 
 pub use ai::{AiAction, AiCost, ModelWeight};
 pub use command::{
-    Command, FontTarget, PortraitChoice, SettingBool, SettingPicker, SettingTextKnob, StylePicker,
-    StyleTextKnob,
+    BibleRefreshMode, Command, FontTarget, PortraitChoice, SettingBool, SettingPicker,
+    SettingTextKnob, StylePicker, StyleTextKnob,
 };
 pub use palette::PaletteRow;
 pub use palette::{Palette, PaletteItem};

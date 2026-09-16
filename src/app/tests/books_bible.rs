@@ -300,7 +300,7 @@ fn one_confirm_gates_the_whole_batch_then_seeds_every_pass() {
                 matches!(s.pending, Pending::ConfirmRefreshBibles { .. }),
                 "the single combined confirm opens"
             );
-            assert!(s.label.contains("Refresh all bibles"), "{}", s.label);
+            assert!(s.label.contains("Refresh story bible"), "{}", s.label);
         }
         _ => panic!("expected the combined cost confirm"),
     }

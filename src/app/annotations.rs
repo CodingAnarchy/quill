@@ -15,7 +15,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::App;
 use crate::annotation::{Live, Remapper, Reply};
-use crate::mode::{JumpPos, Mode, Pending};
+use crate::mode::{on_filter_key, FilterInput, JumpPos, Mode, Pending};
 
 impl App {
     /// Reconcile annotations with the buffer on the idle tick (#302/#370): reload
@@ -480,19 +480,15 @@ impl App {
     /// list's commands act on the narrowed set (a second Esc, in command mode,
     /// clears it).
     fn on_key_annotations_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_annotations_typing(false),
-            KeyCode::Up => {
-                let s = self.annotation_step(false);
+        match on_filter_key(key, true) {
+            Some(FilterInput::Leave) => self.set_annotations_typing(false),
+            Some(FilterInput::Step(down)) => {
+                let s = self.annotation_step(down);
                 self.set_annotations_selected(s);
             }
-            KeyCode::Down => {
-                let s = self.annotation_step(true);
-                self.set_annotations_selected(s);
-            }
-            KeyCode::Backspace => self.annotation_filter_pop(),
-            KeyCode::Char(c) => self.annotation_filter_push(c),
-            _ => {}
+            Some(FilterInput::Pop) => self.annotation_filter_pop(),
+            Some(FilterInput::Push(c)) => self.annotation_filter_push(c),
+            Some(FilterInput::Enter) | None => {}
         }
     }
 

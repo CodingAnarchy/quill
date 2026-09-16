@@ -544,12 +544,10 @@ so a tracked fact traces back to a source you control.
 
 Each pass runs off the editor thread, so the editor never freezes, and a pass
 that would cost more than your threshold asks before spending. Passes route to
-the right-sized cloud model per action, you can run several as a durable queue
-that resumes where it left off after a restart, and — opt-in — a background
-bible update rebuilds the bibles from the full manuscript through Claude's
-asynchronous Batch API (about 50% cheaper), returning immediately and
-reconciling the result on a later launch (set [ai] background-batch-update; off
-by default).
+the right-sized cloud model per action. **Refresh story bible** (Ctrl-K) is the
+one suite action: pick **Run now**, **Queue (resumable)** (survives a restart),
+or — with `[ai] background-batch-update` on — **Queue as background batch**
+(Claude's Batch API, about 50% cheaper, results land later).
 
 Your API key is kept in the OS keychain, not in plaintext in your config file, so
 a synced dotfile or a backup of the config never carries it. Run "Set Claude API
@@ -568,11 +566,11 @@ common; 8 results") if you like — and returns candidate words or short phrases
 with definitions, using the current line only to judge fit. It hands you options
 to choose from; it never rewrites your sentence.
 
-Want an editor's read? "Editorial read" flags issues across three lenses —
-structural (pacing, stakes), continuity (contradictions between chapters), and
-line (grammar, usage, typos) — into the revision-triage list, each tagged by
-lens. It points out what to look at; it never suggests the fix or rewrites your
-prose — you decide what to change.
+Want an editor's read? "Editorial read" flags line-level issues (grammar, usage,
+typos, awkward constructions) into the revision-triage list, each with a quoted
+span so you can find it. Structural and continuity notes live on those dedicated
+passes. It points out what to look at; it never suggests the fix or rewrites
+your prose — you decide what to change.
 
 Already have notes? "Import notes" (in the Ctrl-K menu) takes a Markdown file —
 or a folder of them — preserves the original under bible/sources/, and folds
@@ -581,13 +579,13 @@ outline) into the matching bible documents in Quill's format. To start from
 scratch, "New project from a folder of notes" creates a project and imports the
 folder in one step.
 
-Writing a series? "Refresh series bible" (in the Ctrl-K menu, for multi-book
-projects) brings the characters, timeline, and setting up to date across every
-book — one book at a time, in reading order, so the bible spans the whole series.
-Only changed books re-run, progress shows per book, and Esc cancels. Because each
-book is checked against the running bible, the timeline and setting findings catch
-cross-book contradictions too; they land in Revision triage tagged with their
-book, and jumping to one switches books for you.
+Writing a series? "Refresh story bible" (Ctrl-K) brings the characters, timeline,
+setting, plot, and theme up to date across every book — one book at a time, in
+reading order, so the bible spans the whole series. Pick run-now or a resumable
+queue. Only changed books re-run, progress shows per book, and Esc cancels.
+Because each book is checked against the running bible, the timeline and setting
+findings catch cross-book contradictions too; they land in Revision triage tagged
+with their book, and jumping to one switches books for you.
 
 
 ACTIONS & WORKFLOWS

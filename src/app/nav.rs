@@ -270,26 +270,22 @@ impl App {
     /// leaves input — keeping the filter so the browser's commands act on the
     /// narrowed list (a second Esc, in command mode, clears it).
     fn on_key_nav_filter(&mut self, key: KeyEvent, sel: usize) {
-        match key.code {
-            KeyCode::Esc => self.set_nav_typing(false),
-            KeyCode::Enter => {
+        match on_filter_key(key, false) {
+            Some(FilterInput::Leave) => self.set_nav_typing(false),
+            Some(FilterInput::Enter) => {
                 if self.nav_chapter_matches(sel, &self.nav_query()) {
                     self.activate_chapter(sel);
                     self.browser_opened_outline = false;
                     self.mode = self.editing_mode();
                 }
             }
-            KeyCode::Up => {
-                let s = self.nav_step(sel, false);
+            Some(FilterInput::Step(down)) => {
+                let s = self.nav_step(sel, down);
                 self.select(s);
             }
-            KeyCode::Down => {
-                let s = self.nav_step(sel, true);
-                self.select(s);
-            }
-            KeyCode::Backspace => self.nav_filter_pop(),
-            KeyCode::Char(c) => self.nav_filter_push(c),
-            _ => {}
+            Some(FilterInput::Pop) => self.nav_filter_pop(),
+            Some(FilterInput::Push(c)) => self.nav_filter_push(c),
+            None => {}
         }
     }
 

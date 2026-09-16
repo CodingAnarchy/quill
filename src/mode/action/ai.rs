@@ -69,7 +69,8 @@ pub enum AiAction {
     /// Name generator — candidate character / place / term names by constraints,
     /// an option-list lookup the author picks from (#610).
     NameGen,
-    /// Editorial read — flag structural / continuity / line issues, no fixes (#293).
+    /// Editorial read — flag line-level issues (grammar, usage, awkwardness), no
+    /// fixes (#293). Structural and continuity work belong to the dedicated passes.
     Editorial,
     /// Cultural & historical accuracy — author-invoked, per a named concern (#973):
     /// flag passages that read as factually / period / culturally INACCURATE for the
@@ -589,10 +590,10 @@ impl AiAction {
             "ai:editorial",
             ModelWeight::Heavy,
             FindingKind::Editorial,
-            "AI · Editorial read (flags, no fixes)",
+            "AI · Editorial read (line flags, no fixes)",
             (
                 "Editorial read",
-                "Flag structural / continuity / line issues — no fixes",
+                "Flag grammar, usage, and awkward constructions — no fixes",
             ),
             None,
         ),
@@ -658,6 +659,17 @@ impl AiAction {
             ),
             None,
         ),
+    ];
+
+    /// The persistent story-bible trackers a suite refresh runs, in a stable
+    /// order. Shared by the interactive refresh, the durable queue, and the
+    /// background batch so those three paths cannot drift.
+    pub(crate) const BIBLE_TRACKERS: [Self; 5] = [
+        Self::Characters,
+        Self::Continuity,
+        Self::Setting,
+        Self::Plot,
+        Self::Theme,
     ];
 
     /// This action's descriptor — its single source of every derivable fact.
@@ -740,6 +752,33 @@ impl AiAction {
     pub(crate) fn finding_kind(self) -> FindingKind {
         self.spec().finding_kind
     }
+
+    /// Local aggregation views that issue no backend request: they work with the
+    /// text-AI backend off (browsing already-collected findings / past answers).
+    /// The enable on-ramp (#602), [`Action::is_sync`](super::Action::is_sync), and
+    /// the run-action availability check all derive from this, so a new local view
+    /// joins them here instead of patching a third allowlist.
+    pub(crate) const fn is_local_view(self) -> bool {
+        matches!(
+            self,
+            Self::Triage | Self::Dashboard | Self::CoOccurrence | Self::AskHistory
+        )
+    }
+
+    /// Image passes (#238/#239) carry their own `[image]` opt-in and key, so they
+    /// never go through the text-AI enable on-ramp.
+    pub(crate) const fn is_image(self) -> bool {
+        matches!(self, Self::Portrait | Self::Scene)
+    }
+
+    /// Whether this action needs the text-AI backend — and so the in-app enable
+    /// on-ramp when AI is off (#602). Local views and image passes don't; every
+    /// other pass does (bible trackers, analysis, lookups, on-device embedding
+    /// scans). A new analysis pass defaults to `true` rather than having to join a
+    /// hand-maintained include list.
+    pub(crate) const fn needs_backend(self) -> bool {
+        !self.is_local_view() && !self.is_image()
+    }
 }
 
 #[cfg(test)]
@@ -811,5 +850,49 @@ mod tests {
             AiAction::SPECS.len(),
             ALL_ACTIONS.len(),
         );
+    }
+
+    /// A costed or bible-keyed pass must hit the enable on-ramp; local views and
+    /// image passes must not. Guards the Plot/Theme-class of drift: those two were
+    /// missing from a hand-maintained include list even though SPECS already
+    /// described them as bible trackers.
+    #[test]
+    fn backend_need_follows_specs_minus_local_views_and_images() {
+        use super::AiCost;
+
+        for spec in AiAction::SPECS {
+            let action = spec.action;
+            if action.is_local_view() || action.is_image() {
+                assert!(
+                    !action.needs_backend(),
+                    "{action:?} is a local view or image pass but needs_backend is true",
+                );
+                continue;
+            }
+            assert!(
+                action.needs_backend(),
+                "{action:?} is neither a local view nor an image pass — it must \
+                 hit the enable on-ramp so a new SPECS row can't silently skip it",
+            );
+            if spec.cost != AiCost::None || spec.bible_key.is_some() {
+                assert!(
+                    !action.is_local_view() && !action.is_image(),
+                    "{action:?} is costed or bible-keyed but classified as local/image",
+                );
+            }
+        }
+        // The previously-drifted actions: bible trackers and local-embedding scans
+        // that SPECS already listed, but the old include-match omitted.
+        for action in [
+            AiAction::Plot,
+            AiAction::Theme,
+            AiAction::SemanticFind,
+            AiAction::Echo,
+        ] {
+            assert!(
+                action.needs_backend(),
+                "{action:?} must hit the enable on-ramp",
+            );
+        }
     }
 }

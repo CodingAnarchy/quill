@@ -126,7 +126,7 @@ impl App {
         // Esc cancels it — cleanly, after the current step finishes (#344). Only in
         // an editing mode: a prompt or palette owns Esc itself (a cost-confirm
         // cancels there).
-        if (self.sequenced_run_active() || self.pass_queue_running())
+        if self.sequenced_run_active()
             && key.code == KeyCode::Esc
             && matches!(self.mode, Mode::Insert | Mode::Normal | Mode::Visual { .. })
         {

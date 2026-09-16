@@ -20,16 +20,6 @@ use crate::ai::cost::{self, Estimate};
 use crate::ai::incremental::{PassQueue, QueuedPass};
 use crate::mode::AiAction;
 
-/// The bible trackers a queue run refreshes, each accumulated across the books in
-/// reading order — the same suite the all-bibles refresh runs (#655), but durable.
-const TRACKERS: [AiAction; 5] = [
-    AiAction::Characters,
-    AiAction::Continuity,
-    AiAction::Setting,
-    AiAction::Plot,
-    AiAction::Theme,
-];
-
 /// A durable multi-pass queue run in progress (#923): the persisted queue (its
 /// passes and completed cursor), the shared sequenced-run bookkeeping (#344), and
 /// the triage length when the run started so the summary can report new findings.
@@ -156,7 +146,7 @@ impl App {
     /// Whether any sequenced run (a workflow, the series refresh, or a pass queue)
     /// is already in flight — the shared "only one run at a time" gate.
     const fn a_run_is_active(&self) -> bool {
-        self.sequenced_run_active() || self.pass_queue_run.is_some()
+        self.sequenced_run_active()
     }
 
     /// The `(action, book)` passes a queue run covers — each of the five bible
@@ -165,7 +155,7 @@ impl App {
     /// one book. Stored as slugs in the durable queue.
     fn pass_queue_plan(&self) -> Vec<QueuedPass> {
         let books = self.project.book_count();
-        TRACKERS
+        AiAction::BIBLE_TRACKERS
             .iter()
             .flat_map(|&t| (0..books).map(move |b| (t, b)))
             .map(|(t, book)| QueuedPass {

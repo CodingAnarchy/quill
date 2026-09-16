@@ -32,16 +32,6 @@ use crate::ai::incremental::Digests;
 use crate::ai::{BatchStatus, Request};
 use crate::mode::AiAction;
 
-/// The bible trackers a background update rebuilds — the same suite the all-bibles
-/// refresh (#655) and the pass queue (#923) cover, but through the batch endpoint.
-const TRACKERS: [AiAction; 5] = [
-    AiAction::Characters,
-    AiAction::Continuity,
-    AiAction::Setting,
-    AiAction::Plot,
-    AiAction::Theme,
-];
-
 /// A single background-batch job's spec, assembled on the UI thread and handed to
 /// the worker: which tracker pass over which book, the request to run, and the
 /// manuscript digests it's built against (the staleness baseline).
@@ -207,7 +197,7 @@ impl App {
         already: &std::collections::BTreeSet<(String, usize)>,
     ) -> Vec<BatchJob> {
         let books = self.project.book_count();
-        TRACKERS
+        AiAction::BIBLE_TRACKERS
             .iter()
             .flat_map(|&t| (0..books).map(move |b| (t, b)))
             .filter(|(t, book)| !already.contains(&(t.slug().to_string(), *book)))

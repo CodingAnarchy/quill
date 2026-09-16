@@ -10,7 +10,7 @@ use ratatui::text::Line;
 use crate::atomic;
 use crate::buffer::Buffer;
 use crate::frontmatter;
-use crate::mode::{Finding, Findings, Mode};
+use crate::mode::{on_filter_key, FilterInput, Finding, Findings, Mode};
 use crate::project::read_existing;
 use crate::text::count_matches;
 
@@ -216,19 +216,15 @@ impl App {
     /// overlay's commands act on the narrowed list (a second Esc, in command mode,
     /// clears it).
     fn on_key_findings_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_findings_typing(false),
-            KeyCode::Up => {
-                let s = self.findings_step(false);
+        match on_filter_key(key, true) {
+            Some(FilterInput::Leave) => self.set_findings_typing(false),
+            Some(FilterInput::Step(down)) => {
+                let s = self.findings_step(down);
                 self.set_findings_selected(s);
             }
-            KeyCode::Down => {
-                let s = self.findings_step(true);
-                self.set_findings_selected(s);
-            }
-            KeyCode::Backspace => self.findings_filter_pop(),
-            KeyCode::Char(c) => self.findings_filter_push(c),
-            _ => {}
+            Some(FilterInput::Pop) => self.findings_filter_pop(),
+            Some(FilterInput::Push(c)) => self.findings_filter_push(c),
+            Some(FilterInput::Enter) | None => {}
         }
     }
 

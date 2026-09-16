@@ -341,15 +341,14 @@ The palette actions:
 - **Prose & style** (#79) — *semantic* findings (POV / tense consistency, voice
   drift, context-aware repeated phrasing); analysis only, no rewrites. Frequency
   metrics (crutch words, etc.) are the local-analysis report's job (#70).
-- **Editorial read** (#293) — a holistic editor's read across three lenses —
-  **structural** (pacing, stakes, a sagging middle), **continuity**
-  (contradictions across chapters), and **line** (grammar, usage, typos,
-  awkwardness) — surfaced as located, plain-language flags in the revision-triage
-  list, each tagged by lens (and line issues quoting the span). It *only points
-  out* issues: never a fix, a corrected sentence, or replacement prose — the
-  author decides what to change. The analysis category of the assistant-not-
-  co-writer rule, taken to its sharpest: advice you accept or ignore, not prose to
-  adopt.
+- **Editorial read** (#293) — a line-level editor's read: grammar, usage,
+  agreement, tense slips, typos, and genuinely awkward constructions, each with a
+  verbatim quote so you can find the span. Structural and continuity observations
+  belong to those dedicated passes (and to pacing / plot / scaffold). It *only
+  points out* issues: never a fix, a corrected sentence, or replacement prose —
+  the author decides what to change. The analysis category of the
+  assistant-not-co-writer rule, taken to its sharpest: advice you accept or
+  ignore, not prose to adopt.
 - **Cultural & historical accuracy** (#973) — an **author-invoked**, opt-in
   accuracy pass. The author *names* a concern to check against — a period, place,
   or cultural/technical domain ("1850s London", "Heian-era court protocol",
@@ -545,13 +544,23 @@ bible to *revise* — never another book's prose. A book's "full" pass on a seri
 revises the shared bible rather than rebuilding it, so folding one book in never
 discards the others.
 
-**Refresh series bible** (#340, the Ctrl-K menu, multi-book projects only) drives
-this across the whole series: it runs each book's character, timeline, and setting
-pass in reading order — one book per AI call — so each book builds on the bible
-the earlier books wrote. Only books with changes run; the status line shows
-per-book progress and **Esc** cancels cleanly after the in-flight pass. A
-standalone novel uses the per-book passes directly (the action is unavailable).
-The fast active-book passes (Ctrl-A) stay as they were. *Trade-off:* a deleted
+**Refresh story bible** (Ctrl-K) is the one suite action for characters,
+continuity, setting, plot, and theme. It opens a picker:
+
+- **Run now** — interactive, status-bar progress, Esc cancels after the in-flight
+  pass. On a series it walks each book in reading order so each book builds on
+  the bible the earlier books wrote.
+- **Queue (resumable)** — the same walk, persisted to `bible/.queue.toml` so a
+  crash or quit resumes rather than losing completed passes.
+- **Queue as background batch** — listed only when `[ai] background-batch-update`
+  is on and Claude is the backend. Half price via the Message Batches API;
+  results land later (up to ~24h).
+
+Only books with changes run (unless you force a full rebuild with `R`). A
+standalone novel runs the five trackers over its one book. The fast active-book
+passes (Ctrl-A) stay as they were. Workflows can still name the old slugs
+(`bible:refresh-all`, `bible:queue`, `bible:series`, `bible:background-update`);
+those skip the picker and start that mode directly. *Trade-off:* a deleted
 chapter in a series book leaves a stale bible entry until a full rebuild — the
 cost of not re-scanning every book on each refresh.
 

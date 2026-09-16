@@ -186,6 +186,8 @@ impl App {
 
     /// Whether any sequenced run is in progress (so Esc routes to its cancel).
     pub(crate) const fn sequenced_run_active(&self) -> bool {
-        self.workflow_run.is_some() || self.series_bible_run.is_some()
+        self.workflow_run.is_some()
+            || self.series_bible_run.is_some()
+            || self.pass_queue_run.is_some()
     }
 }

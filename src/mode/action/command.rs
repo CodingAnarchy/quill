@@ -9,6 +9,17 @@ use super::{Action, AiAction, ExportFormat, ExportScope, GitAction};
 
 use crate::analysis::FlagCategory;
 
+/// How a story-bible suite refresh runs, picked from the one "Refresh story bible"
+/// action. Interactive (`Now`) uses the in-memory sequenced run; `Queue` is the
+/// durable resumable path; `Batch` is the cheap/slow Claude Message Batches path
+/// (only offered when that opt-in is on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BibleRefreshMode {
+    Now,
+    Queue,
+    Batch,
+}
+
 /// A command reachable from a palette — the AI menu (Ctrl-A), the version-control
 /// menu (Ctrl-V), and the export menu (Ctrl-E) share one palette mechanism.
 #[derive(Clone)]
@@ -81,6 +92,13 @@ pub enum Command {
     /// of the sweep's category menu. Turns on the underline and jumps to the first
     /// occurrence; `]r` / `[r` then step through them.
     PickStyleFlag(FlagCategory),
+    /// Run a story-bible refresh in the chosen mode — now, queued, or background
+    /// batch — from the one "Refresh story bible" action's picker. `force` rebuilds
+    /// each bible from the whole manuscript (the run-action menu's `R`).
+    BibleRefresh {
+        mode: BibleRefreshMode,
+        force: bool,
+    },
     /// Turn the style-flag sweep off (#1001) — clears the active category and its
     /// underlines. The "(off)" entry at the top of the sweep's category menu.
     ClearStyleFlags,

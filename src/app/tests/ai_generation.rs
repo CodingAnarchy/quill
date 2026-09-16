@@ -287,10 +287,8 @@ fn editorial_read_flags_land_in_the_findings_list_tagged_by_lens() {
         Mode::Findings(f) => {
             let summaries: Vec<&str> = f.items.iter().map(|i| i.summary.as_str()).collect();
             assert!(
-                summaries
-                    .iter()
-                    .any(|s| s.starts_with("structural:") && s.contains("stakes")),
-                "{summaries:?}"
+                summaries.iter().all(|s| !s.starts_with("structural:")),
+                "structural notes are dropped, not surfaced: {summaries:?}"
             );
             assert!(
                 summaries.iter().any(|s| s.starts_with("line:")

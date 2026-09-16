@@ -117,20 +117,12 @@ impl App {
     #[allow(clippy::match_same_arms)]
     pub(crate) fn action_status(&self, action: Action) -> Option<String> {
         match action {
-            // Triage, the health dashboard, and the Ask history are local — they
-            // work with the AI backend off (browsing already-collected findings /
-            // past answers, #609/#827).
-            Action::Ai(
-                AiAction::Triage
-                | AiAction::Dashboard
-                | AiAction::CoOccurrence
-                | AiAction::AskHistory,
-            ) => None,
-            // Image generation has its own opt-in / key, separate from the text AI
-            // (and its own "local not compiled" fail-fast).
-            Action::Ai(AiAction::Portrait | AiAction::Scene) => {
-                self.image_backend_spec().err().map(|e| e.to_string())
-            }
+            // Local aggregation views work with the AI backend off (browsing
+            // already-collected findings / past answers, #609/#827). Image
+            // generation has its own opt-in / key. Both sets come from SPECS
+            // helpers so they can't drift from `needs_backend` / `is_sync`.
+            Action::Ai(a) if a.is_local_view() => None,
+            Action::Ai(a) if a.is_image() => self.image_backend_spec().err().map(|e| e.to_string()),
             Action::Ai(_) => self.ai_startable(),
             // The in-app on-ramp (#602) only makes sense while AI is off; once it's
             // enabled the switch, key, and backend actions cover the rest.
@@ -255,49 +247,23 @@ impl App {
             self.message = Some(format!("{}: {reason}", action.label()));
             return;
         }
+        // The one visible bible-suite action opens a now/queue/batch picker.
+        // Workflows call `dispatch_action` and skip the picker (run now).
+        if matches!(action, Action::RefreshBibles) {
+            self.open_bible_refresh_picker(force);
+            return;
+        }
         self.dispatch_action(action, force);
     }
 
     /// Whether `action` needs the AI backend but AI is off (#602) — the case the
-    /// in-app enable on-ramp intercepts. Triage is local aggregation and the image
-    /// passes carry their own opt-in, so neither counts; a keyed-but-off setup
-    /// still routes here (the enable confirm chains to the key flow only when a key
-    /// is missing). `EnableAi` itself is excluded so its own dispatch runs.
+    /// in-app enable on-ramp intercepts. Derived from
+    /// [`Action::needs_ai_backend`](crate::mode::Action::needs_ai_backend) so a
+    /// new SPECS row (Plot, Theme, …) cannot silently skip the confirm. Local
+    /// views and image passes don't count; `EnableAi` itself is excluded so its
+    /// own dispatch runs.
     const fn wants_ai_but_off(&self, action: Action) -> bool {
-        if self.ai.enabled {
-            return false;
-        }
-        matches!(
-            action,
-            Action::Ai(
-                AiAction::Ask
-                    | AiAction::Characters
-                    | AiAction::Continuity
-                    | AiAction::Setting
-                    | AiAction::Scaffold
-                    | AiAction::Naming
-                    | AiAction::Style
-                    | AiAction::Brainstorm
-                    | AiAction::DraftCharacters
-                    | AiAction::DraftSetting
-                    | AiAction::Voice
-                    | AiAction::Submission
-                    | AiAction::Marketing
-                    | AiAction::Social
-                    | AiAction::AdCreative
-                    | AiAction::Thesaurus
-                    | AiAction::NameGen
-                    | AiAction::Editorial
-                    | AiAction::Accuracy
-                    | AiAction::Relationship
-                    | AiAction::Foreshadow
-                    | AiAction::FactCheck
-                    | AiAction::Pacing
-            ) | Action::RefreshSeriesBible
-                | Action::RefreshBibles
-                | Action::QueuePasses
-                | Action::DescribeConfig
-        )
+        !self.ai.enabled && action.needs_ai_backend()
     }
 
     /// Run an action's effect, its availability already checked by
@@ -587,6 +553,11 @@ impl App {
                         replacement,
                     }) => self.replace_misspelling(start, end, &word, &replacement),
                     Some(Command::PickStyleFlag(cat)) => self.start_style_flag_sweep(cat),
+                    Some(Command::BibleRefresh { mode, force }) => match mode {
+                        crate::mode::BibleRefreshMode::Now => self.start_refresh_bibles(force),
+                        crate::mode::BibleRefreshMode::Queue => self.start_queue_passes(force),
+                        crate::mode::BibleRefreshMode::Batch => self.start_batch_update(),
+                    },
                     Some(Command::ClearStyleFlags) => self.clear_style_flags(),
                     Some(Command::PickFontRole(i)) => self.open_font_role_picker(i),
                     Some(Command::ApplyFont(i, target)) => self.apply_font(i, target),

@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::config::ProjectsConfig;
-use crate::mode::{DirBrowser, DirEntry, Mode, Pending, ProjectBrowser};
+use crate::mode::{
+    on_filter_key, DirBrowser, DirEntry, FilterInput, Mode, Pending, ProjectBrowser,
+};
 use crate::project::Project;
 use crate::recent;
 
@@ -93,24 +95,20 @@ impl App {
     /// — keeping the filter so the browser's commands act on the narrowed list (a
     /// second Esc, in command mode, clears it).
     fn on_key_project_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.set_project_typing(false),
-            KeyCode::Enter => {
+        match on_filter_key(key, false) {
+            Some(FilterInput::Leave) => self.set_project_typing(false),
+            Some(FilterInput::Enter) => {
                 if let Some(target) = self.selected_project_path() {
                     self.request_switch(target);
                 }
             }
-            KeyCode::Up => {
-                let s = self.project_step(false);
+            Some(FilterInput::Step(down)) => {
+                let s = self.project_step(down);
                 self.set_project_selected(s);
             }
-            KeyCode::Down => {
-                let s = self.project_step(true);
-                self.set_project_selected(s);
-            }
-            KeyCode::Backspace => self.project_filter_pop(),
-            KeyCode::Char(c) => self.project_filter_push(c),
-            _ => {}
+            Some(FilterInput::Pop) => self.project_filter_pop(),
+            Some(FilterInput::Push(c)) => self.project_filter_push(c),
+            None => {}
         }
     }
 

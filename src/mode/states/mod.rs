@@ -5,6 +5,7 @@
 //! state type stays reachable as `crate::mode::<Type>`, exactly as before.
 
 mod browser;
+mod filter;
 mod findings;
 mod history;
 mod import;
@@ -13,6 +14,7 @@ mod review;
 mod search;
 
 pub use browser::*;
+pub use filter::{on_filter_key, FilterInput};
 pub use findings::*;
 pub use history::*;
 pub use import::*;

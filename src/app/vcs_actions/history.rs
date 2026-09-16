@@ -93,19 +93,15 @@ impl App {
     /// the filter so `d`/`r` act on the narrowed list (a second Esc, in command
     /// mode, clears it).
     fn on_key_history_filter(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.set_history_typing(false),
-            KeyCode::Up => {
-                let s = self.history_filter_step(false);
+        match on_filter_key(key, true) {
+            Some(FilterInput::Leave) => self.set_history_typing(false),
+            Some(FilterInput::Step(down)) => {
+                let s = self.history_filter_step(down);
                 self.set_history_selected(s);
             }
-            KeyCode::Down => {
-                let s = self.history_filter_step(true);
-                self.set_history_selected(s);
-            }
-            KeyCode::Backspace => self.history_filter_pop(),
-            KeyCode::Char(c) => self.history_filter_push(c),
-            _ => {}
+            Some(FilterInput::Pop) => self.history_filter_pop(),
+            Some(FilterInput::Push(c)) => self.history_filter_push(c),
+            Some(FilterInput::Enter) | None => {}
         }
     }
 

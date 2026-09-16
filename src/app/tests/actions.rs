@@ -641,6 +641,149 @@ fn ai_action_when_ai_is_off_offers_to_enable() {
     }
 }
 
+/// Plot, Theme, SemanticFind, Echo, and BackgroundBibleUpdate used to skip the
+/// enable on-ramp because a hand-maintained include-match lagged SPECS. Running
+/// each with AI off must offer the same confirm Character bible already does.
+#[test]
+fn drifted_ai_actions_hit_the_enable_on_ramp_when_ai_is_off() {
+    let (mut app, _dir) = two_chapter_app("action-ai-off-drift");
+    app.ai = ai::Settings::default();
+    for action in [
+        Action::Ai(AiAction::Plot),
+        Action::Ai(AiAction::Theme),
+        Action::Ai(AiAction::SemanticFind),
+        Action::Ai(AiAction::Echo),
+        Action::BackgroundBibleUpdate,
+    ] {
+        app.mode = app.editing_mode();
+        app.message = None;
+        app.run_action(action, false);
+        assert!(
+            !app.ai_task.is_busy(),
+            "{action:?}: nothing sent when AI is off"
+        );
+        match &app.mode {
+            Mode::Prompt(s) if matches!(s.pending, Pending::ConfirmEnableAi { .. }) => {}
+            _ => panic!("{action:?}: expected the enable-AI prompt"),
+        }
+    }
+}
+
+/// Image passes carry their own `[image]` opt-in: with AI off they must not open
+/// the text-AI enable confirm (they fail on the image backend instead).
+#[test]
+fn image_passes_do_not_hit_the_text_ai_enable_on_ramp() {
+    let (mut app, _dir) = two_chapter_app("action-image-no-enable");
+    app.ai = ai::Settings::default();
+    app.run_action(Action::Ai(AiAction::Portrait), false);
+    assert!(!matches!(
+        app.mode,
+        Mode::Prompt(ref s) if matches!(s.pending, Pending::ConfirmEnableAi { .. })
+    ));
+}
+
+/// Completeness: every registry action that needs the text-AI backend is exactly
+/// the SPECS-derived set plus the bible-suite / describe-config actions. A new
+/// `Action::Ai` variant cannot skip the on-ramp without failing `needs_backend`.
+#[test]
+fn needs_ai_backend_matches_specs_and_the_bible_suite_actions() {
+    for spec in AiAction::SPECS {
+        assert_eq!(
+            Action::Ai(spec.action).needs_ai_backend(),
+            spec.action.needs_backend(),
+            "{:?} Action wrapper drifted from AiAction::needs_backend",
+            spec.action
+        );
+        assert_eq!(
+            Action::Ai(spec.action).is_sync(),
+            spec.action.is_local_view(),
+            "{:?} is_sync drifted from is_local_view",
+            spec.action
+        );
+    }
+    assert!(Action::BackgroundBibleUpdate.needs_ai_backend());
+    assert!(Action::RefreshBibles.needs_ai_backend());
+    assert!(Action::QueuePasses.needs_ai_backend());
+    assert!(Action::DescribeConfig.needs_ai_backend());
+    assert!(!Action::Save.needs_ai_backend());
+    assert!(!Action::EnableAi.needs_ai_backend());
+    assert!(Action::Save.is_sync());
+    assert!(Action::Ai(AiAction::Triage).is_sync());
+    assert!(!Action::Ai(AiAction::Plot).is_sync());
+}
+
+/// The visible registry lists one bible-suite action; the old queue / series /
+/// batch names stay resolvable so existing workflows keep working.
+#[test]
+fn bible_suite_aliases_resolve_after_leaving_the_visible_registry() {
+    let names: Vec<&str> = Action::ALL.iter().map(|a| a.name()).collect();
+    assert!(names.contains(&"bible:refresh-all"));
+    assert!(!names.contains(&"bible:queue"));
+    assert!(!names.contains(&"bible:background-update"));
+    assert!(!names.contains(&"bible:series"));
+    assert!(matches!(
+        Action::from_name("bible:refresh-all"),
+        Some(Action::RefreshBibles)
+    ));
+    assert!(matches!(
+        Action::from_name("bible:queue"),
+        Some(Action::QueuePasses)
+    ));
+    assert!(matches!(
+        Action::from_name("bible:background-update"),
+        Some(Action::BackgroundBibleUpdate)
+    ));
+    assert!(matches!(
+        Action::from_name("bible:series"),
+        Some(Action::RefreshSeriesBible)
+    ));
+}
+
+/// Running the one visible action opens a now/queue picker; batch is absent until
+/// the background-batch opt-in is on.
+#[test]
+fn refresh_story_bible_opens_a_now_or_queue_picker() {
+    let (mut app, _dir) = two_chapter_app("bible-refresh-picker");
+    app.ai.enabled = true;
+    app.ai.backend = crate::ai::BackendKind::Local;
+    app.run_action(Action::RefreshBibles, false);
+    match &app.mode {
+        Mode::Palette(p) => {
+            assert_eq!(p.title, "Refresh story bible: pick how to run");
+            let labels: Vec<&str> = p.items.iter().map(|i| i.label.as_str()).collect();
+            assert_eq!(labels[0], "Run now");
+            assert_eq!(labels[1], "Queue (resumable)");
+            assert!(
+                !labels.iter().any(|l| l.contains("batch")),
+                "batch is hidden without the opt-in: {labels:?}"
+            );
+        }
+        _ => panic!("expected the bible-refresh picker"),
+    }
+}
+
+/// With the background-batch opt-in and a ready Claude backend, the picker adds
+/// the cheap/slow queue mode.
+#[test]
+fn refresh_story_bible_offers_batch_when_opted_in() {
+    let (mut app, _dir) = two_chapter_app("bible-refresh-batch-mode");
+    app.ai.enabled = true;
+    app.ai.backend = crate::ai::BackendKind::Claude;
+    app.ai.api_key = Some("sk-test".into());
+    app.ai.background_batch_update = true;
+    app.run_action(Action::RefreshBibles, false);
+    match &app.mode {
+        Mode::Palette(p) => {
+            let labels: Vec<&str> = p.items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.contains("background batch")),
+                "batch mode listed when opted in: {labels:?}"
+            );
+        }
+        _ => panic!("expected the bible-refresh picker"),
+    }
+}
+
 /// Declining the enable prompt leaves AI off and writes nothing — the opt-in
 /// default is preserved (#602).
 #[test]
