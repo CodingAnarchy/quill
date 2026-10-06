@@ -49,19 +49,12 @@ pub struct App {
     /// True between a `Ctrl-w` window prefix and the command key that follows it.
     pub(super) window_pending: bool,
     pub mode: Mode,
-    /// Opt-in Vim-style modal editing (#27), from the `[editor]` config. When on,
-    /// the editor's resting state is [`Mode::Normal`] and the status bar shows the
-    /// mode; when off, editing is exactly as it has always been.
-    pub vim: bool,
-    /// Smart typography (#296), from the `[editor]` config: substitute curly
-    /// quotes / em-dashes / ellipses as the author types prose. On by default;
-    /// when off, typed punctuation is inserted verbatim.
-    pub smart_typography: bool,
-    /// Auto-pair quotes and brackets (#1007), from the `[editor]` config: typing an
-    /// opener inserts its matching closer with the cursor between, and typing a
-    /// closer that's already at the cursor skips past it. Off by default; when off,
-    /// each mark is inserted exactly as typed.
-    pub auto_pair: bool,
+    /// The boolean `[editor]` knobs (Vim mode, smart typography, auto-pair,
+    /// typewriter scrolling, focus mode, paragraph indent, the annotation margin,
+    /// the daily-goal cue), copied whole from the config at startup and on a live
+    /// reload. The palette toggles flip them for the session; see
+    /// [`SettingBool::SPECS`](crate::mode::SettingBool::SPECS) for each knob.
+    pub flags: crate::config::EditorFlags,
     /// The active color theme (#300), from the `[theme]` config. Threaded through
     /// the render path so the palette is data, not hard-coded literals.
     pub theme: crate::theme::Theme,
@@ -185,21 +178,6 @@ pub struct App {
     pub should_quit: bool,
     /// Distraction-free centering: target column width for the text, in cells.
     pub focus_width: u16,
-    /// Typewriter scrolling (#301), from the `[editor]` config: pin the cursor's
-    /// line to the vertical centre of the page instead of letting it drift to the
-    /// bottom. A toggle (palette action); off by default.
-    pub typewriter: bool,
-    /// Focus mode (#301), from the `[editor]` config: dim every paragraph but the
-    /// one under the cursor. A toggle (palette action); off by default.
-    pub focus_mode: bool,
-    /// First-line paragraph indent (#722), from the `[editor]` config: visually
-    /// indent the first line of each prose paragraph, display-only. A toggle
-    /// (palette action); off by default.
-    pub paragraph_indent: bool,
-    /// The annotation margin, from the `[editor]` config: draw each inline note
-    /// beside the prose column, level with its anchor. A toggle (palette action);
-    /// on by default.
-    pub annotation_margin: bool,
     /// Heading/scene folding (#975): the collapsed sections, keyed by heading start
     /// byte. Purely display-only — the renderer hides a folded section's body lines
     /// and marks its heading, never touching the rope or the file. Empty by default.
@@ -622,11 +600,6 @@ pub struct App {
     /// state, never persisted; `None` until the author sets one. Independent of a
     /// timed sprint — the author can run either, both, or neither.
     pub(crate) session_target: Option<sprint::SessionTarget>,
-    /// The ambient below-target cue (#1012), from `[editor] daily_nudge`; on by
-    /// default. When on and a `[goals] daily` target is set, a quiet status-bar tag
-    /// shows how far under it today's net is — reading only the cached daily tally,
-    /// so it costs nothing per draw.
-    pub(crate) daily_nudge: bool,
     /// The "Ask the manuscript" history (#609), newest last: each ask, its
     /// grounded answer, and the chapters it cited. Lets the author re-open a past
     /// lookup (and re-jump its citations) without re-asking. Loaded from the

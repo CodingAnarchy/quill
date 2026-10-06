@@ -73,7 +73,7 @@ fn vim_mode_is_shown_in_the_status_bar() {
         "no chip when Vim is off"
     );
     // On, resting in Normal.
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     assert!(render(&app, 80, 8).contains("NORMAL"), "Normal shown");
     // Entering Insert updates the indicator.
@@ -102,7 +102,7 @@ fn vim_mode_is_shown_in_the_status_bar() {
 #[test]
 fn visual_selection_draws_a_highlight() {
     let mut app = app_with("hello world\n");
-    app.vim = true;
+    app.flags.vim = true;
     // Select the first few graphemes (anchor at 0, cursor at col 2).
     app.mode = Mode::Visual {
         anchor: 0,
@@ -121,7 +121,7 @@ fn visual_selection_draws_a_highlight() {
 fn visual_mode_status_bar_shows_the_selected_count() {
     // Selection tallies only the selected bytes, not the whole document (#824).
     let mut app = app_with("one two three four\n");
-    app.vim = true;
+    app.flags.vim = true;
     // Non-Visual: the status bar shows the document count, no "selected" tally.
     let doc = render(&app, 80, 8);
     assert!(
@@ -168,14 +168,14 @@ fn the_below_target_cue_shows_in_the_status_bar_and_hides() {
         render(&app, 80, 8)
     );
     // Turned off (config or the palette toggle): no cue.
-    app.daily_nudge = false;
+    app.flags.daily_nudge = false;
     assert!(
         !render(&app, 80, 8).contains("to daily goal"),
         "an opted-out cue never shows:\n{}",
         render(&app, 80, 8)
     );
     // Meeting the target removes it (nudge back on, net now over the target).
-    app.daily_nudge = true;
+    app.flags.daily_nudge = true;
     app.set_day_tally_for_test(120, 0);
     assert!(
         !render(&app, 80, 8).contains("to daily goal"),
@@ -213,10 +213,10 @@ fn typewriter_pins_the_cursor_line_to_the_centre() {
     };
 
     // Off: the cursor's line has drifted to the bottom of the page.
-    app.typewriter = false;
+    app.flags.typewriter = false;
     let off = row_of_last(&app);
     // On: it's lifted back to the vertical centre, text scrolling under it.
-    app.typewriter = true;
+    app.flags.typewriter = true;
     let on = row_of_last(&app);
 
     assert!(
@@ -263,7 +263,7 @@ fn focus_mode_dims_the_other_paragraphs() {
     );
 
     // On: the other paragraph dims; the one under the cursor stays normal.
-    app.focus_mode = true;
+    app.flags.focus_mode = true;
     assert_eq!(
         first_letter_fg(&app, "alpha"),
         Some(dim),
@@ -285,11 +285,11 @@ fn paragraph_indent_indents_only_the_first_line_of_a_prose_paragraph() {
     let h = 20;
 
     // Off (default): the paragraph's rows all start at the same column.
-    app.paragraph_indent = false;
+    app.flags.paragraph_indent = false;
     let base = indent_of_row(&app, "word word", w, h).expect("paragraph on screen");
 
     // On: the first row shifts right by the four-space indent…
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     let first = indent_of_row(&app, "word word", w, h).expect("first row on screen");
     assert_eq!(first, base + 4, "first line indented by four columns");
 
@@ -309,7 +309,7 @@ fn paragraph_indent_leaves_the_buffer_and_file_bytes_unchanged() {
     let text = "First paragraph.\n\nSecond paragraph.\n";
     let mut app = app_with(text);
     let before = app.edit_buffer().text();
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     let _ = render(&app, 60, 12);
     assert_eq!(
         app.edit_buffer().text(),
@@ -333,7 +333,7 @@ fn paragraph_indent_skips_headings_blank_lines_and_the_first_para_after_a_headin
     let base_heading = indent_of_row(&app, "A Heading", w, h).expect("heading on screen");
     let base_opening = indent_of_row(&app, "Opening line.", w, h).expect("opening on screen");
 
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     // The heading itself is never indented.
     assert_eq!(
         indent_of_row(&app, "A Heading", w, h),
@@ -348,9 +348,9 @@ fn paragraph_indent_skips_headings_blank_lines_and_the_first_para_after_a_headin
     );
     // A later paragraph is indented.
     let base_following = {
-        app.paragraph_indent = false;
+        app.flags.paragraph_indent = false;
         let b = indent_of_row(&app, "Following line.", w, h).expect("following on screen");
-        app.paragraph_indent = true;
+        app.flags.paragraph_indent = true;
         b
     };
     assert_eq!(
@@ -367,7 +367,7 @@ fn paragraph_indent_skips_fenced_code_blocks() {
     let w = 60;
     let h = 16;
     let base_code = indent_of_row(&app, "code line", w, h).expect("code on screen");
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     assert_eq!(
         indent_of_row(&app, "code line", w, h),
         Some(base_code),
@@ -456,7 +456,7 @@ fn paragraph_indent_skips_the_paragraph_after_a_scene_break() {
     let base_resuming = indent_of_row(&app, "Resuming para.", w, h).expect("resuming on screen");
     let base_later = indent_of_row(&app, "Later para.", w, h).expect("later on screen");
 
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     assert_eq!(
         indent_of_row(&app, "Resuming para.", w, h),
         Some(base_resuming),
@@ -476,7 +476,7 @@ fn paragraph_indent_skips_the_paragraph_after_a_code_block() {
     let w = 60;
     let h = 18;
     let base_after = indent_of_row(&app, "After code.", w, h).expect("after-code on screen");
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     assert_eq!(
         indent_of_row(&app, "After code.", w, h),
         Some(base_after),
@@ -497,7 +497,7 @@ fn paragraph_indent_keeps_the_cursor_on_the_indented_line() {
     };
 
     let off = cursor_x(&app);
-    app.paragraph_indent = true;
+    app.flags.paragraph_indent = true;
     let on = cursor_x(&app);
     assert_eq!(on, off + 4, "the cursor shifts right with the indent");
 

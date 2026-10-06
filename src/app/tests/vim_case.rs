@@ -8,7 +8,7 @@ use super::*;
 /// A Vim app in Normal mode over `text`, cursor at byte 0.
 fn case_app(name: &str, text: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.buffer = Buffer::from_text(text);
     (app, dir)

@@ -28,7 +28,7 @@ const MAX_NOTE_ROWS: usize = 4;
 /// Whether the margin applies this frame: switched on, notes to show, and not in
 /// composition mode (which hides all chrome).
 pub(super) const fn wanted(app: &App) -> bool {
-    app.annotation_margin && !app.annotations.is_empty() && !app.distraction_free
+    app.flags.annotation_margin && !app.annotations.is_empty() && !app.distraction_free
 }
 
 /// Place the prose `column` within `area` so the margin has room: keep it

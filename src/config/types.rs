@@ -15,16 +15,58 @@ use super::load_section;
 
 /// Editor behavior from the `[editor]` section. The default keeps Quill's
 /// modeless editing unchanged (but with smart typography on — see below).
+///
+/// The on/off knobs live in [`EditorFlags`], flattened in so the file layout is
+/// unchanged (`[editor] typewriter = true`); this struct holds only the valued
+/// settings.
 #[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct EditorConfig {
-    /// Opt-in Vim-style modal editing (#27). Off by default — with it off the
-    /// editor behaves exactly as it always has.
-    pub vim: bool,
+    /// The boolean `[editor]` knobs, read from the same table (flattened).
+    #[serde(flatten)]
+    pub flags: EditorFlags,
     /// Vim key remaps (#208) from the `[editor.keys]` table: action name → the
     /// key that should trigger it (e.g. `down = "n"`). Validated when the editor
     /// builds its keymap; unknown actions are reported, not silently dropped.
     pub keys: HashMap<String, String>,
+    /// The centered text column width in characters (#303). Defaults to 72; the
+    /// runtime `+`/`-` adjustment still applies on top, this just sets the start.
+    pub column_width: u16,
+    /// Autosave interval in seconds (#409): after this many seconds with no input,
+    /// the active chapter is saved automatically through the same atomic,
+    /// front-matter-preserving path as Ctrl-S (but without firing on-save
+    /// workflows). `0` (the default) turns autosave off — behavior unchanged.
+    pub autosave_interval_secs: u64,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            flags: EditorFlags::default(),
+            keys: HashMap::new(),
+            column_width: 72,
+            autosave_interval_secs: 0,
+        }
+    }
+}
+
+/// The boolean `[editor]` knobs, grouped so the editor copies them as one value
+/// (at startup and on a live config reload) and reads them as `app.flags.<knob>`.
+///
+/// Adding a knob: a field here (plus its default below), one
+/// [`SettingBool::SPECS`](crate::mode::SettingBool::SPECS) row (config key, label,
+/// AI-vocabulary description, Settings-menu placement, optional palette toggle),
+/// and its line in `docs/configuration.md`. The Settings menu, the `:set` /
+/// describe-config vocabulary and validator, the palette toggle, and the docs
+/// guard all derive from that row; a field with no row fails the SPECS
+/// completeness test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct EditorFlags {
+    /// Opt-in Vim-style modal editing (#27). Off by default — with it off the
+    /// editor behaves exactly as it always has. When on, the editor's resting
+    /// state is Normal mode and the status bar shows the mode.
+    pub vim: bool,
     /// Smart typography (#296): as you type, straight quotes become curly
     /// (`“” ‘’`), `--` becomes an em-dash (`—`), and `...` becomes an ellipsis
     /// (`…`). **On by default** — set `smart_typography = false` for plain ASCII
@@ -37,9 +79,6 @@ pub struct EditorConfig {
     /// `auto_pair = true`. Composes with `smart_typography`: with both on, a `"`
     /// becomes a correctly-oriented open/close curly-quote pair.
     pub auto_pair: bool,
-    /// The centered text column width in characters (#303). Defaults to 72; the
-    /// runtime `+`/`-` adjustment still applies on top, this just sets the start.
-    pub column_width: u16,
     /// Typewriter scrolling (#301): keep the cursor's line pinned at the vertical
     /// centre of the page, the text scrolling under it, instead of letting the
     /// cursor drift to the bottom as a chapter grows. Off by default.
@@ -59,32 +98,25 @@ pub struct EditorConfig {
     /// their notes while they write. Display-only. On by default; it only appears
     /// when the chapter has annotations and the terminal has room beside the column.
     pub annotation_margin: bool,
-    /// Autosave interval in seconds (#409): after this many seconds with no input,
-    /// the active chapter is saved automatically through the same atomic,
-    /// front-matter-preserving path as Ctrl-S (but without firing on-save
-    /// workflows). `0` (the default) turns autosave off — behavior unchanged.
-    pub autosave_interval_secs: u64,
     /// The ambient below-target cue (#1012): when a `[goals] daily` target is set
     /// and today's net is under it, a quiet, dismissible status-bar tag shows how
     /// far short the day is. **On by default** — set `daily_nudge = false` to turn
     /// it off entirely for authors who don't want it. It never appears without a
-    /// daily target, so a project with no target is unaffected either way.
+    /// daily target, so a project with no target is unaffected either way. Reads
+    /// only the cached daily tally, so it costs nothing per draw.
     pub daily_nudge: bool,
 }
 
-impl Default for EditorConfig {
+impl Default for EditorFlags {
     fn default() -> Self {
         Self {
             vim: false,
-            keys: HashMap::new(),
             smart_typography: true,
             auto_pair: false,
-            column_width: 72,
             typewriter: false,
             focus_mode: false,
             paragraph_indent: false,
             annotation_margin: true,
-            autosave_interval_secs: 0,
             daily_nudge: true,
         }
     }
@@ -394,14 +426,17 @@ mod tests {
         // Auto-pair ships off (#1007) so authors who type both marks are unaffected;
         // opt in with `auto_pair = true` under `[editor]`.
         assert!(
-            !EditorConfig::default().auto_pair,
+            !EditorConfig::default().flags.auto_pair,
             "auto_pair is off by default"
         );
         let on: EditorConfig = toml::from_str("auto_pair = true").unwrap();
-        assert!(on.auto_pair, "opt in with auto_pair = true");
+        assert!(on.flags.auto_pair, "opt in with auto_pair = true");
         // Turning it on doesn't disturb the other opt-ins (smart typography stays
         // at its own default).
-        assert!(on.smart_typography, "unrelated defaults are untouched");
+        assert!(
+            on.flags.smart_typography,
+            "unrelated defaults are untouched"
+        );
     }
 
     #[test]
@@ -409,13 +444,16 @@ mod tests {
         // The below-target cue ships on (#1012) so the pace feedback is ambient;
         // opt out with `daily_nudge = false` under `[editor]`.
         assert!(
-            EditorConfig::default().daily_nudge,
+            EditorConfig::default().flags.daily_nudge,
             "daily_nudge is on by default"
         );
         let off: EditorConfig = toml::from_str("daily_nudge = false").unwrap();
-        assert!(!off.daily_nudge, "opt out with daily_nudge = false");
+        assert!(!off.flags.daily_nudge, "opt out with daily_nudge = false");
         // Turning it off doesn't disturb the other defaults.
-        assert!(off.smart_typography, "unrelated defaults are untouched");
+        assert!(
+            off.flags.smart_typography,
+            "unrelated defaults are untouched"
+        );
     }
 
     #[test]
@@ -429,9 +467,12 @@ mod tests {
         let editor: EditorConfig =
             toml::from_str("vim = true\ncolumn_width = 90\nfuture_editor_feature = \"ignored\"\n")
                 .expect("unknown config keys must not fail the load");
-        assert!(editor.vim, "known key applied");
+        assert!(editor.flags.vim, "known key applied");
         assert_eq!(editor.column_width, 90, "known key applied");
-        assert!(editor.smart_typography, "unset known key keeps its default");
+        assert!(
+            editor.flags.smart_typography,
+            "unset known key keeps its default"
+        );
 
         // The behavior on re-save is DROP (config structs are typed and only
         // deserialized here — Quill never rewrites the home config wholesale), and

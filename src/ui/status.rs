@@ -403,7 +403,7 @@ pub(super) fn editor_status_bar(app: &App, active: usize) -> (String, String) {
 pub(super) fn mode_chip(app: &App) -> Option<Span<'static>> {
     let theme = app.theme;
     match app.mode {
-        _ if !app.vim => None, // Vim mode off: no chip
+        _ if !app.flags.vim => None, // Vim mode off: no chip
         Mode::Insert => Some(("INSERT", theme.mode_insert)),
         Mode::Visual {
             linewise: false, ..

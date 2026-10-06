@@ -34,7 +34,7 @@ fn a_valid_proposal_stages_changes_and_opens_a_confirm() {
         .expect("changes staged for confirm");
     assert_eq!(staged.len(), 3);
     // The editor is untouched until the author confirms.
-    assert!(!app.vim);
+    assert!(!app.flags.vim);
     assert_eq!(app.focus_width, 72);
 }
 
@@ -164,7 +164,7 @@ fn a_project_override_applies_when_the_editor_opens_the_project() {
     let buffer = Buffer::from_path(project.active_path()).unwrap();
     let app = App::new(buffer, project);
     assert!(
-        app.vim,
+        app.flags.vim,
         "the project's [quill.editor] vim = true applies at open"
     );
     assert!(

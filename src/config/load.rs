@@ -293,10 +293,10 @@ mod tests {
             Some("title = \"Book\"\n\n[quill.editor]\nvim = true\n"),
         );
         let editor = EditorConfig::load();
-        assert!(editor.vim, "project's key applies");
+        assert!(editor.flags.vim, "project's key applies");
         assert_eq!(editor.column_width, 80, "global fills the unset key");
         assert!(
-            editor.smart_typography,
+            editor.flags.smart_typography,
             "a key neither layer sets keeps its default"
         );
     }

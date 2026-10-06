@@ -6,7 +6,7 @@
 use super::*;
 use crate::ai;
 use crate::ai::keychain::Key;
-use crate::mode::{Action, AiAction, Command, ExportFormat, PaletteRow, Pending};
+use crate::mode::{Action, AiAction, Command, ExportFormat, PaletteRow, Pending, SettingBool};
 use std::io::{Cursor, Read};
 
 /// Every registry action has a distinct stable name — workflows (#89) reference
@@ -489,6 +489,38 @@ fn run_save_action_writes_the_chapter() {
     assert!(!app.buffer.dirty, "save clears the dirty flag");
     let saved = fs::read_to_string(dir.join("one.md")).unwrap();
     assert!(saved.starts_with('X'), "edit saved, got: {saved:?}");
+}
+
+/// Every knob toggle the `SettingBool::SPECS` table declares is a registry action
+/// under its declared name, and running it flips exactly that one flag and reports
+/// "<label> on/off." — the one dispatch arm serves every knob.
+#[test]
+fn each_knob_toggle_flips_only_its_flag_and_reports_it() {
+    let (mut app, _dir) = two_chapter_app("action-knob-toggles");
+    let toggles: Vec<_> = SettingBool::SPECS
+        .iter()
+        .filter_map(|spec| spec.toggle.as_ref().map(|t| (spec.knob, t.name)))
+        .collect();
+    assert!(!toggles.is_empty());
+    for (knob, name) in toggles {
+        let action = Action::Toggle(knob);
+        assert_eq!(Action::from_name(name), Some(action), "{name} resolves");
+        assert!(Action::ALL.contains(&action), "{name} is in the registry");
+        for _ in 0..2 {
+            let before = app.flags;
+            app.run_action(action, false);
+            let on = knob.get(&app.flags);
+            assert_eq!(on, !knob.get(&before), "{name} flipped its flag");
+            let mut expected = before;
+            knob.toggle(&mut expected);
+            assert_eq!(app.flags, expected, "{name} changed only its own flag");
+            let state = if on { "on" } else { "off" };
+            assert_eq!(
+                app.message.as_deref(),
+                Some(format!("{} {state}.", knob.label()).as_str())
+            );
+        }
+    }
 }
 
 #[test]

@@ -127,15 +127,8 @@ impl App {
         // image, backup) reads the same two files: parse each once for the batch.
         let _config_session = crate::config::LoadSession::begin();
         let editor = crate::config::EditorConfig::load();
-        let vim = editor.vim;
-        let smart_typography = editor.smart_typography;
-        let auto_pair = editor.auto_pair;
-        let typewriter = editor.typewriter;
-        let focus_mode = editor.focus_mode;
-        let paragraph_indent = editor.paragraph_indent;
-        let annotation_margin = editor.annotation_margin;
+        let flags = editor.flags;
         let autosave_interval_secs = editor.autosave_interval_secs;
-        let daily_nudge = editor.daily_nudge;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
         let (theme, theme_warnings) = crate::config::load_theme();
         // Make the loaded palette the active one for rendering (#300). `ui::draw`
@@ -169,10 +162,12 @@ impl App {
             window_pending: false,
             // With Vim mode on, the editor rests in Normal; otherwise it's always
             // the modeless Insert.
-            mode: if vim { Mode::Normal } else { Mode::Insert },
-            vim,
-            smart_typography,
-            auto_pair,
+            mode: if flags.vim {
+                Mode::Normal
+            } else {
+                Mode::Insert
+            },
+            flags,
             theme,
             spell_flags: Vec::new(),
             spell_rev: 0,
@@ -202,10 +197,6 @@ impl App {
             case_op: None,
             should_quit: false,
             focus_width: editor.column_width,
-            typewriter,
-            focus_mode,
-            paragraph_indent,
-            annotation_margin,
             folds: FoldState::default(),
             distraction_free: false,
             galley: None,
@@ -299,7 +290,6 @@ impl App {
             pending_restore_backup: None,
             sprint: None,
             session_target: None,
-            daily_nudge,
             qa_log,
             qa_store,
             pending_qa_question: None,
@@ -335,7 +325,7 @@ impl App {
         if let Some(config_warning) = crate::config::global_config_warning() {
             warnings.push(config_warning);
         }
-        if vim && !key_errors.is_empty() {
+        if flags.vim && !key_errors.is_empty() {
             warnings.push(format!("Vim keymap ignored: {}", key_errors.join("; ")));
         }
         if !trigger_errors.is_empty() {

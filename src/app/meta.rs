@@ -105,7 +105,7 @@ impl App {
         // per-keystroke, but through the shared `typography` core so the two paths
         // can't drift (#519). Off, or any other field, leaves the text verbatim.
         let smartened;
-        let text = if self.smart_typography && field.is_epigraph() {
+        let text = if self.flags.smart_typography && field.is_epigraph() {
             smartened = typography::smarten(text);
             smartened.as_str()
         } else {

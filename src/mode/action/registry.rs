@@ -5,7 +5,7 @@
 //! the module root, so callers are unaffected.
 
 use super::table::{rows, ActionSpec, ALL_ACTIONS};
-use super::{AiAction, Needs};
+use super::{AiAction, Needs, SettingBool};
 
 /// A single invokable Quill action — the unified registry (#225). The run-action
 /// command lists these and runs one by name, and author workflows (#89) will
@@ -136,16 +136,11 @@ pub enum Action {
     /// echoed within a short window of the visible text — a deliberate revision-pass
     /// aid, off by default.
     ToggleProximityRepeats,
-    /// Toggle typewriter scrolling — pin the cursor line to the page centre (#301).
-    ToggleTypewriter,
-    /// Toggle focus mode — dim every paragraph but the current one (#301).
-    ToggleFocus,
-    /// Toggle the first-line paragraph indent in the editor (#722).
-    ToggleParagraphIndent,
-    /// Toggle the annotation margin — notes shown beside the prose they mark.
-    ToggleAnnotationMargin,
-    /// Hide or restore the below-daily-goal status-bar cue (#1012) for this session.
-    ToggleDailyCue,
+    /// Flip a boolean `[editor]` knob for this session (typewriter scrolling,
+    /// focus mode, paragraph indent, the annotation margin, the daily-goal cue, …)
+    /// — one variant per knob with a palette toggle in its
+    /// [`SettingBool::SPECS`] row, which supplies the name, label, and runnability.
+    Toggle(SettingBool),
     /// Fold every section in the active chapter to its heading (#975).
     FoldAll,
     /// Expand every folded section (#975).

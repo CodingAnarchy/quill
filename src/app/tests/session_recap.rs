@@ -5,7 +5,7 @@
 //! toggle (or the config) hides and restores it. None of this walks the manuscript per draw.
 
 use super::*;
-use crate::mode::Action;
+use crate::mode::{Action, SettingBool};
 use crate::project::GoalField;
 
 /// Two-chapter app with a daily word target set, ready for the cue tests. Vim /
@@ -114,7 +114,7 @@ fn esc_never_hides_the_cue() {
     assert!(app.nudge_showing(), "Esc in plain Insert leaves the cue up");
 
     let (mut app, _dir) = nudge_app("cue-vim-esc", 100);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Insert;
     write_words(&mut app, 3);
     app.on_key(key(KeyCode::Esc));
@@ -137,17 +137,17 @@ fn esc_never_hides_the_cue() {
 fn the_palette_toggle_hides_and_restores_the_cue() {
     let (mut app, _dir) = nudge_app("cue-toggle", 100);
     write_words(&mut app, 20);
-    app.run_action(Action::ToggleDailyCue, false);
+    app.run_action(Action::Toggle(SettingBool::DailyNudge), false);
     assert!(!app.nudge_showing(), "toggled off");
     assert_eq!(app.message.as_deref(), Some("Daily goal cue off."));
-    app.run_action(Action::ToggleDailyCue, false);
+    app.run_action(Action::Toggle(SettingBool::DailyNudge), false);
     assert!(app.nudge_showing(), "toggled back on, still short");
 }
 
 #[test]
 fn the_cue_can_be_turned_off_entirely() {
     let (mut app, _dir) = nudge_app("cue-off", 100);
-    app.daily_nudge = false; // as `[editor] daily_nudge = false` would
+    app.flags.daily_nudge = false; // as `[editor] daily_nudge = false` would
     write_words(&mut app, 20);
     assert!(
         app.daily_target_shortfall().is_some(),

@@ -10,7 +10,7 @@ use super::App;
 use crate::ai::config_gen::{self, GeneratedConfig};
 use crate::ai::Outcome;
 use crate::config;
-use crate::mode::Pending;
+use crate::mode::{Pending, SettingBool, SettingPlacement};
 use crate::theme;
 
 impl App {
@@ -150,15 +150,8 @@ impl App {
         // editor and theme sections share one fresh parse of each file.
         let _config_session = config::LoadSession::begin();
         let editor = config::EditorConfig::load();
-        self.vim = editor.vim;
-        self.smart_typography = editor.smart_typography;
-        self.auto_pair = editor.auto_pair;
+        self.flags = editor.flags;
         self.focus_width = editor.column_width;
-        self.typewriter = editor.typewriter;
-        self.focus_mode = editor.focus_mode;
-        self.paragraph_indent = editor.paragraph_indent;
-        self.annotation_margin = editor.annotation_margin;
-        self.daily_nudge = editor.daily_nudge;
         self.autosave_interval_secs = editor.autosave_interval_secs;
         // Rebuild the Vim keymap from `[editor.keys]` so an in-app remap (#1109)
         // takes effect without a restart; bad entries are dropped (kept default)
@@ -178,46 +171,30 @@ impl App {
 /// with a human description (with allowed values) for the model to map against.
 /// The keys are dotted `section.field`, matching the config file's layout.
 pub fn settings_vocab() -> Vec<(String, String)> {
-    let mut v = vec![
-        ("editor.vim".to_string(), "Vim-style modal editing — true or false".to_string()),
-        (
-            "editor.smart_typography".to_string(),
-            "Smart curly quotes, em-dashes, and ellipses as you type — true or false".to_string(),
-        ),
-        (
-            "editor.auto_pair".to_string(),
-            "Auto-close quotes and brackets as you type, skipping over an existing closer — true or false".to_string(),
-        ),
-        (
-            "editor.column_width".to_string(),
-            "Width of the centered text column, in characters (32–160; e.g. 64 is narrow, 90 is wide)".to_string(),
-        ),
-        (
-            "editor.typewriter".to_string(),
-            "Typewriter scrolling — pin the cursor's line to the page centre — true or false".to_string(),
-        ),
-        (
-            "editor.focus_mode".to_string(),
-            "Focus mode — dim every paragraph but the one under the cursor — true or false".to_string(),
-        ),
-        (
-            "editor.paragraph_indent".to_string(),
-            "Indent the first line of each prose paragraph in the editor (display-only) — true or false".to_string(),
-        ),
-        (
-            "editor.annotation_margin".to_string(),
-            "Show annotations in the margin beside the prose, level with their text — true or false".to_string(),
-        ),
-        (
-            "editor.daily_nudge".to_string(),
-            "Show how far short of the daily word goal today is, in the status bar — true or false".to_string(),
-        ),
-        (
-            "editor.autosave_interval_secs".to_string(),
-            "Autosave interval in seconds after you stop typing (0 turns autosave off; up to 3600)".to_string(),
-        ),
-        ("theme.name".to_string(), "Base color theme — dark or light".to_string()),
-    ];
+    // The boolean knobs come from their descriptor table, split around the
+    // valued `[editor]` keys by Settings-menu placement.
+    let bools = |placement: SettingPlacement| {
+        SettingBool::SPECS
+            .iter()
+            .filter(move |spec| spec.placement == placement)
+            .map(|spec| (spec.knob.key(), spec.describe.to_string()))
+    };
+    let mut v: Vec<(String, String)> = bools(SettingPlacement::Typing).collect();
+    v.push((
+        "editor.column_width".to_string(),
+        "Width of the centered text column, in characters (32–160; e.g. 64 is narrow, 90 is wide)"
+            .to_string(),
+    ));
+    v.extend(bools(SettingPlacement::Display));
+    v.push((
+        "editor.autosave_interval_secs".to_string(),
+        "Autosave interval in seconds after you stop typing (0 turns autosave off; up to 3600)"
+            .to_string(),
+    ));
+    v.push((
+        "theme.name".to_string(),
+        "Base color theme — dark or light".to_string(),
+    ));
     for &field in theme::COLOR_FIELDS {
         v.push((
             format!("theme.{field}"),
@@ -247,14 +224,7 @@ pub fn validate_change(key: &str, value: &str) -> Result<String, String> {
     let bad = |why: &str| Err(format!("{key} ({why})"));
     let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
     match key {
-        "editor.vim"
-        | "editor.smart_typography"
-        | "editor.auto_pair"
-        | "editor.typewriter"
-        | "editor.focus_mode"
-        | "editor.paragraph_indent"
-        | "editor.annotation_margin"
-        | "editor.daily_nudge" => {
+        _ if SettingBool::from_key(key).is_some() => {
             parse_bool(value).map_or_else(|| bad("expected true/false"), |b| Ok(b.to_string()))
         }
         "editor.column_width" => match value.trim().parse::<u16>() {

@@ -313,31 +313,9 @@ impl App {
             Action::PrevMisspelling => self.navigate_spell_flag(-1),
             Action::StyleFlagSweep => self.open_style_flag_picker(),
             Action::ToggleProximityRepeats => self.toggle_proximity_repeats(),
-            Action::ToggleTypewriter => {
-                self.typewriter = !self.typewriter;
-                self.message = Some(format!("Typewriter scrolling {}.", on_off(self.typewriter)));
-            }
-            Action::ToggleFocus => {
-                self.focus_mode = !self.focus_mode;
-                self.message = Some(format!("Focus mode {}.", on_off(self.focus_mode)));
-            }
-            Action::ToggleParagraphIndent => {
-                self.paragraph_indent = !self.paragraph_indent;
-                self.message = Some(format!(
-                    "Paragraph indent {}.",
-                    on_off(self.paragraph_indent)
-                ));
-            }
-            Action::ToggleAnnotationMargin => {
-                self.annotation_margin = !self.annotation_margin;
-                self.message = Some(format!(
-                    "Annotation margin {}.",
-                    on_off(self.annotation_margin)
-                ));
-            }
-            Action::ToggleDailyCue => {
-                self.daily_nudge = !self.daily_nudge;
-                self.message = Some(format!("Daily goal cue {}.", on_off(self.daily_nudge)));
+            Action::Toggle(knob) => {
+                let on = knob.toggle(&mut self.flags);
+                self.message = Some(format!("{} {}.", knob.label(), on_off(on)));
             }
             Action::FoldAll => self.fold_all(),
             Action::ExpandAll => self.expand_all_folds(),

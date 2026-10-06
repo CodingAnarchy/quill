@@ -79,7 +79,7 @@ fn chapter_structure_edits_keep_the_overrides() {
     assert_eq!(titles, ["One", "Two", "Uno"]);
 
     // The config loader still sees the project's overrides after the rewrites.
-    assert!(EditorConfig::load().typewriter);
+    assert!(EditorConfig::load().flags.typewriter);
     let (snippets, _) = load_snippets();
     assert!(snippets.iter().any(|s| s.name == "sig" && s.text == "— A."));
     set_config_dir(None);
@@ -92,6 +92,6 @@ fn setting_a_goal_keeps_the_overrides() {
         .set_goal(GoalField::Words, Some(80_000))
         .unwrap();
     assert_overrides_kept(&dir);
-    assert!(EditorConfig::load().typewriter);
+    assert!(EditorConfig::load().flags.typewriter);
     set_config_dir(None);
 }

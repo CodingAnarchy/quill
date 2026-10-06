@@ -8,7 +8,7 @@ use super::*;
 /// to type fresh prose into. (The shared `two_chapter_app` pins it off.)
 fn smart_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.smart_typography = true;
+    app.flags.smart_typography = true;
     app.buffer = Buffer::from_text("");
     (app, dir)
 }
@@ -61,7 +61,7 @@ fn off_inserts_punctuation_verbatim() {
 #[test]
 fn substitutions_persist_to_disk_and_reload() {
     let (mut app, dir) = two_chapter_app("typo-roundtrip");
-    app.smart_typography = true;
+    app.flags.smart_typography = true;
     // Type into the active chapter (one.md), then save and read it back.
     type_str(&mut app, "He said \"hi--bye...\" ");
     app.on_key(ctrl('s'));

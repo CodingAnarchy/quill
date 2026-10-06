@@ -4,14 +4,14 @@
 
 use super::*;
 use crate::annotation::Live;
-use crate::mode::Action;
+use crate::mode::{Action, SettingBool};
 
 const PROSE: &str = "The night was dark and long.\n\nShe reached the gate.\n";
 
 /// An app over `PROSE` with a note on each `(start, end, note)`, margin on.
 fn annotated(notes: &[(usize, usize, &str)]) -> App {
     let mut app = app_with(PROSE);
-    app.annotation_margin = true;
+    app.flags.annotation_margin = true;
     app.annotations = notes
         .iter()
         .map(|&(start, end, note)| Live {
@@ -96,8 +96,8 @@ fn no_margin_when_there_is_no_room_or_it_is_off() {
         "and the prose stays centered"
     );
 
-    app.run_action(Action::ToggleAnnotationMargin, false);
-    assert!(!app.annotation_margin);
+    app.run_action(Action::Toggle(SettingBool::AnnotationMargin), false);
+    assert!(!app.flags.annotation_margin);
     let off = render(&app, 120, 12);
     assert!(!off.contains("check"), "toggled off:\n{off}");
 }

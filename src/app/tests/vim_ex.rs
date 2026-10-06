@@ -6,7 +6,7 @@ use super::*;
 
 fn vim_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     (app, dir)
 }

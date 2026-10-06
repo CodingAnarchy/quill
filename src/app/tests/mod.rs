@@ -188,9 +188,9 @@ pub fn launch_test_app(dir: &Path) -> App {
 /// Pin every config-derived setting on a freshly built editor (#428) — see
 /// [`open_test_app`].
 fn pin_test_settings(mut app: App) -> App {
-    app.vim = false;
-    app.smart_typography = false;
-    app.auto_pair = false;
+    app.flags.vim = false;
+    app.flags.smart_typography = false;
+    app.flags.auto_pair = false;
     // Vim's resting Normal mode back to Insert — but keep a prompt a launch-time
     // offer (recovery, damage restore) opened.
     if matches!(app.mode, Mode::Normal) {

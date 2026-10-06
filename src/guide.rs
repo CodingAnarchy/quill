@@ -16,6 +16,8 @@ pub const CONFIG_REFERENCE: &str = include_str!("../docs/configuration.md");
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::EditorFlags;
+    use crate::project::extra_keys::field_names;
 
     /// Every `Ctrl-<letter>` keybinding documented in the README's "Keys" table
     /// must also appear in the guide, so the in-tool help can't silently fall
@@ -98,32 +100,28 @@ mod tests {
     }
 
     /// Every field of the `[editor]` and `[projects]` sections must be documented
-    /// by name in the configuration reference (#807). The names are listed here
-    /// (mirroring `EditorConfig` / `ProjectsConfig`) rather than derived, so the
-    /// guard needn't touch `config/types.rs` — adding a field means updating this
-    /// list, which fails until the doc gains the key.
+    /// by name in the configuration reference (#807). The boolean `[editor]` knobs
+    /// come straight from `EditorFlags`' serde field list, so a new flag is guarded
+    /// with no list to update; the valued fields are listed here (mirroring
+    /// `EditorConfig` / `ProjectsConfig`) — adding one means updating this list,
+    /// which fails until the doc gains the key.
     #[test]
     fn config_reference_documents_every_editor_and_projects_field() {
-        // Mirror of `EditorConfig` (incl. the `[editor.keys]` remap table) and
-        // `ProjectsConfig` field names in `src/config/types.rs`.
-        const FIELDS: &[&str] = &[
-            "vim",
+        // Mirror of `EditorConfig`'s valued fields (incl. the `[editor.keys]` remap
+        // table) and `ProjectsConfig` field names in `src/config/types.rs`.
+        const VALUED: &[&str] = &[
             "keys",
-            "smart_typography",
-            "auto_pair",
             "column_width",
-            "typewriter",
-            "focus_mode",
-            "paragraph_indent",
-            "annotation_margin",
-            "daily_nudge",
             "autosave_interval_secs",
             "home",
             "setup_wizard",
             "open_last",
         ];
-        let missing: Vec<&str> = FIELDS
+        let flags = field_names::<EditorFlags>();
+        assert!(flags.contains(&"vim"), "the flag field list is read");
+        let missing: Vec<&str> = VALUED
             .iter()
+            .chain(flags)
             .copied()
             .filter(|f| !CONFIG_REFERENCE.contains(&format!("`{f}`")))
             .collect();

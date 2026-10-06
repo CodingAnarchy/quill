@@ -183,7 +183,7 @@ fn the_sweep_never_edits_the_prose() {
 #[test]
 fn the_vim_bracket_r_bindings_step_the_sweep() {
     let (mut app, _dir) = adverb_app("flag-vim");
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.style_flag_category = Some(FlagCategory::Adverbs);
     app.refresh_style_flags();

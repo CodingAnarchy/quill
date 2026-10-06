@@ -9,7 +9,7 @@ use super::*;
 /// word to exercise `.` against).
 fn dot_app(name: &str, text: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     app.buffer = Buffer::from_text(text);
     (app, dir)

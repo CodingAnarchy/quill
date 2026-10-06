@@ -1,11 +1,11 @@
 //! The [`Command`] a palette emits on Enter, and the small picker/knob enums the
-//! Settings and export-style menus branch on ([`SettingPicker`], [`SettingBool`],
+//! Settings and export-style menus branch on ([`SettingPicker`],
 //! [`SettingTextKnob`], [`StylePicker`], [`StyleTextKnob`], [`FontTarget`],
 //! [`PortraitChoice`]). Split out of `action.rs` to keep each file under the
 //! ~1,000-line convention; re-exported from the module root, so callers are
 //! unaffected. Pure move.
 
-use super::{Action, AiAction, ExportFormat, ExportScope, GitAction};
+use super::{Action, AiAction, ExportFormat, ExportScope, GitAction, SettingBool};
 
 use crate::analysis::FlagCategory;
 
@@ -110,8 +110,8 @@ pub enum Command {
     /// Open one of the plain Settings menu's sub-pickers (#592) — the theme name
     /// or a boolean toggle — from the Settings menu.
     OpenSettingPicker(SettingPicker),
-    /// Set a boolean `[editor]` knob from the Settings menu (#592): Vim mode,
-    /// smart typography, typewriter scrolling, or focus mode.
+    /// Set a boolean `[editor]` knob from the Settings menu (#592) — any
+    /// [`SettingBool`].
     SetSettingBool(SettingBool, bool),
     /// Set the `[theme] name` from the Settings menu (#592): the index into the
     /// built-in theme list.
@@ -136,58 +136,6 @@ pub enum SettingPicker {
     /// The Vim `[editor.keys]` key bindings (#1109): a row per remappable action
     /// showing its current key, each opening a prompt to remap it.
     KeyBindings,
-}
-
-/// A boolean `[editor]` knob the plain Settings menu toggles (#592). Each maps to a
-/// dotted config key validated through the shared vocabulary (`editor.vim`, …).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SettingBool {
-    /// Vim-style modal editing (`editor.vim`).
-    Vim,
-    /// Smart typography as you type (`editor.smart_typography`).
-    SmartTypography,
-    /// Auto-pair quotes and brackets as you type (`editor.auto_pair`).
-    AutoPair,
-    /// Typewriter scrolling (`editor.typewriter`).
-    Typewriter,
-    /// Focus mode (`editor.focus_mode`).
-    FocusMode,
-    /// First-line paragraph indent (`editor.paragraph_indent`).
-    ParagraphIndent,
-    /// The annotation margin beside the prose (`editor.annotation_margin`).
-    AnnotationMargin,
-    /// The below-daily-goal status-bar cue (`editor.daily_nudge`).
-    DailyNudge,
-}
-
-impl SettingBool {
-    /// The dotted config key this knob writes, matched by the shared validator.
-    pub(crate) const fn key(self) -> &'static str {
-        match self {
-            Self::Vim => "editor.vim",
-            Self::SmartTypography => "editor.smart_typography",
-            Self::AutoPair => "editor.auto_pair",
-            Self::Typewriter => "editor.typewriter",
-            Self::FocusMode => "editor.focus_mode",
-            Self::ParagraphIndent => "editor.paragraph_indent",
-            Self::AnnotationMargin => "editor.annotation_margin",
-            Self::DailyNudge => "editor.daily_nudge",
-        }
-    }
-
-    /// A human label for the menu row, picker title, and status message.
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Vim => "Vim mode",
-            Self::SmartTypography => "Smart typography",
-            Self::AutoPair => "Auto-pair brackets",
-            Self::Typewriter => "Typewriter scrolling",
-            Self::FocusMode => "Focus mode",
-            Self::ParagraphIndent => "Paragraph indent",
-            Self::AnnotationMargin => "Annotation margin",
-            Self::DailyNudge => "Daily goal cue",
-        }
-    }
 }
 
 /// A numeric / free-text Settings knob the plain menu edits through a prompt (#592):

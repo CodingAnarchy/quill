@@ -11,7 +11,7 @@ use super::*;
 /// `two_chapter_app` pins both off.
 fn pair_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = two_chapter_app(name);
-    app.auto_pair = true;
+    app.flags.auto_pair = true;
     app.buffer = Buffer::from_text("");
     (app, dir)
 }
@@ -100,7 +100,7 @@ fn off_by_default_leaves_typing_unchanged() {
 /// Auto-pair *and* smart typography both on, empty buffer — the interaction case.
 fn smart_pair_app(name: &str) -> (App, TempProject) {
     let (mut app, dir) = pair_app(name);
-    app.smart_typography = true;
+    app.flags.smart_typography = true;
     (app, dir)
 }
 

@@ -273,7 +273,7 @@ fn the_ring_survives_ordinary_navigation() {
 fn the_ring_and_manual_marks_coexist() {
     let (mut app, dir) = line_app("ring-and-marks", "alpha\nbeta\ngamma\ndelta\n");
     // Turn on Vim so the mark keys are live.
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
 
     // Set a manual mark 'a' on line 1.
@@ -568,7 +568,7 @@ fn bracket_bracket_keys_drive_the_scene_heading_motion() {
     // lands on it.
     let body = "lead\n\n# One\n\nalpha\n\n# Two\n\nbeta\n";
     let (mut app, _dir) = scene_app("scene-keys", &[body]);
-    app.vim = true;
+    app.flags.vim = true;
     app.mode = Mode::Normal;
     let headings: Vec<usize> = app
         .buffer
@@ -695,7 +695,7 @@ fn a_mark_set_in_the_continuous_view_round_trips_to_the_right_chapter() {
     // A Vim mark set with the cursor in a later segment jumps back to that chapter
     // and byte, the same chapter-local contract the ring gets.
     let (mut app, _dir) = three_chapter_app("cont-mark-roundtrip");
-    app.vim = true;
+    app.flags.vim = true;
     app.on_key(ctrl('l')); // enter continuous view
     app.mode = Mode::Normal;
 
