@@ -35,6 +35,7 @@ use crate::report::{self, Momentum, PartDelta};
 use crate::typography;
 
 /// Shown when the author tries to delete a project's last remaining chapter.
+mod annotation_remove;
 mod annotations;
 mod api_keys;
 mod archive;
@@ -127,6 +128,7 @@ impl App {
         let typewriter = editor.typewriter;
         let focus_mode = editor.focus_mode;
         let paragraph_indent = editor.paragraph_indent;
+        let annotation_margin = editor.annotation_margin;
         let autosave_interval_secs = editor.autosave_interval_secs;
         let daily_nudge = editor.daily_nudge;
         let (vim_keys, key_errors) = build_keymap(&editor.keys);
@@ -193,6 +195,7 @@ impl App {
             typewriter,
             focus_mode,
             paragraph_indent,
+            annotation_margin,
             folds: FoldState::default(),
             distraction_free: false,
             galley: None,
@@ -280,7 +283,6 @@ impl App {
             sprint: None,
             session_target: None,
             daily_nudge,
-            nudge_dismissed: false,
             qa_log,
             qa_store,
             pending_qa_question: None,

@@ -120,6 +120,12 @@ impl App {
                 }
                 _ => self.mode = closed,
             },
+            Pending::ClearAnnotations => {
+                self.mode = closed;
+                if matches!(key.code, KeyCode::Char('y' | 'Y')) {
+                    self.clear_annotations();
+                }
+            }
             Pending::Merge { at } => match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     let selected = self.merge_chapter(at);

@@ -154,6 +154,8 @@ impl App {
         self.typewriter = editor.typewriter;
         self.focus_mode = editor.focus_mode;
         self.paragraph_indent = editor.paragraph_indent;
+        self.annotation_margin = editor.annotation_margin;
+        self.daily_nudge = editor.daily_nudge;
         self.autosave_interval_secs = editor.autosave_interval_secs;
         // Rebuild the Vim keymap from `[editor.keys]` so an in-app remap (#1109)
         // takes effect without a restart; bad entries are dropped (kept default)
@@ -200,6 +202,14 @@ pub fn settings_vocab() -> Vec<(String, String)> {
             "Indent the first line of each prose paragraph in the editor (display-only) — true or false".to_string(),
         ),
         (
+            "editor.annotation_margin".to_string(),
+            "Show annotations in the margin beside the prose, level with their text — true or false".to_string(),
+        ),
+        (
+            "editor.daily_nudge".to_string(),
+            "Show how far short of the daily word goal today is, in the status bar — true or false".to_string(),
+        ),
+        (
             "editor.autosave_interval_secs".to_string(),
             "Autosave interval in seconds after you stop typing (0 turns autosave off; up to 3600)".to_string(),
         ),
@@ -239,7 +249,9 @@ pub fn validate_change(key: &str, value: &str) -> Result<String, String> {
         | "editor.auto_pair"
         | "editor.typewriter"
         | "editor.focus_mode"
-        | "editor.paragraph_indent" => {
+        | "editor.paragraph_indent"
+        | "editor.annotation_margin"
+        | "editor.daily_nudge" => {
             parse_bool(value).map_or_else(|| bad("expected true/false"), |b| Ok(b.to_string()))
         }
         "editor.column_width" => match value.trim().parse::<u16>() {

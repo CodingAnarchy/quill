@@ -261,12 +261,11 @@ impl App {
         (net < target as i64).then(|| (target as i64 - net).max(0) as usize)
     }
 
-    /// Whether the ambient below-target cue is currently showing (#1012): the nudge
-    /// is enabled, not dismissed this session, and today's net is under a set daily
-    /// target. The single predicate the status-bar tag and the Esc-dismiss handler
-    /// both read, so they can't drift. O(1) — cached tally + goal only.
+    /// Whether the ambient below-target cue is currently showing (#1012): the cue
+    /// is switched on and today's net is under a set daily target. O(1) — cached
+    /// tally + goal only.
     pub fn nudge_showing(&self) -> bool {
-        self.daily_nudge && !self.nudge_dismissed && self.daily_target_shortfall().is_some()
+        self.daily_nudge && self.daily_target_shortfall().is_some()
     }
 
     /// Seed today's tally directly (#1012), for render tests outside the `app`

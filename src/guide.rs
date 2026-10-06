@@ -115,6 +115,8 @@ mod tests {
             "typewriter",
             "focus_mode",
             "paragraph_indent",
+            "annotation_margin",
+            "daily_nudge",
             "autosave_interval_secs",
             "home",
             "setup_wizard",

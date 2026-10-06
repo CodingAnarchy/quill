@@ -141,6 +141,10 @@ pub enum Action {
     ToggleFocus,
     /// Toggle the first-line paragraph indent in the editor (#722).
     ToggleParagraphIndent,
+    /// Toggle the annotation margin — notes shown beside the prose they mark.
+    ToggleAnnotationMargin,
+    /// Hide or restore the below-daily-goal status-bar cue (#1012) for this session.
+    ToggleDailyCue,
     /// Fold every section in the active chapter to its heading (#975).
     FoldAll,
     /// Expand every folded section (#975).
@@ -174,6 +178,11 @@ pub enum Action {
     AddAnnotation,
     /// Open the annotation review list for the active chapter (#302).
     ReviewAnnotations,
+    /// Remove the annotation(s) anchored under the cursor, or overlapping the
+    /// Visual selection — the editor-side counterpart to the review list's `d`.
+    RemoveAnnotation,
+    /// Remove every annotation on the loaded chapter(s), after a y/N confirm.
+    ClearAnnotations,
     /// Switch the active AI backend between Claude and the local model (#371).
     SwitchBackend,
     /// Open the local AI model manager — choose which models to use (#379).
@@ -370,6 +379,8 @@ impl Action {
         Self::MergeChapter,
         Self::AddAnnotation,
         Self::ReviewAnnotations,
+        Self::RemoveAnnotation,
+        Self::ClearAnnotations,
         Self::InsertSnippet,
         Self::StartSprint,
         Self::StopSprint,
@@ -378,6 +389,8 @@ impl Action {
         Self::ToggleTypewriter,
         Self::ToggleFocus,
         Self::ToggleParagraphIndent,
+        Self::ToggleAnnotationMargin,
+        Self::ToggleDailyCue,
         Self::FoldAll,
         Self::ExpandAll,
         Self::ToggleComposition,
@@ -447,6 +460,8 @@ impl Action {
             Self::ToggleTypewriter => "view:typewriter",
             Self::ToggleFocus => "view:focus",
             Self::ToggleParagraphIndent => "view:paragraph-indent",
+            Self::ToggleAnnotationMargin => "view:annotation-margin",
+            Self::ToggleDailyCue => "view:daily-cue",
             Self::FoldAll => "view:fold-all",
             Self::ExpandAll => "view:expand-all",
             Self::ToggleComposition => "view:composition",
@@ -457,6 +472,8 @@ impl Action {
             Self::MergeChapter => "chapter:merge",
             Self::AddAnnotation => "annotate",
             Self::ReviewAnnotations => "annotate:review",
+            Self::RemoveAnnotation => "annotate:remove",
+            Self::ClearAnnotations => "annotate:clear",
             Self::SwitchBackend => "ai:backend",
             Self::ManageModels => "ai:models",
             Self::SetClaudeKey => "ai:set-key",
@@ -544,6 +561,8 @@ impl Action {
             | Self::MergeChapter
             | Self::AddAnnotation
             | Self::ReviewAnnotations
+            | Self::RemoveAnnotation
+            | Self::ClearAnnotations
             | Self::InsertSnippet
             | Self::StartSprint
             | Self::StopSprint
@@ -551,6 +570,8 @@ impl Action {
             Self::ToggleTypewriter
             | Self::ToggleFocus
             | Self::ToggleParagraphIndent
+            | Self::ToggleAnnotationMargin
+            | Self::ToggleDailyCue
             | Self::FoldAll
             | Self::ExpandAll
             | Self::ToggleComposition
@@ -618,6 +639,8 @@ impl Action {
             Self::ToggleTypewriter => "Typewriter scrolling (toggle)",
             Self::ToggleFocus => "Focus mode (toggle)",
             Self::ToggleParagraphIndent => "Paragraph indent (toggle)",
+            Self::ToggleAnnotationMargin => "Annotation margin (toggle)",
+            Self::ToggleDailyCue => "Daily goal cue (toggle)",
             Self::FoldAll => "Fold all sections",
             Self::ExpandAll => "Expand all sections",
             Self::ToggleComposition => "Composition mode — distraction-free (toggle)",
@@ -628,6 +651,8 @@ impl Action {
             Self::MergeChapter => "Merge chapter into the one above",
             Self::AddAnnotation => "Annotate selection",
             Self::ReviewAnnotations => "Review annotations",
+            Self::RemoveAnnotation => "Remove annotation at cursor",
+            Self::ClearAnnotations => "Remove all annotations here…",
             Self::SwitchBackend => "Switch AI backend (Claude / local)",
             Self::ManageModels => "Local AI models",
             Self::SetClaudeKey => "Set Claude API key (keychain)",
@@ -765,6 +790,7 @@ impl Action {
                 | Self::ToggleTypewriter
                 | Self::ToggleFocus
                 | Self::ToggleParagraphIndent
+                | Self::ToggleAnnotationMargin
                 | Self::SwitchBackend
         )
     }

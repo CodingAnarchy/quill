@@ -54,6 +54,11 @@ pub struct EditorConfig {
     /// display-only — no spaces ever enter the buffer or the saved file. Off by
     /// default.
     pub paragraph_indent: bool,
+    /// The annotation margin: show each inline note in the gutter to the right of
+    /// the prose column, level with the text it's anchored to, so the author sees
+    /// their notes while they write. Display-only. On by default; it only appears
+    /// when the chapter has annotations and the terminal has room beside the column.
+    pub annotation_margin: bool,
     /// Autosave interval in seconds (#409): after this many seconds with no input,
     /// the active chapter is saved automatically through the same atomic,
     /// front-matter-preserving path as Ctrl-S (but without firing on-save
@@ -78,6 +83,7 @@ impl Default for EditorConfig {
             typewriter: false,
             focus_mode: false,
             paragraph_indent: false,
+            annotation_margin: true,
             autosave_interval_secs: 0,
             daily_nudge: true,
         }

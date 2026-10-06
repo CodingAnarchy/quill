@@ -145,6 +145,8 @@ except the `[editor.keys]` remaps, which are hand-edited.
 | `column_width` | `72` | `32`–`160` (characters) | The centered text column's starting width (#303). The runtime `Ctrl-+` / `Ctrl--` adjustment still applies on top. |
 | `typewriter` | `false` | `true` / `false` | Typewriter scrolling (#301): keep the cursor's line pinned at the vertical centre of the page, the text scrolling under it. |
 | `focus_mode` | `false` | `true` / `false` | Focus mode (#301): dim every paragraph but the one under the cursor. |
+| `daily_nudge` | `true` | `true` / `false` | When a `[goals] daily` target is set and today's net is under it, show how far short the day is in the status bar (e.g. `◈ 180 to daily goal`). "Daily goal cue (toggle)" in the Ctrl-K palette hides or restores it for the session; the Settings menu saves the choice here. |
+| `annotation_margin` | `true` | `true` / `false` | Show each inline annotation in the margin to the right of the prose column, level with the text it's anchored to, so notes stay in view while you write. Display-only; appears only when the chapter has annotations and the terminal has room beside the column. |
 | `paragraph_indent` | `false` | `true` / `false` | Visually indent the first line of each prose paragraph in the editor (#722), matching the exports. Display-only — no spaces enter the buffer or the saved file. |
 | `autosave_interval_secs` | `0` (off) | `0`–`3600` (seconds) | Idle-timer autosave (#409): after this many seconds with no input, the active chapter is saved automatically through the same atomic, front-matter-preserving path as Ctrl-S (without firing on-save workflows). `0` turns autosave off. |
 

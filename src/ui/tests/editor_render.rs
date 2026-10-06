@@ -152,7 +152,7 @@ fn visual_mode_status_bar_shows_the_selected_count() {
 }
 
 #[test]
-fn the_below_target_cue_shows_in_the_status_bar_and_dismisses() {
+fn the_below_target_cue_shows_in_the_status_bar_and_hides() {
     // A daily target set, and today's net under it, so the ambient cue (#1012)
     // shows the shortfall in the editor status bar.
     let mut app = app_with("one two three\n");
@@ -166,15 +166,7 @@ fn the_below_target_cue_shows_in_the_status_bar_and_dismisses() {
         "the cue shows the shortfall:\n{}",
         render(&app, 80, 8)
     );
-    // Dismissed for the session: the tag is gone.
-    app.nudge_dismissed = true;
-    assert!(
-        !render(&app, 80, 8).contains("to daily goal"),
-        "a dismissed cue leaves the bar:\n{}",
-        render(&app, 80, 8)
-    );
-    // Turned off entirely (config): also no cue, even undismissed.
-    app.nudge_dismissed = false;
+    // Turned off (config or the palette toggle): no cue.
     app.daily_nudge = false;
     assert!(
         !render(&app, 80, 8).contains("to daily goal"),

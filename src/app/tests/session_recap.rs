@@ -1,10 +1,11 @@
 //! Tests for the ambient session recap and the below-target daily cue (#1012):
 //! the on-quit summary reads the daily tally already maintained (this session's
 //! net + the day's net); the status-bar cue shows only when a `[goals] daily`
-//! target is set and today's net is under it, and it's dismissible (Esc) and can
-//! be turned off entirely. None of this walks the manuscript per draw.
+//! target is set and today's net is under it, it ignores Esc, and a palette
+//! toggle (or the config) hides and restores it. None of this walks the manuscript per draw.
 
 use super::*;
+use crate::mode::Action;
 use crate::project::GoalField;
 
 /// Two-chapter app with a daily word target set, ready for the cue tests. Vim /
@@ -102,24 +103,45 @@ fn the_cue_shows_only_when_a_target_is_set_and_the_net_is_under_it() {
 }
 
 #[test]
-fn the_cue_is_dismissible_with_esc_for_the_session() {
-    let (mut app, _dir) = nudge_app("cue-dismiss", 100);
+fn esc_never_hides_the_cue() {
+    // Esc is the most overloaded key in the editor (leave Insert, cancel a Vim
+    // operator, exit composition mode), so the cue doesn't listen to it at all —
+    // it used to dismiss the cue for the session, which in Vim mode swallowed the
+    // Esc leaving Insert and made the cue vanish just as the author began cutting.
+    let (mut app, _dir) = nudge_app("cue-esc", 100);
     write_words(&mut app, 20);
-    assert!(app.nudge_showing(), "the cue is up before dismissal");
-
-    // Esc in the resting editing mode dismisses it (non-modal — the cue was the
-    // only thing Esc would act on).
     app.on_key(key(KeyCode::Esc));
-    assert!(app.nudge_dismissed, "Esc dismissed the cue");
-    assert!(!app.nudge_showing(), "the cue stays hidden after dismissal");
+    assert!(app.nudge_showing(), "Esc in plain Insert leaves the cue up");
 
-    // Even writing more (still under the target) doesn't bring it back this run.
-    write_words(&mut app, 5);
+    let (mut app, _dir) = nudge_app("cue-vim-esc", 100);
+    app.vim = true;
+    app.mode = Mode::Insert;
+    write_words(&mut app, 3);
+    app.on_key(key(KeyCode::Esc));
     assert!(
-        app.daily_target_shortfall().is_some(),
-        "still short of the target"
+        matches!(app.mode, Mode::Normal),
+        "Esc left Insert for Normal"
     );
-    assert!(!app.nudge_showing(), "dismissal holds for the session");
+    // `dd` drops the whole line — the 3 new words plus "first chapter" — leaving
+    // the day net-negative, and the cue shows the larger shortfall.
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_key(key(KeyCode::Char('d')));
+    app.on_idle();
+    assert!(app.day_net_words() < 0, "the cut left the day net-negative");
+    app.on_key(key(KeyCode::Esc));
+    assert!(app.nudge_showing(), "the cue is still up");
+    assert!(app.daily_target_shortfall().unwrap() > 100);
+}
+
+#[test]
+fn the_palette_toggle_hides_and_restores_the_cue() {
+    let (mut app, _dir) = nudge_app("cue-toggle", 100);
+    write_words(&mut app, 20);
+    app.run_action(Action::ToggleDailyCue, false);
+    assert!(!app.nudge_showing(), "toggled off");
+    assert_eq!(app.message.as_deref(), Some("Daily goal cue off."));
+    app.run_action(Action::ToggleDailyCue, false);
+    assert!(app.nudge_showing(), "toggled back on, still short");
 }
 
 #[test]

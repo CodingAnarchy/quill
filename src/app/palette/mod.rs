@@ -364,6 +364,17 @@ impl App {
                     on_off(self.paragraph_indent)
                 ));
             }
+            Action::ToggleAnnotationMargin => {
+                self.annotation_margin = !self.annotation_margin;
+                self.message = Some(format!(
+                    "Annotation margin {}.",
+                    on_off(self.annotation_margin)
+                ));
+            }
+            Action::ToggleDailyCue => {
+                self.daily_nudge = !self.daily_nudge;
+                self.message = Some(format!("Daily goal cue {}.", on_off(self.daily_nudge)));
+            }
             Action::FoldAll => self.fold_all(),
             Action::ExpandAll => self.expand_all_folds(),
             Action::ToggleComposition => self.toggle_distraction_free(),
@@ -374,6 +385,8 @@ impl App {
             Action::MergeChapter => self.start_merge_chapter(),
             Action::AddAnnotation => self.start_annotation(),
             Action::ReviewAnnotations => self.open_annotation_review(),
+            Action::RemoveAnnotation => self.remove_annotation_at_cursor(),
+            Action::ClearAnnotations => self.start_clear_annotations(),
             Action::SwitchBackend => self.toggle_ai_backend(),
             Action::ManageModels => self.open_model_manager(),
             Action::SetClaudeKey => self.start_set_api_key(ai::keychain::Key::Anthropic),
